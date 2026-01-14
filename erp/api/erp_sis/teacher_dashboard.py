@@ -353,27 +353,6 @@ def get_teacher_week_optimized():
         if not teacher_name:
             return success_response(data=[], message="No teacher record found")
         
-        # Build education_stage filter
-        valid_column_ids = []
-        if education_stage:
-            # Get valid timetable columns for this education stage
-            column_filters = {"education_stage_id": education_stage}
-            if campus_id:
-                column_filters["campus_id"] = campus_id
-            
-            valid_columns = frappe.get_all(
-                "SIS Timetable Column",
-                fields=["name"],
-                filters=column_filters
-            )
-            
-            if not valid_columns:
-                frappe.logger().warning(f"No timetable columns found for education_stage={education_stage}")
-                return success_response(data=[], message="No timetable columns found for this education stage")
-            
-            valid_column_ids = [col.name for col in valid_columns]
-            frappe.logger().info(f"Found {len(valid_column_ids)} columns for education_stage={education_stage}")
-        
         # ⚡ SINGLE MEGA QUERY: Get everything with JOINs
         # Build WHERE clause with proper parameter handling
         where_clauses = [
@@ -387,10 +366,12 @@ def get_teacher_week_optimized():
             "week_end": week_end
         }
         
-        # Add education_stage filter if needed
-        if valid_column_ids:
-            where_clauses.append("tt.timetable_column_id IN %(column_ids)s")
-            params["column_ids"] = valid_column_ids
+        # ⚡ FIX: Filter theo education_stage của CLASS (thông qua education_grade)
+        # Thay vì chỉ filter theo timetable_column, phải filter theo cấp học của lớp
+        if education_stage:
+            where_clauses.append("eg.education_stage = %(education_stage)s")
+            params["education_stage"] = education_stage
+            frappe.logger().info(f"🎯 Filtering by CLASS education_stage: {education_stage}")
         
         entries_sql = """
             SELECT 
@@ -413,6 +394,7 @@ def get_teacher_week_optimized():
             LEFT JOIN `tabSIS Subject` s ON tt.subject_id = s.name
             LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
             LEFT JOIN `tabSIS Class` c ON tt.class_id = c.name
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
             LEFT JOIN `tabERP Administrative Room` r ON tt.room_id = r.name
             LEFT JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
             WHERE {where_clause}
@@ -420,7 +402,7 @@ def get_teacher_week_optimized():
         """.format(where_clause=" AND ".join(where_clauses))
         
         # Execute query
-        frappe.logger().info(f"Executing SQL with params: teacher={teacher_name}, week={week_start} to {week_end}, columns={len(valid_column_ids)}")
+        frappe.logger().info(f"Executing SQL with params: teacher={teacher_name}, week={week_start} to {week_end}, education_stage={education_stage or 'all'}")
         entries = frappe.db.sql(entries_sql, params, as_dict=True)
         
         # Process entries: Use timetable_subject title if available, otherwise subject title
