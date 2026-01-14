@@ -2826,9 +2826,11 @@ def _calculate_totals_v2(order_student_doc, order_doc):
             line_amounts[fee_line.line_number] = calculated_amounts
     
     # Cập nhật total_amount cho order_student_doc
-    # total_amount = tổng tất cả các milestone của dòng total (lấy milestone đầu tiên làm đại diện)
+    # total_amount = giá trị của dòng total theo milestone được chọn
+    calculated_total = 0
+    
     if total_line_amounts:
-        # Lấy giá trị milestone đầu tiên của yearly (thường là tổng phải đóng)
+        # Ưu tiên 1: Lấy giá trị milestone đầu tiên của yearly (thường là tổng phải đóng cả năm)
         first_yearly_key = None
         for m_key in milestone_keys:
             if m_key.startswith('yearly_'):
@@ -2836,16 +2838,119 @@ def _calculate_totals_v2(order_student_doc, order_doc):
                 break
         
         if first_yearly_key and first_yearly_key in total_line_amounts:
-            order_student_doc.total_amount = total_line_amounts[first_yearly_key]
-            order_student_doc.outstanding_amount = total_line_amounts[first_yearly_key] - (order_student_doc.paid_amount or 0)
+            calculated_total = total_line_amounts[first_yearly_key]
+        else:
+            # Fallback: Lấy milestone đầu tiên có giá trị
+            for m_key in milestone_keys:
+                if m_key in total_line_amounts and total_line_amounts[m_key]:
+                    calculated_total = total_line_amounts[m_key]
+                    break
+    
+    # Nếu không có dòng total, tính tổng từ các dòng item (không phải category/subtotal)
+    if not calculated_total:
+        for fee_line in order_student_doc.fee_lines:
+            # Chỉ tính các dòng item (không phải category, subtotal, total)
+            if fee_line.line_type == 'item' and fee_line.amounts_json:
+                try:
+                    amounts = json.loads(fee_line.amounts_json)
+                    # Lấy is_deduction từ order_line (vì Student Order Line không có field này)
+                    order_line = order_doc.get_fee_line(fee_line.line_number)
+                    is_deduction = order_line.is_deduction if order_line else False
+                    
+                    # Ưu tiên yearly_1, fallback sang milestone đầu tiên
+                    for m_key in milestone_keys:
+                        if m_key.startswith('yearly_') and m_key in amounts:
+                            # Nếu là khoản trừ (is_deduction), trừ đi
+                            value = amounts.get(m_key, 0) or 0
+                            if is_deduction:
+                                calculated_total -= abs(value)
+                            else:
+                                calculated_total += value
+                            break
+                    else:
+                        # Fallback: lấy milestone đầu tiên
+                        for m_key in milestone_keys:
+                            if m_key in amounts:
+                                value = amounts.get(m_key, 0) or 0
+                                if is_deduction:
+                                    calculated_total -= abs(value)
+                                else:
+                                    calculated_total += value
+                                break
+                except:
+                    pass
+    
+    # Cập nhật total_amount
+    if calculated_total:
+        order_student_doc.total_amount = calculated_total
+        order_student_doc.outstanding_amount = calculated_total - (order_student_doc.paid_amount or 0)
+        
+        # Cập nhật payment_status
+        if order_student_doc.paid_amount and order_student_doc.paid_amount >= order_student_doc.total_amount:
+            order_student_doc.payment_status = 'paid'
+        elif order_student_doc.paid_amount and order_student_doc.paid_amount > 0:
+            order_student_doc.payment_status = 'partial'
+        else:
+            order_student_doc.payment_status = 'unpaid'
+    
+    # Cập nhật data_status nếu có số tiền
+    if calculated_total or any(fl.amounts_json for fl in order_student_doc.fee_lines):
+        order_student_doc.data_status = 'complete'
+
+
+@frappe.whitelist()
+def recalculate_order_totals(order_id=None):
+    """
+    Tính lại total_amount cho tất cả Order Students trong một Order.
+    Sử dụng khi cần fix dữ liệu đã import nhưng chưa cập nhật total_amount đúng.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền thực hiện", logs=logs)
+        
+        if not order_id:
+            order_id = frappe.request.args.get('order_id') or frappe.form_dict.get('order_id')
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        logs.append(f"Recalculate totals cho Order: {order_id}")
+        
+        # Lấy tất cả Order Students
+        order_students = frappe.get_all(
+            "SIS Finance Order Student",
+            filters={"order_id": order_id},
+            pluck="name"
+        )
+        
+        updated_count = 0
+        for os_name in order_students:
+            os_doc = frappe.get_doc("SIS Finance Order Student", os_name)
             
-            # Cập nhật payment_status
-            if order_student_doc.paid_amount and order_student_doc.paid_amount >= order_student_doc.total_amount:
-                order_student_doc.payment_status = 'paid'
-            elif order_student_doc.paid_amount and order_student_doc.paid_amount > 0:
-                order_student_doc.payment_status = 'partial'
-            else:
-                order_student_doc.payment_status = 'unpaid'
+            # Tính lại totals
+            _calculate_totals_v2(os_doc, order_doc)
+            os_doc.save(ignore_permissions=True)
+            updated_count += 1
+        
+        frappe.db.commit()
+        logs.append(f"Đã cập nhật {updated_count} học sinh")
+        
+        return success_response(
+            data={
+                "order_id": order_id,
+                "updated_count": updated_count
+            },
+            message=f"Đã tính lại totals cho {updated_count} học sinh",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Recalculate Order Totals Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
 
 
 # ==================== SEND BATCH APIs ====================
