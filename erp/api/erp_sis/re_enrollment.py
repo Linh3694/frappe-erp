@@ -932,6 +932,15 @@ def get_submissions():
                         "selected_options", "selected_options_text_vn", "selected_options_text_en"]
             )
             sub["answers"] = answers
+            
+            # Lấy notes (lịch sử log)
+            notes = frappe.get_all(
+                "SIS Re-enrollment Note",
+                filters={"parent": sub.name},
+                fields=["note_type", "note", "created_by_user", "created_by_name", "created_at"],
+                order_by="created_at asc"
+            )
+            sub["notes"] = notes
         
         logs.append(f"Tìm thấy {len(submissions)} / {total} đơn")
         
