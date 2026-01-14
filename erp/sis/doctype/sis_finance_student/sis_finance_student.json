@@ -33,7 +33,8 @@
   "payment_status",
   "system_information",
   "synced_at",
-  "synced_from"
+  "synced_from",
+  "sync_mode"
  ],
  "fields": [
   {
@@ -159,6 +160,14 @@
    "label": "Nguồn đồng bộ",
    "read_only": 1,
    "description": "ID của SIS Class Student đã đồng bộ"
+  },
+  {
+   "fieldname": "sync_mode",
+   "fieldtype": "Select",
+   "label": "Chế độ đồng bộ",
+   "options": "\ncurrent\nprevious",
+   "read_only": 1,
+   "description": "current: Từ năm học hiện tại, previous: Từ năm học trước"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -481,10 +481,13 @@ def toggle_finance_year_active():
 def sync_students():
     """
     Đồng bộ học sinh từ SIS Class Student vào năm tài chính.
-    Lấy danh sách học sinh đã xếp lớp regular trong năm học tương ứng.
+    Hỗ trợ 2 mode:
+    - 'current': Lấy học sinh từ năm học hiện tại (bổ sung học sinh mới)
+    - 'previous': Lấy học sinh từ năm học trước, loại trừ khối 12 (chuẩn bị năm N+1)
     
     Body:
         finance_year_id: ID năm tài chính
+        mode: 'current' (mặc định) hoặc 'previous'
     
     Returns:
         Số lượng học sinh đã đồng bộ
@@ -501,95 +504,28 @@ def sync_students():
             data = frappe.form_dict
         
         finance_year_id = data.get('finance_year_id')
+        mode = data.get('mode', 'current')  # 'current' hoặc 'previous'
+        
         if not finance_year_id:
             return validation_error_response(
                 "Thiếu finance_year_id",
                 {"finance_year_id": ["Finance Year ID là bắt buộc"]}
             )
         
-        logs.append(f"Đồng bộ học sinh cho năm tài chính: {finance_year_id}")
+        logs.append(f"Đồng bộ học sinh cho năm tài chính: {finance_year_id}, mode: {mode}")
         
         # Lấy thông tin năm tài chính
         fy_doc = frappe.get_doc("SIS Finance Year", finance_year_id)
-        school_year_id = fy_doc.school_year_id
         campus_id = fy_doc.campus_id
         
-        logs.append(f"Lấy học sinh từ năm học: {school_year_id}, Campus: {campus_id}")
+        if mode == 'previous':
+            # Mode: Lấy học sinh từ năm học trước, loại trừ khối 12
+            result = _sync_from_previous_year(fy_doc, campus_id, logs)
+        else:
+            # Mode: Lấy học sinh từ năm học hiện tại (default)
+            result = _sync_from_current_year(fy_doc, campus_id, logs)
         
-        # Lấy danh sách học sinh đã xếp lớp REGULAR trong năm học
-        students = frappe.db.sql("""
-            SELECT DISTINCT 
-                cs.name as class_student_id,
-                cs.student_id,
-                s.student_name,
-                s.student_code,
-                c.name as class_id,
-                c.title as class_title
-            FROM `tabSIS Class Student` cs
-            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
-            INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
-            WHERE c.school_year_id = %(school_year_id)s
-              AND c.campus_id = %(campus_id)s
-              AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
-        """, {
-            "school_year_id": school_year_id,
-            "campus_id": campus_id
-        }, as_dict=True)
-        
-        logs.append(f"Tìm thấy {len(students)} học sinh đã xếp lớp")
-        
-        created_count = 0
-        skipped_count = 0
-        
-        for student in students:
-            try:
-                # Kiểm tra đã có record chưa
-                existing = frappe.db.exists("SIS Finance Student", {
-                    "finance_year_id": finance_year_id,
-                    "student_id": student.student_id
-                })
-                
-                if existing:
-                    skipped_count += 1
-                    continue
-                
-                # Tạo record mới
-                fs_doc = frappe.get_doc({
-                    "doctype": "SIS Finance Student",
-                    "finance_year_id": finance_year_id,
-                    "student_id": student.student_id,
-                    "student_name": student.student_name,
-                    "student_code": student.student_code,
-                    "campus_id": campus_id,
-                    "class_id": student.class_id,
-                    "class_title": student.class_title,
-                    "synced_at": now(),
-                    "synced_from": student.class_student_id
-                })
-                fs_doc.insert(ignore_permissions=True)
-                created_count += 1
-                
-            except Exception as e:
-                logs.append(f"Lỗi khi tạo record cho {student.student_code}: {str(e)}")
-                continue
-        
-        frappe.db.commit()
-        
-        # Cập nhật thống kê năm tài chính
-        fy_doc.update_statistics()
-        
-        logs.append(f"Đã tạo {created_count} học sinh mới, bỏ qua {skipped_count} học sinh đã tồn tại")
-        
-        return success_response(
-            data={
-                "created_count": created_count,
-                "skipped_count": skipped_count,
-                "total_students": len(students),
-                "finance_year_id": finance_year_id
-            },
-            message=f"Đồng bộ thành công! Tạo mới {created_count} học sinh.",
-            logs=logs
-        )
+        return result
         
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
@@ -598,3 +534,178 @@ def sync_students():
             message=f"Lỗi khi đồng bộ học sinh: {str(e)}",
             logs=logs
         )
+
+
+def _sync_from_current_year(fy_doc, campus_id, logs):
+    """
+    Đồng bộ học sinh từ năm học hiện tại (cùng school_year_id).
+    Dùng khi N+1 đã trở thành năm hiện tại, cần bổ sung học sinh mới.
+    """
+    school_year_id = fy_doc.school_year_id
+    finance_year_id = fy_doc.name
+    
+    logs.append(f"Lấy học sinh từ năm học hiện tại: {school_year_id}, Campus: {campus_id}")
+    
+    # Lấy danh sách học sinh đã xếp lớp REGULAR trong năm học hiện tại
+    students = frappe.db.sql("""
+        SELECT DISTINCT 
+            cs.name as class_student_id,
+            cs.student_id,
+            s.student_name,
+            s.student_code,
+            c.name as class_id,
+            c.title as class_title
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+        INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+        WHERE c.school_year_id = %(school_year_id)s
+          AND c.campus_id = %(campus_id)s
+          AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
+    """, {
+        "school_year_id": school_year_id,
+        "campus_id": campus_id
+    }, as_dict=True)
+    
+    logs.append(f"Tìm thấy {len(students)} học sinh đã xếp lớp trong năm học hiện tại")
+    
+    return _create_finance_students(finance_year_id, campus_id, students, logs, "current")
+
+
+def _sync_from_previous_year(fy_doc, campus_id, logs):
+    """
+    Đồng bộ học sinh từ năm học trước (N-1), loại trừ khối 12.
+    Dùng khi tạo Finance Year N+1, mặc định học sinh lớp 1-11 sẽ tiếp tục theo học.
+    """
+    finance_year_id = fy_doc.name
+    current_school_year_id = fy_doc.school_year_id
+    
+    logs.append(f"Tìm năm học trước của: {current_school_year_id}")
+    
+    # Lấy thông tin năm học hiện tại để tìm năm học trước
+    current_sy = frappe.db.get_value(
+        "SIS School Year",
+        current_school_year_id,
+        ["start_date", "campus_id"],
+        as_dict=True
+    )
+    
+    if not current_sy:
+        return error_response(f"Không tìm thấy năm học: {current_school_year_id}", logs=logs)
+    
+    # Tìm năm học trước đó (có start_date nhỏ hơn và cùng campus)
+    previous_sy = frappe.db.sql("""
+        SELECT name, title_vn, start_date
+        FROM `tabSIS School Year`
+        WHERE campus_id = %(campus_id)s
+          AND start_date < %(current_start_date)s
+        ORDER BY start_date DESC
+        LIMIT 1
+    """, {
+        "campus_id": campus_id,
+        "current_start_date": current_sy.start_date
+    }, as_dict=True)
+    
+    if not previous_sy:
+        return error_response(
+            "Không tìm thấy năm học trước. Vui lòng dùng mode 'current' để sync từ năm học hiện tại.",
+            logs=logs
+        )
+    
+    previous_school_year_id = previous_sy[0].name
+    logs.append(f"Năm học trước: {previous_school_year_id} ({previous_sy[0].title_vn})")
+    
+    # Lấy danh sách học sinh từ năm học trước, loại trừ khối 12
+    # Kiểm tra khối 12 bằng grade_level hoặc tên lớp chứa "12"
+    students = frappe.db.sql("""
+        SELECT DISTINCT 
+            cs.name as class_student_id,
+            cs.student_id,
+            s.student_name,
+            s.student_code,
+            c.name as class_id,
+            c.title as class_title,
+            c.grade_level
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+        INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+        WHERE c.school_year_id = %(school_year_id)s
+          AND c.campus_id = %(campus_id)s
+          AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
+          AND (
+              c.grade_level IS NULL 
+              OR c.grade_level NOT LIKE '%%12%%'
+          )
+          AND (
+              c.title IS NULL 
+              OR c.title NOT LIKE '%%12%%'
+          )
+    """, {
+        "school_year_id": previous_school_year_id,
+        "campus_id": campus_id
+    }, as_dict=True)
+    
+    logs.append(f"Tìm thấy {len(students)} học sinh từ năm học trước (đã loại trừ khối 12)")
+    
+    return _create_finance_students(finance_year_id, campus_id, students, logs, "previous")
+
+
+def _create_finance_students(finance_year_id, campus_id, students, logs, mode):
+    """
+    Tạo Finance Student records từ danh sách học sinh.
+    """
+    created_count = 0
+    skipped_count = 0
+    
+    for student in students:
+        try:
+            # Kiểm tra đã có record chưa
+            existing = frappe.db.exists("SIS Finance Student", {
+                "finance_year_id": finance_year_id,
+                "student_id": student.student_id
+            })
+            
+            if existing:
+                skipped_count += 1
+                continue
+            
+            # Tạo record mới
+            fs_doc = frappe.get_doc({
+                "doctype": "SIS Finance Student",
+                "finance_year_id": finance_year_id,
+                "student_id": student.student_id,
+                "student_name": student.student_name,
+                "student_code": student.student_code,
+                "campus_id": campus_id,
+                "class_id": student.get("class_id"),
+                "class_title": student.get("class_title"),
+                "synced_at": now(),
+                "synced_from": student.class_student_id,
+                "sync_mode": mode  # Ghi nhận mode sync
+            })
+            fs_doc.insert(ignore_permissions=True)
+            created_count += 1
+            
+        except Exception as e:
+            logs.append(f"Lỗi khi tạo record cho {student.student_code}: {str(e)}")
+            continue
+    
+    frappe.db.commit()
+    
+    # Cập nhật thống kê năm tài chính
+    fy_doc = frappe.get_doc("SIS Finance Year", finance_year_id)
+    fy_doc.update_statistics()
+    
+    mode_text = "năm học trước" if mode == "previous" else "năm học hiện tại"
+    logs.append(f"Đã tạo {created_count} học sinh mới từ {mode_text}, bỏ qua {skipped_count} học sinh đã tồn tại")
+    
+    return success_response(
+        data={
+            "created_count": created_count,
+            "skipped_count": skipped_count,
+            "total_students": len(students),
+            "finance_year_id": finance_year_id,
+            "mode": mode
+        },
+        message=f"Đồng bộ thành công! Tạo mới {created_count} học sinh từ {mode_text}.",
+        logs=logs
+    )
