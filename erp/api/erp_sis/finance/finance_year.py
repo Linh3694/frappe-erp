@@ -615,7 +615,7 @@ def _sync_from_previous_year(fy_doc, campus_id, logs):
     logs.append(f"Năm học trước: {previous_school_year_id} ({previous_sy[0].title_vn})")
     
     # Lấy danh sách học sinh từ năm học trước, loại trừ khối 12
-    # Kiểm tra khối 12 bằng grade_level hoặc tên lớp chứa "12"
+    # JOIN với SIS Education Grade để kiểm tra grade_code không phải "12"
     students = frappe.db.sql("""
         SELECT DISTINCT 
             cs.name as class_student_id,
@@ -624,16 +624,17 @@ def _sync_from_previous_year(fy_doc, campus_id, logs):
             s.student_code,
             c.name as class_id,
             c.title as class_title,
-            c.grade_level
+            eg.grade_code
         FROM `tabSIS Class Student` cs
         INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
         INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+        LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
         WHERE c.school_year_id = %(school_year_id)s
           AND c.campus_id = %(campus_id)s
           AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
           AND (
-              c.grade_level IS NULL 
-              OR c.grade_level NOT LIKE '%%12%%'
+              eg.grade_code IS NULL 
+              OR eg.grade_code != '12'
           )
           AND (
               c.title IS NULL 
