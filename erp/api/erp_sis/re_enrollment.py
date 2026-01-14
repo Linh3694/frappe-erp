@@ -136,6 +136,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
             
             # Lấy danh sách học sinh đã xếp lớp REGULAR trong năm học nguồn tại campus này
             # Chỉ lấy lớp regular, không lấy lớp mixed
+            # Loại bỏ học sinh lớp 12 (grade_code = '12') vì sẽ tốt nghiệp
             students = frappe.db.sql("""
                 SELECT DISTINCT 
                     cs.student_id,
@@ -146,15 +147,18 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
                 INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+                LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
                 WHERE c.school_year_id = %(school_year_id)s
                   AND c.campus_id = %(campus_id)s
                   AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
+                  AND (eg.grade_code IS NULL OR eg.grade_code != '12')
+                  AND c.title NOT LIKE '%%12%%'
             """, {
                 "school_year_id": source_school_year_id,
                 "campus_id": campus_id
             }, as_dict=True)
             
-            logs.append(f"Tìm thấy {len(students)} học sinh đã xếp lớp")
+            logs.append(f"Tìm thấy {len(students)} học sinh đã xếp lớp (đã loại bỏ lớp 12)")
         
         # Tạo records cho từng học sinh
         for student in students:
