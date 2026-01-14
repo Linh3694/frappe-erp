@@ -26,6 +26,13 @@
   "data_status",
   "fee_lines_section",
   "fee_lines",
+  "milestone_payment_section",
+  "payment_scheme_choice",
+  "current_milestone_key",
+  "column_break_milestone",
+  "semester_1_paid",
+  "semester_2_paid",
+  "milestone_amounts_json",
   "payment_summary",
   "total_amount",
   "paid_amount",
@@ -110,6 +117,50 @@
    "label": "Các dòng khoản phí",
    "options": "SIS Finance Student Order Line",
    "description": "Số tiền cụ thể của học sinh này theo từng mốc deadline"
+  },
+  {
+   "fieldname": "milestone_payment_section",
+   "fieldtype": "Section Break",
+   "label": "Thanh toán theo mốc"
+  },
+  {
+   "fieldname": "payment_scheme_choice",
+   "fieldtype": "Select",
+   "label": "Phương thức thanh toán",
+   "options": "\nyearly\nsemester",
+   "description": "Phương thức thanh toán đã chọn: yearly (đóng cả năm) hoặc semester (đóng theo kỳ)"
+  },
+  {
+   "fieldname": "current_milestone_key",
+   "fieldtype": "Data",
+   "label": "Mốc hiện tại",
+   "description": "Mốc thanh toán hiện tại: yearly_1, yearly_2, semester_1, semester_2"
+  },
+  {
+   "fieldname": "column_break_milestone",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "semester_1_paid",
+   "fieldtype": "Currency",
+   "label": "Đã đóng Kỳ 1",
+   "default": 0,
+   "description": "Số tiền đã đóng cho Kỳ 1 (khi chọn đóng theo kỳ)"
+  },
+  {
+   "fieldname": "semester_2_paid",
+   "fieldtype": "Currency",
+   "label": "Đã đóng Kỳ 2",
+   "default": 0,
+   "description": "Số tiền đã đóng cho Kỳ 2 (khi chọn đóng theo kỳ)"
+  },
+  {
+   "fieldname": "milestone_amounts_json",
+   "fieldtype": "Small Text",
+   "label": "Số tiền các mốc (JSON)",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "JSON chứa số tiền TOTAL của từng milestone: {yearly_1: xxx, yearly_2: xxx, semester_1: xxx, semester_2: xxx}"
   },
   {
    "fieldname": "payment_summary",
