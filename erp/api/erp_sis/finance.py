@@ -2114,6 +2114,9 @@ def add_students_to_order_v2():
     """
     Thêm học sinh vào đơn hàng (version mới).
     Tạo Order Student và Student Order Lines (rỗng, chưa có số tiền).
+    
+    Nếu order_type = 'tuition', sẽ bỏ qua học sinh đã đóng học phí 
+    trong order tuition khác của cùng năm tài chính.
     """
     logs = []
     
@@ -2128,6 +2131,8 @@ def add_students_to_order_v2():
         
         order_id = data.get('order_id')
         student_ids = data.get('student_ids', [])
+        # Tùy chọn bỏ qua học sinh đã đóng học phí (mặc định True cho order tuition)
+        exclude_paid_tuition = data.get('exclude_paid_tuition', True)
         
         if not order_id:
             return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
@@ -2145,12 +2150,33 @@ def add_students_to_order_v2():
         
         logs.append(f"Thêm {len(student_ids)} học sinh vào đơn hàng {order_id}")
         
+        # Nếu order_type là tuition và exclude_paid_tuition = True, 
+        # lấy danh sách học sinh đã đóng học phí trong năm
+        paid_tuition_student_ids = set()
+        if order_doc.order_type == 'tuition' and exclude_paid_tuition:
+            paid_students = frappe.db.sql("""
+                SELECT DISTINCT os.finance_student_id
+                FROM `tabSIS Finance Order Student` os
+                JOIN `tabSIS Finance Order` o ON o.name = os.order_id
+                WHERE o.finance_year_id = %(finance_year_id)s
+                AND o.order_type = 'tuition'
+                AND o.name != %(current_order)s
+                AND os.payment_status = 'paid'
+            """, {
+                "finance_year_id": order_doc.finance_year_id,
+                "current_order": order_id
+            }, as_list=True)
+            paid_tuition_student_ids = {r[0] for r in paid_students}
+            if paid_tuition_student_ids:
+                logs.append(f"Tìm thấy {len(paid_tuition_student_ids)} học sinh đã đóng học phí trong năm")
+        
         created_count = 0
         skipped_count = 0
+        skipped_paid_count = 0  # Số học sinh bị bỏ qua do đã đóng học phí
         
         for student_id in student_ids:
             try:
-                # Kiểm tra đã có chưa
+                # Kiểm tra đã có trong order này chưa
                 existing = frappe.db.exists("SIS Finance Order Student", {
                     "order_id": order_id,
                     "finance_student_id": student_id
@@ -2158,6 +2184,11 @@ def add_students_to_order_v2():
                 
                 if existing:
                     skipped_count += 1
+                    continue
+                
+                # Kiểm tra học sinh đã đóng học phí trong order tuition khác chưa
+                if student_id in paid_tuition_student_ids:
+                    skipped_paid_count += 1
                     continue
                 
                 # Tạo Order Student
@@ -2192,12 +2223,13 @@ def add_students_to_order_v2():
         order_doc.update_statistics()
         order_doc.update_status_based_on_students()
         
-        logs.append(f"Đã thêm {created_count} học sinh, bỏ qua {skipped_count}")
+        logs.append(f"Đã thêm {created_count} học sinh, bỏ qua {skipped_count} (đã có), bỏ qua {skipped_paid_count} (đã đóng học phí)")
         
         return success_response(
             data={
                 "created_count": created_count,
                 "skipped_count": skipped_count,
+                "skipped_paid_count": skipped_paid_count,
                 "total": len(student_ids),
                 "order_id": order_id
             },
@@ -2294,6 +2326,217 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
         return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_paid_tuition_students(finance_year_id=None, exclude_order_id=None):
+    """
+    Lấy danh sách học sinh đã đóng học phí trong năm tài chính.
+    Dùng để filter trong StudentPoolModal khi thêm học sinh vào order tuition.
+    
+    Args:
+        finance_year_id: ID năm tài chính
+        exclude_order_id: ID order cần loại trừ (order hiện tại)
+    
+    Returns:
+        Danh sách finance_student_id đã đóng học phí
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not finance_year_id:
+            finance_year_id = frappe.request.args.get('finance_year_id')
+        if not exclude_order_id:
+            exclude_order_id = frappe.request.args.get('exclude_order_id')
+        
+        if not finance_year_id:
+            return validation_error_response("Thiếu finance_year_id", {"finance_year_id": ["Bắt buộc"]})
+        
+        # Query học sinh đã đóng học phí trong các order tuition
+        where_clause = """
+            o.finance_year_id = %(finance_year_id)s
+            AND o.order_type = 'tuition'
+            AND os.payment_status = 'paid'
+        """
+        params = {"finance_year_id": finance_year_id}
+        
+        if exclude_order_id:
+            where_clause += " AND o.name != %(exclude_order_id)s"
+            params["exclude_order_id"] = exclude_order_id
+        
+        paid_students = frappe.db.sql(f"""
+            SELECT DISTINCT 
+                os.finance_student_id,
+                fs.student_name,
+                fs.student_code,
+                o.title as order_title
+            FROM `tabSIS Finance Order Student` os
+            JOIN `tabSIS Finance Order` o ON o.name = os.order_id
+            JOIN `tabSIS Finance Student` fs ON fs.name = os.finance_student_id
+            WHERE {where_clause}
+        """, params, as_dict=True)
+        
+        # Trả về list ID và thông tin chi tiết
+        paid_ids = [s.finance_student_id for s in paid_students]
+        
+        return success_response(
+            data={
+                "paid_student_ids": paid_ids,
+                "paid_students": paid_students,
+                "count": len(paid_ids)
+            },
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def update_order_student_payment():
+    """
+    Cập nhật số tiền đã đóng cho Order Student.
+    Cascade update lên Finance Student để tổng hợp trạng thái thanh toán.
+    
+    Body:
+        order_student_id: ID của Order Student
+        paid_amount: Số tiền đã đóng
+        notes: Ghi chú (optional)
+    
+    Returns:
+        Thông tin Order Student sau cập nhật
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền cập nhật", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        order_student_id = data.get('order_student_id')
+        paid_amount = data.get('paid_amount')
+        notes = data.get('notes')
+        
+        if not order_student_id:
+            return validation_error_response(
+                "Thiếu order_student_id",
+                {"order_student_id": ["Order Student ID là bắt buộc"]}
+            )
+        
+        if paid_amount is None:
+            return validation_error_response(
+                "Thiếu paid_amount",
+                {"paid_amount": ["Số tiền đã đóng là bắt buộc"]}
+            )
+        
+        # Lấy Order Student
+        if not frappe.db.exists("SIS Finance Order Student", order_student_id):
+            return not_found_response(f"Không tìm thấy Order Student: {order_student_id}")
+        
+        order_student = frappe.get_doc("SIS Finance Order Student", order_student_id)
+        finance_student_id = order_student.finance_student_id
+        
+        # Cập nhật paid_amount
+        order_student.paid_amount = float(paid_amount) if paid_amount else 0
+        
+        # Cập nhật notes nếu có
+        if notes is not None:
+            order_student.notes = notes
+        
+        # Lưu Order Student (before_save sẽ tự tính outstanding và payment_status)
+        order_student.save(ignore_permissions=True)
+        
+        logs.append(f"Đã cập nhật Order Student: {order_student_id}")
+        
+        # Cascade update lên Finance Student
+        finance_student_updated = _update_finance_student_summary(finance_student_id, logs)
+        
+        # Cập nhật thống kê Order
+        order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
+        order_doc.update_statistics()
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "name": order_student.name,
+                "paid_amount": order_student.paid_amount,
+                "outstanding_amount": order_student.outstanding_amount,
+                "payment_status": order_student.payment_status,
+                "finance_student_id": finance_student_id,
+                "finance_student_updated": finance_student_updated
+            },
+            message="Cập nhật thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Update Order Student Payment Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+def _update_finance_student_summary(finance_student_id, logs=None):
+    """
+    Cập nhật tổng hợp tài chính cho Finance Student từ tất cả Order Student.
+    
+    Args:
+        finance_student_id: ID của Finance Student
+        logs: List để append logs
+    
+    Returns:
+        True nếu cập nhật thành công
+    """
+    if logs is None:
+        logs = []
+    
+    try:
+        # Tính tổng từ tất cả Order Student của học sinh
+        summary = frappe.db.sql("""
+            SELECT 
+                COALESCE(SUM(total_amount), 0) as total_amount,
+                COALESCE(SUM(paid_amount), 0) as paid_amount
+            FROM `tabSIS Finance Order Student`
+            WHERE finance_student_id = %s
+        """, (finance_student_id,), as_dict=True)[0]
+        
+        total_amount = summary.get('total_amount', 0)
+        paid_amount = summary.get('paid_amount', 0)
+        outstanding_amount = total_amount - paid_amount
+        
+        # Xác định payment_status
+        if total_amount <= 0:
+            payment_status = 'unpaid'
+        elif paid_amount >= total_amount:
+            payment_status = 'paid'
+        elif paid_amount > 0:
+            payment_status = 'partial'
+        else:
+            payment_status = 'unpaid'
+        
+        # Cập nhật Finance Student
+        frappe.db.set_value("SIS Finance Student", finance_student_id, {
+            "total_amount": total_amount,
+            "paid_amount": paid_amount,
+            "outstanding_amount": outstanding_amount,
+            "payment_status": payment_status
+        }, update_modified=True)
+        
+        logs.append(f"Cascade update Finance Student: {finance_student_id} - total: {total_amount}, paid: {paid_amount}, status: {payment_status}")
+        
+        return True
+        
+    except Exception as e:
+        logs.append(f"Lỗi cascade update Finance Student: {str(e)}")
+        return False
 
 
 # ==================== EXCEL IMPORT/EXPORT APIs ====================
