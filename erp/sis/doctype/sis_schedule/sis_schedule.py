@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils import getdate
 
 
 class SISSchedule(Document):
@@ -22,7 +23,10 @@ class SISSchedule(Document):
     def validate_date_range(self):
         """Kiểm tra ngày bắt đầu phải trước ngày kết thúc"""
         if self.start_date and self.end_date:
-            if self.start_date > self.end_date:
+            # Chuyển đổi sang datetime.date để so sánh an toàn
+            start = getdate(self.start_date)
+            end = getdate(self.end_date)
+            if start > end:
                 frappe.throw(_("Ngày bắt đầu phải trước ngày kết thúc"))
     
     def validate_overlapping_schedules(self):
@@ -32,6 +36,10 @@ class SISSchedule(Document):
         """
         if not self.start_date or not self.end_date:
             return
+        
+        # Chuyển đổi date của schedule hiện tại sang datetime.date
+        current_start = getdate(self.start_date)
+        current_end = getdate(self.end_date)
         
         # Tìm các schedule khác có cùng education_stage, campus, school_year
         # và có date range trùng lặp
@@ -50,17 +58,20 @@ class SISSchedule(Document):
         )
         
         for schedule in overlapping:
+            # Chuyển đổi date của schedule khác sang datetime.date để so sánh an toàn
+            other_start = getdate(schedule.start_date)
+            other_end = getdate(schedule.end_date)
+            
             # Kiểm tra trùng lặp: A.start <= B.end AND A.end >= B.start
-            if (self.start_date <= schedule.end_date and 
-                self.end_date >= schedule.start_date):
+            if (current_start <= other_end and current_end >= other_start):
                 frappe.throw(
                     _("Thời gian biểu '{0}' ({1} - {2}) đang trùng lặp với thời gian biểu '{3}' ({4} - {5})").format(
                         self.schedule_name,
-                        self.start_date,
-                        self.end_date,
+                        current_start,
+                        current_end,
                         schedule.schedule_name,
-                        schedule.start_date,
-                        schedule.end_date
+                        other_start,
+                        other_end
                     )
                 )
     
