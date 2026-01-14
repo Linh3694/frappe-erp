@@ -160,6 +160,40 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
             
             logs.append(f"Tìm thấy {len(students)} học sinh đã xếp lớp (đã loại bỏ lớp 12)")
         
+        # Xóa học sinh lớp 12 đã có trong config (chưa submit)
+        # Chỉ xóa những record chưa có decision để không mất dữ liệu đã submit
+        deleted_count = 0
+        grade12_records = frappe.db.sql("""
+            SELECT re.name, re.student_code, re.current_class
+            FROM `tabSIS Re-enrollment` re
+            WHERE re.config_id = %(config_id)s
+              AND (re.decision IS NULL OR re.decision = '')
+              AND (
+                  re.current_class LIKE '%%12%%'
+                  OR EXISTS (
+                      SELECT 1 FROM `tabSIS Class Student` cs
+                      INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                      LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                      WHERE cs.student_id = re.student_id
+                        AND c.school_year_id = %(school_year_id)s
+                        AND eg.grade_code = '12'
+                  )
+              )
+        """, {
+            "config_id": config_id,
+            "school_year_id": source_school_year_id
+        }, as_dict=True)
+        
+        for record in grade12_records:
+            try:
+                frappe.delete_doc("SIS Re-enrollment", record.name, ignore_permissions=True, force=True)
+                deleted_count += 1
+            except Exception as e:
+                logs.append(f"Lỗi xóa record lớp 12 {record.student_code}: {str(e)}")
+        
+        if deleted_count > 0:
+            logs.append(f"Đã xóa {deleted_count} học sinh lớp 12 (chưa submit)")
+        
         # Tạo records cho từng học sinh
         for student in students:
             try:
@@ -198,8 +232,9 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
     except Exception as e:
         logs.append(f"Lỗi auto-create records: {str(e)}")
         frappe.log_error(frappe.get_traceback(), "Auto Create Re-enrollment Records Error")
+        deleted_count = 0
     
-    return created_count
+    return {"created_count": created_count, "deleted_count": deleted_count}
 
 
 # ==================== CONFIG APIs ====================
@@ -1845,7 +1880,7 @@ def sync_students():
             logs.append(f"Finance Year: {finance_year_id}")
         
         # Gọi hàm auto-create với năm học nguồn hoặc năm tài chính
-        created_count = _auto_create_student_records(
+        result = _auto_create_student_records(
             config_id,
             config.source_school_year_id,  # Dùng năm học nguồn để lấy danh sách học sinh
             config.campus_id,
@@ -1853,12 +1888,25 @@ def sync_students():
             finance_year_id=finance_year_id  # Nếu có thì lấy từ Finance Year
         )
         
+        created_count = result.get("created_count", 0)
+        deleted_count = result.get("deleted_count", 0)
+        
+        # Tạo message phù hợp
+        messages = []
+        if created_count > 0:
+            messages.append(f"Tạo thêm {created_count} đơn mới")
+        if deleted_count > 0:
+            messages.append(f"Xóa {deleted_count} học sinh lớp 12 (chưa submit)")
+        
+        message = "Đã đồng bộ thành công. " + ", ".join(messages) if messages else "Danh sách đã đồng bộ, không có thay đổi."
+        
         return success_response(
             data={
                 "created_count": created_count,
+                "deleted_count": deleted_count,
                 "config_id": config_id
             },
-            message=f"Đã đồng bộ thành công. Tạo thêm {created_count} đơn mới.",
+            message=message,
             logs=logs
         )
         
