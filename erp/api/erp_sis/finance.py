@@ -2953,8 +2953,13 @@ def recalculate_order_totals(order_id=None):
         if not _check_admin_permission():
             return error_response("Bạn không có quyền thực hiện", logs=logs)
         
+        # Nhận order_id từ nhiều nguồn: JSON body, form_dict, hoặc query params
         if not order_id:
-            order_id = frappe.request.args.get('order_id') or frappe.form_dict.get('order_id')
+            if frappe.request.is_json:
+                data = frappe.request.json or {}
+                order_id = data.get('order_id')
+            else:
+                order_id = frappe.form_dict.get('order_id') or frappe.request.args.get('order_id')
         
         if not order_id:
             return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
