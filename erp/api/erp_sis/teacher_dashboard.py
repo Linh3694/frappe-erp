@@ -369,9 +369,9 @@ def get_teacher_week_optimized():
         # ⚡ FIX: Filter theo education_stage của CLASS (thông qua education_grade)
         # Thay vì chỉ filter theo timetable_column, phải filter theo cấp học của lớp
         if education_stage:
-            where_clauses.append("eg.education_stage = %(education_stage)s")
+            where_clauses.append("eg.education_stage_id = %(education_stage)s")
             params["education_stage"] = education_stage
-            frappe.logger().info(f"🎯 Filtering by CLASS education_stage: {education_stage}")
+            frappe.logger().info(f"🎯 Filtering by CLASS education_stage_id: {education_stage}")
         
         entries_sql = """
             SELECT 
