@@ -308,6 +308,11 @@ def get_config(config_id=None):
             order_by="deadline asc"
         )
         
+        # Convert deadline sang string để đảm bảo format nhất quán
+        for discount in discounts:
+            if discount.get("deadline"):
+                discount["deadline"] = str(discount["deadline"])
+        
         # Lấy câu hỏi khảo sát từ config document
         questions = []
         for q in config.questions:
@@ -824,6 +829,7 @@ def get_submissions():
                     fs.paid_amount as finance_paid_amount,
                     fs.outstanding_amount as finance_outstanding_amount,
                     re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
+                    re.selected_discount_deadline,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
                 LEFT JOIN `tabCRM Guardian` g ON re.guardian_id = g.name
@@ -842,6 +848,7 @@ def get_submissions():
                     re.current_class, re.campus_id,
                     re.decision, re.payment_type, re.not_re_enroll_reason,
                     re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
+                    re.selected_discount_deadline,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
                 LEFT JOIN `tabCRM Guardian` g ON re.guardian_id = g.name
@@ -873,6 +880,10 @@ def get_submissions():
                 "refunded": "Hoàn tiền"
             }
             sub["payment_status_display"] = payment_status_map.get(sub.payment_status, "-")
+            
+            # Convert selected_discount_deadline sang string nếu có
+            if sub.get("selected_discount_deadline"):
+                sub["selected_discount_deadline"] = str(sub["selected_discount_deadline"])
             
             # Lấy answers (câu trả lời khảo sát)
             answers = frappe.get_all(
