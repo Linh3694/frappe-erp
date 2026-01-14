@@ -706,17 +706,32 @@ def get_finance_students(finance_year_id=None, search=None, page=1, page_size=20
         offset = (page - 1) * page_size
         total_pages = (total + page_size - 1) // page_size
         
-        # Lấy danh sách học sinh
+        # Lấy danh sách học sinh với tổng hợp từ Order Student (tính động)
+        # Build WHERE clause với prefix fs.
+        where_sql_with_prefix = where_sql.replace('finance_year_id', 'fs.finance_year_id').replace('student_name', 'fs.student_name').replace('student_code', 'fs.student_code')
+        
+        query_params = {**params, "page_size": page_size, "offset": offset}
+        
         students = frappe.db.sql(f"""
             SELECT 
-                name, finance_year_id, student_id, student_name, student_code,
-                campus_id, class_id, class_title,
-                total_amount, paid_amount, outstanding_amount, payment_status
-            FROM `tabSIS Finance Student`
-            WHERE {where_sql}
-            ORDER BY student_name ASC
+                fs.name, fs.finance_year_id, fs.student_id, fs.student_name, fs.student_code,
+                fs.campus_id, fs.class_id, fs.class_title,
+                COALESCE(SUM(os.total_amount), 0) as total_amount,
+                COALESCE(SUM(os.paid_amount), 0) as paid_amount,
+                COALESCE(SUM(os.outstanding_amount), 0) as outstanding_amount,
+                CASE 
+                    WHEN COALESCE(SUM(os.total_amount), 0) = 0 THEN 'no_fee'
+                    WHEN COALESCE(SUM(os.paid_amount), 0) >= COALESCE(SUM(os.total_amount), 0) THEN 'paid'
+                    WHEN COALESCE(SUM(os.paid_amount), 0) > 0 THEN 'partial'
+                    ELSE 'unpaid'
+                END as payment_status
+            FROM `tabSIS Finance Student` fs
+            LEFT JOIN `tabSIS Finance Order Student` os ON os.finance_student_id = fs.name
+            WHERE {where_sql_with_prefix}
+            GROUP BY fs.name
+            ORDER BY fs.student_name ASC
             LIMIT %(page_size)s OFFSET %(offset)s
-        """, {**params, "page_size": page_size, "offset": offset}, as_dict=True)
+        """, query_params, as_dict=True)
         
         logs.append(f"Tìm thấy {total} học sinh, trả về {len(students)} học sinh")
         
