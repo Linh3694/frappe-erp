@@ -707,8 +707,11 @@ def get_finance_students(finance_year_id=None, search=None, page=1, page_size=20
         total_pages = (total + page_size - 1) // page_size
         
         # Lấy danh sách học sinh với tổng hợp từ Order Student (tính động)
-        # Build WHERE clause với prefix fs.
-        where_sql_with_prefix = where_sql.replace('finance_year_id', 'fs.finance_year_id').replace('student_name', 'fs.student_name').replace('student_code', 'fs.student_code')
+        # Build WHERE clause với prefix fs. (chỉ thay đổi tên cột, không thay đổi placeholder)
+        where_clauses_with_prefix = ["fs.finance_year_id = %(finance_year_id)s"]
+        if search:
+            where_clauses_with_prefix.append("(fs.student_name LIKE %(search)s OR fs.student_code LIKE %(search)s)")
+        where_sql_with_prefix = " AND ".join(where_clauses_with_prefix)
         
         query_params = {**params, "page_size": page_size, "offset": offset}
         
