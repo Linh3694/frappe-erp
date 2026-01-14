@@ -2771,19 +2771,27 @@ def import_student_fee_data():
         return error_response(f"Lỗi: {str(e)}", logs=logs)
 
 
-def _calculate_totals_v2(order_student_doc, order_doc):
+def _calculate_totals_v2(order_student_doc, order_doc, debug=False):
     """
     Tính toán các dòng total/subtotal dựa trên formula.
     Đồng thời cập nhật total_amount trên order_student_doc.
+    
+    Args:
+        debug: Nếu True, sẽ print debug info
     """
     import re
+    
+    debug_info = []
     
     # Lấy tất cả amounts theo line_number
     line_amounts = {}
     for fee_line in order_student_doc.fee_lines:
         if fee_line.amounts_json:
             try:
-                line_amounts[fee_line.line_number] = json.loads(fee_line.amounts_json)
+                amounts_data = json.loads(fee_line.amounts_json)
+                line_amounts[fee_line.line_number] = amounts_data
+                if debug and amounts_data:
+                    debug_info.append(f"Line {fee_line.line_number} ({fee_line.line_type}): {amounts_data}")
             except:
                 line_amounts[fee_line.line_number] = {}
     
@@ -2793,10 +2801,28 @@ def _calculate_totals_v2(order_student_doc, order_doc):
         for m in order_doc.milestones
     ]
     
+    if debug:
+        debug_info.append(f"Milestone keys: {milestone_keys}")
+        debug_info.append(f"Line amounts keys: {list(line_amounts.keys())}")
+    
     # Tính toán các dòng có formula
     total_line_amounts = {}  # Lưu amounts của dòng total
+    
     for fee_line in order_student_doc.fee_lines:
         order_line = order_doc.get_fee_line(fee_line.line_number)
+        
+        # Nếu là dòng total nhưng KHÔNG có formula, lấy giá trị trực tiếp từ amounts_json
+        if fee_line.line_type == 'total' and (not order_line or not order_line.formula):
+            if fee_line.amounts_json:
+                try:
+                    total_line_amounts = json.loads(fee_line.amounts_json)
+                    if debug:
+                        debug_info.append(f"Total line (no formula) amounts: {total_line_amounts}")
+                except:
+                    pass
+            continue
+        
+        # Skip nếu không có formula
         if not order_line or not order_line.formula:
             continue
         
@@ -2824,6 +2850,8 @@ def _calculate_totals_v2(order_student_doc, order_doc):
         if fee_line.line_type == 'total':
             total_line_amounts = calculated_amounts
             line_amounts[fee_line.line_number] = calculated_amounts
+            if debug:
+                debug_info.append(f"Total line (with formula) amounts: {total_line_amounts}")
     
     # Cập nhật total_amount cho order_student_doc
     # total_amount = giá trị của dòng total theo milestone được chọn
@@ -2848,16 +2876,23 @@ def _calculate_totals_v2(order_student_doc, order_doc):
     
     # Nếu không có dòng total, tính tổng từ các dòng item (không phải category/subtotal)
     if not calculated_total:
+        if debug:
+            debug_info.append("Fallback: Tính từ các dòng item")
+        
         for fee_line in order_student_doc.fee_lines:
             # Chỉ tính các dòng item (không phải category, subtotal, total)
             if fee_line.line_type == 'item' and fee_line.amounts_json:
                 try:
                     amounts = json.loads(fee_line.amounts_json)
+                    if debug and amounts:
+                        debug_info.append(f"Item line {fee_line.line_number}: keys={list(amounts.keys())}")
+                    
                     # Lấy is_deduction từ order_line (vì Student Order Line không có field này)
                     order_line = order_doc.get_fee_line(fee_line.line_number)
                     is_deduction = order_line.is_deduction if order_line else False
                     
                     # Ưu tiên yearly_1, fallback sang milestone đầu tiên
+                    found_key = False
                     for m_key in milestone_keys:
                         if m_key.startswith('yearly_') and m_key in amounts:
                             # Nếu là khoản trừ (is_deduction), trừ đi
@@ -2866,8 +2901,10 @@ def _calculate_totals_v2(order_student_doc, order_doc):
                                 calculated_total -= abs(value)
                             else:
                                 calculated_total += value
+                            found_key = True
                             break
-                    else:
+                    
+                    if not found_key:
                         # Fallback: lấy milestone đầu tiên
                         for m_key in milestone_keys:
                             if m_key in amounts:
@@ -2877,8 +2914,9 @@ def _calculate_totals_v2(order_student_doc, order_doc):
                                 else:
                                     calculated_total += value
                                 break
-                except:
-                    pass
+                except Exception as e:
+                    if debug:
+                        debug_info.append(f"Error parsing item {fee_line.line_number}: {str(e)}")
     
     # Cập nhật total_amount
     if calculated_total:
@@ -2896,6 +2934,11 @@ def _calculate_totals_v2(order_student_doc, order_doc):
     # Cập nhật data_status nếu có số tiền
     if calculated_total or any(fl.amounts_json for fl in order_student_doc.fee_lines):
         order_student_doc.data_status = 'complete'
+    
+    if debug:
+        debug_info.append(f"Final calculated_total: {calculated_total}")
+        debug_info.append(f"total_line_amounts: {total_line_amounts}")
+        frappe.log_error('\n'.join(debug_info), "Calculate Totals V2 Debug")
 
 
 @frappe.whitelist()
@@ -2919,6 +2962,17 @@ def recalculate_order_totals(order_id=None):
         order_doc = frappe.get_doc("SIS Finance Order", order_id)
         logs.append(f"Recalculate totals cho Order: {order_id}")
         
+        # Debug: Log cấu trúc milestones
+        milestone_keys = [
+            f"{m.payment_scheme or 'yearly'}_{m.milestone_number}" 
+            for m in order_doc.milestones
+        ]
+        logs.append(f"Milestone keys: {milestone_keys}")
+        
+        # Debug: Log cấu trúc fee_lines
+        fee_line_types = [(fl.line_number, fl.line_type, fl.formula or '') for fl in order_doc.fee_lines]
+        logs.append(f"Fee line types: {fee_line_types}")
+        
         # Lấy tất cả Order Students
         order_students = frappe.get_all(
             "SIS Finance Order Student",
@@ -2927,13 +2981,35 @@ def recalculate_order_totals(order_id=None):
         )
         
         updated_count = 0
+        debug_first_student = None
+        
         for os_name in order_students:
             os_doc = frappe.get_doc("SIS Finance Order Student", os_name)
             
-            # Tính lại totals
-            _calculate_totals_v2(os_doc, order_doc)
+            # Debug: Log fee_lines của student đầu tiên
+            if not debug_first_student:
+                debug_first_student = {
+                    "name": os_doc.name,
+                    "fee_lines": [
+                        {
+                            "line_number": fl.line_number,
+                            "line_type": fl.line_type,
+                            "amounts_json": fl.amounts_json
+                        }
+                        for fl in os_doc.fee_lines
+                    ]
+                }
+                logs.append(f"First student fee_lines: {json.dumps(debug_first_student, ensure_ascii=False)}")
+            
+            # Tính lại totals (debug cho student đầu tiên)
+            is_first = (updated_count == 0)
+            _calculate_totals_v2(os_doc, order_doc, debug=is_first)
             os_doc.save(ignore_permissions=True)
             updated_count += 1
+            
+            # Debug: Log kết quả sau khi tính
+            if is_first:
+                logs.append(f"After calculate - total_amount: {os_doc.total_amount}, outstanding: {os_doc.outstanding_amount}")
         
         frappe.db.commit()
         logs.append(f"Đã cập nhật {updated_count} học sinh")
@@ -2941,7 +3017,12 @@ def recalculate_order_totals(order_id=None):
         return success_response(
             data={
                 "order_id": order_id,
-                "updated_count": updated_count
+                "updated_count": updated_count,
+                "debug": {
+                    "milestone_keys": milestone_keys,
+                    "fee_line_types": fee_line_types,
+                    "first_student": debug_first_student
+                }
             },
             message=f"Đã tính lại totals cho {updated_count} học sinh",
             logs=logs
