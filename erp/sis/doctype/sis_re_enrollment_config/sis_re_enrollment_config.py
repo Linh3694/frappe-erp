@@ -23,13 +23,6 @@ class SISReenrollmentConfig(Document):
 		if self.start_date and self.end_date:
 			if getdate(self.start_date) > getdate(self.end_date):
 				frappe.throw("Ngày bắt đầu phải trước ngày kết thúc")
-		
-		# Kiểm tra các deadline trong bảng ưu đãi
-		if self.discounts:
-			for discount in self.discounts:
-				if discount.deadline:
-					if self.end_date and getdate(discount.deadline) > getdate(self.end_date):
-						frappe.throw(f"Hạn ưu đãi {discount.deadline} không được sau ngày kết thúc {self.end_date}")
 	
 	def validate_single_active(self):
 		"""Chỉ cho phép 1 config active cho mỗi campus"""

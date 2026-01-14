@@ -25,6 +25,7 @@
   "is_active",
   "is_required",
   "sort_order",
+  "debit_note_form_code",
   "description_section",
   "description",
   "milestones_section",
@@ -107,6 +108,13 @@
    "fieldtype": "Int",
    "label": "Thứ tự hiển thị",
    "default": 0
+  },
+  {
+   "fieldname": "debit_note_form_code",
+   "fieldtype": "Data",
+   "label": "Form Debit Note",
+   "default": "TUITION_STANDARD",
+   "description": "Mã form template dùng để render Debit Note. VD: TUITION_STANDARD, SERVICES_STANDARD"
   },
   {
    "fieldname": "description_section",

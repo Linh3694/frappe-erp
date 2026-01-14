@@ -290,7 +290,8 @@ def get_debit_note_preview(order_student_id=None, milestone_key=None):
                 },
                 "order": {
                     "name": order_doc.name,
-                    "title": order_doc.title
+                    "title": order_doc.title,
+                    "debit_note_form_code": order_doc.debit_note_form_code or 'TUITION_STANDARD'
                 },
                 "current_milestone_key": milestone_key,
                 "yearly_milestones": yearly_milestones,    # Đóng cả năm

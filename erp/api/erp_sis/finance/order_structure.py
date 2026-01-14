@@ -61,7 +61,8 @@ def create_order_with_structure():
             "status": "draft",
             "is_active": data.get('is_active', 1),
             "is_required": data.get('is_required', 1),
-            "description": data.get('description', '')
+            "description": data.get('description', ''),
+            "debit_note_form_code": data.get('debit_note_form_code', 'TUITION_STANDARD')
         })
         
         # Thêm milestones
@@ -157,6 +158,7 @@ def get_order_with_structure(order_id=None):
             "is_active": order_doc.is_active,
             "is_required": order_doc.is_required,
             "description": order_doc.description,
+            "debit_note_form_code": order_doc.debit_note_form_code or 'TUITION_STANDARD',
             "total_students": order_doc.total_students,
             "data_completed_count": order_doc.data_completed_count,
             "total_collected": order_doc.total_collected,
