@@ -102,9 +102,11 @@ def get_news_articles():
                     # No articles found with these tags
                     return list_response(data=[], message="No articles found with specified tags")
 
-        # Pagination params
-        page = int(data.get("page", 1))
-        limit = int(data.get("limit", 10))
+        # Pagination params - đọc từ nhiều sources (GET params)
+        page_param = data.get("page") or request_args.get("page") or request_values.get("page")
+        limit_param = data.get("limit") or request_args.get("limit") or request_values.get("limit")
+        page = int(page_param) if page_param else 1
+        limit = int(limit_param) if limit_param else 10
 
         frappe.logger().info(f"Parent portal - Using filters: {filters}")
 

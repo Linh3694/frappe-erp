@@ -100,32 +100,6 @@ def _create_re_enrollment_announcement(
         # Lấy thêm thông tin reason từ submission_data
         reason = submission_data.get('reason', '')
         
-        # Build survey answers section nếu có
-        survey_section_vn = ""
-        survey_section_en = ""
-        if answers and len(answers) > 0 and decision == 're_enroll':
-            survey_lines_vn = []
-            survey_lines_en = []
-            for idx, answer in enumerate(answers, 1):
-                q_vn = answer.get('question_text_vn', '')
-                q_en = answer.get('question_text_en', q_vn)
-                a_vn = answer.get('selected_options_text_vn', '')
-                a_en = answer.get('selected_options_text_en', a_vn)
-                
-                if q_vn and a_vn:
-                    # Mỗi câu hỏi trên 1 dòng, câu trả lời trên dòng tiếp theo (in đậm)
-                    survey_lines_vn.append(f"{idx}. {q_vn}")
-                    survey_lines_vn.append(f"   → **{a_vn}**")
-                    survey_lines_vn.append("")  # Dòng trống giữa các câu
-                    
-                    survey_lines_en.append(f"{idx}. {q_en}")
-                    survey_lines_en.append(f"   → **{a_en}**")
-                    survey_lines_en.append("")
-            
-            if survey_lines_vn:
-                survey_section_vn = "\n\n**Khảo sát dịch vụ:**\n\n" + "\n".join(survey_lines_vn)
-                survey_section_en = "\n\n**Service Survey:**\n\n" + "\n".join(survey_lines_en)
-        
         # Build content based on action type
         if is_update:
             # Admin update notification
@@ -171,7 +145,6 @@ Nhà trường xác nhận việc điều chỉnh và cập nhật hồ sơ Tái
 Hồ sơ Tái ghi danh của Học sinh **{student_name}** – **{student_code}** đã được hệ thống ghi nhận vào **{time_display_vi}**, với các nội dung như sau:
 
 {info_details_vn}
-{survey_section_vn}
 
 Trường hợp Quý Phụ huynh có nhu cầu tiếp tục điều chỉnh thông tin, bổ sung hồ sơ hoặc cần hỗ trợ thêm liên quan đến kế hoạch tái ghi danh, xin vui lòng liên hệ Bộ phận Kết nối WISers – Phòng Tuyển sinh qua các kênh sau:
 📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
@@ -206,7 +179,6 @@ The School confirms that the re-enrollment application for School Year {school_y
 The re-enrollment application for student **{student_name}** – **{student_code}** has been recorded in the system on **{time_display_en}**, with the following details:
 
 {info_details_en}
-{survey_section_en}
 
 If you need to continue adjusting information, supplementing documents, or require further support regarding the re-enrollment plan, please contact the WISers Connection Department – Admissions Office through the following channels:
 📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
@@ -222,26 +194,6 @@ Best regards,
             # Parent submission notification
             title_vn = f"Đơn tái ghi danh - {student_name}"
             title_en = f"Re-enrollment Application - {student_name}"
-            
-            # Build details based on decision (bold các giá trị quan trọng)
-            details_vn = f"• Năm học đăng ký: **{school_year}**\n• Quyết định: **{decision_vi}**"
-            details_en = f"• School Year: **{school_year}**\n• Decision: **{decision_en}**"
-            
-            if decision == 're_enroll' and payment_vi:
-                details_vn += f"\n• Phương thức thanh toán: **{payment_vi}**"
-                details_en += f"\n• Payment Method: **{payment_en}**"
-                
-                if discount_name and discount_percent:
-                    details_vn += f"\n• Ưu đãi áp dụng: **Giảm {discount_percent}%** ({discount_name})"
-                    details_en += f"\n• Discount Applied: **{discount_percent}% off** ({discount_name})"
-            
-            # Thêm lý do nếu là cân nhắc hoặc không tái ghi danh
-            if decision in ['considering', 'not_re_enroll'] and reason:
-                details_vn += f"\n• Lý do: {reason}"
-                details_en += f"\n• Reason: {reason}"
-            
-            details_vn += f"\n• Thời gian nộp: **{time_display_vi}**"
-            details_en += f"\n• Submitted at: **{time_display_en}**"
             
             # Lấy thông tin mốc thanh toán (discount deadline) từ submission_data
             discount_deadline = submission_data.get('discount_deadline', '')
@@ -282,7 +234,6 @@ Nhà trường trân trọng cảm ơn Quý Phụ huynh đã xác nhận thông 
 Đơn Tái ghi danh của Học sinh **{student_name}** – **{student_code}** đã được gửi thành công vào **{time_display_vi}** với các thông tin đăng ký như sau:
 
 {info_details_vn}
-{survey_section_vn}
 
 Trong trường hợp Quý Phụ huynh cần hỗ trợ thêm thông tin, điều chỉnh hoặc hỗ trợ liên quan đến hồ sơ tái ghi danh, xin vui lòng liên hệ Bộ phận hỗ trợ qua các kênh sau:
 
@@ -295,14 +246,39 @@ Nhà trường rất mong tiếp tục được đồng hành cùng Gia đình v
 Trân trọng,
 **Hệ thống Trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
 
+            # Build thông tin đơn tiếng Anh cho parent submission
+            info_lines_en = [
+                f"- School Year for Re-enrollment: **{school_year}**",
+                f"- Decision: **{decision_en}**"
+            ]
+            
+            if decision == 're_enroll':
+                if payment_en:
+                    info_lines_en.append(f"- Payment Method: **{payment_en}**")
+                
+                if discount_deadline_display:
+                    info_lines_en.append(f"- Selected Payment Milestone: **{discount_deadline_display}**")
+                
+                if discount_name and discount_percent:
+                    info_lines_en.append(f"- Financial Discount Applied: **{discount_percent}% off** (discount deadline: before {discount_deadline_display})")
+            
+            info_details_en = "\n".join(info_lines_en)
+            
             content_en = f"""Dear Parents,
 
-The re-enrollment application for student **{student_name}** ({student_code}) has been submitted successfully.
+The School sincerely thanks you for confirming the Re-enrollment information for School Year {school_year}.
 
-Application Details:
-{details_en}{survey_section_en}
+The Re-enrollment application for student **{student_name}** – **{student_code}** has been successfully submitted on **{time_display_en}** with the following details:
 
-If you need to make changes, please contact the Admissions Office.
+{info_details_en}
+
+If you need additional support, information adjustments, or assistance regarding the re-enrollment application, please contact the support departments through the following channels:
+
+📞 WISers Connection Department – Admissions Office: 0973 759 229 | 0915 846 229 | (024) 37305 8668
+📞 Finance Department: 0936 203 888
+📞 Student Services Department: 083 657 3838 | 0902 192 200
+
+The School looks forward to continuing our journey with your family and student in the new school year at Wellspring Hanoi.
 
 Best regards,
 **Wellspring International Bilingual School Hanoi**"""
@@ -351,9 +327,10 @@ Best regards,
                 data={
                     "type": "announcement",
                     "announcement_id": announcement.name,
+                    "student_id": student_id,
                     "title_en": title_en,
                     "title_vn": title_vn,
-                    "url": f"/announcement?id={announcement.name}"
+                    "url": f"/announcement?id={announcement.name}&student={student_id}"
                 }
             )
             
