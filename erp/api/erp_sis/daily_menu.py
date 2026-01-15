@@ -659,7 +659,7 @@ def get_meal_tracking_by_date(date=None):
         grade_to_stage_map = {grade.name: stage_id_to_title_map.get(grade.education_stage_id, grade.education_stage_id or "Unknown") for grade in education_grades}
 
         # Step 3: Get attendance data for the specified date
-        # Only count students who were actually marked as present (not absent/unknown)
+        # Only count students who were actually marked as present in homeroom period
         attendance_data = frappe.get_all(
             "SIS Class Attendance",
             fields=[
@@ -669,9 +669,42 @@ def get_meal_tracking_by_date(date=None):
             filters={
                 "date": date,
                 "class_id": ["in", [cls.name for cls in classes_with_homeroom]],
+                "period": "homeroom",  # Chỉ lấy điểm danh tiết chủ nhiệm
                 "status": ["in", ["present", "Present", "PRESENT"]]  # Only count present students
             }
         )
+        
+        # Step 3b: Check if date is Wednesday (weekday 2 in Python) to get Set Á/Âu data
+        from datetime import datetime
+        date_obj = datetime.strptime(date, '%Y-%m-%d')
+        is_wednesday = date_obj.weekday() == 2  # 0=Mon, 1=Tue, 2=Wed, ...
+        
+        # If Wednesday, get menu registration data by education stage
+        set_a_by_stage = {}
+        set_au_by_stage = {}
+        
+        if is_wednesday:
+            # Lấy thông tin đăng ký suất ăn theo education_stage cho ngày này
+            menu_registration_data = frappe.db.sql("""
+                SELECT 
+                    es.title_vn as education_stage,
+                    ri.choice,
+                    COUNT(DISTINCT ri.parent) as count
+                FROM `tabSIS Menu Registration Item` ri
+                INNER JOIN `tabSIS Menu Registration` r ON ri.parent = r.name
+                INNER JOIN `tabSIS Class` c ON r.class_id = c.name
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                INNER JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
+                WHERE ri.date = %s
+                GROUP BY es.title_vn, ri.choice
+            """, (date,), as_dict=True)
+            
+            for item in menu_registration_data:
+                stage = item.education_stage
+                if item.choice == 'A':
+                    set_a_by_stage[stage] = item.count
+                elif item.choice == 'AU':
+                    set_au_by_stage[stage] = item.count
 
         # Step 4: Group attendance by class
         class_present_students = {}
@@ -698,16 +731,25 @@ def get_meal_tracking_by_date(date=None):
                 education_stage_stats[education_stage] = {
                     'education_stage': education_stage,
                     'total_students': 0,
-                    'classes_count': 0
+                    'classes_count': 0,
+                    'set_a': 0,
+                    'set_au': 0
                 }
 
             education_stage_stats[education_stage]['total_students'] += present_count
             education_stage_stats[education_stage]['classes_count'] += 1
+        
+        # Step 5b: Add Set Á/Âu data if Wednesday
+        if is_wednesday:
+            for stage_name, stats in education_stage_stats.items():
+                stats['set_a'] = set_a_by_stage.get(stage_name, 0)
+                stats['set_au'] = set_au_by_stage.get(stage_name, 0)
 
         # Step 6: Convert to list format for response
         result = {
             'education_stages': list(education_stage_stats.values()),
             'date': date,
+            'is_wednesday': is_wednesday,
             'total_classes': len(class_present_students),
             'total_students': sum([stage['total_students'] for stage in education_stage_stats.values()])
         }
