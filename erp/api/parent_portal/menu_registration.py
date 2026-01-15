@@ -769,6 +769,12 @@ def get_class_registrations(class_id=None, period_id=None):
     logs = []
     
     try:
+        # Lấy params từ request args nếu không có trong function params
+        if not class_id:
+            class_id = frappe.form_dict.get('class_id') or (frappe.request.args.get('class_id') if frappe.request else None)
+        if not period_id:
+            period_id = frappe.form_dict.get('period_id') or (frappe.request.args.get('period_id') if frappe.request else None)
+        
         if not class_id:
             return validation_error_response(
                 "Thiếu class_id",
