@@ -455,14 +455,22 @@ def get_daily_health_summary():
             report["porridge_dates"] = porridge_dates
             report["created_at"] = str(report.get("creation", ""))
             
-            # Lấy campus từ class
+            # Lấy education_stage từ class -> education_grade -> education_stage
             if report.get("class_id"):
                 try:
-                    report["campus"] = frappe.db.get_value("SIS Class", report["class_id"], "campus_id")
+                    education_grade = frappe.db.get_value("SIS Class", report["class_id"], "education_grade")
+                    if education_grade:
+                        education_stage_id = frappe.db.get_value("SIS Education Grade", education_grade, "education_stage_id")
+                        if education_stage_id:
+                            report["education_stage"] = frappe.db.get_value("SIS Education Stage", education_stage_id, "title_vn")
+                        else:
+                            report["education_stage"] = None
+                    else:
+                        report["education_stage"] = None
                 except:
-                    report["campus"] = None
+                    report["education_stage"] = None
             else:
-                report["campus"] = None
+                report["education_stage"] = None
         
         # Lấy tổng số
         total = frappe.db.count("SIS Health Report", filters=filters)
@@ -505,7 +513,7 @@ def get_porridge_list():
         search = data.get("search") or request_args.get("search")
         
         # Query để lấy danh sách học sinh có đăng ký cháo cho ngày này
-        # Sử dụng SQL để join với child table và SIS Class để lấy campus
+        # Sử dụng SQL để join với child table, SIS Class, Education Grade và Education Stage
         query = """
             SELECT DISTINCT
                 hr.student_id,
@@ -513,13 +521,15 @@ def get_porridge_list():
                 hr.student_code,
                 hr.class_id,
                 hr.class_name,
-                c.campus_id as campus,
+                es.title_vn as education_stage,
                 hrp.breakfast,
                 hrp.lunch,
                 hrp.afternoon
             FROM `tabSIS Health Report` hr
             INNER JOIN `tabSIS Health Report Porridge` hrp ON hrp.parent = hr.name
             LEFT JOIN `tabSIS Class` c ON c.name = hr.class_id
+            LEFT JOIN `tabSIS Education Grade` eg ON eg.name = c.education_grade
+            LEFT JOIN `tabSIS Education Stage` es ON es.name = eg.education_stage_id
             WHERE hr.porridge_registration = 1
                 AND hrp.date = %s
                 AND (hrp.breakfast = 1 OR hrp.lunch = 1 OR hrp.afternoon = 1)
@@ -527,7 +537,8 @@ def get_porridge_list():
         params = [target_date]
         
         if campus:
-            query += " AND c.campus_id = %s"
+            # Filter theo campus qua education_grade
+            query += " AND eg.campus_id = %s"
             params.append(campus)
         
         if search:
