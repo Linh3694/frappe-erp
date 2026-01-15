@@ -867,6 +867,16 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
     logs = []
     
     try:
+        # Lấy params từ request args nếu không có trong function params
+        if not period_id:
+            period_id = frappe.form_dict.get('period_id') or (frappe.request.args.get('period_id') if frappe.request else None)
+        if page == 1:
+            page = frappe.form_dict.get('page') or (frappe.request.args.get('page') if frappe.request else None) or 1
+        if page_size == 50:
+            page_size = frappe.form_dict.get('page_size') or (frappe.request.args.get('page_size') if frappe.request else None) or 50
+        if not search:
+            search = frappe.form_dict.get('search') or (frappe.request.args.get('search') if frappe.request else None)
+        
         if not period_id:
             return validation_error_response(
                 "Thiếu period_id",
