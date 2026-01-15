@@ -1,0 +1,198 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:PAE-{#####}",
+ "beta": 0,
+ "creation": "2026-01-15 10:00:00.000000",
+ "custom": 0,
+ "description": "Logs API errors from Parent Portal for monitoring and debugging",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "error_info_section",
+  "error_id",
+  "api_endpoint",
+  "error_type",
+  "occurred_at",
+  "column_break_error",
+  "is_resolved",
+  "resolved_at",
+  "resolved_by",
+  "guardian_section",
+  "guardian",
+  "guardian_name",
+  "column_break_guardian",
+  "ip_address",
+  "user_agent",
+  "error_details_section",
+  "error_message",
+  "stack_trace",
+  "request_section",
+  "request_params",
+  "response_data",
+  "device_info"
+ ],
+ "fields": [
+  {
+   "fieldname": "error_info_section",
+   "fieldtype": "Section Break",
+   "label": "Error Information"
+  },
+  {
+   "fieldname": "error_id",
+   "fieldtype": "Data",
+   "label": "Error ID",
+   "unique": 1,
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "api_endpoint",
+   "fieldtype": "Data",
+   "label": "API Endpoint",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "error_type",
+   "fieldtype": "Select",
+   "label": "Error Type",
+   "options": "\nValidationError\nPermissionError\nNotFoundError\nServerError\nTimeoutError\nUnknownError",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "label": "Occurred At",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_error",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_resolved",
+   "fieldtype": "Check",
+   "label": "Is Resolved",
+   "default": 0,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "resolved_at",
+   "fieldtype": "Datetime",
+   "label": "Resolved At",
+   "depends_on": "is_resolved"
+  },
+  {
+   "fieldname": "resolved_by",
+   "fieldtype": "Link",
+   "label": "Resolved By",
+   "options": "User",
+   "depends_on": "is_resolved"
+  },
+  {
+   "fieldname": "guardian_section",
+   "fieldtype": "Section Break",
+   "label": "Guardian Information"
+  },
+  {
+   "fieldname": "guardian",
+   "fieldtype": "Link",
+   "label": "Guardian",
+   "options": "CRM Guardian"
+  },
+  {
+   "fieldname": "guardian_name",
+   "fieldtype": "Data",
+   "label": "Guardian Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_guardian",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ip_address",
+   "fieldtype": "Data",
+   "label": "IP Address"
+  },
+  {
+   "fieldname": "user_agent",
+   "fieldtype": "Small Text",
+   "label": "User Agent"
+  },
+  {
+   "fieldname": "error_details_section",
+   "fieldtype": "Section Break",
+   "label": "Error Details"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "stack_trace",
+   "fieldtype": "Code",
+   "label": "Stack Trace",
+   "options": "Python"
+  },
+  {
+   "fieldname": "request_section",
+   "fieldtype": "Section Break",
+   "label": "Request & Response",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "request_params",
+   "fieldtype": "JSON",
+   "label": "Request Parameters"
+  },
+  {
+   "fieldname": "response_data",
+   "fieldtype": "JSON",
+   "label": "Response Data"
+  },
+  {
+   "fieldname": "device_info",
+   "fieldtype": "JSON",
+   "label": "Device Info"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-15 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "Portal API Error",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 1,
+   "print": 0,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "occurred_at",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "error_message",
+ "track_changes": 0
+}

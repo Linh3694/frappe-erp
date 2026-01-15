@@ -27,6 +27,42 @@ def generate_otp(length=6):
     return ''.join([str(secrets.randbelow(10)) for _ in range(length)])
 
 
+def update_guardian_login_stats(guardian_name):
+    """
+    Cập nhật thống kê login của guardian.
+    - Nếu chưa có first_login_at, set first_login_at và portal_activated = 1 (người dùng mới)
+    - Luôn cập nhật last_login_at
+    - Tạo/cập nhật activity record trong Portal Guardian Activity
+    
+    Args:
+        guardian_name: Tên document CRM Guardian (e.g., "CRM-GUARDIAN-00001")
+    """
+    try:
+        now = frappe.utils.now_datetime()
+        
+        # Lấy guardian document
+        guardian = frappe.get_doc("CRM Guardian", guardian_name)
+        
+        # Cập nhật first_login_at nếu chưa có (người dùng mới)
+        if not guardian.first_login_at:
+            guardian.first_login_at = now
+            guardian.portal_activated = 1
+        
+        # Luôn cập nhật last_login_at
+        guardian.last_login_at = now
+        guardian.save(ignore_permissions=True)
+        
+        # Tạo/cập nhật activity record
+        from erp.crm.doctype.portal_guardian_activity.portal_guardian_activity import record_guardian_activity
+        record_guardian_activity(guardian_name, 'otp_login')
+        
+        frappe.db.commit()
+        
+    except Exception as e:
+        frappe.log_error(f"Error updating guardian login stats: {str(e)}", "Guardian Login Stats")
+        # Không raise exception để không ảnh hưởng đến login flow
+
+
 def normalize_phone_number(phone):
     """
     Normalize phone number to 84XXXXXXXXX format
@@ -418,6 +454,13 @@ def verify_otp_and_login(phone_number, otp):
             logs.append(f"✅ Logged OTP authentication for {user_email}")
         except Exception as e:
             logs.append(f"⚠️ Failed to log authentication: {str(e)}")
+
+        # Cập nhật login stats và tạo activity record
+        try:
+            update_guardian_login_stats(guardian["name"])
+            logs.append(f"✅ Updated guardian login stats")
+        except Exception as e:
+            logs.append(f"⚠️ Failed to update login stats: {str(e)}")
 
         # Get comprehensive guardian data
         comprehensive_data = get_guardian_comprehensive_data(guardian["name"])

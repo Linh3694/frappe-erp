@@ -16,10 +16,103 @@ import os
 import re
 
 
+def get_eligible_guardians_count():
+	"""
+	Đếm số guardian có thể đăng nhập Parent Portal.
+	Điều kiện: có guardian_id, có phone_number, VÀ có link với student.
+	"""
+	result = frappe.db.sql("""
+		SELECT COUNT(DISTINCT g.name)
+		FROM `tabCRM Guardian` g
+		INNER JOIN `tabCRM Family Relationship` r ON r.parent = g.name
+		WHERE g.guardian_id IS NOT NULL AND g.guardian_id != ''
+		AND g.phone_number IS NOT NULL AND g.phone_number != ''
+	""")
+	return result[0][0] if result else 0
+
+
+def get_analytics_from_database():
+	"""
+	Lấy analytics metrics từ database (CRM Guardian + Portal Guardian Activity).
+	Đây là phương pháp chính xác hơn so với parse logs.
+	
+	Returns:
+		dict: {
+			'total_eligible': Tổng guardians có thể login,
+			'activated_users': Số guardians đã login ít nhất 1 lần,
+			'dau': Daily Active Users (có activity hôm nay),
+			'wau': Weekly Active Users (có activity trong 7 ngày),
+			'mau': Monthly Active Users (có activity trong 30 ngày),
+			'new_users_today': Số guardians login lần đầu hôm nay
+		}
+	"""
+	try:
+		today_date = today()
+		date_7d_ago = add_days(today_date, -7)
+		date_30d_ago = add_days(today_date, -30)
+		
+		# Tổng guardians có thể login
+		total_eligible = get_eligible_guardians_count()
+		
+		# Số guardians đã activate (có first_login_at)
+		activated_users = frappe.db.count("CRM Guardian", {"portal_activated": 1})
+		
+		# DAU từ Portal Guardian Activity
+		dau = frappe.db.sql("""
+			SELECT COUNT(DISTINCT guardian) 
+			FROM `tabPortal Guardian Activity`
+			WHERE activity_date = %s
+		""", (today_date,))[0][0] or 0
+		
+		# WAU từ Portal Guardian Activity
+		wau = frappe.db.sql("""
+			SELECT COUNT(DISTINCT guardian) 
+			FROM `tabPortal Guardian Activity`
+			WHERE activity_date >= %s
+		""", (date_7d_ago,))[0][0] or 0
+		
+		# MAU từ Portal Guardian Activity
+		mau = frappe.db.sql("""
+			SELECT COUNT(DISTINCT guardian) 
+			FROM `tabPortal Guardian Activity`
+			WHERE activity_date >= %s
+		""", (date_30d_ago,))[0][0] or 0
+		
+		# New users today (first_login_at = today)
+		new_users_today = frappe.db.sql("""
+			SELECT COUNT(*) 
+			FROM `tabCRM Guardian`
+			WHERE DATE(first_login_at) = %s
+		""", (today_date,))[0][0] or 0
+		
+		return {
+			'total_eligible': total_eligible,
+			'activated_users': activated_users,
+			'dau': dau,
+			'wau': wau,
+			'mau': mau,
+			'new_users_today': new_users_today
+		}
+		
+	except Exception as e:
+		frappe.errprint(f"❌ [Analytics] Error getting analytics from database: {str(e)}")
+		return {
+			'total_eligible': 0,
+			'activated_users': 0,
+			'dau': 0,
+			'wau': 0,
+			'mau': 0,
+			'new_users_today': 0
+		}
+
+
 def aggregate_portal_analytics():
 	"""
 	Main scheduled job to aggregate portal analytics
 	Runs daily to collect statistics about Parent Portal usage
+	
+	Ưu tiên lấy data từ database (Portal Guardian Activity).
+	Fallback sang logs nếu database chưa có data.
 	"""
 	try:
 		date = today()
@@ -35,36 +128,38 @@ def aggregate_portal_analytics():
 			doc.date = date
 			frappe.errprint(f"🔵 [Analytics] Creating new analytics for {date}")
 		
-		# 1. Count total guardians in system
-		doc.total_guardians = frappe.db.count("CRM Guardian", {
+		# 1. Lấy data từ database trước (chính xác hơn)
+		db_stats = get_analytics_from_database()
+		
+		# 2. Fallback sang logs nếu database chưa có data
+		if db_stats['dau'] == 0 and db_stats['mau'] == 0:
+			frappe.errprint(f"⚠️ [Analytics] No data in database, falling back to logs")
+			log_stats = count_active_guardians_from_logs()
+			active_stats = log_stats
+		else:
+			frappe.errprint(f"✅ [Analytics] Using database data")
+			active_stats = db_stats
+		
+		# 3. Đếm total guardians - sử dụng eligible count
+		doc.total_guardians = db_stats['total_eligible'] or frappe.db.count("CRM Guardian", {
 			"guardian_id": ["!=", ""]
 		})
 		
-		# 2. Get comprehensive activity metrics from logs
-		try:
-			active_stats = count_active_guardians_from_logs()
-			
-			# New meaningful metrics:
-			doc.active_guardians_today = active_stats.get('dau', 0)  # Daily Active Users (API calls)
-			doc.active_guardians_7d = active_stats.get('wau', 0)     # Weekly Active Users
-			doc.active_guardians_30d = active_stats.get('mau', 0)    # Monthly Active Users
-			doc.new_guardians = active_stats.get('new_users_today', 0)  # First-time logins today
-			
-			# Store additional metrics in details (can add to doctype later)
-			activated_users = active_stats.get('activated_users', 0)
-			activation_rate = round((activated_users / doc.total_guardians * 100), 1) if doc.total_guardians > 0 else 0
-			engagement_rate = round((active_stats.get('dau', 0) / active_stats.get('mau', 1) * 100), 1) if active_stats.get('mau', 0) > 0 else 0
-			
-			frappe.errprint(f"📊 [Analytics] Activated: {activated_users}/{doc.total_guardians} ({activation_rate}%), Engagement: {engagement_rate}%")
-			
-		except Exception as e:
-			frappe.errprint(f"❌ [Analytics] Error counting active guardians: {str(e)}")
-			doc.active_guardians_today = 0
-			doc.active_guardians_7d = 0
-			doc.active_guardians_30d = 0
-			doc.new_guardians = 0
+		# 4. Set metrics
+		doc.active_guardians_today = active_stats.get('dau', 0)
+		doc.active_guardians_7d = active_stats.get('wau', 0)
+		doc.active_guardians_30d = active_stats.get('mau', 0)
+		doc.new_guardians = active_stats.get('new_users_today', 0)
 		
-		# 4. Aggregate API calls by module
+		# Log metrics
+		activated_users = db_stats.get('activated_users', 0)
+		activation_rate = round((activated_users / doc.total_guardians * 100), 1) if doc.total_guardians > 0 else 0
+		engagement_rate = round((active_stats.get('dau', 0) / active_stats.get('mau', 1) * 100), 1) if active_stats.get('mau', 0) > 0 else 0
+		
+		frappe.errprint(f"📊 [Analytics] Eligible: {doc.total_guardians}, Activated: {activated_users} ({activation_rate}%)")
+		frappe.errprint(f"📊 [Analytics] DAU: {doc.active_guardians_today}, WAU: {doc.active_guardians_7d}, MAU: {doc.active_guardians_30d}")
+		
+		# 5. Aggregate API calls by module (vẫn dùng logs cho phần này)
 		try:
 			module_usage = aggregate_module_usage_from_logs()
 			doc.api_calls_by_module = json.dumps(module_usage, ensure_ascii=False)
@@ -81,7 +176,8 @@ def aggregate_portal_analytics():
 			"success": True,
 			"date": date,
 			"total_guardians": doc.total_guardians,
-			"active_today": doc.active_guardians_today
+			"active_today": doc.active_guardians_today,
+			"activated_users": activated_users
 		}
 		
 	except Exception as e:

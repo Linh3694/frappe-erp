@@ -19,12 +19,22 @@ def get_dashboard_summary():
 	"""
 	Get summary statistics for today compared to yesterday
 	Returns: dict with today's stats and comparison with yesterday
+	
+	Response includes:
+	- total_guardians: Tổng số guardians có thể đăng nhập (có phone + có student)
+	- eligible_guardians: Số guardians có thể đăng nhập (alias của total_guardians)
+	- activated_guardians: Số guardians đã đăng nhập ít nhất 1 lần
+	- activation_rate: Tỷ lệ kích hoạt (%)
+	- active_guardians_today: DAU
+	- active_guardians_7d: WAU
+	- active_guardians_30d: MAU
+	- new_guardians: Số người login lần đầu hôm nay
 	"""
 	try:
 		today_date = today()
 		yesterday_date = add_days(today_date, -1)
 		
-		# Get today's analytics
+		# Get today's analytics from SIS Portal Analytics
 		today_analytics = frappe.db.get_value(
 			"SIS Portal Analytics",
 			today_date,
@@ -51,6 +61,18 @@ def get_dashboard_summary():
 				as_dict=True
 			)
 		
+		# Bổ sung thêm metrics từ database
+		from erp.api.analytics.portal_analytics import get_eligible_guardians_count
+		
+		# Số guardians đã activate (có first_login_at)
+		activated_guardians = frappe.db.count("CRM Guardian", {"portal_activated": 1})
+		
+		# Số guardians eligible (có phone + có student)
+		eligible_guardians = get_eligible_guardians_count()
+		
+		# Tính activation rate
+		activation_rate = round((activated_guardians / eligible_guardians * 100), 1) if eligible_guardians > 0 else 0
+		
 		# Calculate changes
 		changes = {}
 		if yesterday_analytics:
@@ -73,10 +95,16 @@ def get_dashboard_summary():
 			changes['active_today'] = 0
 			changes['total'] = 0
 		
+		# Merge data
+		response_data = today_analytics or {}
+		response_data['eligible_guardians'] = eligible_guardians
+		response_data['activated_guardians'] = activated_guardians
+		response_data['activation_rate'] = activation_rate
+		
 		return {
 			"success": True,
 			"data": {
-				"today": today_analytics or {},
+				"today": response_data,
 				"changes": changes,
 				"date": today_date
 			}
