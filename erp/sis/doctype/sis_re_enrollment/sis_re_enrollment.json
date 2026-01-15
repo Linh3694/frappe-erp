@@ -41,6 +41,9 @@
   "agreement_accepted",
   "payment_section",
   "payment_status",
+  "adjustment_section",
+  "adjustment_status",
+  "adjustment_requested_at",
   "status_section",
   "submitted_at",
   "column_break_status",
@@ -224,6 +227,26 @@
    "description": "unpaid: Chưa đóng, paid: Đã đóng, refunded: Hoàn tiền"
   },
   {
+   "fieldname": "adjustment_section",
+   "fieldtype": "Section Break",
+   "label": "Yêu cầu điều chỉnh",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "adjustment_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái điều chỉnh",
+   "options": "\nrequested\ncompleted",
+   "description": "requested: Phụ huynh yêu cầu điều chỉnh, completed: Admin đã điều chỉnh xong"
+  },
+  {
+   "fieldname": "adjustment_requested_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian yêu cầu điều chỉnh",
+   "read_only": 1,
+   "depends_on": "eval:doc.adjustment_status"
+  },
+  {
    "fieldname": "status_section",
    "fieldtype": "Section Break",
    "label": "Thông tin hệ thống",
@@ -269,7 +292,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2026-01-06 00:00:00.000000",
+ "modified": "2026-01-15 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Re-enrollment",

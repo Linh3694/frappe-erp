@@ -801,6 +801,7 @@ def get_submissions():
         config_id = frappe.request.args.get('config_id')
         status = frappe.request.args.get('status')
         decision = frappe.request.args.get('decision')
+        adjustment_status = frappe.request.args.get('adjustment_status')
         search = frappe.request.args.get('search')
         page = int(frappe.request.args.get('page', 1))
         page_size = int(frappe.request.args.get('page_size', 50))
@@ -834,6 +835,11 @@ def get_submissions():
         if decision:
             conditions.append("re.decision = %(decision)s")
             values["decision"] = decision
+        
+        # Filter theo adjustment_status
+        if adjustment_status:
+            conditions.append("re.adjustment_status = %(adjustment_status)s")
+            values["adjustment_status"] = adjustment_status
         
         # Search by student name or code
         if search:
@@ -869,6 +875,7 @@ def get_submissions():
                     fs.outstanding_amount as finance_outstanding_amount,
                     re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
                     re.selected_discount_deadline,
+                    re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
                 LEFT JOIN `tabCRM Guardian` g ON re.guardian_id = g.name
@@ -888,6 +895,7 @@ def get_submissions():
                     re.decision, re.payment_type, re.not_re_enroll_reason,
                     re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
                     re.selected_discount_deadline,
+                    re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
                 LEFT JOIN `tabCRM Guardian` g ON re.guardian_id = g.name
@@ -1093,7 +1101,8 @@ def update_submission():
             'payment_type': submission.payment_type,
             'selected_discount_id': submission.selected_discount_id,
             'not_re_enroll_reason': submission.not_re_enroll_reason,
-            'payment_status': submission.payment_status
+            'payment_status': submission.payment_status,
+            'adjustment_status': submission.adjustment_status
         }
         
         # Lưu lại answers cũ để so sánh
@@ -1118,7 +1127,7 @@ def update_submission():
         
         # Các trường admin có thể sửa
         updatable_fields = ['decision', 'payment_type', 'selected_discount_id', 
-                          'not_re_enroll_reason', 'payment_status']
+                          'not_re_enroll_reason', 'payment_status', 'adjustment_status']
         
         for field in updatable_fields:
             if field in data:
@@ -1250,6 +1259,17 @@ def update_submission():
             new_display = payment_status_map.get(new_payment_status, new_payment_status)
             changes.append(f"• Thanh toán: {old_display} → {new_display}")
             # Không thêm vào important_changes
+        
+        # So sánh adjustment_status (QUAN TRỌNG - gửi notification khi hoàn tất điều chỉnh)
+        adjustment_status_map = {'requested': 'Yêu cầu điều chỉnh', 'completed': 'Đã điều chỉnh'}
+        new_adjustment_status = data.get('adjustment_status') or submission.adjustment_status
+        if old_values['adjustment_status'] != new_adjustment_status:
+            old_display = adjustment_status_map.get(old_values['adjustment_status'], old_values['adjustment_status'] or 'Chưa có')
+            new_display = adjustment_status_map.get(new_adjustment_status, new_adjustment_status)
+            changes.append(f"• Trạng thái điều chỉnh: {old_display} → {new_display}")
+            # Gửi notification khi admin hoàn tất điều chỉnh
+            if new_adjustment_status == 'completed':
+                important_changes.append('adjustment_completed')
         
         # So sánh discount (QUAN TRỌNG - gửi notification)
         new_discount_id = data.get('selected_discount_id') or submission.selected_discount_id
@@ -1540,6 +1560,13 @@ def get_statistics():
             WHERE config_id = %s AND (decision IS NULL OR decision = '')
         """, config_id, as_dict=True)[0].count
         
+        # Đếm số yêu cầu điều chỉnh
+        adjustment_requested_count = frappe.db.sql("""
+            SELECT COUNT(*) as count
+            FROM `tabSIS Re-enrollment`
+            WHERE config_id = %s AND adjustment_status = 'requested'
+        """, config_id, as_dict=True)[0].count
+        
         logs.append(f"Thống kê cho config {config_id}")
         
         return success_response(
@@ -1547,6 +1574,7 @@ def get_statistics():
                 "total_submissions": total,
                 "total_students_in_campus": total_students,
                 "not_submitted": not_submitted_count,
+                "adjustment_requested": adjustment_requested_count,
                 "by_decision": {
                     "re_enroll": decision_dict.get("re_enroll", 0),
                     "considering": decision_dict.get("considering", 0),

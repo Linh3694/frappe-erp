@@ -663,7 +663,7 @@ def get_active_config():
                     "student_id": student["name"],
                     "config_id": config.name
                 },
-                ["name", "decision", "payment_type", "status", "submitted_at"],
+                ["name", "decision", "payment_type", "status", "submitted_at", "adjustment_status", "adjustment_requested_at"],
                 as_dict=True
             )
             
@@ -1216,6 +1216,113 @@ def get_my_re_enrollments():
         frappe.log_error(frappe.get_traceback(), "Parent Portal Get My Re-enrollments Error")
         return error_response(
             message=f"Lỗi khi lấy danh sách đơn tái ghi danh: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def request_adjustment():
+    """
+    Phụ huynh yêu cầu điều chỉnh đơn tái ghi danh.
+    Chỉ được yêu cầu khi đơn đã được nộp (submitted_at có giá trị).
+    
+    POST body: { "re_enrollment_id": "SIS-REENROLL-00001" }
+    """
+    logs = []
+    
+    try:
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        re_enrollment_id = data.get('re_enrollment_id')
+        
+        if not re_enrollment_id:
+            return validation_error_response(
+                "Thiếu re_enrollment_id",
+                {"re_enrollment_id": ["Re-enrollment ID là bắt buộc"]}
+            )
+        
+        logs.append(f"Yêu cầu điều chỉnh đơn: {re_enrollment_id}")
+        
+        # Lấy thông tin phụ huynh
+        parent_id = _get_current_parent()
+        if not parent_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        logs.append(f"Parent ID: {parent_id}")
+        
+        # Kiểm tra đơn tồn tại
+        if not frappe.db.exists("SIS Re-enrollment", re_enrollment_id):
+            return not_found_response("Không tìm thấy đơn tái ghi danh")
+        
+        # Lấy thông tin đơn
+        re_enrollment = frappe.get_doc("SIS Re-enrollment", re_enrollment_id)
+        
+        # Kiểm tra quyền: phụ huynh phải có quan hệ với học sinh trong đơn
+        relationship = frappe.db.exists(
+            "CRM Family Relationship",
+            {"guardian": parent_id, "student": re_enrollment.student_id}
+        )
+        
+        if not relationship:
+            return error_response(
+                "Bạn không có quyền yêu cầu điều chỉnh đơn này",
+                logs=logs
+            )
+        
+        # Kiểm tra đơn đã được nộp chưa
+        if not re_enrollment.submitted_at:
+            return error_response(
+                "Đơn chưa được nộp, không thể yêu cầu điều chỉnh",
+                logs=logs
+            )
+        
+        # Kiểm tra đã yêu cầu điều chỉnh chưa
+        if re_enrollment.adjustment_status == 'requested':
+            return error_response(
+                "Đơn đã được yêu cầu điều chỉnh trước đó",
+                logs=logs
+            )
+        
+        # Cập nhật trạng thái điều chỉnh
+        re_enrollment.adjustment_status = 'requested'
+        re_enrollment.adjustment_requested_at = now()
+        
+        # Lấy tên phụ huynh để ghi log
+        guardian_name = frappe.db.get_value("CRM Guardian", parent_id, "guardian_name") or "Phụ huynh"
+        
+        # Tạo log hệ thống
+        re_enrollment.append("notes", {
+            "note_type": "system_log",
+            "note": f"Phụ huynh {guardian_name} đã yêu cầu điều chỉnh đơn tái ghi danh.",
+            "created_by_name": guardian_name,
+            "created_at": now()
+        })
+        
+        re_enrollment.flags.ignore_permissions = True
+        re_enrollment.save()
+        frappe.db.commit()
+        
+        logs.append(f"Đã cập nhật trạng thái điều chỉnh cho đơn: {re_enrollment_id}")
+        
+        return success_response(
+            data={
+                "re_enrollment_id": re_enrollment_id,
+                "adjustment_status": "requested",
+                "adjustment_requested_at": str(re_enrollment.adjustment_requested_at)
+            },
+            message="Yêu cầu điều chỉnh đã được gửi thành công. Bộ phận tuyển sinh sẽ liên hệ với bạn.",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Request Adjustment Error")
+        return error_response(
+            message=f"Lỗi khi yêu cầu điều chỉnh: {str(e)}",
             logs=logs
         )
 
