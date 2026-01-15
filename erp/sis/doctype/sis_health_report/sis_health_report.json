@@ -14,7 +14,6 @@
   "column_break_1",
   "class_id",
   "class_name",
-  "campus",
   "health_section",
   "description",
   "porridge_section",
@@ -76,16 +75,6 @@
    "in_list_view": 1,
    "label": "Tên lớp",
    "read_only": 1
-  },
-  {
-   "fetch_from": "class_id.campus",
-   "fieldname": "campus",
-   "fieldtype": "Link",
-   "in_standard_filter": 0,
-   "label": "Trường",
-   "options": "SIS Campus",
-   "read_only": 1,
-   "is_virtual": 1
   },
   {
    "fieldname": "health_section",
