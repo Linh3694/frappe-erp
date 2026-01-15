@@ -132,43 +132,86 @@ def _create_re_enrollment_announcement(
             title_vn = f"Cập nhật đơn tái ghi danh - {student_name}"
             title_en = f"Re-enrollment Update - {student_name}"
             
-            # Build update details (bold các giá trị quan trọng)
-            update_details_vn = f"• Quyết định: **{decision_vi}**"
-            update_details_en = f"• Decision: **{decision_en}**"
+            # Lấy thông tin mốc thanh toán (discount deadline) từ submission_data
+            discount_deadline = submission_data.get('discount_deadline', '')
+            discount_deadline_display = ""
+            if discount_deadline:
+                try:
+                    from datetime import datetime
+                    if isinstance(discount_deadline, str):
+                        dt = datetime.fromisoformat(discount_deadline.replace('Z', '+00:00'))
+                        discount_deadline_display = dt.strftime('%d/%m/%Y')
+                    else:
+                        discount_deadline_display = str(discount_deadline)
+                except:
+                    discount_deadline_display = str(discount_deadline)
             
-            # Thêm ưu đãi nếu là tái ghi danh
-            if decision == 're_enroll' and discount_name and discount_percent:
-                update_details_vn += f"\n• Ưu đãi áp dụng: **Giảm {discount_percent}%** ({discount_name})"
-                update_details_en += f"\n• Discount Applied: **{discount_percent}% off** ({discount_name})"
+            # Build thông tin đơn theo format mới cho update
+            info_lines_vn = [
+                f"- Năm học tái ghi danh: **{school_year}**",
+                f"- Quyết định: **{decision_vi}**"
+            ]
             
-            # Thêm lý do nếu là cân nhắc hoặc không tái ghi danh
-            if decision in ['considering', 'not_re_enroll'] and reason:
-                update_details_vn += f"\n• Lý do: {reason}"
-                update_details_en += f"\n• Reason: {reason}"
+            if decision == 're_enroll':
+                if payment_vi:
+                    info_lines_vn.append(f"- Phương thức thanh toán: **{payment_vi}**")
+                
+                if discount_deadline_display:
+                    info_lines_vn.append(f"- Mốc thanh toán lựa chọn: **{discount_deadline_display}**")
+                
+                if discount_name and discount_percent:
+                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **Giảm {discount_percent}%** (theo hạn ưu đãi: trước {discount_deadline_display})")
             
-            update_details_vn += f"\n• Thời gian cập nhật: **{time_display_vi}**"
-            update_details_en += f"\n• Updated at: **{time_display_en}**"
+            info_details_vn = "\n".join(info_lines_vn)
             
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
-Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được cập nhật.
+Nhà trường xác nhận việc điều chỉnh và cập nhật hồ sơ Tái ghi danh cho Năm học {school_year} đã được thực hiện thành công theo thông tin Quý Phụ huynh cung cấp.
 
-Thông tin cập nhật:
-{update_details_vn}{survey_section_vn}
+Hồ sơ Tái ghi danh của Học sinh **{student_name}** – **{student_code}** đã được hệ thống ghi nhận vào **{time_display_vi}**, với các nội dung như sau:
 
-Nếu có thắc mắc, vui lòng liên hệ Phòng Tuyển sinh.
+{info_details_vn}
+{survey_section_vn}
+
+Trường hợp Quý Phụ huynh có nhu cầu tiếp tục điều chỉnh thông tin, bổ sung hồ sơ hoặc cần hỗ trợ thêm liên quan đến kế hoạch tái ghi danh, xin vui lòng liên hệ Bộ phận Kết nối WISers – Phòng Tuyển sinh qua các kênh sau:
+📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
+
+Nhà trường trân trọng cảm ơn sự phối hợp và đồng hành của Quý Phụ huynh, đồng thời rất mong tiếp tục được đồng hành cùng Gia đình và Học sinh trong năm học mới tại Wellspring Hanoi.
 
 Trân trọng,
-**Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
+**Hệ thống Trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
 
+            # Build thông tin đơn tiếng Anh cho update
+            info_lines_en = [
+                f"- School Year: **{school_year}**",
+                f"- Decision: **{decision_en}**"
+            ]
+            
+            if decision == 're_enroll':
+                if payment_en:
+                    info_lines_en.append(f"- Payment Method: **{payment_en}**")
+                
+                if discount_deadline_display:
+                    info_lines_en.append(f"- Selected Payment Milestone: **{discount_deadline_display}**")
+                
+                if discount_name and discount_percent:
+                    info_lines_en.append(f"- Financial Discount Applied: **{discount_percent}% off** (discount deadline: before {discount_deadline_display})")
+            
+            info_details_en = "\n".join(info_lines_en)
+            
             content_en = f"""Dear Parents,
 
-The re-enrollment application for student **{student_name}** ({student_code}) has been updated.
+The School confirms that the re-enrollment application for School Year {school_year} has been successfully updated based on the information you provided.
 
-Update Details:
-{update_details_en}{survey_section_en}
+The re-enrollment application for student **{student_name}** – **{student_code}** has been recorded in the system on **{time_display_en}**, with the following details:
 
-If you have any questions, please contact the Admissions Office.
+{info_details_en}
+{survey_section_en}
+
+If you need to continue adjusting information, supplementing documents, or require further support regarding the re-enrollment plan, please contact the WISers Connection Department – Admissions Office through the following channels:
+📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
+
+The School sincerely appreciates your cooperation and partnership, and looks forward to continuing our journey with your family and student in the new school year at Wellspring Hanoi.
 
 Best regards,
 **Wellspring International Bilingual School Hanoi**"""
@@ -200,17 +243,57 @@ Best regards,
             details_vn += f"\n• Thời gian nộp: **{time_display_vi}**"
             details_en += f"\n• Submitted at: **{time_display_en}**"
             
+            # Lấy thông tin mốc thanh toán (discount deadline) từ submission_data
+            discount_deadline = submission_data.get('discount_deadline', '')
+            discount_deadline_display = ""
+            if discount_deadline:
+                try:
+                    from datetime import datetime
+                    if isinstance(discount_deadline, str):
+                        dt = datetime.fromisoformat(discount_deadline.replace('Z', '+00:00'))
+                        discount_deadline_display = dt.strftime('%d/%m/%Y')
+                    else:
+                        discount_deadline_display = str(discount_deadline)
+                except:
+                    discount_deadline_display = str(discount_deadline)
+            
+            # Build thông tin đơn theo format mới
+            info_lines_vn = [
+                f"- Năm học đăng ký tái ghi danh: **{school_year}**",
+                f"- Quyết định: **{decision_vi}**"
+            ]
+            
+            if decision == 're_enroll':
+                if payment_vi:
+                    info_lines_vn.append(f"- Phương thức thanh toán: **{payment_vi}**")
+                
+                if discount_deadline_display:
+                    info_lines_vn.append(f"- Mốc thanh toán lựa chọn: **{discount_deadline_display}**")
+                
+                if discount_name and discount_percent:
+                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **Giảm {discount_percent}%** (theo hạn ưu đãi: trước {discount_deadline_display})")
+            
+            info_details_vn = "\n".join(info_lines_vn)
+            
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
-Đơn tái ghi danh của học sinh **{student_name}** ({student_code}) đã được gửi thành công.
+Nhà trường trân trọng cảm ơn Quý Phụ huynh đã xác nhận thông tin Tái ghi danh cho Năm học {school_year}.
 
-Thông tin đơn:
-{details_vn}{survey_section_vn}
+Đơn Tái ghi danh của Học sinh **{student_name}** – **{student_code}** đã được gửi thành công vào **{time_display_vi}** với các thông tin đăng ký như sau:
 
-Nếu cần thay đổi thông tin, vui lòng liên hệ Phòng Tuyển sinh.
+{info_details_vn}
+{survey_section_vn}
+
+Trong trường hợp Quý Phụ huynh cần hỗ trợ thêm thông tin, điều chỉnh hoặc hỗ trợ liên quan đến hồ sơ tái ghi danh, xin vui lòng liên hệ Bộ phận hỗ trợ qua các kênh sau:
+
+📞 Bộ phận Kết nối WISers – Phòng Tuyển sinh: 0973 759 229 | 0915 846 229 | (024) 37305 8668
+📞 Phòng Kế toán: 0936 203 888
+📞 Phòng Dịch vụ Học sinh: 083 657 3838 | 0902 192 200
+
+Nhà trường rất mong tiếp tục được đồng hành cùng Gia đình và Học sinh trong năm học mới tại Wellspring Hanoi.
 
 Trân trọng,
-**Hệ thống trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
+**Hệ thống Trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
 
             content_en = f"""Dear Parents,
 
@@ -1010,6 +1093,7 @@ def submit_re_enrollment():
                     'payment_type': data.get('payment_type'),
                     'discount_name': discount_name,
                     'discount_percent': discount_percent,
+                    'discount_deadline': str(re_enrollment_doc.selected_discount_deadline) if re_enrollment_doc.selected_discount_deadline else None,
                     'reason': reason_value,  # Lý do (cho considering/not_re_enroll)
                     'school_year': school_year,
                     'submitted_at': str(re_enrollment_doc.submitted_at),
