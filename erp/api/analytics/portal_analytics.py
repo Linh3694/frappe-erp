@@ -111,73 +111,24 @@ def aggregate_portal_analytics():
 	Main scheduled job to aggregate portal analytics
 	Runs daily to collect statistics about Parent Portal usage
 	
-	Ưu tiên lấy data từ database (Portal Guardian Activity).
-	Fallback sang logs nếu database chưa có data.
+	CHỈ sử dụng data từ database (Portal Guardian Activity + CRM Guardian).
+	KHÔNG còn fallback sang logs nữa.
 	"""
 	try:
 		date = today()
 		frappe.errprint(f"🔵 [Analytics] Starting portal analytics aggregation for {date}")
 		
-		# Check if analytics already exists for today
-		existing = frappe.db.exists("SIS Portal Analytics", date)
-		if existing:
-			doc = frappe.get_doc("SIS Portal Analytics", date)
-			frappe.errprint(f"🔵 [Analytics] Updating existing analytics for {date}")
-		else:
-			doc = frappe.new_doc("SIS Portal Analytics")
-			doc.date = date
-			frappe.errprint(f"🔵 [Analytics] Creating new analytics for {date}")
-		
-		# 1. Lấy data từ database trước (chính xác hơn)
+		# Lấy data từ database (nguồn duy nhất)
 		db_stats = get_analytics_from_database()
 		
-		# 2. Fallback sang logs nếu database chưa có data
-		if db_stats['dau'] == 0 and db_stats['mau'] == 0:
-			frappe.errprint(f"⚠️ [Analytics] No data in database, falling back to logs")
-			log_stats = count_active_guardians_from_logs()
-			active_stats = log_stats
-		else:
-			frappe.errprint(f"✅ [Analytics] Using database data")
-			active_stats = db_stats
+		frappe.errprint(f"📊 [Analytics] Eligible: {db_stats['total_eligible']}, Activated: {db_stats['activated_users']}")
+		frappe.errprint(f"📊 [Analytics] DAU: {db_stats['dau']}, WAU: {db_stats['wau']}, MAU: {db_stats['mau']}")
+		frappe.errprint(f"📊 [Analytics] New today: {db_stats['new_users_today']}")
 		
-		# 3. Đếm total guardians - sử dụng eligible count
-		doc.total_guardians = db_stats['total_eligible'] or frappe.db.count("CRM Guardian", {
-			"guardian_id": ["!=", ""]
-		})
-		
-		# 4. Set metrics
-		doc.active_guardians_today = active_stats.get('dau', 0)
-		doc.active_guardians_7d = active_stats.get('wau', 0)
-		doc.active_guardians_30d = active_stats.get('mau', 0)
-		doc.new_guardians = active_stats.get('new_users_today', 0)
-		
-		# Log metrics
-		activated_users = db_stats.get('activated_users', 0)
-		activation_rate = round((activated_users / doc.total_guardians * 100), 1) if doc.total_guardians > 0 else 0
-		engagement_rate = round((active_stats.get('dau', 0) / active_stats.get('mau', 1) * 100), 1) if active_stats.get('mau', 0) > 0 else 0
-		
-		frappe.errprint(f"📊 [Analytics] Eligible: {doc.total_guardians}, Activated: {activated_users} ({activation_rate}%)")
-		frappe.errprint(f"📊 [Analytics] DAU: {doc.active_guardians_today}, WAU: {doc.active_guardians_7d}, MAU: {doc.active_guardians_30d}")
-		
-		# 5. Aggregate API calls by module (vẫn dùng logs cho phần này)
-		try:
-			module_usage = aggregate_module_usage_from_logs()
-			doc.api_calls_by_module = json.dumps(module_usage, ensure_ascii=False)
-		except Exception as e:
-			frappe.errprint(f"❌ [Analytics] Error aggregating module usage: {str(e)}")
-			doc.api_calls_by_module = json.dumps({})
-		
-		# Save document
-		doc.save(ignore_permissions=True)
-		frappe.db.commit()
-		
-		frappe.errprint(f"✅ [Analytics] Successfully aggregated portal analytics for {date}")
 		return {
 			"success": True,
 			"date": date,
-			"total_guardians": doc.total_guardians,
-			"active_today": doc.active_guardians_today,
-			"activated_users": activated_users
+			"data": db_stats
 		}
 		
 	except Exception as e:
