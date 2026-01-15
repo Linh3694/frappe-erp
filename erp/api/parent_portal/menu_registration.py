@@ -761,9 +761,9 @@ def get_period_stats(period_id=None):
 
 
 @frappe.whitelist()
-def get_class_registrations(class_id=None, period_id=None):
+def get_class_registrations(class_id=None, month=None, year=None):
     """
-    Lấy danh sách đăng ký theo lớp (cho tab Thực đơn trong ClassInfo).
+    Lấy danh sách đăng ký theo lớp và tháng (cho tab Thực đơn trong ClassInfo).
     Trả về ma trận: học sinh x ngày Thứ 4.
     """
     logs = []
@@ -772,8 +772,10 @@ def get_class_registrations(class_id=None, period_id=None):
         # Lấy params từ request args nếu không có trong function params
         if not class_id:
             class_id = frappe.form_dict.get('class_id') or (frappe.request.args.get('class_id') if frappe.request else None)
-        if not period_id:
-            period_id = frappe.form_dict.get('period_id') or (frappe.request.args.get('period_id') if frappe.request else None)
+        if not month:
+            month = frappe.form_dict.get('month') or (frappe.request.args.get('month') if frappe.request else None)
+        if not year:
+            year = frappe.form_dict.get('year') or (frappe.request.args.get('year') if frappe.request else None)
         
         if not class_id:
             return validation_error_response(
@@ -781,41 +783,23 @@ def get_class_registrations(class_id=None, period_id=None):
                 {"class_id": ["Class ID là bắt buộc"]}
             )
         
-        # Nếu không có period_id, tìm kỳ đăng ký đang mở
-        if not period_id:
-            period = frappe.db.sql("""
-                SELECT name, month, year
-                FROM `tabSIS Menu Registration Period`
-                WHERE status = 'Open'
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, as_dict=True)
-            
-            if period:
-                period_id = period[0].name
-                month = period[0].month
-                year = period[0].year
-            else:
-                # Không có kỳ nào đang mở, trả về rỗng
-                return success_response(
-                    data={
-                        "class_id": class_id,
-                        "period_id": None,
-                        "wednesdays": [],
-                        "students": []
-                    },
-                    message="Không có kỳ đăng ký nào đang mở",
-                    logs=logs
-                )
+        # Nếu không có month/year, dùng tháng hiện tại
+        if not month or not year:
+            today = getdate(nowdate())
+            month = today.month
+            year = today.year
         else:
-            period = frappe.db.get_value(
-                "SIS Menu Registration Period",
-                period_id,
-                ["month", "year"],
-                as_dict=True
-            )
-            month = period.month
-            year = period.year
+            month = int(month)
+            year = int(year)
+        
+        # Tìm period_id nếu có (để query registrations)
+        period = frappe.db.get_value(
+            "SIS Menu Registration Period",
+            {"month": month, "year": year},
+            ["name"],
+            as_dict=True
+        )
+        period_id = period.name if period else None
         
         # Lấy các ngày Thứ 4
         wednesdays = _get_wednesdays_in_month(year, month)
@@ -959,6 +943,158 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
         frappe.log_error(frappe.get_traceback(), "Admin Get Period Registrations Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def check_open_period():
+    """
+    Kiểm tra có kỳ đăng ký suất ăn đang mở không.
+    Trả về period_id nếu có, None nếu không.
+    """
+    logs = []
+    
+    try:
+        # Tìm kỳ đăng ký đang mở
+        period = frappe.db.get_value(
+            "SIS Menu Registration Period",
+            {"status": "Open"},
+            ["name", "title", "month", "year"],
+            as_dict=True
+        )
+        
+        if period:
+            return success_response(
+                data={
+                    "has_open_period": True,
+                    "period_id": period.name,
+                    "period_title": period.title,
+                    "month": period.month,
+                    "year": period.year
+                },
+                message="Có kỳ đăng ký đang mở",
+                logs=logs
+            )
+        else:
+            return success_response(
+                data={
+                    "has_open_period": False,
+                    "period_id": None
+                },
+                message="Không có kỳ đăng ký nào đang mở",
+                logs=logs
+            )
+            
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Check Open Period Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def send_menu_registration_reminder():
+    """
+    Gửi push notification nhắc phụ huynh đăng ký suất ăn Á/Âu.
+    
+    POST body:
+    {
+        "student_ids": ["CRM-STUDENT-00001", ...],  # Danh sách ID học sinh cần nhắc
+        "message": "Nội dung tin nhắn tùy chỉnh"    # Nội dung do user nhập
+    }
+    
+    Trả về:
+    {
+        "success": true,
+        "data": {
+            "success_count": 10,
+            "failed_count": 2,
+            "total_students": 12
+        }
+    }
+    """
+    logs = []
+    
+    try:
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        student_ids = data.get('student_ids', [])
+        message = data.get('message', '')
+        
+        if isinstance(student_ids, str):
+            student_ids = json.loads(student_ids)
+        
+        if not student_ids:
+            return validation_error_response(
+                "Thiếu danh sách học sinh",
+                {"student_ids": ["Danh sách học sinh là bắt buộc"]}
+            )
+        
+        if not message or not message.strip():
+            return validation_error_response(
+                "Thiếu nội dung tin nhắn",
+                {"message": ["Nội dung tin nhắn là bắt buộc"]}
+            )
+        
+        # Giới hạn độ dài message (150 ký tự để hiển thị tốt trên mobile)
+        message = message.strip()[:150]
+        
+        logs.append(f"Gửi nhắc nhở cho {len(student_ids)} học sinh")
+        logs.append(f"Message: {message}")
+        
+        # Gửi push notification
+        try:
+            from erp.utils.notification_handler import send_bulk_parent_notifications
+            
+            # Sử dụng notification_type = "reminder"
+            result = send_bulk_parent_notifications(
+                recipient_type="reminder",
+                recipients_data={
+                    "student_ids": student_ids
+                },
+                title="Đăng ký suất ăn",
+                body=message,
+                icon="/icon.png",
+                data={
+                    "type": "reminder",
+                    "subtype": "menu_registration",
+                    "url": "/menu-registration"  # URL trên parent-portal
+                }
+            )
+            
+            logs.append(f"Kết quả gửi: {result}")
+            
+            return success_response(
+                data={
+                    "success_count": result.get("success_count", 0),
+                    "failed_count": result.get("failed_count", 0),
+                    "total_students": len(student_ids),
+                    "total_parents": result.get("total_parents", 0)
+                },
+                message=f"Đã gửi thông báo đến {result.get('success_count', 0)} phụ huynh",
+                logs=logs
+            )
+            
+        except Exception as notif_err:
+            logs.append(f"Lỗi gửi notification: {str(notif_err)}")
+            frappe.log_error(frappe.get_traceback(), "Send Menu Registration Reminder Error")
+            return error_response(
+                message=f"Lỗi khi gửi thông báo: {str(notif_err)}",
+                logs=logs
+            )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Send Menu Registration Reminder Error")
         return error_response(
             message=f"Lỗi: {str(e)}",
             logs=logs
