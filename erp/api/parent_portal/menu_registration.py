@@ -371,7 +371,7 @@ def get_daily_menu_for_date(date=None):
                 category = frappe.db.get_value(
                     "SIS Menu Category",
                     item.menu_category_id,
-                    ["name", "title_vn", "title_en", "image", "display_name", "display_name_en", "code"],
+                    ["name", "title_vn", "title_en", "image_url", "display_name", "display_name_en", "code"],
                     as_dict=True
                 )
             
@@ -383,7 +383,7 @@ def get_daily_menu_for_date(date=None):
                     "title_en": category.title_en or category.display_name_en or "",
                     "display_name": category.display_name or category.title_vn or "",
                     "display_name_en": category.display_name_en or category.title_en or "",
-                    "image_url": category.image,
+                    "image_url": category.image_url or "",
                     "code": category.code or ""
                 }
                 
