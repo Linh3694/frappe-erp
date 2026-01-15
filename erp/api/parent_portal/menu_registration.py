@@ -903,7 +903,7 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
         """
         total = frappe.db.sql(count_sql, params, as_dict=True)[0].count
         
-        # Get list
+        # Get list - JOIN thêm để lấy education_stage
         offset = (int(page) - 1) * int(page_size)
         list_sql = f"""
             SELECT 
@@ -914,10 +914,14 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
                 r.class_id,
                 c.title as class_name,
                 r.registration_date,
-                r.registered_by
+                r.registered_by,
+                es.name as education_stage_id,
+                es.title_vn as education_stage_name
             FROM `tabSIS Menu Registration` r
             INNER JOIN `tabCRM Student` s ON r.student_id = s.name
             LEFT JOIN `tabSIS Class` c ON r.class_id = c.name
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+            LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
             WHERE {where_clause}
             ORDER BY r.registration_date DESC
             LIMIT %s OFFSET %s
