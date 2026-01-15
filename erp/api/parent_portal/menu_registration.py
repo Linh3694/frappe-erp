@@ -589,7 +589,7 @@ def get_period_list(status=None, page=1, page_size=20):
             filters=filters,
             fields=[
                 "name", "title", "month", "year", "start_date", "end_date",
-                "status", "education_stage_id", "school_year_id",
+                "status", "school_year_id",
                 "created_at", "created_by"
             ],
             order_by="year desc, month desc",
@@ -606,11 +606,30 @@ def get_period_list(status=None, page=1, page_size=20):
             )
             period["registration_count"] = reg_count
             
-            # Lấy tên cấp học
-            if period.education_stage_id:
-                period["education_stage_name"] = frappe.db.get_value(
-                    "SIS Education Stage",
-                    period.education_stage_id,
+            # Lấy danh sách cấp học từ child table
+            education_stages = frappe.get_all(
+                "SIS Menu Registration Period Education Stage",
+                filters={"parent": period.name},
+                fields=["education_stage_id", "education_stage_name"]
+            )
+            period["education_stages"] = education_stages
+            
+            # Tạo chuỗi tên cấp học để hiển thị
+            stage_names = []
+            for stage in education_stages:
+                if stage.education_stage_name:
+                    stage_names.append(stage.education_stage_name)
+                elif stage.education_stage_id:
+                    name = frappe.db.get_value("SIS Education Stage", stage.education_stage_id, "title_vn")
+                    if name:
+                        stage_names.append(name)
+            period["education_stage_names"] = ", ".join(stage_names) if stage_names else ""
+            
+            # Lấy tên năm học
+            if period.school_year_id:
+                period["school_year_name"] = frappe.db.get_value(
+                    "SIS School Year",
+                    period.school_year_id,
                     "title_vn"
                 )
         

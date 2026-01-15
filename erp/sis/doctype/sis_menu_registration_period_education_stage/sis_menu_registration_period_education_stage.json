@@ -1,0 +1,52 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "beta": 0,
+ "creation": "2026-01-15 00:00:00.000000",
+ "custom": 0,
+ "description": "Cấp học áp dụng cho kỳ đăng ký suất ăn",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "education_stage_id",
+  "education_stage_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "education_stage_id",
+   "fieldtype": "Link",
+   "label": "Cấp học",
+   "options": "SIS Education Stage",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "education_stage_name",
+   "fieldtype": "Data",
+   "label": "Tên cấp học",
+   "read_only": 1,
+   "fetch_from": "education_stage_id.title_vn",
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-01-15 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Menu Registration Period Education Stage",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

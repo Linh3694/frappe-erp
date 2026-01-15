@@ -25,7 +25,7 @@
   "start_date",
   "end_date",
   "config_section",
-  "education_stage_id",
+  "education_stages",
   "school_year_id",
   "system_information",
   "created_by",
@@ -96,12 +96,12 @@
    "label": "Cấu hình"
   },
   {
-   "fieldname": "education_stage_id",
-   "fieldtype": "Link",
+   "fieldname": "education_stages",
+   "fieldtype": "Table",
    "label": "Cấp học áp dụng",
-   "options": "SIS Education Stage",
+   "options": "SIS Menu Registration Period Education Stage",
    "reqd": 1,
-   "description": "Cấp học áp dụng cho kỳ đăng ký (VD: Tiểu học)"
+   "description": "Danh sách cấp học áp dụng cho kỳ đăng ký"
   },
   {
    "fieldname": "school_year_id",
@@ -140,7 +140,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2026-01-14 00:00:00.000000",
+ "modified": "2026-01-15 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Menu Registration Period",
