@@ -102,8 +102,6 @@ class SISHealthReport(Document):
 			try:
 				cls = frappe.get_doc("SIS Class", self.class_id)
 				self.class_name = cls.title
-				# Chỉ set campus nếu field tồn tại trong DocType
-				if hasattr(self, 'campus'):
-					self.campus = cls.campus
+				# campus là virtual field, sẽ được fetch tự động từ class_id.campus
 			except Exception as e:
 				frappe.logger().warning(f"Could not fetch class info: {str(e)}")

@@ -330,7 +330,7 @@ def get_daily_health_summary():
     Lấy tổng hợp báo cáo y tế toàn trường (cho Operation)
     Params:
         - date: Ngày báo cáo (required)
-        - campus: Campus filter (optional)
+        - campus: Campus filter (optional) - filter qua class
         - search: Tìm kiếm theo tên/mã học sinh (optional)
         - page: Trang (default: 1)
         - page_length: Số lượng mỗi trang (default: 50)
@@ -351,8 +351,6 @@ def get_daily_health_summary():
         
         # Build filters
         filters = {"report_date": report_date}
-        if campus:
-            filters["campus"] = campus
         
         # Search filters
         or_filters = None
@@ -363,14 +361,30 @@ def get_daily_health_summary():
                 ["class_name", "like", f"%{search}%"]
             ]
         
-        # Lấy danh sách báo cáo
+        # Nếu có filter campus, lấy danh sách class_id thuộc campus đó
+        if campus:
+            class_ids = frappe.get_all(
+                "SIS Class",
+                filters={"campus": campus},
+                pluck="name"
+            )
+            if class_ids:
+                filters["class_id"] = ["in", class_ids]
+            else:
+                # Không có class nào thuộc campus này
+                return success_response(
+                    data={"data": [], "total": 0, "page": page, "page_length": page_length},
+                    message="Lấy tổng hợp báo cáo y tế thành công"
+                )
+        
+        # Lấy danh sách báo cáo (không query trực tiếp field campus)
         reports = frappe.get_all(
             "SIS Health Report",
             filters=filters,
             or_filters=or_filters,
             fields=[
                 "name", "student_id", "student_name", "student_code",
-                "class_id", "class_name", "campus", "description",
+                "class_id", "class_name", "description",
                 "porridge_registration", "report_date",
                 "created_by_user", "created_by_name", "creation"
             ],
@@ -379,7 +393,7 @@ def get_daily_health_summary():
             limit_start=offset
         )
         
-        # Lấy porridge_dates cho mỗi report
+        # Lấy porridge_dates và campus cho mỗi report
         for report in reports:
             porridge_dates = frappe.get_all(
                 "SIS Health Report Porridge",
@@ -389,6 +403,15 @@ def get_daily_health_summary():
             )
             report["porridge_dates"] = porridge_dates
             report["created_at"] = str(report.get("creation", ""))
+            
+            # Lấy campus từ class
+            if report.get("class_id"):
+                try:
+                    report["campus"] = frappe.db.get_value("SIS Class", report["class_id"], "campus")
+                except:
+                    report["campus"] = None
+            else:
+                report["campus"] = None
         
         # Lấy tổng số
         total = frappe.db.count("SIS Health Report", filters=filters)
@@ -417,7 +440,7 @@ def get_porridge_list():
     Lấy danh sách học sinh ăn cháo (cho TrackingMeal)
     Params:
         - date: Ngày (required)
-        - campus: Campus filter (optional)
+        - campus: Campus filter (optional) - filter qua class
         - search: Tìm kiếm theo tên/mã học sinh (optional)
     """
     try:
@@ -431,7 +454,7 @@ def get_porridge_list():
         search = data.get("search") or request_args.get("search")
         
         # Query để lấy danh sách học sinh có đăng ký cháo cho ngày này
-        # Sử dụng SQL để join với child table
+        # Sử dụng SQL để join với child table và SIS Class để lấy campus
         query = """
             SELECT DISTINCT
                 hr.student_id,
@@ -439,12 +462,13 @@ def get_porridge_list():
                 hr.student_code,
                 hr.class_id,
                 hr.class_name,
-                hr.campus,
+                c.campus,
                 hrp.breakfast,
                 hrp.lunch,
                 hrp.afternoon
             FROM `tabSIS Health Report` hr
             INNER JOIN `tabSIS Health Report Porridge` hrp ON hrp.parent = hr.name
+            LEFT JOIN `tabSIS Class` c ON c.name = hr.class_id
             WHERE hr.porridge_registration = 1
                 AND hrp.date = %s
                 AND (hrp.breakfast = 1 OR hrp.lunch = 1 OR hrp.afternoon = 1)
@@ -452,7 +476,7 @@ def get_porridge_list():
         params = [target_date]
         
         if campus:
-            query += " AND hr.campus = %s"
+            query += " AND c.campus = %s"
             params.append(campus)
         
         if search:
