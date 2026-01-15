@@ -416,7 +416,7 @@ def get_daily_health_summary():
         if campus:
             class_ids = frappe.get_all(
                 "SIS Class",
-                filters={"campus": campus},
+                filters={"campus_id": campus},
                 pluck="name"
             )
             if class_ids:
@@ -458,7 +458,7 @@ def get_daily_health_summary():
             # Lấy campus từ class
             if report.get("class_id"):
                 try:
-                    report["campus"] = frappe.db.get_value("SIS Class", report["class_id"], "campus")
+                    report["campus"] = frappe.db.get_value("SIS Class", report["class_id"], "campus_id")
                 except:
                     report["campus"] = None
             else:
@@ -513,7 +513,7 @@ def get_porridge_list():
                 hr.student_code,
                 hr.class_id,
                 hr.class_name,
-                c.campus,
+                c.campus_id as campus,
                 hrp.breakfast,
                 hrp.lunch,
                 hrp.afternoon
@@ -527,7 +527,7 @@ def get_porridge_list():
         params = [target_date]
         
         if campus:
-            query += " AND c.campus = %s"
+            query += " AND c.campus_id = %s"
             params.append(campus)
         
         if search:
