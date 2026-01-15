@@ -54,13 +54,23 @@ def normalize_phone_number(phone):
     return phone
 
 
-def send_sms_via_vivas(phone_number, message):
+def is_production_server():
+    """
+    Kiểm tra xem server hiện tại có phải là production không.
+    Đọc từ site_config.json: "is_production": true
+    """
+    site_config = frappe.get_site_config()
+    return site_config.get("is_production", False)
+
+
+def send_sms_via_vivas(phone_number, message, otp_code=None):
     """
     Send SMS via VIVAS service
     
     Args:
         phone_number: Phone number in 84XXXXXXXXX format
         message: Text message to send
+        otp_code: OTP code (chỉ log trong môi trường dev)
         
     Returns:
         dict: Response with status and details
@@ -68,7 +78,27 @@ def send_sms_via_vivas(phone_number, message):
     logs = []
     
     try:
-        # Check if SMS sending is enabled
+        # Kiểm tra môi trường production
+        is_prod = is_production_server()
+        
+        # Nếu không phải production, chỉ log OTP và không gửi SMS
+        if not is_prod:
+            logs.append("⚠️ [DEV MODE] Không phải server production - SMS sẽ không được gửi")
+            logs.append(f"📱 Phone: {phone_number}")
+            if otp_code:
+                logs.append(f"🔐 [DEV ONLY] OTP Code: {otp_code}")
+            logs.append(f"📝 Message: {message}")
+            
+            # Return mock success response - OTP chỉ có trong logs, không có trong data
+            return {
+                "success": True,
+                "message": "SMS mocked (dev environment)",
+                "logs": logs,
+                "mock": True,
+                "is_production": False
+            }
+        
+        # Check if SMS sending is enabled (chỉ apply cho production)
         if not VIVAS_SMS_CONFIG.get("enabled", False):
             logs.append("⚠️ SMS sending is DISABLED in configuration")
             logs.append(f"📱 Would send to: {phone_number}")
@@ -79,7 +109,8 @@ def send_sms_via_vivas(phone_number, message):
                 "success": True,
                 "message": "SMS mocked (sending disabled for safety)",
                 "logs": logs,
-                "mock": True
+                "mock": True,
+                "is_production": True
             }
         
         # Prepare request payload
@@ -188,7 +219,11 @@ def request_otp(phone_number):
         
         # Generate OTP
         otp_code = generate_otp(6)
-        logs.append(f"🔐 Generated OTP: {otp_code}")
+        # Chỉ log OTP trong môi trường dev (không phải production)
+        if not is_production_server():
+            logs.append(f"🔐 [DEV ONLY] Generated OTP: {otp_code}")
+        else:
+            logs.append("🔐 OTP generated successfully")
         
         # Store OTP in cache (expires in 5 minutes)
         cache_key = f"parent_portal_otp:{normalized_phone}"
@@ -207,8 +242,8 @@ def request_otp(phone_number):
         # Prepare SMS message
         sms_message = f"Ma xac thuc Parent Portal cua ban la: {otp_code}. Ma co hieu luc trong 5 phut."
         
-        # Send SMS
-        sms_result = send_sms_via_vivas(normalized_phone, sms_message)
+        # Send SMS (truyền otp_code để log trong môi trường dev)
+        sms_result = send_sms_via_vivas(normalized_phone, sms_message, otp_code=otp_code)
         logs.extend(sms_result.get("logs", []))
         
         # Return response
