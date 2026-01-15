@@ -684,6 +684,10 @@ def get_period_stats(period_id=None):
     logs = []
     
     try:
+        # Lấy period_id từ request args nếu không có trong function params
+        if not period_id:
+            period_id = frappe.form_dict.get('period_id') or (frappe.request.args.get('period_id') if frappe.request else None)
+        
         if not period_id:
             return validation_error_response(
                 "Thiếu period_id",
