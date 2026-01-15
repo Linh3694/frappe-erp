@@ -1,0 +1,191 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-MENU-REG-PERIOD-{#####}",
+ "beta": 0,
+ "creation": "2026-01-14 00:00:00.000000",
+ "custom": 0,
+ "description": "Kỳ đăng ký suất ăn Á/Âu",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "title",
+  "month",
+  "year",
+  "column_break_basic",
+  "status",
+  "start_date",
+  "end_date",
+  "config_section",
+  "education_stage_id",
+  "school_year_id",
+  "system_information",
+  "created_by",
+  "created_at",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên kỳ đăng ký",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "VD: Đăng ký suất ăn Tháng 8/2026"
+  },
+  {
+   "fieldname": "month",
+   "fieldtype": "Int",
+   "label": "Tháng áp dụng",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Tháng mà kỳ đăng ký áp dụng (1-12)"
+  },
+  {
+   "fieldname": "year",
+   "fieldtype": "Int",
+   "label": "Năm áp dụng",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Năm mà kỳ đăng ký áp dụng"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Draft\nOpen\nClosed",
+   "default": "Draft",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Draft: Nháp, Open: Đang mở, Closed: Đã đóng"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Ngày bắt đầu đăng ký",
+   "reqd": 1,
+   "description": "Ngày bắt đầu cho phép phụ huynh đăng ký"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "Ngày kết thúc đăng ký",
+   "reqd": 1,
+   "description": "Ngày kết thúc cho phép phụ huynh đăng ký"
+  },
+  {
+   "fieldname": "config_section",
+   "fieldtype": "Section Break",
+   "label": "Cấu hình"
+  },
+  {
+   "fieldname": "education_stage_id",
+   "fieldtype": "Link",
+   "label": "Cấp học áp dụng",
+   "options": "SIS Education Stage",
+   "reqd": 1,
+   "description": "Cấp học áp dụng cho kỳ đăng ký (VD: Tiểu học)"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "description": "Năm học áp dụng"
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Người tạo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-14 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Menu Registration Period",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Canteen",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

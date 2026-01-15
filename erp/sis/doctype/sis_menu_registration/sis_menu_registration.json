@@ -1,0 +1,223 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:SIS-MENU-REG-{#####}",
+ "beta": 0,
+ "creation": "2026-01-14 00:00:00.000000",
+ "custom": 0,
+ "description": "Đăng ký suất ăn Á/Âu của học sinh",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "period",
+  "student_id",
+  "student_name",
+  "student_code",
+  "column_break_basic",
+  "family_id",
+  "class_id",
+  "class_name",
+  "registered_by",
+  "registrations_section",
+  "registrations",
+  "status_section",
+  "registration_date",
+  "column_break_status",
+  "last_modified_by",
+  "last_modified_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "period",
+   "fieldtype": "Link",
+   "label": "Kỳ đăng ký",
+   "options": "SIS Menu Registration Period",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Tên học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_code"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "family_id",
+   "fieldtype": "Link",
+   "label": "Gia đình",
+   "options": "CRM Family"
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Lớp học",
+   "options": "SIS Class",
+   "description": "Lớp học hiện tại của học sinh"
+  },
+  {
+   "fieldname": "class_name",
+   "fieldtype": "Data",
+   "label": "Tên lớp",
+   "read_only": 1,
+   "fetch_from": "class_id.title"
+  },
+  {
+   "fieldname": "registered_by",
+   "fieldtype": "Link",
+   "label": "Người đăng ký",
+   "options": "User",
+   "description": "Phụ huynh thực hiện đăng ký"
+  },
+  {
+   "fieldname": "registrations_section",
+   "fieldtype": "Section Break",
+   "label": "Chi tiết đăng ký"
+  },
+  {
+   "fieldname": "registrations",
+   "fieldtype": "Table",
+   "label": "Danh sách đăng ký",
+   "options": "SIS Menu Registration Item",
+   "reqd": 1,
+   "description": "Chi tiết đăng ký suất ăn cho từng ngày Thứ 4"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "registration_date",
+   "fieldtype": "Datetime",
+   "label": "Ngày đăng ký",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "last_modified_by",
+   "fieldtype": "Link",
+   "label": "Người sửa cuối",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_modified_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian sửa cuối",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-01-14 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Menu Registration",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Canteen",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "SIS Teacher",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}
