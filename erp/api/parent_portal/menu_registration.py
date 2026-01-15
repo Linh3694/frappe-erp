@@ -953,32 +953,43 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
 def check_open_period():
     """
     Kiểm tra có kỳ đăng ký suất ăn đang mở không.
+    Kiểm tra status = "Open" VÀ ngày hiện tại nằm trong khoảng start_date - end_date.
     Trả về period_id nếu có, None nếu không.
     """
     logs = []
     
     try:
-        # Tìm kỳ đăng ký đang mở
-        period = frappe.db.get_value(
-            "SIS Menu Registration Period",
-            {"status": "Open"},
-            ["name", "title", "month", "year"],
-            as_dict=True
-        )
+        today = nowdate()
+        logs.append(f"Ngày hiện tại: {today}")
         
-        if period:
+        # Tìm kỳ đăng ký đang mở VÀ ngày hiện tại nằm trong khoảng start_date - end_date
+        period = frappe.db.sql("""
+            SELECT name, title, month, year, start_date, end_date
+            FROM `tabSIS Menu Registration Period`
+            WHERE status = 'Open'
+            AND start_date <= %(today)s
+            AND end_date >= %(today)s
+            LIMIT 1
+        """, {"today": today}, as_dict=True)
+        
+        if period and len(period) > 0:
+            p = period[0]
+            logs.append(f"Tìm thấy kỳ đăng ký: {p.name} ({p.start_date} - {p.end_date})")
             return success_response(
                 data={
                     "has_open_period": True,
-                    "period_id": period.name,
-                    "period_title": period.title,
-                    "month": period.month,
-                    "year": period.year
+                    "period_id": p.name,
+                    "period_title": p.title,
+                    "month": p.month,
+                    "year": p.year,
+                    "start_date": str(p.start_date),
+                    "end_date": str(p.end_date)
                 },
                 message="Có kỳ đăng ký đang mở",
                 logs=logs
             )
         else:
+            logs.append("Không có kỳ đăng ký nào đang mở tại thời điểm này")
             return success_response(
                 data={
                     "has_open_period": False,
