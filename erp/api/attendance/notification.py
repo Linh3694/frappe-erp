@@ -99,8 +99,14 @@ def publish_attendance_notification(
 				date=date
 			)
 
-		# UPDATE DEBOUNCE CACHE: Mark notification as sent
-		update_debounce_cache(employee_code, timestamp)
+		# UPDATE DEBOUNCE CACHE: Mark notification as sent (dùng Redis cache)
+		update_debounce_cache(
+			employee_code, 
+			timestamp,
+			check_in_time=check_in_time,
+			check_out_time=check_out_time,
+			total_check_ins=total_check_ins
+		)
 
 		frappe.logger().info(f"✅ [Attendance Notif] Notification sent for {employee_code}")
 
@@ -520,101 +526,100 @@ def format_datetime_vn(dt):
 def should_skip_due_to_debounce(employee_code, current_timestamp, check_in_time=None, check_out_time=None, total_check_ins=None):
 	"""
 	Check if notification should be skipped due to debounce
-	Enhanced logic that considers attendance context, not just time window
+	SỬ DỤNG REDIS CACHE thay vì query database với LIKE (rất chậm!)
+	
 	Returns True if notification should be skipped
 	
-	FIX: Debounce phải check theo từng học sinh (employee_code), không phải theo guardian
-	Vì 1 guardian có thể có nhiều con, mỗi con check-in riêng cần notification riêng
+	FIX: Debounce theo employee_code, dùng Redis cache để check nhanh
 	"""
 	try:
-		# Get guardians for this student first
-		from erp.utils.notification_handler import get_guardians_for_students
-		guardians = get_guardians_for_students([employee_code])
-
-		if not guardians:
-			frappe.logger().info(f"⏱️ [Debounce] {employee_code} - No guardians found, allowing notification")
-			return False
-
-		# Get guardian emails
-		guardian_emails = [g['email'] for g in guardians]
-
-		# FIX: Query notification theo CẢ guardian VÀ student_id trong data
-		# Chỉ skip nếu đã có notification cho CÙNG học sinh này gần đây
-		recent_notifications = frappe.db.sql("""
-			SELECT creation, data, recipient_user
-			FROM `tabERP Notification`
-			WHERE recipient_user IN %(guardian_emails)s
-			AND notification_type = 'attendance'
-			AND creation >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
-			AND (
-				data LIKE %(student_pattern1)s 
-				OR data LIKE %(student_pattern2)s
-				OR data LIKE %(student_pattern3)s
-			)
-			ORDER BY creation DESC
-			LIMIT 5
-		""", {
-			"guardian_emails": guardian_emails,
-			"student_pattern1": f'%"student_id": "{employee_code}"%',
-			"student_pattern2": f'%"studentId": "{employee_code}"%',
-			"student_pattern3": f'%"employeeCode": "{employee_code}"%'
-		}, as_dict=True)
-
-		if recent_notifications:
-			last_notif_time = recent_notifications[0].creation
-			time_diff = (current_timestamp - last_notif_time).total_seconds() / 60
-
-			frappe.logger().info(f"⏱️ [Debounce] {employee_code} - current: {current_timestamp}, last: {last_notif_time}, diff: {time_diff:.2f} min")
-
-			# If last notification was very recent (< 1 minute), always skip
-			if time_diff < 1:
-				frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - too recent ({time_diff:.2f} min < 1 min)")
-				return True
-
-			# If within 5 minutes, check if attendance state has actually changed
-			if time_diff < 5:
-				# Parse the last notification's data to understand previous state
-				try:
-					last_data = json.loads(recent_notifications[0].data) if isinstance(recent_notifications[0].data, str) else recent_notifications[0].data
-
-					last_check_ins = last_data.get('totalCheckIns', 0)
-					last_is_checkin = last_data.get('isCheckIn', True)
-
-					# If total check-ins haven't changed and it's the same type of event, skip
-					if (total_check_ins and last_check_ins == total_check_ins and
-						determine_checkin_or_checkout(current_timestamp, check_in_time, check_out_time) == last_is_checkin):
-						frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - same attendance state (check_ins: {total_check_ins}, type: {'check-in' if last_is_checkin else 'check-out'})")
-						return True
-
-				except Exception as parse_error:
-					frappe.logger().warning(f"⚠️ [Debounce] Could not parse last notification data: {str(parse_error)}")
-					# If we can't parse the data, be conservative and skip
+		# Dùng Redis cache để debounce - nhanh hơn rất nhiều so với query database
+		cache_key = f"attendance_debounce:{employee_code}"
+		
+		# Check cache
+		cached_data = frappe.cache().get_value(cache_key)
+		
+		if cached_data:
+			try:
+				# Parse cached data
+				if isinstance(cached_data, str):
+					cached_data = json.loads(cached_data)
+				
+				last_timestamp = cached_data.get('timestamp')
+				last_check_ins = cached_data.get('total_check_ins', 0)
+				last_is_checkin = cached_data.get('is_check_in', True)
+				
+				# Parse last timestamp
+				if isinstance(last_timestamp, str):
+					last_timestamp = frappe.utils.get_datetime(last_timestamp)
+				
+				# Calculate time difference
+				if isinstance(current_timestamp, str):
+					current_timestamp = frappe.utils.get_datetime(current_timestamp)
+				
+				time_diff = (current_timestamp - last_timestamp).total_seconds() / 60
+				
+				frappe.logger().info(f"⏱️ [Debounce] {employee_code} - diff: {time_diff:.2f} min")
+				
+				# Nếu notification gần đây (<1 phút), luôn skip
+				if time_diff < 1:
+					frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - too recent ({time_diff:.2f} min)")
 					return True
-
-			frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - significant attendance change")
-			return False
-
-		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - no recent notification for this student")
+				
+				# Nếu trong 3 phút, check xem trạng thái có thay đổi không
+				if time_diff < 3:
+					current_is_checkin = determine_checkin_or_checkout(current_timestamp, check_in_time, check_out_time)
+					
+					# Nếu total_check_ins không đổi và cùng loại event, skip
+					if (total_check_ins and last_check_ins == total_check_ins and 
+						current_is_checkin == last_is_checkin):
+						frappe.logger().info(f"⏭️ [Debounce] SKIPPING {employee_code} - same state")
+						return True
+				
+				frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - state changed or time passed")
+				return False
+				
+			except Exception as parse_error:
+				frappe.logger().warning(f"⚠️ [Debounce] Cache parse error: {str(parse_error)}")
+				return False
+		
+		frappe.logger().info(f"✅ [Debounce] ALLOWING {employee_code} - no cache entry")
 		return False
 
 	except Exception as e:
-		frappe.logger().error(f"❌ [Debounce] Error checking debounce for {employee_code}: {str(e)}")
-		return False  # On error, allow notification to be sent
+		frappe.logger().error(f"❌ [Debounce] Error: {str(e)}")
+		return False  # On error, allow notification
 
 
-def update_debounce_cache(employee_code, timestamp):
+def update_debounce_cache(employee_code, timestamp, check_in_time=None, check_out_time=None, total_check_ins=None):
 	"""
-	Update debounce cache with timestamp of successful notification
-	Now using database-based approach, so this function is kept for compatibility
-	but doesn't need to do anything since we check from ERP Notification table
+	Lưu debounce info vào Redis cache
+	Cache expires sau 5 phút (300 giây)
 	"""
 	try:
-		# Database-based debounce doesn't need explicit cache update
-		# The notification record itself serves as the debounce marker
-		frappe.logger().info(f"📝 [Debounce] Notification sent for {employee_code} - database-based debounce active")
+		cache_key = f"attendance_debounce:{employee_code}"
+		
+		# Tính is_check_in
+		is_check_in = determine_checkin_or_checkout(timestamp, check_in_time, check_out_time)
+		
+		# Data để cache
+		cache_data = {
+			"timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+			"total_check_ins": total_check_ins or 0,
+			"is_check_in": is_check_in
+		}
+		
+		# Lưu vào Redis với TTL 5 phút
+		frappe.cache().set_value(
+			cache_key, 
+			json.dumps(cache_data),
+			expires_in_sec=300  # 5 phút
+		)
+		
+		frappe.logger().info(f"📝 [Debounce] Cached for {employee_code} (TTL: 5min)")
 
 	except Exception as e:
-		frappe.logger().error(f"❌ [Debounce] Error in update_debounce_cache for {employee_code}: {str(e)}")
+		frappe.logger().error(f"❌ [Debounce] Cache error for {employee_code}: {str(e)}")
 
 
 def clear_attendance_notification_cache(employee_code=None):

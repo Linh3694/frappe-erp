@@ -312,39 +312,36 @@ def handle_hikvision_event():
 				# Update attendance time - pass original timestamp to preserve it
 				attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name, original_timestamp=timestamp)
 				
-				# Save to database
+				# Save to database (commit sẽ được gọi sau khi xử lý xong tất cả posts)
 				logger.info(f"💾 Saving attendance record for {employee_code} - check_in: {format_vn_time(attendance_doc.check_in_time)}, check_out: {format_vn_time(attendance_doc.check_out_time)}")
 				attendance_doc.save(ignore_permissions=True)
-				frappe.db.commit()
 				logger.info(f"✅ Record saved! ID: {attendance_doc.name}")
 				
 				records_processed += 1
 				
-				# Log success - hiển thị đúng loại user
-				from erp.api.attendance.notification import check_if_student
-				is_student = check_if_student(employee_code)
-				user_type = "Học sinh" if is_student else "Nhân viên"
-
+				# Log success
 				display_time = format_vn_time(parsed_timestamp)
-				logger.info(f"✅ {user_type} {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
+				logger.info(f"✅ {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
 				
-				# Send notification immediately (no enqueue for instant push delivery)
-				# Check per-request deduplication to prevent multiple notifications for same student
+				# ENQUEUE notification để không block worker (FIX: server lag khi tan học)
+				# Check per-request deduplication để tránh duplicate notification
 				if employee_code not in processed_students:
 					processed_students.add(employee_code)
 
-					# CHECK: Skip notification for historical attendance data (from newly connected devices syncing old data)
+					# CHECK: Skip notification cho dữ liệu chấm công cũ (từ máy mới sync data cũ)
 					if is_historical_attendance(parsed_timestamp):
 						threshold = get_historical_attendance_threshold_minutes()
-						logger.info(f"🔇 [SILENT SYNC] Skipping notification for {employee_code} - historical data (>{threshold} min old), timestamp: {format_vn_time(parsed_timestamp)}")
+						logger.info(f"🔇 [SILENT SYNC] Skipping notification for {employee_code} - historical data (>{threshold} min old)")
 					else:
+						# QUAN TRỌNG: Dùng enqueue thay vì gọi trực tiếp để không block worker
+						# Khi 100+ học sinh tan học cùng lúc, worker không bị chờ notification
 						try:
-							# Import and call notification function directly
-							from erp.api.attendance.notification import publish_attendance_notification
-
-							# Call immediately for instant push notification
-							logger.info(f"📢 [HIKVISION] About to call publish_attendance_notification for {employee_code}")
-							publish_attendance_notification(
+							frappe.enqueue(
+								"erp.api.attendance.notification.publish_attendance_notification",
+								queue="short",  # Dùng short queue cho priority cao
+								job_name=f"attendance_notif_{employee_code}_{parsed_timestamp.strftime('%H%M%S')}",
+								deduplicate=True,  # Tránh duplicate jobs
+								timeout=120,  # 2 phút timeout
 								employee_code=employee_code,
 								employee_name=employee_name,
 								timestamp=parsed_timestamp.isoformat(),
@@ -355,30 +352,9 @@ def handle_hikvision_event():
 								total_check_ins=attendance_doc.total_check_ins,
 								date=str(attendance_doc.date)
 							)
-
-							logger.info(f"✅ [HIKVISION] Push notification sent immediately for {employee_code}")
-
-						except Exception as notify_error:
-							logger.warning(f"⚠️ Failed to send immediate notification: {str(notify_error)}")
-							# Fallback to enqueue if immediate send fails
-							try:
-								frappe.enqueue(
-									"erp.api.attendance.notification.publish_attendance_notification",
-									queue="default",
-									timeout=300,
-									employee_code=employee_code,
-									employee_name=employee_name,
-									timestamp=parsed_timestamp.isoformat(),
-									device_id=device_id,
-									device_name=device_name,
-									check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-									check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-									total_check_ins=attendance_doc.total_check_ins,
-									date=str(attendance_doc.date)
-								)
-								logger.info(f"📋 Fallback: Notification enqueued for {employee_code}")
-							except Exception as enqueue_error:
-								logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
+							logger.info(f"📋 [HIKVISION] Notification enqueued for {employee_code}")
+						except Exception as enqueue_error:
+							logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
 				else:
 					logger.info(f"⏭️ Skipping duplicate notification for {employee_code} in this request")
 				
@@ -388,6 +364,12 @@ def handle_hikvision_event():
 					"post": post,
 					"error": str(post_error)
 				})
+		
+		# BATCH COMMIT: Commit 1 lần sau khi xử lý xong tất cả records (thay vì commit từng record)
+		# Giảm lock contention và tăng throughput khi có nhiều requests đồng thời
+		if records_processed > 0:
+			frappe.db.commit()
+			logger.info(f"💾 Batch committed {records_processed} attendance records")
 		
 		# Return response
 		response = {
