@@ -321,7 +321,7 @@ def get_active_period():
 def get_daily_menu_for_date(date=None):
     """
     Lấy thực đơn Set Á và Set Âu cho một ngày cụ thể.
-    Dùng để hiển thị món ăn khi phụ huynh chọn ngày.
+    Dùng để hiển thị món ăn khi phụ huynh chọn ngày trong trang đăng ký suất ăn.
     """
     logs = []
     
@@ -348,51 +348,51 @@ def get_daily_menu_for_date(date=None):
         
         if not daily_menu:
             return success_response(
-                data={"set_a": None, "set_au": None},
+                data={"date": date, "daily_menu_id": None, "set_a": [], "set_au": []},
                 message="Chưa có thực đơn cho ngày này",
                 logs=logs
             )
         
-        # Lấy các meal (chỉ lấy lunch)
-        meals = frappe.get_all(
-            "SIS Daily Menu Meal",
-            filters={"parent": daily_menu.name, "meal_type": "lunch"},
-            fields=["name", "meal_type"]
-        )
+        # Lấy document đầy đủ để access items child table
+        daily_menu_doc = frappe.get_doc("SIS Daily Menu", daily_menu.name)
         
         set_a_items = []
         set_au_items = []
         
-        for meal in meals:
-            # Lấy các items của meal
-            items = frappe.get_all(
-                "SIS Daily Menu Meal Item",
-                filters={"parent": meal.name},
-                fields=["menu_category_id", "set_type", "item_type"]
-            )
+        # Parse items từ child table
+        for item in daily_menu_doc.items or []:
+            # Chỉ lấy lunch items
+            if item.meal_type != "lunch":
+                continue
             
-            for item in items:
-                # Lấy thông tin món ăn
+            # Lấy thông tin món ăn
+            category = None
+            if item.menu_category_id:
                 category = frappe.db.get_value(
                     "SIS Menu Category",
                     item.menu_category_id,
-                    ["name", "title_vn", "title_en", "image", "display_name", "display_name_en"],
+                    ["name", "title_vn", "title_en", "image", "display_name", "display_name_en", "code"],
                     as_dict=True
                 )
+            
+            if category:
+                item_data = {
+                    "id": category.name,
+                    "name": category.name,
+                    "title_vn": category.title_vn or category.display_name or "",
+                    "title_en": category.title_en or category.display_name_en or "",
+                    "display_name": category.display_name or category.title_vn or "",
+                    "display_name_en": category.display_name_en or category.title_en or "",
+                    "image_url": category.image,
+                    "code": category.code or ""
+                }
                 
-                if category:
-                    item_data = {
-                        "name": category.name,
-                        "title_vn": category.title_vn or category.display_name,
-                        "title_en": category.title_en or category.display_name_en,
-                        "image": category.image,
-                        "item_type": item.item_type
-                    }
-                    
-                    if item.set_type == "set_a":
-                        set_a_items.append(item_data)
-                    elif item.set_type == "set_au":
-                        set_au_items.append(item_data)
+                # Kiểm tra meal_type_reference để xác định set_a hay set_au
+                meal_ref = (item.meal_type_reference or "").lower()
+                if "set_a" in meal_ref and "set_au" not in meal_ref:
+                    set_a_items.append(item_data)
+                elif "set_au" in meal_ref:
+                    set_au_items.append(item_data)
         
         return success_response(
             data={
