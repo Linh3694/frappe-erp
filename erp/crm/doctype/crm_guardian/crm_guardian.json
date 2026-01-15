@@ -28,7 +28,9 @@
   "first_login_at",
   "last_login_at",
   "column_break_portal",
-  "portal_activated"
+  "portal_activated",
+  "jwt_token_version",
+  "force_logout_at"
  ],
  "fields": [
   {
@@ -118,6 +120,21 @@
    "read_only": 1,
    "default": 0,
    "description": "Đã kích hoạt Parent Portal"
+  },
+  {
+   "fieldname": "jwt_token_version",
+   "fieldtype": "Int",
+   "label": "JWT Token Version",
+   "read_only": 1,
+   "default": 1,
+   "description": "Phiên bản token - tăng lên khi force logout"
+  },
+  {
+   "fieldname": "force_logout_at",
+   "fieldtype": "Datetime",
+   "label": "Force Logout At",
+   "read_only": 1,
+   "description": "Thời điểm bị force logout gần nhất"
   }
  ],
  "index_web_pages_for_search": 1,

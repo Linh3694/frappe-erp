@@ -415,10 +415,10 @@ def verify_otp_and_login(phone_number, otp):
                     user_doc.save()
                     logs.append(f"✅ Added Guardian role to existing user: {user_email}")
             
-            # Generate JWT token
-            from erp.api.erp_common_user.auth import generate_jwt_token
-            token = generate_jwt_token(user_email)
-            logs.append("JWT token generated")
+            # Generate JWT token với token_version cho force logout support
+            from erp.api.parent_portal.guardian_auth import generate_guardian_jwt_token
+            token = generate_guardian_jwt_token(user_email, guardian["name"])
+            logs.append("JWT token generated with token_version")
         finally:
             # Restore Guest user context
             frappe.set_user("Guest")

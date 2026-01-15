@@ -43,6 +43,8 @@ def authenticate_via_jwt():
     """
     Authenticate user via JWT token from Authorization header
     Returns user_email if successful, None otherwise
+    
+    Cho Parent Portal users: kiểm tra token_version để support force logout
     """
     try:
         # Check Authorization header first
@@ -68,6 +70,26 @@ def authenticate_via_jwt():
         if not frappe.db.exists('User', user_email):
             frappe.logger().warning(f"User {user_email} not found in database")
             return None
+        
+        # ===== KIỂM TRA TOKEN VERSION CHO PARENT PORTAL USERS =====
+        # Nếu là Parent Portal user và token có token_version, verify với database
+        if '@parent.wellspring.edu.vn' in user_email:
+            guardian_name = payload.get('guardian')
+            token_version = payload.get('token_version')
+            
+            if guardian_name and token_version:
+                # Lấy current token_version từ database
+                current_version = frappe.db.get_value(
+                    "CRM Guardian", guardian_name, "jwt_token_version"
+                ) or 1
+                
+                # Nếu token_version không match, token đã bị revoke (force logout)
+                if token_version != current_version:
+                    frappe.logger().warning(
+                        f"Token revoked for {guardian_name}: "
+                        f"token_version={token_version}, current={current_version}"
+                    )
+                    return None
         
         frappe.logger().debug(f"JWT authentication successful for user: {user_email}")
         return user_email
