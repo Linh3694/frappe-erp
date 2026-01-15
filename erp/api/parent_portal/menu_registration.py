@@ -317,7 +317,7 @@ def get_active_period():
         )
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_daily_menu_for_date(date=None):
     """
     Lấy thực đơn Set Á và Set Âu cho một ngày cụ thể.
@@ -326,6 +326,10 @@ def get_daily_menu_for_date(date=None):
     logs = []
     
     try:
+        # Fallback: lấy từ request args nếu không có trong params
+        if not date:
+            date = frappe.form_dict.get('date')
+        
         if not date:
             return validation_error_response(
                 "Thiếu ngày",
