@@ -326,9 +326,14 @@ def get_daily_menu_for_date(date=None):
     logs = []
     
     try:
-        # Fallback: lấy từ request args nếu không có trong params
+        # Debug: log tất cả params nhận được
+        logs.append(f"Param date: {date}")
+        logs.append(f"form_dict: {dict(frappe.form_dict)}")
+        logs.append(f"request.args: {dict(frappe.request.args) if frappe.request else 'no request'}")
+        
+        # Fallback: lấy từ form_dict hoặc request.args
         if not date:
-            date = frappe.form_dict.get('date')
+            date = frappe.form_dict.get('date') or (frappe.request.args.get('date') if frappe.request else None)
         
         if not date:
             return validation_error_response(
