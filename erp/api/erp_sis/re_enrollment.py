@@ -102,7 +102,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
             finance_year = frappe.db.get_value(
                 "SIS Finance Year",
                 finance_year_id,
-                ["name", "campus_id"],
+                ["name", "campus_id", "school_year_id"],
                 as_dict=True
             )
             
@@ -114,7 +114,8 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                 logs.append(f"Năm tài chính không thuộc campus {campus_id}")
                 return 0
             
-            # Lấy học sinh từ SIS Finance Student
+            # Lấy học sinh từ SIS Finance Student - loại trừ lớp 12
+            # JOIN với SIS Class Student để kiểm tra grade_code
             students = frappe.db.sql("""
                 SELECT DISTINCT 
                     fs.student_id,
@@ -124,12 +125,19 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                     fs.name as finance_student_id
                 FROM `tabSIS Finance Student` fs
                 INNER JOIN `tabCRM Student` s ON fs.student_id = s.name
+                LEFT JOIN `tabSIS Class Student` cs ON fs.student_id = cs.student_id
+                LEFT JOIN `tabSIS Class` c ON cs.class_id = c.name 
+                    AND c.school_year_id = %(school_year_id)s
+                LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
                 WHERE fs.finance_year_id = %(finance_year_id)s
+                  AND (eg.grade_code IS NULL OR eg.grade_code != '12')
+                  AND (fs.class_title IS NULL OR fs.class_title NOT LIKE '%%12%%')
             """, {
-                "finance_year_id": finance_year_id
+                "finance_year_id": finance_year_id,
+                "school_year_id": finance_year.school_year_id or source_school_year_id
             }, as_dict=True)
             
-            logs.append(f"Tìm thấy {len(students)} học sinh từ năm tài chính")
+            logs.append(f"Tìm thấy {len(students)} học sinh từ năm tài chính (đã loại bỏ lớp 12)")
         else:
             # Lấy từ SIS Class Student như cũ
             logs.append(f"Lấy học sinh từ năm học nguồn: {source_school_year_id}, Campus: {campus_id}")
@@ -525,7 +533,7 @@ def create_config():
         
         # Auto-create re-enrollment records cho tất cả học sinh
         # Ưu tiên lấy từ Finance Year nếu có, không thì lấy từ SIS Class Student
-        created_count = _auto_create_student_records(
+        result = _auto_create_student_records(
             config_doc.name, 
             data['source_school_year_id'],  # Dùng năm học nguồn để lấy danh sách học sinh
             resolved_campus_id,
@@ -533,13 +541,19 @@ def create_config():
             finance_year_id=data.get('finance_year_id')  # Nếu có thì lấy từ Finance Year
         )
         
+        created_count = result.get("created_count", 0)
+        deleted_count = result.get("deleted_count", 0)
+        
         logs.append(f"Đã tạo {created_count} records cho học sinh")
+        if deleted_count > 0:
+            logs.append(f"Đã xóa {deleted_count} học sinh lớp 12")
         
         return success_response(
             data={
                 "name": config_doc.name,
                 "title": config_doc.title,
-                "student_records_created": created_count
+                "student_records_created": created_count,
+                "grade12_deleted": deleted_count
             },
             message=f"Tạo cấu hình tái ghi danh thành công. Đã tạo {created_count} đơn cho học sinh.",
             logs=logs
