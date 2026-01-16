@@ -12,7 +12,21 @@ from frappe.utils import today, now_datetime
 from functools import wraps
 
 # Mapping API endpoints → Module names
+# Thứ tự quan trọng: keywords cụ thể hơn phải đặt trước
 API_MODULE_MAPPING = {
+    # Thực đơn - cụ thể trước
+    'daily_menu': 'Thực đơn',
+    'menu_registration': 'Đăng ký ăn',
+    'buffet': 'Thực đơn',
+    'menu': 'Thực đơn',
+    'meal': 'Thực đơn',
+    
+    # Thông báo - cụ thể trước
+    'notification_center': 'Thông báo',
+    'notification': 'Thông báo',
+    'announcement': 'Thông báo',
+    'news': 'Thông báo',
+    
     # Thời khóa biểu
     'timetable': 'Thời khóa biểu',
     'schedule': 'Thời khóa biểu',
@@ -20,22 +34,16 @@ API_MODULE_MAPPING = {
     # Điểm danh
     'attendance': 'Điểm danh',
     
-    # Thực đơn
-    'menu': 'Thực đơn',
-    'meal': 'Thực đơn',
-    
     # Xin phép
     'leave': 'Xin phép',
     'absence': 'Xin phép',
     
-    # Thông báo
-    'notification': 'Thông báo',
-    'announcement': 'Thông báo',
-    
     # Bảng điểm
+    'report_card': 'Bảng điểm',
     'grade': 'Bảng điểm',
     'score': 'Bảng điểm',
     'gradebook': 'Bảng điểm',
+    'subject': 'Bảng điểm',
     
     # Lịch học
     'calendar': 'Lịch học',
@@ -46,6 +54,7 @@ API_MODULE_MAPPING = {
     'transport': 'Xe bus',
     
     # Liên lạc
+    'contact_log': 'Liên lạc',
     'contact': 'Liên lạc',
     'message': 'Liên lạc',
     'chat': 'Liên lạc',
@@ -57,11 +66,17 @@ API_MODULE_MAPPING = {
     # Thông tin học sinh
     'student': 'Thông tin HS',
     'children': 'Thông tin HS',
+    'interface': 'Thông tin HS',
     
-    # Học phí
+    # Học phí / Tài chính
+    'finance': 'Học phí',
     'fee': 'Học phí',
     'payment': 'Học phí',
     'tuition': 'Học phí',
+    
+    # Tái tuyển sinh / Scholarship
+    're_enrollment': 'Tái tuyển sinh',
+    'scholarship': 'Học bổng',
 }
 
 
@@ -80,9 +95,12 @@ def detect_module_from_endpoint(endpoint):
     
     endpoint_lower = endpoint.lower()
     
-    for keyword, module in API_MODULE_MAPPING.items():
+    # Sắp xếp keywords theo độ dài giảm dần để match keyword dài (cụ thể) trước
+    sorted_keywords = sorted(API_MODULE_MAPPING.keys(), key=len, reverse=True)
+    
+    for keyword in sorted_keywords:
         if keyword in endpoint_lower:
-            return module
+            return API_MODULE_MAPPING[keyword]
     
     return None
 
@@ -117,6 +135,7 @@ def record_module_usage(guardian_name, module_name):
                     last_activity_at = %s
                 WHERE name = %s
             """, (now_datetime(), existing[0][0]))
+            frappe.errprint(f"✅ [ModuleUsage] Updated existing: {existing[0][0]}")
         else:
             # Tạo record mới
             doc = frappe.new_doc("Portal Guardian Activity")
@@ -126,11 +145,15 @@ def record_module_usage(guardian_name, module_name):
             doc.activity_count = 1
             doc.last_activity_at = now_datetime()
             doc.insert(ignore_permissions=True)
+            frappe.errprint(f"✅ [ModuleUsage] Created new: {doc.name}")
         
         frappe.db.commit()
         return True
         
     except Exception as e:
+        import traceback
+        frappe.errprint(f"❌ [ModuleUsage] Error: {str(e)}")
+        frappe.errprint(traceback.format_exc())
         frappe.log_error(f"Error recording module usage: {str(e)}", "Module Tracker")
         return False
 
@@ -205,26 +228,36 @@ def track_request_module_usage():
         
         request_path = frappe.request.path or ''
         
-        # Chỉ track parent_portal APIs
-        if 'parent_portal' not in request_path:
+        # Chỉ track parent_portal APIs (và một số attendance APIs)
+        if 'parent_portal' not in request_path and 'attendance' not in request_path:
             return
         
         # Detect module từ endpoint
         module_name = detect_module_from_endpoint(request_path)
+        
+        # Debug log
+        frappe.errprint(f"🔵 [ModuleTracker] Path: {request_path}, Module: {module_name}")
+        
         if not module_name:
+            frappe.errprint(f"⚠️ [ModuleTracker] No module detected for: {request_path}")
             return
         
         # Lấy guardian từ session
         guardian_name = get_current_guardian_from_session()
         if not guardian_name:
+            frappe.errprint(f"⚠️ [ModuleTracker] No guardian found for user: {user_email}")
             return
         
         # Record module usage
-        record_module_usage(guardian_name, module_name)
+        frappe.errprint(f"🔵 [ModuleTracker] Recording: {guardian_name} -> {module_name}")
+        result = record_module_usage(guardian_name, module_name)
+        frappe.errprint(f"✅ [ModuleTracker] Recorded: {result}")
         
     except Exception as e:
-        # Không làm ảnh hưởng đến request
-        pass
+        # Log lỗi để debug
+        import traceback
+        frappe.errprint(f"❌ [ModuleTracker] Error: {str(e)}")
+        frappe.errprint(traceback.format_exc())
 
 
 def get_module_usage_stats(days=30):
