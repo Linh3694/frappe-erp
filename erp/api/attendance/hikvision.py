@@ -339,7 +339,7 @@ def handle_hikvision_event():
 							frappe.enqueue(
 								"erp.api.attendance.notification.publish_attendance_notification",
 								queue="short",  # Dùng short queue cho priority cao
-								job_name=f"attendance_notif_{employee_code}_{parsed_timestamp.strftime('%H%M%S')}",
+								job_id=f"attendance_notif_{employee_code}_{parsed_timestamp.strftime('%H%M%S')}",  # job_id cho deduplicate
 								deduplicate=True,  # Tránh duplicate jobs
 								timeout=120,  # 2 phút timeout
 								employee_code=employee_code,
