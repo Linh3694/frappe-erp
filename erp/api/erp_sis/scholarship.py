@@ -523,7 +523,9 @@ def toggle_period_status():
 def delete_scholarship_period():
     """
     Xóa kỳ học bổng.
-    Chỉ có thể xóa kỳ chưa có đơn đăng ký.
+    Chỉ có thể xóa kỳ chưa có đơn đăng ký, trừ khi:
+    - User có role System Manager VÀ force_delete=true
+    - Khi đó sẽ xóa tất cả đơn đăng ký trước khi xóa kỳ
     """
     logs = []
     
@@ -538,6 +540,11 @@ def delete_scholarship_period():
             data = frappe.form_dict
         
         period_id = data.get('period_id')
+        force_delete = data.get('force_delete', False)
+        
+        # Chuyển đổi force_delete sang boolean nếu là string
+        if isinstance(force_delete, str):
+            force_delete = force_delete.lower() in ('true', '1', 'yes')
         
         if not period_id:
             return validation_error_response(
@@ -556,10 +563,35 @@ def delete_scholarship_period():
         )
         
         if application_count > 0:
-            return validation_error_response(
-                f"Không thể xóa kỳ học bổng vì đã có {application_count} đơn đăng ký",
-                {"period_id": ["Kỳ học bổng đã có đơn đăng ký"]}
-            )
+            # Kiểm tra nếu user là System Manager và force_delete=true
+            is_system_manager = "System Manager" in frappe.get_roles(frappe.session.user)
+            
+            if force_delete and is_system_manager:
+                # Xóa tất cả đơn đăng ký học bổng của kỳ này
+                logs.append(f"System Manager đang xóa {application_count} đơn đăng ký học bổng...")
+                
+                applications = frappe.get_all(
+                    "SIS Scholarship Application",
+                    filters={"scholarship_period_id": period_id},
+                    pluck="name"
+                )
+                
+                for app_name in applications:
+                    frappe.delete_doc("SIS Scholarship Application", app_name, force=True)
+                
+                logs.append(f"Đã xóa {len(applications)} đơn đăng ký học bổng")
+            else:
+                # Không có quyền force delete
+                if not is_system_manager:
+                    return validation_error_response(
+                        f"Không thể xóa kỳ học bổng vì đã có {application_count} đơn đăng ký. Chỉ System Manager mới có quyền xóa.",
+                        {"period_id": ["Kỳ học bổng đã có đơn đăng ký"]}
+                    )
+                else:
+                    return validation_error_response(
+                        f"Không thể xóa kỳ học bổng vì đã có {application_count} đơn đăng ký",
+                        {"period_id": ["Kỳ học bổng đã có đơn đăng ký"]}
+                    )
         
         # Xóa kỳ học bổng
         frappe.delete_doc("SIS Scholarship Period", period_id)
@@ -568,8 +600,8 @@ def delete_scholarship_period():
         logs.append(f"Đã xóa kỳ học bổng: {period_id}")
         
         return success_response(
-            data={"message": "Đã xóa kỳ học bổng thành công"},
-            message="Đã xóa kỳ học bổng thành công",
+            data={"message": "Đã xóa kỳ học bổng thành công" + (f" (bao gồm {application_count} đơn)" if application_count > 0 else "")},
+            message="Đã xóa kỳ học bổng thành công" + (f" (bao gồm {application_count} đơn)" if application_count > 0 else ""),
             logs=logs
         )
         
