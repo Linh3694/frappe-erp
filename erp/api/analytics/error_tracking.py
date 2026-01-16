@@ -280,3 +280,146 @@ def bulk_mark_resolved(error_ids):
             "success": False,
             "message": str(e)
         }
+
+
+@frappe.whitelist()
+def get_slow_apis(limit=50, since_minutes=60, min_response_time=1000):
+    """
+    Lấy danh sách API có response chậm
+    
+    Args:
+        limit: Số lượng records tối đa (default 50)
+        since_minutes: Lấy trong X phút gần đây (default 60)
+        min_response_time: Ngưỡng response time ms (default 1000)
+        
+    Returns:
+        dict: {success, data: [slow_apis]}
+    """
+    try:
+        limit = int(limit)
+        since_minutes = int(since_minutes)
+        min_response_time = int(min_response_time)
+        
+        cutoff = add_to_date(None, minutes=-since_minutes)
+        
+        slow_apis = frappe.get_all(
+            "Portal Slow API",
+            filters={
+                "occurred_at": [">=", cutoff],
+                "response_time_ms": [">=", min_response_time]
+            },
+            fields=[
+                "name", "api_endpoint", "method", "response_time_ms",
+                "guardian", "user", "occurred_at", "severity", "ip_address"
+            ],
+            order_by="occurred_at desc",
+            limit=limit
+        )
+        
+        # Format datetime và lấy guardian name
+        for api in slow_apis:
+            if api.get('occurred_at'):
+                api['occurred_at'] = str(api['occurred_at'])
+            
+            # Lấy guardian name nếu có
+            if api.get('guardian'):
+                api['guardian_name'] = frappe.db.get_value(
+                    "CRM Guardian", api['guardian'], "guardian_name"
+                ) or api['guardian']
+            else:
+                api['guardian_name'] = api.get('user', 'Unknown')
+        
+        return {
+            "success": True,
+            "data": slow_apis,
+            "total": len(slow_apis),
+            "since_minutes": since_minutes
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error getting slow APIs: {str(e)}", "Error Tracking API")
+        return {
+            "success": False,
+            "message": str(e),
+            "data": []
+        }
+
+
+@frappe.whitelist()
+def get_slow_api_stats(period="24h"):
+    """
+    Thống kê slow APIs theo endpoint
+    
+    Args:
+        period: Khoảng thời gian ("1h", "6h", "24h", "7d")
+        
+    Returns:
+        dict: {success, data: {by_endpoint, by_severity, avg_response_time}}
+    """
+    try:
+        # Parse period
+        if period == "1h":
+            interval = "1 HOUR"
+        elif period == "6h":
+            interval = "6 HOUR"
+        elif period == "7d":
+            interval = "7 DAY"
+        else:  # 24h default
+            interval = "24 HOUR"
+        
+        # Top slow endpoints
+        by_endpoint = frappe.db.sql(f"""
+            SELECT 
+                api_endpoint,
+                COUNT(*) as count,
+                AVG(response_time_ms) as avg_time,
+                MAX(response_time_ms) as max_time
+            FROM `tabPortal Slow API`
+            WHERE occurred_at >= DATE_SUB(NOW(), INTERVAL {interval})
+            GROUP BY api_endpoint
+            ORDER BY count DESC
+            LIMIT 10
+        """, as_dict=True)
+        
+        # Format avg_time
+        for item in by_endpoint:
+            item['avg_time'] = round(item['avg_time'] or 0, 0)
+        
+        # Count by severity
+        by_severity = frappe.db.sql(f"""
+            SELECT severity, COUNT(*) as count
+            FROM `tabPortal Slow API`
+            WHERE occurred_at >= DATE_SUB(NOW(), INTERVAL {interval})
+            GROUP BY severity
+            ORDER BY count DESC
+        """, as_dict=True)
+        
+        # Total và averages
+        totals = frappe.db.sql(f"""
+            SELECT 
+                COUNT(*) as total,
+                AVG(response_time_ms) as avg_response_time,
+                MAX(response_time_ms) as max_response_time
+            FROM `tabPortal Slow API`
+            WHERE occurred_at >= DATE_SUB(NOW(), INTERVAL {interval})
+        """, as_dict=True)[0]
+        
+        return {
+            "success": True,
+            "data": {
+                "by_endpoint": by_endpoint,
+                "by_severity": by_severity,
+                "total_slow_calls": totals.get('total', 0),
+                "avg_response_time": round(totals.get('avg_response_time') or 0, 0),
+                "max_response_time": totals.get('max_response_time', 0)
+            },
+            "period": period
+        }
+        
+    except Exception as e:
+        frappe.log_error(f"Error getting slow API stats: {str(e)}", "Error Tracking API")
+        return {
+            "success": False,
+            "message": str(e),
+            "data": {}
+        }

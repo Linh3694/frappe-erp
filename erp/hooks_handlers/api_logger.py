@@ -33,6 +33,60 @@ def detect_module(endpoint: str) -> str:
     return None
 
 
+def log_slow_api(endpoint: str, method: str, response_time_ms: float, user: str, ip: str, user_agent: str):
+    """
+    Lưu slow API vào database để hiển thị trên dashboard.
+    
+    Thresholds:
+    - 1000-3000ms: medium (🟡)
+    - 3000-5000ms: slow (🟠)
+    - >5000ms: very_slow (🔴)
+    """
+    try:
+        # Xác định severity
+        if response_time_ms > 5000:
+            severity = 'very_slow'
+        elif response_time_ms > 3000:
+            severity = 'slow'
+        else:
+            severity = 'medium'
+        
+        # Tìm guardian nếu là parent portal user
+        guardian_name = None
+        if user and '@parent.wellspring.edu.vn' in user:
+            guardian_id = user.split('@')[0]
+            guardian_name = frappe.db.get_value("CRM Guardian", {"guardian_id": guardian_id}, "name")
+        
+        # Lấy request params (nếu có)
+        request_params = None
+        try:
+            if frappe.request and frappe.request.args:
+                request_params = dict(frappe.request.args)
+        except:
+            pass
+        
+        # Tạo record
+        doc = frappe.new_doc("Portal Slow API")
+        doc.api_endpoint = endpoint[:500] if endpoint else ''  # Truncate nếu quá dài
+        doc.method = method
+        doc.response_time_ms = int(response_time_ms)
+        doc.guardian = guardian_name
+        doc.user = user
+        doc.occurred_at = frappe.utils.now_datetime()
+        doc.severity = severity
+        doc.ip_address = ip
+        doc.user_agent = user_agent[:200] if user_agent else ''
+        doc.request_params = frappe.as_json(request_params) if request_params else None
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        frappe.errprint(f"🐌 [SlowAPI] Logged: {endpoint} ({response_time_ms:.0f}ms) - {severity}")
+        
+    except Exception as e:
+        # Không throw error để không ảnh hưởng request chính
+        frappe.errprint(f"❌ [SlowAPI] Error: {str(e)}")
+
+
 def log_api_request_start(**kwargs):
     """Hook called before API request execution"""
     try:
@@ -140,6 +194,21 @@ def log_api_request_end(**kwargs):
                 'module': module_name  # Track which module this API belongs to
             }
         )
+        
+        # Lưu slow API vào database (chỉ cho parent_portal APIs > 1000ms)
+        if 'parent_portal' in endpoint.lower() and response_time_ms > 1000:
+            try:
+                log_slow_api(
+                    endpoint=endpoint,
+                    method=method,
+                    response_time_ms=response_time_ms,
+                    user=user,
+                    ip=ip,
+                    user_agent=user_agent
+                )
+            except Exception as slow_err:
+                frappe.errprint(f"⚠️ [api_logger] Error logging slow API: {str(slow_err)}")
+                
     except Exception as e:
         import traceback
         frappe.errprint(f"❌ [api_logger] Error: {str(e)}")

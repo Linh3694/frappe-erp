@@ -729,7 +729,9 @@ def toggle_config_active():
 def delete_config():
     """
     Xóa cấu hình tái ghi danh.
-    Chỉ xóa được nếu chưa có đơn nào.
+    Chỉ xóa được nếu chưa có đơn nào, trừ khi:
+    - User có role System Manager VÀ force_delete=true
+    - Khi đó sẽ xóa tất cả đơn trước khi xóa config
     """
     logs = []
     
@@ -744,6 +746,11 @@ def delete_config():
             data = frappe.form_dict
         
         config_id = data.get('config_id')
+        force_delete = data.get('force_delete', False)
+        
+        # Chuyển đổi force_delete sang boolean nếu là string
+        if isinstance(force_delete, str):
+            force_delete = force_delete.lower() in ('true', '1', 'yes')
         
         if not config_id:
             return validation_error_response(
@@ -758,18 +765,44 @@ def delete_config():
         )
         
         if submission_count > 0:
-            return error_response(
-                f"Không thể xóa vì đã có {submission_count} đơn tái ghi danh",
-                logs=logs
-            )
+            # Kiểm tra nếu user là System Manager và force_delete=true
+            is_system_manager = "System Manager" in frappe.get_roles(frappe.session.user)
+            
+            if force_delete and is_system_manager:
+                # Xóa tất cả đơn tái ghi danh của config này
+                logs.append(f"System Manager đang xóa {submission_count} đơn tái ghi danh...")
+                
+                submissions = frappe.get_all(
+                    "SIS Re-enrollment",
+                    filters={"config_id": config_id},
+                    pluck="name"
+                )
+                
+                for submission_name in submissions:
+                    frappe.delete_doc("SIS Re-enrollment", submission_name, force=True)
+                
+                logs.append(f"Đã xóa {len(submissions)} đơn tái ghi danh")
+            else:
+                # Không có quyền force delete
+                if not is_system_manager:
+                    return error_response(
+                        f"Không thể xóa vì đã có {submission_count} đơn tái ghi danh. Chỉ System Manager mới có quyền xóa.",
+                        logs=logs
+                    )
+                else:
+                    return error_response(
+                        f"Không thể xóa vì đã có {submission_count} đơn tái ghi danh",
+                        logs=logs
+                    )
         
+        # Xóa config
         frappe.delete_doc("SIS Re-enrollment Config", config_id)
         frappe.db.commit()
         
         logs.append(f"Đã xóa config: {config_id}")
         
         return success_response(
-            message="Xóa cấu hình thành công",
+            message="Xóa cấu hình thành công" + (f" (bao gồm {submission_count} đơn)" if submission_count > 0 else ""),
             logs=logs
         )
         
