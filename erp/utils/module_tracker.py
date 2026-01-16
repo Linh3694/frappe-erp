@@ -137,14 +137,14 @@ def record_module_usage(guardian_name, module_name):
             """, (now_datetime(), existing[0][0]))
             frappe.errprint(f"✅ [ModuleUsage] Updated existing: {existing[0][0]}")
         else:
-            # Tạo record mới
+            # Tạo record mới với hash autoname
             doc = frappe.new_doc("Portal Guardian Activity")
             doc.guardian = guardian_name
             doc.activity_date = current_date
             doc.activity_type = module_name
             doc.activity_count = 1
             doc.last_activity_at = now_datetime()
-            doc.insert(ignore_permissions=True)
+            doc.insert(ignore_permissions=True, ignore_if_duplicate=True)
             frappe.errprint(f"✅ [ModuleUsage] Created new: {doc.name}")
         
         frappe.db.commit()

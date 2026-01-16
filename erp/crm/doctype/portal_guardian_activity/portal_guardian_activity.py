@@ -20,35 +20,32 @@ class PortalGuardianActivity(Document):
 def record_guardian_activity(guardian_name, activity_type='api_call'):
     """
     Ghi nhận activity của guardian.
-    Nếu đã có record cho ngày hôm nay, tăng activity_count.
-    Nếu chưa có, tạo record mới.
+    Mỗi guardian có thể có nhiều records trong 1 ngày (1 record cho mỗi activity_type).
     
     Args:
         guardian_name: Tên document CRM Guardian (e.g., "CRM-GUARDIAN-00001")
-        activity_type: Loại activity ("otp_login", "app_session", "api_call")
+        activity_type: Loại activity ("otp_login", "app_session", hoặc tên module)
     """
     try:
         frappe.errprint(f"🔵 [Activity] Recording activity for {guardian_name}, type={activity_type}")
         current_date = today()
-        frappe.errprint(f"🔵 [Activity] Current date: {current_date}")
         
-        # Tìm record hiện có cho guardian + ngày hôm nay
-        existing = frappe.db.exists("Portal Guardian Activity", {
-            "guardian": guardian_name,
-            "activity_date": current_date
-        })
-        frappe.errprint(f"🔵 [Activity] Existing record: {existing}")
+        # Tìm record hiện có cho guardian + ngày + activity_type
+        existing = frappe.db.sql("""
+            SELECT name FROM `tabPortal Guardian Activity`
+            WHERE guardian = %s AND activity_date = %s AND activity_type = %s
+            LIMIT 1
+        """, (guardian_name, current_date, activity_type))
         
         if existing:
             # Cập nhật record hiện có
-            doc = frappe.get_doc("Portal Guardian Activity", existing)
-            doc.activity_count = (doc.activity_count or 0) + 1
-            doc.last_activity_at = now_datetime()
-            # Ưu tiên loại activity: otp_login > app_session > api_call
-            if activity_type == 'otp_login' or (activity_type == 'app_session' and doc.activity_type != 'otp_login'):
-                doc.activity_type = activity_type
-            doc.save(ignore_permissions=True)
-            frappe.errprint(f"✅ [Activity] Updated existing record: {doc.name}, count={doc.activity_count}")
+            frappe.db.sql("""
+                UPDATE `tabPortal Guardian Activity`
+                SET activity_count = activity_count + 1,
+                    last_activity_at = %s
+                WHERE name = %s
+            """, (now_datetime(), existing[0][0]))
+            frappe.errprint(f"✅ [Activity] Updated existing record: {existing[0][0]}")
         else:
             # Tạo record mới
             doc = frappe.new_doc("Portal Guardian Activity")
@@ -57,7 +54,7 @@ def record_guardian_activity(guardian_name, activity_type='api_call'):
             doc.activity_type = activity_type
             doc.activity_count = 1
             doc.last_activity_at = now_datetime()
-            doc.insert(ignore_permissions=True)
+            doc.insert(ignore_permissions=True, ignore_if_duplicate=True)
             frappe.errprint(f"✅ [Activity] Created new record: {doc.name}")
         
         frappe.db.commit()
@@ -67,5 +64,4 @@ def record_guardian_activity(guardian_name, activity_type='api_call'):
         import traceback
         frappe.errprint(f"❌ [Activity] Error: {str(e)}")
         frappe.errprint(traceback.format_exc())
-        frappe.log_error(f"Error recording guardian activity: {str(e)}\n{traceback.format_exc()}", "Portal Guardian Activity")
         return False
