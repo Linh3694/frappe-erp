@@ -1169,10 +1169,10 @@ def delete_period():
         if not frappe.db.exists("SIS Menu Registration Period", period_id):
             return not_found_response("Không tìm thấy kỳ đăng ký")
         
-        # Kiểm tra có đơn đăng ký hay không
+        # Kiểm tra có đơn đăng ký hay không (field tên là "period" không phải "period_id")
         registration_count = frappe.db.count(
             "SIS Menu Registration",
-            {"period_id": period_id}
+            {"period": period_id}
         )
         
         deleted_registrations = 0
@@ -1187,7 +1187,7 @@ def delete_period():
                 
                 registrations = frappe.get_all(
                     "SIS Menu Registration",
-                    filters={"period_id": period_id},
+                    filters={"period": period_id},
                     pluck="name"
                 )
                 
