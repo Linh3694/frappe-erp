@@ -1209,8 +1209,8 @@ def delete_period():
                         logs=logs
                     )
         
-        # Xóa kỳ đăng ký
-        frappe.delete_doc("SIS Menu Registration Period", period_id)
+        # Xóa kỳ đăng ký (force=True để bỏ qua kiểm tra linked documents vì đã xóa hết ở trên)
+        frappe.delete_doc("SIS Menu Registration Period", period_id, force=True)
         frappe.db.commit()
         
         logs.append(f"Đã xóa kỳ đăng ký: {period_id}")
