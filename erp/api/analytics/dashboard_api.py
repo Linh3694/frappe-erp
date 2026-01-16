@@ -18,11 +18,10 @@ from datetime import datetime, timedelta
 def get_dashboard_summary():
 	"""
 	Get summary statistics - LẤY TRỰC TIẾP TỪ DATABASE
-	Không còn dựa vào SIS Portal Analytics hay logs nữa.
 	
 	Response includes:
-	- total_guardians: Tổng số guardians có thể đăng nhập (có phone + có student)
-	- eligible_guardians: Số guardians có thể đăng nhập
+	- total_guardians: Tổng số guardians có thể đăng nhập
+	- eligible_guardians: Alias của total_guardians
 	- activated_guardians: Số guardians đã đăng nhập ít nhất 1 lần
 	- activation_rate: Tỷ lệ kích hoạt (%)
 	- active_guardians_today: DAU
@@ -31,11 +30,12 @@ def get_dashboard_summary():
 	- new_guardians: Số người login lần đầu hôm nay
 	"""
 	try:
-		from erp.api.analytics.portal_analytics import get_analytics_from_database, get_eligible_guardians_count
+		from erp.api.analytics.portal_analytics import get_analytics_from_database
 		
 		today_date = today()
+		yesterday_date = add_days(today_date, -1)
 		
-		# Lấy data trực tiếp từ database
+		# Lấy data trực tiếp từ database (realtime)
 		db_stats = get_analytics_from_database()
 		
 		# Build response data
@@ -50,8 +50,7 @@ def get_dashboard_summary():
 			'new_guardians': db_stats['new_users_today']
 		}
 		
-		# Changes - so sánh với ngày hôm qua từ Portal Guardian Activity
-		yesterday_date = add_days(today_date, -1)
+		# Changes - so sánh với ngày hôm qua
 		yesterday_dau = frappe.db.sql("""
 			SELECT COUNT(DISTINCT guardian) 
 			FROM `tabPortal Guardian Activity`
@@ -78,7 +77,8 @@ def get_dashboard_summary():
 		}
 		
 	except Exception as e:
-		frappe.log_error(f"Error getting dashboard summary: {str(e)}", "Dashboard API Error")
+		import traceback
+		frappe.log_error(f"Error getting dashboard summary: {str(e)}\n{traceback.format_exc()}", "Dashboard API Error")
 		return {
 			"success": False,
 			"message": str(e)
@@ -88,7 +88,7 @@ def get_dashboard_summary():
 @frappe.whitelist()
 def get_user_trends(period="30d"):
 	"""
-	Get user activity trends over time - LẤY TỪ Portal Guardian Activity
+	Get user activity trends - LẤY TỪ Portal Guardian Activity
 	Args:
 		period: "7d" or "30d"
 	Returns: list of daily active user counts
@@ -139,7 +139,8 @@ def get_user_trends(period="30d"):
 		}
 		
 	except Exception as e:
-		frappe.log_error(f"Error getting user trends: {str(e)}", "Dashboard API Error")
+		import traceback
+		frappe.log_error(f"Error getting user trends: {str(e)}\n{traceback.format_exc()}", "Dashboard API Error")
 		return {
 			"success": False,
 			"message": str(e)
@@ -150,7 +151,7 @@ def get_user_trends(period="30d"):
 def get_module_usage(period="30d"):
 	"""
 	Get module usage statistics
-	Hiện tại trả về empty vì chưa có dữ liệu (sẽ có sau khi go-live)
+	Hiện tại trả về empty vì chưa có dữ liệu module tracking
 	
 	Args:
 		period: "7d" or "30d"
@@ -171,7 +172,7 @@ def get_module_usage(period="30d"):
 			'Đánh giá'
 		]
 		
-		# Trả về empty data với structure đúng
+		# Trả về empty data (sẽ có sau khi implement module tracking)
 		formatted_data = []
 		for module in modules:
 			formatted_data.append({
@@ -184,7 +185,7 @@ def get_module_usage(period="30d"):
 			"success": True,
 			"data": formatted_data,
 			"total_calls": 0,
-			"message": "Dữ liệu sẽ được cập nhật sau khi go-live"
+			"message": "Dữ liệu sẽ có sau khi go-live"
 		}
 		
 	except Exception as e:
@@ -283,74 +284,20 @@ def get_feedback_ratings(page=1, page_size=20):
 
 
 @frappe.whitelist()
-def debug_analytics():
+def trigger_analytics_aggregation():
 	"""
-	Debug API để kiểm tra trạng thái data trong database.
-	Gọi API này để xem tại sao DAU/WAU/MAU = 0.
+	Manually trigger analytics aggregation
+	Useful for testing or on-demand updates
 	"""
 	try:
-		from frappe.utils import today, add_days
-		
-		today_date = today()
-		date_7d_ago = add_days(today_date, -7)
-		date_30d_ago = add_days(today_date, -30)
-		
-		# Kiểm tra bảng Portal Guardian Activity
-		total_activities = frappe.db.count("Portal Guardian Activity")
-		
-		# Lấy tất cả activities hôm nay
-		today_activities = frappe.db.sql("""
-			SELECT * FROM `tabPortal Guardian Activity`
-			WHERE activity_date = %s
-		""", (today_date,), as_dict=True)
-		
-		# Lấy tất cả activities trong 7 ngày
-		week_activities = frappe.db.sql("""
-			SELECT activity_date, COUNT(*) as count, COUNT(DISTINCT guardian) as unique_guardians
-			FROM `tabPortal Guardian Activity`
-			WHERE activity_date >= %s
-			GROUP BY activity_date
-			ORDER BY activity_date DESC
-		""", (date_7d_ago,), as_dict=True)
-		
-		# Kiểm tra CRM Guardian với portal_activated
-		activated_count = frappe.db.count("CRM Guardian", {"portal_activated": 1})
-		
-		# Guardians with first_login_at today
-		new_today = frappe.db.sql("""
-			SELECT COUNT(*) FROM `tabCRM Guardian`
-			WHERE DATE(first_login_at) = %s
-		""", (today_date,))[0][0]
-		
-		# Sample activated guardians
-		sample_guardians = frappe.db.sql("""
-			SELECT name, guardian_id, guardian_name, first_login_at, last_login_at, portal_activated
-			FROM `tabCRM Guardian`
-			WHERE portal_activated = 1
-			LIMIT 5
-		""", as_dict=True)
-		
-		return {
-			"success": True,
-			"debug": {
-				"today_date": today_date,
-				"date_7d_ago": str(date_7d_ago),
-				"date_30d_ago": str(date_30d_ago),
-				"total_activity_records": total_activities,
-				"today_activities": today_activities,
-				"week_activities_by_day": week_activities,
-				"activated_guardians_count": activated_count,
-				"new_users_today": new_today,
-				"sample_activated_guardians": sample_guardians
-			}
-		}
-		
+		from erp.api.analytics.portal_analytics import aggregate_portal_analytics
+		result = aggregate_portal_analytics()
+		return result
 	except Exception as e:
-		import traceback
+		frappe.log_error(f"Error triggering analytics aggregation: {str(e)}", "Dashboard API Error")
 		return {
 			"success": False,
-			"error": str(e),
-			"traceback": traceback.format_exc()
+			"message": str(e)
 		}
 
 
@@ -364,8 +311,6 @@ def get_login_history(days=30, limit=50):
 		limit: Số records tối đa (default 50)
 	"""
 	try:
-		from frappe.utils import add_days
-		
 		today_date = today()
 		start_date = add_days(today_date, -int(days))
 		
@@ -415,8 +360,68 @@ def get_login_history(days=30, limit=50):
 		}
 		
 	except Exception as e:
-		frappe.log_error(f"Error getting login history: {str(e)}", "Dashboard API Error")
+		import traceback
+		frappe.log_error(f"Error getting login history: {str(e)}\n{traceback.format_exc()}", "Dashboard API Error")
 		return {
 			"success": False,
 			"message": str(e)
+		}
+
+
+@frappe.whitelist()
+def debug_analytics():
+	"""
+	Debug API để kiểm tra trạng thái data trong database.
+	"""
+	try:
+		today_date = today()
+		date_7d_ago = add_days(today_date, -7)
+		
+		# Kiểm tra bảng Portal Guardian Activity
+		total_activities = frappe.db.count("Portal Guardian Activity")
+		
+		# Lấy activities hôm nay
+		today_activities = frappe.db.sql("""
+			SELECT * FROM `tabPortal Guardian Activity`
+			WHERE activity_date = %s
+		""", (today_date,), as_dict=True)
+		
+		# Lấy activities trong 7 ngày
+		week_activities = frappe.db.sql("""
+			SELECT activity_date, COUNT(*) as count, COUNT(DISTINCT guardian) as unique_guardians
+			FROM `tabPortal Guardian Activity`
+			WHERE activity_date >= %s
+			GROUP BY activity_date
+			ORDER BY activity_date DESC
+		""", (date_7d_ago,), as_dict=True)
+		
+		# Kiểm tra CRM Guardian với portal_activated
+		activated_count = frappe.db.count("CRM Guardian", {"portal_activated": 1})
+		
+		# Sample activated guardians
+		sample_guardians = frappe.db.sql("""
+			SELECT name, guardian_id, guardian_name, first_login_at, last_login_at, portal_activated
+			FROM `tabCRM Guardian`
+			WHERE portal_activated = 1
+			LIMIT 5
+		""", as_dict=True)
+		
+		return {
+			"success": True,
+			"debug": {
+				"today_date": today_date,
+				"total_activity_records": total_activities,
+				"today_activities": today_activities,
+				"week_activities_by_day": week_activities,
+				"activated_guardians_count": activated_count,
+				"sample_activated_guardians": sample_guardians
+			}
+		}
+		
+	except Exception as e:
+		import traceback
+		return {
+			"success": False,
+			"error": str(e),
+			"traceback": traceback.format_exc()
 		}
