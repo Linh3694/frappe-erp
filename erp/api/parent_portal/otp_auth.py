@@ -38,28 +38,40 @@ def update_guardian_login_stats(guardian_name):
         guardian_name: Tên document CRM Guardian (e.g., "CRM-GUARDIAN-00001")
     """
     try:
+        frappe.errprint(f"🔵 [LoginStats] Starting update for {guardian_name}")
         now = frappe.utils.now_datetime()
         
         # Lấy guardian document
         guardian = frappe.get_doc("CRM Guardian", guardian_name)
+        frappe.errprint(f"🔵 [LoginStats] Got guardian: {guardian.guardian_id}")
         
         # Cập nhật first_login_at nếu chưa có (người dùng mới)
+        is_new_user = False
         if not guardian.first_login_at:
             guardian.first_login_at = now
             guardian.portal_activated = 1
+            is_new_user = True
+            frappe.errprint(f"🔵 [LoginStats] New user - setting first_login_at")
         
         # Luôn cập nhật last_login_at
         guardian.last_login_at = now
         guardian.save(ignore_permissions=True)
+        frappe.errprint(f"🔵 [LoginStats] Guardian saved: first_login={guardian.first_login_at}, last_login={guardian.last_login_at}")
         
         # Tạo/cập nhật activity record
+        frappe.errprint(f"🔵 [LoginStats] Recording activity...")
         from erp.crm.doctype.portal_guardian_activity.portal_guardian_activity import record_guardian_activity
-        record_guardian_activity(guardian_name, 'otp_login')
+        result = record_guardian_activity(guardian_name, 'otp_login')
+        frappe.errprint(f"🔵 [LoginStats] Activity recorded: {result}")
         
         frappe.db.commit()
+        frappe.errprint(f"✅ [LoginStats] Successfully updated stats for {guardian_name}, new_user={is_new_user}")
         
     except Exception as e:
-        frappe.log_error(f"Error updating guardian login stats: {str(e)}", "Guardian Login Stats")
+        import traceback
+        frappe.errprint(f"❌ [LoginStats] Error: {str(e)}")
+        frappe.errprint(traceback.format_exc())
+        frappe.log_error(f"Error updating guardian login stats: {str(e)}\n{traceback.format_exc()}", "Guardian Login Stats")
         # Không raise exception để không ảnh hưởng đến login flow
 
 

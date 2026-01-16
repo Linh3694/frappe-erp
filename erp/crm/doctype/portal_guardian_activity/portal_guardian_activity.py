@@ -28,13 +28,16 @@ def record_guardian_activity(guardian_name, activity_type='api_call'):
         activity_type: Loại activity ("otp_login", "app_session", "api_call")
     """
     try:
+        frappe.errprint(f"🔵 [Activity] Recording activity for {guardian_name}, type={activity_type}")
         current_date = today()
+        frappe.errprint(f"🔵 [Activity] Current date: {current_date}")
         
         # Tìm record hiện có cho guardian + ngày hôm nay
         existing = frappe.db.exists("Portal Guardian Activity", {
             "guardian": guardian_name,
             "activity_date": current_date
         })
+        frappe.errprint(f"🔵 [Activity] Existing record: {existing}")
         
         if existing:
             # Cập nhật record hiện có
@@ -45,6 +48,7 @@ def record_guardian_activity(guardian_name, activity_type='api_call'):
             if activity_type == 'otp_login' or (activity_type == 'app_session' and doc.activity_type != 'otp_login'):
                 doc.activity_type = activity_type
             doc.save(ignore_permissions=True)
+            frappe.errprint(f"✅ [Activity] Updated existing record: {doc.name}, count={doc.activity_count}")
         else:
             # Tạo record mới
             doc = frappe.new_doc("Portal Guardian Activity")
@@ -54,10 +58,14 @@ def record_guardian_activity(guardian_name, activity_type='api_call'):
             doc.activity_count = 1
             doc.last_activity_at = now_datetime()
             doc.insert(ignore_permissions=True)
+            frappe.errprint(f"✅ [Activity] Created new record: {doc.name}")
         
         frappe.db.commit()
         return True
         
     except Exception as e:
-        frappe.log_error(f"Error recording guardian activity: {str(e)}", "Portal Guardian Activity")
+        import traceback
+        frappe.errprint(f"❌ [Activity] Error: {str(e)}")
+        frappe.errprint(traceback.format_exc())
+        frappe.log_error(f"Error recording guardian activity: {str(e)}\n{traceback.format_exc()}", "Portal Guardian Activity")
         return False

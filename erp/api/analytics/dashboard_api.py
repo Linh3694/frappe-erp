@@ -283,6 +283,78 @@ def get_feedback_ratings(page=1, page_size=20):
 
 
 @frappe.whitelist()
+def debug_analytics():
+	"""
+	Debug API để kiểm tra trạng thái data trong database.
+	Gọi API này để xem tại sao DAU/WAU/MAU = 0.
+	"""
+	try:
+		from frappe.utils import today, add_days
+		
+		today_date = today()
+		date_7d_ago = add_days(today_date, -7)
+		date_30d_ago = add_days(today_date, -30)
+		
+		# Kiểm tra bảng Portal Guardian Activity
+		total_activities = frappe.db.count("Portal Guardian Activity")
+		
+		# Lấy tất cả activities hôm nay
+		today_activities = frappe.db.sql("""
+			SELECT * FROM `tabPortal Guardian Activity`
+			WHERE activity_date = %s
+		""", (today_date,), as_dict=True)
+		
+		# Lấy tất cả activities trong 7 ngày
+		week_activities = frappe.db.sql("""
+			SELECT activity_date, COUNT(*) as count, COUNT(DISTINCT guardian) as unique_guardians
+			FROM `tabPortal Guardian Activity`
+			WHERE activity_date >= %s
+			GROUP BY activity_date
+			ORDER BY activity_date DESC
+		""", (date_7d_ago,), as_dict=True)
+		
+		# Kiểm tra CRM Guardian với portal_activated
+		activated_count = frappe.db.count("CRM Guardian", {"portal_activated": 1})
+		
+		# Guardians with first_login_at today
+		new_today = frappe.db.sql("""
+			SELECT COUNT(*) FROM `tabCRM Guardian`
+			WHERE DATE(first_login_at) = %s
+		""", (today_date,))[0][0]
+		
+		# Sample activated guardians
+		sample_guardians = frappe.db.sql("""
+			SELECT name, guardian_id, guardian_name, first_login_at, last_login_at, portal_activated
+			FROM `tabCRM Guardian`
+			WHERE portal_activated = 1
+			LIMIT 5
+		""", as_dict=True)
+		
+		return {
+			"success": True,
+			"debug": {
+				"today_date": today_date,
+				"date_7d_ago": str(date_7d_ago),
+				"date_30d_ago": str(date_30d_ago),
+				"total_activity_records": total_activities,
+				"today_activities": today_activities,
+				"week_activities_by_day": week_activities,
+				"activated_guardians_count": activated_count,
+				"new_users_today": new_today,
+				"sample_activated_guardians": sample_guardians
+			}
+		}
+		
+	except Exception as e:
+		import traceback
+		return {
+			"success": False,
+			"error": str(e),
+			"traceback": traceback.format_exc()
+		}
+
+
+@frappe.whitelist()
 def get_login_history(days=30, limit=50):
 	"""
 	Get recent login history từ Portal Guardian Activity
