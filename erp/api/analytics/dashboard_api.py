@@ -150,46 +150,30 @@ def get_user_trends(period="30d"):
 @frappe.whitelist()
 def get_module_usage(period="30d"):
 	"""
-	Get module usage statistics
-	Hiện tại trả về empty vì chưa có dữ liệu module tracking
+	Get module usage statistics - LẤY TỪ Portal Guardian Activity
 	
 	Args:
 		period: "7d" or "30d"
 	Returns: dict with module names and usage counts
 	"""
 	try:
-		# Định nghĩa các modules của Parent Portal
-		modules = [
-			'Thời khóa biểu',
-			'Điểm danh',
-			'Thực đơn',
-			'Xin phép',
-			'Thông báo',
-			'Bảng điểm',
-			'Lịch học',
-			'Xe bus',
-			'Liên lạc',
-			'Đánh giá'
-		]
+		from erp.utils.module_tracker import get_module_usage_stats
 		
-		# Trả về empty data (sẽ có sau khi implement module tracking)
-		formatted_data = []
-		for module in modules:
-			formatted_data.append({
-				"module": module,
-				"count": 0,
-				"percentage": 0
-			})
+		# Chuyển đổi period sang số ngày
+		days = 7 if period == "7d" else 30
+		
+		# Lấy stats từ module tracker
+		stats = get_module_usage_stats(days=days)
 		
 		return {
 			"success": True,
-			"data": formatted_data,
-			"total_calls": 0,
-			"message": "Dữ liệu sẽ có sau khi go-live"
+			"data": stats.get("data", []),
+			"total_calls": stats.get("total_calls", 0)
 		}
 		
 	except Exception as e:
-		frappe.log_error(f"Error getting module usage: {str(e)}", "Dashboard API Error")
+		import traceback
+		frappe.log_error(f"Error getting module usage: {str(e)}\n{traceback.format_exc()}", "Dashboard API Error")
 		return {
 			"success": False,
 			"message": str(e)

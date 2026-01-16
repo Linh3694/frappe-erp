@@ -692,7 +692,8 @@ before_request = [
 ]
 
 after_request = [
-	"erp.hooks_handlers.api_logger.log_api_request_end"
+	"erp.hooks_handlers.api_logger.log_api_request_end",
+	"erp.utils.module_tracker.track_request_module_usage"
 ]
 
 # Job Events
