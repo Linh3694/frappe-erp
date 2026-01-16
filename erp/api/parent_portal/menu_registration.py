@@ -1128,3 +1128,107 @@ def send_menu_registration_reminder():
             message=f"Lỗi: {str(e)}",
             logs=logs
         )
+
+
+@frappe.whitelist()
+def delete_period():
+    """
+    Xóa kỳ đăng ký suất ăn.
+    Chỉ có thể xóa kỳ chưa có đơn đăng ký, trừ khi:
+    - User có role System Manager VÀ force_delete=true
+    - Khi đó sẽ xóa tất cả đơn đăng ký trước khi xóa kỳ
+    """
+    logs = []
+    
+    try:
+        # Kiểm tra quyền
+        if "System Manager" not in frappe.get_roles(frappe.session.user) and \
+           "SIS Admin" not in frappe.get_roles(frappe.session.user):
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        period_id = data.get('period_id')
+        force_delete = data.get('force_delete', False)
+        
+        # Chuyển đổi force_delete sang boolean nếu là string
+        if isinstance(force_delete, str):
+            force_delete = force_delete.lower() in ('true', '1', 'yes')
+        
+        if not period_id:
+            return validation_error_response(
+                "Thiếu period_id",
+                {"period_id": ["Period ID là bắt buộc"]}
+            )
+        
+        # Kiểm tra tồn tại
+        if not frappe.db.exists("SIS Menu Registration Period", period_id):
+            return not_found_response("Không tìm thấy kỳ đăng ký")
+        
+        # Kiểm tra có đơn đăng ký hay không
+        registration_count = frappe.db.count(
+            "SIS Menu Registration",
+            {"period_id": period_id}
+        )
+        
+        deleted_registrations = 0
+        
+        if registration_count > 0:
+            # Kiểm tra nếu user là System Manager và force_delete=true
+            is_system_manager = "System Manager" in frappe.get_roles(frappe.session.user)
+            
+            if force_delete and is_system_manager:
+                # Xóa tất cả đơn đăng ký của kỳ này
+                logs.append(f"System Manager đang xóa {registration_count} đơn đăng ký...")
+                
+                registrations = frappe.get_all(
+                    "SIS Menu Registration",
+                    filters={"period_id": period_id},
+                    pluck="name"
+                )
+                
+                for reg_name in registrations:
+                    frappe.delete_doc("SIS Menu Registration", reg_name, force=True)
+                    deleted_registrations += 1
+                
+                logs.append(f"Đã xóa {deleted_registrations} đơn đăng ký")
+            else:
+                # Không có quyền force delete
+                if not is_system_manager:
+                    return error_response(
+                        f"Không thể xóa kỳ đăng ký vì đã có {registration_count} đơn đăng ký. Chỉ System Manager mới có quyền xóa.",
+                        logs=logs
+                    )
+                else:
+                    return error_response(
+                        f"Không thể xóa kỳ đăng ký vì đã có {registration_count} đơn đăng ký",
+                        logs=logs
+                    )
+        
+        # Xóa kỳ đăng ký
+        frappe.delete_doc("SIS Menu Registration Period", period_id)
+        frappe.db.commit()
+        
+        logs.append(f"Đã xóa kỳ đăng ký: {period_id}")
+        
+        message = "Đã xóa kỳ đăng ký thành công"
+        if deleted_registrations > 0:
+            message += f" (bao gồm {deleted_registrations} đơn đăng ký)"
+        
+        return success_response(
+            data={"message": message, "deleted_registrations": deleted_registrations},
+            message=message,
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Delete Menu Registration Period Error")
+        return error_response(
+            message=f"Lỗi khi xóa: {str(e)}",
+            logs=logs
+        )
