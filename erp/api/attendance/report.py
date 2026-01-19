@@ -361,7 +361,8 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                 SELECT 
                     UPPER(employee_code) as code,
                     check_in_time,
-                    check_out_time
+                    check_out_time,
+                    total_check_ins
                 FROM `tabERP Time Attendance`
                 WHERE UPPER(employee_code) IN %(codes)s
                     AND date = %(date)s
@@ -371,9 +372,28 @@ def get_campus_faceid_summary(campus_id=None, date=None):
             }, as_dict=True)
             
             for r in records:
+                has_check_in = r.get('check_in_time') is not None
+                has_check_out = False
+                
+                # Chỉ tính check-out khi:
+                # 1. Có check_out_time
+                # 2. Có ít nhất 2 lần quét HOẶC check_out khác check_in ít nhất 1 giờ
+                check_in = r.get('check_in_time')
+                check_out = r.get('check_out_time')
+                total_checks = r.get('total_check_ins') or 0
+                
+                if check_out is not None:
+                    if total_checks >= 2:
+                        has_check_out = True
+                    elif check_in and check_out:
+                        # Kiểm tra nếu check_out cách check_in ít nhất 1 giờ
+                        time_diff = (check_out - check_in).total_seconds()
+                        if time_diff >= 3600:  # 1 giờ = 3600 giây
+                            has_check_out = True
+                
                 attendance_map[r['code']] = {
-                    'has_check_in': r.get('check_in_time') is not None,
-                    'has_check_out': r.get('check_out_time') is not None
+                    'has_check_in': has_check_in,
+                    'has_check_out': has_check_out
                 }
         
         # Tính toán thống kê cho từng lớp
