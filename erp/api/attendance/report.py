@@ -261,15 +261,16 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                 code="NO_ACTIVE_SCHOOL_YEAR"
             )
         
-        # Lấy danh sách lớp trong campus
+        # Lấy danh sách lớp Regular trong campus (không lấy mixed)
         classes = frappe.get_all(
             "SIS Class",
             filters={
                 "campus_id": campus_id,
                 "school_year_id": school_year,
-                "class_type": ["in", ["regular", "mixed"]]
+                "class_type": "regular"
             },
-            fields=["name", "title", "homeroom_teacher"]
+            fields=["name", "title", "homeroom_teacher"],
+            order_by="title asc"
         )
         
         # Lấy tất cả học sinh và mã của họ
@@ -326,8 +327,7 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                 "rate": round(checked_in / total * 100, 1) if total > 0 else 0
             })
         
-        # Sort theo tỷ lệ điểm danh (thấp nhất trước)
-        classes_result.sort(key=lambda x: x['rate'])
+        # Sort theo tên lớp (đã được order_by title asc từ query)
         
         return success_response(
             data={
