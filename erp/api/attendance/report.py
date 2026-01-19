@@ -248,13 +248,29 @@ def get_campus_faceid_summary(campus_id=None, date=None):
         # Parse date
         date_obj = frappe.utils.getdate(date)
         
-        # Debug: Xem campus_id và các school year trong DB
-        all_school_years = frappe.get_all(
-            "SIS School Year",
-            fields=["name", "campus_id", "is_enable", "start_date", "end_date"]
-        )
-        frappe.log_error(f"Debug - campus_id received: {campus_id}")
-        frappe.log_error(f"Debug - All school years: {all_school_years}")
+        # Kiểm tra campus_id có tồn tại không, nếu không thì tìm theo title hoặc lấy campus đầu tiên
+        campus_exists = frappe.db.exists("SIS Campus", campus_id)
+        if not campus_exists:
+            # Thử tìm campus theo title
+            campus_id = frappe.db.get_value(
+                "SIS Campus",
+                {"title_vn": campus_id},
+                "name"
+            ) or frappe.db.get_value(
+                "SIS Campus",
+                {"title_en": campus_id},
+                "name"
+            )
+            
+            # Nếu vẫn không tìm thấy, lấy campus đầu tiên
+            if not campus_id:
+                campus_id = frappe.db.get_value("SIS Campus", {}, "name")
+            
+            if not campus_id:
+                return error_response(
+                    message="Không tìm thấy campus nào trong hệ thống",
+                    code="NO_CAMPUS"
+                )
         
         # Tìm năm học theo thứ tự ưu tiên:
         # 1. Năm học có is_enable = 1
@@ -289,7 +305,7 @@ def get_campus_faceid_summary(campus_id=None, date=None):
         
         if not school_year:
             return error_response(
-                message=f"Không tìm thấy năm học cho campus: {campus_id}. School years in DB: {all_school_years}",
+                message=f"Không tìm thấy năm học cho campus: {campus_id}",
                 code="NO_SCHOOL_YEAR"
             )
         
