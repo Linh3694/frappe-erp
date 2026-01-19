@@ -354,11 +354,14 @@ def get_campus_faceid_summary(campus_id=None, date=None):
             class_student_map[cls.name] = codes
             all_student_codes.extend(codes)
         
-        # Query tất cả attendance records 1 lần
-        attendance_set = set()
+        # Query tất cả attendance records 1 lần (bao gồm check_in và check_out)
+        attendance_map = {}  # code -> {has_check_in, has_check_out}
         if all_student_codes:
             records = frappe.db.sql("""
-                SELECT UPPER(employee_code) as code
+                SELECT 
+                    UPPER(employee_code) as code,
+                    check_in_time,
+                    check_out_time
                 FROM `tabERP Time Attendance`
                 WHERE UPPER(employee_code) IN %(codes)s
                     AND date = %(date)s
@@ -367,20 +370,27 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                 "date": date_obj
             }, as_dict=True)
             
-            attendance_set = {r['code'] for r in records}
+            for r in records:
+                attendance_map[r['code']] = {
+                    'has_check_in': r.get('check_in_time') is not None,
+                    'has_check_out': r.get('check_out_time') is not None
+                }
         
         # Tính toán thống kê cho từng lớp
         classes_result = []
         total_all = 0
         checked_in_all = 0
+        checked_out_all = 0
         
         for cls in classes:
             codes = class_student_map.get(cls.name, [])
             total = len(codes)
-            checked_in = sum(1 for c in codes if c in attendance_set)
+            checked_in = sum(1 for c in codes if attendance_map.get(c, {}).get('has_check_in', False))
+            checked_out = sum(1 for c in codes if attendance_map.get(c, {}).get('has_check_out', False))
             
             total_all += total
             checked_in_all += checked_in
+            checked_out_all += checked_out
             
             classes_result.append({
                 "class_id": cls.name,
@@ -389,7 +399,10 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                 "total": total,
                 "checked_in": checked_in,
                 "not_checked_in": total - checked_in,
-                "rate": round(checked_in / total * 100, 1) if total > 0 else 0
+                "checked_out": checked_out,
+                "not_checked_out": total - checked_out,
+                "rate_in": round(checked_in / total * 100, 1) if total > 0 else 0,
+                "rate_out": round(checked_out / total * 100, 1) if total > 0 else 0
             })
         
         # Sort theo tên lớp (đã được order_by title asc từ query)
@@ -404,7 +417,10 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                     "total_students": total_all,
                     "checked_in": checked_in_all,
                     "not_checked_in": total_all - checked_in_all,
-                    "rate": round(checked_in_all / total_all * 100, 1) if total_all > 0 else 0
+                    "checked_out": checked_out_all,
+                    "not_checked_out": total_all - checked_out_all,
+                    "rate_in": round(checked_in_all / total_all * 100, 1) if total_all > 0 else 0,
+                    "rate_out": round(checked_out_all / total_all * 100, 1) if total_all > 0 else 0
                 },
                 "classes": classes_result
             },
