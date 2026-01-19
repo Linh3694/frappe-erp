@@ -1263,14 +1263,34 @@ class TimetableImportExecutor:
 		Nếu không, Teacher Timetable sẽ trống vì pattern rows không có teachers.
 		
 		Logic:
-		1. Lấy tất cả Subject Assignments cho các classes đã import
-		2. Với mỗi assignment, tìm pattern rows tương ứng (class + subject)
-		3. Gán teachers vào pattern rows
+		1. ⚡ XÓA TẤT CẢ Teacher Timetable entries cho các instances đã import
+		2. Lấy tất cả Subject Assignments cho các classes đã import
+		3. Với mỗi assignment, tìm pattern rows tương ứng (class + subject)
+		4. Gán teachers vào pattern rows + sync Teacher Timetable entries MỚI
+		
+		⚡ FIX (2026-01-19): Xóa entries cũ TRƯỚC KHI sync để đảm bảo:
+		- Các tiết bị xóa khỏi TKB mới sẽ không còn trong Teacher Timetable
+		- Các tiết mới được sync fresh từ assignments
 		"""
 		if not self.processed_instances:
 			return
 		
 		campus_id = self.metadata["campus_id"]
+		
+		# ⚡ STEP 0: Xóa TẤT CẢ Teacher Timetable entries cho các instances đã import
+		# Điều này đảm bảo các tiết cũ (bị xóa khỏi TKB mới) không còn trong Teacher Timetable
+		instance_ids = list(self.processed_instances.keys())
+		if instance_ids:
+			frappe.logger().info(f"🗑️ Clearing Teacher Timetable for {len(instance_ids)} instances...")
+			
+			# Xóa từng instance để tránh query quá lớn
+			for instance_id in instance_ids:
+				frappe.db.sql("""
+					DELETE FROM `tabSIS Teacher Timetable`
+					WHERE timetable_instance_id = %s
+				""", (instance_id,))
+			
+			frappe.logger().info(f"✅ Cleared Teacher Timetable entries for {len(instance_ids)} instances")
 		
 		# Get unique class IDs from processed instances
 		class_ids = list(set(
