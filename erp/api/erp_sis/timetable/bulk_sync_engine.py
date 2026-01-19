@@ -14,7 +14,7 @@ Target: 25-30 lớp trong 2-5 phút (thay vì 25-30 phút)
 """
 
 import frappe
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Optional
 from datetime import datetime, timedelta, date
 from collections import defaultdict
 

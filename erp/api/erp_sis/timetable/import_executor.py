@@ -682,9 +682,19 @@ class TimetableImportExecutor:
 	
 	def _delete_overlapping_pattern_rows(self, instance_id: str):
 		"""
-		⚡ FIXED (2025-12-19): Xử lý pattern rows có date range overlap với range mới.
+		⚡ BUG FIX (2026-01-12): Smart detection cho full replacement.
 		
-		Logic mới:
+		**VẤN ĐỀ TRƯỚC ĐÂY**:
+		- Chỉ xóa overlapping rows → Môn cũ vẫn tồn tại ngoài date range mới upload
+		- VD: Schedule cũ 01/09-31/05 có môn Toán
+		      Upload TKB mới 01/01-31/01 (học kỳ 2) không có môn Toán
+		      → Môn Toán từ 01/09-31/12 vẫn tồn tại vì không overlap với range 01/01-31/01
+		
+		**GIẢI PHÁP MỚI**:
+		- Detect full replacement: Nếu range mới = instance range → XÓA HẾT pattern rows
+		- Partial update: Nếu range mới < instance range → CHỈ xóa overlapping rows
+		
+		Logic xử lý overlap (cho partial update):
 		1. Tìm pattern rows có overlap với range mới
 		2. Với mỗi pattern row overlap:
 		   - Nếu pattern nằm hoàn toàn trong range mới → XÓA
@@ -718,6 +728,41 @@ class TimetableImportExecutor:
 			inst_start = datetime.strptime(inst_start, "%Y-%m-%d").date()
 		if isinstance(inst_end, str):
 			inst_end = datetime.strptime(inst_end, "%Y-%m-%d").date()
+		
+		# ⚡ NEW: Detect full replacement
+		# Nếu range mới bao phủ toàn bộ instance range → XÓA HẾT
+		is_full_replacement = (new_start <= inst_start and new_end >= inst_end)
+		
+		if is_full_replacement:
+			frappe.logger().info(
+				f"🔄 FULL REPLACEMENT: new [{new_start} → {new_end}] "
+				f"covers instance [{inst_start} → {inst_end}] → Deleting ALL pattern rows"
+			)
+			
+			# Xóa teachers child table trước (foreign key constraint)
+			frappe.db.sql("""
+				DELETE t FROM `tabSIS Timetable Instance Row Teacher` t
+				INNER JOIN `tabSIS Timetable Instance Row` r ON t.parent = r.name
+				WHERE r.parent = %s
+				  AND r.date IS NULL
+			""", (instance_id,))
+			
+			# Xóa TẤT CẢ pattern rows (date IS NULL)
+			frappe.db.sql("""
+				DELETE FROM `tabSIS Timetable Instance Row`
+				WHERE parent = %s
+				  AND date IS NULL
+			""", (instance_id,))
+			
+			frappe.logger().info(f"🗑️ Deleted ALL pattern rows for instance {instance_id}")
+			self.logs.append("Đã xóa TẤT CẢ pattern rows cũ (full replacement)")
+			return
+		
+		# Nếu không phải full replacement → Xử lý overlapping rows như cũ
+		frappe.logger().info(
+			f"📝 PARTIAL UPDATE: new [{new_start} → {new_end}] "
+			f"within instance [{inst_start} → {inst_end}] → Processing overlapping rows only"
+		)
 		
 		# 1. Xử lý old-style pattern rows (valid_from=NULL, valid_to=NULL)
 		# Coi như có valid_from = inst_start, valid_to = inst_end
