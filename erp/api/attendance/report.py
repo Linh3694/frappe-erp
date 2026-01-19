@@ -248,7 +248,10 @@ def get_campus_faceid_summary(campus_id=None, date=None):
         # Parse date
         date_obj = frappe.utils.getdate(date)
         
-        # Lấy active school year (is_enable = 1)
+        # Tìm năm học theo thứ tự ưu tiên:
+        # 1. Năm học có is_enable = 1
+        # 2. Năm học mà ngày được chọn nằm trong khoảng start_date - end_date
+        # 3. Năm học gần nhất của campus
         school_year = frappe.db.get_value(
             "SIS School Year",
             {"campus_id": campus_id, "is_enable": 1},
@@ -256,9 +259,30 @@ def get_campus_faceid_summary(campus_id=None, date=None):
         )
         
         if not school_year:
+            # Tìm năm học theo ngày
+            school_year = frappe.db.get_value(
+                "SIS School Year",
+                {
+                    "campus_id": campus_id,
+                    "start_date": ["<=", date_obj],
+                    "end_date": [">=", date_obj]
+                },
+                "name"
+            )
+        
+        if not school_year:
+            # Lấy năm học gần nhất
+            school_year = frappe.db.get_value(
+                "SIS School Year",
+                {"campus_id": campus_id},
+                "name",
+                order_by="start_date desc"
+            )
+        
+        if not school_year:
             return error_response(
-                message="Không tìm thấy năm học đang hoạt động",
-                code="NO_ACTIVE_SCHOOL_YEAR"
+                message="Không tìm thấy năm học cho campus này",
+                code="NO_SCHOOL_YEAR"
             )
         
         # Lấy danh sách lớp Regular trong campus (không lấy mixed)
