@@ -38,28 +38,32 @@
    "label": "Teacher",
    "options": "SIS Teacher",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "search_index": 1
   },
   {
    "fieldname": "timetable_instance_id",
    "fieldtype": "Link",
    "label": "Timetable Instance",
    "options": "SIS Timetable Instance",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "day_of_week",
    "fieldtype": "Select",
    "label": "Day of Week",
    "options": "mon\ntue\nwed\nthu\nfri\nsat\nsun",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "timetable_column_id",
    "fieldtype": "Link",
    "label": "Timetable Column",
    "options": "SIS Timetable Column",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "subject_id",
@@ -85,7 +89,8 @@
    "fieldname": "date",
    "fieldtype": "Date",
    "label": "Date",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   }
  ],
  "index_web_pages_for_search": 1,
