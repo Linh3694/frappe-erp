@@ -129,8 +129,8 @@ def get_class_faceid_summary(class_id=None, date=None):
                 # Phân loại thời gian dựa trên buổi sáng/chiều
                 # Buổi sáng: trước 12h → check-in
                 # Buổi chiều: sau 12h → check-out
-                morning_times = []  # Các lần quét buổi sáng (trước 12h)
-                afternoon_times = []  # Các lần quét buổi chiều (sau 12h)
+                morning_records = []  # Các lần quét buổi sáng (trước 12h) - {time, device}
+                afternoon_records = []  # Các lần quét buổi chiều (sau 12h) - {time, device}
                 total_check_ins = att.total_check_ins or 0
                 
                 if att.raw_data:
@@ -139,33 +139,42 @@ def get_class_faceid_summary(class_id=None, date=None):
                         if raw_data and len(raw_data) > 0:
                             for item in raw_data:
                                 ts_str = item.get('timestamp')
+                                device = item.get('device_name') or item.get('device') or att.device_name
                                 if ts_str:
                                     ts = frappe.utils.get_datetime(ts_str)
+                                    record = {'time': ts, 'device': device}
                                     if ts.hour < 12:
-                                        morning_times.append(ts)
+                                        morning_records.append(record)
                                     else:
-                                        afternoon_times.append(ts)
+                                        afternoon_records.append(record)
                             total_check_ins = len(raw_data)
                     except Exception:
                         pass
                 
                 # Nếu không có raw_data, dùng check_in_time và check_out_time gốc
-                if not morning_times and not afternoon_times:
+                if not morning_records and not afternoon_records:
                     if att.check_in_time:
+                        record = {'time': att.check_in_time, 'device': att.device_name}
                         if att.check_in_time.hour < 12:
-                            morning_times.append(att.check_in_time)
+                            morning_records.append(record)
                         else:
-                            afternoon_times.append(att.check_in_time)
+                            afternoon_records.append(record)
                     if att.check_out_time and att.check_out_time != att.check_in_time:
+                        record = {'time': att.check_out_time, 'device': att.device_name}
                         if att.check_out_time.hour < 12:
-                            morning_times.append(att.check_out_time)
+                            morning_records.append(record)
                         else:
-                            afternoon_times.append(att.check_out_time)
+                            afternoon_records.append(record)
                 
                 # Check-in = lần quét sớm nhất buổi sáng
-                check_in_time = min(morning_times) if morning_times else None
+                check_in_record = min(morning_records, key=lambda x: x['time']) if morning_records else None
+                check_in_time = check_in_record['time'] if check_in_record else None
+                device_in = check_in_record['device'] if check_in_record else None
+                
                 # Check-out = lần quét muộn nhất buổi chiều
-                check_out_time = max(afternoon_times) if afternoon_times else None
+                check_out_record = max(afternoon_records, key=lambda x: x['time']) if afternoon_records else None
+                check_out_time = check_out_record['time'] if check_out_record else None
+                device_out = check_out_record['device'] if check_out_record else None
                 
                 # Xác định trạng thái
                 status_morning = None  # Trạng thái buổi sáng
@@ -201,7 +210,9 @@ def get_class_faceid_summary(class_id=None, date=None):
                     "check_in_time": check_in_time.isoformat() if check_in_time else None,
                     "check_out_time": check_out_time.isoformat() if check_out_time else None,
                     "total_check_ins": total_check_ins,
-                    "device_name": att.device_name,
+                    "device_name": device_in or device_out,  # Fallback
+                    "device_in": device_in,
+                    "device_out": device_out,
                     "status": "checked_in" if has_check_in else "absent_morning",
                     "status_morning": status_morning,
                     "status_afternoon": status_afternoon
