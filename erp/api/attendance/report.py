@@ -248,10 +248,10 @@ def get_campus_faceid_summary(campus_id=None, date=None):
         # Parse date
         date_obj = frappe.utils.getdate(date)
         
-        # Lấy active school year
+        # Lấy active school year (is_enable = 1)
         school_year = frappe.db.get_value(
             "SIS School Year",
-            {"campus_id": campus_id, "is_active": 1},
+            {"campus_id": campus_id, "is_enable": 1},
             "name"
         )
         
