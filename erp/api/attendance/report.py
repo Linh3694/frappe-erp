@@ -174,11 +174,12 @@ def get_class_faceid_summary(class_id=None, date=None):
         
         total_students = len(class_students)
         
-        # Lấy tên giáo viên chủ nhiệm
+        # Lấy tên giáo viên chủ nhiệm (từ User vì SIS Teacher chỉ có user_id)
         homeroom_teacher_name = None
         if class_doc.homeroom_teacher:
-            teacher = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "teacher_name")
-            homeroom_teacher_name = teacher
+            user_id = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "user_id")
+            if user_id:
+                homeroom_teacher_name = frappe.get_value("User", user_id, "full_name")
         
         return success_response(
             data={
