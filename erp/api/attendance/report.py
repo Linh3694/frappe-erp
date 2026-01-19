@@ -248,23 +248,39 @@ def get_campus_faceid_summary(campus_id=None, date=None):
         # Parse date
         date_obj = frappe.utils.getdate(date)
         
-        # Kiểm tra campus_id có tồn tại không, nếu không thì tìm theo title hoặc lấy campus đầu tiên
+        # Kiểm tra campus_id có tồn tại không, nếu không thì tìm theo title hoặc lấy campus có school year
+        original_campus_id = campus_id
         campus_exists = frappe.db.exists("SIS Campus", campus_id)
         if not campus_exists:
             # Thử tìm campus theo title
             campus_id = frappe.db.get_value(
                 "SIS Campus",
-                {"title_vn": campus_id},
+                {"title_vn": original_campus_id},
                 "name"
             ) or frappe.db.get_value(
                 "SIS Campus",
-                {"title_en": campus_id},
+                {"title_en": original_campus_id},
                 "name"
             )
             
-            # Nếu vẫn không tìm thấy, lấy campus đầu tiên
+            # Nếu vẫn không tìm thấy, lấy campus có school year enabled
             if not campus_id:
-                campus_id = frappe.db.get_value("SIS Campus", {}, "name")
+                school_year_campus = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "campus_id"
+                )
+                if school_year_campus:
+                    campus_id = school_year_campus
+            
+            # Cuối cùng lấy campus đầu tiên có school year
+            if not campus_id:
+                campus_id = frappe.db.get_value(
+                    "SIS School Year",
+                    {},
+                    "campus_id",
+                    order_by="creation desc"
+                )
             
             if not campus_id:
                 return error_response(
