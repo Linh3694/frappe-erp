@@ -126,50 +126,85 @@ def get_class_faceid_summary(class_id=None, date=None):
             att = attendance_records.get(code)
             
             if att:
-                checked_in_count += 1
-                
-                # Recalculate từ raw_data nếu có
-                check_in_time = att.check_in_time
-                check_out_time = att.check_out_time
+                # Phân loại thời gian dựa trên buổi sáng/chiều
+                # Buổi sáng: trước 12h → check-in
+                # Buổi chiều: sau 12h → check-out
+                morning_times = []  # Các lần quét buổi sáng (trước 12h)
+                afternoon_times = []  # Các lần quét buổi chiều (sau 12h)
                 total_check_ins = att.total_check_ins or 0
                 
                 if att.raw_data:
                     try:
                         raw_data = json.loads(att.raw_data) if isinstance(att.raw_data, str) else att.raw_data
                         if raw_data and len(raw_data) > 0:
-                            all_times = []
                             for item in raw_data:
                                 ts_str = item.get('timestamp')
                                 if ts_str:
-                                    all_times.append(frappe.utils.get_datetime(ts_str))
-                            if all_times:
-                                all_times.sort()
-                                check_in_time = all_times[0]
-                                # Chỉ set check_out nếu có ít nhất 2 lần quét
-                                if len(all_times) >= 2:
-                                    check_out_time = all_times[-1]
-                                else:
-                                    check_out_time = None
-                                total_check_ins = len(all_times)
+                                    ts = frappe.utils.get_datetime(ts_str)
+                                    if ts.hour < 12:
+                                        morning_times.append(ts)
+                                    else:
+                                        afternoon_times.append(ts)
+                            total_check_ins = len(raw_data)
                     except Exception:
                         pass
                 
-                # Kiểm tra check_out hợp lệ: cách check_in ít nhất 1 giờ
-                valid_check_out = None
-                if check_out_time and check_in_time:
-                    time_diff = (check_out_time - check_in_time).total_seconds()
-                    if time_diff >= 3600:  # 1 giờ
-                        valid_check_out = check_out_time
+                # Nếu không có raw_data, dùng check_in_time và check_out_time gốc
+                if not morning_times and not afternoon_times:
+                    if att.check_in_time:
+                        if att.check_in_time.hour < 12:
+                            morning_times.append(att.check_in_time)
+                        else:
+                            afternoon_times.append(att.check_in_time)
+                    if att.check_out_time and att.check_out_time != att.check_in_time:
+                        if att.check_out_time.hour < 12:
+                            morning_times.append(att.check_out_time)
+                        else:
+                            afternoon_times.append(att.check_out_time)
+                
+                # Check-in = lần quét sớm nhất buổi sáng
+                check_in_time = min(morning_times) if morning_times else None
+                # Check-out = lần quét muộn nhất buổi chiều
+                check_out_time = max(afternoon_times) if afternoon_times else None
+                
+                # Xác định trạng thái
+                status_morning = None  # Trạng thái buổi sáng
+                status_afternoon = None  # Trạng thái buổi chiều
+                
+                if check_in_time:
+                    if check_in_time.hour < 8:
+                        status_morning = "on_time"  # Đúng giờ
+                    else:
+                        status_morning = "late"  # Đi muộn
+                else:
+                    status_morning = "absent_morning"  # Vắng buổi sáng
+                
+                if check_out_time:
+                    if check_out_time.hour >= 16:
+                        status_afternoon = "on_time"  # Tan học đúng giờ
+                    else:
+                        status_afternoon = "early_leave"  # Về sớm
+                else:
+                    status_afternoon = "no_checkout"  # Chưa check-out
+                
+                # Tính có điểm danh hay không (có mặt = có ít nhất 1 lần quét sáng)
+                has_check_in = check_in_time is not None
+                has_check_out = check_out_time is not None
+                
+                if has_check_in:
+                    checked_in_count += 1
                 
                 students_result.append({
                     "student_id": student.student_id,
                     "student_name": student.student_name,
                     "student_code": student.student_code,
                     "check_in_time": check_in_time.isoformat() if check_in_time else None,
-                    "check_out_time": valid_check_out.isoformat() if valid_check_out else None,
+                    "check_out_time": check_out_time.isoformat() if check_out_time else None,
                     "total_check_ins": total_check_ins,
                     "device_name": att.device_name,
-                    "status": "checked_in"
+                    "status": "checked_in" if has_check_in else "absent_morning",
+                    "status_morning": status_morning,
+                    "status_afternoon": status_afternoon
                 })
             else:
                 students_result.append({
@@ -366,6 +401,7 @@ def get_campus_faceid_summary(campus_id=None, date=None):
             all_student_codes.extend(codes)
         
         # Query tất cả attendance records 1 lần (bao gồm check_in và check_out)
+        # Logic: Buổi sáng (trước 12h) = check-in, Buổi chiều (sau 12h) = check-out
         attendance_map = {}  # code -> {has_check_in, has_check_out}
         if all_student_codes:
             records = frappe.db.sql("""
@@ -373,7 +409,7 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                     UPPER(employee_code) as code,
                     check_in_time,
                     check_out_time,
-                    total_check_ins
+                    raw_data
                 FROM `tabERP Time Attendance`
                 WHERE UPPER(employee_code) IN %(codes)s
                     AND date = %(date)s
@@ -383,28 +419,41 @@ def get_campus_faceid_summary(campus_id=None, date=None):
             }, as_dict=True)
             
             for r in records:
-                has_check_in = r.get('check_in_time') is not None
-                has_check_out = False
+                morning_times = []
+                afternoon_times = []
                 
-                # Chỉ tính check-out khi:
-                # 1. Có check_out_time
-                # 2. Có ít nhất 2 lần quét HOẶC check_out khác check_in ít nhất 1 giờ
-                check_in = r.get('check_in_time')
-                check_out = r.get('check_out_time')
-                total_checks = r.get('total_check_ins') or 0
+                # Phân loại từ raw_data
+                if r.get('raw_data'):
+                    try:
+                        raw_data = json.loads(r['raw_data']) if isinstance(r['raw_data'], str) else r['raw_data']
+                        if raw_data:
+                            for item in raw_data:
+                                ts_str = item.get('timestamp')
+                                if ts_str:
+                                    ts = frappe.utils.get_datetime(ts_str)
+                                    if ts.hour < 12:
+                                        morning_times.append(ts)
+                                    else:
+                                        afternoon_times.append(ts)
+                    except Exception:
+                        pass
                 
-                if check_out is not None:
-                    if total_checks >= 2:
-                        has_check_out = True
-                    elif check_in and check_out:
-                        # Kiểm tra nếu check_out cách check_in ít nhất 1 giờ
-                        time_diff = (check_out - check_in).total_seconds()
-                        if time_diff >= 3600:  # 1 giờ = 3600 giây
-                            has_check_out = True
+                # Fallback nếu không có raw_data
+                if not morning_times and not afternoon_times:
+                    if r.get('check_in_time'):
+                        if r['check_in_time'].hour < 12:
+                            morning_times.append(r['check_in_time'])
+                        else:
+                            afternoon_times.append(r['check_in_time'])
+                    if r.get('check_out_time') and r.get('check_out_time') != r.get('check_in_time'):
+                        if r['check_out_time'].hour < 12:
+                            morning_times.append(r['check_out_time'])
+                        else:
+                            afternoon_times.append(r['check_out_time'])
                 
                 attendance_map[r['code']] = {
-                    'has_check_in': has_check_in,
-                    'has_check_out': has_check_out
+                    'has_check_in': len(morning_times) > 0,  # Có quét buổi sáng
+                    'has_check_out': len(afternoon_times) > 0  # Có quét buổi chiều
                 }
         
         # Tính toán thống kê cho từng lớp
