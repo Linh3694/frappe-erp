@@ -145,17 +145,28 @@ def get_class_faceid_summary(class_id=None, date=None):
                             if all_times:
                                 all_times.sort()
                                 check_in_time = all_times[0]
-                                check_out_time = all_times[-1]
+                                # Chỉ set check_out nếu có ít nhất 2 lần quét
+                                if len(all_times) >= 2:
+                                    check_out_time = all_times[-1]
+                                else:
+                                    check_out_time = None
                                 total_check_ins = len(all_times)
                     except Exception:
                         pass
+                
+                # Kiểm tra check_out hợp lệ: cách check_in ít nhất 1 giờ
+                valid_check_out = None
+                if check_out_time and check_in_time:
+                    time_diff = (check_out_time - check_in_time).total_seconds()
+                    if time_diff >= 3600:  # 1 giờ
+                        valid_check_out = check_out_time
                 
                 students_result.append({
                     "student_id": student.student_id,
                     "student_name": student.student_name,
                     "student_code": student.student_code,
                     "check_in_time": check_in_time.isoformat() if check_in_time else None,
-                    "check_out_time": check_out_time.isoformat() if check_out_time else None,
+                    "check_out_time": valid_check_out.isoformat() if valid_check_out else None,
                     "total_check_ins": total_check_ins,
                     "device_name": att.device_name,
                     "status": "checked_in"
