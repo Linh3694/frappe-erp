@@ -838,8 +838,10 @@ def get_application_detail(application_id=None):
                 
                 if sis_photos and sis_photos[0].photo:
                     student_image = sis_photos[0].photo
-            except:
-                pass  # Photo is optional
+                    
+                logs.append(f"Student: {app.student_id}, School year: {school_year_id}, Photos found: {len(sis_photos)}, Image: {student_image}")
+            except Exception as e:
+                logs.append(f"Error getting photo: {str(e)}")
         
         # Lấy thành tích
         achievements = []
