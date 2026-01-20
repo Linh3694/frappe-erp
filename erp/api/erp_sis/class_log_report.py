@@ -731,7 +731,7 @@ def get_class_log_dashboard(date=None, campus_id=None):
         classes = frappe.get_all(
             "SIS Class",
             filters=class_filters,
-            fields=["name", "title", "homeroom_teacher"]
+            fields=["name", "title", "homeroom_teacher", "education_stage_id"]
         )
         
         if not classes:
@@ -871,6 +871,7 @@ def get_class_log_dashboard(date=None, campus_id=None):
                 "class_id": cls.name,
                 "class_title": cls.title,
                 "homeroom_teacher_name": teacher_names.get(cls.homeroom_teacher),
+                "education_stage_id": cls.education_stage_id,
                 "total_study_periods": total_study,
                 "entered_periods": entered_study,
                 "total_students": total_students,
