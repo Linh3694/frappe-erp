@@ -636,3 +636,472 @@ def get_campus_class_log_overview(campus_id=None, date=None):
             message=f"Lỗi khi lấy thống kê campus: {str(e)}",
             code="GET_CAMPUS_LOG_OVERVIEW_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_class_log_dashboard(date=None, campus_id=None):
+    """
+    Lấy tổng hợp dashboard sổ đầu bài cho tất cả lớp Regular
+    Bao gồm thông tin class log và contact log status
+    
+    Một lớp được coi là "hoàn thiện" khi:
+    1. Tất cả các tiết Study đã được nhập sổ đầu bài
+    2. GVCN đã gửi tin nhắn (Contact Log) đến 100% học sinh
+    
+    Args:
+        date: Ngày cần xem (YYYY-MM-DD), mặc định là hôm nay
+        campus_id: Campus ID (optional)
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                summary: { total_regular, completed, incomplete },
+                classes: [
+                    {
+                        class_id, class_title, homeroom_teacher_name,
+                        total_study_periods, entered_periods,
+                        total_students, students_with_contact_sent,
+                        class_log_complete, contact_log_complete, is_completed
+                    }
+                ]
+            }
+        }
+    """
+    try:
+        if not date:
+            date = frappe.request.args.get('date')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        
+        if not date:
+            date = frappe.utils.today()
+        
+        date_obj = frappe.utils.getdate(date)
+        
+        # Lấy campus từ context nếu không truyền
+        if not campus_id:
+            try:
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
+            except Exception:
+                pass
+        
+        # Lấy active school year
+        school_year_filters = {"is_active": 1}
+        if campus_id:
+            school_year_filters["campus_id"] = campus_id
+        
+        school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+        
+        # Lấy danh sách lớp Regular
+        class_filters = {
+            "school_year_id": school_year,
+            "class_type": "regular"
+        }
+        if campus_id:
+            class_filters["campus_id"] = campus_id
+        
+        classes = frappe.get_all(
+            "SIS Class",
+            filters=class_filters,
+            fields=["name", "title", "homeroom_teacher"]
+        )
+        
+        if not classes:
+            return success_response(
+                data={
+                    "summary": {
+                        "total_regular": 0,
+                        "completed": 0,
+                        "incomplete": 0
+                    },
+                    "classes": []
+                },
+                message="Không có lớp Regular nào"
+            )
+        
+        class_ids = [c.name for c in classes]
+        day_name = date_obj.strftime("%A")
+        
+        # Lấy tên GVCN
+        teacher_ids = [c.homeroom_teacher for c in classes if c.homeroom_teacher]
+        teacher_names = {}
+        if teacher_ids:
+            teachers = frappe.get_all(
+                "SIS Teacher",
+                filters={"name": ["in", teacher_ids]},
+                fields=["name", "teacher_name"]
+            )
+            teacher_names = {t.name: t.teacher_name for t in teachers}
+        
+        # Đếm số tiết Study theo lịch cho mỗi lớp (chỉ tiết có tên chứa "Tiết")
+        scheduled_counts = frappe.db.sql("""
+            SELECT 
+                ti.class_id,
+                COUNT(DISTINCT tc.period_name) as period_count
+            FROM `tabSIS Timetable Instance` ti
+            INNER JOIN `tabSIS Timetable Column` tc ON tc.timetable_instance_id = ti.name
+            WHERE ti.class_id IN %(class_ids)s
+                AND ti.start_date <= %(date)s
+                AND ti.end_date >= %(date)s
+                AND tc.day_of_week = %(day)s
+                AND LOWER(tc.period_name) LIKE '%%tiết%%'
+            GROUP BY ti.class_id
+        """, {
+            "class_ids": class_ids,
+            "date": date_obj,
+            "day": day_name
+        }, as_dict=True)
+        
+        scheduled_map = {r['class_id']: r['period_count'] for r in scheduled_counts}
+        
+        # Đếm số tiết Study đã nhập log
+        entered_counts = frappe.db.sql("""
+            SELECT 
+                cls.class_id,
+                COUNT(DISTINCT cls.period) as entered_count
+            FROM `tabSIS Class Log Subject` cls
+            LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+            WHERE cls.class_id IN %(class_ids)s
+                AND cls.log_date = %(date)s
+                AND LOWER(cls.period) LIKE '%%tiết%%'
+                AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
+                     OR clst.name IS NOT NULL)
+            GROUP BY cls.class_id
+        """, {
+            "class_ids": class_ids,
+            "date": date_obj
+        }, as_dict=True)
+        
+        entered_map = {r['class_id']: r['entered_count'] for r in entered_counts}
+        
+        # Đếm số học sinh trong mỗi lớp
+        student_counts = frappe.db.sql("""
+            SELECT 
+                class_id,
+                COUNT(*) as student_count
+            FROM `tabSIS Class Student`
+            WHERE class_id IN %(class_ids)s
+            GROUP BY class_id
+        """, {"class_ids": class_ids}, as_dict=True)
+        
+        student_count_map = {r['class_id']: r['student_count'] for r in student_counts}
+        
+        # Đếm số học sinh đã được gửi contact log (status = 'Sent')
+        # Cần join qua timetable instance và class log subject
+        contact_sent_counts = frappe.db.sql("""
+            SELECT 
+                cls.class_id,
+                COUNT(DISTINCT clst.student_id) as sent_count
+            FROM `tabSIS Class Log Subject` cls
+            INNER JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+            WHERE cls.class_id IN %(class_ids)s
+                AND cls.log_date = %(date)s
+                AND clst.contact_log_status = 'Sent'
+            GROUP BY cls.class_id
+        """, {
+            "class_ids": class_ids,
+            "date": date_obj
+        }, as_dict=True)
+        
+        contact_sent_map = {r['class_id']: r['sent_count'] for r in contact_sent_counts}
+        
+        # Build kết quả
+        classes_result = []
+        completed_count = 0
+        
+        for cls in classes:
+            total_study = scheduled_map.get(cls.name, 0)
+            entered_study = entered_map.get(cls.name, 0)
+            total_students = student_count_map.get(cls.name, 0)
+            students_sent = contact_sent_map.get(cls.name, 0)
+            
+            # Class log hoàn thành khi tất cả tiết Study đã nhập
+            class_log_complete = (total_study > 0 and entered_study >= total_study)
+            
+            # Contact log hoàn thành khi 100% học sinh đã được gửi tin nhắn
+            contact_log_complete = (total_students > 0 and students_sent >= total_students)
+            
+            # Lớp hoàn thiện khi cả class log và contact log đều hoàn thành
+            is_completed = class_log_complete and contact_log_complete
+            
+            if is_completed:
+                completed_count += 1
+            
+            classes_result.append({
+                "class_id": cls.name,
+                "class_title": cls.title,
+                "homeroom_teacher_name": teacher_names.get(cls.homeroom_teacher),
+                "total_study_periods": total_study,
+                "entered_periods": entered_study,
+                "total_students": total_students,
+                "students_with_contact_sent": students_sent,
+                "class_log_complete": class_log_complete,
+                "contact_log_complete": contact_log_complete,
+                "is_completed": is_completed
+            })
+        
+        # Sort: chưa hoàn thành trước, sau đó theo tên lớp
+        classes_result.sort(key=lambda x: (x['is_completed'], x['class_title']))
+        
+        total_regular = len(classes)
+        
+        return success_response(
+            data={
+                "summary": {
+                    "total_regular": total_regular,
+                    "completed": completed_count,
+                    "incomplete": total_regular - completed_count
+                },
+                "classes": classes_result
+            },
+            message="Lấy dashboard sổ đầu bài thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_class_log_dashboard error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy dashboard sổ đầu bài: {str(e)}",
+            code="GET_CLASS_LOG_DASHBOARD_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_class_log_detail(class_id=None, date=None):
+    """
+    Lấy chi tiết sổ đầu bài của 1 lớp bao gồm:
+    - Thông tin các tiết học
+    - Trạng thái contact log của từng học sinh
+    
+    Args:
+        class_id: ID của lớp
+        date: Ngày cần xem (YYYY-MM-DD)
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                class_info: { ... },
+                periods: [ ... ],
+                contact_log: {
+                    total_students, sent_count, not_sent_count,
+                    students: [ { student_id, student_name, is_sent, viewed_count } ]
+                }
+            }
+        }
+    """
+    try:
+        if not class_id:
+            class_id = frappe.request.args.get('class_id')
+        if not date:
+            date = frappe.request.args.get('date')
+        
+        if not class_id or not date:
+            return error_response(
+                message="Thiếu tham số: class_id và date là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        date_obj = frappe.utils.getdate(date)
+        
+        # Lấy thông tin lớp
+        class_doc = frappe.get_doc("SIS Class", class_id)
+        
+        # Lấy tên giáo viên chủ nhiệm
+        homeroom_teacher_name = None
+        if class_doc.homeroom_teacher:
+            homeroom_teacher_name = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "teacher_name")
+        
+        # Lấy timetable instance
+        timetable_instance = frappe.db.get_value(
+            "SIS Timetable Instance",
+            {
+                "class_id": class_id,
+                "start_date": ["<=", date_obj],
+                "end_date": [">=", date_obj]
+            },
+            "name"
+        )
+        
+        periods_result = []
+        
+        if timetable_instance:
+            # Lấy các tiết học trong ngày (chỉ tiết Study)
+            day_of_week = date_obj.strftime("%A")
+            
+            periods_data = frappe.db.sql("""
+                SELECT 
+                    tc.period_name,
+                    tc.subject_id,
+                    sub.title as subject_name,
+                    tc.teacher_id,
+                    t.teacher_name
+                FROM `tabSIS Timetable Column` tc
+                LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
+                LEFT JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
+                WHERE tc.timetable_instance_id = %(instance)s
+                    AND tc.day_of_week = %(day)s
+                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                ORDER BY tc.period_name
+            """, {
+                "instance": timetable_instance,
+                "day": day_of_week
+            }, as_dict=True)
+            
+            # Lấy class log subjects đã tạo
+            period_names = [p['period_name'] for p in periods_data]
+            
+            log_map = {}
+            if period_names:
+                class_log_subjects = frappe.db.sql("""
+                    SELECT 
+                        cls.name,
+                        cls.period,
+                        cls.general_comment,
+                        cls.modified,
+                        cls.creation,
+                        COUNT(clst.name) as student_log_count
+                    FROM `tabSIS Class Log Subject` cls
+                    LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                    WHERE cls.timetable_instance_id = %(instance)s
+                        AND cls.log_date = %(date)s
+                        AND cls.period IN %(periods)s
+                    GROUP BY cls.name
+                """, {
+                    "instance": timetable_instance,
+                    "date": date_obj,
+                    "periods": period_names
+                }, as_dict=True)
+                
+                for log in class_log_subjects:
+                    log_map[log['period']] = log
+            
+            # Build periods result
+            for p in periods_data:
+                period_name = p['period_name']
+                log = log_map.get(period_name)
+                
+                if log:
+                    has_content = log.get('general_comment') or log.get('student_log_count', 0) > 0
+                    if has_content:
+                        status = "updated" if log.get('modified') != log.get('creation') else "entered"
+                    else:
+                        status = "not_entered"
+                    
+                    periods_result.append({
+                        "period": period_name,
+                        "subject_id": p.get('subject_id'),
+                        "subject_name": p.get('subject_name'),
+                        "teacher_id": p.get('teacher_id'),
+                        "teacher_name": p.get('teacher_name'),
+                        "status": status,
+                        "has_general_comment": bool(log.get('general_comment')),
+                        "student_count_with_log": log.get('student_log_count', 0),
+                        "last_modified": log.get('modified').isoformat() if log.get('modified') else None
+                    })
+                else:
+                    periods_result.append({
+                        "period": period_name,
+                        "subject_id": p.get('subject_id'),
+                        "subject_name": p.get('subject_name'),
+                        "teacher_id": p.get('teacher_id'),
+                        "teacher_name": p.get('teacher_name'),
+                        "status": "not_entered",
+                        "has_general_comment": False,
+                        "student_count_with_log": 0,
+                        "last_modified": None
+                    })
+        
+        # Lấy danh sách học sinh và trạng thái contact log
+        students = frappe.db.sql("""
+            SELECT 
+                cs.student_id,
+                s.student_name
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabStudent` s ON cs.student_id = s.name
+            WHERE cs.class_id = %(class_id)s
+            ORDER BY s.student_name
+        """, {"class_id": class_id}, as_dict=True)
+        
+        # Lấy contact log status cho ngày này
+        contact_log_map = {}
+        if timetable_instance:
+            contact_logs = frappe.db.sql("""
+                SELECT 
+                    clst.student_id,
+                    clst.contact_log_status,
+                    clst.contact_log_viewed_count
+                FROM `tabSIS Class Log Subject` cls
+                INNER JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                WHERE cls.class_id = %(class_id)s
+                    AND cls.log_date = %(date)s
+            """, {
+                "class_id": class_id,
+                "date": date_obj
+            }, as_dict=True)
+            
+            for log in contact_logs:
+                contact_log_map[log['student_id']] = {
+                    "status": log.get('contact_log_status'),
+                    "viewed_count": log.get('contact_log_viewed_count') or 0
+                }
+        
+        # Build contact log result
+        students_result = []
+        sent_count = 0
+        
+        for student in students:
+            contact_info = contact_log_map.get(student['student_id'], {})
+            is_sent = contact_info.get('status') == 'Sent'
+            
+            if is_sent:
+                sent_count += 1
+            
+            students_result.append({
+                "student_id": student['student_id'],
+                "student_name": student['student_name'],
+                "is_sent": is_sent,
+                "viewed_count": contact_info.get('viewed_count', 0)
+            })
+        
+        total_students = len(students)
+        total_periods = len(periods_result)
+        entered_periods = len([p for p in periods_result if p['status'] != 'not_entered'])
+        
+        return success_response(
+            data={
+                "class_info": {
+                    "name": class_doc.name,
+                    "title": class_doc.title,
+                    "homeroom_teacher": class_doc.homeroom_teacher,
+                    "homeroom_teacher_name": homeroom_teacher_name
+                },
+                "periods": periods_result,
+                "summary": {
+                    "total_periods": total_periods,
+                    "entered": entered_periods,
+                    "rate": round(entered_periods / total_periods * 100, 1) if total_periods > 0 else 0
+                },
+                "contact_log": {
+                    "total_students": total_students,
+                    "sent_count": sent_count,
+                    "not_sent_count": total_students - sent_count,
+                    "rate": round(sent_count / total_students * 100, 1) if total_students > 0 else 0,
+                    "students": students_result
+                }
+            },
+            message="Lấy chi tiết sổ đầu bài thành công"
+        )
+        
+    except frappe.DoesNotExistError:
+        return error_response(
+            message=f"Không tìm thấy lớp: {class_id}",
+            code="CLASS_NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.log_error(f"get_class_log_detail error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy chi tiết sổ đầu bài: {str(e)}",
+            code="GET_CLASS_LOG_DETAIL_ERROR"
+        )
