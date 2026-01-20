@@ -215,16 +215,18 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
         if period_name.lower() != 'homeroom':
             # Query timetable để lấy giáo viên bộ môn và môn học
             # Sử dụng đúng tên bảng: SIS Timetable Instance Row
+            # SIS Teacher chỉ có user_id, cần join User để lấy full_name
             timetable_data = frappe.db.sql("""
                 SELECT 
                     ti.class_id,
                     tr.teacher_1_id as teacher_id,
-                    t.teacher_name,
+                    u.full_name as teacher_name,
                     tr.subject_id,
                     COALESCE(ts.title_vn, sub.title) as subject_name
                 FROM `tabSIS Timetable Instance` ti
                 INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
                 LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
+                LEFT JOIN `tabUser` u ON t.user_id = u.name
                 LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
                 WHERE ti.class_id IN %(class_ids)s
@@ -244,13 +246,14 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
                     SELECT 
                         ti.class_id,
                         tr.teacher_1_id as teacher_id,
-                        t.teacher_name,
+                        u.full_name as teacher_name,
                         tr.subject_id,
                         COALESCE(ts.title_vn, sub.title) as subject_name
                     FROM `tabSIS Timetable Instance` ti
                     INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
                     INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
                     LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
+                    LEFT JOIN `tabUser` u ON t.user_id = u.name
                     LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
                     LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
                     WHERE ti.class_id IN %(class_ids)s
@@ -307,7 +310,11 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
             teacher_info = teacher_map.get(cls.name)
             if not teacher_info and cls.homeroom_teacher:
                 # Fallback về homeroom teacher
-                teacher_name = frappe.get_value("SIS Teacher", cls.homeroom_teacher, "teacher_name")
+                # SIS Teacher chỉ có user_id, cần query User để lấy full_name
+                teacher_user_id = frappe.get_value("SIS Teacher", cls.homeroom_teacher, "user_id")
+                teacher_name = None
+                if teacher_user_id:
+                    teacher_name = frappe.get_value("User", teacher_user_id, "full_name")
                 teacher_info = {
                     "teacher_id": cls.homeroom_teacher,
                     "teacher_name": teacher_name,
@@ -409,9 +416,12 @@ def get_class_attendance_summary(class_id=None, date=None):
         total_students = frappe.db.count("SIS Class Student", {"class_id": class_id})
         
         # Lấy tên giáo viên chủ nhiệm
+        # SIS Teacher chỉ có user_id, cần query User để lấy full_name
         homeroom_teacher_name = None
         if class_doc.homeroom_teacher:
-            homeroom_teacher_name = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "teacher_name")
+            teacher_user_id = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "user_id")
+            if teacher_user_id:
+                homeroom_teacher_name = frappe.get_value("User", teacher_user_id, "full_name")
         
         # Lấy timetable instance
         timetable_instance = frappe.db.get_value(
@@ -436,10 +446,11 @@ def get_class_attendance_summary(class_id=None, date=None):
                     tc.subject_id,
                     sub.title as subject_name,
                     tc.teacher_id,
-                    t.teacher_name
+                    u.full_name as teacher_name
                 FROM `tabSIS Timetable Column` tc
                 LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
                 LEFT JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
+                LEFT JOIN `tabUser` u ON t.user_id = u.name
                 WHERE tc.timetable_instance_id = %(instance)s
                     AND tc.day_of_week = %(day)s
                 ORDER BY tc.period_name
