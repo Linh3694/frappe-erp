@@ -213,31 +213,33 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
         # Lấy giáo viên và môn học dạy tiết này (từ timetable)
         teacher_map = {}
         if period_name.lower() != 'homeroom':
-            # Query timetable để lấy giáo viên bộ môn và môn học
-            # Sử dụng đúng tên bảng: SIS Timetable Instance Row
-            # SIS Teacher chỉ có user_id, cần join User để lấy full_name
+            # day_of_week trong database là format viết tắt: mon, tue, wed, thu, fri, sat, sun
+            day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+            day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
+            
+            # Query timetable để lấy môn học
+            # SIS Timetable Instance Row có subject_id và child table teachers
             timetable_data = frappe.db.sql("""
                 SELECT 
                     ti.class_id,
-                    tr.teacher_1_id as teacher_id,
-                    u.full_name as teacher_name,
+                    tr.name as row_id,
                     tr.subject_id,
-                    COALESCE(ts.title_vn, sub.title) as subject_name
+                    sub.title as subject_name
                 FROM `tabSIS Timetable Instance` ti
                 INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
-                LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
-                LEFT JOIN `tabUser` u ON t.user_id = u.name
-                LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
                 WHERE ti.class_id IN %(class_ids)s
                     AND ti.start_date <= %(date)s
                     AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
                     AND tr.timetable_column_id = %(period_id)s
-                    AND tr.day_of_week = DAYNAME(%(date)s)
+                    AND tr.day_of_week = %(day_of_week)s
+                    AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                    AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
             """, {
                 "class_ids": class_ids,
                 "date": date_obj,
-                "period_id": period if period.startswith("SIS-TIMETABLE-COLUMN") else None
+                "period_id": period if period.startswith("SIS-TIMETABLE-COLUMN") else None,
+                "day_of_week": day_of_week_short
             }, as_dict=True)
             
             # Nếu không tìm được bằng period_id, thử tìm bằng period_name
@@ -245,32 +247,60 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
                 timetable_data = frappe.db.sql("""
                     SELECT 
                         ti.class_id,
-                        tr.teacher_1_id as teacher_id,
-                        u.full_name as teacher_name,
+                        tr.name as row_id,
                         tr.subject_id,
-                        COALESCE(ts.title_vn, sub.title) as subject_name
+                        sub.title as subject_name
                     FROM `tabSIS Timetable Instance` ti
                     INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
                     INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
-                    LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
-                    LEFT JOIN `tabUser` u ON t.user_id = u.name
-                    LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
                     LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
                     WHERE ti.class_id IN %(class_ids)s
                         AND ti.start_date <= %(date)s
                         AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
                         AND tc.period_name = %(period_name)s
-                        AND tr.day_of_week = DAYNAME(%(date)s)
+                        AND tr.day_of_week = %(day_of_week)s
+                        AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                        AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
                 """, {
                     "class_ids": class_ids,
                     "date": date_obj,
-                    "period_name": period_name
+                    "period_name": period_name,
+                    "day_of_week": day_of_week_short
                 }, as_dict=True)
             
+            # Lấy teacher từ child table cho các rows tìm được
+            row_ids = [row['row_id'] for row in timetable_data if row.get('row_id')]
+            teacher_data_by_row = {}
+            
+            if row_ids:
+                # Lấy teacher đầu tiên (sort_order thấp nhất) từ child table
+                teacher_rows = frappe.db.sql("""
+                    SELECT 
+                        trt.parent as row_id,
+                        trt.teacher_id,
+                        u.full_name as teacher_name
+                    FROM `tabSIS Timetable Instance Row Teacher` trt
+                    LEFT JOIN `tabSIS Teacher` t ON trt.teacher_id = t.name
+                    LEFT JOIN `tabUser` u ON t.user_id = u.name
+                    WHERE trt.parent IN %(row_ids)s
+                    ORDER BY trt.sort_order ASC
+                """, {
+                    "row_ids": row_ids
+                }, as_dict=True)
+                
+                for trow in teacher_rows:
+                    if trow['row_id'] not in teacher_data_by_row:
+                        teacher_data_by_row[trow['row_id']] = {
+                            "teacher_id": trow.get('teacher_id'),
+                            "teacher_name": trow.get('teacher_name')
+                        }
+            
             for row in timetable_data:
+                row_id = row.get('row_id')
+                teacher_info = teacher_data_by_row.get(row_id, {})
                 teacher_map[row['class_id']] = {
-                    "teacher_id": row.get('teacher_id'),
-                    "teacher_name": row.get('teacher_name'),
+                    "teacher_id": teacher_info.get('teacher_id'),
+                    "teacher_name": teacher_info.get('teacher_name'),
                     "subject_id": row.get('subject_id'),
                     "subject_name": row.get('subject_name')
                 }
@@ -437,27 +467,68 @@ def get_class_attendance_summary(class_id=None, date=None):
         # Lấy các tiết học trong ngày từ timetable
         periods_data = []
         if timetable_instance:
-            # Lấy day_of_week
-            day_of_week = date_obj.strftime("%A")
+            # day_of_week trong database là format viết tắt: mon, tue, wed, thu, fri, sat, sun
+            day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+            day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
             
-            periods_data = frappe.db.sql("""
+            # Lấy các rows trong timetable instance cho ngày này
+            rows_data = frappe.db.sql("""
                 SELECT 
+                    tr.name as row_id,
                     tc.period_name,
-                    tc.subject_id,
-                    sub.title as subject_name,
-                    tc.teacher_id,
-                    u.full_name as teacher_name
-                FROM `tabSIS Timetable Column` tc
-                LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
-                LEFT JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
-                LEFT JOIN `tabUser` u ON t.user_id = u.name
-                WHERE tc.timetable_instance_id = %(instance)s
-                    AND tc.day_of_week = %(day)s
-                ORDER BY tc.period_name
+                    tr.subject_id,
+                    sub.title as subject_name
+                FROM `tabSIS Timetable Instance Row` tr
+                LEFT JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+                LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+                WHERE tr.parent = %(instance)s
+                    AND tr.day_of_week = %(day)s
+                    AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                    AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
+                ORDER BY tc.period_priority
             """, {
                 "instance": timetable_instance,
-                "day": day_of_week
+                "day": day_of_week_short,
+                "date": date_obj
             }, as_dict=True)
+            
+            # Lấy teacher từ child table
+            row_ids = [r['row_id'] for r in rows_data if r.get('row_id')]
+            teacher_map = {}
+            
+            if row_ids:
+                teacher_rows = frappe.db.sql("""
+                    SELECT 
+                        trt.parent as row_id,
+                        trt.teacher_id,
+                        u.full_name as teacher_name
+                    FROM `tabSIS Timetable Instance Row Teacher` trt
+                    LEFT JOIN `tabSIS Teacher` t ON trt.teacher_id = t.name
+                    LEFT JOIN `tabUser` u ON t.user_id = u.name
+                    WHERE trt.parent IN %(row_ids)s
+                    ORDER BY trt.sort_order ASC
+                """, {
+                    "row_ids": row_ids
+                }, as_dict=True)
+                
+                for trow in teacher_rows:
+                    if trow['row_id'] not in teacher_map:
+                        teacher_map[trow['row_id']] = {
+                            "teacher_id": trow.get('teacher_id'),
+                            "teacher_name": trow.get('teacher_name')
+                        }
+            
+            # Build periods_data với teacher info
+            for row in rows_data:
+                row_id = row.get('row_id')
+                teacher_info = teacher_map.get(row_id, {})
+                periods_data.append({
+                    "period_name": row.get('period_name'),
+                    "subject_id": row.get('subject_id'),
+                    "subject_name": row.get('subject_name'),
+                    "teacher_id": teacher_info.get('teacher_id'),
+                    "teacher_name": teacher_info.get('teacher_name')
+                })
         
         # Thêm Homeroom vào cuối
         periods_data.append({
