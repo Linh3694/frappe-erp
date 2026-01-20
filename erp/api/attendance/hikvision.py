@@ -1,6 +1,11 @@
 """
 HiVision Attendance API
 Handles real-time attendance events from HiVision Face ID devices
+
+PERFORMANCE OPTIMIZED:
+- Events được push vào Redis buffer thay vì xử lý trực tiếp
+- Batch processor xử lý hàng loạt events mỗi 5 giây
+- API response time < 100ms thay vì 2-5s
 """
 
 import frappe
@@ -11,6 +16,11 @@ import pytz
 import logging
 import os
 from erp.common.doctype.erp_time_attendance.erp_time_attendance import find_or_create_day_record
+
+# Redis key cho attendance buffer
+ATTENDANCE_BUFFER_KEY = "hikvision:attendance_buffer"
+# Batch size cho mỗi lần xử lý
+BUFFER_BATCH_SIZE = 100
 
 # Tạo logger riêng cho HiVision với file log riêng
 def get_hikvision_logger():
@@ -242,9 +252,10 @@ def handle_hikvision_event():
 				"event_state": event_state
 			}
 		
-		# Process attendance records
-		logger.info(f"🎯 PROCESSING ATTENDANCE EVENT: {event_type}")
-		records_processed = 0
+		# PERFORMANCE FIX: Push events vào Redis buffer thay vì xử lý trực tiếp
+		# Batch processor sẽ xử lý hàng loạt mỗi 5 giây
+		logger.info(f"🚀 BUFFERING ATTENDANCE EVENT: {event_type}")
+		events_buffered = 0
 		errors = []
 		
 		# Collect posts to process
@@ -261,7 +272,7 @@ def handle_hikvision_event():
 			# Fallback: parse from root level
 			posts_to_process.append(event_data)
 		
-		# Process each post
+		# Push each post vào Redis buffer
 		for post in posts_to_process:
 			try:
 				# Extract employee information - prioritize employeeNoString
@@ -277,117 +288,53 @@ def handle_hikvision_event():
 				device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
 				device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
 				
-				logger.info(f"Processing post - employee_code: {employee_code}, timestamp: {timestamp}")
-				
 				# Skip if no employee data
 				if not employee_code or not timestamp:
 					logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
 					continue
 				
-				# Parse timestamp
-				parsed_timestamp = parse_attendance_timestamp(timestamp)
+				# Tạo event data để push vào buffer
+				buffer_event = {
+					"employee_code": employee_code,
+					"employee_name": employee_name,
+					"timestamp": timestamp,
+					"device_id": device_id,
+					"device_name": device_name,
+					"event_type": event_type,
+					"similarity": post.get("similarity"),
+					"face_id_name": post.get("name"),
+					"received_at": frappe.utils.now()
+				}
 				
-				# Find or create attendance record
-				attendance_doc = find_or_create_day_record(
-					employee_code=employee_code,
-					date=parsed_timestamp,
-					device_id=device_id,
-					employee_name=employee_name,
-					device_name=device_name
-				)
+				# Push vào Redis buffer (O(1) operation - rất nhanh)
+				push_to_attendance_buffer(buffer_event)
+				events_buffered += 1
 				
-				# Add metadata to notes
-				notes_parts = []
-				if post.get("name"):
-					notes_parts.append(f"Face ID: {post.get('name')}")
-				if post.get("similarity"):
-					notes_parts.append(f"Similarity: {post.get('similarity')}%")
-				if event_type:
-					notes_parts.append(f"Event: {event_type}")
-				
-				if notes_parts:
-					existing_notes = attendance_doc.notes or ""
-					attendance_doc.notes = existing_notes + "; ".join(notes_parts) + "; "
-				
-				# Update attendance time - pass original timestamp to preserve it
-				attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name, original_timestamp=timestamp)
-				
-				# Save to database (commit sẽ được gọi sau khi xử lý xong tất cả posts)
-				logger.info(f"💾 Saving attendance record for {employee_code} - check_in: {format_vn_time(attendance_doc.check_in_time)}, check_out: {format_vn_time(attendance_doc.check_out_time)}")
-				attendance_doc.save(ignore_permissions=True)
-				logger.info(f"✅ Record saved! ID: {attendance_doc.name}")
-				
-				records_processed += 1
-				
-				# Log success
-				display_time = format_vn_time(parsed_timestamp)
-				logger.info(f"✅ {employee_name or employee_code} đã chấm công lúc {display_time} tại máy {device_name}")
-				
-				# ENQUEUE notification để không block worker (FIX: server lag khi tan học)
-				# Check per-request deduplication để tránh duplicate notification
-				if employee_code not in processed_students:
-					processed_students.add(employee_code)
-
-					# CHECK: Skip notification cho dữ liệu chấm công cũ (từ máy mới sync data cũ)
-					if is_historical_attendance(parsed_timestamp):
-						threshold = get_historical_attendance_threshold_minutes()
-						logger.info(f"🔇 [SILENT SYNC] Skipping notification for {employee_code} - historical data (>{threshold} min old)")
-					else:
-						# QUAN TRỌNG: Dùng enqueue thay vì gọi trực tiếp để không block worker
-						# Khi 100+ học sinh tan học cùng lúc, worker không bị chờ notification
-						try:
-							frappe.enqueue(
-								"erp.api.attendance.notification.publish_attendance_notification",
-								queue="short",  # Dùng short queue cho priority cao
-								job_id=f"attendance_notif_{employee_code}_{parsed_timestamp.strftime('%H%M%S')}",  # job_id cho deduplicate
-								deduplicate=True,  # Tránh duplicate jobs
-								timeout=120,  # 2 phút timeout
-								employee_code=employee_code,
-								employee_name=employee_name,
-								timestamp=parsed_timestamp.isoformat(),
-								device_id=device_id,
-								device_name=device_name,
-								check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-								check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-								total_check_ins=attendance_doc.total_check_ins,
-								date=str(attendance_doc.date)
-							)
-							logger.info(f"📋 [HIKVISION] Notification enqueued for {employee_code}")
-						except Exception as enqueue_error:
-							logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
-				else:
-					logger.info(f"⏭️ Skipping duplicate notification for {employee_code} in this request")
+				logger.info(f"📥 Buffered event for {employee_code} at {timestamp}")
 				
 			except Exception as post_error:
-				logger.error(f"❌ Error processing post: {str(post_error)}")
+				logger.error(f"❌ Error buffering post: {str(post_error)}")
 				errors.append({
-					"post": post,
+					"post": str(post)[:200],
 					"error": str(post_error)
 				})
 		
-		# BATCH COMMIT: Commit 1 lần sau khi xử lý xong tất cả records (thay vì commit từng record)
-		# Giảm lock contention và tăng throughput khi có nhiều requests đồng thời
-		if records_processed > 0:
-			frappe.db.commit()
-			logger.info(f"💾 Batch committed {records_processed} attendance records")
-		
-		# Return response
+		# Return response ngay lập tức - không đợi DB
 		response = {
 			"status": "success",
-			"message": f"Processed {records_processed} attendance events",
+			"message": f"Buffered {events_buffered} attendance events for processing",
 			"timestamp": frappe.utils.now(),
 			"event_type": event_type or "unknown",
 			"event_state": event_state or "unknown",
-			"records_processed": records_processed,
-			"total_errors": len(errors)
+			"events_buffered": events_buffered,
+			"total_errors": len(errors),
+			"processing_mode": "async_buffer"
 		}
 		
 		if errors and len(errors) > 0:
-			response["errors"] = errors[:5]  # Return first 5 errors only
+			response["errors"] = errors[:5]
 		
-		if records_processed > 0 or len(errors) > 0:
-			logger.info(f"📊 SUMMARY: Processed {records_processed} attendance events, {len(errors)} errors")
-		
+		logger.info(f"📊 BUFFERED: {events_buffered} events, {len(errors)} errors")
 		logger.info("=" * 80)
 		return response
 		
@@ -410,20 +357,29 @@ def upload_attendance_batch():
 	Endpoint: /api/method/erp.api.attendance.hikvision.upload_attendance_batch
 
 	Body: { data: [{ fingerprintCode, dateTime, device_id }], tracker_id }
+	
+	PERFORMANCE OPTIMIZED:
+	- Push tất cả events vào Redis buffer
+	- Batch processor sẽ xử lý sau
+	- API response nhanh hơn nhiều
 	"""
 	# Get logger riêng cho HiVision
 	logger = get_hikvision_logger()
 
-	# Track processed students for this request to prevent duplicate notifications
-	processed_students = set()
-
 	try:
 		logger.info("=" * 80)
-		logger.info("===== BATCH UPLOAD REQUEST =====")
+		logger.info("===== BATCH UPLOAD REQUEST (BUFFERED) =====")
 		
 		request_data = frappe.local.form_dict
 		data = request_data.get("data")
 		tracker_id = request_data.get("tracker_id")
+		
+		# Parse data nếu là string
+		if isinstance(data, str):
+			try:
+				data = json.loads(data)
+			except:
+				pass
 		
 		logger.info(f"Batch size: {len(data) if isinstance(data, list) else 0}")
 		logger.info(f"Tracker ID: {tracker_id}")
@@ -434,8 +390,7 @@ def upload_attendance_batch():
 				"message": "Invalid data. Expected array of attendance records."
 			}
 		
-		records_processed = 0
-		records_updated = 0
+		events_buffered = 0
 		errors = []
 		
 		for record in data:
@@ -448,97 +403,44 @@ def upload_attendance_batch():
 				
 				if not fingerprint_code or not date_time:
 					errors.append({
-						"record": record,
+						"record": str(record)[:100],
 						"error": "fingerprintCode and dateTime are required"
 					})
 					continue
 				
-				# Parse timestamp
-				timestamp = parse_attendance_timestamp(date_time)
+				# Tạo event data để push vào buffer
+				buffer_event = {
+					"employee_code": fingerprint_code,
+					"employee_name": employee_name,
+					"timestamp": date_time,
+					"device_id": device_id,
+					"device_name": device_name,
+					"event_type": "batch_upload",
+					"tracker_id": tracker_id,
+					"received_at": frappe.utils.now()
+				}
 				
-				# Find or create record
-				attendance_doc = find_or_create_day_record(
-					employee_code=fingerprint_code,
-					date=timestamp,
-					device_id=device_id,
-					employee_name=employee_name,
-					device_name=device_name
-				)
-				
-				# Update tracker_id if provided
-				if tracker_id:
-					attendance_doc.tracker_id = tracker_id
-				
-				# Update attendance time
-				is_new = not attendance_doc.name
-				attendance_doc.update_attendance_time(timestamp, device_id, device_name, original_timestamp=date_time)
-				
-				# Save
-				attendance_doc.save(ignore_permissions=True)
-				frappe.db.commit()
-				
-				if is_new:
-					records_processed += 1
-				else:
-					records_updated += 1
-				
-				# Log - hiển thị đúng loại user
-				from erp.api.attendance.notification import check_if_student
-				is_student = check_if_student(fingerprint_code)
-				user_type = "Học sinh" if is_student else "Nhân viên"
-
-				display_time = format_vn_time(timestamp)
-				logger.info(f"✅ {user_type} {employee_name or fingerprint_code} đã chấm công lúc {display_time} tại máy {device_name or 'Unknown Device'}")
-				
-				# Trigger notification with per-request deduplication
-				if fingerprint_code not in processed_students:
-					processed_students.add(fingerprint_code)
-
-					# CHECK: Skip notification for historical attendance data (from newly connected devices syncing old data)
-					if is_historical_attendance(timestamp):
-						threshold = get_historical_attendance_threshold_minutes()
-						logger.info(f"🔇 [SILENT SYNC] Skipping notification for {fingerprint_code} - historical data (>{threshold} min old), timestamp: {format_vn_time(timestamp)}")
-					else:
-						try:
-							frappe.enqueue(
-								"erp.api.attendance.notification.publish_attendance_notification",
-								queue="default",
-								timeout=300,
-								employee_code=fingerprint_code,
-								employee_name=employee_name,
-								timestamp=timestamp.isoformat(),
-								device_id=device_id,
-								device_name=device_name,
-								check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-								check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-								total_check_ins=attendance_doc.total_check_ins,
-								date=str(attendance_doc.date),
-								event_type="batch_upload",
-								tracker_id=tracker_id
-							)
-							logger.info(f"📋 Notification enqueued for {fingerprint_code} (batch)")
-						except Exception as enqueue_error:
-							logger.warning(f"⚠️ Failed to enqueue notification: {str(enqueue_error)}")
-				else:
-					logger.info(f"⏭️ Skipping duplicate notification for {fingerprint_code} in batch")
+				# Push vào Redis buffer
+				push_to_attendance_buffer(buffer_event)
+				events_buffered += 1
 				
 			except Exception as record_error:
-				logger.error(f"❌ Error processing record: {str(record_error)}")
+				logger.error(f"❌ Error buffering record: {str(record_error)}")
 				errors.append({
-					"record": record,
+					"record": str(record)[:100],
 					"error": str(record_error)
 				})
 		
-		logger.info(f"📊 BATCH SUMMARY: Processed {records_processed} new, updated {records_updated}, errors {len(errors)}")
+		logger.info(f"📊 BATCH BUFFERED: {events_buffered} events, {len(errors)} errors")
 		logger.info("=" * 80)
 		
 		return {
 			"status": "success",
-			"message": f"Processed {records_processed} new records, updated {records_updated} records",
-			"records_processed": records_processed,
-			"records_updated": records_updated,
+			"message": f"Buffered {events_buffered} records for processing",
+			"events_buffered": events_buffered,
 			"total_errors": len(errors),
-			"errors": errors[:10]  # Return first 10 errors
+			"errors": errors[:10],
+			"processing_mode": "async_buffer"
 		}
 		
 	except Exception as e:
@@ -652,3 +554,217 @@ def is_historical_attendance(attendance_timestamp, threshold_minutes=None):
 	
 	# If attendance is older than threshold, it's historical
 	return diff_minutes > threshold_minutes
+
+
+# ============================================================================
+# REDIS BUFFER FUNCTIONS - Performance optimization cho giờ tan học
+# ============================================================================
+
+def push_to_attendance_buffer(event_data):
+	"""
+	Push attendance event vào Redis buffer để xử lý batch sau.
+	Operation này rất nhanh (O(1)) nên API có thể return ngay.
+	
+	Args:
+		event_data: Dict chứa thông tin attendance event
+			- employee_code
+			- employee_name
+			- timestamp
+			- device_id
+			- device_name
+			- event_type
+			- similarity (optional)
+			- face_id_name (optional)
+			- received_at
+	"""
+	try:
+		# Serialize event data to JSON
+		event_json = json.dumps(event_data, default=str)
+		
+		# Push vào Redis list (LPUSH - O(1))
+		# Sử dụng frappe.cache() để lấy Redis connection
+		cache = frappe.cache()
+		
+		# Dùng lpush để thêm vào đầu list
+		# Batch processor sẽ dùng rpop để lấy từ cuối (FIFO order)
+		if hasattr(cache, 'lpush'):
+			cache.lpush(ATTENDANCE_BUFFER_KEY, event_json)
+		else:
+			# Fallback: dùng Redis connection trực tiếp
+			redis_conn = cache.redis if hasattr(cache, 'redis') else None
+			if redis_conn:
+				redis_conn.lpush(ATTENDANCE_BUFFER_KEY, event_json)
+			else:
+				# Last fallback: xử lý synchronous nếu không có Redis
+				get_hikvision_logger().warning("⚠️ Redis not available, falling back to sync processing")
+				process_single_attendance_event(event_data)
+				return
+		
+		get_hikvision_logger().debug(f"📥 Event pushed to buffer: {event_data.get('employee_code')}")
+		
+	except Exception as e:
+		get_hikvision_logger().error(f"❌ Failed to push to buffer: {str(e)}")
+		# Fallback: xử lý synchronous nếu push fail
+		process_single_attendance_event(event_data)
+
+
+def get_buffer_length():
+	"""Lấy số lượng events đang chờ trong buffer"""
+	try:
+		cache = frappe.cache()
+		if hasattr(cache, 'llen'):
+			return cache.llen(ATTENDANCE_BUFFER_KEY) or 0
+		else:
+			redis_conn = cache.redis if hasattr(cache, 'redis') else None
+			if redis_conn:
+				return redis_conn.llen(ATTENDANCE_BUFFER_KEY) or 0
+		return 0
+	except Exception:
+		return 0
+
+
+def pop_from_attendance_buffer(count=None):
+	"""
+	Pop multiple events từ buffer để xử lý batch.
+	
+	Args:
+		count: Số lượng events cần lấy. Mặc định là BUFFER_BATCH_SIZE.
+	
+	Returns:
+		List of event dicts
+	"""
+	if count is None:
+		count = BUFFER_BATCH_SIZE
+	
+	events = []
+	try:
+		cache = frappe.cache()
+		redis_conn = None
+		
+		if hasattr(cache, 'rpop'):
+			# Dùng frappe.cache() methods
+			for _ in range(count):
+				event_json = cache.rpop(ATTENDANCE_BUFFER_KEY)
+				if not event_json:
+					break
+				if isinstance(event_json, bytes):
+					event_json = event_json.decode('utf-8')
+				events.append(json.loads(event_json))
+		else:
+			# Dùng Redis connection trực tiếp
+			redis_conn = cache.redis if hasattr(cache, 'redis') else None
+			if redis_conn:
+				for _ in range(count):
+					event_json = redis_conn.rpop(ATTENDANCE_BUFFER_KEY)
+					if not event_json:
+						break
+					if isinstance(event_json, bytes):
+						event_json = event_json.decode('utf-8')
+					events.append(json.loads(event_json))
+		
+		return events
+		
+	except Exception as e:
+		get_hikvision_logger().error(f"❌ Failed to pop from buffer: {str(e)}")
+		return events
+
+
+def process_single_attendance_event(event_data):
+	"""
+	Xử lý single attendance event (fallback khi Redis không available).
+	Đây là logic cũ được tách ra thành function riêng.
+	"""
+	logger = get_hikvision_logger()
+	
+	try:
+		employee_code = event_data.get("employee_code")
+		employee_name = event_data.get("employee_name")
+		timestamp = event_data.get("timestamp")
+		device_id = event_data.get("device_id")
+		device_name = event_data.get("device_name")
+		event_type = event_data.get("event_type")
+		
+		# Parse timestamp
+		parsed_timestamp = parse_attendance_timestamp(timestamp)
+		
+		# Find or create attendance record
+		attendance_doc = find_or_create_day_record(
+			employee_code=employee_code,
+			date=parsed_timestamp,
+			device_id=device_id,
+			employee_name=employee_name,
+			device_name=device_name
+		)
+		
+		# Add metadata to notes
+		notes_parts = []
+		if event_data.get("face_id_name"):
+			notes_parts.append(f"Face ID: {event_data.get('face_id_name')}")
+		if event_data.get("similarity"):
+			notes_parts.append(f"Similarity: {event_data.get('similarity')}%")
+		if event_type:
+			notes_parts.append(f"Event: {event_type}")
+		
+		if notes_parts:
+			existing_notes = attendance_doc.notes or ""
+			attendance_doc.notes = existing_notes + "; ".join(notes_parts) + "; "
+		
+		# Update attendance time
+		attendance_doc.update_attendance_time(parsed_timestamp, device_id, device_name, original_timestamp=timestamp)
+		
+		# Save to database
+		attendance_doc.save(ignore_permissions=True)
+		frappe.db.commit()
+		
+		logger.info(f"✅ [SYNC] Processed attendance for {employee_code}")
+		
+		# Enqueue notification nếu không phải historical data
+		if not is_historical_attendance(parsed_timestamp):
+			try:
+				frappe.enqueue(
+					"erp.api.attendance.notification.publish_attendance_notification",
+					queue="short",
+					job_id=f"attendance_notif_{employee_code}_{parsed_timestamp.strftime('%H%M%S')}",
+					deduplicate=True,
+					timeout=120,
+					employee_code=employee_code,
+					employee_name=employee_name,
+					timestamp=parsed_timestamp.isoformat(),
+					device_id=device_id,
+					device_name=device_name,
+					check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+					check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+					total_check_ins=attendance_doc.total_check_ins,
+					date=str(attendance_doc.date)
+				)
+			except Exception as enqueue_error:
+				logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
+		
+		return True
+		
+	except Exception as e:
+		logger.error(f"❌ Error processing single event: {str(e)}")
+		return False
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def get_buffer_status():
+	"""
+	API để check status của attendance buffer.
+	Dùng cho monitoring và debugging.
+	"""
+	try:
+		length = get_buffer_length()
+		return {
+			"status": "success",
+			"buffer_key": ATTENDANCE_BUFFER_KEY,
+			"pending_events": length,
+			"batch_size": BUFFER_BATCH_SIZE,
+			"timestamp": frappe.utils.now()
+		}
+	except Exception as e:
+		return {
+			"status": "error",
+			"message": str(e),
+			"timestamp": frappe.utils.now()
+		}

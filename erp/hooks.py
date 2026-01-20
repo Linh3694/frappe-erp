@@ -778,6 +778,11 @@ fixtures = [
 ]
 
 scheduler_events = {
+    # Attendance Batch Processor - Chạy mỗi lần scheduler tick (khoảng 5-10 giây)
+    # Xử lý batch attendance events từ Redis buffer để giảm load database
+    "all": [
+        "erp.api.attendance.batch_processor.scheduled_process_attendance_buffer"
+    ],
     "cron": {
         # Renew subscription mỗi 30 phút
         "*/30 * * * *": [

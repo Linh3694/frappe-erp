@@ -230,3 +230,186 @@ def get_attendance_stats(start_date=None, end_date=None, employee_code=None):
 	)
 	
 	return records
+
+
+# ============================================================================
+# BATCH OPERATIONS - Performance optimization cho xử lý hàng loạt
+# ============================================================================
+
+def batch_find_or_create_records(employee_date_list):
+	"""
+	Batch find or create attendance records cho nhiều employee-date combinations.
+	Giảm số lượng queries từ N xuống còn 2 (1 query tìm existing + 1 bulk insert).
+	
+	Args:
+		employee_date_list: List of tuples [(employee_code, date, employee_name, device_id, device_name), ...]
+	
+	Returns:
+		Dict: {(employee_code, date_str): ERPTimeAttendance doc}
+	"""
+	if not employee_date_list:
+		return {}
+	
+	result = {}
+	
+	# Normalize dates và build lookup keys
+	normalized_list = []
+	for item in employee_date_list:
+		employee_code = item[0]
+		date = item[1]
+		employee_name = item[2] if len(item) > 2 else None
+		device_id = item[3] if len(item) > 3 else None
+		device_name = item[4] if len(item) > 4 else None
+		
+		# Normalize date
+		if isinstance(date, str):
+			try:
+				date_obj = frappe.utils.get_datetime(date)
+				date_only = normalize_date_to_vn_timezone(date_obj)
+			except:
+				date_only = frappe.utils.getdate(date)
+		else:
+			date_only = normalize_date_to_vn_timezone(date)
+		
+		normalized_list.append({
+			"employee_code": employee_code,
+			"date": date_only,
+			"date_str": str(date_only),
+			"employee_name": employee_name,
+			"device_id": device_id,
+			"device_name": device_name
+		})
+	
+	# Build list of employee_codes và dates để query
+	employee_codes = list(set([item["employee_code"] for item in normalized_list]))
+	dates = list(set([item["date"] for item in normalized_list]))
+	
+	# Batch query existing records
+	existing_records = frappe.get_all(
+		"ERP Time Attendance",
+		filters={
+			"employee_code": ["in", employee_codes],
+			"date": ["in", dates]
+		},
+		fields=["name", "employee_code", "date"]
+	)
+	
+	# Build lookup map: (employee_code, date_str) -> name
+	existing_map = {}
+	for rec in existing_records:
+		key = (rec.employee_code, str(rec.date))
+		existing_map[key] = rec.name
+	
+	# Process each item
+	to_create = []
+	
+	for item in normalized_list:
+		key = (item["employee_code"], item["date_str"])
+		
+		if key in existing_map:
+			# Existing record - load it
+			doc = frappe.get_doc("ERP Time Attendance", existing_map[key])
+			
+			# Update employee_name and device_name if provided and not set
+			if item["employee_name"] and not doc.employee_name:
+				doc.employee_name = item["employee_name"]
+			if item["device_name"] and not doc.device_name:
+				doc.device_name = item["device_name"]
+			
+			result[key] = doc
+		else:
+			# Need to create
+			to_create.append(item)
+	
+	# Bulk create new records
+	for item in to_create:
+		key = (item["employee_code"], item["date_str"])
+		
+		doc = frappe.new_doc("ERP Time Attendance")
+		doc.employee_code = item["employee_code"]
+		doc.employee_name = item["employee_name"]
+		doc.date = item["date"]
+		doc.device_id = item["device_id"]
+		doc.device_name = item["device_name"]
+		doc.raw_data = "[]"
+		doc.save(ignore_permissions=True)
+		
+		result[key] = doc
+	
+	return result
+
+
+def batch_update_attendance_times(records_data):
+	"""
+	Batch update attendance times cho nhiều records.
+	
+	Args:
+		records_data: List of dicts:
+			[{
+				"doc": ERPTimeAttendance doc,
+				"events": [{timestamp, device_id, device_name, original_timestamp}, ...]
+			}, ...]
+	
+	Returns:
+		List of updated docs
+	"""
+	updated_docs = []
+	
+	for record_data in records_data:
+		doc = record_data.get("doc")
+		events = record_data.get("events", [])
+		
+		if not doc or not events:
+			continue
+		
+		# Sort events by timestamp
+		sorted_events = sorted(events, key=lambda x: frappe.utils.get_datetime(x.get("timestamp")))
+		
+		# Update với tất cả events
+		for evt in sorted_events:
+			doc.update_attendance_time(
+				evt.get("timestamp"),
+				evt.get("device_id"),
+				evt.get("device_name"),
+				original_timestamp=evt.get("original_timestamp")
+			)
+		
+		# Save (không commit - caller sẽ commit batch)
+		doc.save(ignore_permissions=True)
+		updated_docs.append(doc)
+	
+	return updated_docs
+
+
+def get_existing_records_map(employee_codes, dates):
+	"""
+	Lấy map của existing records cho batch lookup.
+	
+	Args:
+		employee_codes: List of employee codes
+		dates: List of dates
+	
+	Returns:
+		Dict: {(employee_code, date_str): record_name}
+	"""
+	if not employee_codes or not dates:
+		return {}
+	
+	# Convert dates to strings for consistent lookup
+	date_strs = [str(d) if not isinstance(d, str) else d for d in dates]
+	
+	existing_records = frappe.get_all(
+		"ERP Time Attendance",
+		filters={
+			"employee_code": ["in", employee_codes],
+			"date": ["in", date_strs]
+		},
+		fields=["name", "employee_code", "date"]
+	)
+	
+	result = {}
+	for rec in existing_records:
+		key = (rec.employee_code, str(rec.date))
+		result[key] = rec.name
+	
+	return result
