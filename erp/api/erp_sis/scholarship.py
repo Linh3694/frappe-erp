@@ -212,6 +212,21 @@ def get_scholarship_period(period_id=None):
                 "questions": questions
             })
         
+        # Lấy cấu hình hạng mục thành tích
+        achievement_categories = []
+        for category in period.achievement_categories:
+            achievement_categories.append({
+                "name": category.name,
+                "title_vn": category.title_vn,
+                "title_en": category.title_en,
+                "description_vn": category.description_vn,
+                "description_en": category.description_en,
+                "example_vn": category.example_vn,
+                "example_en": category.example_en,
+                "is_required": category.is_required,
+                "sort_order": category.sort_order
+            })
+        
         # Tên năm học
         school_year = frappe.db.get_value(
             "SIS School Year",
@@ -235,6 +250,7 @@ def get_scholarship_period(period_id=None):
                 "to_date": str(period.to_date) if period.to_date else None,
                 "education_stages": education_stages,
                 "approvers": approvers,
+                "achievement_categories": achievement_categories,
                 "form_sections": form_sections,
                 "created_by": period.created_by,
                 "created_at": str(period.created_at) if period.created_at else None
@@ -333,6 +349,23 @@ def create_scholarship_period():
                 "section_title_en": section.get('section_title_en'),
                 "sort_order": section.get('sort_order', idx),
                 "questions_json": json.dumps(questions) if questions else None
+            })
+        
+        # Thêm cấu hình hạng mục thành tích
+        achievement_categories = data.get('achievement_categories', [])
+        if isinstance(achievement_categories, str):
+            achievement_categories = json.loads(achievement_categories)
+        
+        for idx, category in enumerate(achievement_categories):
+            period_doc.append("achievement_categories", {
+                "title_vn": category.get('title_vn'),
+                "title_en": category.get('title_en'),
+                "description_vn": category.get('description_vn'),
+                "description_en": category.get('description_en'),
+                "example_vn": category.get('example_vn'),
+                "example_en": category.get('example_en'),
+                "is_required": category.get('is_required', 0),
+                "sort_order": category.get('sort_order', idx)
             })
         
         period_doc.insert()
@@ -436,6 +469,25 @@ def update_scholarship_period():
                     "section_title_en": section.get('section_title_en'),
                     "sort_order": section.get('sort_order', idx),
                     "questions_json": json.dumps(questions) if questions else None
+                })
+        
+        # Update achievement categories
+        if 'achievement_categories' in data:
+            achievement_categories = data['achievement_categories']
+            if isinstance(achievement_categories, str):
+                achievement_categories = json.loads(achievement_categories)
+            
+            period_doc.achievement_categories = []
+            for idx, category in enumerate(achievement_categories):
+                period_doc.append("achievement_categories", {
+                    "title_vn": category.get('title_vn'),
+                    "title_en": category.get('title_en'),
+                    "description_vn": category.get('description_vn'),
+                    "description_en": category.get('description_en'),
+                    "example_vn": category.get('example_vn'),
+                    "example_en": category.get('example_en'),
+                    "is_required": category.get('is_required', 0),
+                    "sort_order": category.get('sort_order', idx)
                 })
         
         period_doc.save()
@@ -1137,6 +1189,7 @@ def get_class_applications(class_id=None):
 def get_recommendation_form(application_id=None):
     """
     Lấy form thư giới thiệu cho một đơn đăng ký.
+    Trả về recommendation_id tương ứng với user hiện tại.
     """
     logs = []
     
@@ -1152,6 +1205,34 @@ def get_recommendation_form(application_id=None):
         
         app = frappe.get_doc("SIS Scholarship Application", application_id)
         period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+        
+        # Xác định recommendation_id dựa trên user hiện tại
+        user = frappe.session.user
+        teacher_id = frappe.db.get_value("SIS Teacher", {"user_id": user}, "name")
+        
+        recommendation_id = None
+        recommendation_type = None
+        
+        if teacher_id:
+            if app.main_teacher_id == teacher_id:
+                recommendation_id = app.main_recommendation_id
+                recommendation_type = "main"
+            elif app.second_teacher_id == teacher_id:
+                recommendation_id = app.second_recommendation_id
+                recommendation_type = "second"
+        
+        # Nếu là admin, lấy recommendation đầu tiên có sẵn
+        if not recommendation_id:
+            user_roles = frappe.get_roles(user)
+            if any(role in user_roles for role in ['System Manager', 'SIS Manager']):
+                if app.main_recommendation_id:
+                    recommendation_id = app.main_recommendation_id
+                    recommendation_type = "main"
+                elif app.second_recommendation_id:
+                    recommendation_id = app.second_recommendation_id
+                    recommendation_type = "second"
+        
+        logs.append(f"User: {user}, Teacher: {teacher_id}, Rec ID: {recommendation_id}")
         
         # Lấy cấu hình form
         form_sections = []
@@ -1179,6 +1260,8 @@ def get_recommendation_form(application_id=None):
         
         return single_item_response(
             data={
+                "recommendation_id": recommendation_id,
+                "recommendation_type": recommendation_type,
                 "student_info": student_info,
                 "form_sections": form_sections
             },

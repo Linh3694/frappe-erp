@@ -28,6 +28,8 @@
   "education_stages",
   "approvers_section",
   "approvers",
+  "achievement_categories_section",
+  "achievement_categories",
   "recommendation_form_section",
   "form_sections",
   "system_information",
@@ -117,6 +119,18 @@
    "label": "Danh sách người phê duyệt",
    "options": "SIS Scholarship Approver",
    "description": "Người phê duyệt hồ sơ theo từng cấp học"
+  },
+  {
+   "fieldname": "achievement_categories_section",
+   "fieldtype": "Section Break",
+   "label": "Cấu hình hạng mục Thành tích & Khen thưởng"
+  },
+  {
+   "fieldname": "achievement_categories",
+   "fieldtype": "Table",
+   "label": "Các hạng mục thành tích",
+   "options": "SIS Scholarship Achievement Category",
+   "description": "Cấu hình các hạng mục thành tích mà phụ huynh cần điền khi đăng ký học bổng"
   },
   {
    "fieldname": "recommendation_form_section",

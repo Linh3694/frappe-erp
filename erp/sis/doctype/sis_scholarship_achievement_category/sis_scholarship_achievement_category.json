@@ -1,0 +1,98 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "beta": 0,
+ "creation": "2026-01-20 00:00:00.000000",
+ "custom": 0,
+ "description": "Cấu hình hạng mục thành tích cho kỳ học bổng",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title_vn",
+  "title_en",
+  "description_vn",
+  "description_en",
+  "example_vn",
+  "example_en",
+  "is_required",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "label": "Tên hạng mục (VN)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Tên hạng mục thành tích tiếng Việt"
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "label": "Tên hạng mục (EN)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Tên hạng mục thành tích tiếng Anh"
+  },
+  {
+   "fieldname": "description_vn",
+   "fieldtype": "Small Text",
+   "label": "Mô tả (VN)",
+   "description": "Mô tả chi tiết cho hạng mục (tiếng Việt)"
+  },
+  {
+   "fieldname": "description_en",
+   "fieldtype": "Small Text",
+   "label": "Mô tả (EN)",
+   "description": "Mô tả chi tiết cho hạng mục (tiếng Anh)"
+  },
+  {
+   "fieldname": "example_vn",
+   "fieldtype": "Data",
+   "label": "Ví dụ (VN)",
+   "in_list_view": 1,
+   "description": "Ví dụ minh họa (tiếng Việt)"
+  },
+  {
+   "fieldname": "example_en",
+   "fieldtype": "Data",
+   "label": "Ví dụ (EN)",
+   "description": "Ví dụ minh họa (tiếng Anh)"
+  },
+  {
+   "fieldname": "is_required",
+   "fieldtype": "Check",
+   "label": "Bắt buộc",
+   "default": "0",
+   "in_list_view": 1,
+   "description": "Đánh dấu nếu hạng mục này bắt buộc phải điền"
+  },
+  {
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Thứ tự",
+   "default": "0",
+   "description": "Thứ tự hiển thị (số nhỏ hiển thị trước)"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-01-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Scholarship Achievement Category",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

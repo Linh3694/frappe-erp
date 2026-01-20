@@ -246,6 +246,21 @@ def get_active_period():
             
             students.append(student_info)
         
+        # Lấy cấu hình hạng mục thành tích
+        achievement_categories = []
+        for category in period_doc.achievement_categories:
+            achievement_categories.append({
+                "name": category.name,
+                "title_vn": category.title_vn,
+                "title_en": category.title_en,
+                "description_vn": category.description_vn,
+                "description_en": category.description_en,
+                "example_vn": category.example_vn,
+                "example_en": category.example_en,
+                "is_required": category.is_required,
+                "sort_order": category.sort_order
+            })
+        
         logs.append(f"Tìm thấy kỳ {period_data.name}, {len(students)} học sinh có thể đăng ký")
         
         return success_response(
@@ -258,7 +273,8 @@ def get_active_period():
                     "school_year_name_vn": school_year.title_vn if school_year else None,
                     "school_year_name_en": school_year.title_en if school_year else None,
                     "from_date": str(period_data.from_date) if period_data.from_date else None,
-                    "to_date": str(period_data.to_date) if period_data.to_date else None
+                    "to_date": str(period_data.to_date) if period_data.to_date else None,
+                    "achievement_categories": achievement_categories
                 },
                 "students": students
             }
