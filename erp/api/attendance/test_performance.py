@@ -17,6 +17,7 @@ import frappe
 import json
 import time
 import random
+import sys
 from datetime import datetime, timedelta
 
 from erp.api.attendance.hikvision import (
@@ -96,34 +97,33 @@ def run_load_test(num_events=500, batch_size=50):
     print(f"   - Rate: {push_rate:.0f} events/second")
     print(f"   - Buffer size: {get_buffer_length()}")
     
-	# Phase 2: Process buffer
-	print(f"\n📤 Phase 2: Processing buffer...")
-	print(f"   (This may take a while for {num_events} new records...)")
-	start_process = time.time()
-	
-	total_processed = 0
-	batch_count = 0
-	max_batches = (num_events // 100) + 10  # Safety limit
-	
-	while get_buffer_length() > 0 and batch_count < max_batches:
-		batch_start = time.time()
-		result = process_attendance_buffer()
-		batch_duration = time.time() - batch_start
-		
-		processed = result.get("records_processed", 0) + result.get("records_updated", 0)
-		total_processed += processed
-		batch_count += 1
-		
-		remaining = result.get("remaining_in_buffer", 0)
-		rate = processed / batch_duration if batch_duration > 0 else 0
-		print(f"   Batch {batch_count}: {processed} records in {batch_duration:.1f}s ({rate:.0f}/s), remaining: {remaining}")
-		
-		if processed == 0 and remaining == 0:
-			break
-		
-		# Flush output để thấy progress ngay
-		import sys
-		sys.stdout.flush()
+    # Phase 2: Process buffer
+    print(f"\n📤 Phase 2: Processing buffer...")
+    print(f"   (This may take a while for {num_events} new records...)")
+    sys.stdout.flush()
+    
+    start_process = time.time()
+    
+    total_processed = 0
+    batch_count = 0
+    max_batches = (num_events // 100) + 10  # Safety limit
+    
+    while get_buffer_length() > 0 and batch_count < max_batches:
+        batch_start = time.time()
+        result = process_attendance_buffer()
+        batch_duration = time.time() - batch_start
+        
+        processed = result.get("records_processed", 0) + result.get("records_updated", 0)
+        total_processed += processed
+        batch_count += 1
+        
+        remaining = result.get("remaining_in_buffer", 0)
+        rate = processed / batch_duration if batch_duration > 0 else 0
+        print(f"   Batch {batch_count}: {processed} records in {batch_duration:.1f}s ({rate:.0f}/s), remaining: {remaining}")
+        sys.stdout.flush()
+        
+        if processed == 0 and remaining == 0:
+            break
     
     process_duration = time.time() - start_process
     process_rate = total_processed / process_duration if process_duration > 0 else 0
