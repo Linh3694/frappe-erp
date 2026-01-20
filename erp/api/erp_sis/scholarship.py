@@ -814,6 +814,33 @@ def get_application_detail(application_id=None):
         
         app = frappe.get_doc("SIS Scholarship Application", application_id)
         
+        # Lấy ảnh học sinh từ SIS Photo
+        student_image = None
+        if app.student_id:
+            try:
+                # Lấy năm học từ scholarship period
+                period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+                school_year_id = period.academic_year_id
+                
+                # Ưu tiên: 1) Năm học của kỳ học bổng, 2) Upload date mới nhất
+                sis_photos = frappe.db.sql("""
+                    SELECT photo
+                    FROM `tabSIS Photo`
+                    WHERE student_id = %s
+                        AND type = 'student'
+                        AND status = 'Active'
+                    ORDER BY 
+                        CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                        upload_date DESC,
+                        creation DESC
+                    LIMIT 1
+                """, (app.student_id, school_year_id), as_dict=True)
+                
+                if sis_photos and sis_photos[0].photo:
+                    student_image = sis_photos[0].photo
+            except:
+                pass  # Photo is optional
+        
         # Lấy thành tích
         achievements = []
         for ach in app.achievements:
@@ -878,6 +905,7 @@ def get_application_detail(application_id=None):
                 "student_id": app.student_id,
                 "student_name": app.student_name,
                 "student_code": app.student_code,
+                "student_image": student_image,
                 "class_id": app.class_id,
                 "class_name": app.class_name,
                 "education_stage_id": app.education_stage_id,
