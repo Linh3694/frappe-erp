@@ -33,13 +33,13 @@
   },
   {
    "fieldname": "question_text_vn",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "label": "Câu hỏi (Tiếng Việt)",
    "in_list_view": 1
   },
   {
    "fieldname": "question_text_en",
-   "fieldtype": "Data",
+   "fieldtype": "Small Text",
    "label": "Câu hỏi (Tiếng Anh)"
   },
   {
