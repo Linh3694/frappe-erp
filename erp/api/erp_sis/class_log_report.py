@@ -720,19 +720,24 @@ def get_class_log_dashboard(date=None, campus_id=None):
         
         school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
         
-        # Lấy danh sách lớp Regular
-        class_filters = {
-            "school_year_id": school_year,
-            "class_type": "Regular"
-        }
-        if campus_id:
-            class_filters["campus_id"] = campus_id
-        
-        classes = frappe.get_all(
-            "SIS Class",
-            filters=class_filters,
-            fields=["name", "title", "homeroom_teacher", "education_stage_id"]
-        )
+        # Lấy danh sách lớp Regular kèm education_stage_id qua education_grade
+        classes = frappe.db.sql("""
+            SELECT 
+                c.name,
+                c.title,
+                c.homeroom_teacher,
+                eg.education_stage_id
+            FROM `tabSIS Class` c
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+            WHERE c.school_year_id = %(school_year)s
+                AND c.class_type = 'Regular'
+                {campus_filter}
+        """.format(
+            campus_filter="AND c.campus_id = %(campus_id)s" if campus_id else ""
+        ), {
+            "school_year": school_year,
+            "campus_id": campus_id
+        }, as_dict=True)
         
         if not classes:
             return success_response(
@@ -871,7 +876,7 @@ def get_class_log_dashboard(date=None, campus_id=None):
                 "class_id": cls.name,
                 "class_title": cls.title,
                 "homeroom_teacher_name": teacher_names.get(cls.homeroom_teacher),
-                "education_stage_id": cls.education_stage_id,
+                "education_stage_id": cls.get('education_stage_id'),
                 "total_study_periods": total_study,
                 "entered_periods": entered_study,
                 "total_students": total_students,
