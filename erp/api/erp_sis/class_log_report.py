@@ -103,25 +103,32 @@ def get_class_log_status(class_id=None, date=None):
             )
         
         # Lấy các tiết học trong ngày
-        day_of_week = date_obj.strftime("%A")
+        # day_of_week trong database là format viết tắt: mon, tue, wed, thu, fri, sat, sun
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
         
         periods_data = frappe.db.sql("""
             SELECT 
                 tc.period_name,
-                tc.subject_id,
-                sub.title as subject_name,
-                tc.teacher_id,
+                tr.subject_id,
+                COALESCE(ts.title_vn, sub.title) as subject_name,
+                tr.teacher_id,
                 u.full_name as teacher_name
-            FROM `tabSIS Timetable Column` tc
-            LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
-            LEFT JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
+            FROM `tabSIS Timetable Instance Row` tr
+            INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+            LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+            LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+            LEFT JOIN `tabSIS Teacher` t ON tr.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
-            WHERE tc.timetable_instance_id = %(instance)s
-                AND tc.day_of_week = %(day)s
+            WHERE tr.parent = %(instance)s
+                AND tr.day_of_week = %(day)s
+                AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
             ORDER BY tc.period_name
         """, {
             "instance": timetable_instance,
-            "day": day_of_week
+            "day": day_of_week_short,
+            "date": date_obj
         }, as_dict=True)
         
         # Thêm Homeroom
@@ -296,31 +303,33 @@ def get_teacher_class_log_summary(teacher_id=None, start_date=None, end_date=Non
         if teacher.user_id:
             teacher_full_name = frappe.get_value("User", teacher.user_id, "full_name")
         
-        # Lấy các môn giáo viên dạy
+        # Lấy các môn giáo viên dạy - sử dụng SIS Timetable Instance Row
         teacher_subjects = frappe.db.sql("""
             SELECT DISTINCT s.name, s.title
-            FROM `tabSIS Timetable Column` tc
-            INNER JOIN `tabSIS Subject` s ON tc.subject_id = s.name
-            WHERE tc.teacher_id = %(teacher_id)s
+            FROM `tabSIS Timetable Instance Row` tr
+            INNER JOIN `tabSIS Subject` s ON tr.subject_id = s.name
+            WHERE tr.teacher_id = %(teacher_id)s
         """, {"teacher_id": teacher_id}, as_dict=True)
         
         # Lấy tất cả các tiết GV đã dạy trong khoảng thời gian
-        # Query từ timetable
+        # Query từ timetable - sử dụng SIS Timetable Instance Row
         scheduled_periods = frappe.db.sql("""
             SELECT DISTINCT
                 ti.class_id,
                 c.title as class_title,
                 tc.period_name,
-                tc.subject_id,
-                sub.title as subject_name,
-                tc.day_of_week
-            FROM `tabSIS Timetable Column` tc
-            INNER JOIN `tabSIS Timetable Instance` ti ON tc.timetable_instance_id = ti.name
+                tr.subject_id,
+                COALESCE(ts.title_vn, sub.title) as subject_name,
+                tr.day_of_week
+            FROM `tabSIS Timetable Instance Row` tr
+            INNER JOIN `tabSIS Timetable Instance` ti ON tr.parent = ti.name
+            INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
             INNER JOIN `tabSIS Class` c ON ti.class_id = c.name
-            LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
-            WHERE tc.teacher_id = %(teacher_id)s
+            LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+            LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+            WHERE tr.teacher_id = %(teacher_id)s
                 AND ti.start_date <= %(end_date)s
-                AND ti.end_date >= %(start_date)s
+                AND (ti.end_date >= %(start_date)s OR ti.end_date IS NULL)
         """, {
             "teacher_id": teacher_id,
             "start_date": start_date_obj,
@@ -334,16 +343,19 @@ def get_teacher_class_log_summary(teacher_id=None, start_date=None, end_date=Non
             fields=["name", "title"]
         )
         
+        # Map day_of_week format: database dùng 'mon', 'tue', v.v.
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        
         # Generate all expected logs based on schedule and date range
         expected_logs = []
         current_date = start_date_obj
         
         while current_date <= end_date_obj:
-            day_name = current_date.strftime("%A")
+            day_short = day_map.get(current_date.weekday(), 'mon')
             
             # Thêm các tiết theo lịch
             for period in scheduled_periods:
-                if period['day_of_week'] == day_name:
+                if period['day_of_week'] == day_short:
                     expected_logs.append({
                         "date": current_date,
                         "class_id": period['class_id'],
@@ -561,7 +573,10 @@ def get_campus_class_log_overview(campus_id=None, date=None):
             )
         
         class_ids = [c.name for c in classes]
-        day_name = date_obj.strftime("%A")
+        
+        # day_of_week trong database là format viết tắt: mon, tue, wed, thu, fri, sat, sun
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
         
         # Đếm số tiết theo lịch cho mỗi lớp
         scheduled_counts = frappe.db.sql("""
@@ -569,16 +584,19 @@ def get_campus_class_log_overview(campus_id=None, date=None):
                 ti.class_id,
                 COUNT(DISTINCT tc.period_name) as period_count
             FROM `tabSIS Timetable Instance` ti
-            INNER JOIN `tabSIS Timetable Column` tc ON tc.timetable_instance_id = ti.name
+            INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
+            INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
             WHERE ti.class_id IN %(class_ids)s
                 AND ti.start_date <= %(date)s
-                AND ti.end_date >= %(date)s
-                AND tc.day_of_week = %(day)s
+                AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
+                AND tr.day_of_week = %(day)s
+                AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
             GROUP BY ti.class_id
         """, {
             "class_ids": class_ids,
             "date": date_obj,
-            "day": day_name
+            "day": day_of_week_short
         }, as_dict=True)
         
         scheduled_map = {r['class_id']: r['period_count'] + 1 for r in scheduled_counts}  # +1 for Homeroom
@@ -749,22 +767,29 @@ def get_class_log_dashboard(date=None, campus_id=None):
                     teacher_names[t.name] = full_name
         
         # Đếm số tiết Study theo lịch cho mỗi lớp (chỉ tiết có tên chứa "Tiết")
+        # day_of_week trong database là format viết tắt: mon, tue, wed, thu, fri, sat, sun
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
+        
         scheduled_counts = frappe.db.sql("""
             SELECT 
                 ti.class_id,
                 COUNT(DISTINCT tc.period_name) as period_count
             FROM `tabSIS Timetable Instance` ti
-            INNER JOIN `tabSIS Timetable Column` tc ON tc.timetable_instance_id = ti.name
+            INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
+            INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
             WHERE ti.class_id IN %(class_ids)s
                 AND ti.start_date <= %(date)s
-                AND ti.end_date >= %(date)s
-                AND tc.day_of_week = %(day)s
+                AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
+                AND tr.day_of_week = %(day)s
                 AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
             GROUP BY ti.class_id
         """, {
             "class_ids": class_ids,
             "date": date_obj,
-            "day": day_name
+            "day": day_of_week_short
         }, as_dict=True)
         
         scheduled_map = {r['class_id']: r['period_count'] for r in scheduled_counts}
@@ -943,26 +968,33 @@ def get_class_log_detail(class_id=None, date=None):
         
         if timetable_instance:
             # Lấy các tiết học trong ngày (chỉ tiết Study)
-            day_of_week = date_obj.strftime("%A")
+            # day_of_week trong database là format viết tắt: mon, tue, wed, thu, fri, sat, sun
+            day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+            day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
             
             periods_data = frappe.db.sql("""
                 SELECT 
                     tc.period_name,
-                    tc.subject_id,
-                    sub.title as subject_name,
-                    tc.teacher_id,
+                    tr.subject_id,
+                    COALESCE(ts.title_vn, sub.title) as subject_name,
+                    tr.teacher_id,
                     u.full_name as teacher_name
-                FROM `tabSIS Timetable Column` tc
-                LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
-                LEFT JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
+                FROM `tabSIS Timetable Instance Row` tr
+                INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+                LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+                LEFT JOIN `tabSIS Teacher` t ON tr.teacher_id = t.name
                 LEFT JOIN `tabUser` u ON t.user_id = u.name
-                WHERE tc.timetable_instance_id = %(instance)s
-                    AND tc.day_of_week = %(day)s
+                WHERE tr.parent = %(instance)s
+                    AND tr.day_of_week = %(day)s
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                    AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                    AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
                 ORDER BY tc.period_name
             """, {
                 "instance": timetable_instance,
-                "day": day_of_week
+                "day": day_of_week_short,
+                "date": date_obj
             }, as_dict=True)
             
             # Lấy class log subjects đã tạo
