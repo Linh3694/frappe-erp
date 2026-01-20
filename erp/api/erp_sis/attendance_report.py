@@ -214,6 +214,7 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
         teacher_map = {}
         if period_name.lower() != 'homeroom':
             # Query timetable để lấy giáo viên bộ môn và môn học
+            # Sử dụng đúng tên bảng: SIS Timetable Instance Row
             timetable_data = frappe.db.sql("""
                 SELECT 
                     ti.class_id,
@@ -222,7 +223,7 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
                     tr.subject_id,
                     COALESCE(ts.title_vn, sub.title) as subject_name
                 FROM `tabSIS Timetable Instance` ti
-                INNER JOIN `tabSIS Timetable Row` tr ON tr.timetable_instance_id = ti.name
+                INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
                 LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
                 LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
@@ -247,7 +248,7 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
                         tr.subject_id,
                         COALESCE(ts.title_vn, sub.title) as subject_name
                     FROM `tabSIS Timetable Instance` ti
-                    INNER JOIN `tabSIS Timetable Row` tr ON tr.timetable_instance_id = ti.name
+                    INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
                     INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
                     LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
                     LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
@@ -596,13 +597,19 @@ def get_education_stages(campus_id=None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_timetable_columns(education_stage_id=None, campus_id=None):
+def get_timetable_columns(education_stage_id=None, campus_id=None, date=None):
     """
     Lấy danh sách các tiết học (Timetable Columns) theo cấp học
+    
+    Logic:
+    1. Nếu có date: Tìm schedule active cho ngày đó, lấy periods từ schedule
+    2. Nếu không có schedule active: Fallback về legacy periods (schedule_id is NULL)
+    3. Dedupe theo period_priority (ưu tiên schedule periods)
     
     Args:
         education_stage_id: Education Stage ID (required)
         campus_id: Campus ID (optional)
+        date: Ngày cần lấy periods (YYYY-MM-DD), nếu không truyền sẽ dùng ngày hôm nay
     
     Returns:
         {
@@ -616,10 +623,15 @@ def get_timetable_columns(education_stage_id=None, campus_id=None):
         }
     """
     try:
+        from frappe.utils import getdate, nowdate
+        from datetime import timedelta
+        
         if not education_stage_id:
             education_stage_id = frappe.request.args.get('education_stage_id')
         if not campus_id:
             campus_id = frappe.request.args.get('campus_id')
+        if not date:
+            date = frappe.request.args.get('date')
         
         if not education_stage_id:
             return error_response(
@@ -638,28 +650,84 @@ def get_timetable_columns(education_stage_id=None, campus_id=None):
             except Exception:
                 pass
         
-        # Build filters
-        filters = {
-            "education_stage_id": education_stage_id,
-            "period_type": "study"  # Chỉ lấy các tiết học (không lấy break, lunch...)
-        }
-        if campus_id:
-            filters["campus_id"] = campus_id
+        # Nếu không truyền date, dùng ngày hôm nay
+        target_date = getdate(date) if date else getdate(nowdate())
         
-        # Lấy danh sách timetable columns
-        columns = frappe.get_all(
-            "SIS Timetable Column",
-            filters=filters,
-            fields=["name", "period_name", "period_priority", "start_time", "end_time", "period_type"],
-            order_by="period_priority asc"
+        columns = []
+        
+        # Tìm schedule active cho ngày target_date
+        schedule_filters = {
+            "campus_id": campus_id,
+            "education_stage_id": education_stage_id,
+            "is_active": 1,
+            "start_date": ["<=", target_date],
+            "end_date": [">=", target_date]
+        }
+        
+        active_schedules = frappe.get_all(
+            "SIS Schedule",
+            filters=schedule_filters,
+            fields=["name"],
+            order_by="start_date desc"
         )
         
-        # Format thời gian
+        if active_schedules:
+            # Lấy periods từ schedule active
+            schedule_ids = [s.name for s in active_schedules]
+            columns = frappe.get_all(
+                "SIS Timetable Column",
+                filters={
+                    "schedule_id": ["in", schedule_ids],
+                    "education_stage_id": education_stage_id,
+                    "period_type": "study"
+                },
+                fields=["name", "period_name", "period_priority", "start_time", "end_time", "period_type", "schedule_id"],
+                order_by="period_priority asc"
+            )
+        
+        # Nếu không có periods từ schedule, fallback về legacy
+        if not columns:
+            legacy_filters = {
+                "education_stage_id": education_stage_id,
+                "period_type": "study",
+                "schedule_id": ["is", "not set"]
+            }
+            if campus_id:
+                legacy_filters["campus_id"] = campus_id
+            
+            columns = frappe.get_all(
+                "SIS Timetable Column",
+                filters=legacy_filters,
+                fields=["name", "period_name", "period_priority", "start_time", "end_time", "period_type", "schedule_id"],
+                order_by="period_priority asc"
+            )
+        
+        # Dedupe theo period_priority (chỉ giữ 1 period cho mỗi priority)
+        seen_priorities = set()
+        deduped_columns = []
         for col in columns:
-            if col.get('start_time'):
-                col['start_time'] = str(col['start_time'])[:5]  # HH:MM
-            if col.get('end_time'):
-                col['end_time'] = str(col['end_time'])[:5]  # HH:MM
+            priority = col.get("period_priority")
+            if priority not in seen_priorities:
+                seen_priorities.add(priority)
+                deduped_columns.append(col)
+        columns = deduped_columns
+        
+        # Format thời gian
+        def format_time(time_value):
+            if not time_value:
+                return ""
+            if isinstance(time_value, timedelta):
+                total_seconds = int(time_value.total_seconds())
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                return f"{hours:02d}:{minutes:02d}"
+            return str(time_value)[:5]
+        
+        for col in columns:
+            col['start_time'] = format_time(col.get('start_time'))
+            col['end_time'] = format_time(col.get('end_time'))
+            # Bỏ schedule_id khỏi response để đơn giản hóa
+            col.pop('schedule_id', None)
         
         return success_response(
             data=columns,
