@@ -114,13 +114,13 @@ def get_class_log_status(class_id=None, date=None):
                 tc.period_name,
                 tr.subject_id,
                 COALESCE(ts.title_vn, sub.title) as subject_name,
-                tr.teacher_id,
+                tr.teacher_1_id as teacher_id,
                 u.full_name as teacher_name
             FROM `tabSIS Timetable Instance Row` tr
             INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
             LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
             LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
-            LEFT JOIN `tabSIS Teacher` t ON tr.teacher_id = t.name
+            LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE tr.parent = %(instance)s
                 AND tr.day_of_week = %(day)s
@@ -310,7 +310,7 @@ def get_teacher_class_log_summary(teacher_id=None, start_date=None, end_date=Non
             SELECT DISTINCT s.name, s.title
             FROM `tabSIS Timetable Instance Row` tr
             INNER JOIN `tabSIS Subject` s ON tr.subject_id = s.name
-            WHERE tr.teacher_id = %(teacher_id)s
+            WHERE tr.teacher_1_id = %(teacher_id)s
         """, {"teacher_id": teacher_id}, as_dict=True)
         
         # Lấy tất cả các tiết GV đã dạy trong khoảng thời gian
@@ -329,7 +329,7 @@ def get_teacher_class_log_summary(teacher_id=None, start_date=None, end_date=Non
             INNER JOIN `tabSIS Class` c ON ti.class_id = c.name
             LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
             LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
-            WHERE tr.teacher_id = %(teacher_id)s
+            WHERE tr.teacher_1_id = %(teacher_id)s
                 AND ti.start_date <= %(end_date)s
                 AND (ti.end_date >= %(start_date)s OR ti.end_date IS NULL)
         """, {
@@ -987,13 +987,13 @@ def get_class_log_detail(class_id=None, date=None):
                     tc.period_name,
                     tr.subject_id,
                     COALESCE(ts.title_vn, sub.title) as subject_name,
-                    tr.teacher_id,
+                    tr.teacher_1_id as teacher_id,
                     u.full_name as teacher_name
                 FROM `tabSIS Timetable Instance Row` tr
                 INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
                 LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
-                LEFT JOIN `tabSIS Teacher` t ON tr.teacher_id = t.name
+                LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
                 LEFT JOIN `tabUser` u ON t.user_id = u.name
                 WHERE tr.parent = %(instance)s
                     AND tr.day_of_week = %(day)s
