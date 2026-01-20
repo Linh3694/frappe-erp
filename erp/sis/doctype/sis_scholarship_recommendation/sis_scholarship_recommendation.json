@@ -57,7 +57,6 @@
    "fieldtype": "Data",
    "label": "Tên giáo viên",
    "read_only": 1,
-   "fetch_from": "teacher_id.full_name",
    "in_list_view": 1
   },
   {

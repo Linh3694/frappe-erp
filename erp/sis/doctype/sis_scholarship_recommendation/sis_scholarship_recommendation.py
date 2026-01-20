@@ -15,7 +15,15 @@ class SISScholarshipRecommendation(Document):
 	
 	def validate(self):
 		"""Validate trước khi lưu"""
+		self.set_teacher_name()
 		self.validate_teacher_permission()
+	
+	def set_teacher_name(self):
+		"""Lấy tên giáo viên từ User vì SIS Teacher không có full_name"""
+		if self.teacher_id and not self.teacher_name:
+			teacher_user = frappe.db.get_value("SIS Teacher", self.teacher_id, "user_id")
+			if teacher_user:
+				self.teacher_name = frappe.db.get_value("User", teacher_user, "full_name")
 	
 	def validate_teacher_permission(self):
 		"""Kiểm tra giáo viên có quyền viết thư không"""
