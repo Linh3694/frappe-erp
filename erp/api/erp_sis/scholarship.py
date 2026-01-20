@@ -1190,6 +1190,7 @@ def get_recommendation_form(application_id=None):
     """
     Lấy form thư giới thiệu cho một đơn đăng ký.
     Trả về recommendation_id tương ứng với user hiện tại.
+    Tự động tạo recommendation record nếu chưa có.
     """
     logs = []
     
@@ -1217,9 +1218,42 @@ def get_recommendation_form(application_id=None):
             if app.main_teacher_id == teacher_id:
                 recommendation_id = app.main_recommendation_id
                 recommendation_type = "main"
+                
+                # Tự động tạo recommendation nếu chưa có
+                if not recommendation_id:
+                    logs.append(f"Tạo main recommendation cho teacher {teacher_id}")
+                    main_rec = frappe.get_doc({
+                        "doctype": "SIS Scholarship Recommendation",
+                        "application_id": app.name,
+                        "teacher_id": teacher_id,
+                        "recommendation_type": "main",
+                        "status": "Pending"
+                    })
+                    main_rec.insert(ignore_permissions=True)
+                    app.db_set("main_recommendation_id", main_rec.name)
+                    app.db_set("main_recommendation_status", "Pending")
+                    frappe.db.commit()
+                    recommendation_id = main_rec.name
+                    
             elif app.second_teacher_id == teacher_id:
                 recommendation_id = app.second_recommendation_id
                 recommendation_type = "second"
+                
+                # Tự động tạo recommendation nếu chưa có
+                if not recommendation_id:
+                    logs.append(f"Tạo second recommendation cho teacher {teacher_id}")
+                    second_rec = frappe.get_doc({
+                        "doctype": "SIS Scholarship Recommendation",
+                        "application_id": app.name,
+                        "teacher_id": teacher_id,
+                        "recommendation_type": "second",
+                        "status": "Pending"
+                    })
+                    second_rec.insert(ignore_permissions=True)
+                    app.db_set("second_recommendation_id", second_rec.name)
+                    app.db_set("second_recommendation_status", "Pending")
+                    frappe.db.commit()
+                    recommendation_id = second_rec.name
         
         # Nếu là admin, lấy recommendation đầu tiên có sẵn
         if not recommendation_id:
