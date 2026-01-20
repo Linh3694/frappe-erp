@@ -687,9 +687,73 @@ def delete_announcement():
         )
 
 
+def _send_announcement_background(announcement_id: str, user_email: str):
+    """
+    Background job để gửi announcement
+    Được gọi qua frappe.enqueue để tránh timeout
+    """
+    try:
+        frappe.logger().info(f"🚀 [Background Job] Starting to send announcement: {announcement_id}")
+        
+        # Get the announcement
+        announcement = frappe.get_doc("SIS Announcement", announcement_id)
+        
+        # Parse recipients
+        recipients = []
+        if announcement.recipients:
+            try:
+                recipients = json.loads(announcement.recipients)
+            except (json.JSONDecodeError, TypeError):
+                recipients = []
+        
+        if not recipients:
+            frappe.logger().error(f"❌ [Background Job] No recipients for announcement: {announcement_id}")
+            return
+        
+        # Use unified notification handler to send notifications
+        from erp.utils.notification_handler import send_bulk_parent_notifications
+        
+        notification_result = send_bulk_parent_notifications(
+            recipient_type="announcement",
+            recipients_data={
+                "student_ids": [],  # Will be resolved in handler
+                "recipients": recipients,  # Raw recipient selection
+                "announcement_id": announcement.name
+            },
+            title="Thông báo",
+            body=announcement.title_vn or announcement.title_en or "Thông báo mới",
+            icon="/icon.png",
+            data={
+                "type": "announcement",
+                "announcement_id": announcement.name,
+                "title_en": announcement.title_en,
+                "title_vn": announcement.title_vn,
+                "url": f"/announcement/{announcement.name}"
+            }
+        )
+        
+        frappe.logger().info(f"📢 [Background Job] Notification result: {notification_result}")
+        
+        # Update announcement with final results
+        announcement.reload()
+        announcement.sent_count = notification_result.get("total_parents", 0)
+        announcement.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        frappe.logger().info(f"✅ [Background Job] Announcement {announcement_id} sent to {notification_result.get('total_parents', 0)} parents")
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Background Job] Error sending announcement {announcement_id}: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+
+
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def send_announcement():
-    """Send a draft announcement"""
+    """
+    Gửi announcement - sử dụng background job cho số lượng lớn
+    API trả về ngay sau khi queue job thành công
+    """
     try:
         data = frappe.local.form_dict
         
@@ -739,15 +803,44 @@ def send_announcement():
                 {"recipients": ["No recipients to send to"]}
             )
 
-        # Use unified notification handler to send notifications
-        from erp.utils.notification_handler import send_bulk_parent_notifications
+        # Tính số lượng người nhận trước
+        from erp.utils.notification_handler import resolve_recipient_students, get_guardians_for_students, get_parent_emails
+        
+        student_ids = resolve_recipient_students(recipients)
+        estimated_count = len(student_ids)
+        
+        # Lấy số lượng parents thực tế
+        if student_ids:
+            guardians = get_guardians_for_students(student_ids)
+            parent_emails = get_parent_emails(guardians)
+            estimated_count = len(parent_emails)
+        
+        frappe.logger().info(f"📊 Estimated recipients: {estimated_count} parents from {len(student_ids)} students")
 
-        try:
+        # Update status to "sending" ngay lập tức để UI có thể hiển thị
+        announcement.status = "sent"  # Đánh dấu sent ngay để tránh gửi lại
+        announcement.sent_at = frappe.utils.now()
+        announcement.sent_by = frappe.session.user
+        announcement.sent_count = estimated_count  # Ước tính ban đầu
+        announcement.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        # Quyết định sync hay async dựa trên số lượng người nhận
+        # Nếu < 100 người: gửi sync (nhanh)
+        # Nếu >= 100 người: gửi async qua background job
+        ASYNC_THRESHOLD = 100
+        
+        if estimated_count < ASYNC_THRESHOLD:
+            # Gửi đồng bộ cho số lượng nhỏ
+            frappe.logger().info(f"📤 Sending announcement SYNC (< {ASYNC_THRESHOLD} recipients)")
+            
+            from erp.utils.notification_handler import send_bulk_parent_notifications
+            
             notification_result = send_bulk_parent_notifications(
                 recipient_type="announcement",
                 recipients_data={
-                    "student_ids": [],  # Will be resolved in handler
-                    "recipients": recipients,  # Raw recipient selection
+                    "student_ids": [],
+                    "recipients": recipients,
                     "announcement_id": announcement.name
                 },
                 title="Thông báo",
@@ -761,26 +854,23 @@ def send_announcement():
                     "url": f"/announcement/{announcement.name}"
                 }
             )
-
-            frappe.logger().info(f"📢 Announcement notification result: {notification_result}")
-
-            # Update status to sent and store sent count
-            announcement.status = "sent"
-            announcement.sent_at = frappe.utils.now()
+            
+            # Update với kết quả thực tế
+            announcement.reload()
             announcement.sent_count = notification_result.get("total_parents", 0)
-            announcement.save()
-
-            frappe.logger().info(f"✅ Announcement {announcement_id} sent successfully to {notification_result.get('total_parents', 0)} parents")
-
+            announcement.save(ignore_permissions=True)
+            frappe.db.commit()
+            
             return success_response(
                 message="Announcement sent successfully",
                 data={
                     "announcement_id": announcement.name,
                     "status": announcement.status,
-                    "sent_at": announcement.sent_at,
+                    "sent_at": str(announcement.sent_at),
                     "sent_by": announcement.sent_by,
                     "sent_by_fullname": _get_user_fullname(announcement.sent_by),
                     "sent_count": announcement.sent_count,
+                    "is_async": False,
                     "notification_summary": {
                         "total_parents": notification_result.get("total_parents", 0),
                         "success_count": notification_result.get("success_count", 0),
@@ -788,18 +878,48 @@ def send_announcement():
                     }
                 }
             )
-
-        except Exception as e:
-            frappe.logger().error(f"❌ Error sending notifications: {str(e)}")
-            return error_response(
-                message=f"Failed to send notifications: {str(e)}",
-                code="NOTIFICATION_ERROR"
+        else:
+            # Gửi qua background job cho số lượng lớn
+            frappe.logger().info(f"📤 Queueing announcement ASYNC (>= {ASYNC_THRESHOLD} recipients)")
+            
+            # Enqueue background job với timeout dài (30 phút)
+            frappe.enqueue(
+                method="erp.api.erp_sis.announcement._send_announcement_background",
+                queue="long",
+                timeout=1800,  # 30 phút
+                announcement_id=announcement_id,
+                user_email=frappe.session.user,
+                now=False
+            )
+            
+            frappe.logger().info(f"✅ Announcement {announcement_id} queued for background processing")
+            
+            return success_response(
+                message="Thông báo đang được gửi trong nền. Vui lòng đợi vài phút để hoàn tất.",
+                data={
+                    "announcement_id": announcement.name,
+                    "status": announcement.status,
+                    "sent_at": str(announcement.sent_at),
+                    "sent_by": announcement.sent_by,
+                    "sent_by_fullname": _get_user_fullname(announcement.sent_by),
+                    "sent_count": estimated_count,
+                    "is_async": True,  # Flag để FE biết đây là async
+                    "estimated_recipients": estimated_count,
+                    "notification_summary": {
+                        "total_parents": estimated_count,
+                        "success_count": 0,  # Chưa biết vì đang chạy background
+                        "failed_count": 0,
+                        "status": "processing"
+                    }
+                }
             )
 
     except frappe.DoesNotExistError:
         return not_found_response("Announcement not found")
     except Exception as e:
         frappe.logger().error(f"Error sending announcement: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
         return error_response(
             message=f"Failed to send announcement: {str(e)}",
             code="SEND_ERROR"
