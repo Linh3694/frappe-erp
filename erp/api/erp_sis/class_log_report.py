@@ -109,19 +109,26 @@ def get_class_log_status(class_id=None, date=None):
         day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
         day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
         
+        # Lấy giáo viên từ child table hoặc deprecated field
         periods_data = frappe.db.sql("""
             SELECT 
                 tc.period_name,
                 tr.subject_id,
                 COALESCE(ts.title_vn, sub.title) as subject_name,
-                tr.teacher_1_id as teacher_id,
-                u.full_name as teacher_name
+                COALESCE(trt.teacher_id, tr.teacher_1_id) as teacher_id,
+                COALESCE(u_new.full_name, u_old.full_name) as teacher_name
             FROM `tabSIS Timetable Instance Row` tr
             INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
             LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
             LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
-            LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
-            LEFT JOIN `tabUser` u ON t.user_id = u.name
+            -- Lấy giáo viên từ child table (ưu tiên sort_order nhỏ nhất)
+            LEFT JOIN `tabSIS Timetable Instance Row Teacher` trt ON trt.parent = tr.name 
+                AND trt.idx = (SELECT MIN(idx) FROM `tabSIS Timetable Instance Row Teacher` WHERE parent = tr.name)
+            LEFT JOIN `tabSIS Teacher` t_new ON trt.teacher_id = t_new.name
+            LEFT JOIN `tabUser` u_new ON t_new.user_id = u_new.name
+            -- Fallback: lấy từ deprecated field
+            LEFT JOIN `tabSIS Teacher` t_old ON tr.teacher_1_id = t_old.name
+            LEFT JOIN `tabUser` u_old ON t_old.user_id = u_old.name
             WHERE tr.parent = %(instance)s
                 AND tr.day_of_week = %(day)s
                 AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
@@ -982,19 +989,26 @@ def get_class_log_detail(class_id=None, date=None):
             day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
             day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
             
+            # Lấy giáo viên từ child table hoặc deprecated field
             periods_data = frappe.db.sql("""
                 SELECT 
                     tc.period_name,
                     tr.subject_id,
                     COALESCE(ts.title_vn, sub.title) as subject_name,
-                    tr.teacher_1_id as teacher_id,
-                    u.full_name as teacher_name
+                    COALESCE(trt.teacher_id, tr.teacher_1_id) as teacher_id,
+                    COALESCE(u_new.full_name, u_old.full_name) as teacher_name
                 FROM `tabSIS Timetable Instance Row` tr
                 INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
                 LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
-                LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
-                LEFT JOIN `tabUser` u ON t.user_id = u.name
+                -- Lấy giáo viên từ child table (ưu tiên sort_order nhỏ nhất)
+                LEFT JOIN `tabSIS Timetable Instance Row Teacher` trt ON trt.parent = tr.name 
+                    AND trt.idx = (SELECT MIN(idx) FROM `tabSIS Timetable Instance Row Teacher` WHERE parent = tr.name)
+                LEFT JOIN `tabSIS Teacher` t_new ON trt.teacher_id = t_new.name
+                LEFT JOIN `tabUser` u_new ON t_new.user_id = u_new.name
+                -- Fallback: lấy từ deprecated field
+                LEFT JOIN `tabSIS Teacher` t_old ON tr.teacher_1_id = t_old.name
+                LEFT JOIN `tabUser` u_old ON t_old.user_id = u_old.name
                 WHERE tr.parent = %(instance)s
                     AND tr.day_of_week = %(day)s
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
