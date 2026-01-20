@@ -218,16 +218,18 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
             day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
             
             # Query timetable để lấy môn học
-            # SIS Timetable Instance Row có subject_id và child table teachers
+            # SIS Timetable Instance Row có subject_id link đến SIS Subject
+            # SIS Subject có timetable_subject_id link đến SIS Timetable Subject (có title_vn)
             timetable_data = frappe.db.sql("""
                 SELECT 
                     ti.class_id,
                     tr.name as row_id,
                     tr.subject_id,
-                    sub.title as subject_name
+                    COALESCE(ts.title_vn, sub.title) as subject_name
                 FROM `tabSIS Timetable Instance` ti
                 INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
                 WHERE ti.class_id IN %(class_ids)s
                     AND ti.start_date <= %(date)s
                     AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
@@ -249,11 +251,12 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
                         ti.class_id,
                         tr.name as row_id,
                         tr.subject_id,
-                        sub.title as subject_name
+                        COALESCE(ts.title_vn, sub.title) as subject_name
                     FROM `tabSIS Timetable Instance` ti
                     INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
                     INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
                     LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+                    LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
                     WHERE ti.class_id IN %(class_ids)s
                         AND ti.start_date <= %(date)s
                         AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
@@ -472,15 +475,17 @@ def get_class_attendance_summary(class_id=None, date=None):
             day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
             
             # Lấy các rows trong timetable instance cho ngày này
+            # SIS Subject có timetable_subject_id link đến SIS Timetable Subject (có title_vn)
             rows_data = frappe.db.sql("""
                 SELECT 
                     tr.name as row_id,
                     tc.period_name,
                     tr.subject_id,
-                    sub.title as subject_name
+                    COALESCE(ts.title_vn, sub.title) as subject_name
                 FROM `tabSIS Timetable Instance Row` tr
                 LEFT JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
                 WHERE tr.parent = %(instance)s
                     AND tr.day_of_week = %(day)s
                     AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
