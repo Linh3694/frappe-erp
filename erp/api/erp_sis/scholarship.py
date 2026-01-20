@@ -689,14 +689,18 @@ def get_applications():
         allowed_stages = []
         if not is_admin and period_id:
             period = frappe.get_doc("SIS Scholarship Period", period_id)
+            logs.append(f"Check permission for user: {user}")
             for approver in period.approvers:
-                if approver.user_id == user:
+                logs.append(f"Approver: {approver.user_id}, Stage: {approver.educational_stage_id}")
+                if str(approver.user_id) == str(user):
                     allowed_stages.append(approver.educational_stage_id)
+            logs.append(f"Allowed stages: {allowed_stages}")
         
         # Nếu không phải admin và không được phân quyền cấp học nào, chỉ cho phép xem nếu có role Registrar/SIS BOD
-        if not is_admin and not allowed_stages:
-            if not any(role in user_roles for role in ['Registrar', 'SIS BOD']):
-                return error_response("Bạn không có quyền truy cập", logs=logs)
+        is_viewer = any(role in user_roles for role in ['Registrar', 'SIS BOD'])
+        if not is_admin and not allowed_stages and not is_viewer:
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        logs.append(f"is_admin: {is_admin}, is_viewer: {is_viewer}, allowed_stages: {allowed_stages}")
         education_stage_id = frappe.request.args.get('education_stage_id')
         education_stage_name = frappe.request.args.get('education_stage_name')  # Filter theo tên cấp học
         status = frappe.request.args.get('status')
@@ -933,10 +937,15 @@ def get_application_detail(application_id=None):
         if not is_admin:
             # Kiểm tra user có được phân quyền chấm điểm cho cấp học này không
             period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+            app_stage = app.education_stage_id
+            logs.append(f"User: {user}, App stage: {app_stage}")
             for approver in period.approvers:
-                if approver.user_id == user and approver.educational_stage_id == app.education_stage_id:
+                logs.append(f"Approver: {approver.user_id}, Stage: {approver.educational_stage_id}")
+                if str(approver.user_id) == str(user) and str(approver.educational_stage_id) == str(app_stage):
                     can_score = True
+                    logs.append(f"Match found! can_score = True")
                     break
+            logs.append(f"Final can_score: {can_score}")
         
         return single_item_response(
             data={
@@ -967,7 +976,8 @@ def get_application_detail(application_id=None):
                 "approved_by": app.approved_by,
                 "approved_at": str(app.approved_at) if app.approved_at else None,
                 "rejection_reason": app.rejection_reason,
-                "can_score": can_score
+                "can_score": can_score,
+                "debug_logs": logs  # Debug logs
             },
             message="Lấy chi tiết đơn thành công"
         )
@@ -1016,13 +1026,19 @@ def save_scoring():
         if not is_admin:
             # Kiểm tra user có được phân quyền chấm điểm cho cấp học này không
             period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+            app_stage = app.education_stage_id
             can_score = False
+            
+            logs.append(f"User: {user}, App stage: {app_stage}")
             for approver in period.approvers:
-                if approver.user_id == user and approver.educational_stage_id == app.education_stage_id:
+                logs.append(f"Approver: {approver.user_id}, Stage: {approver.educational_stage_id}")
+                if str(approver.user_id) == str(user) and str(approver.educational_stage_id) == str(app_stage):
                     can_score = True
+                    logs.append("Match found!")
                     break
             
             if not can_score:
+                logs.append("Permission denied - user not assigned to this education stage")
                 return error_response("Bạn không có quyền chấm điểm hồ sơ này", logs=logs)
         
         logs.append(f"Chấm điểm cho đơn: {application_id}")
@@ -1526,13 +1542,11 @@ def deny_recommendation():
 def get_statistics(period_id=None):
     """
     Lấy thống kê học bổng theo kỳ.
+    Chỉ đếm hồ sơ mà user có quyền truy cập.
     """
     logs = []
     
     try:
-        if not _check_admin_permission():
-            return error_response("Bạn không có quyền truy cập", logs=logs)
-        
         if not period_id:
             period_id = frappe.request.args.get('period_id')
         
@@ -1542,28 +1556,82 @@ def get_statistics(period_id=None):
                 {"period_id": ["Period ID là bắt buộc"]}
             )
         
+        # Kiểm tra quyền và lấy danh sách cấp học được phân quyền
+        user = frappe.session.user
+        user_roles = frappe.get_roles(user)
+        is_admin = any(role in user_roles for role in ['System Manager', 'SIS Manager'])
+        is_viewer = any(role in user_roles for role in ['Registrar', 'SIS BOD'])
+        
+        # Lấy danh sách cấp học user được phân quyền
+        allowed_stages = []
+        if not is_admin:
+            period = frappe.get_doc("SIS Scholarship Period", period_id)
+            for approver in period.approvers:
+                if str(approver.user_id) == str(user):
+                    allowed_stages.append(approver.educational_stage_id)
+        
+        # Nếu không phải admin và không có quyền, chỉ cho xem nếu là viewer
+        if not is_admin and not allowed_stages and not is_viewer:
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Build điều kiện filter
+        stage_condition = ""
+        if allowed_stages and not is_admin:
+            stage_placeholders = ", ".join(["%s"] * len(allowed_stages))
+            stage_condition = f" AND education_stage_id IN ({stage_placeholders})"
+        
         # Thống kê theo trạng thái
-        status_stats = frappe.db.sql("""
-            SELECT 
-                status,
-                COUNT(*) as count
-            FROM `tabSIS Scholarship Application`
-            WHERE scholarship_period_id = %s
-            GROUP BY status
-        """, period_id, as_dict=True)
+        if stage_condition:
+            status_stats = frappe.db.sql(f"""
+                SELECT 
+                    status,
+                    COUNT(*) as count
+                FROM `tabSIS Scholarship Application`
+                WHERE scholarship_period_id = %s {stage_condition}
+                GROUP BY status
+            """, [period_id] + allowed_stages, as_dict=True)
+        else:
+            status_stats = frappe.db.sql("""
+                SELECT 
+                    status,
+                    COUNT(*) as count
+                FROM `tabSIS Scholarship Application`
+                WHERE scholarship_period_id = %s
+                GROUP BY status
+            """, period_id, as_dict=True)
         
         # Thống kê theo cấp học
-        stage_stats = frappe.db.sql("""
-            SELECT 
-                education_stage_name,
-                COUNT(*) as count
-            FROM `tabSIS Scholarship Application`
-            WHERE scholarship_period_id = %s
-            GROUP BY education_stage_id
-        """, period_id, as_dict=True)
+        if stage_condition:
+            stage_stats = frappe.db.sql(f"""
+                SELECT 
+                    education_stage_id,
+                    education_stage_name,
+                    COUNT(*) as count
+                FROM `tabSIS Scholarship Application`
+                WHERE scholarship_period_id = %s {stage_condition}
+                GROUP BY education_stage_id, education_stage_name
+            """, [period_id] + allowed_stages, as_dict=True)
+        else:
+            stage_stats = frappe.db.sql("""
+                SELECT 
+                    education_stage_id,
+                    education_stage_name,
+                    COUNT(*) as count
+                FROM `tabSIS Scholarship Application`
+                WHERE scholarship_period_id = %s
+                GROUP BY education_stage_id, education_stage_name
+            """, period_id, as_dict=True)
         
         # Tổng số
-        total = frappe.db.count("SIS Scholarship Application", {"scholarship_period_id": period_id})
+        if stage_condition:
+            total_result = frappe.db.sql(f"""
+                SELECT COUNT(*) as total
+                FROM `tabSIS Scholarship Application`
+                WHERE scholarship_period_id = %s {stage_condition}
+            """, [period_id] + allowed_stages, as_dict=True)
+            total = total_result[0].total if total_result else 0
+        else:
+            total = frappe.db.count("SIS Scholarship Application", {"scholarship_period_id": period_id})
         
         # Chuyển đổi thành dict
         status_dict = {item.status: item.count for item in status_stats}
@@ -1580,7 +1648,9 @@ def get_statistics(period_id=None):
                     "Rejected": status_dict.get("Rejected", 0),
                     "DeniedByTeacher": status_dict.get("DeniedByTeacher", 0)
                 },
-                "by_stage": stage_stats
+                "by_stage": stage_stats,
+                "allowed_stages": allowed_stages,  # Trả về để FE biết user có quyền với cấp học nào
+                "is_admin": is_admin
             },
             message="Lấy thống kê thành công",
             logs=logs
