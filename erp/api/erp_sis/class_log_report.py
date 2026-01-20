@@ -71,16 +71,18 @@ def get_class_log_status(class_id=None, date=None):
             if teacher_user_id:
                 homeroom_teacher_name = frappe.get_value("User", teacher_user_id, "full_name")
         
-        # Lấy timetable instance
-        timetable_instance = frappe.db.get_value(
-            "SIS Timetable Instance",
-            {
-                "class_id": class_id,
-                "start_date": ["<=", date_obj],
-                "end_date": [">=", date_obj]
-            },
-            "name"
-        )
+        # Lấy timetable instance (xử lý cả trường hợp end_date là NULL)
+        timetable_instance_result = frappe.db.sql("""
+            SELECT name FROM `tabSIS Timetable Instance`
+            WHERE class_id = %(class_id)s
+                AND start_date <= %(date)s
+                AND (end_date >= %(date)s OR end_date IS NULL)
+            LIMIT 1
+        """, {
+            "class_id": class_id,
+            "date": date_obj
+        }, as_dict=True)
+        timetable_instance = timetable_instance_result[0].name if timetable_instance_result else None
         
         if not timetable_instance:
             return success_response(
@@ -959,16 +961,18 @@ def get_class_log_detail(class_id=None, date=None):
             if teacher_user_id:
                 homeroom_teacher_name = frappe.get_value("User", teacher_user_id, "full_name")
         
-        # Lấy timetable instance
-        timetable_instance = frappe.db.get_value(
-            "SIS Timetable Instance",
-            {
-                "class_id": class_id,
-                "start_date": ["<=", date_obj],
-                "end_date": [">=", date_obj]
-            },
-            "name"
-        )
+        # Lấy timetable instance (xử lý cả trường hợp end_date là NULL)
+        timetable_instance_result = frappe.db.sql("""
+            SELECT name FROM `tabSIS Timetable Instance`
+            WHERE class_id = %(class_id)s
+                AND start_date <= %(date)s
+                AND (end_date >= %(date)s OR end_date IS NULL)
+            LIMIT 1
+        """, {
+            "class_id": class_id,
+            "date": date_obj
+        }, as_dict=True)
+        timetable_instance = timetable_instance_result[0].name if timetable_instance_result else None
         
         periods_result = []
         
