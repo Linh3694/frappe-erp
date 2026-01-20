@@ -64,10 +64,12 @@ def get_class_log_status(class_id=None, date=None):
         # Lấy thông tin lớp
         class_doc = frappe.get_doc("SIS Class", class_id)
         
-        # Lấy tên giáo viên chủ nhiệm
+        # Lấy tên giáo viên chủ nhiệm qua User.full_name
         homeroom_teacher_name = None
         if class_doc.homeroom_teacher:
-            homeroom_teacher_name = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "teacher_name")
+            teacher_user_id = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "user_id")
+            if teacher_user_id:
+                homeroom_teacher_name = frappe.get_value("User", teacher_user_id, "full_name")
         
         # Lấy timetable instance
         timetable_instance = frappe.db.get_value(
@@ -109,10 +111,11 @@ def get_class_log_status(class_id=None, date=None):
                 tc.subject_id,
                 sub.title as subject_name,
                 tc.teacher_id,
-                t.teacher_name
+                u.full_name as teacher_name
             FROM `tabSIS Timetable Column` tc
             LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
             LEFT JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE tc.timetable_instance_id = %(instance)s
                 AND tc.day_of_week = %(day)s
             ORDER BY tc.period_name
@@ -288,6 +291,11 @@ def get_teacher_class_log_summary(teacher_id=None, start_date=None, end_date=Non
         # Lấy thông tin giáo viên
         teacher = frappe.get_doc("SIS Teacher", teacher_id)
         
+        # Lấy tên giáo viên từ User.full_name
+        teacher_full_name = None
+        if teacher.user_id:
+            teacher_full_name = frappe.get_value("User", teacher.user_id, "full_name")
+        
         # Lấy các môn giáo viên dạy
         teacher_subjects = frappe.db.sql("""
             SELECT DISTINCT s.name, s.title
@@ -444,7 +452,7 @@ def get_teacher_class_log_summary(teacher_id=None, start_date=None, end_date=Non
             data={
                 "teacher_info": {
                     "name": teacher.name,
-                    "teacher_name": teacher.teacher_name,
+                    "teacher_name": teacher_full_name,
                     "subjects": [{"name": s['name'], "title": s['title']} for s in teacher_subjects]
                 },
                 "summary": {
@@ -724,16 +732,21 @@ def get_class_log_dashboard(date=None, campus_id=None):
         class_ids = [c.name for c in classes]
         day_name = date_obj.strftime("%A")
         
-        # Lấy tên GVCN
+        # Lấy tên GVCN qua User.full_name
         teacher_ids = [c.homeroom_teacher for c in classes if c.homeroom_teacher]
         teacher_names = {}
         if teacher_ids:
+            # Lấy user_id từ SIS Teacher
             teachers = frappe.get_all(
                 "SIS Teacher",
                 filters={"name": ["in", teacher_ids]},
-                fields=["name", "teacher_name"]
+                fields=["name", "user_id"]
             )
-            teacher_names = {t.name: t.teacher_name for t in teachers}
+            # Lấy full_name từ User
+            for t in teachers:
+                if t.user_id:
+                    full_name = frappe.db.get_value("User", t.user_id, "full_name")
+                    teacher_names[t.name] = full_name
         
         # Đếm số tiết Study theo lịch cho mỗi lớp (chỉ tiết có tên chứa "Tiết")
         scheduled_counts = frappe.db.sql("""
@@ -908,10 +921,12 @@ def get_class_log_detail(class_id=None, date=None):
         # Lấy thông tin lớp
         class_doc = frappe.get_doc("SIS Class", class_id)
         
-        # Lấy tên giáo viên chủ nhiệm
+        # Lấy tên giáo viên chủ nhiệm qua User.full_name
         homeroom_teacher_name = None
         if class_doc.homeroom_teacher:
-            homeroom_teacher_name = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "teacher_name")
+            teacher_user_id = frappe.get_value("SIS Teacher", class_doc.homeroom_teacher, "user_id")
+            if teacher_user_id:
+                homeroom_teacher_name = frappe.get_value("User", teacher_user_id, "full_name")
         
         # Lấy timetable instance
         timetable_instance = frappe.db.get_value(
@@ -936,10 +951,11 @@ def get_class_log_detail(class_id=None, date=None):
                     tc.subject_id,
                     sub.title as subject_name,
                     tc.teacher_id,
-                    t.teacher_name
+                    u.full_name as teacher_name
                 FROM `tabSIS Timetable Column` tc
                 LEFT JOIN `tabSIS Subject` sub ON tc.subject_id = sub.name
                 LEFT JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
+                LEFT JOIN `tabUser` u ON t.user_id = u.name
                 WHERE tc.timetable_instance_id = %(instance)s
                     AND tc.day_of_week = %(day)s
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
