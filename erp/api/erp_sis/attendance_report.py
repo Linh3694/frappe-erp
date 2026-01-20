@@ -21,14 +21,15 @@ def _get_json_body():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_period_attendance_overview(date=None, period=None, campus_id=None):
+def get_period_attendance_overview(date=None, period=None, campus_id=None, education_stage_id=None):
     """
     Thống kê điểm danh 1 tiết cho tất cả các lớp
     
     Args:
         date: Ngày cần xem (YYYY-MM-DD)
-        period: Tên tiết (e.g. "Tiết 1", "Homeroom")
+        period: Tên tiết (e.g. "Tiết 1", "Homeroom") hoặc ID của SIS Timetable Column
         campus_id: Campus ID (optional)
+        education_stage_id: Education Stage ID để filter lớp theo cấp học (optional)
     
     Returns:
         {
@@ -36,13 +37,13 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
             data: {
                 period: "Tiết 1",
                 date: "2025-01-19",
-                summary: { total_classes, total_students, present, absent, late },
+                summary: { total_classes, total_students, present, absent, late, completed_classes, incomplete_classes },
                 classes: [
                     {
                         class_id, class_title, 
                         total, present, absent, late, excused,
-                        teacher_id, teacher_name,
-                        rate
+                        teacher_id, teacher_name, subject_name,
+                        has_attendance, rate
                     }
                 ]
             }
@@ -56,6 +57,8 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
             period = frappe.request.args.get('period')
         if not campus_id:
             campus_id = frappe.request.args.get('campus_id')
+        if not education_stage_id:
+            education_stage_id = frappe.request.args.get('education_stage_id')
         
         if not date or not period:
             return error_response(
@@ -75,25 +78,50 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
                 pass
         
         # Lấy active school year
-        school_year_filters = {"is_active": 1}
+        school_year_filters = {"is_enable": 1}
         if campus_id:
             school_year_filters["campus_id"] = campus_id
         
         school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
         
-        # Lấy danh sách lớp (chỉ lớp regular cho homeroom, tất cả cho các tiết khác)
-        class_filters = {
-            "school_year_id": school_year,
-            "class_type": "regular"
-        }
-        if campus_id:
-            class_filters["campus_id"] = campus_id
+        # Lấy period_name từ timetable_column nếu period là ID
+        period_name = period
+        if period.startswith("SIS-TIMETABLE-COLUMN"):
+            tc = frappe.db.get_value("SIS Timetable Column", period, "period_name")
+            if tc:
+                period_name = tc
         
-        classes = frappe.get_all(
-            "SIS Class",
-            filters=class_filters,
-            fields=["name", "title", "homeroom_teacher"]
-        )
+        # Lấy danh sách lớp, có thể filter theo education_stage_id
+        if education_stage_id:
+            # Query với filter theo education_stage thông qua education_grade
+            classes = frappe.db.sql("""
+                SELECT DISTINCT c.name, c.title, c.homeroom_teacher, c.education_grade
+                FROM `tabSIS Class` c
+                LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                WHERE c.school_year_id = %(school_year)s
+                    AND c.class_type = 'regular'
+                    AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL)
+                    AND eg.education_stage_id = %(education_stage_id)s
+                ORDER BY c.title
+            """, {
+                "school_year": school_year,
+                "campus_id": campus_id,
+                "education_stage_id": education_stage_id
+            }, as_dict=True)
+        else:
+            # Query không filter education_stage
+            class_filters = {
+                "school_year_id": school_year,
+                "class_type": "regular"
+            }
+            if campus_id:
+                class_filters["campus_id"] = campus_id
+            
+            classes = frappe.get_all(
+                "SIS Class",
+                filters=class_filters,
+                fields=["name", "title", "homeroom_teacher", "education_grade"]
+            )
         
         if not classes:
             return success_response(
@@ -138,7 +166,7 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
         """, {
             "class_ids": class_ids,
             "date": date_obj,
-            "period": period
+            "period": period_name
         }, as_dict=True)
         
         # Build attendance map: class_id -> {status -> count}
@@ -148,33 +176,65 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
                 attendance_map[row['class_id']] = {}
             attendance_map[row['class_id']][row['status']] = row['count']
         
-        # Lấy giáo viên dạy tiết này (từ timetable)
+        # Lấy giáo viên và môn học dạy tiết này (từ timetable)
         teacher_map = {}
-        if period.lower() != 'homeroom':
-            # Query timetable để lấy giáo viên bộ môn
+        if period_name.lower() != 'homeroom':
+            # Query timetable để lấy giáo viên bộ môn và môn học
             timetable_data = frappe.db.sql("""
                 SELECT 
                     ti.class_id,
-                    tc.teacher_id,
-                    t.teacher_name
+                    tr.teacher_1_id as teacher_id,
+                    t.teacher_name,
+                    tr.subject_id,
+                    COALESCE(ts.title_vn, sub.title) as subject_name
                 FROM `tabSIS Timetable Instance` ti
-                INNER JOIN `tabSIS Timetable Column` tc ON tc.timetable_instance_id = ti.name
-                INNER JOIN `tabSIS Teacher` t ON tc.teacher_id = t.name
+                INNER JOIN `tabSIS Timetable Row` tr ON tr.timetable_instance_id = ti.name
+                LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
+                LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
                 WHERE ti.class_id IN %(class_ids)s
                     AND ti.start_date <= %(date)s
-                    AND ti.end_date >= %(date)s
-                    AND tc.period_name = %(period)s
-                    AND tc.day_of_week = DAYNAME(%(date)s)
+                    AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
+                    AND tr.timetable_column_id = %(period_id)s
+                    AND tr.day_of_week = DAYNAME(%(date)s)
             """, {
                 "class_ids": class_ids,
                 "date": date_obj,
-                "period": period
+                "period_id": period if period.startswith("SIS-TIMETABLE-COLUMN") else None
             }, as_dict=True)
+            
+            # Nếu không tìm được bằng period_id, thử tìm bằng period_name
+            if not timetable_data:
+                timetable_data = frappe.db.sql("""
+                    SELECT 
+                        ti.class_id,
+                        tr.teacher_1_id as teacher_id,
+                        t.teacher_name,
+                        tr.subject_id,
+                        COALESCE(ts.title_vn, sub.title) as subject_name
+                    FROM `tabSIS Timetable Instance` ti
+                    INNER JOIN `tabSIS Timetable Row` tr ON tr.timetable_instance_id = ti.name
+                    INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+                    LEFT JOIN `tabSIS Teacher` t ON tr.teacher_1_id = t.name
+                    LEFT JOIN `tabSIS Timetable Subject` ts ON tr.subject_id = ts.name
+                    LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+                    WHERE ti.class_id IN %(class_ids)s
+                        AND ti.start_date <= %(date)s
+                        AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
+                        AND tc.period_name = %(period_name)s
+                        AND tr.day_of_week = DAYNAME(%(date)s)
+                """, {
+                    "class_ids": class_ids,
+                    "date": date_obj,
+                    "period_name": period_name
+                }, as_dict=True)
             
             for row in timetable_data:
                 teacher_map[row['class_id']] = {
-                    "teacher_id": row['teacher_id'],
-                    "teacher_name": row['teacher_name']
+                    "teacher_id": row.get('teacher_id'),
+                    "teacher_name": row.get('teacher_name'),
+                    "subject_id": row.get('subject_id'),
+                    "subject_name": row.get('subject_name')
                 }
         
         # Build kết quả cho từng lớp
@@ -183,6 +243,8 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
         present_all = 0
         absent_all = 0
         late_all = 0
+        completed_classes = 0
+        incomplete_classes = 0
         
         for cls in classes:
             total = student_count_map.get(cls.name, 0)
@@ -199,14 +261,23 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
             absent_all += absent
             late_all += late
             
-            # Lấy teacher info
+            # Kiểm tra đã điểm danh hay chưa
+            has_attendance = sum([present, absent, late, excused, left_early]) > 0
+            if has_attendance:
+                completed_classes += 1
+            else:
+                incomplete_classes += 1
+            
+            # Lấy teacher info và subject info
             teacher_info = teacher_map.get(cls.name)
             if not teacher_info and cls.homeroom_teacher:
                 # Fallback về homeroom teacher
                 teacher_name = frappe.get_value("SIS Teacher", cls.homeroom_teacher, "teacher_name")
                 teacher_info = {
                     "teacher_id": cls.homeroom_teacher,
-                    "teacher_name": teacher_name
+                    "teacher_name": teacher_name,
+                    "subject_id": None,
+                    "subject_name": None
                 }
             
             classes_result.append({
@@ -220,7 +291,9 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
                 "left_early": left_early,
                 "teacher_id": teacher_info.get('teacher_id') if teacher_info else None,
                 "teacher_name": teacher_info.get('teacher_name') if teacher_info else None,
-                "has_attendance": sum([present, absent, late, excused, left_early]) > 0,
+                "subject_id": teacher_info.get('subject_id') if teacher_info else None,
+                "subject_name": teacher_info.get('subject_name') if teacher_info else None,
+                "has_attendance": has_attendance,
                 "rate": round(present / total * 100, 1) if total > 0 else 0
             })
         
@@ -229,7 +302,8 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
         
         return success_response(
             data={
-                "period": period,
+                "period": period_name,
+                "period_id": period if period.startswith("SIS-TIMETABLE-COLUMN") else None,
                 "date": str(date_obj),
                 "summary": {
                     "total_classes": len(classes),
@@ -237,6 +311,8 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None):
                     "present": present_all,
                     "absent": absent_all,
                     "late": late_all,
+                    "completed_classes": completed_classes,
+                    "incomplete_classes": incomplete_classes,
                     "rate": round(present_all / total_students_all * 100, 1) if total_students_all > 0 else 0
                 },
                 "classes": classes_result
@@ -424,4 +500,135 @@ def get_class_attendance_summary(class_id=None, date=None):
         return error_response(
             message=f"Lỗi khi lấy thống kê điểm danh: {str(e)}",
             code="GET_CLASS_ATTENDANCE_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_education_stages(campus_id=None):
+    """
+    Lấy danh sách các cấp học (Education Stages) của campus
+    
+    Args:
+        campus_id: Campus ID (optional, nếu không truyền sẽ lấy từ context)
+    
+    Returns:
+        {
+            success: true,
+            data: [
+                { name, title_vn, title_en, short_title }
+            ]
+        }
+    """
+    try:
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        
+        # Lấy campus từ context nếu không truyền
+        if not campus_id:
+            try:
+                from erp.utils.campus_utils import get_current_campus_from_context
+                campus_id = get_current_campus_from_context()
+            except Exception:
+                pass
+        
+        if not campus_id:
+            return error_response(
+                message="Thiếu tham số: campus_id là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        # Lấy danh sách education stages của campus
+        stages = frappe.get_all(
+            "SIS Education Stage",
+            filters={"campus_id": campus_id},
+            fields=["name", "title_vn", "title_en", "short_title"],
+            order_by="title_vn asc"
+        )
+        
+        return success_response(
+            data=stages,
+            message="Lấy danh sách cấp học thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_education_stages error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách cấp học: {str(e)}",
+            code="GET_EDUCATION_STAGES_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_timetable_columns(education_stage_id=None, campus_id=None):
+    """
+    Lấy danh sách các tiết học (Timetable Columns) theo cấp học
+    
+    Args:
+        education_stage_id: Education Stage ID (required)
+        campus_id: Campus ID (optional)
+    
+    Returns:
+        {
+            success: true,
+            data: [
+                { 
+                    name, period_name, period_priority, 
+                    start_time, end_time, period_type 
+                }
+            ]
+        }
+    """
+    try:
+        if not education_stage_id:
+            education_stage_id = frappe.request.args.get('education_stage_id')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        
+        if not education_stage_id:
+            return error_response(
+                message="Thiếu tham số: education_stage_id là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        # Lấy campus từ context nếu không truyền
+        if not campus_id:
+            try:
+                from erp.utils.campus_utils import get_current_campus_from_context
+                campus_id = get_current_campus_from_context()
+            except Exception:
+                pass
+        
+        # Build filters
+        filters = {
+            "education_stage_id": education_stage_id,
+            "period_type": "study"  # Chỉ lấy các tiết học (không lấy break, lunch...)
+        }
+        if campus_id:
+            filters["campus_id"] = campus_id
+        
+        # Lấy danh sách timetable columns
+        columns = frappe.get_all(
+            "SIS Timetable Column",
+            filters=filters,
+            fields=["name", "period_name", "period_priority", "start_time", "end_time", "period_type"],
+            order_by="period_priority asc"
+        )
+        
+        # Format thời gian
+        for col in columns:
+            if col.get('start_time'):
+                col['start_time'] = str(col['start_time'])[:5]  # HH:MM
+            if col.get('end_time'):
+                col['end_time'] = str(col['end_time'])[:5]  # HH:MM
+        
+        return success_response(
+            data=columns,
+            message="Lấy danh sách tiết học thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_timetable_columns error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách tiết học: {str(e)}",
+            code="GET_TIMETABLE_COLUMNS_ERROR"
         )
