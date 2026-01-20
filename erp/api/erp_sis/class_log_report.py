@@ -517,8 +517,8 @@ def get_campus_class_log_overview(campus_id=None, date=None):
             except Exception:
                 pass
         
-        # Lấy active school year
-        school_year_filters = {"is_active": 1}
+        # Lấy active school year (is_enable = 1)
+        school_year_filters = {"is_enable": 1}
         if campus_id:
             school_year_filters["campus_id"] = campus_id
         
@@ -527,7 +527,7 @@ def get_campus_class_log_overview(campus_id=None, date=None):
         # Lấy danh sách lớp
         class_filters = {
             "school_year_id": school_year,
-            "class_type": "regular"
+            "class_type": "Regular"
         }
         if campus_id:
             class_filters["campus_id"] = campus_id
@@ -687,8 +687,8 @@ def get_class_log_dashboard(date=None, campus_id=None):
             except Exception:
                 pass
         
-        # Lấy active school year
-        school_year_filters = {"is_active": 1}
+        # Lấy active school year (is_enable = 1)
+        school_year_filters = {"is_enable": 1}
         if campus_id:
             school_year_filters["campus_id"] = campus_id
         
@@ -697,7 +697,7 @@ def get_class_log_dashboard(date=None, campus_id=None):
         # Lấy danh sách lớp Regular
         class_filters = {
             "school_year_id": school_year,
-            "class_type": "regular"
+            "class_type": "Regular"
         }
         if campus_id:
             class_filters["campus_id"] = campus_id
