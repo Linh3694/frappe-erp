@@ -467,6 +467,16 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                     'has_check_out': len(afternoon_times) > 0  # Có quét buổi chiều
                 }
         
+        # Đếm tổng số đơn nghỉ phép trong ngày (đơn có start_date <= date <= end_date)
+        total_leave_requests = frappe.db.count(
+            "SIS Student Leave Request",
+            filters={
+                "campus_id": campus_id,
+                "start_date": ["<=", date_obj],
+                "end_date": [">=", date_obj]
+            }
+        )
+        
         # Tính toán thống kê cho từng lớp
         classes_result = []
         total_all = 0
@@ -511,7 +521,8 @@ def get_campus_faceid_summary(campus_id=None, date=None):
                     "checked_out": checked_out_all,
                     "not_checked_out": total_all - checked_out_all,
                     "rate_in": round(checked_in_all / total_all * 100, 1) if total_all > 0 else 0,
-                    "rate_out": round(checked_out_all / total_all * 100, 1) if total_all > 0 else 0
+                    "rate_out": round(checked_out_all / total_all * 100, 1) if total_all > 0 else 0,
+                    "total_leave_requests": total_leave_requests  # Tổng số đơn nghỉ phép trong ngày
                 },
                 "classes": classes_result
             },
