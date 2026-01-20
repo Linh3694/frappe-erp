@@ -618,6 +618,7 @@ def get_campus_leave_requests(campus_id=None, date=None):
                 )
         
         # Lấy danh sách đơn nghỉ phép trong ngày (đơn có start_date <= date <= end_date)
+        # Sử dụng subquery để lấy duy nhất lớp regular của học sinh, tránh duplicate
         leave_requests = frappe.db.sql("""
             SELECT 
                 lr.name,
@@ -633,11 +634,16 @@ def get_campus_leave_requests(campus_id=None, date=None):
                 lr.total_days,
                 lr.description,
                 lr.submitted_at,
-                cs.class_id,
-                c.title as class_title
+                cls.class_id,
+                cls.class_title
             FROM `tabSIS Student Leave Request` lr
-            LEFT JOIN `tabSIS Class Student` cs ON cs.student_id = lr.student_id
-            LEFT JOIN `tabSIS Class` c ON c.name = cs.class_id AND c.class_type = 'regular'
+            LEFT JOIN (
+                SELECT cs.student_id, cs.class_id, c.title as class_title
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id 
+                    AND c.class_type = 'regular'
+                    AND c.campus_id = %(campus_id)s
+            ) cls ON cls.student_id = lr.student_id
             WHERE lr.campus_id = %(campus_id)s
                 AND lr.start_date <= %(date)s
                 AND lr.end_date >= %(date)s
@@ -646,6 +652,16 @@ def get_campus_leave_requests(campus_id=None, date=None):
             "campus_id": campus_id,
             "date": date_obj
         }, as_dict=True)
+        
+        # Loại bỏ duplicate dựa trên leave request name (mỗi đơn chỉ hiển thị 1 lần)
+        seen_requests = set()
+        unique_requests = []
+        for lr in leave_requests:
+            if lr.name not in seen_requests:
+                seen_requests.add(lr.name)
+                unique_requests.append(lr)
+        
+        leave_requests = unique_requests
         
         # Đếm theo lý do
         sick_child_count = sum(1 for r in leave_requests if r.get('reason') == 'sick_child')
