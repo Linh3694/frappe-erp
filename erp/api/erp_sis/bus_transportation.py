@@ -196,6 +196,38 @@ def create_bus_transportation(**data):
 def update_bus_transportation(**data):
 	"""Update an existing bus transportation"""
 	try:
+		# Parse request body nếu chứa URL-encoded data hoặc JSON
+		if not data or data.get('cmd'):
+			if frappe.request.data and isinstance(frappe.request.data, bytes):
+				try:
+					# Thử parse JSON trước
+					body_string = frappe.request.data.decode('utf-8')
+					data = json.loads(body_string)
+				except (json.JSONDecodeError, ValueError):
+					try:
+						# Parse URL-encoded data từ request body
+						from urllib.parse import unquote_plus
+						body_string = frappe.request.data.decode('utf-8')
+						
+						# Parse URL-encoded data
+						parsed_data = {}
+						for pair in body_string.split('&'):
+							if '=' in pair:
+								key, value = pair.split('=', 1)
+								parsed_data[unquote_plus(key)] = unquote_plus(value)
+						
+						data = parsed_data
+					except Exception as parse_error:
+						# Fallback to form_dict
+						form_data = dict(frappe.form_dict)
+						form_data.pop('cmd', None)
+						data = form_data
+			else:
+				# Fallback to form_dict
+				form_data = dict(frappe.form_dict)
+				form_data.pop('cmd', None)
+				data = form_data
+		
 		# Get name from data (sent by frontend as part of data object)
 		name = data.get('name')
 		if not name:
