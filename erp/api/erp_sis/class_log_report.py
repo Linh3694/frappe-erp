@@ -1077,7 +1077,7 @@ def get_class_log_detail(class_id=None, date=None):
                 cs.student_id,
                 s.student_name
             FROM `tabSIS Class Student` cs
-            INNER JOIN `tabStudent` s ON cs.student_id = s.name
+            INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
             WHERE cs.class_id = %(class_id)s
             ORDER BY s.student_name
         """, {"class_id": class_id}, as_dict=True)
