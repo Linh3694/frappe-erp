@@ -677,13 +677,26 @@ def get_applications():
     logs = []
     
     try:
-        # Kiểm tra quyền
-        user_roles = frappe.get_roles(frappe.session.user)
-        if not any(role in user_roles for role in ['System Manager', 'SIS Manager', 'Registrar', 'SIS BOD']):
-            return error_response("Bạn không có quyền truy cập", logs=logs)
-        
         # Lấy filters từ query params
         period_id = frappe.request.args.get('period_id')
+        
+        # Kiểm tra quyền
+        user = frappe.session.user
+        user_roles = frappe.get_roles(user)
+        is_admin = any(role in user_roles for role in ['System Manager', 'SIS Manager'])
+        
+        # Lấy danh sách cấp học user được phân quyền từ scholarship period
+        allowed_stages = []
+        if not is_admin and period_id:
+            period = frappe.get_doc("SIS Scholarship Period", period_id)
+            for approver in period.approvers:
+                if approver.user_id == user:
+                    allowed_stages.append(approver.educational_stage_id)
+        
+        # Nếu không phải admin và không được phân quyền cấp học nào, chỉ cho phép xem nếu có role Registrar/SIS BOD
+        if not is_admin and not allowed_stages:
+            if not any(role in user_roles for role in ['Registrar', 'SIS BOD']):
+                return error_response("Bạn không có quyền truy cập", logs=logs)
         education_stage_id = frappe.request.args.get('education_stage_id')
         education_stage_name = frappe.request.args.get('education_stage_name')  # Filter theo tên cấp học
         status = frappe.request.args.get('status')
@@ -707,13 +720,17 @@ def get_applications():
         if education_stage_name:
             # Lấy education_stage_id từ tên
             stage_id = frappe.db.get_value(
-                "SIS Educational Stage",
+                "SIS Education Stage",
                 {"title_vn": education_stage_name},
                 "name"
             )
             if stage_id:
                 conditions.append("app.education_stage_id = %(education_stage_id_from_name)s")
                 values["education_stage_id_from_name"] = stage_id
+            else:
+                # Nếu không tìm thấy stage_id, filter trực tiếp theo education_stage_name trên application
+                conditions.append("app.education_stage_name = %(education_stage_name)s")
+                values["education_stage_name"] = education_stage_name
         
         if status:
             conditions.append("app.status = %(status)s")
@@ -722,6 +739,13 @@ def get_applications():
         if search:
             conditions.append("(app.student_name LIKE %(search)s OR app.student_code LIKE %(search)s)")
             values["search"] = f"%{search}%"
+        
+        # Filter theo cấp học user được phân quyền (nếu không phải admin)
+        if allowed_stages:
+            placeholders = ", ".join([f"%(allowed_stage_{i})s" for i in range(len(allowed_stages))])
+            conditions.append(f"app.education_stage_id IN ({placeholders})")
+            for i, stage in enumerate(allowed_stages):
+                values[f"allowed_stage_{i}"] = stage
         
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
@@ -900,6 +924,20 @@ def get_application_detail(application_id=None):
                 "approver_name": score_doc.approver_name
             }
         
+        # Kiểm tra quyền chấm điểm của user hiện tại
+        user = frappe.session.user
+        user_roles = frappe.get_roles(user)
+        is_admin = any(role in user_roles for role in ['System Manager', 'SIS Manager'])
+        
+        can_score = is_admin  # Admin luôn có quyền
+        if not is_admin:
+            # Kiểm tra user có được phân quyền chấm điểm cho cấp học này không
+            period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+            for approver in period.approvers:
+                if approver.user_id == user and approver.educational_stage_id == app.education_stage_id:
+                    can_score = True
+                    break
+        
         return single_item_response(
             data={
                 "name": app.name,
@@ -928,7 +966,8 @@ def get_application_detail(application_id=None):
                 "total_percentage": app.total_percentage,
                 "approved_by": app.approved_by,
                 "approved_at": str(app.approved_at) if app.approved_at else None,
-                "rejection_reason": app.rejection_reason
+                "rejection_reason": app.rejection_reason,
+                "can_score": can_score
             },
             message="Lấy chi tiết đơn thành công"
         )
@@ -948,13 +987,11 @@ def get_application_detail(application_id=None):
 def save_scoring():
     """
     Lưu chấm điểm hồ sơ.
+    Chỉ user được phân quyền theo cấp học mới có thể chấm điểm.
     """
     logs = []
     
     try:
-        if not _check_admin_permission():
-            return error_response("Bạn không có quyền truy cập", logs=logs)
-        
         # Lấy data từ request
         if frappe.request.is_json:
             data = frappe.request.json or {}
@@ -968,10 +1005,27 @@ def save_scoring():
                 {"application_id": ["Application ID là bắt buộc"]}
             )
         
-        logs.append(f"Chấm điểm cho đơn: {application_id}")
-        
-        # Lấy hoặc tạo scoring record
+        # Lấy application để kiểm tra quyền
         app = frappe.get_doc("SIS Scholarship Application", application_id)
+        
+        # Kiểm tra quyền chấm điểm
+        user = frappe.session.user
+        user_roles = frappe.get_roles(user)
+        is_admin = any(role in user_roles for role in ['System Manager', 'SIS Manager'])
+        
+        if not is_admin:
+            # Kiểm tra user có được phân quyền chấm điểm cho cấp học này không
+            period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+            can_score = False
+            for approver in period.approvers:
+                if approver.user_id == user and approver.educational_stage_id == app.education_stage_id:
+                    can_score = True
+                    break
+            
+            if not can_score:
+                return error_response("Bạn không có quyền chấm điểm hồ sơ này", logs=logs)
+        
+        logs.append(f"Chấm điểm cho đơn: {application_id}")
         
         if app.scoring_id:
             scoring = frappe.get_doc("SIS Scholarship Scoring", app.scoring_id)
