@@ -32,7 +32,10 @@ from erp.api.attendance.hikvision import (
 	get_historical_attendance_threshold_minutes,
 	get_hikvision_logger
 )
-from erp.common.doctype.erp_time_attendance.erp_time_attendance import find_or_create_day_record
+from erp.common.doctype.erp_time_attendance.erp_time_attendance import (
+	find_or_create_day_record,
+	normalize_date_to_vn_timezone
+)
 
 
 def get_batch_processor_logger():
@@ -109,6 +112,10 @@ def process_attendance_buffer():
 		
 		logger.info(f"📊 Grouped into {len(grouped_events)} employee-date combinations")
 		
+		# OPTIMIZATION: Batch query existing records trước để giảm N queries xuống 1
+		existing_map = batch_get_existing_records(grouped_events, logger)
+		logger.info(f"📋 Found {len(existing_map)} existing records")
+		
 		# Process each group
 		records_processed = 0
 		records_updated = 0
@@ -119,7 +126,9 @@ def process_attendance_buffer():
 		try:
 			for key, employee_events in grouped_events.items():
 				try:
-					result = process_employee_events(key, employee_events, logger)
+					# Truyền existing record name nếu có
+					existing_name = existing_map.get(key)
+					result = process_employee_events(key, employee_events, logger, existing_name=existing_name)
 					
 					if result.get("success"):
 						if result.get("is_new"):
@@ -223,7 +232,54 @@ def group_events_by_employee_date(events):
 	return grouped
 
 
-def process_employee_events(key, events, logger):
+def batch_get_existing_records(grouped_events, logger):
+	"""
+	Batch query để lấy tất cả existing attendance records trong 1 query.
+	Giảm từ N queries xuống còn 1.
+	
+	Args:
+		grouped_events: Dict {(employee_code, date_str): events}
+		logger: Logger instance
+	
+	Returns:
+		Dict: {(employee_code, date_str): record_name}
+	"""
+	if not grouped_events:
+		return {}
+	
+	# Extract unique employee_codes và dates
+	employee_codes = list(set([key[0] for key in grouped_events.keys()]))
+	dates = list(set([key[1] for key in grouped_events.keys()]))
+	
+	if not employee_codes or not dates:
+		return {}
+	
+	try:
+		# Single batch query cho tất cả combinations
+		existing_records = frappe.db.sql("""
+			SELECT name, employee_code, date 
+			FROM `tabERP Time Attendance`
+			WHERE employee_code IN %(employee_codes)s
+			AND date IN %(dates)s
+		""", {
+			"employee_codes": employee_codes,
+			"dates": dates
+		}, as_dict=True)
+		
+		# Build lookup map
+		result = {}
+		for rec in existing_records:
+			key = (rec.employee_code, str(rec.date))
+			result[key] = rec.name
+		
+		return result
+		
+	except Exception as e:
+		logger.error(f"❌ Error batch querying existing records: {str(e)}")
+		return {}
+
+
+def process_employee_events(key, events, logger, existing_name=None):
 	"""
 	Xử lý tất cả events cho 1 employee trong 1 ngày.
 	
@@ -231,6 +287,7 @@ def process_employee_events(key, events, logger):
 		key: Tuple (employee_code, date_str)
 		events: List of events cho employee này
 		logger: Logger instance
+		existing_name: Optional - tên record nếu đã tồn tại (từ batch query)
 	
 	Returns:
 		Dict with processing result
@@ -260,16 +317,26 @@ def process_employee_events(key, events, logger):
 	logger.debug(f"Processing {len(events)} events for {employee_code} on {date_str}")
 	
 	try:
-		# Find or create attendance record
-		attendance_doc = find_or_create_day_record(
-			employee_code=employee_code,
-			date=earliest_timestamp,
-			device_id=device_id,
-			employee_name=employee_name,
-			device_name=device_name
-		)
-		
-		is_new = not attendance_doc.name or not attendance_doc.get("__islocal") == False
+		# OPTIMIZED: Dùng existing_name nếu có, không cần query lại
+		if existing_name:
+			# Load existing record directly
+			attendance_doc = frappe.get_doc("ERP Time Attendance", existing_name)
+			# Update employee_name và device_name nếu provided và chưa có
+			if employee_name and not attendance_doc.employee_name:
+				attendance_doc.employee_name = employee_name
+			if device_name and not attendance_doc.device_name:
+				attendance_doc.device_name = device_name
+			is_new = False
+		else:
+			# Create new record
+			attendance_doc = frappe.new_doc("ERP Time Attendance")
+			attendance_doc.employee_code = employee_code
+			attendance_doc.employee_name = employee_name
+			attendance_doc.date = normalize_date_to_vn_timezone(earliest_timestamp)
+			attendance_doc.device_id = device_id
+			attendance_doc.device_name = device_name
+			attendance_doc.raw_data = "[]"
+			is_new = True
 		
 		# Update với tất cả timestamps từ events
 		for evt in sorted_events:

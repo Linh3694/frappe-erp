@@ -19,8 +19,8 @@ from erp.common.doctype.erp_time_attendance.erp_time_attendance import find_or_c
 
 # Redis key cho attendance buffer
 ATTENDANCE_BUFFER_KEY = "hikvision:attendance_buffer"
-# Batch size cho mỗi lần xử lý
-BUFFER_BATCH_SIZE = 100
+# Batch size cho mỗi lần xử lý (tăng lên 200 để xử lý nhanh hơn)
+BUFFER_BATCH_SIZE = 200
 
 # Tạo logger riêng cho HiVision với file log riêng
 def get_hikvision_logger():
