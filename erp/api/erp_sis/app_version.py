@@ -15,7 +15,7 @@ APP_VERSIONS = {
             "store_url": "https://apps.apple.com/app/id6746143732",
         },
         "android": {
-            "version": "1.5.6",  # Version mới nhất trên Play Store
+            "version": "1.5.8",  # Version mới nhất trên Play Store
             "min_version": "1.0.0",  # Version tối thiểu bắt buộc
             "store_url": "https://play.google.com/store/apps/details?id=com.hailinh.n23.workspace",
         },
