@@ -20,6 +20,37 @@ def _get_json_body():
     return {}
 
 
+def _resolve_campus_id(campus_id):
+    """
+    Chuyển đổi campus_id từ format frontend (campus-1) sang format database (CAMPUS-00001)
+    """
+    if not campus_id:
+        return None
+    
+    # Nếu đã đúng format CAMPUS-xxxxx thì return luôn
+    if campus_id.startswith("CAMPUS-"):
+        if frappe.db.exists("SIS Campus", campus_id):
+            return campus_id
+    
+    # Nếu là format campus-1, campus-2, etc.
+    if campus_id.startswith("campus-"):
+        try:
+            campus_index = int(campus_id.split("-")[1])
+            mapped_campus = f"CAMPUS-{campus_index:05d}"
+            if frappe.db.exists("SIS Campus", mapped_campus):
+                return mapped_campus
+        except (ValueError, IndexError):
+            pass
+    
+    # Thử tìm theo name trực tiếp
+    if frappe.db.exists("SIS Campus", campus_id):
+        return campus_id
+    
+    # Thử tìm campus đầu tiên nếu không tìm được
+    first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+    return first_campus
+
+
 @frappe.whitelist(allow_guest=False)
 def get_period_attendance_overview(date=None, period=None, campus_id=None, education_stage_id=None):
     """
@@ -68,6 +99,9 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
         
         # Parse date
         date_obj = frappe.utils.getdate(date)
+        
+        # Resolve campus_id từ format frontend sang format database
+        campus_id = _resolve_campus_id(campus_id)
         
         # Lấy campus từ context nếu không truyền
         if not campus_id:
@@ -523,11 +557,14 @@ def get_education_stages(campus_id=None):
         if not campus_id:
             campus_id = frappe.request.args.get('campus_id')
         
+        # Resolve campus_id từ format frontend sang format database
+        campus_id = _resolve_campus_id(campus_id)
+        
         # Lấy campus từ context nếu không truyền
         if not campus_id:
             try:
-                from erp.utils.campus_utils import get_current_campus_from_context
-                campus_id = get_current_campus_from_context()
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
             except Exception:
                 pass
         
@@ -590,11 +627,14 @@ def get_timetable_columns(education_stage_id=None, campus_id=None):
                 code="MISSING_PARAMS"
             )
         
+        # Resolve campus_id từ format frontend sang format database
+        campus_id = _resolve_campus_id(campus_id)
+        
         # Lấy campus từ context nếu không truyền
         if not campus_id:
             try:
-                from erp.utils.campus_utils import get_current_campus_from_context
-                campus_id = get_current_campus_from_context()
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
             except Exception:
                 pass
         
