@@ -740,6 +740,19 @@ def get_timetable_columns(education_stage_id=None, campus_id=None, date=None):
             # Bỏ schedule_id khỏi response để đơn giản hóa
             col.pop('schedule_id', None)
         
+        # Thêm tiết Homeroom - tiết đặc biệt không có trong schedule
+        # Đặt ở cuối với priority cao nhất
+        max_priority = max([col.get('period_priority', 0) for col in columns], default=0) + 1
+        homeroom_period = {
+            "name": "HOMEROOM",
+            "period_name": "Homeroom",
+            "period_priority": max_priority,
+            "start_time": "",
+            "end_time": "",
+            "period_type": "study"
+        }
+        columns.append(homeroom_period)
+        
         return success_response(
             data=columns,
             message="Lấy danh sách tiết học thành công"
