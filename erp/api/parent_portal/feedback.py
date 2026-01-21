@@ -246,11 +246,19 @@ def create():
         frappe.db.commit()
         
         # Send push notification to mobile staff (cho cả Góp ý và Đánh giá)
+        # Chạy async (background job) để không block response
         try:
             from erp.api.notification.feedback import send_new_feedback_notification
-            send_new_feedback_notification(feedback)
+            frappe.enqueue(
+                send_new_feedback_notification,
+                feedback_doc=feedback,
+                queue='short',
+                timeout=60,
+                now=False  # Chạy background, không block
+            )
+            frappe.logger().info(f"📱 Feedback notification enqueued for {feedback.name}")
         except Exception as notify_error:
-            frappe.logger().error(f"Error sending feedback notification: {str(notify_error)}")
+            frappe.logger().error(f"Error enqueueing feedback notification: {str(notify_error)}")
             # Don't fail the request if notification fails
         
         return success_response(
@@ -679,11 +687,20 @@ def add_reply():
         frappe.db.commit()
         
         # Send push notification to assigned staff (if any)
+        # Chạy async (background job) để không block response
         try:
             from erp.api.notification.feedback import send_feedback_reply_notification
-            send_feedback_reply_notification(feedback, "Guardian")
+            frappe.enqueue(
+                send_feedback_reply_notification,
+                feedback_doc=feedback,
+                reply_type="Guardian",
+                queue='short',
+                timeout=60,
+                now=False
+            )
+            frappe.logger().info(f"📱 Reply notification enqueued for {feedback.name}")
         except Exception as notify_error:
-            frappe.logger().error(f"Error sending reply notification: {str(notify_error)}")
+            frappe.logger().error(f"Error enqueueing reply notification: {str(notify_error)}")
             # Don't fail the request if notification fails
         
         return success_response(
