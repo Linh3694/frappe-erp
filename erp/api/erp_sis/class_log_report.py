@@ -990,9 +990,11 @@ def get_class_log_detail(class_id=None, date=None):
             day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
             
             # Lấy giáo viên từ child table hoặc deprecated field
+            # Bao gồm period_priority để sort theo thứ tự ưu tiên
             periods_data = frappe.db.sql("""
                 SELECT 
                     tc.period_name,
+                    tc.period_priority,
                     tr.subject_id,
                     COALESCE(ts.title_vn, sub.title) as subject_name,
                     COALESCE(trt.teacher_id, tr.teacher_1_id) as teacher_id,
@@ -1014,12 +1016,22 @@ def get_class_log_detail(class_id=None, date=None):
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
                     AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
                     AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
-                ORDER BY tc.period_name
+                ORDER BY tc.period_priority ASC
             """, {
                 "instance": timetable_instance,
                 "day": day_of_week_short,
                 "date": date_obj
             }, as_dict=True)
+            
+            # Thêm tiết Homeroom ở đầu (priority = 0)
+            periods_data.insert(0, {
+                "period_name": "Homeroom",
+                "period_priority": 0,
+                "subject_id": None,
+                "subject_name": "Homeroom",
+                "teacher_id": class_doc.homeroom_teacher,
+                "teacher_name": homeroom_teacher_name
+            })
             
             # Lấy class log subjects đã tạo
             period_names = [p['period_name'] for p in periods_data]
