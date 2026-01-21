@@ -1096,7 +1096,7 @@ def get_class_log_detail(class_id=None, date=None):
             # Ví dụ: "Tiết 1 + 2" -> 1, "Tiết 11" -> 11
             import re
             def extract_period_number(period_name):
-                """Extract số đầu tiên từ tên tiết để sort"""
+                """Extract số đầu tiên từ tên tiết để sort và match"""
                 match = re.search(r'\d+', period_name or '')
                 return int(match.group()) if match else 999
             
@@ -1106,7 +1106,15 @@ def get_class_log_detail(class_id=None, date=None):
             # Lưu ý: Homeroom không có class log, chỉ có attendance
             period_names = [p['period_name'] for p in periods_data]
             
-            log_map = {}
+            # Build map: period_number -> period_name (để match log theo số tiết)
+            # VD: "Tiết 1 + 2" -> 1, log có thể được lưu là "Tiết 1" hoặc "Tiết 1 + 2"
+            period_number_map = {}  # period_number -> timetable period_name
+            for p in periods_data:
+                pnum = extract_period_number(p.get('period_name', ''))
+                if pnum not in period_number_map:
+                    period_number_map[pnum] = p['period_name']
+            
+            log_map = {}  # period_number -> log (match theo số tiết đầu tiên)
             if period_names:
                 # 1. Lấy danh sách học sinh trong lớp
                 homeroom_students = frappe.get_all(
@@ -1131,11 +1139,10 @@ def get_class_log_detail(class_id=None, date=None):
                         INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
                         WHERE st.student_id IN %(student_ids)s
                             AND st.date = %(date)s
-                            AND tc.period_name IN %(periods)s
+                            AND LOWER(tc.period_name) LIKE '%%tiết%%'
                     """, {
                         "student_ids": student_ids,
-                        "date": date_obj,
-                        "periods": period_names
+                        "date": date_obj
                     }, as_dict=True)
                     
                     for entry in student_timetable:
@@ -1166,8 +1173,11 @@ def get_class_log_detail(class_id=None, date=None):
                     "date": date_obj
                 }, as_dict=True)
                 
+                # Build log_map theo số tiết đầu tiên (để match "Tiết 1" với "Tiết 1 + 2")
                 for log in class_log_subjects:
-                    log_map[log['period']] = log
+                    period_num = extract_period_number(log['period'])
+                    if period_num not in log_map:
+                        log_map[period_num] = log
                 
                 # 4. Query class logs từ mixed classes và merge vào log_map
                 # Chỉ thêm nếu homeroom class chưa có log cho tiết đó
@@ -1195,20 +1205,20 @@ def get_class_log_detail(class_id=None, date=None):
                     }, as_dict=True)
                     
                     for log in mixed_log_subjects:
-                        period = log['period']
+                        period_num = extract_period_number(log['period'])
                         # Ưu tiên log từ mixed class nếu có học sinh của homeroom học ở đó
                         # và homeroom class chưa có log cho tiết này
-                        if period not in log_map:
-                            log_map[period] = log
+                        if period_num not in log_map:
+                            log_map[period_num] = log
                         else:
-                            # Nếu cả 2 đều có log, merge student_log_count
-                            existing = log_map[period]
+                            # Nếu cả 2 đều có log, ưu tiên cái có content
+                            existing = log_map[period_num]
                             has_existing_content = existing.get('general_comment') or existing.get('student_log_count', 0) > 0
                             has_new_content = log.get('general_comment') or log.get('student_log_count', 0) > 0
                             
                             # Nếu existing không có content nhưng mixed có, dùng mixed
                             if not has_existing_content and has_new_content:
-                                log_map[period] = log
+                                log_map[period_num] = log
             
             # Query attendance cho tiết Homeroom
             # Homeroom không có class log, chỉ có attendance
@@ -1242,7 +1252,8 @@ def get_class_log_detail(class_id=None, date=None):
             # Build periods result cho các tiết học
             for p in periods_data:
                 period_name = p['period_name']
-                log = log_map.get(period_name)
+                period_num = extract_period_number(period_name)
+                log = log_map.get(period_num)  # Match theo số tiết đầu tiên
                 
                 if log:
                     has_content = log.get('general_comment') or log.get('student_log_count', 0) > 0
@@ -1333,6 +1344,16 @@ def get_class_log_detail(class_id=None, date=None):
         total_periods = len(study_periods)
         entered_periods = len([p for p in study_periods if p['status'] != 'not_entered'])
         
+        # Debug: log_map keys và mixed_classes info
+        debug_info = {
+            "log_map_keys": list(log_map.keys()) if log_map else [],
+            "log_map_periods": {k: v.get('period') for k, v in log_map.items()} if log_map else {},
+            "mixed_classes": list(mixed_classes) if 'mixed_classes' in locals() and mixed_classes else [],
+            "homeroom_logs_count": len(class_log_subjects) if 'class_log_subjects' in locals() else 0,
+            "mixed_logs_count": len(mixed_log_subjects) if 'mixed_log_subjects' in locals() else 0,
+            "period_number_map": period_number_map if 'period_number_map' in locals() else {},
+        }
+        
         return success_response(
             data={
                 "class_info": {
@@ -1353,7 +1374,8 @@ def get_class_log_detail(class_id=None, date=None):
                     "not_sent_count": total_students - sent_count,
                     "rate": round(sent_count / total_students * 100, 1) if total_students > 0 else 0,
                     "students": students_result
-                }
+                },
+                "debug": debug_info
             },
             message="Lấy chi tiết sổ đầu bài thành công"
         )
