@@ -708,3 +708,171 @@ def get_campus_leave_requests(campus_id=None, date=None):
             message=f"Lỗi khi lấy danh sách đơn nghỉ phép: {str(e)}",
             code="GET_LEAVE_REQUESTS_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_campus_leave_requests_by_submitted_date(campus_id=None, start_date=None, end_date=None):
+    """
+    Lấy danh sách đơn nghỉ phép của campus theo thời gian tạo đơn (submitted_at)
+    
+    Args:
+        campus_id: ID của campus
+        start_date: Ngày bắt đầu (YYYY-MM-DD) - lọc theo submitted_at
+        end_date: Ngày kết thúc (YYYY-MM-DD) - lọc theo submitted_at
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                summary: { total, sick_child, family_matters, other },
+                requests: [...]
+            }
+        }
+    """
+    try:
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        if not start_date:
+            start_date = frappe.request.args.get('start_date')
+        if not end_date:
+            end_date = frappe.request.args.get('end_date')
+        
+        if not campus_id or not start_date or not end_date:
+            return error_response(
+                message="Thiếu tham số: campus_id, start_date và end_date là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        # Parse dates
+        start_date_obj = frappe.utils.getdate(start_date)
+        end_date_obj = frappe.utils.getdate(end_date)
+        
+        # Kiểm tra và tìm campus_id thực sự
+        original_campus_id = campus_id
+        campus_exists = frappe.db.exists("SIS Campus", campus_id)
+        if not campus_exists:
+            campus_id = frappe.db.get_value(
+                "SIS Campus",
+                {"title_vn": original_campus_id},
+                "name"
+            ) or frappe.db.get_value(
+                "SIS Campus",
+                {"title_en": original_campus_id},
+                "name"
+            )
+            
+            if not campus_id:
+                school_year_campus = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "campus_id"
+                )
+                if school_year_campus:
+                    campus_id = school_year_campus
+            
+            if not campus_id:
+                campus_id = frappe.db.get_value(
+                    "SIS School Year",
+                    {},
+                    "campus_id",
+                    order_by="creation desc"
+                )
+            
+            if not campus_id:
+                return error_response(
+                    message="Không tìm thấy campus nào trong hệ thống",
+                    code="NO_CAMPUS"
+                )
+        
+        # Lấy danh sách đơn nghỉ phép theo thời gian tạo đơn (submitted_at)
+        # Lọc: start_date <= DATE(submitted_at) <= end_date
+        leave_requests = frappe.db.sql("""
+            SELECT 
+                lr.name,
+                lr.student_id,
+                lr.student_name,
+                lr.student_code,
+                lr.parent_id,
+                lr.parent_name,
+                lr.reason,
+                lr.other_reason,
+                lr.start_date,
+                lr.end_date,
+                lr.total_days,
+                lr.description,
+                lr.submitted_at,
+                cls.class_id,
+                cls.class_title
+            FROM `tabSIS Student Leave Request` lr
+            LEFT JOIN (
+                SELECT cs.student_id, cs.class_id, c.title as class_title
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id 
+                    AND c.class_type = 'regular'
+                    AND c.campus_id = %(campus_id)s
+            ) cls ON cls.student_id = lr.student_id
+            WHERE lr.campus_id = %(campus_id)s
+                AND DATE(lr.submitted_at) >= %(start_date)s
+                AND DATE(lr.submitted_at) <= %(end_date)s
+            ORDER BY lr.submitted_at DESC
+        """, {
+            "campus_id": campus_id,
+            "start_date": start_date_obj,
+            "end_date": end_date_obj
+        }, as_dict=True)
+        
+        # Loại bỏ duplicate
+        seen_requests = set()
+        unique_requests = []
+        for lr in leave_requests:
+            if lr.name not in seen_requests:
+                seen_requests.add(lr.name)
+                unique_requests.append(lr)
+        
+        leave_requests = unique_requests
+        
+        # Đếm theo lý do
+        sick_child_count = sum(1 for r in leave_requests if r.get('reason') == 'sick_child')
+        family_matters_count = sum(1 for r in leave_requests if r.get('reason') == 'family_matters')
+        other_count = sum(1 for r in leave_requests if r.get('reason') == 'other')
+        
+        # Format kết quả
+        requests_result = []
+        for lr in leave_requests:
+            requests_result.append({
+                "name": lr.name,
+                "student_id": lr.student_id,
+                "student_name": lr.student_name,
+                "student_code": lr.student_code,
+                "class_id": lr.class_id,
+                "class_title": lr.class_title,
+                "parent_id": lr.parent_id,
+                "parent_name": lr.parent_name,
+                "reason": lr.reason,
+                "other_reason": lr.other_reason,
+                "start_date": str(lr.start_date) if lr.start_date else None,
+                "end_date": str(lr.end_date) if lr.end_date else None,
+                "total_days": lr.total_days or 1,
+                "description": lr.description,
+                "submitted_at": lr.submitted_at.isoformat() if lr.submitted_at else None
+            })
+        
+        return success_response(
+            data={
+                "summary": {
+                    "total": len(leave_requests),
+                    "sick_child": sick_child_count,
+                    "family_matters": family_matters_count,
+                    "other": other_count
+                },
+                "requests": requests_result
+            },
+            message="Lấy danh sách đơn nghỉ phép theo thời gian tạo thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_campus_leave_requests_by_submitted_date error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách đơn nghỉ phép: {str(e)}",
+            code="GET_LEAVE_REQUESTS_ERROR"
+        )
