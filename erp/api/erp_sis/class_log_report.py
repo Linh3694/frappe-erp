@@ -803,73 +803,34 @@ def get_class_log_dashboard(date=None, campus_id=None):
         
         scheduled_map = {r['class_id']: r['period_count'] for r in scheduled_counts}
         
-        # Đếm số tiết Study đã nhập log (bao gồm cả mixed class)
-        # 1. Đếm logs trực tiếp từ homeroom class + lấy danh sách periods
+        # Đếm số tiết Study đã nhập log
+        # OPTIMIZED: Sử dụng COUNT với subquery thay vì LEFT JOIN + GROUP BY
         homeroom_entered = frappe.db.sql("""
             SELECT 
                 cls.class_id,
                 cls.period
             FROM `tabSIS Class Log Subject` cls
-            LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
             WHERE cls.class_id IN %(class_ids)s
                 AND cls.log_date = %(date)s
                 AND LOWER(cls.period) LIKE '%%tiết%%'
-                AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
-                     OR clst.name IS NOT NULL)
+                AND (
+                    (cls.general_comment IS NOT NULL AND cls.general_comment != '')
+                    OR EXISTS (SELECT 1 FROM `tabSIS Class Log Student` clst WHERE clst.subject_id = cls.name LIMIT 1)
+                )
             GROUP BY cls.class_id, cls.period
         """, {
             "class_ids": class_ids,
             "date": date_obj
         }, as_dict=True)
         
-        # Build map: homeroom_class_id -> set of periods đã nhập
-        homeroom_periods_map = {}
+        # Build entered_map: đếm số period đã nhập cho mỗi lớp
+        # NOTE: Chỉ đếm logs từ homeroom class để tối ưu performance
+        # Mixed class logs sẽ được tính chi tiết trong get_class_log_detail
+        entered_map = {}
         for r in homeroom_entered:
-            if r['class_id'] not in homeroom_periods_map:
-                homeroom_periods_map[r['class_id']] = set()
-            homeroom_periods_map[r['class_id']].add(r['period'])
-        
-        # 2. Tìm các tiết tổ hợp (mixed class) đã được nhập log
-        # OPTIMIZED: Gộp 2 query thành 1 query duy nhất với subquery
-        # Chỉ lấy mixed periods mà đã có log (thay vì lấy tất cả rồi filter)
-        mixed_periods_with_logs = frappe.db.sql("""
-            SELECT DISTINCT
-                cs.class_id as homeroom_class_id,
-                cls.period
-            FROM `tabSIS Class Student` cs
-            INNER JOIN `tabSIS Student Timetable` st ON st.student_id = cs.student_id
-                AND st.date = %(date)s
-                AND st.class_id != cs.class_id
-            INNER JOIN `tabSIS Class Log Subject` cls ON cls.class_id = st.class_id
-                AND cls.log_date = %(date)s
-                AND LOWER(cls.period) LIKE '%%tiết%%'
-            WHERE cs.class_id IN %(class_ids)s
-                AND (
-                    (cls.general_comment IS NOT NULL AND cls.general_comment != '')
-                    OR EXISTS (
-                        SELECT 1 FROM `tabSIS Class Log Student` clst 
-                        WHERE clst.subject_id = cls.name
-                    )
-                )
-        """, {
-            "class_ids": class_ids,
-            "date": date_obj
-        }, as_dict=True)
-        
-        # Với mỗi homeroom class, thêm các tiết tổ hợp đã được nhập
-        for m in mixed_periods_with_logs:
-            homeroom_id = m['homeroom_class_id']
-            period = m['period']
-            
-            # Chỉ thêm nếu homeroom chưa có log cho tiết này
-            homeroom_periods = homeroom_periods_map.get(homeroom_id, set())
-            if period not in homeroom_periods:
-                if homeroom_id not in homeroom_periods_map:
-                    homeroom_periods_map[homeroom_id] = set()
-                homeroom_periods_map[homeroom_id].add(period)
-        
-        # Build entered_map từ homeroom_periods_map
-        entered_map = {class_id: len(periods) for class_id, periods in homeroom_periods_map.items()}
+            if r['class_id'] not in entered_map:
+                entered_map[r['class_id']] = 0
+            entered_map[r['class_id']] += 1
         
         # Đếm số học sinh trong mỗi lớp
         student_counts = frappe.db.sql("""
