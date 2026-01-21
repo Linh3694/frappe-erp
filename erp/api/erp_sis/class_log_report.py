@@ -808,11 +808,12 @@ def get_class_log_dashboard(date=None, campus_id=None):
         
         scheduled_map = {r['class_id']: r['period_count'] for r in scheduled_counts}
         
-        # Đếm số tiết Study đã nhập log
-        entered_counts = frappe.db.sql("""
+        # Đếm số tiết Study đã nhập log (bao gồm cả mixed class)
+        # 1. Đếm logs trực tiếp từ homeroom class + lấy danh sách periods
+        homeroom_entered = frappe.db.sql("""
             SELECT 
                 cls.class_id,
-                COUNT(DISTINCT cls.period) as entered_count
+                cls.period
             FROM `tabSIS Class Log Subject` cls
             LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
             WHERE cls.class_id IN %(class_ids)s
@@ -820,13 +821,80 @@ def get_class_log_dashboard(date=None, campus_id=None):
                 AND LOWER(cls.period) LIKE '%%tiết%%'
                 AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
                      OR clst.name IS NOT NULL)
-            GROUP BY cls.class_id
+            GROUP BY cls.class_id, cls.period
         """, {
             "class_ids": class_ids,
             "date": date_obj
         }, as_dict=True)
         
-        entered_map = {r['class_id']: r['entered_count'] for r in entered_counts}
+        # Build map: homeroom_class_id -> set of periods đã nhập
+        homeroom_periods_map = {}
+        for r in homeroom_entered:
+            if r['class_id'] not in homeroom_periods_map:
+                homeroom_periods_map[r['class_id']] = set()
+            homeroom_periods_map[r['class_id']].add(r['period'])
+        
+        # 2. Tìm các tiết tổ hợp (mixed class) đã được nhập log
+        # Query SIS Student Timetable để biết học sinh nào học ở mixed class
+        mixed_periods_by_homeroom = frappe.db.sql("""
+            SELECT DISTINCT
+                cs.class_id as homeroom_class_id,
+                tc.period_name,
+                st.class_id as mixed_class_id
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Student Timetable` st ON st.student_id = cs.student_id
+            INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+            WHERE cs.class_id IN %(class_ids)s
+                AND st.date = %(date)s
+                AND st.class_id != cs.class_id
+                AND LOWER(tc.period_name) LIKE '%%tiết%%'
+        """, {
+            "class_ids": class_ids,
+            "date": date_obj
+        }, as_dict=True)
+        
+        # Lấy danh sách mixed class ids
+        mixed_class_ids = list(set([m['mixed_class_id'] for m in mixed_periods_by_homeroom]))
+        
+        if mixed_class_ids:
+            # Query logs từ mixed classes
+            mixed_entered = frappe.db.sql("""
+                SELECT 
+                    cls.class_id,
+                    cls.period
+                FROM `tabSIS Class Log Subject` cls
+                LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                WHERE cls.class_id IN %(mixed_class_ids)s
+                    AND cls.log_date = %(date)s
+                    AND LOWER(cls.period) LIKE '%%tiết%%'
+                    AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
+                         OR clst.name IS NOT NULL)
+                GROUP BY cls.class_id, cls.period
+            """, {
+                "mixed_class_ids": mixed_class_ids,
+                "date": date_obj
+            }, as_dict=True)
+            
+            # Build set của (mixed_class_id, period) đã được nhập
+            mixed_entered_set = set((m['class_id'], m['period']) for m in mixed_entered)
+            
+            # Với mỗi homeroom class, thêm các tiết tổ hợp đã được nhập
+            for m in mixed_periods_by_homeroom:
+                homeroom_id = m['homeroom_class_id']
+                period = m['period_name']
+                mixed_id = m['mixed_class_id']
+                
+                if (mixed_id, period) in mixed_entered_set:
+                    # Tiết này đã được nhập ở mixed class
+                    # Chỉ thêm nếu homeroom chưa có log cho tiết này
+                    homeroom_periods = homeroom_periods_map.get(homeroom_id, set())
+                    if period not in homeroom_periods:
+                        if homeroom_id not in homeroom_periods_map:
+                            homeroom_periods_map[homeroom_id] = set()
+                        homeroom_periods_map[homeroom_id].add(period)
+        
+        # Build entered_map từ homeroom_periods_map
+        entered_map = {class_id: len(periods) for class_id, periods in homeroom_periods_map.items()}
         
         # Đếm số học sinh trong mỗi lớp
         student_counts = frappe.db.sql("""
@@ -1033,18 +1101,8 @@ def get_class_log_detail(class_id=None, date=None):
             
             periods_data.sort(key=lambda p: extract_period_number(p.get('period_name', '')))
             
-            # Thêm tiết Homeroom ở đầu
-            # GV chủ nhiệm là giáo viên dạy tiết Homeroom
-            periods_data.insert(0, {
-                "period_name": "Homeroom",
-                "period_priority": 0,
-                "subject_id": None,
-                "subject_name": "Sinh hoạt lớp",
-                "teacher_id": class_doc.homeroom_teacher,
-                "teacher_name": homeroom_teacher_name
-            })
-            
             # Lấy class log subjects đã tạo (bao gồm cả mixed class)
+            # Lưu ý: Homeroom không có class log, chỉ có attendance
             period_names = [p['period_name'] for p in periods_data]
             
             log_map = {}
@@ -1167,7 +1225,36 @@ def get_class_log_detail(class_id=None, date=None):
                             if not has_existing_content and has_new_content:
                                 log_map[period] = log
             
-            # Build periods result
+            # Query attendance cho tiết Homeroom
+            # Homeroom không có class log, chỉ có attendance
+            homeroom_attendance_count = frappe.db.sql("""
+                SELECT COUNT(DISTINCT student_id) as count
+                FROM `tabSIS Class Attendance`
+                WHERE class_id = %(class_id)s
+                    AND date = %(date)s
+                    AND period = 'Homeroom'
+            """, {
+                "class_id": class_id,
+                "date": date_obj
+            }, as_dict=True)
+            
+            homeroom_has_attendance = (homeroom_attendance_count[0]['count'] if homeroom_attendance_count else 0) > 0
+            
+            # Thêm tiết Homeroom ở đầu với trạng thái attendance
+            periods_result.append({
+                "period": "Homeroom",
+                "subject_id": None,
+                "subject_name": "Sinh hoạt lớp",
+                "teacher_id": class_doc.homeroom_teacher,
+                "teacher_name": homeroom_teacher_name,
+                "status": "entered" if homeroom_has_attendance else "not_entered",
+                "has_general_comment": False,
+                "student_count_with_log": 0,
+                "last_modified": None,
+                "is_homeroom": True  # Flag để frontend biết đây là tiết Homeroom
+            })
+            
+            # Build periods result cho các tiết học
             for p in periods_data:
                 period_name = p['period_name']
                 log = log_map.get(period_name)
