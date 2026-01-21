@@ -1073,6 +1073,17 @@ def upload_single_photo():
 def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=None, school_year_id=None, page=1, limit=20):
     """Get list of photos with optional filters"""
     try:
+        # Lấy params từ request args nếu function params là None (GET request)
+        if frappe.request and frappe.request.args:
+            args = frappe.request.args
+            photo_type = photo_type or args.get('photo_type')
+            student_id = student_id or args.get('student_id')
+            class_id = class_id or args.get('class_id')
+            campus_id = campus_id or args.get('campus_id')
+            school_year_id = school_year_id or args.get('school_year_id')
+            page = args.get('page', page)
+            limit = args.get('limit', limit)
+        
         # Debug: Log received params
         frappe.logger().info(f"🔍 get_photos_list called with: photo_type={photo_type}, student_id={student_id}, class_id={class_id}, campus_id={campus_id}, school_year_id={school_year_id}")
         
