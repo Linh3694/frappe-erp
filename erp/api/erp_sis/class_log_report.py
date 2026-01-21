@@ -1161,8 +1161,10 @@ def get_class_log_detail(class_id=None, date=None):
             })
         
         total_students = len(students)
-        total_periods = len(periods_result)
-        entered_periods = len([p for p in periods_result if p['status'] != 'not_entered'])
+        # Tính summary không bao gồm Homeroom (để khớp với dashboard)
+        study_periods = [p for p in periods_result if p['period'] != 'Homeroom']
+        total_periods = len(study_periods)
+        entered_periods = len([p for p in study_periods if p['status'] != 'not_entered'])
         
         return success_response(
             data={
