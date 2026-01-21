@@ -1144,24 +1144,7 @@ def get_class_log_detail(class_id=None, date=None):
                             mixed_classes.add(entry['class_id'])
                         student_period_class[(entry['student_id'], entry['period_name'])] = entry['class_id']
                 
-                # 3. Lấy timetable instances của các mixed class
-                mixed_instances = {}
-                if mixed_classes:
-                    mixed_instance_rows = frappe.db.sql("""
-                        SELECT class_id, name
-                        FROM `tabSIS Timetable Instance`
-                        WHERE class_id IN %(class_ids)s
-                            AND start_date <= %(date)s
-                            AND (end_date >= %(date)s OR end_date IS NULL)
-                    """, {
-                        "class_ids": list(mixed_classes),
-                        "date": date_obj
-                    }, as_dict=True)
-                    
-                    for row in mixed_instance_rows:
-                        mixed_instances[row['class_id']] = row['name']
-                
-                # 4. Query class logs từ homeroom class
+                # 3. Query class logs từ homeroom class (theo class_id để đồng nhất với dashboard)
                 class_log_subjects = frappe.db.sql("""
                     SELECT 
                         cls.name,
@@ -1173,12 +1156,14 @@ def get_class_log_detail(class_id=None, date=None):
                         COUNT(clst.name) as student_log_count
                     FROM `tabSIS Class Log Subject` cls
                     LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
-                    WHERE cls.timetable_instance_id = %(instance)s
+                    WHERE cls.class_id = %(class_id)s
                         AND cls.log_date = %(date)s
                         AND cls.period IN %(periods)s
-                    GROUP BY cls.name
+                        AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
+                             OR clst.name IS NOT NULL)
+                    GROUP BY cls.name, cls.period
                 """, {
-                    "instance": timetable_instance,
+                    "class_id": class_id,
                     "date": date_obj,
                     "periods": period_names
                 }, as_dict=True)
@@ -1188,8 +1173,7 @@ def get_class_log_detail(class_id=None, date=None):
                 
                 # 5. Query class logs từ mixed classes và merge vào log_map
                 # Chỉ thêm nếu homeroom class chưa có log cho tiết đó
-                if mixed_instances:
-                    mixed_instance_ids = list(mixed_instances.values())
+                if mixed_classes:
                     mixed_log_subjects = frappe.db.sql("""
                         SELECT 
                             cls.name,
@@ -1201,12 +1185,14 @@ def get_class_log_detail(class_id=None, date=None):
                             COUNT(clst.name) as student_log_count
                         FROM `tabSIS Class Log Subject` cls
                         LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
-                        WHERE cls.timetable_instance_id IN %(instance_ids)s
+                        WHERE cls.class_id IN %(mixed_class_ids)s
                             AND cls.log_date = %(date)s
                             AND cls.period IN %(periods)s
-                        GROUP BY cls.name
+                            AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
+                                 OR clst.name IS NOT NULL)
+                        GROUP BY cls.name, cls.period
                     """, {
-                        "instance_ids": mixed_instance_ids,
+                        "mixed_class_ids": list(mixed_classes),
                         "date": date_obj,
                         "periods": period_names
                     }, as_dict=True)
