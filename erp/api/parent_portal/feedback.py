@@ -247,11 +247,11 @@ def create():
         
         # Send push notification to mobile staff (cho cả Góp ý và Đánh giá)
         # Chạy async (background job) để không block response
+        # LƯU Ý: Truyền feedback_name thay vì feedback object vì object không serialize được
         try:
-            from erp.api.notification.feedback import send_new_feedback_notification
             frappe.enqueue(
-                send_new_feedback_notification,
-                feedback_doc=feedback,
+                "erp.api.notification.feedback.send_new_feedback_notification_by_name",
+                feedback_name=feedback.name,
                 queue='short',
                 timeout=60,
                 now=False  # Chạy background, không block
@@ -688,11 +688,11 @@ def add_reply():
         
         # Send push notification to assigned staff (if any)
         # Chạy async (background job) để không block response
+        # LƯU Ý: Truyền feedback_name thay vì feedback object vì object không serialize được
         try:
-            from erp.api.notification.feedback import send_feedback_reply_notification
             frappe.enqueue(
-                send_feedback_reply_notification,
-                feedback_doc=feedback,
+                "erp.api.notification.feedback.send_feedback_reply_notification_by_name",
+                feedback_name=feedback.name,
                 reply_type="Guardian",
                 queue='short',
                 timeout=60,

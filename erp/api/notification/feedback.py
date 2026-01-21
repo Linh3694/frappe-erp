@@ -384,6 +384,34 @@ def send_feedback_assigned_notification(feedback_doc, assigned_by=None):
         frappe.logger().error(f"❌ [Feedback Notification] Error in send_feedback_assigned_notification: {str(e)}")
 
 
+# ===== WRAPPER FUNCTIONS CHO BACKGROUND JOB =====
+# Các function này nhận feedback_name (string) thay vì feedback_doc (object)
+# Vì frappe.enqueue không serialize được document object
+
+def send_new_feedback_notification_by_name(feedback_name):
+    """
+    Wrapper function để gọi từ frappe.enqueue
+    Nhận feedback_name, load document rồi gọi send_new_feedback_notification
+    """
+    try:
+        feedback_doc = frappe.get_doc("Feedback", feedback_name)
+        send_new_feedback_notification(feedback_doc)
+    except Exception as e:
+        frappe.logger().error(f"❌ [Feedback Notification] Error in wrapper: {str(e)}")
+
+
+def send_feedback_reply_notification_by_name(feedback_name, reply_type="Guardian"):
+    """
+    Wrapper function để gọi từ frappe.enqueue
+    Nhận feedback_name, load document rồi gọi send_feedback_reply_notification
+    """
+    try:
+        feedback_doc = frappe.get_doc("Feedback", feedback_name)
+        send_feedback_reply_notification(feedback_doc, reply_type)
+    except Exception as e:
+        frappe.logger().error(f"❌ [Feedback Notification] Error in reply wrapper: {str(e)}")
+
+
 # Whitelist for testing
 @frappe.whitelist()
 def test_feedback_notification(feedback_name):
