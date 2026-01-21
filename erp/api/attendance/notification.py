@@ -426,21 +426,37 @@ def get_student_guardians(student_code):
 			ORDER BY cfr.key_person DESC, cfr.creation ASC
 		""", (student_record,), as_dict=True)
 
-		# Format results
-		guardians = []
+		# Format results - sử dụng dict để DEDUPE theo guardian_id
+		# Vì relationship có thể duplicate ở nhiều nơi (CRM Family, CRM Student, CRM Guardian)
+		guardians_map = {}
+		
 		for rel in relationships:
-			if rel.guardian_email:
-				# Use system email format for push notifications (guardian_id@parent.wellspring.edu.vn)
-				system_email = f"{rel.guardian_id}@parent.wellspring.edu.vn" if hasattr(rel, 'guardian_id') and rel.guardian_id else rel.guardian_email
+			# FIX: Không cần guardian_email để gửi push notification
+			# Push notification dùng system_email = guardian_id@parent.wellspring.edu.vn
+			# Chỉ cần guardian_id là đủ
+			if rel.guardian_id:
+				# DEDUPE: Chỉ add nếu guardian_id chưa có trong map
+				# Ưu tiên record có key_person = True (đã sort ở query)
+				if rel.guardian_id not in guardians_map:
+					system_email = f"{rel.guardian_id}@parent.wellspring.edu.vn"
+					
+					guardians_map[rel.guardian_id] = {
+						"name": rel.guardian_name or rel.guardian,
+						"email": system_email,
+						"personal_email": rel.guardian_email,
+						"relation": rel.relationship_type,
+						"is_primary": rel.key_person,
+						"guardian_doc": rel.guardian,
+						"guardian_id": rel.guardian_id
+					}
+					frappe.logger().info(f"📧 Found guardian: {rel.guardian_name} ({rel.guardian_id}) -> {system_email}")
+				else:
+					frappe.logger().debug(f"⏭️ Skipping duplicate guardian: {rel.guardian_id}")
+			else:
+				frappe.logger().warning(f"⚠️ Skipping guardian without guardian_id: {rel.guardian}")
 
-				guardians.append({
-					"name": rel.guardian_name or rel.guardian,
-					"email": system_email,  # Use system email for push notifications
-					"personal_email": rel.guardian_email,  # Keep personal email for reference
-					"relation": rel.relationship_type,
-					"is_primary": rel.key_person
-				})
-
+		guardians = list(guardians_map.values())
+		frappe.logger().info(f"📋 Total unique guardians for student: {len(guardians)}")
 		return guardians
 
 	except Exception as e:
