@@ -848,7 +848,7 @@ def get_class_log_dashboard(date=None, campus_id=None):
         # Build entered_map: đếm số period đã nhập cho mỗi lớp
         # QUAN TRỌNG: Chỉ đếm logs có period_number match với timetable periods
         # Để đồng nhất với logic trong get_class_log_detail
-        entered_map = {}
+        entered_map = {}  # class_id -> set of period_numbers
         for r in homeroom_entered:
             class_id = r['class_id']
             log_period_num = extract_period_number(r['period'])
@@ -858,6 +858,111 @@ def get_class_log_dashboard(date=None, campus_id=None):
                 if class_id not in entered_map:
                     entered_map[class_id] = set()
                 entered_map[class_id].add(log_period_num)
+        
+        # ==================== MIXED CLASS LOGS ====================
+        # Đồng nhất với logic trong get_class_log_detail:
+        # Query logs từ mixed classes và merge vào entered_map
+        # 
+        # 1. Lấy danh sách student_ids cho tất cả homeroom classes
+        all_students = frappe.db.sql("""
+            SELECT class_id, student_id
+            FROM `tabSIS Class Student`
+            WHERE class_id IN %(class_ids)s
+        """, {"class_ids": class_ids}, as_dict=True)
+        
+        # Build: class_id -> set of student_ids
+        class_students = {}
+        all_student_ids = set()
+        for s in all_students:
+            if s['student_id']:
+                if s['class_id'] not in class_students:
+                    class_students[s['class_id']] = set()
+                class_students[s['class_id']].add(s['student_id'])
+                all_student_ids.add(s['student_id'])
+        
+        # 2. Query SIS Student Timetable để tìm mixed classes cho tất cả students
+        mixed_classes = set()  # Tất cả mixed class IDs
+        student_period_class = {}  # (student_id, period_num) -> class_id
+        
+        if all_student_ids:
+            student_timetable = frappe.db.sql("""
+                SELECT 
+                    st.student_id,
+                    st.class_id,
+                    tc.period_name
+                FROM `tabSIS Student Timetable` st
+                INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+                WHERE st.student_id IN %(student_ids)s
+                    AND st.date = %(date)s
+                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
+            """, {
+                "student_ids": list(all_student_ids),
+                "date": date_obj
+            }, as_dict=True)
+            
+            for entry in student_timetable:
+                period_num = extract_period_number(entry['period_name'])
+                # Nếu class_id khác với homeroom class của student -> là mixed class
+                if entry['class_id'] not in class_ids:
+                    mixed_classes.add(entry['class_id'])
+                student_period_class[(entry['student_id'], period_num)] = entry['class_id']
+        
+        # 3. Query logs từ mixed classes
+        if mixed_classes:
+            mixed_entered = frappe.db.sql("""
+                SELECT 
+                    cls.class_id,
+                    cls.period
+                FROM `tabSIS Class Log Subject` cls
+                WHERE cls.class_id IN %(mixed_class_ids)s
+                    AND cls.log_date = %(date)s
+                    AND LOWER(cls.period) LIKE '%%tiết%%'
+                    AND (
+                        (cls.general_comment IS NOT NULL AND cls.general_comment != '')
+                        OR EXISTS (SELECT 1 FROM `tabSIS Class Log Student` clst WHERE clst.subject_id = cls.name LIMIT 1)
+                    )
+                GROUP BY cls.class_id, cls.period
+            """, {
+                "mixed_class_ids": list(mixed_classes),
+                "date": date_obj
+            }, as_dict=True)
+            
+            # Build: mixed_class_id -> set of entered period_numbers
+            mixed_class_periods = {}
+            for r in mixed_entered:
+                mixed_class_id = r['class_id']
+                period_num = extract_period_number(r['period'])
+                if mixed_class_id not in mixed_class_periods:
+                    mixed_class_periods[mixed_class_id] = set()
+                mixed_class_periods[mixed_class_id].add(period_num)
+            
+            # 4. Merge mixed class logs vào entered_map
+            # Cho mỗi homeroom class, kiểm tra nếu có học sinh học ở mixed class
+            # và mixed class đã có log cho tiết đó
+            for homeroom_class_id in class_ids:
+                if homeroom_class_id not in class_students:
+                    continue
+                    
+                students_in_class = class_students[homeroom_class_id]
+                timetable_periods = class_period_numbers.get(homeroom_class_id, set())
+                
+                for period_num in timetable_periods:
+                    # Đã có log từ homeroom -> skip
+                    if homeroom_class_id in entered_map and period_num in entered_map[homeroom_class_id]:
+                        continue
+                    
+                    # Kiểm tra xem có học sinh nào học ở mixed class cho tiết này không
+                    for student_id in students_in_class:
+                        mixed_class_id = student_period_class.get((student_id, period_num))
+                        if mixed_class_id and mixed_class_id in mixed_class_periods:
+                            if period_num in mixed_class_periods[mixed_class_id]:
+                                # Có log từ mixed class -> đánh dấu là entered
+                                if homeroom_class_id not in entered_map:
+                                    entered_map[homeroom_class_id] = set()
+                                entered_map[homeroom_class_id].add(period_num)
+                                break  # Chỉ cần 1 học sinh có log là đủ
+        
+        # ==================== END MIXED CLASS LOGS ====================
         
         # Convert set sang count
         entered_map = {class_id: len(period_nums) for class_id, period_nums in entered_map.items()}
