@@ -634,6 +634,13 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
         #         errors={"key_person": ["Only one key person allowed"]}
         #     )
         
+        # CRITICAL: Get old guardians BEFORE deleting relationships
+        # để có thể cleanup những guardians bị remove khỏi family
+        old_guardians = set()
+        for rel in family_doc.relationships:
+            if rel.guardian:
+                old_guardians.add(rel.guardian)
+        
         # CRITICAL: Delete ALL old relationships from database first
         # This prevents deleted guardians from still receiving notifications
         frappe.db.sql("""
@@ -696,6 +703,26 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                         })
                 guardian_doc.flags.ignore_validate = True
                 guardian_doc.save(ignore_permissions=True)
+
+        # CRITICAL FIX: Cleanup guardians đã bị remove khỏi family
+        # Clear family_code và student_relationships của họ
+        new_guardians = set(guardians)
+        removed_guardians = old_guardians - new_guardians
+        
+        if removed_guardians:
+            frappe.logger().info(f"🧹 Cleaning up {len(removed_guardians)} removed guardians from family {family_id}")
+            for removed_guardian_id in removed_guardians:
+                if frappe.db.exists("CRM Guardian", removed_guardian_id):
+                    try:
+                        removed_guardian_doc = frappe.get_doc("CRM Guardian", removed_guardian_id)
+                        # Clear family_code và student_relationships
+                        removed_guardian_doc.family_code = None
+                        removed_guardian_doc.set("student_relationships", [])
+                        removed_guardian_doc.flags.ignore_validate = True
+                        removed_guardian_doc.save(ignore_permissions=True)
+                        frappe.logger().info(f"✅ Cleaned up guardian {removed_guardian_id}")
+                    except Exception as cleanup_error:
+                        frappe.logger().error(f"❌ Error cleaning up guardian {removed_guardian_id}: {str(cleanup_error)}")
 
         frappe.db.commit()
 
