@@ -907,6 +907,53 @@ def get_class_log_dashboard(date=None, campus_id=None):
                     mixed_classes.add(entry['class_id'])
                 student_period_class[(entry['student_id'], period_num)] = entry['class_id']
         
+        # ⚡ 2b. Fallback: Tìm mixed class qua SIS Class Attendance
+        # Nếu SIS Student Timetable không có data, kiểm tra attendance
+        if all_student_ids:
+            mixed_attendance = frappe.db.sql("""
+                SELECT student_id, class_id, period
+                FROM `tabSIS Class Attendance`
+                WHERE date = %(date)s
+                    AND student_id IN %(student_ids)s
+                    AND class_id NOT IN %(homeroom_ids)s
+                    AND LOWER(period) LIKE '%%tiết%%'
+            """, {
+                "date": date_obj,
+                "student_ids": list(all_student_ids),
+                "homeroom_ids": class_ids
+            }, as_dict=True)
+            
+            for entry in mixed_attendance:
+                period_num = extract_period_number(entry['period'])
+                if entry['class_id'] not in class_ids:
+                    mixed_classes.add(entry['class_id'])
+                # Ưu tiên attendance (override timetable nếu có)
+                key = (entry['student_id'], period_num)
+                if key not in student_period_class or student_period_class[key] in class_ids:
+                    student_period_class[key] = entry['class_id']
+        
+        # ⚡ 2c. Tìm mixed class qua SIS Class Student
+        # Query tất cả mixed class mà students thuộc về
+        student_mixed_classes = {}  # student_id -> [mixed_class_ids]
+        if all_student_ids:
+            mixed_class_students = frappe.db.sql("""
+                SELECT cs.student_id, cs.class_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                WHERE cs.student_id IN %(student_ids)s
+                    AND cs.class_id NOT IN %(homeroom_ids)s
+                    AND c.class_type = 'mixed'
+            """, {
+                "student_ids": list(all_student_ids),
+                "homeroom_ids": class_ids
+            }, as_dict=True)
+            
+            for entry in mixed_class_students:
+                if entry['student_id'] not in student_mixed_classes:
+                    student_mixed_classes[entry['student_id']] = []
+                student_mixed_classes[entry['student_id']].append(entry['class_id'])
+                mixed_classes.add(entry['class_id'])
+        
         # 3. Query logs từ mixed classes
         if mixed_classes:
             mixed_entered = frappe.db.sql("""
@@ -951,8 +998,11 @@ def get_class_log_dashboard(date=None, campus_id=None):
                     if homeroom_class_id in entered_map and period_num in entered_map[homeroom_class_id]:
                         continue
                     
+                    found_mixed_log = False
+                    
                     # Kiểm tra xem có học sinh nào học ở mixed class cho tiết này không
                     for student_id in students_in_class:
+                        # Cách 1: Qua student_period_class (từ timetable hoặc attendance)
                         mixed_class_id = student_period_class.get((student_id, period_num))
                         if mixed_class_id and mixed_class_id in mixed_class_periods:
                             if period_num in mixed_class_periods[mixed_class_id]:
@@ -960,7 +1010,22 @@ def get_class_log_dashboard(date=None, campus_id=None):
                                 if homeroom_class_id not in entered_map:
                                     entered_map[homeroom_class_id] = set()
                                 entered_map[homeroom_class_id].add(period_num)
-                                break  # Chỉ cần 1 học sinh có log là đủ
+                                found_mixed_log = True
+                                break
+                        
+                        # Cách 2: Qua student_mixed_classes (từ SIS Class Student)
+                        # Kiểm tra tất cả mixed class mà student thuộc về
+                        if not found_mixed_log and student_id in student_mixed_classes:
+                            for mc_id in student_mixed_classes[student_id]:
+                                if mc_id in mixed_class_periods and period_num in mixed_class_periods[mc_id]:
+                                    if homeroom_class_id not in entered_map:
+                                        entered_map[homeroom_class_id] = set()
+                                    entered_map[homeroom_class_id].add(period_num)
+                                    found_mixed_log = True
+                                    break
+                        
+                        if found_mixed_log:
+                            break
         
         # ==================== END MIXED CLASS LOGS ====================
         
