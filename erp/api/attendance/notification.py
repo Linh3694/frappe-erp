@@ -118,8 +118,13 @@ def publish_attendance_notification(
 def check_if_student(employee_code):
 	"""Check if employee_code belongs to a student or staff"""
 	try:
-		# First, check if it's a student in CRM Student table
-		student = frappe.db.exists("CRM Student", {"student_code": employee_code})
+		# FIX: Case-insensitive check cho student_code vì device có thể gửi khác case
+		student = frappe.db.sql("""
+			SELECT name FROM `tabCRM Student`
+			WHERE UPPER(student_code) = UPPER(%(code)s)
+			LIMIT 1
+		""", {"code": employee_code})
+		
 		if student:
 			frappe.logger().info(f"✅ {employee_code} identified as STUDENT (found in CRM Student)")
 			return True
@@ -393,11 +398,18 @@ def get_student_guardians(student_code):
 		List of dicts: [{"name": "Guardian Name", "email": "guardian@email.com", "relation": "Father"}]
 	"""
 	try:
-		# First, find the CRM Student record by student_code
-		student_record = frappe.db.get_value("CRM Student", {"student_code": student_code}, "name")
+		# FIX: Case-insensitive lookup cho student_code
+		student_record = frappe.db.sql("""
+			SELECT name FROM `tabCRM Student`
+			WHERE UPPER(student_code) = UPPER(%(code)s)
+			LIMIT 1
+		""", {"code": student_code})
+		
 		if not student_record:
 			frappe.logger().warning(f"No CRM Student found for student_code: {student_code}")
 			return []
+		
+		student_record = student_record[0][0]
 
 		# Query CRM Family Relationship with correct joins
 		relationships = frappe.db.sql("""

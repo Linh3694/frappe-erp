@@ -207,16 +207,21 @@ def get_guardians_for_students(student_ids: List[str]) -> List[Dict]:
                 # Already a CRM student ID
                 actual_student_ids.append(student_id)
             else:
-                # Try to find CRM student ID by student_code
-                crm_student = frappe.get_value('CRM Student', {'student_code': student_id}, 'name')
+                # FIX: Case-insensitive lookup cho student_code vì device có thể gửi khác case
+                crm_student = frappe.db.sql("""
+                    SELECT name FROM `tabCRM Student`
+                    WHERE UPPER(student_code) = UPPER(%(code)s)
+                    LIMIT 1
+                """, {"code": student_id}, as_dict=True)
+                
                 if crm_student:
-                    actual_student_ids.append(crm_student)
-                    frappe.logger().info(f"📝 Mapped student_code {student_id} to CRM student_id {crm_student}")
+                    actual_student_ids.append(crm_student[0].name)
+                    frappe.logger().info(f"📝 Mapped student_code {student_id} to CRM student_id {crm_student[0].name}")
                 else:
                     # Try direct lookup as student_id
-                    crm_student = frappe.get_value('CRM Student', student_id, 'name')
-                    if crm_student:
-                        actual_student_ids.append(crm_student)
+                    direct_student = frappe.get_value('CRM Student', student_id, 'name')
+                    if direct_student:
+                        actual_student_ids.append(direct_student)
                     else:
                         frappe.logger().warning(f"⚠️ Could not find CRM student for {student_id}")
 
