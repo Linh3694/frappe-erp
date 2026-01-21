@@ -1044,15 +1044,69 @@ def get_class_log_detail(class_id=None, date=None):
                 "teacher_name": homeroom_teacher_name
             })
             
-            # Lấy class log subjects đã tạo
+            # Lấy class log subjects đã tạo (bao gồm cả mixed class)
             period_names = [p['period_name'] for p in periods_data]
             
             log_map = {}
             if period_names:
+                # 1. Lấy danh sách học sinh trong lớp
+                homeroom_students = frappe.get_all(
+                    "SIS Class Student",
+                    filters={"class_id": class_id},
+                    fields=["student_id"]
+                )
+                student_ids = [s['student_id'] for s in homeroom_students if s.get('student_id')]
+                
+                # 2. Query SIS Student Timetable để tìm mixed class cho từng tiết
+                # (học sinh có thể học ở lớp mixed thay vì homeroom cho một số tiết)
+                mixed_classes = set()
+                student_period_class = {}  # (student_id, period) -> class_id
+                
+                if student_ids:
+                    student_timetable = frappe.db.sql("""
+                        SELECT 
+                            st.student_id,
+                            st.class_id,
+                            tc.period_name
+                        FROM `tabSIS Student Timetable` st
+                        INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+                        WHERE st.student_id IN %(student_ids)s
+                            AND st.date = %(date)s
+                            AND tc.period_name IN %(periods)s
+                    """, {
+                        "student_ids": student_ids,
+                        "date": date_obj,
+                        "periods": period_names
+                    }, as_dict=True)
+                    
+                    for entry in student_timetable:
+                        if entry['class_id'] != class_id:
+                            mixed_classes.add(entry['class_id'])
+                        student_period_class[(entry['student_id'], entry['period_name'])] = entry['class_id']
+                
+                # 3. Lấy timetable instances của các mixed class
+                mixed_instances = {}
+                if mixed_classes:
+                    mixed_instance_rows = frappe.db.sql("""
+                        SELECT class_id, name
+                        FROM `tabSIS Timetable Instance`
+                        WHERE class_id IN %(class_ids)s
+                            AND start_date <= %(date)s
+                            AND (end_date >= %(date)s OR end_date IS NULL)
+                    """, {
+                        "class_ids": list(mixed_classes),
+                        "date": date_obj
+                    }, as_dict=True)
+                    
+                    for row in mixed_instance_rows:
+                        mixed_instances[row['class_id']] = row['name']
+                
+                # 4. Query class logs từ homeroom class
                 class_log_subjects = frappe.db.sql("""
                     SELECT 
                         cls.name,
                         cls.period,
+                        cls.class_id,
                         cls.general_comment,
                         cls.modified,
                         cls.creation,
@@ -1071,6 +1125,47 @@ def get_class_log_detail(class_id=None, date=None):
                 
                 for log in class_log_subjects:
                     log_map[log['period']] = log
+                
+                # 5. Query class logs từ mixed classes và merge vào log_map
+                # Chỉ thêm nếu homeroom class chưa có log cho tiết đó
+                if mixed_instances:
+                    mixed_instance_ids = list(mixed_instances.values())
+                    mixed_log_subjects = frappe.db.sql("""
+                        SELECT 
+                            cls.name,
+                            cls.period,
+                            cls.class_id,
+                            cls.general_comment,
+                            cls.modified,
+                            cls.creation,
+                            COUNT(clst.name) as student_log_count
+                        FROM `tabSIS Class Log Subject` cls
+                        LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                        WHERE cls.timetable_instance_id IN %(instance_ids)s
+                            AND cls.log_date = %(date)s
+                            AND cls.period IN %(periods)s
+                        GROUP BY cls.name
+                    """, {
+                        "instance_ids": mixed_instance_ids,
+                        "date": date_obj,
+                        "periods": period_names
+                    }, as_dict=True)
+                    
+                    for log in mixed_log_subjects:
+                        period = log['period']
+                        # Ưu tiên log từ mixed class nếu có học sinh của homeroom học ở đó
+                        # và homeroom class chưa có log cho tiết này
+                        if period not in log_map:
+                            log_map[period] = log
+                        else:
+                            # Nếu cả 2 đều có log, merge student_log_count
+                            existing = log_map[period]
+                            has_existing_content = existing.get('general_comment') or existing.get('student_log_count', 0) > 0
+                            has_new_content = log.get('general_comment') or log.get('student_log_count', 0) > 0
+                            
+                            # Nếu existing không có content nhưng mixed có, dùng mixed
+                            if not has_existing_content and has_new_content:
+                                log_map[period] = log
             
             # Build periods result
             for p in periods_data:
