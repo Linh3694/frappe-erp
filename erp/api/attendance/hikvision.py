@@ -22,6 +22,11 @@ ATTENDANCE_BUFFER_KEY = "hikvision:attendance_buffer"
 # Batch size cho mỗi lần xử lý (tăng lên 200 để xử lý nhanh hơn)
 BUFFER_BATCH_SIZE = 200
 
+# Config: Xử lý trực tiếp hay dùng buffer
+# True = xử lý ngay khi nhận event (đơn giản, realtime, không phụ thuộc scheduler)
+# False = push vào buffer, scheduler xử lý sau (response nhanh hơn nhưng có delay)
+USE_DIRECT_PROCESSING = True
+
 # Tạo logger riêng cho HiVision với file log riêng
 def get_hikvision_logger():
 	"""Get or create HiVision logger với file handler riêng"""
@@ -252,12 +257,6 @@ def handle_hikvision_event():
 				"event_state": event_state
 			}
 		
-		# PERFORMANCE FIX: Push events vào Redis buffer thay vì xử lý trực tiếp
-		# Batch processor sẽ xử lý hàng loạt mỗi 5 giây
-		logger.info(f"🚀 BUFFERING ATTENDANCE EVENT: {event_type}")
-		events_buffered = 0
-		errors = []
-		
 		# Collect posts to process
 		posts_to_process = []
 		
@@ -272,71 +271,148 @@ def handle_hikvision_event():
 			# Fallback: parse from root level
 			posts_to_process.append(event_data)
 		
-		# Push each post vào Redis buffer
-		for post in posts_to_process:
-			try:
-				# Extract employee information - prioritize employeeNoString
-				employee_code = (
-					post.get("employeeNoString") or 
-					post.get("FPID") or 
-					post.get("cardNo") or 
-					post.get("employeeCode") or 
-					post.get("userID")
-				)
-				employee_name = post.get("name")
-				timestamp = post.get("dateTime") or date_time
-				device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
-				device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
-				
-				# Skip if no employee data
-				if not employee_code or not timestamp:
-					logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
-					continue
-				
-				# Tạo event data để push vào buffer
-				buffer_event = {
-					"employee_code": employee_code,
-					"employee_name": employee_name,
-					"timestamp": timestamp,
-					"device_id": device_id,
-					"device_name": device_name,
-					"event_type": event_type,
-					"similarity": post.get("similarity"),
-					"face_id_name": post.get("name"),
-					"received_at": frappe.utils.now()
-				}
-				
-				# Push vào Redis buffer (O(1) operation - rất nhanh)
-				push_to_attendance_buffer(buffer_event)
-				events_buffered += 1
-				
-				logger.info(f"📥 Buffered event for {employee_code} at {timestamp}")
-				
-			except Exception as post_error:
-				logger.error(f"❌ Error buffering post: {str(post_error)}")
-				errors.append({
-					"post": str(post)[:200],
-					"error": str(post_error)
-				})
+		# Quyết định xử lý trực tiếp hay qua buffer
+		if USE_DIRECT_PROCESSING:
+			# XỬ LÝ TRỰC TIẾP: Đơn giản, realtime, không phụ thuộc scheduler
+			logger.info(f"🚀 DIRECT PROCESSING ATTENDANCE EVENT: {event_type}")
+			events_processed = 0
+			errors = []
+			
+			for post in posts_to_process:
+				try:
+					# Extract employee information
+					employee_code = (
+						post.get("employeeNoString") or 
+						post.get("FPID") or 
+						post.get("cardNo") or 
+						post.get("employeeCode") or 
+						post.get("userID")
+					)
+					employee_name = post.get("name")
+					timestamp = post.get("dateTime") or date_time
+					device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
+					device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
+					
+					# Skip if no employee data
+					if not employee_code or not timestamp:
+						logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
+						continue
+					
+					# Xử lý trực tiếp
+					event_data_direct = {
+						"employee_code": employee_code,
+						"employee_name": employee_name,
+						"timestamp": timestamp,
+						"device_id": device_id,
+						"device_name": device_name,
+						"event_type": event_type,
+						"similarity": post.get("similarity"),
+						"face_id_name": post.get("name"),
+						"received_at": frappe.utils.now()
+					}
+					
+					success = process_single_attendance_event(event_data_direct)
+					if success:
+						events_processed += 1
+						logger.info(f"✅ Processed event for {employee_code} at {timestamp}")
+					else:
+						errors.append({"employee_code": employee_code, "error": "Processing failed"})
+					
+				except Exception as post_error:
+					logger.error(f"❌ Error processing post: {str(post_error)}")
+					errors.append({
+						"post": str(post)[:200],
+						"error": str(post_error)
+					})
+			
+			response = {
+				"status": "success",
+				"message": f"Processed {events_processed} attendance events directly",
+				"timestamp": frappe.utils.now(),
+				"event_type": event_type or "unknown",
+				"event_state": event_state or "unknown",
+				"events_processed": events_processed,
+				"total_errors": len(errors),
+				"processing_mode": "direct"
+			}
+			
+			if errors and len(errors) > 0:
+				response["errors"] = errors[:5]
+			
+			logger.info(f"📊 PROCESSED: {events_processed} events, {len(errors)} errors")
+			logger.info("=" * 80)
+			return response
 		
-		# Return response ngay lập tức - không đợi DB
-		response = {
-			"status": "success",
-			"message": f"Buffered {events_buffered} attendance events for processing",
-			"timestamp": frappe.utils.now(),
-			"event_type": event_type or "unknown",
-			"event_state": event_state or "unknown",
-			"events_buffered": events_buffered,
-			"total_errors": len(errors),
-			"processing_mode": "async_buffer"
-		}
-		
-		if errors and len(errors) > 0:
-			response["errors"] = errors[:5]
-		
-		logger.info(f"📊 BUFFERED: {events_buffered} events, {len(errors)} errors")
-		logger.info("=" * 80)
-		return response
+		else:
+			# BUFFER MODE: Push vào Redis buffer, scheduler xử lý sau
+			logger.info(f"🚀 BUFFERING ATTENDANCE EVENT: {event_type}")
+			events_buffered = 0
+			errors = []
+			
+			for post in posts_to_process:
+				try:
+					# Extract employee information - prioritize employeeNoString
+					employee_code = (
+						post.get("employeeNoString") or 
+						post.get("FPID") or 
+						post.get("cardNo") or 
+						post.get("employeeCode") or 
+						post.get("userID")
+					)
+					employee_name = post.get("name")
+					timestamp = post.get("dateTime") or date_time
+					device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
+					device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
+					
+					# Skip if no employee data
+					if not employee_code or not timestamp:
+						logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
+						continue
+					
+					# Tạo event data để push vào buffer
+					buffer_event = {
+						"employee_code": employee_code,
+						"employee_name": employee_name,
+						"timestamp": timestamp,
+						"device_id": device_id,
+						"device_name": device_name,
+						"event_type": event_type,
+						"similarity": post.get("similarity"),
+						"face_id_name": post.get("name"),
+						"received_at": frappe.utils.now()
+					}
+					
+					# Push vào Redis buffer (O(1) operation - rất nhanh)
+					push_to_attendance_buffer(buffer_event)
+					events_buffered += 1
+					
+					logger.info(f"📥 Buffered event for {employee_code} at {timestamp}")
+					
+				except Exception as post_error:
+					logger.error(f"❌ Error buffering post: {str(post_error)}")
+					errors.append({
+						"post": str(post)[:200],
+						"error": str(post_error)
+					})
+			
+			# Return response ngay lập tức - không đợi DB
+			response = {
+				"status": "success",
+				"message": f"Buffered {events_buffered} attendance events for processing",
+				"timestamp": frappe.utils.now(),
+				"event_type": event_type or "unknown",
+				"event_state": event_state or "unknown",
+				"events_buffered": events_buffered,
+				"total_errors": len(errors),
+				"processing_mode": "async_buffer"
+			}
+			
+			if errors and len(errors) > 0:
+				response["errors"] = errors[:5]
+			
+			logger.info(f"📊 BUFFERED: {events_buffered} events, {len(errors)} errors")
+			logger.info("=" * 80)
+			return response
 		
 	except Exception as e:
 		logger.error(f"❌ FATAL ERROR processing HiVision event: {str(e)}")

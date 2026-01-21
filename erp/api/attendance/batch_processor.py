@@ -321,6 +321,8 @@ def process_employee_events(key, events, logger, existing_name=None):
 		if existing_name:
 			# Load existing record directly
 			attendance_doc = frappe.get_doc("ERP Time Attendance", existing_name)
+			# FIX: Reload để tránh "Document has been modified" error khi concurrent updates
+			attendance_doc.reload()
 			# Update employee_name và device_name nếu provided và chưa có
 			if employee_name and not attendance_doc.employee_name:
 				attendance_doc.employee_name = employee_name
