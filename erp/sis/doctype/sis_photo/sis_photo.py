@@ -1073,36 +1073,47 @@ def upload_single_photo():
 def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=None, school_year_id=None, page=1, limit=20):
     """Get list of photos with optional filters"""
     try:
-        filters = {}
-
+        # Sử dụng SQL query trực tiếp để đảm bảo filter chính xác
+        # (frappe.get_all đôi khi không filter đúng với Link fields)
+        conditions = ["1=1"]
+        params = {}
+        
         if photo_type:
-            filters["type"] = photo_type
+            conditions.append("type = %(photo_type)s")
+            params["photo_type"] = photo_type
         if student_id:
-            filters["student_id"] = student_id
+            conditions.append("student_id = %(student_id)s")
+            params["student_id"] = student_id
         if class_id:
-            filters["class_id"] = class_id
+            conditions.append("class_id = %(class_id)s")
+            params["class_id"] = class_id
         if campus_id:
-            filters["campus_id"] = campus_id
+            conditions.append("campus_id = %(campus_id)s")
+            params["campus_id"] = campus_id
         if school_year_id:
-            filters["school_year_id"] = school_year_id
-
-        # Special handling for student photos to ensure uniqueness
+            conditions.append("school_year_id = %(school_year_id)s")
+            params["school_year_id"] = school_year_id
+            
+        # Special handling for student photos
         if photo_type == "student" and student_id:
-            # For student photos, prioritize Active status and ensure only one photo per student
-            filters["status"] = "Active"  # Only return active photos
+            conditions.append("status = 'Active'")
             frappe.logger().info(f"🎯 Filtering student photos: student_id={student_id}, status=Active")
-
-        # Get photos with pagination
-        photos = frappe.get_all(
-            "SIS Photo",
-            filters=filters,
-            fields=["name", "title", "type", "student_id", "class_id", "photo", "upload_date", "uploaded_by", "status", "description"],
-            order_by="creation desc",
-            start=(int(page) - 1) * int(limit),
-            limit=int(limit)
-        )
-
-        frappe.logger().info(f"📋 Found {len(photos)} photos with filters: {filters}")
+        
+        where_clause = " AND ".join(conditions)
+        offset = (int(page) - 1) * int(limit)
+        params["limit"] = int(limit)
+        params["offset"] = offset
+        
+        # Query photos với SQL trực tiếp
+        photos = frappe.db.sql(f"""
+            SELECT name, title, type, student_id, class_id, photo, upload_date, uploaded_by, status, description
+            FROM `tabSIS Photo`
+            WHERE {where_clause}
+            ORDER BY creation DESC
+            LIMIT %(limit)s OFFSET %(offset)s
+        """, params, as_dict=True)
+        
+        frappe.logger().info(f"📋 Found {len(photos)} photos with SQL filters: {params}")
         
         # Lấy tất cả photo names để batch query File attachments
         photo_names = [p.get("name") for p in photos if p.get("name")]
@@ -1266,27 +1277,16 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             if photo.get("description") is None:
                 del photo["description"]
 
-        # Get total count
-        total_count = frappe.db.count("SIS Photo", filters)
-
-        # Additional validation for student photos - ensure uniqueness
-        if photo_type == "student" and student_id:
-            # Filter out photos that don't belong to the requested student
-            validated_photos = []
-            for photo in photos:
-                if photo.get("student_id") == student_id:
-                    validated_photos.append(photo)
-                else:
-                    frappe.logger().warning(f"⚠️ Filtered out photo {photo.get('name')} - student_id mismatch: requested={student_id}, photo={photo.get('student_id')}")
-
-            if len(validated_photos) != len(photos):
-                frappe.logger().info(f"🎯 Validation filtered {len(photos) - len(validated_photos)} photos, keeping {len(validated_photos)} for student {student_id}")
-                photos = validated_photos
+        # Get total count với cùng filter conditions
+        total_count_result = frappe.db.sql(f"""
+            SELECT COUNT(*) as count
+            FROM `tabSIS Photo`
+            WHERE {where_clause}
+        """, params, as_dict=True)
+        total_count = total_count_result[0]['count'] if total_count_result else 0
 
         # Log final result
-        frappe.logger().info(f"📤 Returning {len(photos)} photos")
-        for photo in photos:
-            frappe.logger().info(f"📤 Final photo {photo.get('name')}: student_id={photo.get('student_id')}, has_photo={bool(photo.get('photo'))}, photo='{photo.get('photo')}'")
+        frappe.logger().info(f"📤 Returning {len(photos)} photos (total: {total_count})")
 
         return {
             "success": True,
