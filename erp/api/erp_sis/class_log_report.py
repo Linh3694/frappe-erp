@@ -6,6 +6,7 @@ Cung cấp các endpoint báo cáo sổ đầu bài
 import frappe
 from frappe import _
 import json
+import re
 from datetime import datetime, timedelta
 from erp.utils.api_response import success_response, error_response
 
@@ -780,10 +781,11 @@ def get_class_log_dashboard(date=None, campus_id=None):
         day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
         day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
         
-        scheduled_counts = frappe.db.sql("""
+        # Lấy danh sách period_name cho mỗi lớp từ timetable
+        scheduled_periods = frappe.db.sql("""
             SELECT 
                 ti.class_id,
-                COUNT(DISTINCT tc.period_name) as period_count
+                tc.period_name
             FROM `tabSIS Timetable Instance` ti
             INNER JOIN `tabSIS Timetable Instance Row` tr ON tr.parent = ti.name
             INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
@@ -794,17 +796,37 @@ def get_class_log_dashboard(date=None, campus_id=None):
                 AND LOWER(tc.period_name) LIKE '%%tiết%%'
                 AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
                 AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
-            GROUP BY ti.class_id
+            GROUP BY ti.class_id, tc.period_name
         """, {
             "class_ids": class_ids,
             "date": date_obj,
             "day": day_of_week_short
         }, as_dict=True)
         
-        scheduled_map = {r['class_id']: r['period_count'] for r in scheduled_counts}
+        # Helper function để extract số tiết đầu tiên từ period_name
+        # Để match với logic trong get_class_log_detail
+        def extract_period_number(period_name):
+            """Extract số đầu tiên từ tên tiết để match"""
+            match = re.search(r'\d+', period_name or '')
+            return int(match.group()) if match else 999
+        
+        # Build scheduled_map: class_id -> {period_numbers} và count
+        scheduled_map = {}  # class_id -> period_count
+        class_period_numbers = {}  # class_id -> set of period_numbers
+        for r in scheduled_periods:
+            class_id = r['class_id']
+            period_num = extract_period_number(r['period_name'])
+            
+            if class_id not in class_period_numbers:
+                class_period_numbers[class_id] = set()
+            class_period_numbers[class_id].add(period_num)
+        
+        # Count periods cho mỗi lớp
+        for class_id, period_nums in class_period_numbers.items():
+            scheduled_map[class_id] = len(period_nums)
         
         # Đếm số tiết Study đã nhập log
-        # OPTIMIZED: Sử dụng COUNT với subquery thay vì LEFT JOIN + GROUP BY
+        # Lấy tất cả logs có nội dung
         homeroom_entered = frappe.db.sql("""
             SELECT 
                 cls.class_id,
@@ -824,13 +846,21 @@ def get_class_log_dashboard(date=None, campus_id=None):
         }, as_dict=True)
         
         # Build entered_map: đếm số period đã nhập cho mỗi lớp
-        # NOTE: Chỉ đếm logs từ homeroom class để tối ưu performance
-        # Mixed class logs sẽ được tính chi tiết trong get_class_log_detail
+        # QUAN TRỌNG: Chỉ đếm logs có period_number match với timetable periods
+        # Để đồng nhất với logic trong get_class_log_detail
         entered_map = {}
         for r in homeroom_entered:
-            if r['class_id'] not in entered_map:
-                entered_map[r['class_id']] = 0
-            entered_map[r['class_id']] += 1
+            class_id = r['class_id']
+            log_period_num = extract_period_number(r['period'])
+            
+            # Chỉ đếm nếu period_number này có trong timetable của lớp
+            if class_id in class_period_numbers and log_period_num in class_period_numbers[class_id]:
+                if class_id not in entered_map:
+                    entered_map[class_id] = set()
+                entered_map[class_id].add(log_period_num)
+        
+        # Convert set sang count
+        entered_map = {class_id: len(period_nums) for class_id, period_nums in entered_map.items()}
         
         # Đếm số học sinh trong mỗi lớp
         student_counts = frappe.db.sql("""
@@ -1030,7 +1060,6 @@ def get_class_log_detail(class_id=None, date=None):
             
             # Sắp xếp lại theo số tiết (extract số đầu tiên từ period_name)
             # Ví dụ: "Tiết 1 + 2" -> 1, "Tiết 11" -> 11
-            import re
             def extract_period_number(period_name):
                 """Extract số đầu tiên từ tên tiết để sort và match"""
                 match = re.search(r'\d+', period_name or '')
