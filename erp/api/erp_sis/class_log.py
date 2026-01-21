@@ -713,6 +713,65 @@ def batch_get_homeroom_class_logs():
                 if key not in student_period_class:
                     student_period_class[key] = entry['class_id']
         
+        # ⚡ Step 2b: Fallback - Tìm mixed class qua SIS Class Attendance
+        # Nếu SIS Student Timetable không có data (chỉ có homeroom), kiểm tra SIS Class Attendance
+        # để xem student có attendance ở mixed class nào
+        step_start_2b = time.time()
+        
+        # Tìm tất cả attendance của students hôm nay (ở bất kỳ class nào ngoài homeroom)
+        mixed_attendance_entries = frappe.db.sql("""
+            SELECT student_id, class_id, period
+            FROM `tabSIS Class Attendance`
+            WHERE date = %(date)s
+                AND student_id IN %(student_ids)s
+                AND class_id != %(homeroom_class_id)s
+                AND LOWER(period) LIKE '%%tiết%%'
+        """, {
+            "date": date,
+            "student_ids": student_ids,
+            "homeroom_class_id": homeroom_class_id
+        }, as_dict=True)
+        
+        # Map mixed class từ attendance vào student_period_class
+        for entry in mixed_attendance_entries:
+            entry_period_num = extract_period_number(entry['period'])
+            if entry_period_num and entry_period_num in period_number_to_combined:
+                combined_period = period_number_to_combined[entry_period_num]
+                key = (entry['student_id'], combined_period)
+                # Ưu tiên mixed class từ attendance (override homeroom nếu có)
+                if key not in student_period_class or student_period_class[key] == homeroom_class_id:
+                    student_period_class[key] = entry['class_id']
+        
+        step_times['2b_mixed_attendance'] = (time.time() - step_start_2b) * 1000
+        frappe.logger().info(f"📋 [Backend] Found {len(mixed_attendance_entries)} mixed class attendance entries ({step_times['2b_mixed_attendance']:.0f}ms)")
+        
+        # ⚡ Step 2c: Tìm mixed class qua SIS Class Student
+        # Nếu vẫn chưa tìm thấy mixed class, kiểm tra students thuộc class nào
+        step_start_2c = time.time()
+        
+        # Tìm tất cả class mà students thuộc về (ngoài homeroom)
+        mixed_class_students = frappe.db.sql("""
+            SELECT cs.student_id, cs.class_id, c.title as class_title
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            WHERE cs.student_id IN %(student_ids)s
+                AND cs.class_id != %(homeroom_class_id)s
+                AND c.class_type = 'mixed'
+        """, {
+            "student_ids": student_ids,
+            "homeroom_class_id": homeroom_class_id
+        }, as_dict=True)
+        
+        # Build map: student_id -> list of mixed classes
+        student_mixed_classes = {}
+        for entry in mixed_class_students:
+            if entry['student_id'] not in student_mixed_classes:
+                student_mixed_classes[entry['student_id']] = []
+            student_mixed_classes[entry['student_id']].append(entry['class_id'])
+        
+        step_times['2c_mixed_class_student'] = (time.time() - step_start_2c) * 1000
+        frappe.logger().info(f"📋 [Backend] Found {len(mixed_class_students)} mixed class student entries ({step_times['2c_mixed_class_student']:.0f}ms)")
+        
         # Step 3: Determine which classes we need to query for each period
         period_class_students = {}  # period -> {class_id -> [student_ids]}
         all_classes_to_query = set()
@@ -720,6 +779,12 @@ def batch_get_homeroom_class_logs():
         # QUAN TRỌNG: Luôn thêm homeroom class vào danh sách query
         # Vì attendance có thể được lưu ở homeroom class dù timetable nói học sinh học ở mixed class
         all_classes_to_query.add(homeroom_class_id)
+        
+        # ⚡ Thêm tất cả mixed classes mà students thuộc về
+        # Điều này đảm bảo chúng ta query class log subjects từ mixed class
+        for student_id, mixed_classes in student_mixed_classes.items():
+            for mixed_class in mixed_classes:
+                all_classes_to_query.add(mixed_class)
         
         for period in periods:
             period_class_students[period] = {}
@@ -944,67 +1009,92 @@ def batch_get_homeroom_class_logs():
             period_student_logs = []
             source_classes = set()
             primary_subject = None
+            students_with_logs = set()  # Track students đã có log để không duplicate
             
-            for class_id, class_student_ids in classes_for_period.items():
-                source_classes.add(class_id)
-                subject_key = (class_id, period)
-                subject_log = subject_by_class_period.get(subject_key)
+            # ⚡ STEP 8a: Tìm subject_log từ homeroom class trước
+            homeroom_subject_key = (homeroom_class_id, period)
+            homeroom_subject_log = subject_by_class_period.get(homeroom_subject_key)
+            
+            if homeroom_subject_log:
+                primary_subject = homeroom_subject_log
+                source_classes.add(homeroom_class_id)
+            
+            # ⚡ STEP 8b: Tìm subject_log từ mixed class
+            # Kiểm tra tất cả mixed class mà students thuộc về
+            mixed_subject_logs = {}  # class_id -> subject_log
+            for student_id in student_ids:
+                mixed_classes = student_mixed_classes.get(student_id, [])
+                for mixed_class_id in mixed_classes:
+                    if mixed_class_id not in mixed_subject_logs:
+                        mixed_key = (mixed_class_id, period)
+                        mixed_log = subject_by_class_period.get(mixed_key)
+                        if mixed_log:
+                            mixed_subject_logs[mixed_class_id] = mixed_log
+                            source_classes.add(mixed_class_id)
+                            # Nếu chưa có primary_subject, dùng mixed class
+                            if primary_subject is None:
+                                primary_subject = mixed_log
+            
+            # ⚡ STEP 8c: Build student logs - ưu tiên data từ mixed class
+            for student_id in student_ids:
+                attendance_key = (student_id, period)
+                class_attendance_status = class_attendance_map.get(attendance_key)
+                event_attendance_status = event_attendance_map.get(attendance_key)
+                final_attendance = event_attendance_status or class_attendance_status
                 
-                if subject_log:
-                    if primary_subject is None or class_id == homeroom_class_id:
-                        primary_subject = subject_log
-                    
-                    subject_student_logs = students_by_subject.get(subject_log['name'], {})
-                    
-                    for student_id in class_student_ids:
-                        attendance_key = (student_id, period)
-                        class_attendance_status = class_attendance_map.get(attendance_key)
-                        event_attendance_status = event_attendance_map.get(attendance_key)
-                        final_attendance = event_attendance_status or class_attendance_status
-                        
+                student_log_found = False
+                
+                # Kiểm tra mixed class trước (ưu tiên cao hơn homeroom)
+                mixed_classes = student_mixed_classes.get(student_id, [])
+                for mixed_class_id in mixed_classes:
+                    mixed_log = mixed_subject_logs.get(mixed_class_id)
+                    if mixed_log:
+                        subject_student_logs = students_by_subject.get(mixed_log['name'], {})
                         if student_id in subject_student_logs:
                             student_log = subject_student_logs[student_id].copy()
                             student_log['attendance'] = final_attendance
                             period_student_logs.append(student_log)
-                        else:
-                            # ⚡ Use dict lookup instead of next() with generator
-                            period_student_logs.append({
-                                "student_id": student_id,
-                                "class_student_id": student_to_class_student.get(student_id),
-                                "attendance": final_attendance
-                            })
-                else:
-                    for student_id in class_student_ids:
-                        attendance_key = (student_id, period)
-                        class_attendance_status = class_attendance_map.get(attendance_key)
-                        event_attendance_status = event_attendance_map.get(attendance_key)
-                        final_attendance = event_attendance_status or class_attendance_status
-                        
-                        # ⚡ Use dict lookup instead of next() with generator
-                        period_student_logs.append({
-                            "student_id": student_id,
-                            "class_student_id": student_to_class_student.get(student_id),
-                            "attendance": final_attendance
-                        })
+                            students_with_logs.add(student_id)
+                            student_log_found = True
+                            break
+                
+                if student_log_found:
+                    continue
+                
+                # Fallback: Kiểm tra homeroom class
+                if homeroom_subject_log:
+                    subject_student_logs = students_by_subject.get(homeroom_subject_log['name'], {})
+                    if student_id in subject_student_logs:
+                        student_log = subject_student_logs[student_id].copy()
+                        student_log['attendance'] = final_attendance
+                        period_student_logs.append(student_log)
+                        students_with_logs.add(student_id)
+                        continue
+                
+                # No log found - add basic info
+                period_student_logs.append({
+                    "student_id": student_id,
+                    "class_student_id": student_to_class_student.get(student_id),
+                    "attendance": final_attendance
+                })
             
+            # Determine primary class
             primary_class = homeroom_class_id
-            if classes_for_period:
-                if homeroom_class_id in classes_for_period:
-                    primary_class = homeroom_class_id
-                else:
-                    primary_class = list(classes_for_period.keys())[0]
+            if mixed_subject_logs:
+                # Nếu có subject_log từ mixed class, dùng mixed class đầu tiên
+                primary_class = list(mixed_subject_logs.keys())[0]
             
             result[period] = {
                 "subject": {
                     "name": primary_subject['name'] if primary_subject else None,
                     "timetable_instance_id": primary_subject['timetable_instance_id'] if primary_subject else class_instances.get(homeroom_class_id),
-                    "class_id": primary_class,
+                    "class_id": primary_subject['class_id'] if primary_subject else homeroom_class_id,
                     "general_comment": primary_subject.get('general_comment') if primary_subject else None
                 } if primary_subject else None,
                 "students": period_student_logs,
-                "source_class_id": primary_class,
+                "source_class_id": primary_subject['class_id'] if primary_subject else homeroom_class_id,
                 "source_classes": list(source_classes),
-                "is_homeroom_class": primary_class == homeroom_class_id
+                "is_homeroom_class": (primary_subject['class_id'] if primary_subject else homeroom_class_id) == homeroom_class_id
             }
         
         step_times['8_build_result'] = (time.time() - step_start) * 1000
