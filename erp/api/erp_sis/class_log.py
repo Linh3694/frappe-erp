@@ -1,4 +1,5 @@
 import json
+import re
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
@@ -656,6 +657,30 @@ def batch_get_homeroom_class_logs():
         # Step 2: Query SIS Student Timetable to find which class each student attends for each period
         # This tells us if a student is in a mixed class for a specific period
         step_start = time.time()
+        
+        # Helper function để extract period number từ period_name
+        def extract_period_number(period_name):
+            """Extract số đầu tiên từ tên tiết (VD: 'Tiết 1 + 2' -> 1, 'Tiết 11' -> 11)"""
+            match = re.search(r'\d+', period_name or '')
+            return int(match.group()) if match else None
+        
+        # Build map: period_number -> combined_period_name (request periods)
+        # VD: "Tiết 1 + 2" -> period_numbers [1, 2] -> map 1 -> "Tiết 1 + 2", 2 -> "Tiết 1 + 2"
+        period_number_to_combined = {}
+        for period in periods:
+            period_num = extract_period_number(period)
+            if period_num:
+                period_number_to_combined[period_num] = period
+                # Nếu là combined period (VD: "Tiết 1 + 2"), cũng map period thứ 2
+                # Extract all numbers từ period name
+                all_nums = re.findall(r'\d+', period or '')
+                for num_str in all_nums:
+                    num = int(num_str)
+                    if num not in period_number_to_combined:
+                        period_number_to_combined[num] = period
+        
+        # Query SIS Student Timetable với LIKE '%tiết%' để lấy tất cả tiết học
+        # Sau đó filter và map theo period_number
         student_timetable_entries = frappe.db.sql("""
             SELECT 
                 st.student_id,
@@ -665,21 +690,28 @@ def batch_get_homeroom_class_logs():
             INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
             WHERE st.student_id IN %(student_ids)s
                 AND st.date = %(date)s
-                AND tc.period_name IN %(periods)s
+                AND LOWER(tc.period_name) LIKE '%%tiết%%'
         """, {
             "student_ids": student_ids,
-            "date": date,
-            "periods": periods
+            "date": date
         }, as_dict=True)
         step_times['2_student_timetable'] = (time.time() - step_start) * 1000
         
         frappe.logger().info(f"📋 [Backend] Found {len(student_timetable_entries)} student timetable entries ({step_times['2_student_timetable']:.0f}ms)")
         
         # Build mapping: (student_id, period) -> class_id
+        # Map từ single period (VD: "Tiết 1") về combined period (VD: "Tiết 1 + 2")
         student_period_class = {}
         for entry in student_timetable_entries:
-            key = (entry['student_id'], entry['period_name'])
-            student_period_class[key] = entry['class_id']
+            # Extract period number từ entry
+            entry_period_num = extract_period_number(entry['period_name'])
+            if entry_period_num and entry_period_num in period_number_to_combined:
+                # Map về combined period name từ request
+                combined_period = period_number_to_combined[entry_period_num]
+                key = (entry['student_id'], combined_period)
+                # Chỉ set nếu chưa có (ưu tiên entry đầu tiên)
+                if key not in student_period_class:
+                    student_period_class[key] = entry['class_id']
         
         # Step 3: Determine which classes we need to query for each period
         period_class_students = {}  # period -> {class_id -> [student_ids]}
@@ -724,6 +756,7 @@ def batch_get_homeroom_class_logs():
         frappe.logger().info(f"📚 [Backend] Found {len(class_instances)} timetable instances ({step_times['4_timetable_instances']:.0f}ms)")
         
         # Step 5: Batch query all class log subjects for all classes and periods
+        # Query với LIKE '%tiết%' để lấy tất cả, sau đó filter và map theo period_number
         step_start = time.time()
         all_subject_logs = []
         instance_ids = list(class_instances.values())
@@ -734,18 +767,29 @@ def batch_get_homeroom_class_logs():
                 FROM `tabSIS Class Log Subject`
                 WHERE timetable_instance_id IN %(instance_ids)s
                     AND log_date = %(date)s
-                    AND period IN %(periods)s
+                    AND LOWER(period) LIKE '%%tiết%%'
             """, {
                 "instance_ids": instance_ids,
-                "date": date,
-                "periods": periods
+                "date": date
             }, as_dict=True)
         
         # Build map: (class_id, period) -> subject_log
+        # Map từ single period (VD: "Tiết 1") về combined period (VD: "Tiết 1 + 2") nếu cần
         subject_by_class_period = {}
         for log in all_subject_logs:
-            key = (log['class_id'], log['period'])
-            subject_by_class_period[key] = log
+            log_period_num = extract_period_number(log['period'])
+            
+            # Nếu period trong log match exact với request periods -> dùng trực tiếp
+            if log['period'] in periods:
+                key = (log['class_id'], log['period'])
+                subject_by_class_period[key] = log
+            # Nếu không match exact nhưng period_number match -> map về combined period
+            elif log_period_num and log_period_num in period_number_to_combined:
+                combined_period = period_number_to_combined[log_period_num]
+                key = (log['class_id'], combined_period)
+                # Chỉ set nếu chưa có (ưu tiên entry đầu tiên)
+                if key not in subject_by_class_period:
+                    subject_by_class_period[key] = log
         step_times['5_class_log_subjects'] = (time.time() - step_start) * 1000
         
         frappe.logger().info(f"📝 [Backend] Found {len(all_subject_logs)} class log subjects ({step_times['5_class_log_subjects']:.0f}ms)")
@@ -786,17 +830,17 @@ def batch_get_homeroom_class_logs():
         step_start = time.time()
         
         # ⚡ Query all class attendance in single query
+        # Dùng LIKE '%tiết%' để lấy tất cả tiết, sau đó map theo period_number
         class_attendance_records = frappe.db.sql("""
             SELECT student_id, period, status, class_id
             FROM `tabSIS Class Attendance`
             WHERE date = %(date)s
                 AND student_id IN %(student_ids)s
-                AND period IN %(periods)s
+                AND LOWER(period) LIKE '%%tiết%%'
                 AND class_id IN %(class_ids)s
         """, {
             "date": date,
             "student_ids": student_ids,
-            "periods": periods,
             "class_ids": list(all_classes_to_query)
         }, as_dict=True)
         
@@ -807,16 +851,30 @@ def batch_get_homeroom_class_logs():
         homeroom_attendance_map = {}  # Fallback map cho homeroom class
         
         for record in class_attendance_records:
-            key = (record['student_id'], record['period'])
+            # Map period từ attendance record về combined period từ request
+            record_period_num = extract_period_number(record['period'])
+            
+            # Tìm combined period tương ứng
+            mapped_period = record['period']  # Default: giữ nguyên
+            if record['period'] in periods:
+                mapped_period = record['period']
+            elif record_period_num and record_period_num in period_number_to_combined:
+                mapped_period = period_number_to_combined[record_period_num]
+            else:
+                continue  # Skip nếu không map được
+            
+            key = (record['student_id'], mapped_period)
             expected_class = student_period_class.get(key, homeroom_class_id)
             
             # Lưu attendance từ homeroom class vào fallback map
             if record['class_id'] == homeroom_class_id:
-                homeroom_attendance_map[key] = record['status']
+                if key not in homeroom_attendance_map:
+                    homeroom_attendance_map[key] = record['status']
             
             # Nếu class_id match với expected_class, ưu tiên dùng
             if record['class_id'] == expected_class:
-                class_attendance_map[key] = record['status']
+                if key not in class_attendance_map:
+                    class_attendance_map[key] = record['status']
         
         # Merge: Dùng homeroom fallback nếu không có từ expected_class
         for key, status in homeroom_attendance_map.items():
@@ -846,18 +904,29 @@ def batch_get_homeroom_class_logs():
                     FROM `tabSIS Event Attendance`
                     WHERE date = %(date)s
                         AND student_id IN %(student_ids)s
-                        AND period IN %(periods)s
+                        AND LOWER(period) LIKE '%%tiết%%'
                         AND education_stage_id = %(education_stage_id)s
                 """, {
                     "date": date,
                     "student_ids": student_ids,
-                    "periods": periods,
                     "education_stage_id": education_stage_id
                 }, as_dict=True)
                 
                 for record in event_attendance_records:
-                    key = (record['student_id'], record['period'])
-                    event_attendance_map[key] = record['status']
+                    # Map period từ event attendance về combined period từ request
+                    record_period_num = extract_period_number(record['period'])
+                    
+                    mapped_period = record['period']
+                    if record['period'] in periods:
+                        mapped_period = record['period']
+                    elif record_period_num and record_period_num in period_number_to_combined:
+                        mapped_period = period_number_to_combined[record_period_num]
+                    else:
+                        continue
+                    
+                    key = (record['student_id'], mapped_period)
+                    if key not in event_attendance_map:
+                        event_attendance_map[key] = record['status']
                 
                 frappe.logger().info(f"🎪 [Backend] Found {len(event_attendance_records)} event attendance records")
         except Exception as e:
