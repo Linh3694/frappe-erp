@@ -1023,12 +1023,23 @@ def get_class_log_detail(class_id=None, date=None):
                 "date": date_obj
             }, as_dict=True)
             
-            # Thêm tiết Homeroom ở đầu (priority = 0)
+            # Sắp xếp lại theo số tiết (extract số đầu tiên từ period_name)
+            # Ví dụ: "Tiết 1 + 2" -> 1, "Tiết 11" -> 11
+            import re
+            def extract_period_number(period_name):
+                """Extract số đầu tiên từ tên tiết để sort"""
+                match = re.search(r'\d+', period_name or '')
+                return int(match.group()) if match else 999
+            
+            periods_data.sort(key=lambda p: extract_period_number(p.get('period_name', '')))
+            
+            # Thêm tiết Homeroom ở đầu
+            # GV chủ nhiệm là giáo viên dạy tiết Homeroom
             periods_data.insert(0, {
                 "period_name": "Homeroom",
                 "period_priority": 0,
                 "subject_id": None,
-                "subject_name": "Homeroom",
+                "subject_name": "Sinh hoạt lớp",
                 "teacher_id": class_doc.homeroom_teacher,
                 "teacher_name": homeroom_teacher_name
             })
