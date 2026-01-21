@@ -1059,14 +1059,15 @@ def get_class_log_detail(class_id=None, date=None):
             
             # Lấy giáo viên từ child table hoặc deprecated field
             # Bao gồm period_priority để sort theo thứ tự ưu tiên
+            # Sử dụng GROUP BY để tránh duplicate khi có nhiều timetable rows cho cùng period
             periods_data = frappe.db.sql("""
                 SELECT 
                     tc.period_name,
                     tc.period_priority,
-                    tr.subject_id,
-                    COALESCE(ts.title_vn, sub.title) as subject_name,
-                    COALESCE(trt.teacher_id, tr.teacher_1_id) as teacher_id,
-                    COALESCE(u_new.full_name, u_old.full_name) as teacher_name
+                    MAX(tr.subject_id) as subject_id,
+                    MAX(COALESCE(ts.title_vn, sub.title)) as subject_name,
+                    MAX(COALESCE(trt.teacher_id, tr.teacher_1_id)) as teacher_id,
+                    MAX(COALESCE(u_new.full_name, u_old.full_name)) as teacher_name
                 FROM `tabSIS Timetable Instance Row` tr
                 INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
                 LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
@@ -1084,6 +1085,7 @@ def get_class_log_detail(class_id=None, date=None):
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
                     AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
                     AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
+                GROUP BY tc.period_name, tc.period_priority
                 ORDER BY tc.period_priority ASC
             """, {
                 "instance": timetable_instance,
