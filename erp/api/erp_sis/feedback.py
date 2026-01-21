@@ -295,96 +295,105 @@ def admin_get():
                     "students": []
                 }
 
-                # Get students from student_relationships table
+                # FIX: Lấy students từ CRM Family relationships (nguồn đúng)
+                # KHÔNG dùng guardian.student_relationships vì có thể bị outdated
+                family_relationships = frappe.db.sql("""
+                    SELECT DISTINCT fr.student, fr.relationship_type, fr.key_person
+                    FROM `tabCRM Family Relationship` fr
+                    INNER JOIN `tabCRM Family` f ON fr.parent = f.name
+                    WHERE fr.guardian = %(guardian)s 
+                        AND fr.parentfield = 'relationships'
+                        AND f.docstatus < 2
+                """, {"guardian": feedback.guardian}, as_dict=True)
+                
                 students = []
-                if guardian.student_relationships:
-                    for relationship in guardian.student_relationships:
-                        # Get student info from CRM Student and SIS Student doctypes
-                        student_name = relationship.student
-                        student_code = None
+                for relationship in family_relationships:
+                    # Get student info from CRM Student and SIS Student doctypes
+                    student_name = relationship.student
+                    student_code = None
+                    class_name = None
+                    program = None
+
+                    try:
+                        # Get from CRM Student
+                        crm_student = frappe.get_doc("CRM Student", relationship.student)
+                        student_name = crm_student.student_name or relationship.student
+                        student_code = crm_student.student_code
+
+                        # Use CRM Student name as student_id for SIS Class Student (same as otp_auth.py)
+                        # Get class info from SIS Class Student directly using CRM Student name
+                        program = None  # Will be set if we can find SIS Student
+
+                        student_classes = frappe.get_all("SIS Class Student",
+                            filters={"student_id": relationship.student},  # Use CRM Student name directly
+                            fields=["class_id"],
+                            order_by="modified desc"
+                        )
+
+                        # Find the latest regular class
                         class_name = None
-                        program = None
+                        for cs in student_classes:
+                            if cs["class_id"]:
+                                try:
+                                    class_doc = frappe.get_doc("SIS Class", cs["class_id"])
+                                    # Check if this is a regular class (same as otp_auth.py)
+                                    if hasattr(class_doc, 'class_type') and class_doc.class_type == "regular":
+                                        class_name = class_doc.title
+                                        break  # Use the most recent regular class
+                                except:
+                                    continue
 
-                        try:
-                            # Get from CRM Student
-                            crm_student = frappe.get_doc("CRM Student", relationship.student)
-                            student_name = crm_student.student_name or relationship.student
-                            student_code = crm_student.student_code
+                    except frappe.DoesNotExistError:
+                        # Student not found, use relationship student ID
+                        student_name = relationship.student
+                    except Exception as e:
+                        # Any other error, log and use relationship student ID
+                        frappe.logger().error(f"Error getting student {relationship.student}: {str(e)}")
+                        student_name = relationship.student
 
-                            # Use CRM Student name as student_id for SIS Class Student (same as otp_auth.py)
-                            # Get class info from SIS Class Student directly using CRM Student name
-                            program = None  # Will be set if we can find SIS Student
+                    # Get student photo from SIS Photo (same as otp_auth.py)
+                    student_photo = None
+                    photo_title = None
 
-                            student_classes = frappe.get_all("SIS Class Student",
-                                filters={"student_id": relationship.student},  # Use CRM Student name directly
-                                fields=["class_id"],
-                                order_by="modified desc"
-                            )
+                    try:
+                        # Lấy năm học hiện tại đang active
+                        current_school_year = frappe.db.get_value(
+                            "SIS School Year",
+                            {"is_enable": 1},
+                            "name",
+                            order_by="start_date desc"
+                        )
+                        
+                        # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
+                        sis_photos = frappe.db.sql("""
+                            SELECT photo, title, upload_date, school_year_id
+                            FROM `tabSIS Photo`
+                            WHERE student_id = %s
+                                AND type = 'student'
+                                AND status = 'Active'
+                            ORDER BY 
+                                CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                                upload_date DESC,
+                                creation DESC
+                            LIMIT 1
+                        """, (relationship.student, current_school_year), as_dict=True)
 
-                            # Find the latest regular class
-                            class_name = None
-                            for cs in student_classes:
-                                if cs["class_id"]:
-                                    try:
-                                        class_doc = frappe.get_doc("SIS Class", cs["class_id"])
-                                        # Check if this is a regular class (same as otp_auth.py)
-                                        if hasattr(class_doc, 'class_type') and class_doc.class_type == "regular":
-                                            class_name = class_doc.title
-                                            break  # Use the most recent regular class
-                                    except:
-                                        continue
+                        if sis_photos:
+                            student_photo = sis_photos[0]["photo"]
+                            photo_title = sis_photos[0]["title"]
+                    except:
+                        pass  # Photo is optional, don't fail if not found
 
-                        except frappe.DoesNotExistError:
-                            # Student not found, use relationship student ID
-                            student_name = relationship.student
-                        except Exception as e:
-                            # Any other error, log and use relationship student ID
-                            frappe.logger().error(f"Error getting student {relationship.student}: {str(e)}")
-                            student_name = relationship.student
-
-                        # Get student photo from SIS Photo (same as otp_auth.py)
-                        student_photo = None
-                        photo_title = None
-
-                        try:
-                            # Lấy năm học hiện tại đang active
-                            current_school_year = frappe.db.get_value(
-                                "SIS School Year",
-                                {"is_enable": 1},
-                                "name",
-                                order_by="start_date desc"
-                            )
-                            
-                            # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
-                            sis_photos = frappe.db.sql("""
-                                SELECT photo, title, upload_date, school_year_id
-                                FROM `tabSIS Photo`
-                                WHERE student_id = %s
-                                    AND type = 'student'
-                                    AND status = 'Active'
-                                ORDER BY 
-                                    CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
-                                    upload_date DESC,
-                                    creation DESC
-                                LIMIT 1
-                            """, (relationship.student, current_school_year), as_dict=True)
-
-                            if sis_photos:
-                                student_photo = sis_photos[0]["photo"]
-                                photo_title = sis_photos[0]["title"]
-                        except:
-                            pass  # Photo is optional, don't fail if not found
-
-                        student_info = {
-                            "name": student_name,
-                            "student_id": student_code or relationship.student,  # student_code from CRM Student, fallback to CRM Student ID
-                            "relationship": relationship.relationship_type,
-                            "class_name": class_name,
-                            "program": program,
-                            "photo": student_photo,
-                            "photo_title": photo_title
-                        }
-                        students.append(student_info)
+                    student_info = {
+                        "name": student_name,
+                        "student_id": student_code or relationship.student,  # student_code from CRM Student, fallback to CRM Student ID
+                        "relationship": relationship.relationship_type,
+                        "class_name": class_name,
+                        "program": program,
+                        "photo": student_photo,
+                        "photo_title": photo_title
+                    }
+                    students.append(student_info)
 
                 feedback_data["guardian_info"]["students"] = students
 
