@@ -1073,6 +1073,9 @@ def upload_single_photo():
 def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=None, school_year_id=None, page=1, limit=20):
     """Get list of photos with optional filters"""
     try:
+        # Debug: Log received params
+        frappe.logger().info(f"🔍 get_photos_list called with: photo_type={photo_type}, student_id={student_id}, class_id={class_id}, campus_id={campus_id}, school_year_id={school_year_id}")
+        
         # Sử dụng SQL query trực tiếp để đảm bảo filter chính xác
         # (frappe.get_all đôi khi không filter đúng với Link fields)
         conditions = ["1=1"]
@@ -1104,16 +1107,21 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
         params["limit"] = int(limit)
         params["offset"] = offset
         
-        # Query photos với SQL trực tiếp
-        photos = frappe.db.sql(f"""
+        # Debug: Log SQL query
+        sql_query = f"""
             SELECT name, title, type, student_id, class_id, photo, upload_date, uploaded_by, status, description
             FROM `tabSIS Photo`
             WHERE {where_clause}
             ORDER BY creation DESC
             LIMIT %(limit)s OFFSET %(offset)s
-        """, params, as_dict=True)
+        """
+        frappe.logger().info(f"🔍 SQL Query: {sql_query}")
+        frappe.logger().info(f"🔍 SQL Params: {params}")
         
-        frappe.logger().info(f"📋 Found {len(photos)} photos with SQL filters: {params}")
+        # Query photos với SQL trực tiếp
+        photos = frappe.db.sql(sql_query, params, as_dict=True)
+        
+        frappe.logger().info(f"📋 Found {len(photos)} photos")
         
         # Lấy tất cả photo names để batch query File attachments
         photo_names = [p.get("name") for p in photos if p.get("name")]
@@ -1296,6 +1304,16 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
                 "limit": int(limit),
                 "total_count": total_count,
                 "total_pages": (total_count + int(limit) - 1) // int(limit)
+            },
+            "_debug": {
+                "received_params": {
+                    "photo_type": photo_type,
+                    "student_id": student_id,
+                    "class_id": class_id,
+                    "school_year_id": school_year_id
+                },
+                "where_clause": where_clause,
+                "sql_params": {k: v for k, v in params.items() if k not in ['limit', 'offset']}
             }
         }
 
