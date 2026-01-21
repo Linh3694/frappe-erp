@@ -1058,12 +1058,11 @@ def get_class_log_detail(class_id=None, date=None):
             day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
             
             # Lấy giáo viên từ child table hoặc deprecated field
-            # Bao gồm period_priority để sort theo thứ tự ưu tiên
-            # Sử dụng GROUP BY để tránh duplicate khi có nhiều timetable rows cho cùng period
+            # GROUP BY period_name để tránh duplicate
             periods_data = frappe.db.sql("""
                 SELECT 
                     tc.period_name,
-                    tc.period_priority,
+                    MIN(tc.period_priority) as period_priority,
                     MAX(tr.subject_id) as subject_id,
                     MAX(COALESCE(ts.title_vn, sub.title)) as subject_name,
                     MAX(COALESCE(trt.teacher_id, tr.teacher_1_id)) as teacher_id,
@@ -1085,8 +1084,8 @@ def get_class_log_detail(class_id=None, date=None):
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
                     AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
                     AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
-                GROUP BY tc.period_name, tc.period_priority
-                ORDER BY tc.period_priority ASC
+                GROUP BY tc.period_name
+                ORDER BY MIN(tc.period_priority) ASC
             """, {
                 "instance": timetable_instance,
                 "day": day_of_week_short,
@@ -1144,7 +1143,7 @@ def get_class_log_detail(class_id=None, date=None):
                             mixed_classes.add(entry['class_id'])
                         student_period_class[(entry['student_id'], entry['period_name'])] = entry['class_id']
                 
-                # 3. Query class logs từ homeroom class (theo class_id để đồng nhất với dashboard)
+                # 3. Query class logs từ homeroom class (theo class_id và LIKE '%tiết%' để đồng nhất với dashboard)
                 class_log_subjects = frappe.db.sql("""
                     SELECT 
                         cls.name,
@@ -1158,20 +1157,19 @@ def get_class_log_detail(class_id=None, date=None):
                     LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
                     WHERE cls.class_id = %(class_id)s
                         AND cls.log_date = %(date)s
-                        AND cls.period IN %(periods)s
+                        AND LOWER(cls.period) LIKE '%%tiết%%'
                         AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
                              OR clst.name IS NOT NULL)
                     GROUP BY cls.name, cls.period
                 """, {
                     "class_id": class_id,
-                    "date": date_obj,
-                    "periods": period_names
+                    "date": date_obj
                 }, as_dict=True)
                 
                 for log in class_log_subjects:
                     log_map[log['period']] = log
                 
-                # 5. Query class logs từ mixed classes và merge vào log_map
+                # 4. Query class logs từ mixed classes và merge vào log_map
                 # Chỉ thêm nếu homeroom class chưa có log cho tiết đó
                 if mixed_classes:
                     mixed_log_subjects = frappe.db.sql("""
@@ -1187,14 +1185,13 @@ def get_class_log_detail(class_id=None, date=None):
                         LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
                         WHERE cls.class_id IN %(mixed_class_ids)s
                             AND cls.log_date = %(date)s
-                            AND cls.period IN %(periods)s
+                            AND LOWER(cls.period) LIKE '%%tiết%%'
                             AND (cls.general_comment IS NOT NULL AND cls.general_comment != '' 
                                  OR clst.name IS NOT NULL)
                         GROUP BY cls.name, cls.period
                     """, {
                         "mixed_class_ids": list(mixed_classes),
-                        "date": date_obj,
-                        "periods": period_names
+                        "date": date_obj
                     }, as_dict=True)
                     
                     for log in mixed_log_subjects:
