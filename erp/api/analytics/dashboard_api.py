@@ -353,6 +353,149 @@ def get_login_history(days=30, limit=50):
 
 
 @frappe.whitelist()
+def get_push_subscriptions(search="", page=1, page_size=50):
+	"""
+	Lấy danh sách Push Subscriptions của tất cả Parent
+	
+	Args:
+		search: Tìm kiếm theo tên hoặc email
+		page: Số trang
+		page_size: Số records mỗi trang
+	"""
+	try:
+		page = int(page)
+		page_size = int(page_size)
+		offset = (page - 1) * page_size
+		
+		# Base query với join để lấy thông tin parent
+		base_where = """
+			WHERE hr.role = 'Parent'
+			AND u.enabled = 1
+		"""
+		
+		# Thêm điều kiện search
+		search_condition = ""
+		search_params = []
+		if search:
+			search_condition = """
+				AND (u.full_name LIKE %s OR u.name LIKE %s)
+			"""
+			search_like = f"%{search}%"
+			search_params = [search_like, search_like]
+		
+		# Đếm tổng số parents có subscriptions
+		count_sql = f"""
+			SELECT COUNT(DISTINCT u.name)
+			FROM `tabUser` u
+			INNER JOIN `tabHas Role` hr ON hr.parent = u.name
+			LEFT JOIN `tabPush Subscription` ps ON ps.user = u.name
+			{base_where}
+			{search_condition}
+		"""
+		total_parents = frappe.db.sql(count_sql, search_params)[0][0] or 0
+		
+		# Lấy danh sách parents và subscriptions
+		data_sql = f"""
+			SELECT 
+				u.name as email,
+				u.full_name,
+				u.enabled,
+				ps.name as subscription_name,
+				ps.device_name,
+				ps.created_at,
+				ps.last_used,
+				ps.endpoint
+			FROM `tabUser` u
+			INNER JOIN `tabHas Role` hr ON hr.parent = u.name
+			LEFT JOIN `tabPush Subscription` ps ON ps.user = u.name
+			{base_where}
+			{search_condition}
+			ORDER BY u.full_name ASC, ps.created_at DESC
+			LIMIT %s OFFSET %s
+		"""
+		
+		results = frappe.db.sql(data_sql, search_params + [page_size, offset], as_dict=True)
+		
+		# Group by parent
+		parents_dict = {}
+		for row in results:
+			email = row['email']
+			if email not in parents_dict:
+				parents_dict[email] = {
+					'email': email,
+					'full_name': row['full_name'],
+					'enabled': row['enabled'],
+					'subscriptions': []
+				}
+			
+			if row['subscription_name']:
+				parents_dict[email]['subscriptions'].append({
+					'name': row['subscription_name'],
+					'device_name': row['device_name'] or 'Unknown',
+					'created_at': str(row['created_at']) if row['created_at'] else None,
+					'last_used': str(row['last_used']) if row['last_used'] else None
+				})
+		
+		parents_list = list(parents_dict.values())
+		
+		# Thống kê tổng quan
+		stats_sql = """
+			SELECT 
+				COUNT(DISTINCT u.name) as total_parents,
+				COUNT(DISTINCT CASE WHEN ps.name IS NOT NULL THEN u.name END) as parents_with_subs,
+				COUNT(ps.name) as total_subscriptions
+			FROM `tabUser` u
+			INNER JOIN `tabHas Role` hr ON hr.parent = u.name
+			LEFT JOIN `tabPush Subscription` ps ON ps.user = u.name
+			WHERE hr.role = 'Parent'
+			AND u.enabled = 1
+		"""
+		stats = frappe.db.sql(stats_sql, as_dict=True)[0]
+		
+		# Thống kê theo device
+		device_stats_sql = """
+			SELECT 
+				ps.device_name,
+				COUNT(*) as count
+			FROM `tabPush Subscription` ps
+			INNER JOIN `tabUser` u ON u.name = ps.user
+			INNER JOIN `tabHas Role` hr ON hr.parent = u.name
+			WHERE hr.role = 'Parent'
+			AND u.enabled = 1
+			GROUP BY ps.device_name
+			ORDER BY count DESC
+		"""
+		device_stats = frappe.db.sql(device_stats_sql, as_dict=True)
+		
+		return {
+			"success": True,
+			"data": {
+				"parents": parents_list,
+				"total_count": total_parents,
+				"page": page,
+				"page_size": page_size,
+				"total_pages": (total_parents + page_size - 1) // page_size if total_parents > 0 else 1,
+				"stats": {
+					"total_parents": stats['total_parents'],
+					"parents_with_subs": stats['parents_with_subs'],
+					"parents_without_subs": stats['total_parents'] - stats['parents_with_subs'],
+					"total_subscriptions": stats['total_subscriptions'],
+					"activation_rate": round(stats['parents_with_subs'] / stats['total_parents'] * 100, 1) if stats['total_parents'] > 0 else 0
+				},
+				"device_stats": device_stats
+			}
+		}
+		
+	except Exception as e:
+		import traceback
+		frappe.log_error(f"Error getting push subscriptions: {str(e)}\n{traceback.format_exc()}", "Dashboard API Error")
+		return {
+			"success": False,
+			"message": str(e)
+		}
+
+
+@frappe.whitelist()
 def debug_analytics():
 	"""
 	Debug API để kiểm tra trạng thái data trong database.
