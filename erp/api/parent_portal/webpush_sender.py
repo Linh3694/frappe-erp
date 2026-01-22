@@ -64,15 +64,36 @@ def send_web_push(subscription_info, data, vapid_private_key, vapid_claims):
         'TTL': '86400'  # 24 hours
     })
     
-    # Send request
-    response = requests.post(
-        endpoint,
-        data=payload,
-        headers=headers,
-        timeout=10
-    )
+    # Send request với retry logic
+    max_retries = 2
+    last_error = None
     
-    return response
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.post(
+                endpoint,
+                data=payload,
+                headers=headers,
+                timeout=10
+            )
+            return response
+        except OSError as e:
+            # Handle I/O errors (Errno 5, connection reset, etc.)
+            last_error = e
+            if attempt < max_retries:
+                import time
+                time.sleep(0.5)  # Đợi 500ms trước khi retry
+                continue
+            else:
+                raise
+        except requests.exceptions.RequestException as e:
+            last_error = e
+            if attempt < max_retries:
+                import time
+                time.sleep(0.5)
+                continue
+            else:
+                raise
 
 
 def generate_vapid_headers(endpoint, vapid_private_key, vapid_claims):
@@ -146,18 +167,29 @@ def send_simple_notification(subscription_info, title, body, icon=None, data=Non
         "data": data or {}
     }
     
-    try:
-        response = requests.post(
-            endpoint,
-            json=payload,
-            headers={
-                'Content-Type': 'application/json',
-                'TTL': '86400'
-            },
-            timeout=10
-        )
-        return response
-    except Exception as e:
-        print(f"Error sending notification: {e}")
-        return None
+    max_retries = 2
+    
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers={
+                    'Content-Type': 'application/json',
+                    'TTL': '86400'
+                },
+                timeout=10
+            )
+            return response
+        except OSError as e:
+            # Handle I/O errors với retry
+            if attempt < max_retries:
+                import time
+                time.sleep(0.5)
+                continue
+            print(f"Error sending notification after {max_retries + 1} attempts: {e}")
+            return None
+        except Exception as e:
+            print(f"Error sending notification: {e}")
+            return None
 
