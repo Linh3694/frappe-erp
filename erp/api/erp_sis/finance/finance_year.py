@@ -429,7 +429,7 @@ def delete_finance_year():
                 return error_response(
                     f"Không thể xóa năm tài chính vì còn {student_count} học sinh và {order_count} đơn hàng",
                     logs=logs,
-                    data={
+                    debug_info={
                         "student_count": student_count,
                         "order_count": order_count,
                         "can_force_delete": "System Manager" in frappe.get_roles()
