@@ -364,6 +364,7 @@ def delete_finance_year():
     
     Body:
         finance_year_id: ID năm tài chính cần xóa
+        force: True để force delete (chỉ System Manager mới được phép)
     
     Returns:
         Kết quả xóa
@@ -381,13 +382,19 @@ def delete_finance_year():
             data = frappe.form_dict
         
         finance_year_id = data.get('finance_year_id')
+        force = data.get('force', False)
+        
+        # Chuẩn hóa giá trị force (có thể là string "true" hoặc boolean)
+        if isinstance(force, str):
+            force = force.lower() in ('true', '1', 'yes')
+        
         if not finance_year_id:
             return validation_error_response(
                 "Thiếu finance_year_id",
                 {"finance_year_id": ["Finance Year ID là bắt buộc"]}
             )
         
-        logs.append(f"Xóa năm tài chính: {finance_year_id}")
+        logs.append(f"Xóa năm tài chính: {finance_year_id}, force: {force}")
         
         if not frappe.db.exists("SIS Finance Year", finance_year_id):
             return not_found_response(f"Không tìm thấy năm tài chính: {finance_year_id}")
@@ -397,10 +404,37 @@ def delete_finance_year():
         order_count = frappe.db.count("SIS Finance Order", {"finance_year_id": finance_year_id})
         
         if student_count > 0 or order_count > 0:
-            return error_response(
-                f"Không thể xóa năm tài chính vì còn {student_count} học sinh và {order_count} đơn hàng",
-                logs=logs
-            )
+            # Nếu force=True, kiểm tra quyền System Manager
+            if force:
+                is_system_manager = "System Manager" in frappe.get_roles()
+                if not is_system_manager:
+                    return error_response(
+                        "Chỉ System Manager mới được phép force delete năm tài chính có dữ liệu",
+                        logs=logs
+                    )
+                
+                logs.append(f"Force delete được kích hoạt bởi System Manager")
+                
+                # Xóa tất cả SIS Finance Student liên quan
+                if student_count > 0:
+                    frappe.db.delete("SIS Finance Student", {"finance_year_id": finance_year_id})
+                    logs.append(f"Đã xóa {student_count} học sinh trong năm tài chính")
+                
+                # Xóa tất cả SIS Finance Order liên quan
+                if order_count > 0:
+                    frappe.db.delete("SIS Finance Order", {"finance_year_id": finance_year_id})
+                    logs.append(f"Đã xóa {order_count} đơn hàng trong năm tài chính")
+            else:
+                # Không cho phép xóa, trả về thông tin để frontend hiển thị
+                return error_response(
+                    f"Không thể xóa năm tài chính vì còn {student_count} học sinh và {order_count} đơn hàng",
+                    logs=logs,
+                    data={
+                        "student_count": student_count,
+                        "order_count": order_count,
+                        "can_force_delete": "System Manager" in frappe.get_roles()
+                    }
+                )
         
         frappe.delete_doc("SIS Finance Year", finance_year_id, ignore_permissions=True)
         frappe.db.commit()
