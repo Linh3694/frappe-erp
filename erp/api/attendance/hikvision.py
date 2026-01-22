@@ -794,15 +794,13 @@ def process_single_attendance_event(event_data):
 		
 		logger.info(f"✅ [SYNC] Processed attendance for {employee_code}")
 		
-		# Enqueue notification nếu không phải historical data
+		# Gửi notification SYNC nếu không phải historical data
+		# Thay đổi từ async (RQ) sang sync vì RQ có vấn đề với site config
 		if not is_historical_attendance(parsed_timestamp):
 			try:
-				frappe.enqueue(
-					"erp.api.attendance.notification.publish_attendance_notification",
-					queue="short",
-					job_id=f"attendance_notif_{employee_code}_{parsed_timestamp.strftime('%H%M%S')}",
-					deduplicate=True,
-					timeout=120,
+				from erp.api.attendance.notification import publish_attendance_notification
+				
+				publish_attendance_notification(
 					employee_code=employee_code,
 					employee_name=employee_name,
 					timestamp=parsed_timestamp.isoformat(),
@@ -813,8 +811,9 @@ def process_single_attendance_event(event_data):
 					total_check_ins=attendance_doc.total_check_ins,
 					date=str(attendance_doc.date)
 				)
-			except Exception as enqueue_error:
-				logger.error(f"❌ Failed to enqueue notification: {str(enqueue_error)}")
+				logger.info(f"✅ [SYNC] Notification sent for {employee_code}")
+			except Exception as notif_error:
+				logger.error(f"❌ Failed to send notification: {str(notif_error)}")
 		
 		return True
 		

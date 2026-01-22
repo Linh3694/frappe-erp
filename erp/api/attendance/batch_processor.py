@@ -412,28 +412,32 @@ def process_employee_events(key, events, logger, existing_name=None):
 
 def enqueue_attendance_notification(notif_data):
 	"""
-	Enqueue notification job.
+	Gửi notification SYNC (trực tiếp) thay vì qua RQ.
+	
+	Lý do thay đổi từ async sang sync:
+	- RQ jobs fail với lỗi frappe.init(site=site) trong một số trường hợp
+	- Notification cần được gửi ngay lập tức để phụ huynh nhận kịp thời
+	- Gọi sync chỉ mất 1-2 giây, không ảnh hưởng performance đáng kể
 	
 	Args:
 		notif_data: Dict with notification data
 	"""
+	from erp.api.attendance.notification import publish_attendance_notification
+	
+	logger = get_batch_processor_logger()
 	employee_code = notif_data.get("employee_code")
-	timestamp = notif_data.get("timestamp")
 	
-	# Parse timestamp for job_id
-	if isinstance(timestamp, str):
-		ts = frappe.utils.get_datetime(timestamp)
-	else:
-		ts = timestamp
-	
-	frappe.enqueue(
-		"erp.api.attendance.notification.publish_attendance_notification",
-		queue="short",
-		job_id=f"attendance_notif_{employee_code}_{ts.strftime('%H%M%S')}",
-		deduplicate=True,
-		timeout=120,
-		**notif_data
-	)
+	try:
+		# Gọi TRỰC TIẾP (sync) thay vì qua RQ
+		publish_attendance_notification(**notif_data)
+		logger.info(f"✅ [SYNC] Notification sent for {employee_code}")
+	except Exception as e:
+		logger.error(f"❌ [SYNC] Failed to send notification for {employee_code}: {str(e)}")
+		# Log error nhưng không raise để không ảnh hưởng batch processing
+		frappe.log_error(
+			message=f"Failed to send attendance notification for {employee_code}: {str(e)}",
+			title="Attendance Notification Error"
+		)
 
 
 @frappe.whitelist()
