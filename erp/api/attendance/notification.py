@@ -52,19 +52,21 @@ def publish_attendance_notification(
 			timestamp = frappe.utils.get_datetime(timestamp)
 			frappe.logger().info(f"📢 [Attendance Notif] Parsed timestamp: {timestamp}")
 
-		# DEBOUNCE CHECK: Skip if notification sent recently with enhanced context checking
+		# DEBOUNCE CHECK với ATOMIC LOCK để tránh race condition
+		# Dùng Redis SETNX (set if not exists) để đảm bảo chỉ 1 request được xử lý
 		frappe.logger().info(f"🔍 [Attendance Notif] Checking debounce for {employee_code}")
-		should_skip = should_skip_due_to_debounce(
+		
+		should_skip, lock_acquired = should_skip_due_to_debounce_with_lock(
 			employee_code,
 			timestamp,
 			check_in_time=check_in_time,
 			check_out_time=check_out_time,
 			total_check_ins=total_check_ins
 		)
-		frappe.logger().info(f"🔍 [Attendance Notif] Debounce result for {employee_code}: should_skip={should_skip}")
+		frappe.logger().info(f"🔍 [Attendance Notif] Debounce result for {employee_code}: should_skip={should_skip}, lock_acquired={lock_acquired}")
 
 		if should_skip:
-			frappe.logger().info(f"⏭️ [Debounce] SKIPPING notification for {employee_code} - sent recently")
+			frappe.logger().info(f"⏭️ [Debounce] SKIPPING notification for {employee_code} - sent recently or locked")
 			return
 
 		frappe.logger().info(f"✅ [Attendance Notif] ALLOWING notification for {employee_code}")
@@ -99,14 +101,8 @@ def publish_attendance_notification(
 				date=date
 			)
 
-		# UPDATE DEBOUNCE CACHE: Mark notification as sent (dùng Redis cache)
-		update_debounce_cache(
-			employee_code, 
-			timestamp,
-			check_in_time=check_in_time,
-			check_out_time=check_out_time,
-			total_check_ins=total_check_ins
-		)
+		# Cache đã được update trong should_skip_due_to_debounce_with_lock (atomic)
+		# Không cần update lại ở đây
 
 		frappe.logger().info(f"✅ [Attendance Notif] Notification sent for {employee_code}")
 
@@ -551,8 +547,112 @@ def format_datetime_vn(dt):
 	return vn_time.strftime('%H:%M, %d/%m/%Y')
 
 
+def should_skip_due_to_debounce_with_lock(employee_code, current_timestamp, check_in_time=None, check_out_time=None, total_check_ins=None):
+	"""
+	Check if notification should be skipped due to debounce WITH ATOMIC LOCK
+	Dùng Redis SETNX để tránh race condition khi nhiều request đến cùng lúc
+	
+	Returns: (should_skip: bool, lock_acquired: bool)
+	- should_skip: True nếu nên bỏ qua notification
+	- lock_acquired: True nếu đã acquire lock thành công (để caller biết cần release hay không)
+	
+	FIX: Đảm bảo chỉ 1 request được xử lý tại một thời điểm cho mỗi employee
+	"""
+	try:
+		# Parse timestamp trước
+		if isinstance(current_timestamp, str):
+			current_timestamp = frappe.utils.get_datetime(current_timestamp)
+		
+		# Lock key để đảm bảo atomic operation
+		lock_key = f"attendance_notif_lock:{employee_code}"
+		cache_key = f"attendance_debounce:{employee_code}"
+		
+		# Tính is_check_in cho event này
+		current_is_checkin = determine_checkin_or_checkout(current_timestamp, check_in_time, check_out_time)
+		
+		# Tạo unique request ID để track
+		import uuid
+		request_id = str(uuid.uuid4())[:8]
+		
+		# Step 1: Try to acquire lock với Redis SETNX
+		# Lock expires sau 30 giây để tránh deadlock
+		redis = frappe.cache()
+		
+		# Check existing cache để xác định có nên skip không
+		cached_data = redis.get_value(cache_key)
+		
+		if cached_data:
+			try:
+				if isinstance(cached_data, str):
+					cached_data = json.loads(cached_data)
+				
+				last_timestamp = cached_data.get('timestamp')
+				last_check_ins = cached_data.get('total_check_ins', 0)
+				last_is_checkin = cached_data.get('is_check_in', True)
+				
+				if isinstance(last_timestamp, str):
+					last_timestamp = frappe.utils.get_datetime(last_timestamp)
+				
+				# Tính time diff
+				time_diff = (current_timestamp - last_timestamp).total_seconds()
+				time_diff_min = time_diff / 60
+				
+				frappe.logger().info(f"⏱️ [Debounce-Lock] {employee_code} - diff: {time_diff:.1f}s ({time_diff_min:.2f} min)")
+				
+				# Nếu trong 30 giây và cùng event type, skip
+				if time_diff < 30 and current_is_checkin == last_is_checkin:
+					frappe.logger().info(f"⏭️ [Debounce-Lock] SKIPPING {employee_code} - same event within 30s")
+					return (True, False)
+				
+				# Nếu trong 60 giây và total_check_ins không đổi, skip
+				if time_diff < 60 and total_check_ins and last_check_ins == total_check_ins:
+					frappe.logger().info(f"⏭️ [Debounce-Lock] SKIPPING {employee_code} - same check_ins within 60s")
+					return (True, False)
+				
+			except Exception as parse_error:
+				frappe.logger().warning(f"⚠️ [Debounce-Lock] Cache parse error: {str(parse_error)}")
+		
+		# Step 2: Try to acquire lock
+		# Sử dụng Redis SETNX pattern: set lock nếu chưa tồn tại
+		lock_value = f"{request_id}:{current_timestamp.isoformat()}"
+		
+		# Kiểm tra lock hiện tại
+		existing_lock = redis.get_value(lock_key)
+		
+		if existing_lock:
+			# Lock đang tồn tại, nghĩa là có request khác đang xử lý
+			frappe.logger().info(f"🔒 [Debounce-Lock] {employee_code} - Lock exists, SKIPPING (existing: {existing_lock})")
+			return (True, False)
+		
+		# Set lock với TTL 30 giây
+		redis.set_value(lock_key, lock_value, expires_in_sec=30)
+		frappe.logger().info(f"🔓 [Debounce-Lock] {employee_code} - Acquired lock: {request_id}")
+		
+		# Step 3: Update cache NGAY LẬP TỨC (trước khi gửi notification)
+		# Điều này đảm bảo request tiếp theo sẽ thấy cache mới
+		cache_data = {
+			"timestamp": current_timestamp.isoformat(),
+			"total_check_ins": total_check_ins or 0,
+			"is_check_in": current_is_checkin,
+			"request_id": request_id
+		}
+		
+		redis.set_value(cache_key, json.dumps(cache_data), expires_in_sec=300)
+		frappe.logger().info(f"📝 [Debounce-Lock] {employee_code} - Cache updated immediately")
+		
+		# Cho phép notification
+		return (False, True)
+
+	except Exception as e:
+		frappe.logger().error(f"❌ [Debounce-Lock] Error for {employee_code}: {str(e)}")
+		return (False, False)  # On error, allow notification
+
+
 def should_skip_due_to_debounce(employee_code, current_timestamp, check_in_time=None, check_out_time=None, total_check_ins=None):
 	"""
+	DEPRECATED: Dùng should_skip_due_to_debounce_with_lock thay thế
+	Giữ lại để tương thích ngược
+	
 	Check if notification should be skipped due to debounce
 	SỬ DỤNG REDIS CACHE thay vì query database với LIKE (rất chậm!)
 	

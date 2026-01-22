@@ -141,6 +141,9 @@ def save_contact_log():
     """
     Save contact log (badges + comment) for students
     Does NOT send notification yet - just saves draft
+    
+    FIX: Tìm student log đã có contact_log trước (từ bất kỳ subject nào trong ngày),
+    nếu có thì update, nếu không mới tạo mới
     """
     try:
         body = _get_body() or {}
@@ -157,67 +160,34 @@ def save_contact_log():
         saved_count = 0
         log_ids = {}  # student_id -> log_id
         
-        # First, find timetable instance for this class and date
-        timetable_instance = None
+        # Tìm tất cả subjects của class + date để tìm existing contact logs
+        existing_logs_map = {}  # student_id -> log record có contact_log
         if date:
-            timetable_instances = frappe.get_all(
-                "SIS Timetable Instance",
-                filters={
-                    "class_id": class_id,
-                    "start_date": ["<=", date],
-                    "end_date": [">=", date]
-                },
-                fields=["name"],
-                limit=1
-            )
-            if timetable_instances:
-                timetable_instance = timetable_instances[0]['name']
-        
-        if not timetable_instance:
-            return error_response(
-                message="No active timetable instance found for this class and date",
-                code="NO_TIMETABLE_INSTANCE"
-            )
-        
-        # Get or create subject
-        filters_subject = {
-            "timetable_instance_id": timetable_instance,
-            "class_id": class_id
-        }
-        if date:
-            filters_subject["log_date"] = date
-        
-        subject_rows = frappe.get_all(
-            "SIS Class Log Subject",
-            filters=filters_subject,
-            fields=["name"],
-            limit=1
-        )
-        
-        if not subject_rows:
-            # Need to create subject first
-            from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
-            campus_id = None
-            try:
-                campus_id = get_current_user_campus()
-                if not campus_id:
-                    campuses = get_user_campuses(frappe.session.user)
-                    campus_id = campuses[0] if campuses else None
-            except Exception:
-                pass
+            existing_logs = frappe.db.sql("""
+                SELECT 
+                    cls.name as log_id,
+                    cls.student_id,
+                    cls.subject_id,
+                    cls.contact_log_comment,
+                    cls.contact_log_status
+                FROM `tabSIS Class Log Student` cls
+                JOIN `tabSIS Class Log Subject` sub ON cls.subject_id = sub.name
+                WHERE sub.class_id = %(class_id)s AND sub.log_date = %(date)s
+                ORDER BY 
+                    CASE 
+                        WHEN cls.contact_log_status = 'Sent' THEN 1
+                        WHEN cls.contact_log_comment IS NOT NULL AND cls.contact_log_comment != '' THEN 2
+                        ELSE 3
+                    END
+            """, {"class_id": class_id, "date": date}, as_dict=True)
             
-            subject_doc = frappe.get_doc({
-                "doctype": "SIS Class Log Subject",
-                "timetable_instance_id": timetable_instance,
-                "class_id": class_id,
-                "log_date": date,
-                "recorded_by": frappe.session.user,
-                "campus_id": campus_id
-            })
-            subject_doc.insert()
-            subject_id = subject_doc.name
-        else:
-            subject_id = subject_rows[0]['name']
+            # Lấy record tốt nhất cho mỗi student (ưu tiên record có contact_log)
+            for log in existing_logs:
+                if log['student_id'] not in existing_logs_map:
+                    existing_logs_map[log['student_id']] = log
+        
+        # Tìm hoặc tạo subject mặc định cho trường hợp cần tạo mới
+        default_subject_id = None
         
         # Now process each student
         for student_data in students:
@@ -228,38 +198,96 @@ def save_contact_log():
             if not student_id:
                 continue
             
-            # Get class_student_id from SIS Class Student
-            class_student = frappe.get_value(
-                "SIS Class Student",
-                filters={"class_id": class_id, "student_id": student_id},
-                fieldname="name"
-            )
+            # Kiểm tra xem student đã có log với contact_log chưa
+            existing_log = existing_logs_map.get(student_id)
             
-            if not class_student:
-                frappe.log_error(f"No class student found for student_id={student_id}, class_id={class_id}")
-                continue
-            
-            # Find or create student log
-            student_log_rows = frappe.get_all(
-                "SIS Class Log Student",
-                filters={"subject_id": subject_id, "student_id": student_id},
-                fields=["name"],
-                limit=1
-            )
-            
-            if student_log_rows:
-                # Update existing
-                log_id = student_log_rows[0]['name']
+            if existing_log:
+                # Update existing log (đã có contact_log hoặc ít nhất có record)
+                log_id = existing_log['log_id']
                 student_log = frappe.get_doc("SIS Class Log Student", log_id)
                 student_log.badges = json.dumps(badges)
                 student_log.contact_log_comment = comment
-                student_log.contact_log_status = "Draft"
+                # Chỉ set Draft nếu chưa Sent
+                if student_log.contact_log_status != 'Sent':
+                    student_log.contact_log_status = "Draft"
                 student_log.save()
             else:
-                # Create new
+                # Cần tạo mới - lấy hoặc tạo subject mặc định
+                if not default_subject_id:
+                    # Tìm timetable instance
+                    timetable_instance = None
+                    if date:
+                        timetable_instances = frappe.get_all(
+                            "SIS Timetable Instance",
+                            filters={
+                                "class_id": class_id,
+                                "start_date": ["<=", date],
+                                "end_date": [">=", date]
+                            },
+                            fields=["name"],
+                            limit=1
+                        )
+                        if timetable_instances:
+                            timetable_instance = timetable_instances[0]['name']
+                    
+                    if not timetable_instance:
+                        return error_response(
+                            message="No active timetable instance found for this class and date",
+                            code="NO_TIMETABLE_INSTANCE"
+                        )
+                    
+                    # Tìm subject đã có
+                    subject_rows = frappe.get_all(
+                        "SIS Class Log Subject",
+                        filters={
+                            "timetable_instance_id": timetable_instance,
+                            "class_id": class_id,
+                            "log_date": date
+                        },
+                        fields=["name"],
+                        limit=1
+                    )
+                    
+                    if subject_rows:
+                        default_subject_id = subject_rows[0]['name']
+                    else:
+                        # Tạo subject mới
+                        from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
+                        campus_id = None
+                        try:
+                            campus_id = get_current_user_campus()
+                            if not campus_id:
+                                campuses = get_user_campuses(frappe.session.user)
+                                campus_id = campuses[0] if campuses else None
+                        except Exception:
+                            pass
+                        
+                        subject_doc = frappe.get_doc({
+                            "doctype": "SIS Class Log Subject",
+                            "timetable_instance_id": timetable_instance,
+                            "class_id": class_id,
+                            "log_date": date,
+                            "recorded_by": frappe.session.user,
+                            "campus_id": campus_id
+                        })
+                        subject_doc.insert()
+                        default_subject_id = subject_doc.name
+                
+                # Get class_student_id
+                class_student = frappe.get_value(
+                    "SIS Class Student",
+                    filters={"class_id": class_id, "student_id": student_id},
+                    fieldname="name"
+                )
+                
+                if not class_student:
+                    frappe.log_error(f"No class student found for student_id={student_id}, class_id={class_id}")
+                    continue
+                
+                # Tạo student log mới
                 student_log = frappe.get_doc({
                     "doctype": "SIS Class Log Student",
-                    "subject_id": subject_id,
+                    "subject_id": default_subject_id,
                     "student_id": student_id,
                     "class_student_id": class_student,
                     "badges": json.dumps(badges),
@@ -278,7 +306,7 @@ def save_contact_log():
             message=f"Saved contact logs for {saved_count} students",
             data={
                 "saved_count": saved_count,
-                "log_ids": log_ids  # Return log IDs so frontend can track them
+                "log_ids": log_ids
             }
         )
     
@@ -500,6 +528,9 @@ def get_contact_log_status():
     """
     Get contact log status for all students in a class
     Returns: { student_id: { status, sent_at, viewed_count, ... } }
+    
+    FIX: Query từ TẤT CẢ subjects của ngày đó, không chỉ 1 subject
+    Vì contact_log có thể được lưu ở bất kỳ tiết nào trong ngày
     """
     try:
         # Get params from POST body or GET query params
@@ -513,77 +544,56 @@ def get_contact_log_status():
         # Validate teacher access
         _validate_homeroom_teacher_access(class_id)
         
-        # Find timetable instance for this class and date
-        timetable_instance = None
-        if date:
-            timetable_instances = frappe.get_all(
-                "SIS Timetable Instance",
-                filters={
-                    "class_id": class_id,
-                    "start_date": ["<=", date],
-                    "end_date": [">=", date]
-                },
-                fields=["name"],
-                limit=1
-            )
-            if timetable_instances:
-                timetable_instance = timetable_instances[0]['name']
+        # Query trực tiếp student logs từ TẤT CẢ subjects của class + date
+        # Không cần qua timetable_instance vì có thể có nhiều subjects trong ngày
+        # Ưu tiên log có contact_log_comment hoặc status = 'Sent'
+        student_logs = frappe.db.sql("""
+            SELECT 
+                cls.name,
+                cls.student_id,
+                cls.badges,
+                cls.contact_log_comment,
+                cls.contact_log_status,
+                cls.contact_log_sent_by,
+                cls.contact_log_sent_at,
+                cls.contact_log_recalled_by,
+                cls.contact_log_recalled_at,
+                cls.contact_log_viewed_count
+            FROM `tabSIS Class Log Student` cls
+            JOIN `tabSIS Class Log Subject` sub ON cls.subject_id = sub.name
+            WHERE sub.class_id = %(class_id)s AND sub.log_date = %(date)s
+            ORDER BY 
+                CASE 
+                    WHEN cls.contact_log_status = 'Sent' THEN 1
+                    WHEN cls.contact_log_comment IS NOT NULL AND cls.contact_log_comment != '' THEN 2
+                    WHEN cls.contact_log_status = 'Draft' AND cls.badges IS NOT NULL THEN 3
+                    ELSE 4
+                END,
+                cls.contact_log_sent_at DESC
+        """, {"class_id": class_id, "date": date}, as_dict=True)
         
-        if not timetable_instance:
-            return success_response(data={}, message="No timetable instance found")
-        
-        # Find class log subject
-        filters = {
-            "timetable_instance_id": timetable_instance,
-            "class_id": class_id
-        }
-        if date:
-            filters["log_date"] = date
-        
-        subject_rows = frappe.get_all(
-            "SIS Class Log Subject",
-            filters=filters,
-            fields=["name"],
-            limit=1
-        )
-        
-        if not subject_rows:
+        if not student_logs:
             return success_response(data={}, message="No logs found")
         
-        subject_id = subject_rows[0]['name']
-        
-        # Get all student logs
-        student_logs = frappe.get_all(
-            "SIS Class Log Student",
-            filters={"subject_id": subject_id},
-            fields=[
-                "name",
-                "student_id",
-                "badges",
-                "contact_log_comment",
-                "contact_log_status",
-                "contact_log_sent_by",
-                "contact_log_sent_at",
-                "contact_log_recalled_by",
-                "contact_log_recalled_at",
-                "contact_log_viewed_count"
-            ]
-        )
-        
         # Build map: student_id -> status info
+        # Vì có thể có nhiều logs cho cùng 1 student (từ nhiều tiết),
+        # chỉ lấy log có contact_log đầy đủ nhất (đã sort ở trên)
         status_map = {}
         for log in student_logs:
-            status_map[log['student_id']] = {
-                "log_id": log['name'],  # Important: Include log ID for send/recall
-                "status": log.get('contact_log_status'),
-                "badges": log.get('badges'),
-                "comment": log.get('contact_log_comment'),
-                "sent_by": log.get('contact_log_sent_by'),
-                "sent_at": log.get('contact_log_sent_at'),
-                "recalled_by": log.get('contact_log_recalled_by'),
-                "recalled_at": log.get('contact_log_recalled_at'),
-                "viewed_count": log.get('contact_log_viewed_count') or 0
-            }
+            student_id = log['student_id']
+            # Chỉ lấy record đầu tiên cho mỗi student (đã ưu tiên bởi ORDER BY)
+            if student_id not in status_map:
+                status_map[student_id] = {
+                    "log_id": log['name'],
+                    "status": log.get('contact_log_status'),
+                    "badges": log.get('badges'),
+                    "comment": log.get('contact_log_comment'),
+                    "sent_by": log.get('contact_log_sent_by'),
+                    "sent_at": log.get('contact_log_sent_at'),
+                    "recalled_by": log.get('contact_log_recalled_by'),
+                    "recalled_at": log.get('contact_log_recalled_at'),
+                    "viewed_count": log.get('contact_log_viewed_count') or 0
+                }
         
         return success_response(data=status_map, message="Contact log status fetched")
     
