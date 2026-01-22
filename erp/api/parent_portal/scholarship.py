@@ -756,6 +756,12 @@ def submit_application_with_files():
         video_url = upload_file('video_file', 'Scholarship/Videos')
         
         # Tạo đơn đăng ký
+        # Lưu báo cáo học tập với format: semester1_url||semester2_url
+        # Dùng || để phân biệt với | trong URL
+        academic_report_str = None
+        if semester1_report_url or semester2_report_url:
+            academic_report_str = f"{semester1_report_url or ''}||{semester2_report_url or ''}"
+        
         app = frappe.get_doc({
             "doctype": "SIS Scholarship Application",
             "scholarship_period_id": period_id,
@@ -765,13 +771,67 @@ def submit_application_with_files():
             "guardian_id": guardian_id,
             "main_teacher_id": get_form_value('main_teacher_id') or student_info.get('homeroom_teacher'),
             "second_teacher_id": get_form_value('second_teacher_id'),
-            "academic_report_type": 'upload' if report_links else 'existing',
-            "academic_report_upload": ' | '.join(report_links) if report_links else None,
+            "academic_report_type": 'upload' if academic_report_str else 'existing',
+            "academic_report_upload": academic_report_str,  # Format: semester1_url||semester2_url
             "video_url": video_url,
             "status": "Submitted"
         })
         
-        # Parse và thêm thành tích - Bài thi chuẩn hóa
+        # Parse và thêm thành tích - Cấu trúc mới với dynamic categories
+        achievements_json = get_form_value('achievements')
+        if achievements_json:
+            try:
+                achievements_data = json.loads(achievements_json)
+                logs.append(f"Achievements data: {len(achievements_data)} categories")
+                
+                for cat_data in achievements_data:
+                    category_index = cat_data.get('category_index', 0)
+                    category_title_vn = cat_data.get('category_title_vn', '')
+                    category_title_en = cat_data.get('category_title_en', '')
+                    entries = cat_data.get('entries', [])
+                    file_counts = cat_data.get('file_counts', [])
+                    
+                    # Map category title to achievement_type dựa vào tên
+                    # Có thể mở rộng logic này nếu cần
+                    achievement_type = 'other'
+                    title_lower = category_title_vn.lower() if category_title_vn else ''
+                    if 'bài thi' in title_lower or 'chuẩn hóa' in title_lower or 'standardized' in title_lower.lower():
+                        achievement_type = 'standardized_test'
+                    elif 'giải thưởng' in title_lower or 'thành tích' in title_lower or 'award' in title_lower.lower():
+                        achievement_type = 'award'
+                    elif 'ngoại khóa' in title_lower or 'hoạt động' in title_lower or 'extracurricular' in title_lower.lower():
+                        achievement_type = 'extracurricular'
+                    
+                    logs.append(f"Category {category_index}: {category_title_vn} -> {achievement_type}, {len(entries)} entries")
+                    
+                    # Thêm từng entry vào achievements
+                    for entry_idx, entry_content in enumerate(entries):
+                        # Thu thập tất cả files cho entry này
+                        file_count = file_counts[entry_idx] if entry_idx < len(file_counts) else 0
+                        attachment_urls = []
+                        
+                        for file_idx in range(file_count):
+                            file_key = f'achievement_file_{category_index}_{entry_idx}_{file_idx}'
+                            file_url = upload_file(file_key, 'Scholarship/Certificates')
+                            if file_url:
+                                attachment_urls.append(file_url)
+                        
+                        # Gộp nhiều file URLs thành 1 string, phân cách bằng |
+                        attachment_str = ' | '.join(attachment_urls) if attachment_urls else None
+                        
+                        app.append("achievements", {
+                            "achievement_type": achievement_type,
+                            "title": entry_content,
+                            "description": f"{category_title_vn} ({category_title_en})" if category_title_en else category_title_vn,
+                            "attachment": attachment_str
+                        })
+                        logs.append(f"  Entry {entry_idx}: {entry_content[:50]}... ({file_count} files)")
+                        
+            except json.JSONDecodeError as e:
+                logs.append(f"Error parsing achievements JSON: {str(e)}")
+        
+        # Backward compatible: Hỗ trợ cấu trúc cũ nếu có
+        # Parse và thêm thành tích - Bài thi chuẩn hóa (cấu trúc cũ)
         standardized_tests = get_form_value('standardized_tests')
         if standardized_tests:
             try:
@@ -786,7 +846,7 @@ def submit_application_with_files():
             except json.JSONDecodeError:
                 pass
         
-        # Parse và thêm thành tích - Giải thưởng
+        # Parse và thêm thành tích - Giải thưởng (cấu trúc cũ)
         awards_data = get_form_value('awards')
         if awards_data:
             try:
@@ -801,7 +861,7 @@ def submit_application_with_files():
             except json.JSONDecodeError:
                 pass
         
-        # Parse và thêm thành tích - Hoạt động ngoại khóa
+        # Parse và thêm thành tích - Hoạt động ngoại khóa (cấu trúc cũ)
         extracurriculars_data = get_form_value('extracurriculars')
         if extracurriculars_data:
             try:

@@ -353,7 +353,7 @@ def get_login_history(days=30, limit=50):
 
 
 @frappe.whitelist()
-def get_push_subscriptions(search="", page=1, page_size=50):
+def get_push_subscriptions(search="", page=1, page_size=50, filter_type="all"):
 	"""
 	Lấy danh sách Push Subscriptions của tất cả Parent
 	
@@ -361,6 +361,7 @@ def get_push_subscriptions(search="", page=1, page_size=50):
 		search: Tìm kiếm theo tên hoặc email
 		page: Số trang
 		page_size: Số records mỗi trang
+		filter_type: Lọc theo loại - "all", "with_subs", "without_subs", hoặc device name cụ thể
 	"""
 	try:
 		page = int(page)
@@ -383,62 +384,98 @@ def get_push_subscriptions(search="", page=1, page_size=50):
 			search_like = f"%{search}%"
 			search_params = [search_like, search_like]
 		
-		# Đếm tổng số parents có subscriptions
+		# Thêm điều kiện filter
+		filter_condition = ""
+		filter_join = "LEFT"
+		filter_params = []
+		
+		if filter_type == "with_subs":
+			# Chỉ lấy parents có subscription
+			filter_condition = " AND ps.name IS NOT NULL"
+			filter_join = "INNER"
+		elif filter_type == "without_subs":
+			# Chỉ lấy parents không có subscription
+			filter_condition = " AND ps.name IS NULL"
+		elif filter_type and filter_type not in ["all", ""]:
+			# Filter theo device name cụ thể
+			filter_condition = " AND ps.device_name = %s"
+			filter_params = [filter_type]
+			filter_join = "INNER"
+		
+		# Query lấy danh sách parents - sử dụng subquery để đếm chính xác
+		# Đầu tiên lấy danh sách user IDs thỏa mãn điều kiện
+		user_ids_sql = f"""
+			SELECT DISTINCT u.name
+			FROM `tabUser` u
+			INNER JOIN `tabHas Role` hr ON hr.parent = u.name
+			{filter_join} JOIN `tabPush Subscription` ps ON ps.user = u.name
+			{base_where}
+			{search_condition}
+			{filter_condition}
+			ORDER BY u.full_name ASC
+			LIMIT %s OFFSET %s
+		"""
+		
+		user_ids_result = frappe.db.sql(
+			user_ids_sql, 
+			search_params + filter_params + [page_size, offset], 
+			as_dict=True
+		)
+		user_ids = [r['name'] for r in user_ids_result]
+		
+		# Đếm tổng số để phân trang
 		count_sql = f"""
 			SELECT COUNT(DISTINCT u.name)
 			FROM `tabUser` u
 			INNER JOIN `tabHas Role` hr ON hr.parent = u.name
-			LEFT JOIN `tabPush Subscription` ps ON ps.user = u.name
+			{filter_join} JOIN `tabPush Subscription` ps ON ps.user = u.name
 			{base_where}
 			{search_condition}
+			{filter_condition}
 		"""
-		total_parents = frappe.db.sql(count_sql, search_params)[0][0] or 0
+		total_count = frappe.db.sql(count_sql, search_params + filter_params)[0][0] or 0
 		
-		# Lấy danh sách parents và subscriptions
-		data_sql = f"""
-			SELECT 
-				u.name as email,
-				u.full_name,
-				u.enabled,
-				ps.name as subscription_name,
-				ps.device_name,
-				ps.created_at,
-				ps.last_used,
-				ps.endpoint
-			FROM `tabUser` u
-			INNER JOIN `tabHas Role` hr ON hr.parent = u.name
-			LEFT JOIN `tabPush Subscription` ps ON ps.user = u.name
-			{base_where}
-			{search_condition}
-			ORDER BY u.full_name ASC, ps.created_at DESC
-			LIMIT %s OFFSET %s
-		"""
-		
-		results = frappe.db.sql(data_sql, search_params + [page_size, offset], as_dict=True)
-		
-		# Group by parent
-		parents_dict = {}
-		for row in results:
-			email = row['email']
-			if email not in parents_dict:
-				parents_dict[email] = {
-					'email': email,
-					'full_name': row['full_name'],
-					'enabled': row['enabled'],
-					'subscriptions': []
-				}
+		# Lấy chi tiết subscriptions của các users
+		parents_list = []
+		if user_ids:
+			# Lấy thông tin user
+			users_data = frappe.db.sql("""
+				SELECT name as email, full_name, enabled
+				FROM `tabUser`
+				WHERE name IN %s
+				ORDER BY full_name ASC
+			""", (user_ids,), as_dict=True)
 			
-			if row['subscription_name']:
-				parents_dict[email]['subscriptions'].append({
-					'name': row['subscription_name'],
-					'device_name': row['device_name'] or 'Unknown',
-					'created_at': str(row['created_at']) if row['created_at'] else None,
-					'last_used': str(row['last_used']) if row['last_used'] else None
+			# Lấy tất cả subscriptions của các users này
+			subs_data = frappe.db.sql("""
+				SELECT user, name as subscription_name, device_name, created_at, last_used
+				FROM `tabPush Subscription`
+				WHERE user IN %s
+				ORDER BY created_at DESC
+			""", (user_ids,), as_dict=True)
+			
+			# Group subscriptions theo user
+			subs_by_user = {}
+			for sub in subs_data:
+				if sub['user'] not in subs_by_user:
+					subs_by_user[sub['user']] = []
+				subs_by_user[sub['user']].append({
+					'name': sub['subscription_name'],
+					'device_name': sub['device_name'] or 'Unknown',
+					'created_at': str(sub['created_at']) if sub['created_at'] else None,
+					'last_used': str(sub['last_used']) if sub['last_used'] else None
+				})
+			
+			# Build parents list
+			for user in users_data:
+				parents_list.append({
+					'email': user['email'],
+					'full_name': user['full_name'],
+					'enabled': user['enabled'],
+					'subscriptions': subs_by_user.get(user['email'], [])
 				})
 		
-		parents_list = list(parents_dict.values())
-		
-		# Thống kê tổng quan
+		# Thống kê tổng quan (không áp dụng filter để luôn hiển thị stats đầy đủ)
 		stats_sql = """
 			SELECT 
 				COUNT(DISTINCT u.name) as total_parents,
@@ -471,10 +508,10 @@ def get_push_subscriptions(search="", page=1, page_size=50):
 			"success": True,
 			"data": {
 				"parents": parents_list,
-				"total_count": total_parents,
+				"total_count": total_count,
 				"page": page,
 				"page_size": page_size,
-				"total_pages": (total_parents + page_size - 1) // page_size if total_parents > 0 else 1,
+				"total_pages": (total_count + page_size - 1) // page_size if total_count > 0 else 1,
 				"stats": {
 					"total_parents": stats['total_parents'],
 					"parents_with_subs": stats['parents_with_subs'],
@@ -482,7 +519,8 @@ def get_push_subscriptions(search="", page=1, page_size=50):
 					"total_subscriptions": stats['total_subscriptions'],
 					"activation_rate": round(stats['parents_with_subs'] / stats['total_parents'] * 100, 1) if stats['total_parents'] > 0 else 0
 				},
-				"device_stats": device_stats
+				"device_stats": device_stats,
+				"current_filter": filter_type
 			}
 		}
 		
