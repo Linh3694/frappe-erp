@@ -10,7 +10,7 @@ from frappe import _
 APP_VERSIONS = {
     "wis_staff": {
         "ios": {
-            "version": "1.5.6",  # Version mới nhất trên App Store
+            "version": "1.5.8",  # Version mới nhất trên App Store
             "min_version": "1.0.0",  # Version tối thiểu bắt buộc (force update nếu thấp hơn)
             "store_url": "https://apps.apple.com/app/id6746143732",
         },
