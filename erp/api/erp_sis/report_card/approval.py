@@ -1035,11 +1035,15 @@ def get_approval_config(education_stage_id: Optional[str] = None):
                 fields=["teacher_id", "teacher_name", "user_id"]
             )
             
-            # Lấy tên education_stage
+            # Lấy tên education_stage (dùng title_vn hoặc title_en)
             education_stage_title = frappe.db.get_value(
                 "SIS Education Stage", 
                 config.education_stage_id, 
-                "title"
+                "title_vn"
+            ) or frappe.db.get_value(
+                "SIS Education Stage", 
+                config.education_stage_id, 
+                "title_en"
             )
             
             result.append({
