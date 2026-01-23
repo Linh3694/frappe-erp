@@ -797,6 +797,9 @@ def send_announcement():
             except (json.JSONDecodeError, TypeError):
                 recipients = []
 
+        # DEBUG: Log recipients để kiểm tra type
+        frappe.logger().info(f"🔍 [DEBUG] Announcement {announcement_id} recipients: {recipients}")
+
         if not recipients:
             return validation_error_response(
                 "No recipients to send to",
@@ -806,7 +809,12 @@ def send_announcement():
         # Tính số lượng người nhận trước
         from erp.utils.notification_handler import resolve_recipient_students, get_guardians_for_students, get_parent_emails
         
+        # DEBUG: Log từng recipient type
+        for r in recipients:
+            frappe.logger().info(f"🔍 [DEBUG] Recipient: id={r.get('id')}, type={r.get('type')}")
+        
         student_ids = resolve_recipient_students(recipients)
+        frappe.logger().info(f"🔍 [DEBUG] Resolved student_ids: {len(student_ids)} students")
         estimated_count = len(student_ids)
         
         # Lấy số lượng parents thực tế
