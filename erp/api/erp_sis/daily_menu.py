@@ -818,17 +818,19 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
         # Query chi tiết từng lớp với phân biệt điểm danh trước/sau 9h
         # Sử dụng field `creation` (timestamp hệ thống) để phân biệt
         # Thời gian 9h sáng là mốc chốt cho bộ phận bếp
+        # SIS Teacher chỉ có user_id link đến User, cần join thêm để lấy full_name
         class_detail_data = frappe.db.sql("""
             SELECT 
                 ca.class_id,
                 c.title as class_title,
-                t.employee_name as homeroom_teacher_name,
+                u.full_name as homeroom_teacher_name,
                 COUNT(CASE WHEN TIME(ca.creation) < '09:00:00' THEN 1 END) as present_before_9,
                 COUNT(CASE WHEN TIME(ca.creation) >= '09:00:00' THEN 1 END) as present_after_9,
                 COUNT(*) as total_present
             FROM `tabSIS Class Attendance` ca
             INNER JOIN `tabSIS Class` c ON ca.class_id = c.name
             LEFT JOIN `tabSIS Teacher` t ON c.homeroom_teacher = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ca.date = %(date)s
                 AND ca.period = 'homeroom'
                 AND ca.status IN ('present', 'Present', 'PRESENT')
@@ -837,7 +839,7 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
                     SELECT name FROM `tabSIS Education Grade` 
                     WHERE education_stage_id = %(stage_id)s
                 )
-            GROUP BY ca.class_id, c.title, t.employee_name
+            GROUP BY ca.class_id, c.title, u.full_name
             ORDER BY c.title
         """, {
             "date": date,
