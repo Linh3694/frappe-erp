@@ -33,7 +33,11 @@
   "level_2_approved_by",
   "column_break_approval_3",
   "reviewed_at",
-  "reviewed_by"
+  "reviewed_by",
+  "rejection_section",
+  "rejected_at",
+  "rejected_by",
+  "rejection_reason"
  ],
  "fields": [
   {"fieldname": "title", "fieldtype": "Data", "label": "Tiêu đề", "in_list_view": 1},
@@ -47,7 +51,7 @@
   {"fieldname": "campus_id", "fieldtype": "Link", "label": "Trường học", "options": "SIS Campus", "reqd": 1},                                                   
   {"fieldname": "data_json", "fieldtype": "Long Text", "label": "Dữ liệu báo cáo"},
   {"fieldname": "approval_section", "fieldtype": "Section Break", "label": "Phê duyệt"},
-  {"fieldname": "approval_status", "fieldtype": "Select", "label": "Trạng thái phê duyệt", "options": "draft\nentry\nsubmitted\nlevel_1_approved\nlevel_2_approved\nreviewed\npublished", "default": "draft", "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "approval_status", "fieldtype": "Select", "label": "Trạng thái phê duyệt", "options": "draft\nentry\nsubmitted\nlevel_1_approved\nlevel_2_approved\nreviewed\npublished\nrejected", "default": "draft", "in_list_view": 1, "in_standard_filter": 1},
   {"fieldname": "is_approved", "fieldtype": "Check", "label": "Đã phê duyệt", "default": 0, "in_list_view": 1},
   {"fieldname": "approved_by", "fieldtype": "Link", "label": "Người phê duyệt cuối", "options": "User", "read_only": 1},
   {"fieldname": "approved_at", "fieldtype": "Datetime", "label": "Thời gian phê duyệt cuối", "read_only": 1},
@@ -64,7 +68,11 @@
   {"fieldname": "level_2_approved_by", "fieldtype": "Link", "label": "Người duyệt L2", "options": "User", "read_only": 1},
   {"fieldname": "column_break_approval_3", "fieldtype": "Column Break"},
   {"fieldname": "reviewed_at", "fieldtype": "Datetime", "label": "Thời gian Review L3", "read_only": 1},
-  {"fieldname": "reviewed_by", "fieldtype": "Link", "label": "Người Review L3", "options": "User", "read_only": 1}
+  {"fieldname": "reviewed_by", "fieldtype": "Link", "label": "Người Review L3", "options": "User", "read_only": 1},
+  {"fieldname": "rejection_section", "fieldtype": "Section Break", "label": "Thông tin trả về", "collapsible": 1},
+  {"fieldname": "rejected_at", "fieldtype": "Datetime", "label": "Thời gian trả về", "read_only": 1},
+  {"fieldname": "rejected_by", "fieldtype": "Link", "label": "Người trả về", "options": "User", "read_only": 1},
+  {"fieldname": "rejection_reason", "fieldtype": "Small Text", "label": "Lý do trả về", "read_only": 1}
  ],
  "permissions": [
   {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},

@@ -1511,3 +1511,715 @@ def update_subject_managers():
     except Exception as e:
         frappe.logger().error(f"Error in update_subject_managers: {str(e)}")
         return error_response(f"Lỗi khi cập nhật managers: {str(e)}")
+
+
+# =============================================================================
+# GROUPED APPROVAL APIs - Hiển thị theo Lớp + Môn
+# =============================================================================
+
+@frappe.whitelist(allow_guest=False)
+def get_pending_approvals_grouped(level: Optional[str] = None):
+    """
+    Lấy danh sách báo cáo đang chờ duyệt, grouped by (template, class, subject).
+    Trả về dạng aggregated để hiển thị theo Lớp + Môn.
+    
+    Args:
+        level: Filter theo level (level_1, level_2, review, publish)
+    
+    Returns:
+        {
+            "reports": [
+                {
+                    "template_id": "...",
+                    "template_title": "...",
+                    "class_id": "...",
+                    "class_title": "6AB1",
+                    "subject_id": "...",  # null nếu là homeroom
+                    "subject_title": "Toán",
+                    "pending_level": "level_2",
+                    "student_count": 35,
+                    "submitted_at": "...",
+                    "submitted_by": "..."
+                }
+            ]
+        }
+    """
+    try:
+        # Lấy params từ nhiều nguồn cho GET requests
+        if not level:
+            level = frappe.form_dict.get("level")
+        if not level and hasattr(frappe.request, 'args'):
+            level = frappe.request.args.get("level")
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        # Lấy teacher của user
+        teacher = frappe.get_all(
+            "SIS Teacher",
+            filters={"user_id": user, "campus_id": campus_id},
+            fields=["name"],
+            limit=1
+        )
+        teacher_id = teacher[0].name if teacher else None
+        
+        # Thu thập tất cả reports theo từng level
+        all_reports = []
+        
+        # Level 1: Khối trưởng duyệt homeroom
+        if not level or level == "level_1":
+            if teacher_id:
+                templates_l1 = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"homeroom_reviewer_level_1": teacher_id, "campus_id": campus_id},
+                    fields=["name", "title"]
+                )
+                for tmpl in templates_l1:
+                    reports = frappe.get_all(
+                        "SIS Student Report Card",
+                        filters={
+                            "template_id": tmpl.name,
+                            "approval_status": "submitted",
+                            "campus_id": campus_id
+                        },
+                        fields=["name", "class_id", "submitted_at", "submitted_by"]
+                    )
+                    for r in reports:
+                        r["template_id"] = tmpl.name
+                        r["template_title"] = tmpl.title
+                        r["pending_level"] = "level_1"
+                        r["subject_id"] = None  # Homeroom không có subject
+                        r["subject_title"] = "Nhận xét chủ nhiệm"
+                        all_reports.append(r)
+        
+        # Level 2: Tổ trưởng hoặc Subject Manager
+        if not level or level == "level_2":
+            if teacher_id:
+                # Tổ trưởng duyệt homeroom
+                templates_l2 = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"homeroom_reviewer_level_2": teacher_id, "campus_id": campus_id},
+                    fields=["name", "title"]
+                )
+                for tmpl in templates_l2:
+                    reports = frappe.get_all(
+                        "SIS Student Report Card",
+                        filters={
+                            "template_id": tmpl.name,
+                            "approval_status": ["in", ["submitted", "level_1_approved"]],
+                            "campus_id": campus_id
+                        },
+                        fields=["name", "class_id", "submitted_at", "submitted_by"]
+                    )
+                    for r in reports:
+                        r["template_id"] = tmpl.name
+                        r["template_title"] = tmpl.title
+                        r["pending_level"] = "level_2"
+                        r["subject_id"] = None
+                        r["subject_title"] = "Nhận xét chủ nhiệm"
+                        all_reports.append(r)
+                
+                # Subject Manager - Lấy reports có subjects mà user là manager
+                managed_subjects = frappe.get_all(
+                    "SIS Actual Subject Manager",
+                    filters={"teacher_id": teacher_id},
+                    fields=["parent"]  # parent là subject_id
+                )
+                
+                if managed_subjects:
+                    subject_ids = [s.parent for s in managed_subjects]
+                    
+                    # Lấy thông tin subjects
+                    subject_info_map = {}
+                    for sid in subject_ids:
+                        subject_data = frappe.db.get_value(
+                            "SIS Actual Subject", sid, ["title_vn", "title_en"], as_dict=True
+                        )
+                        if subject_data:
+                            subject_info_map[sid] = subject_data.title_vn or subject_data.title_en or sid
+                    
+                    # Tìm templates có chứa các subjects này
+                    all_templates = frappe.get_all(
+                        "SIS Report Card Template",
+                        filters={"campus_id": campus_id},
+                        fields=["name", "title"]
+                    )
+                    
+                    for tmpl in all_templates:
+                        # Check trong scores
+                        scores = frappe.get_all(
+                            "SIS Report Card Score Config",
+                            filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
+                            fields=["subject_id"]
+                        )
+                        # Check trong subjects (subject_eval)
+                        subjects = frappe.get_all(
+                            "SIS Report Card Subject Config",
+                            filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
+                            fields=["subject_id"]
+                        )
+                        
+                        template_subjects = set([s.subject_id for s in scores] + [s.subject_id for s in subjects])
+                        matching_subjects = [sid for sid in subject_ids if sid in template_subjects]
+                        
+                        if matching_subjects:
+                            # Lấy reports level_1_approved
+                            reports = frappe.get_all(
+                                "SIS Student Report Card",
+                                filters={
+                                    "template_id": tmpl.name,
+                                    "approval_status": "level_1_approved",
+                                    "campus_id": campus_id
+                                },
+                                fields=["name", "class_id", "submitted_at", "submitted_by"]
+                            )
+                            for r in reports:
+                                for sid in matching_subjects:
+                                    r_copy = r.copy()
+                                    r_copy["template_id"] = tmpl.name
+                                    r_copy["template_title"] = tmpl.title
+                                    r_copy["pending_level"] = "level_2"
+                                    r_copy["subject_id"] = sid
+                                    r_copy["subject_title"] = subject_info_map.get(sid, sid)
+                                    all_reports.append(r_copy)
+        
+        # Level 3 & 4: Kiểm tra approval config
+        if not level or level in ["review", "publish"]:
+            configs = frappe.get_all(
+                "SIS Report Card Approval Config",
+                filters={"campus_id": campus_id, "is_active": 1},
+                fields=["name", "education_stage_id"]
+            )
+            
+            for config in configs:
+                # Check if user is L3 reviewer
+                if not level or level == "review":
+                    l3_reviewers = frappe.get_all(
+                        "SIS Report Card Approver",
+                        filters={"parent": config.name, "parentfield": "level_3_reviewers"},
+                        fields=["teacher_id", "user_id"]
+                    )
+                    is_l3 = any(
+                        (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
+                        for r in l3_reviewers
+                    )
+                    if is_l3:
+                        templates = frappe.get_all(
+                            "SIS Report Card Template",
+                            filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
+                            fields=["name", "title"]
+                        )
+                        for tmpl in templates:
+                            reports = frappe.get_all(
+                                "SIS Student Report Card",
+                                filters={
+                                    "template_id": tmpl.name,
+                                    "approval_status": "level_2_approved",
+                                    "campus_id": campus_id
+                                },
+                                fields=["name", "class_id", "submitted_at", "submitted_by"]
+                            )
+                            for r in reports:
+                                r["template_id"] = tmpl.name
+                                r["template_title"] = tmpl.title
+                                r["pending_level"] = "review"
+                                r["subject_id"] = None
+                                r["subject_title"] = "Toàn bộ báo cáo"
+                                all_reports.append(r)
+                
+                # Check if user is L4 approver
+                if not level or level == "publish":
+                    l4_approvers = frappe.get_all(
+                        "SIS Report Card Approver",
+                        filters={"parent": config.name, "parentfield": "level_4_approvers"},
+                        fields=["teacher_id", "user_id"]
+                    )
+                    is_l4 = any(
+                        (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
+                        for r in l4_approvers
+                    )
+                    if is_l4:
+                        templates = frappe.get_all(
+                            "SIS Report Card Template",
+                            filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
+                            fields=["name", "title"]
+                        )
+                        for tmpl in templates:
+                            reports = frappe.get_all(
+                                "SIS Student Report Card",
+                                filters={
+                                    "template_id": tmpl.name,
+                                    "approval_status": "reviewed",
+                                    "campus_id": campus_id
+                                },
+                                fields=["name", "class_id", "submitted_at", "submitted_by"]
+                            )
+                            for r in reports:
+                                r["template_id"] = tmpl.name
+                                r["template_title"] = tmpl.title
+                                r["pending_level"] = "publish"
+                                r["subject_id"] = None
+                                r["subject_title"] = "Toàn bộ báo cáo"
+                                all_reports.append(r)
+        
+        # Group by (template_id, class_id, subject_id, pending_level)
+        grouped = {}
+        for r in all_reports:
+            key = (r["template_id"], r["class_id"], r.get("subject_id"), r["pending_level"])
+            if key not in grouped:
+                grouped[key] = {
+                    "template_id": r["template_id"],
+                    "template_title": r.get("template_title", ""),
+                    "class_id": r["class_id"],
+                    "subject_id": r.get("subject_id"),
+                    "subject_title": r.get("subject_title", ""),
+                    "pending_level": r["pending_level"],
+                    "student_count": 0,
+                    "submitted_at": r.get("submitted_at"),
+                    "submitted_by": r.get("submitted_by"),
+                    "report_ids": set()  # Để tránh duplicate
+                }
+            if r["name"] not in grouped[key]["report_ids"]:
+                grouped[key]["report_ids"].add(r["name"])
+                grouped[key]["student_count"] += 1
+                # Cập nhật submitted_at mới nhất
+                if r.get("submitted_at") and (not grouped[key]["submitted_at"] or r["submitted_at"] > grouped[key]["submitted_at"]):
+                    grouped[key]["submitted_at"] = r["submitted_at"]
+                    grouped[key]["submitted_by"] = r.get("submitted_by")
+        
+        # Convert to list và enrich với thông tin class
+        results = []
+        for key, data in grouped.items():
+            # Remove set (not JSON serializable)
+            del data["report_ids"]
+            
+            # Enrich class info
+            class_info = frappe.db.get_value(
+                "SIS Class",
+                data["class_id"],
+                ["title", "short_title"],
+                as_dict=True
+            )
+            if class_info:
+                data["class_title"] = class_info.short_title or class_info.title
+            
+            results.append(data)
+        
+        # Sort by submitted_at desc
+        results.sort(key=lambda x: x.get("submitted_at") or "", reverse=True)
+        
+        return success_response(
+            data={
+                "reports": results,
+                "total": len(results)
+            },
+            message=f"Tìm thấy {len(results)} nhóm báo cáo đang chờ duyệt"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in get_pending_approvals_grouped: {str(e)}")
+        frappe.logger().error(frappe.get_traceback())
+        return error_response(f"Lỗi khi lấy danh sách chờ duyệt: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def approve_class_reports():
+    """
+    Batch approve tất cả reports trong 1 class cho 1 subject.
+    Chuyển trạng thái sang level tiếp theo.
+    
+    Request body:
+        {
+            "template_id": "...",
+            "class_id": "...",
+            "subject_id": "...",  # Optional, null cho homeroom
+            "pending_level": "level_1" | "level_2" | "review" | "publish",
+            "comment": "..."  # Optional
+        }
+    """
+    try:
+        data = get_request_payload()
+        template_id = data.get("template_id")
+        class_id = data.get("class_id")
+        subject_id = data.get("subject_id")  # Có thể null
+        pending_level = data.get("pending_level")
+        comment = data.get("comment", "")
+        
+        if not template_id:
+            return validation_error_response(
+                message="template_id is required",
+                errors={"template_id": ["Required"]}
+            )
+        
+        if not class_id:
+            return validation_error_response(
+                message="class_id is required",
+                errors={"class_id": ["Required"]}
+            )
+        
+        if not pending_level:
+            return validation_error_response(
+                message="pending_level is required",
+                errors={"pending_level": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        # Xác định current_status và next_status dựa trên pending_level
+        status_map = {
+            "level_1": {"current": ["submitted"], "next": "level_1_approved"},
+            "level_2": {"current": ["submitted", "level_1_approved"], "next": "level_2_approved"},
+            "review": {"current": ["level_2_approved"], "next": "reviewed"},
+            "publish": {"current": ["reviewed"], "next": "published"}
+        }
+        
+        if pending_level not in status_map:
+            return error_response(f"Invalid pending_level: {pending_level}", code="INVALID_LEVEL")
+        
+        current_statuses = status_map[pending_level]["current"]
+        next_status = status_map[pending_level]["next"]
+        
+        # Lấy tất cả reports matching
+        filters = {
+            "template_id": template_id,
+            "class_id": class_id,
+            "approval_status": ["in", current_statuses],
+            "campus_id": campus_id
+        }
+        
+        reports = frappe.get_all(
+            "SIS Student Report Card",
+            filters=filters,
+            fields=["name", "student_id", "approval_status"]
+        )
+        
+        if not reports:
+            return error_response(
+                message="Không tìm thấy báo cáo nào để duyệt",
+                code="NO_REPORTS"
+            )
+        
+        approved_count = 0
+        errors = []
+        now = datetime.now()
+        
+        # Field mapping cho mỗi level
+        field_map = {
+            "level_1": ("level_1_approved_at", "level_1_approved_by"),
+            "level_2": ("level_2_approved_at", "level_2_approved_by"),
+            "review": ("reviewed_at", "reviewed_by"),
+            "publish": ("approved_at", "approved_by")
+        }
+        
+        at_field, by_field = field_map.get(pending_level, ("approved_at", "approved_by"))
+        
+        for report_data in reports:
+            try:
+                update_values = {
+                    "approval_status": next_status,
+                    at_field: now,
+                    by_field: user
+                }
+                
+                # Nếu publish, cũng cập nhật status và is_approved
+                if pending_level == "publish":
+                    update_values["status"] = "published"
+                    update_values["is_approved"] = 1
+                
+                frappe.db.set_value(
+                    "SIS Student Report Card",
+                    report_data.name,
+                    update_values,
+                    update_modified=True
+                )
+                
+                # Thêm approval history
+                report = frappe.get_doc("SIS Student Report Card", report_data.name)
+                _add_approval_history(
+                    report,
+                    f"batch_{pending_level}",
+                    user,
+                    "approved",
+                    f"Class: {class_id}, Subject: {subject_id or 'homeroom'}. {comment}"
+                )
+                report.save(ignore_permissions=True)
+                
+                approved_count += 1
+                
+            except Exception as e:
+                errors.append({
+                    "report_id": report_data.name,
+                    "student_id": report_data.student_id,
+                    "error": str(e)
+                })
+        
+        frappe.db.commit()
+        
+        # Gửi notification nếu publish
+        if pending_level == "publish":
+            for report_data in reports:
+                try:
+                    report = frappe.get_doc("SIS Student Report Card", report_data.name)
+                    _send_report_card_notification(report)
+                except Exception as notif_error:
+                    frappe.logger().error(f"Failed to send notification: {str(notif_error)}")
+        
+        return success_response(
+            data={
+                "template_id": template_id,
+                "class_id": class_id,
+                "subject_id": subject_id,
+                "pending_level": pending_level,
+                "next_status": next_status,
+                "approved_count": approved_count,
+                "total_reports": len(reports),
+                "errors": errors if errors else None
+            },
+            message=f"Đã duyệt {approved_count}/{len(reports)} báo cáo thành công"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in approve_class_reports: {str(e)}")
+        return error_response(f"Lỗi khi duyệt: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def reject_class_reports():
+    """
+    Batch reject tất cả reports trong 1 class cho 1 subject.
+    Chuyển trạng thái về 'rejected' và lưu lý do.
+    
+    Request body:
+        {
+            "template_id": "...",
+            "class_id": "...",
+            "subject_id": "...",  # Optional, null cho homeroom
+            "pending_level": "level_1" | "level_2" | "review" | "publish",
+            "reason": "..."  # Required - Lý do trả về
+        }
+    """
+    try:
+        data = get_request_payload()
+        template_id = data.get("template_id")
+        class_id = data.get("class_id")
+        subject_id = data.get("subject_id")
+        pending_level = data.get("pending_level")
+        reason = data.get("reason", "").strip()
+        
+        if not template_id:
+            return validation_error_response(
+                message="template_id is required",
+                errors={"template_id": ["Required"]}
+            )
+        
+        if not class_id:
+            return validation_error_response(
+                message="class_id is required",
+                errors={"class_id": ["Required"]}
+            )
+        
+        if not pending_level:
+            return validation_error_response(
+                message="pending_level is required",
+                errors={"pending_level": ["Required"]}
+            )
+        
+        if not reason:
+            return validation_error_response(
+                message="reason is required",
+                errors={"reason": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        # Xác định current_status dựa trên pending_level
+        status_map = {
+            "level_1": ["submitted"],
+            "level_2": ["submitted", "level_1_approved"],
+            "review": ["level_2_approved"],
+            "publish": ["reviewed"]
+        }
+        
+        if pending_level not in status_map:
+            return error_response(f"Invalid pending_level: {pending_level}", code="INVALID_LEVEL")
+        
+        current_statuses = status_map[pending_level]
+        
+        # Lấy tất cả reports matching
+        filters = {
+            "template_id": template_id,
+            "class_id": class_id,
+            "approval_status": ["in", current_statuses],
+            "campus_id": campus_id
+        }
+        
+        reports = frappe.get_all(
+            "SIS Student Report Card",
+            filters=filters,
+            fields=["name", "student_id", "approval_status"]
+        )
+        
+        if not reports:
+            return error_response(
+                message="Không tìm thấy báo cáo nào để trả về",
+                code="NO_REPORTS"
+            )
+        
+        rejected_count = 0
+        errors = []
+        now = datetime.now()
+        
+        for report_data in reports:
+            try:
+                frappe.db.set_value(
+                    "SIS Student Report Card",
+                    report_data.name,
+                    {
+                        "approval_status": "rejected",
+                        "rejected_at": now,
+                        "rejected_by": user,
+                        "rejection_reason": reason
+                    },
+                    update_modified=True
+                )
+                
+                # Thêm approval history
+                report = frappe.get_doc("SIS Student Report Card", report_data.name)
+                _add_approval_history(
+                    report,
+                    f"batch_reject_{pending_level}",
+                    user,
+                    "rejected",
+                    f"Class: {class_id}, Subject: {subject_id or 'homeroom'}. Reason: {reason}"
+                )
+                report.save(ignore_permissions=True)
+                
+                rejected_count += 1
+                
+            except Exception as e:
+                errors.append({
+                    "report_id": report_data.name,
+                    "student_id": report_data.student_id,
+                    "error": str(e)
+                })
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "template_id": template_id,
+                "class_id": class_id,
+                "subject_id": subject_id,
+                "pending_level": pending_level,
+                "rejected_count": rejected_count,
+                "total_reports": len(reports),
+                "reason": reason,
+                "errors": errors if errors else None
+            },
+            message=f"Đã trả về {rejected_count}/{len(reports)} báo cáo"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in reject_class_reports: {str(e)}")
+        return error_response(f"Lỗi khi trả về: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_teacher_class_permissions(class_id: Optional[str] = None):
+    """
+    Lấy quyền của teacher với class:
+    - taught_subjects: danh sách subject_id mà GV dạy lớp này
+    - is_homeroom_teacher: có phải GVCN không
+    - is_vice_homeroom_teacher: có phải Phó CN không
+    
+    Args:
+        class_id: ID của lớp
+    """
+    try:
+        # Lấy class_id từ nhiều nguồn
+        if not class_id:
+            class_id = frappe.form_dict.get("class_id")
+        if not class_id and hasattr(frappe.request, 'args'):
+            class_id = frappe.request.args.get("class_id")
+        
+        if not class_id:
+            return validation_error_response(
+                message="class_id is required",
+                errors={"class_id": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        # Lấy teacher của user
+        teacher = frappe.get_all(
+            "SIS Teacher",
+            filters={"user_id": user, "campus_id": campus_id},
+            fields=["name"],
+            limit=1
+        )
+        
+        if not teacher:
+            return success_response(
+                data={
+                    "taught_subjects": [],
+                    "is_homeroom_teacher": False,
+                    "is_vice_homeroom_teacher": False
+                },
+                message="Không tìm thấy thông tin giáo viên"
+            )
+        
+        teacher_id = teacher[0].name
+        
+        # Check GVCN/Phó CN từ SIS Class
+        class_doc = frappe.db.get_value(
+            "SIS Class",
+            class_id,
+            ["homeroom_teacher", "vice_homeroom_teacher"],
+            as_dict=True
+        )
+        
+        is_homeroom = class_doc.homeroom_teacher == teacher_id if class_doc else False
+        is_vice_homeroom = class_doc.vice_homeroom_teacher == teacher_id if class_doc else False
+        
+        # Lấy môn học GV dạy lớp này từ SIS Subject Assignment
+        assignments = frappe.get_all(
+            "SIS Subject Assignment",
+            filters={
+                "teacher_id": teacher_id,
+                "class_id": class_id,
+                "campus_id": campus_id
+            },
+            fields=["actual_subject_id"]
+        )
+        
+        taught_subjects = []
+        for a in assignments:
+            subject_info = frappe.db.get_value(
+                "SIS Actual Subject",
+                a.actual_subject_id,
+                ["name", "title_vn", "title_en"],
+                as_dict=True
+            )
+            if subject_info:
+                taught_subjects.append({
+                    "subject_id": subject_info.name,
+                    "subject_title": subject_info.title_vn or subject_info.title_en or subject_info.name
+                })
+        
+        return success_response(
+            data={
+                "teacher_id": teacher_id,
+                "class_id": class_id,
+                "taught_subjects": taught_subjects,
+                "is_homeroom_teacher": is_homeroom,
+                "is_vice_homeroom_teacher": is_vice_homeroom
+            },
+            message="Lấy thông tin quyền thành công"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in get_teacher_class_permissions: {str(e)}")
+        return error_response(f"Lỗi khi lấy quyền: {str(e)}")

@@ -39,10 +39,14 @@ from .approval import (
     review_report,
     final_publish,
     get_pending_approvals,
+    get_pending_approvals_grouped,
+    approve_class_reports,
+    reject_class_reports,
     get_approval_config,
     save_approval_config,
     get_subject_managers,
     update_subject_managers,
+    get_teacher_class_permissions,
 )
 
 # Images
@@ -100,10 +104,14 @@ __all__ = [
     "review_report",
     "final_publish",
     "get_pending_approvals",
+    "get_pending_approvals_grouped",
+    "approve_class_reports",
+    "reject_class_reports",
     "get_approval_config",
     "save_approval_config",
     "get_subject_managers",
     "update_subject_managers",
+    "get_teacher_class_permissions",
     # Images
     "upload_report_card_images",
     "get_report_card_images",
