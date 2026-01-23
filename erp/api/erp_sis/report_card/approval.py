@@ -483,6 +483,185 @@ def submit_section():
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
+def submit_class_reports():
+    """
+    Batch submit tất cả reports trong 1 class cho 1 section.
+    Tự động xác định approval level phù hợp:
+    - Scores/Subject Eval: Có managers → Level 2, không có → submitted
+    - Homeroom: Có L1 → submitted (chờ L1), không L1 có L2 → level_1_approved (chờ L2),
+                không cả 2 → level_2_approved (chờ L3)
+    
+    Request body:
+        {
+            "template_id": "...",
+            "class_id": "...",
+            "section": "scores" | "homeroom" | "subject_eval" | "all",
+            "subject_id": "..." (optional, chỉ dùng khi submit scores/subject_eval)
+        }
+    """
+    try:
+        data = get_request_payload()
+        template_id = data.get("template_id")
+        class_id = data.get("class_id")
+        section = data.get("section", "all")
+        subject_id = data.get("subject_id")
+        
+        if not template_id:
+            return validation_error_response(
+                message="template_id is required",
+                errors={"template_id": ["Required"]}
+            )
+        
+        if not class_id:
+            return validation_error_response(
+                message="class_id is required",
+                errors={"class_id": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        # Lấy template để kiểm tra config
+        try:
+            template = frappe.get_doc("SIS Report Card Template", template_id)
+        except frappe.DoesNotExistError:
+            return not_found_response("Template không tồn tại")
+        
+        if template.campus_id != campus_id:
+            return forbidden_response("Không có quyền truy cập template này")
+        
+        # Xác định approval level dựa trên section và config
+        target_status = "submitted"  # Default
+        approval_message = "Đang chờ phê duyệt"
+        
+        if section in ["scores", "subject_eval", "main_scores", "ielts"]:
+            # Kiểm tra subject có managers không
+            has_managers = False
+            if subject_id:
+                managers = frappe.get_all(
+                    "SIS Actual Subject Manager",
+                    filters={"parent": subject_id},
+                    limit=1
+                )
+                has_managers = len(managers) > 0
+            
+            if has_managers:
+                # Có managers → Skip L1, chuyển thẳng sang chờ L2
+                target_status = "level_1_approved"
+                approval_message = "Đang chờ phê duyệt Level 2 (Subject Manager)"
+            else:
+                # Không managers → submitted, sẽ qua L1 nếu được assign
+                target_status = "submitted"
+                approval_message = "Đang chờ phê duyệt"
+        
+        elif section == "homeroom":
+            # Kiểm tra homeroom reviewers trong template
+            has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None))
+            has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None))
+            
+            if has_level_1:
+                # Có L1 → chờ L1 duyệt
+                target_status = "submitted"
+                approval_message = "Đang chờ Khối trưởng (Level 1) phê duyệt"
+            elif has_level_2:
+                # Không L1 nhưng có L2 → skip L1, chờ L2
+                target_status = "level_1_approved"
+                approval_message = "Đang chờ Tổ trưởng (Level 2) phê duyệt"
+            else:
+                # Không L1, không L2 → skip cả 2, chờ Review (L3)
+                target_status = "level_2_approved"
+                approval_message = "Đang chờ Review (Level 3)"
+        
+        # Lấy tất cả reports của class với template này
+        reports = frappe.get_all(
+            "SIS Student Report Card",
+            filters={
+                "template_id": template_id,
+                "class_id": class_id,
+                "campus_id": campus_id
+            },
+            fields=["name", "approval_status", "student_id"]
+        )
+        
+        if not reports:
+            return error_response(
+                message="Không tìm thấy báo cáo nào cho lớp này",
+                code="NO_REPORTS"
+            )
+        
+        submitted_count = 0
+        skipped_count = 0
+        errors = []
+        
+        now = datetime.now()
+        
+        for report_data in reports:
+            try:
+                current_status = report_data.approval_status or 'draft'
+                
+                # Chỉ submit các report ở trạng thái draft hoặc entry
+                if current_status not in ['draft', 'entry']:
+                    skipped_count += 1
+                    continue
+                
+                # Cập nhật trực tiếp bằng SQL để tăng hiệu suất
+                frappe.db.set_value(
+                    "SIS Student Report Card",
+                    report_data.name,
+                    {
+                        "approval_status": target_status,
+                        "submitted_at": now,
+                        "submitted_by": user
+                    },
+                    update_modified=True
+                )
+                
+                # Thêm approval history
+                report = frappe.get_doc("SIS Student Report Card", report_data.name)
+                _add_approval_history(
+                    report, 
+                    "batch_submit", 
+                    user, 
+                    target_status, 
+                    f"Section: {section}, Subject: {subject_id or 'N/A'}"
+                )
+                report.save(ignore_permissions=True)
+                
+                submitted_count += 1
+                
+            except Exception as e:
+                errors.append({
+                    "report_id": report_data.name,
+                    "student_id": report_data.student_id,
+                    "error": str(e)
+                })
+        
+        frappe.db.commit()
+        
+        result_message = f"Đã submit {submitted_count} báo cáo. {approval_message}"
+        if skipped_count > 0:
+            result_message += f" ({skipped_count} báo cáo đã được submit trước đó)"
+        
+        return success_response(
+            data={
+                "template_id": template_id,
+                "class_id": class_id,
+                "section": section,
+                "target_status": target_status,
+                "submitted_count": submitted_count,
+                "skipped_count": skipped_count,
+                "total_reports": len(reports),
+                "errors": errors if errors else None
+            },
+            message=result_message
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in submit_class_reports: {str(e)}")
+        return error_response(f"Lỗi khi submit: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def approve_level_1():
     """
     Khối trưởng duyệt Homeroom comments (Level 1).

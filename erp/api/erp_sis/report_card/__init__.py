@@ -33,6 +33,7 @@ from .validators import validate_comment_titles
 from .approval import (
     approve_report_card,
     submit_section,
+    submit_class_reports,
     approve_level_1,
     approve_level_2,
     review_report,
@@ -93,6 +94,7 @@ __all__ = [
     # Approval
     "approve_report_card",
     "submit_section",
+    "submit_class_reports",
     "approve_level_1",
     "approve_level_2",
     "review_report",
