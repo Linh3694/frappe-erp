@@ -678,22 +678,28 @@ def get_meal_tracking_by_date(date=None):
         stage_id_to_title_map = {stage.name: stage.title_vn for stage in education_stages}
         grade_to_stage_map = {grade.name: stage_id_to_title_map.get(grade.education_stage_id, grade.education_stage_id or "Unknown") for grade in education_grades}
 
-        # Step 3: Get attendance data for the specified date
+        # Step 3: Get attendance data for the specified date với timestamp
         # Count students marked as present or late in homeroom period
         # Late students still arrive before lunch and need a meal
-        attendance_data = frappe.get_all(
-            "SIS Class Attendance",
-            fields=[
-                "class_id", "student_id", "status", "period",
-                "student_name", "student_code"
-            ],
-            filters={
-                "date": date,
-                "class_id": ["in", [cls.name for cls in classes_with_homeroom]],
-                "period": "homeroom",  # Chỉ lấy điểm danh tiết chủ nhiệm
-                "status": ["in", ["present", "Present", "PRESENT", "late", "Late", "LATE"]]  # Present + Late = có mặt, cần suất ăn
-            }
-        )
+        # Sử dụng SQL để lấy cả timestamp modified cho việc tính trước/sau 9h
+        class_ids = [cls.name for cls in classes_with_homeroom]
+        class_ids_str = ', '.join([f"'{c}'" for c in class_ids])
+        
+        attendance_data = frappe.db.sql(f"""
+            SELECT 
+                class_id, 
+                student_id, 
+                status, 
+                period,
+                student_name, 
+                student_code,
+                TIME(modified) as modified_time
+            FROM `tabSIS Class Attendance`
+            WHERE date = %(date)s
+                AND class_id IN ({class_ids_str})
+                AND period = 'homeroom'
+                AND status IN ('present', 'Present', 'PRESENT', 'late', 'Late', 'LATE')
+        """, {"date": date}, as_dict=True)
         
         # Step 3b: Check if date is Wednesday (weekday 2 in Python) to get Set Á/Âu data
         from datetime import datetime
@@ -727,13 +733,43 @@ def get_meal_tracking_by_date(date=None):
                 elif item.choice == 'AU':
                     set_au_by_stage[stage] = item.count
 
-        # Step 4: Group attendance by class
+        # Step 4: Group attendance by class (với thông tin trước/sau 9h)
+        from datetime import time as dt_time
+        cutoff_time = dt_time(9, 0, 0)  # 9:00 AM
+        
         class_present_students = {}
+        class_before_9 = {}
+        class_after_9 = {}
+        
         for record in attendance_data:
             class_id = record.class_id
             if class_id not in class_present_students:
                 class_present_students[class_id] = 0
+                class_before_9[class_id] = 0
+                class_after_9[class_id] = 0
+            
             class_present_students[class_id] += 1
+            
+            # Phân loại theo timestamp modified
+            if record.modified_time:
+                # Convert timedelta to time if needed
+                if hasattr(record.modified_time, 'total_seconds'):
+                    # timedelta from SQL
+                    total_seconds = record.modified_time.total_seconds()
+                    hours = int(total_seconds // 3600)
+                    minutes = int((total_seconds % 3600) // 60)
+                    seconds = int(total_seconds % 60)
+                    record_time = dt_time(hours, minutes, seconds)
+                else:
+                    record_time = record.modified_time
+                
+                if record_time < cutoff_time:
+                    class_before_9[class_id] += 1
+                else:
+                    class_after_9[class_id] += 1
+            else:
+                # Nếu không có timestamp, tính là sau 9h (an toàn cho bộ phận bếp)
+                class_after_9[class_id] += 1
 
         # Step 5: Group by education stage
         education_stage_stats = {}
@@ -754,11 +790,15 @@ def get_meal_tracking_by_date(date=None):
                     'total_students': 0,
                     'classes_count': 0,
                     'set_a': 0,
-                    'set_au': 0
+                    'set_au': 0,
+                    'present_before_9': 0,
+                    'present_after_9': 0
                 }
 
             education_stage_stats[education_stage]['total_students'] += present_count
             education_stage_stats[education_stage]['classes_count'] += 1
+            education_stage_stats[education_stage]['present_before_9'] += class_before_9.get(cls.name, 0)
+            education_stage_stats[education_stage]['present_after_9'] += class_after_9.get(cls.name, 0)
         
         # Step 5b: Add Set Á/Âu data if Wednesday
         if is_wednesday:
