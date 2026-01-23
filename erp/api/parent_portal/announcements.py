@@ -261,6 +261,35 @@ def get_announcements():
                                     # School-wide announcements are relevant to all students
                                     is_relevant = True
                                     recipient_type = 'school'  # Normalize type
+                                elif recipient_type == 'stage':
+                                    # Education Stage (Tiểu học, THCS, THPT) - check if student belongs to this stage
+                                    try:
+                                        # Get stage's grades, then check if student's grade is in those grades
+                                        stage_grades = frappe.get_all(
+                                            "SIS Education Grade",
+                                            filters={"education_stage_id": recipient_id},
+                                            fields=["name", "title_en", "title_vn"],
+                                            pluck="name"
+                                        )
+                                        if stage_grades:
+                                            # Get student's grade ID from class
+                                            if student_id:
+                                                class_students = frappe.get_all(
+                                                    "SIS Class Student",
+                                                    filters={"student_id": student_id},
+                                                    fields=["class_id"],
+                                                    order_by="creation desc",
+                                                    limit=1
+                                                )
+                                                if class_students and class_students[0].class_id:
+                                                    class_doc = frappe.get_doc("SIS Class", class_students[0].class_id)
+                                                    student_grade_id = class_doc.education_grade
+                                                    # Check if student's grade belongs to this stage
+                                                    is_relevant = student_grade_id in stage_grades
+                                                    frappe.logger().info(f"Parent portal - Stage check: stage={recipient_id}, student_grade={student_grade_id}, stage_grades={stage_grades}, is_relevant={is_relevant}")
+                                    except Exception as e:
+                                        frappe.logger().error(f"Parent portal - Error checking stage {recipient_id}: {str(e)}")
+                                        is_relevant = False
                                 elif recipient_type == 'grade' and student_grade_name:
                                     # For grade, resolve the grade name from the ID
                                     grade_name_from_db = recipient_id
@@ -295,31 +324,30 @@ def get_announcements():
                                         display_name_vn = "Toàn trường"
                                         display_name_en = "All School"
                                     else:
-                                        # For grade/class/student, resolve display name from database
+                                        # For stage/grade/class/student, resolve display name from database
                                         display_name_vn = recipient_display_name or recipient_id
                                         display_name_en = recipient_display_name or recipient_id
                                         
                                         # Try to resolve from database if display_name is empty/null
-                                        if recipient_type == 'grade' and (not recipient_display_name or recipient_display_name == recipient_id):
-                                            # Try Education Stage first (Tiểu Học, THCS, THPT)
+                                        if recipient_type == 'stage' and (not recipient_display_name or recipient_display_name == recipient_id):
+                                            # Education Stage (Tiểu Học, THCS, THPT)
                                             try:
                                                 stage_doc = frappe.get_doc("SIS Education Stage", recipient_id)
                                                 display_name_vn = stage_doc.title_vn or stage_doc.title_en or recipient_id
                                                 display_name_en = stage_doc.title_en or stage_doc.title_vn or recipient_id
                                             except Exception:
-                                                # Silently fail and try Education Grade
-                                                try:
-                                                    grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
-                                                    display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_id
-                                                    # For EN: try title_en first, then fallback to title_vn (since DB might not have title_en)
-                                                    display_name_en = grade_doc.title_en or display_name_vn or recipient_id
-                                                except Exception:
-                                                    # Both failed, keep original
-                                                    pass
+                                                pass
+                                        elif recipient_type == 'grade' and (not recipient_display_name or recipient_display_name == recipient_id):
+                                            # Education Grade (Khối 1, Khối 2, etc.)
+                                            try:
+                                                grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
+                                                display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_id
+                                                display_name_en = grade_doc.title_en or display_name_vn or recipient_id
+                                            except Exception:
+                                                pass
                                         elif recipient_type == 'class' and (not recipient_display_name or recipient_display_name == recipient_id):
                                             try:
                                                 class_doc = frappe.get_doc("SIS Class", recipient_id)
-                                                # SIS Class might have title field only, but try to get both
                                                 display_name_vn = class_doc.title or recipient_id
                                                 display_name_en = class_doc.title or recipient_id
                                             except:
@@ -510,8 +538,31 @@ def get_announcement_detail(announcement_id):
                                 display_name_en = "All School"
                                 recipient_type = 'school'
                             else:
-                                display_name_vn = recipient_display_name
-                                display_name_en = recipient_display_name
+                                display_name_vn = recipient_display_name or recipient_name
+                                display_name_en = recipient_display_name or recipient_name
+                                
+                                # Try to resolve display name from database
+                                if recipient_type == 'stage' and (not recipient_display_name or recipient_display_name == recipient_name):
+                                    try:
+                                        stage_doc = frappe.get_doc("SIS Education Stage", recipient_name)
+                                        display_name_vn = stage_doc.title_vn or stage_doc.title_en or recipient_name
+                                        display_name_en = stage_doc.title_en or stage_doc.title_vn or recipient_name
+                                    except:
+                                        pass
+                                elif recipient_type == 'grade' and (not recipient_display_name or recipient_display_name == recipient_name):
+                                    try:
+                                        grade_doc = frappe.get_doc("SIS Education Grade", recipient_name)
+                                        display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_name
+                                        display_name_en = grade_doc.title_en or display_name_vn or recipient_name
+                                    except:
+                                        pass
+                                elif recipient_type == 'class' and (not recipient_display_name or recipient_display_name == recipient_name):
+                                    try:
+                                        class_doc = frappe.get_doc("SIS Class", recipient_name)
+                                        display_name_vn = class_doc.title or recipient_name
+                                        display_name_en = class_doc.title or recipient_name
+                                    except:
+                                        pass
 
                             relevant_tags.append({
                                 "type": recipient_type,
