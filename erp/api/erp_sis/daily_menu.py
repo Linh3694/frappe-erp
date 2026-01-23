@@ -621,13 +621,33 @@ def get_meal_tracking_by_date(date=None):
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
 
-        # Step 1: Get all classes with homeroom teachers for the current campus
+        # Lấy năm học hiện tại đang active (is_enable = 1)
+        current_year = frappe.get_all(
+            "SIS School Year",
+            filters={"is_enable": 1},
+            fields=["name"],
+            order_by="creation desc",
+            limit=1
+        )
+        
+        if not current_year:
+            return single_item_response({
+                'education_stages': [],
+                'date': date,
+                'total_classes': 0,
+                'total_students': 0
+            }, "Không tìm thấy năm học đang active")
+        
+        school_year_id = current_year[0].name
+
+        # Step 1: Get all classes with homeroom teachers for the current campus AND school year
         classes_with_homeroom = frappe.get_all(
             "SIS Class",
             fields=["name", "homeroom_teacher", "vice_homeroom_teacher", "campus_id", "education_grade"],
             filters={
                 "campus_id": campus_id or "campus-1",
                 "homeroom_teacher": ["!=", ""],  # Must have homeroom teacher
+                "school_year_id": school_year_id,  # Chỉ lấy lớp của năm học hiện tại
             }
         )
 
@@ -659,7 +679,8 @@ def get_meal_tracking_by_date(date=None):
         grade_to_stage_map = {grade.name: stage_id_to_title_map.get(grade.education_stage_id, grade.education_stage_id or "Unknown") for grade in education_grades}
 
         # Step 3: Get attendance data for the specified date
-        # Only count students who were actually marked as present in homeroom period
+        # Count students marked as present or late in homeroom period
+        # Late students still arrive before lunch and need a meal
         attendance_data = frappe.get_all(
             "SIS Class Attendance",
             fields=[
@@ -670,7 +691,7 @@ def get_meal_tracking_by_date(date=None):
                 "date": date,
                 "class_id": ["in", [cls.name for cls in classes_with_homeroom]],
                 "period": "homeroom",  # Chỉ lấy điểm danh tiết chủ nhiệm
-                "status": ["in", ["present", "Present", "PRESENT"]]  # Only count present students
+                "status": ["in", ["present", "Present", "PRESENT", "late", "Late", "LATE"]]  # Present + Late = có mặt, cần suất ăn
             }
         )
         
@@ -802,6 +823,20 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
 
+        # Lấy năm học hiện tại đang active (is_enable = 1)
+        current_year = frappe.get_all(
+            "SIS School Year",
+            filters={"is_enable": 1},
+            fields=["name"],
+            order_by="creation desc",
+            limit=1
+        )
+        
+        if not current_year:
+            return error_response("Không tìm thấy năm học đang active")
+        
+        school_year_id = current_year[0].name
+
         # Tìm education_stage_id từ title_vn
         stage_info = frappe.get_all(
             "SIS Education Stage",
@@ -816,16 +851,19 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
         stage_id = stage_info[0].name
 
         # Query chi tiết từng lớp với phân biệt điểm danh trước/sau 9h
-        # Sử dụng field `creation` (timestamp hệ thống) để phân biệt
+        # Sử dụng field `modified` (timestamp cập nhật cuối) để phân biệt
+        # Lý do: Nếu GV sửa status từ absent -> present sau 9h, cần tính vào "sau 9h"
         # Thời gian 9h sáng là mốc chốt cho bộ phận bếp
+        # Status: present và late đều tính là có mặt (muộn vẫn đến trước buổi trưa, vẫn cần suất ăn)
         # SIS Teacher chỉ có user_id link đến User, cần join thêm để lấy full_name
+        # QUAN TRỌNG: Chỉ lấy lớp của năm học hiện tại (school_year_id)
         class_detail_data = frappe.db.sql("""
             SELECT 
                 ca.class_id,
                 c.title as class_title,
                 u.full_name as homeroom_teacher_name,
-                COUNT(CASE WHEN TIME(ca.creation) < '09:00:00' THEN 1 END) as present_before_9,
-                COUNT(CASE WHEN TIME(ca.creation) >= '09:00:00' THEN 1 END) as present_after_9,
+                COUNT(CASE WHEN TIME(ca.modified) < '09:00:00' THEN 1 END) as present_before_9,
+                COUNT(CASE WHEN TIME(ca.modified) >= '09:00:00' THEN 1 END) as present_after_9,
                 COUNT(*) as total_present
             FROM `tabSIS Class Attendance` ca
             INNER JOIN `tabSIS Class` c ON ca.class_id = c.name
@@ -833,8 +871,9 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ca.date = %(date)s
                 AND ca.period = 'homeroom'
-                AND ca.status IN ('present', 'Present', 'PRESENT')
+                AND ca.status IN ('present', 'Present', 'PRESENT', 'late', 'Late', 'LATE')
                 AND c.campus_id = %(campus_id)s
+                AND c.school_year_id = %(school_year_id)s
                 AND c.education_grade IN (
                     SELECT name FROM `tabSIS Education Grade` 
                     WHERE education_stage_id = %(stage_id)s
@@ -844,6 +883,7 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
         """, {
             "date": date,
             "campus_id": campus_id or "campus-1",
+            "school_year_id": school_year_id,
             "stage_id": stage_id
         }, as_dict=True)
 

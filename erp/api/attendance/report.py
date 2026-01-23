@@ -617,8 +617,19 @@ def get_campus_leave_requests(campus_id=None, date=None):
                     code="NO_CAMPUS"
                 )
         
+        # Lấy năm học hiện tại đang active (is_enable = 1)
+        current_year = frappe.get_all(
+            "SIS School Year",
+            filters={"is_enable": 1},
+            fields=["name"],
+            order_by="creation desc",
+            limit=1
+        )
+        school_year_id = current_year[0].name if current_year else None
+        
         # Lấy danh sách đơn nghỉ phép trong ngày (đơn có start_date <= date <= end_date)
         # Sử dụng subquery để lấy duy nhất lớp regular của học sinh, tránh duplicate
+        # QUAN TRỌNG: Chỉ lấy lớp của năm học hiện tại
         leave_requests = frappe.db.sql("""
             SELECT 
                 lr.name,
@@ -643,6 +654,7 @@ def get_campus_leave_requests(campus_id=None, date=None):
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id 
                     AND c.class_type = 'regular'
                     AND c.campus_id = %(campus_id)s
+                    AND (%(school_year_id)s IS NULL OR c.school_year_id = %(school_year_id)s)
             ) cls ON cls.student_id = lr.student_id
             WHERE lr.campus_id = %(campus_id)s
                 AND lr.start_date <= %(date)s
@@ -650,7 +662,8 @@ def get_campus_leave_requests(campus_id=None, date=None):
             ORDER BY lr.submitted_at DESC
         """, {
             "campus_id": campus_id,
-            "date": date_obj
+            "date": date_obj,
+            "school_year_id": school_year_id
         }, as_dict=True)
         
         # Loại bỏ duplicate dựa trên leave request name (mỗi đơn chỉ hiển thị 1 lần)
@@ -784,8 +797,19 @@ def get_campus_leave_requests_by_submitted_date(campus_id=None, start_date=None,
                     code="NO_CAMPUS"
                 )
         
+        # Lấy năm học hiện tại đang active (is_enable = 1)
+        current_year = frappe.get_all(
+            "SIS School Year",
+            filters={"is_enable": 1},
+            fields=["name"],
+            order_by="creation desc",
+            limit=1
+        )
+        school_year_id = current_year[0].name if current_year else None
+        
         # Lấy danh sách đơn nghỉ phép theo thời gian tạo đơn (submitted_at)
         # Lọc: start_date <= DATE(submitted_at) <= end_date
+        # QUAN TRỌNG: Chỉ lấy lớp của năm học hiện tại
         leave_requests = frappe.db.sql("""
             SELECT 
                 lr.name,
@@ -810,6 +834,7 @@ def get_campus_leave_requests_by_submitted_date(campus_id=None, start_date=None,
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id 
                     AND c.class_type = 'regular'
                     AND c.campus_id = %(campus_id)s
+                    AND (%(school_year_id)s IS NULL OR c.school_year_id = %(school_year_id)s)
             ) cls ON cls.student_id = lr.student_id
             WHERE lr.campus_id = %(campus_id)s
                 AND DATE(lr.submitted_at) >= %(start_date)s
@@ -818,7 +843,8 @@ def get_campus_leave_requests_by_submitted_date(campus_id=None, start_date=None,
         """, {
             "campus_id": campus_id,
             "start_date": start_date_obj,
-            "end_date": end_date_obj
+            "end_date": end_date_obj,
+            "school_year_id": school_year_id
         }, as_dict=True)
         
         # Loại bỏ duplicate

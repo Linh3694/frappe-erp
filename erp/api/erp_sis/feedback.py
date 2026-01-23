@@ -306,6 +306,16 @@ def admin_get():
                         AND f.docstatus < 2
                 """, {"guardian": feedback.guardian}, as_dict=True)
                 
+                # Lấy năm học hiện tại đang active (is_enable = 1)
+                current_year = frappe.get_all(
+                    "SIS School Year",
+                    filters={"is_enable": 1},
+                    fields=["name"],
+                    order_by="creation desc",
+                    limit=1
+                )
+                current_school_year_id = current_year[0].name if current_year else None
+                
                 students = []
                 for relationship in family_relationships:
                     # Get student info from CRM Student and SIS Student doctypes
@@ -330,16 +340,22 @@ def admin_get():
                             order_by="modified desc"
                         )
 
-                        # Find the latest regular class
+                        # Find the regular class of current school year
+                        # QUAN TRỌNG: Chỉ lấy lớp của năm học hiện tại
                         class_name = None
                         for cs in student_classes:
                             if cs["class_id"]:
                                 try:
                                     class_doc = frappe.get_doc("SIS Class", cs["class_id"])
-                                    # Check if this is a regular class (same as otp_auth.py)
+                                    # Check if this is a regular class AND belongs to current school year
                                     if hasattr(class_doc, 'class_type') and class_doc.class_type == "regular":
-                                        class_name = class_doc.title
-                                        break  # Use the most recent regular class
+                                        # Ưu tiên lớp của năm học hiện tại
+                                        if current_school_year_id and hasattr(class_doc, 'school_year_id') and class_doc.school_year_id == current_school_year_id:
+                                            class_name = class_doc.title
+                                            break  # Found class of current school year
+                                        # Fallback: nếu không có năm học hiện tại, lấy lớp mới nhất
+                                        elif not current_school_year_id and not class_name:
+                                            class_name = class_doc.title
                                 except:
                                     continue
 
