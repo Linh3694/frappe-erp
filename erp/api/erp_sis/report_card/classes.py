@@ -1,0 +1,294 @@
+# -*- coding: utf-8 -*-
+"""
+Report Card Class APIs
+======================
+
+APIs liên quan đến lớp học cho Report Card.
+"""
+
+import frappe
+from typing import Any, Dict, Optional
+
+from erp.utils.api_response import (
+    success_response,
+    error_response,
+    validation_error_response,
+    not_found_response,
+    forbidden_response,
+)
+
+from .utils import get_request_payload, get_current_campus_id
+
+
+@frappe.whitelist(allow_guest=False)
+def get_all_classes_for_reports(school_year: Optional[str] = None, page: int = 1, limit: int = 50):
+    """
+    Lấy TẤT CẢ lớp học cho SIS Manager role.
+    
+    Args:
+        school_year: Năm học (optional)
+        page: Số trang
+        limit: Số items mỗi trang
+    """
+    try:
+        page = int(page or 1)
+        limit = int(limit or 50)
+        offset = (page - 1) * limit
+        campus_id = get_current_campus_id()
+
+        class_filters = {"campus_id": campus_id}
+        if school_year:
+            class_filters["school_year_id"] = school_year
+
+        all_classes = frappe.get_all(
+            "SIS Class",
+            fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+            filters=class_filters,
+            order_by="title asc",
+        )
+
+        total_count = len(all_classes)
+        page_rows = all_classes[offset : offset + limit]
+
+        return {
+            "success": True,
+            "data": page_rows,
+            "current_page": page,
+            "total_count": total_count,
+            "per_page": limit,
+            "message": "All classes for report card fetched successfully",
+        }
+    except Exception as e:
+        frappe.log_error(f"Error fetching all classes for report card: {str(e)}")
+        return error_response("Error fetching all classes for report card")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int = 50):
+    """
+    Lấy các lớp mà user hiện tại là GVCN hoặc dạy môn.
+    Nếu user có role 'SIS Manager', trả về tất cả lớp.
+    
+    Args:
+        school_year: Năm học (optional)
+        page: Số trang (không dùng nữa, giữ để backward compatible)
+        limit: Số items mỗi trang (không dùng nữa)
+    """
+    try:
+        campus_id = get_current_campus_id()
+        user = frappe.session.user
+
+        # Check if SIS Manager
+        user_roles = frappe.get_roles(user)
+        is_sis_manager = "SIS Manager" in user_roles
+
+        # If SIS Manager, return all classes
+        if is_sis_manager:
+            class_filters = {"campus_id": campus_id}
+            if school_year:
+                class_filters["school_year_id"] = school_year
+
+            all_classes = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+                filters=class_filters,
+                order_by="title asc",
+            )
+            
+            return {
+                "success": True,
+                "data": all_classes,
+                "total_count": len(all_classes),
+                "message": "All classes for SIS Manager fetched successfully",
+            }
+
+        # Get teacher record
+        teacher_rows = frappe.get_all(
+            "SIS Teacher", 
+            fields=["name"], 
+            filters={"user_id": user, "campus_id": campus_id}, 
+            limit=1
+        )
+        teacher_id = teacher_rows[0].name if teacher_rows else None
+
+        class_filters = {"campus_id": campus_id}
+        if school_year:
+            class_filters["school_year_id"] = school_year
+
+        # 1) Homeroom classes
+        homeroom_classes = []
+        if teacher_id:
+            homeroom_classes = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+                filters={**class_filters, "homeroom_teacher": teacher_id},
+                order_by="title asc",
+            )
+
+        # 2) Teaching classes
+        teaching_class_ids = set()
+        if teacher_id:
+            # From Teacher Timetable
+            try:
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                day = now.weekday()
+                monday = now - timedelta(days=day)
+                sunday = monday + timedelta(days=6)
+                week_start = monday.strftime('%Y-%m-%d')
+                week_end = sunday.strftime('%Y-%m-%d')
+                
+                teacher_timetable_classes = frappe.get_all(
+                    "SIS Teacher Timetable",
+                    fields=["class_id"],
+                    filters={
+                        "teacher_id": teacher_id,
+                        "date": ["between", [week_start, week_end]]
+                    },
+                    distinct=True,
+                    limit=1000
+                ) or []
+                
+                for record in teacher_timetable_classes:
+                    if record.class_id:
+                        teaching_class_ids.add(record.class_id)
+            except Exception:
+                pass
+                
+            # From Subject Assignment
+            try:
+                assignment_classes = frappe.db.sql(
+                    """
+                    SELECT DISTINCT sa.class_id
+                    FROM `tabSIS Subject Assignment` sa
+                    WHERE sa.teacher_id = %s AND sa.campus_id = %s
+                    """,
+                    (teacher_id, campus_id),
+                    as_dict=True,
+                ) or []
+                
+                for assignment in assignment_classes:
+                    if assignment.class_id:
+                        teaching_class_ids.add(assignment.class_id)
+            except Exception:
+                pass
+        
+        # Get teaching class details
+        teaching_classes = []
+        if teaching_class_ids:
+            teaching_filters = {
+                "name": ["in", list(teaching_class_ids)],
+                "campus_id": campus_id
+            }
+            if school_year:
+                teaching_filters["school_year_id"] = school_year
+                
+            teaching_classes = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+                filters=teaching_filters,
+                order_by="title asc"
+            ) or []
+
+        # Merge & unique
+        by_name: Dict[str, Dict[str, Any]] = {}
+        for row in homeroom_classes + teaching_classes:
+            by_name[row["name"]] = row
+
+        all_rows = list(by_name.values())
+
+        return {
+            "success": True,
+            "data": all_rows,
+            "total_count": len(all_rows),
+            "message": "Classes for report card fetched successfully",
+        }
+    except Exception as e:
+        frappe.log_error(f"Error fetching my classes for report card: {str(e)}")
+        return error_response("Error fetching classes for report card")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str] = None):
+    """
+    Lấy danh sách templates có student reports thực tế cho một lớp.
+    
+    Args:
+        class_id: ID lớp
+        school_year: Năm học (optional)
+    """
+    try:
+        # Resolve class_id
+        if not class_id:
+            form = frappe.local.form_dict or {}
+            class_id = form.get("class_id") or form.get("name")
+        if not class_id and getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
+            class_id = frappe.request.args.get("class_id")
+        if not class_id:
+            payload = get_request_payload()
+            class_id = payload.get("class_id") or payload.get("name")
+        if not class_id:
+            return validation_error_response(
+                message="Class ID is required", 
+                errors={"class_id": ["Required"]}
+            )
+
+        campus_id = get_current_campus_id()
+
+        # Verify class exists
+        try:
+            c = frappe.get_doc("SIS Class", class_id)
+        except frappe.DoesNotExistError:
+            return not_found_response("Class not found")
+        if c.campus_id != campus_id:
+            return forbidden_response("Access denied: Class belongs to another campus")
+
+        # Find templates with actual student reports
+        student_report_query = """
+            SELECT DISTINCT template_id
+            FROM `tabSIS Student Report Card`
+            WHERE class_id = %s AND campus_id = %s
+        """
+        params = [class_id, campus_id]
+        
+        if school_year:
+            student_report_query += " AND school_year = %s"
+            params.append(school_year)
+        elif getattr(c, "school_year_id", None):
+            student_report_query += " AND school_year = %s"
+            params.append(c.school_year_id)
+            
+        template_ids = frappe.db.sql(student_report_query, tuple(params), as_dict=True)
+        
+        if not template_ids:
+            return success_response(data=[], message="No report templates with student data found")
+        
+        template_id_list = [t['template_id'] for t in template_ids if t['template_id']]
+        
+        if not template_id_list:
+            return success_response(data=[], message="No valid template IDs found")
+            
+        rows = frappe.get_all(
+            "SIS Report Card Template",
+            fields=["name", "title", "is_published", "education_grade", "curriculum", "school_year", "semester_part"],
+            filters={
+                "name": ["in", template_id_list],
+                "campus_id": campus_id,
+                "is_published": 1
+            },
+            order_by="title asc",
+        )
+        
+        # Add student report count
+        for row in rows:
+            report_count = frappe.db.count("SIS Student Report Card", {
+                "template_id": row["name"],
+                "class_id": class_id,
+                "campus_id": campus_id
+            })
+            row["student_report_count"] = report_count
+        
+        return success_response(data=rows, message="Templates with student reports fetched successfully")
+    except Exception as e:
+        frappe.log_error(f"Error fetching class report templates: {str(e)}")
+        return error_response("Error fetching class report templates")
