@@ -769,17 +769,25 @@ def upload_single_photo():
 
         else:  # class
             # Class photo: filename can be SIS Class.name or exact title
-            # Try by name first, then by title (exact match)
+            # Tim class theo name (SIS-CLASS-xxx) - khong can filter school_year vi name la unique
             class_record = frappe.get_all("SIS Class",
                 filters={"name": class_name},
-                fields=["name", "title"],
+                fields=["name", "title", "school_year_id"],
                 limit=1
             )
 
             if not class_record:
+                # Tim class theo title - BAT BUOC filter theo school_year_id
+                # Vi 1 title (VD: "5A") co the ton tai o nhieu nam hoc khac nhau
+                if not school_year_id or school_year_id.strip() == '':
+                    frappe.throw("Năm học là bắt buộc khi upload ảnh lớp theo tên. Vui lòng chọn năm học cụ thể.")
+                
                 class_record = frappe.get_all("SIS Class",
-                    filters={"title": class_name},
-                    fields=["name", "title"],
+                    filters={
+                        "title": class_name,
+                        "school_year_id": school_year_id
+                    },
+                    fields=["name", "title", "school_year_id"],
                     limit=1
                 )
 
@@ -791,9 +799,9 @@ def upload_single_photo():
                     limit=1
                 )
                 if student_check:
-                    frappe.throw(f"Class with name/title '{class_name}' not found. However, a student with this code exists. Did you mean to upload a student photo instead?")
+                    frappe.throw(f"Không tìm thấy lớp '{class_name}'. Tuy nhiên, có học sinh với mã này. Bạn có muốn upload ảnh học sinh thay vì ảnh lớp?")
                 else:
-                    frappe.throw(f"Class with name/title '{class_name}' not found. Please check the class name or ensure the class exists.")
+                    frappe.throw(f"Không tìm thấy lớp '{class_name}' trong năm học '{school_year_id}'. Vui lòng kiểm tra lại tên lớp hoặc năm học.")
 
             class_id = class_record[0].name
             photo_title = f"Photo of class {class_record[0].title}"
