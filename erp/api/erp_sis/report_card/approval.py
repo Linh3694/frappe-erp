@@ -2413,3 +2413,92 @@ def publish_batch_reports():
     except Exception as e:
         frappe.logger().error(f"Error in publish_batch_reports: {str(e)}")
         return error_response(f"Lỗi khi xuất bản batch: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def reject_single_report():
+    """
+    Reject (trả lại) một báo cáo từ Level 3 hoặc Level 4.
+    - Level 3 (level_2_approved) -> trả về level_1_approved hoặc submitted
+    - Level 4 (reviewed) -> trả về level_2_approved
+    
+    Request body:
+        {
+            "report_id": "...",
+            "reason": "Lý do trả lại"
+        }
+    """
+    try:
+        data = get_request_payload()
+        report_id = data.get("report_id")
+        reason = data.get("reason", "").strip()
+        
+        if not report_id:
+            return validation_error_response(
+                message="report_id is required",
+                errors={"report_id": ["Required"]}
+            )
+        
+        if not reason:
+            return validation_error_response(
+                message="reason is required",
+                errors={"reason": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        try:
+            report = frappe.get_doc("SIS Student Report Card", report_id)
+        except frappe.DoesNotExistError:
+            return not_found_response("Báo cáo học tập không tồn tại")
+        
+        if report.campus_id != campus_id:
+            return forbidden_response("Không có quyền truy cập báo cáo này")
+        
+        current_status = getattr(report, 'approval_status', 'draft') or 'draft'
+        now = datetime.now()
+        
+        # Xác định target status dựa vào current status
+        if current_status == 'level_2_approved':
+            # Level 3 -> trả về level_1_approved (hoặc submitted nếu không có L1)
+            new_status = 'level_1_approved'
+        elif current_status == 'reviewed':
+            # Level 4 -> trả về level_2_approved
+            new_status = 'level_2_approved'
+        else:
+            return error_response(
+                message=f"Không thể trả lại báo cáo ở trạng thái '{current_status}'",
+                code="INVALID_STATUS"
+            )
+        
+        # Cập nhật báo cáo
+        report.approval_status = new_status
+        report.rejection_reason = reason
+        report.rejected_by = user
+        report.rejected_at = now
+        
+        _add_approval_history(
+            report,
+            f"reject_from_{current_status}",
+            user,
+            "rejected",
+            f"Trả lại từ {current_status} về {new_status}. Lý do: {reason}"
+        )
+        
+        report.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "report_id": report_id,
+                "previous_status": current_status,
+                "new_status": new_status,
+                "reason": reason
+            },
+            message=f"Đã trả lại báo cáo về trạng thái '{new_status}'"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in reject_single_report: {str(e)}")
+        return error_response(f"Lỗi khi trả lại: {str(e)}")
