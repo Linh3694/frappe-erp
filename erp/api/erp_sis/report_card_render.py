@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, List, Union
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import success_response, error_response, validation_error_response, not_found_response, forbidden_response, single_item_response
 
-from .report_card import _intl_scoreboard_enabled
+from .report_card import intl_scoreboard_enabled
 
 
 def _campus() -> str:
@@ -414,7 +414,7 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
         "intl_overall_mark_enabled": bool(getattr(template_doc, "intl_overall_mark_enabled", 0)) if template_doc else False,
         "intl_overall_grade_enabled": bool(getattr(template_doc, "intl_overall_grade_enabled", 0)) if template_doc else False,
         "intl_comment_enabled": bool(getattr(template_doc, "intl_comment_enabled", 0)) if template_doc else False,
-        "intl_scoreboard_enabled": _intl_scoreboard_enabled(template_doc) if template_doc else False,
+        "intl_scoreboard_enabled": intl_scoreboard_enabled(template_doc) if template_doc else False,
     }
     
     # === SUBJECTS STANDARDIZATION ===

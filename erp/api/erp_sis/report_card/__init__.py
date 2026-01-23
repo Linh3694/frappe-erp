@@ -29,6 +29,9 @@ from .template import (
 # Validators
 from .validators import validate_comment_titles
 
+# Serializers
+from .serializers import intl_scoreboard_enabled
+
 # Approval
 from .approval import (
     approve_report_card,
@@ -97,6 +100,8 @@ __all__ = [
     "delete_template",
     # Validators
     "validate_comment_titles",
+    # Serializers
+    "intl_scoreboard_enabled",
     # Approval
     "approve_report_card",
     "submit_section",

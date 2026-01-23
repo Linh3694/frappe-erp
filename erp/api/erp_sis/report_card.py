@@ -19,6 +19,8 @@ from erp.api.erp_sis.report_card import (
     delete_template,
     # Validators
     validate_comment_titles,
+    # Serializers
+    intl_scoreboard_enabled,
     # Approval
     approve_report_card,
     submit_section,
@@ -65,6 +67,8 @@ __all__ = [
     "delete_template",
     # Validators
     "validate_comment_titles",
+    # Serializers
+    "intl_scoreboard_enabled",
     # Approval
     "approve_report_card",
     "submit_section",
