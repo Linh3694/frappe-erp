@@ -30,7 +30,19 @@ from .template import (
 from .validators import validate_comment_titles
 
 # Approval
-from .approval import approve_report_card
+from .approval import (
+    approve_report_card,
+    submit_section,
+    approve_level_1,
+    approve_level_2,
+    review_report,
+    final_publish,
+    get_pending_approvals,
+    get_approval_config,
+    save_approval_config,
+    get_subject_managers,
+    update_subject_managers,
+)
 
 # Images
 from .images import (
@@ -80,6 +92,16 @@ __all__ = [
     "validate_comment_titles",
     # Approval
     "approve_report_card",
+    "submit_section",
+    "approve_level_1",
+    "approve_level_2",
+    "review_report",
+    "final_publish",
+    "get_pending_approvals",
+    "get_approval_config",
+    "save_approval_config",
+    "get_subject_managers",
+    "update_subject_managers",
     # Images
     "upload_report_card_images",
     "get_report_card_images",

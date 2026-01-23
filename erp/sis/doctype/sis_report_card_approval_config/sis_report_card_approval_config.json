@@ -1,83 +1,89 @@
 {
  "actions": [],
  "allow_copy": 0,
- "allow_events_in_timeline": 0,
- "allow_guest_to_view": 0,
  "allow_import": 1,
- "allow_rename": 1,
- "autoname": "format:SIS_ACTUAL_SUBJECT-{#####}",
- "beta": 0,
- "creation": "2024-08-20 09:00:00.000000",
- "custom": 0,
- "description": "SIS Actual Subject Management",
- "docstatus": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS_RC_APPROVAL_CONFIG-{#####}",
+ "creation": "2026-01-23 10:00:00.000000",
  "doctype": "DocType",
- "document_type": "Document",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "basic_information",
+  "basic_info_section",
   "campus_id",
-  "title_vn",
-  "title_en",
   "education_stage_id",
-  "curriculum_id",
-  "managers_section",
-  "managers"
+  "column_break_1",
+  "school_year_id",
+  "is_active",
+  "level_3_section",
+  "level_3_reviewers",
+  "level_4_section",
+  "level_4_approvers"
  ],
  "fields": [
   {
-   "fieldname": "basic_information",
+   "fieldname": "basic_info_section",
    "fieldtype": "Section Break",
    "label": "Basic Information"
   },
   {
    "fieldname": "campus_id",
    "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Campus",
    "options": "SIS Campus",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "title_vn",
-   "fieldtype": "Data",
-   "label": "Actual Subject Name (VN)",
-   "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "title_en",
-   "fieldtype": "Data",
-   "label": "Actual Subject Name (EN)",
-   "reqd": 1,
-   "in_list_view": 1
+   "reqd": 1
   },
   {
    "fieldname": "education_stage_id",
    "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
    "label": "Education Stage",
    "options": "SIS Education Stage",
-   "reqd": 0
+   "reqd": 1
   },
   {
-   "fieldname": "curriculum_id",
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "school_year_id",
    "fieldtype": "Link",
-   "label": "Curriculum",
-   "options": "SIS Curriculum",
-   "reqd": 0
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "School Year",
+   "options": "SIS School Year"
   },
   {
-   "collapsible": 1,
-   "fieldname": "managers_section",
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Active"
+  },
+  {
+   "fieldname": "level_3_section",
    "fieldtype": "Section Break",
-   "label": "Subject Managers (Approval Level 2)"
+   "label": "Level 3 Reviewers"
   },
   {
-   "fieldname": "managers",
+   "fieldname": "level_3_reviewers",
    "fieldtype": "Table",
-   "label": "Managers",
-   "options": "SIS Actual Subject Manager"
+   "label": "Level 3 Reviewers",
+   "options": "SIS Report Card Approver"
+  },
+  {
+   "fieldname": "level_4_section",
+   "fieldtype": "Section Break",
+   "label": "Level 4 Approvers"
+  },
+  {
+   "fieldname": "level_4_approvers",
+   "fieldtype": "Table",
+   "label": "Level 4 Approvers",
+   "options": "SIS Report Card Approver"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -86,7 +92,7 @@
  "modified": "2026-01-23 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
- "name": "SIS Actual Subject",
+ "name": "SIS Report Card Approval Config",
  "owner": "Administrator",
  "permissions": [
   {
@@ -124,23 +130,11 @@
    "role": "SIS BOD",
    "share": 1,
    "write": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Registrar",
-   "share": 1,
-   "write": 1
   }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "title_vn",
+ "title_field": "education_stage_id",
  "track_changes": 1
 }

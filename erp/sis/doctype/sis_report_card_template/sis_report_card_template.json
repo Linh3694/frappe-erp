@@ -29,6 +29,9 @@
   "conduct_ranking_year",
   "homeroom_titles",
   "homeroom_comment_options",
+  "homeroom_approvers_section",
+  "homeroom_reviewer_level_1",
+  "homeroom_reviewer_level_2",
   "subject_eval_enabled",
   "subjects"
  ],
@@ -60,6 +63,10 @@
   {"fieldname": "homeroom_titles", "fieldtype": "Table", "label": "Nhận xét chủ nhiệm", "options": "SIS Report Card Homeroom Title Map"},
   {"fieldname": "homeroom_comment_options", "fieldtype": "Long Text", "label": "Homeroom Comment Options (JSON)"},
 
+  {"fieldname": "homeroom_approvers_section", "fieldtype": "Section Break", "label": "Người duyệt Homeroom", "collapsible": 1},
+  {"fieldname": "homeroom_reviewer_level_1", "fieldtype": "Link", "label": "Khối trưởng (Level 1)", "options": "SIS Teacher"},
+  {"fieldname": "homeroom_reviewer_level_2", "fieldtype": "Link", "label": "Tổ trưởng (Level 2)", "options": "SIS Teacher"},
+
   {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Bật đánh giá môn học"},
   {"fieldname": "subjects", "fieldtype": "Table", "label": "Cấu hình môn học", "options": "SIS Report Card Subject Config"},
   {"fieldname": "intl_overall_mark_enabled", "fieldtype": "Check", "label": "Bật Overall Mark (INTL)"},
@@ -75,4 +82,3 @@
  "sort_field": "modified",
  "sort_order": "DESC"
 }
-
