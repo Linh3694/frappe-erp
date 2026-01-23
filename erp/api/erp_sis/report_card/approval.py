@@ -1061,13 +1061,60 @@ def get_pending_approvals(level: Optional[str] = None):
                         if r not in results:
                             results.append(r)
                 
-                # Subject Manager
+                # Subject Manager - Lấy reports có subjects mà user là manager
                 managed_subjects = frappe.get_all(
                     "SIS Actual Subject Manager",
                     filters={"teacher_id": teacher_id},
-                    fields=["parent"]
+                    fields=["parent"]  # parent là subject_id
                 )
-                # TODO: Filter reports có chứa các subjects này
+                
+                if managed_subjects:
+                    subject_ids = [s.parent for s in managed_subjects]
+                    
+                    # Tìm templates có chứa các subjects này (trong scores hoặc subjects)
+                    # Lấy tất cả templates của campus
+                    all_templates = frappe.get_all(
+                        "SIS Report Card Template",
+                        filters={"campus_id": campus_id},
+                        fields=["name"]
+                    )
+                    
+                    # Filter templates có chứa subjects được quản lý
+                    matching_templates = []
+                    for tmpl in all_templates:
+                        # Check trong scores
+                        scores = frappe.get_all(
+                            "Report Card Score",
+                            filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
+                            fields=["subject_id"]
+                        )
+                        # Check trong subjects (subject_eval)
+                        subjects = frappe.get_all(
+                            "Report Card Subject Config",
+                            filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
+                            fields=["subject_id"]
+                        )
+                        
+                        template_subjects = [s.subject_id for s in scores] + [s.subject_id for s in subjects]
+                        if any(sid in template_subjects for sid in subject_ids):
+                            matching_templates.append(tmpl.name)
+                    
+                    if matching_templates:
+                        # Lấy reports với status level_1_approved (chờ L2 duyệt)
+                        reports_sm = frappe.get_all(
+                            "SIS Student Report Card",
+                            filters={
+                                "template_id": ["in", matching_templates],
+                                "approval_status": "level_1_approved",
+                                "campus_id": campus_id
+                            },
+                            fields=["name", "title", "student_id", "class_id", "approval_status", "submitted_at"]
+                        )
+                        for r in reports_sm:
+                            r["pending_level"] = "level_2"
+                            # Tránh duplicate
+                            if not any(existing["name"] == r["name"] for existing in results):
+                                results.append(r)
         
         # Level 3 & 4: Kiểm tra approval config
         if not level or level in ["review", "publish"]:
