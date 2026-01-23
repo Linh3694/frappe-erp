@@ -1039,13 +1039,41 @@ def recall_announcement():
         announcement.status = "draft"
         announcement.save()
 
+        # Xóa tất cả notifications liên quan đến announcement này
+        deleted_count = 0
+        try:
+            # Tìm notifications có type = announcement và data chứa announcement_id
+            # Data được lưu dạng JSON string, cần search bằng LIKE
+            notifications = frappe.db.sql("""
+                SELECT name FROM `tabERP Notification`
+                WHERE notification_type = 'announcement'
+                AND (
+                    data LIKE %(pattern1)s
+                    OR data LIKE %(pattern2)s
+                )
+            """, {
+                "pattern1": f'%"announcement_id": "{announcement_id}"%',
+                "pattern2": f'%"announcement_id":"{announcement_id}"%'
+            }, as_dict=True)
+            
+            for notif in notifications:
+                frappe.delete_doc("ERP Notification", notif.name, force=True, ignore_permissions=True)
+                deleted_count += 1
+            
+            frappe.db.commit()
+            frappe.logger().info(f"🗑️ Deleted {deleted_count} notifications for recalled announcement {announcement_id}")
+        except Exception as notif_error:
+            frappe.logger().error(f"⚠️ Error deleting notifications for announcement {announcement_id}: {str(notif_error)}")
+            # Không fail toàn bộ operation nếu xóa notification lỗi
+
         frappe.logger().info(f"✅ Announcement {announcement_id} recalled successfully (status changed to draft)")
 
         return success_response(
             message="Announcement recalled successfully",
             data={
                 "announcement_id": announcement.name,
-                "status": announcement.status
+                "status": announcement.status,
+                "notifications_deleted": deleted_count
             }
         )
 
