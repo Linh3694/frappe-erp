@@ -1007,6 +1007,12 @@ def get_approval_config(education_stage_id: Optional[str] = None):
         education_stage_id: ID cấp học (optional - nếu không có sẽ lấy tất cả)
     """
     try:
+        # Lấy params từ nhiều nguồn cho GET requests
+        if not education_stage_id:
+            education_stage_id = frappe.form_dict.get("education_stage_id")
+        if not education_stage_id and hasattr(frappe.request, 'args'):
+            education_stage_id = frappe.request.args.get("education_stage_id")
+        
         campus_id = get_current_campus_id()
         
         filters = {"campus_id": campus_id}
@@ -1165,8 +1171,11 @@ def get_subject_managers(subject_id: Optional[str] = None):
         subject_id: ID môn học
     """
     try:
+        # Lấy subject_id từ nhiều nguồn: function arg, form_dict, request.args
         if not subject_id:
             subject_id = frappe.form_dict.get("subject_id")
+        if not subject_id and hasattr(frappe.request, 'args'):
+            subject_id = frappe.request.args.get("subject_id")
         
         if not subject_id:
             return validation_error_response(
