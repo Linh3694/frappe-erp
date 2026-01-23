@@ -760,3 +760,110 @@ def get_meal_tracking_by_date(date=None):
         frappe.log_error(f"Error fetching meal tracking data: {str(e)}")
         return error_response(f"Error fetching meal tracking data: {str(e)}")
 
+
+@frappe.whitelist(allow_guest=False)
+def get_meal_tracking_class_detail(date=None, education_stage=None):
+    """
+    Lấy chi tiết danh sách lớp theo education stage với phân biệt điểm danh trước/sau 9h.
+    
+    Field `creation` là timestamp hệ thống tự động ghi khi INSERT record,
+    không thể sửa được - đây là evidence tin cậy để bộ phận bếp chốt số liệu.
+    
+    Args:
+        date: Ngày cần xem (YYYY-MM-DD)
+        education_stage: Tên education stage (title_vn từ SIS Education Stage)
+    
+    Returns:
+        {
+            "classes": [...],
+            "summary": {...}
+        }
+    """
+    try:
+        if not date:
+            date = get_request_param('date')
+        if not education_stage:
+            education_stage = get_request_param('education_stage')
+
+        if not date:
+            return validation_error_response("Date is required", {"date": ["Date is required"]})
+        
+        if not education_stage:
+            return validation_error_response("Education stage is required", {"education_stage": ["Education stage is required"]})
+
+        # Validate date format (YYYY-MM-DD)
+        try:
+            from datetime import datetime
+            datetime.strptime(date, '%Y-%m-%d')
+        except ValueError:
+            return validation_error_response("Invalid date format", {"date": ["Date must be in YYYY-MM-DD format"]})
+
+        # Lấy campus từ context
+        from erp.utils.campus_utils import get_current_campus_from_context
+        campus_id = get_current_campus_from_context()
+
+        # Tìm education_stage_id từ title_vn
+        stage_info = frappe.get_all(
+            "SIS Education Stage",
+            filters={"title_vn": education_stage},
+            fields=["name"],
+            limit=1
+        )
+        
+        if not stage_info:
+            return not_found_response(f"Education stage '{education_stage}' not found")
+        
+        stage_id = stage_info[0].name
+
+        # Query chi tiết từng lớp với phân biệt điểm danh trước/sau 9h
+        # Sử dụng field `creation` (timestamp hệ thống) để phân biệt
+        # Thời gian 9h sáng là mốc chốt cho bộ phận bếp
+        class_detail_data = frappe.db.sql("""
+            SELECT 
+                ca.class_id,
+                c.title as class_title,
+                t.employee_name as homeroom_teacher_name,
+                COUNT(CASE WHEN TIME(ca.creation) < '09:00:00' THEN 1 END) as present_before_9,
+                COUNT(CASE WHEN TIME(ca.creation) >= '09:00:00' THEN 1 END) as present_after_9,
+                COUNT(*) as total_present
+            FROM `tabSIS Class Attendance` ca
+            INNER JOIN `tabSIS Class` c ON ca.class_id = c.name
+            LEFT JOIN `tabSIS Teacher` t ON c.homeroom_teacher = t.name
+            WHERE ca.date = %(date)s
+                AND ca.period = 'homeroom'
+                AND ca.status IN ('present', 'Present', 'PRESENT')
+                AND c.campus_id = %(campus_id)s
+                AND c.education_grade IN (
+                    SELECT name FROM `tabSIS Education Grade` 
+                    WHERE education_stage_id = %(stage_id)s
+                )
+            GROUP BY ca.class_id, c.title, t.employee_name
+            ORDER BY c.title
+        """, {
+            "date": date,
+            "campus_id": campus_id or "campus-1",
+            "stage_id": stage_id
+        }, as_dict=True)
+
+        # Tính tổng summary
+        total_before_9 = sum(cls.get('present_before_9', 0) or 0 for cls in class_detail_data)
+        total_after_9 = sum(cls.get('present_after_9', 0) or 0 for cls in class_detail_data)
+
+        result = {
+            "classes": class_detail_data,
+            "summary": {
+                "total_classes": len(class_detail_data),
+                "total_before_9": total_before_9,
+                "total_after_9": total_after_9,
+                "total_present": total_before_9 + total_after_9
+            },
+            "date": date,
+            "education_stage": education_stage
+        }
+
+        return single_item_response(result, f"Class detail fetched successfully for {education_stage} on {date}")
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching meal tracking class detail: {str(e)}")
+        return error_response(f"Error fetching class detail: {str(e)}")
+
