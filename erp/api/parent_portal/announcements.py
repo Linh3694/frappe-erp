@@ -154,34 +154,73 @@ def get_announcements():
             start=offset
         )
 
-        # Get student information for recipient filtering
-        student_grade_name = None
-        student_class_name = None
-        if student_id:
-            try:
-                # Get student's grade and class information
-                class_students = frappe.get_all(
-                    "SIS Class Student",
-                    filters={"student_id": student_id},
-                    fields=["class_id"],
-                    order_by="creation desc",
-                    limit=1
-                )
-
-                if class_students and class_students[0].class_id:
-                    class_id = class_students[0].class_id
-                    class_doc = frappe.get_doc("SIS Class", class_id)
-                    student_class_name = class_doc.title or class_doc.name
-
-                    # Get grade information
-                    if class_doc.education_grade:
-                        grade_doc = frappe.get_doc("SIS Education Grade", class_doc.education_grade)
-                        student_grade_name = grade_doc.title_en or grade_doc.title_vn or grade_doc.name
-            except Exception as e:
-                frappe.logger().error(f"Parent portal - Error getting student grade/class: {str(e)}")
+        # Lấy tất cả students của phụ huynh đang login
+        # Thay vì filter theo 1 student cụ thể, ta sẽ check với tất cả students
+        user_email = frappe.session.user
+        all_student_ids = []
+        all_student_info = {}  # student_id -> {grade_id, class_id, stage_id}
+        
+        try:
+            # Tìm guardian từ user email
+            # Format: {guardian_id}@parent.wellspring.edu.vn
+            guardian_id = user_email.split('@')[0] if '@parent.wellspring.edu.vn' in user_email else None
+            
+            if guardian_id:
+                # Tìm guardian document
+                guardians = frappe.get_all("CRM Guardian", filters={"guardian_id": guardian_id}, fields=["name"])
+                if guardians:
+                    guardian_name = guardians[0].name
+                    
+                    # Lấy tất cả students từ relationships
+                    relationships = frappe.db.sql("""
+                        SELECT DISTINCT fr.student
+                        FROM `tabCRM Family Relationship` fr
+                        INNER JOIN `tabCRM Family` f ON fr.parent = f.name
+                        WHERE fr.guardian = %(guardian)s
+                            AND fr.student IS NOT NULL
+                            AND f.docstatus < 2
+                            AND fr.parentfield = 'relationships'
+                    """, {"guardian": guardian_name}, as_dict=True)
+                    
+                    for rel in relationships:
+                        student_id_from_rel = rel.get("student")
+                        if student_id_from_rel:
+                            all_student_ids.append(student_id_from_rel)
+                            
+                            # Lấy thông tin class/grade/stage của student
+                            class_students = frappe.get_all(
+                                "SIS Class Student",
+                                filters={"student_id": student_id_from_rel},
+                                fields=["class_id"],
+                                order_by="creation desc",
+                                limit=1
+                            )
+                            
+                            if class_students and class_students[0].class_id:
+                                class_id = class_students[0].class_id
+                                class_doc = frappe.get_doc("SIS Class", class_id)
+                                grade_id = class_doc.education_grade
+                                stage_id = None
+                                
+                                if grade_id:
+                                    try:
+                                        grade_doc = frappe.get_doc("SIS Education Grade", grade_id)
+                                        stage_id = grade_doc.education_stage_id
+                                    except:
+                                        pass
+                                
+                                all_student_info[student_id_from_rel] = {
+                                    "class_id": class_id,
+                                    "grade_id": grade_id,
+                                    "stage_id": stage_id
+                                }
+            
+            frappe.logger().info(f"Parent portal - User {user_email} has {len(all_student_ids)} students: {all_student_ids}")
+        except Exception as e:
+            frappe.logger().error(f"Parent portal - Error getting user's students: {str(e)}")
 
         # ⭐ DEBUG LOG
-        frappe.logger().info(f"Parent portal - student_id={student_id}, student_grade_name={student_grade_name}, student_class_name={student_class_name}")
+        frappe.logger().info(f"Parent portal - all_student_ids={all_student_ids}, all_student_info={all_student_info}")
 
         # Process announcements to add additional information
         processed_announcements = []
@@ -210,23 +249,22 @@ def get_announcements():
                 except:
                     pass
 
-            # Process recipients to get relevant tags for current student
-            relevant_tags = []
+            # ===== LOGIC MỚI: Hiển thị TẤT CẢ recipient_tags, filter dựa trên TẤT CẢ students của phụ huynh =====
+            recipient_tags = []
+            is_announcement_relevant = False
             
-            # ⭐ QUAN TRỌNG: Check recipient_type ở level announcement trước
-            # Nếu là announcement toàn trường (recipient_type == 'school'), luôn hiển thị
+            # Check nếu là announcement toàn trường
             announcement_is_school_wide = announcement.recipient_type == 'school'
-            
             if announcement_is_school_wide:
-                # Announcement toàn trường - luôn relevant với tất cả students
-                relevant_tags.append({
+                is_announcement_relevant = True
+                recipient_tags.append({
                     "type": "school",
                     "name": "school",
                     "display_name": "Toàn trường",
                     "display_name_en": "All School"
                 })
             
-            # Xử lý recipients JSON (cho các loại khác hoặc bổ sung tags)
+            # Xử lý recipients JSON
             if announcement.recipients:
                 try:
                     if isinstance(announcement.recipients, str):
@@ -238,139 +276,102 @@ def get_announcements():
                         for recipient in recipients:
                             if isinstance(recipient, dict):
                                 recipient_type = recipient.get('type')
-                                # Support cả 'id' và 'name' field (backward compatibility)
                                 recipient_id = recipient.get('id') or recipient.get('name', '')
                                 recipient_display_name = recipient.get('display_name', recipient_id)
-
-                                # Check if this recipient is relevant to current student
-                                is_relevant = False
                                 
-                                # Kiểm tra nếu là announcement toàn trường (nhiều cách lưu trong JSON)
+                                # Skip nếu đã có tag school
                                 is_school_wide = (
                                     recipient_type == 'school' or 
                                     recipient_id == 'school' or
-                                    (recipient_display_name and 'toàn trường' in recipient_display_name.lower()) or
-                                    (recipient_display_name and 'all school' in recipient_display_name.lower())
+                                    (recipient_display_name and 'toàn trường' in recipient_display_name.lower())
                                 )
-
-                                # Nếu đã add tag school ở trên rồi, skip để tránh duplicate
-                                if is_school_wide and announcement_is_school_wide:
-                                    continue
-
                                 if is_school_wide:
-                                    # School-wide announcements are relevant to all students
-                                    is_relevant = True
-                                    recipient_type = 'school'  # Normalize type
-                                elif recipient_type == 'stage':
-                                    # Education Stage (Tiểu học, THCS, THPT) - check if student belongs to this stage
+                                    if not announcement_is_school_wide:
+                                        is_announcement_relevant = True
+                                        recipient_tags.append({
+                                            "type": "school",
+                                            "name": "school",
+                                            "display_name": "Toàn trường",
+                                            "display_name_en": "All School"
+                                        })
+                                    continue
+                                
+                                # Resolve display name từ database
+                                display_name_vn = recipient_display_name or recipient_id
+                                display_name_en = recipient_display_name or recipient_id
+                                
+                                if recipient_type == 'stage':
                                     try:
-                                        # Get stage's grades, then check if student's grade is in those grades
-                                        stage_grades = frappe.get_all(
-                                            "SIS Education Grade",
-                                            filters={"education_stage_id": recipient_id},
-                                            fields=["name", "title_en", "title_vn"],
-                                            pluck="name"
-                                        )
-                                        if stage_grades:
-                                            # Get student's grade ID from class
-                                            if student_id:
-                                                class_students = frappe.get_all(
-                                                    "SIS Class Student",
-                                                    filters={"student_id": student_id},
-                                                    fields=["class_id"],
-                                                    order_by="creation desc",
-                                                    limit=1
-                                                )
-                                                if class_students and class_students[0].class_id:
-                                                    class_doc = frappe.get_doc("SIS Class", class_students[0].class_id)
-                                                    student_grade_id = class_doc.education_grade
-                                                    # Check if student's grade belongs to this stage
-                                                    is_relevant = student_grade_id in stage_grades
-                                                    frappe.logger().info(f"Parent portal - Stage check: stage={recipient_id}, student_grade={student_grade_id}, stage_grades={stage_grades}, is_relevant={is_relevant}")
-                                    except Exception as e:
-                                        frappe.logger().error(f"Parent portal - Error checking stage {recipient_id}: {str(e)}")
-                                        is_relevant = False
-                                elif recipient_type == 'grade' and student_grade_name:
-                                    # For grade, resolve the grade name from the ID
-                                    grade_name_from_db = recipient_id
-                                    try:
-                                        if recipient_id and recipient_id != 'school':
-                                            grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
-                                            grade_name_from_db = grade_doc.title_en or grade_doc.title_vn or recipient_id
-                                    except:
-                                        pass
-                                    # Check if student's grade matches this recipient
-                                    is_relevant = grade_name_from_db == student_grade_name or recipient_display_name == student_grade_name
-                                    
-                                elif recipient_type == 'class' and student_class_name:
-                                    # For class, resolve the class name from the ID
-                                    class_name_from_db = recipient_id
-                                    try:
-                                        if recipient_id and recipient_id != 'school':
-                                            class_doc = frappe.get_doc("SIS Class", recipient_id)
-                                            class_name_from_db = class_doc.title or recipient_id
-                                    except:
-                                        pass
-                                    # Check if student's class matches this recipient
-                                    is_relevant = class_name_from_db == student_class_name or recipient_display_name == student_class_name
-                                    
-                                elif recipient_type == 'student':
-                                    # Check if student is specifically targeted
-                                    is_relevant = recipient_id == student_id
-
-                                if is_relevant:
-                                    # Handle special case for school-wide announcements
-                                    if recipient_type == 'school':
-                                        display_name_vn = "Toàn trường"
-                                        display_name_en = "All School"
-                                    else:
-                                        # For stage/grade/class/student, resolve display name from database
-                                        display_name_vn = recipient_display_name or recipient_id
-                                        display_name_en = recipient_display_name or recipient_id
+                                        stage_doc = frappe.get_doc("SIS Education Stage", recipient_id)
+                                        display_name_vn = stage_doc.title_vn or stage_doc.title_en or recipient_id
+                                        display_name_en = stage_doc.title_en or stage_doc.title_vn or recipient_id
                                         
-                                        # Try to resolve from database if display_name is empty/null
-                                        if recipient_type == 'stage' and (not recipient_display_name or recipient_display_name == recipient_id):
-                                            # Education Stage (Tiểu Học, THCS, THPT)
-                                            try:
-                                                stage_doc = frappe.get_doc("SIS Education Stage", recipient_id)
-                                                display_name_vn = stage_doc.title_vn or stage_doc.title_en or recipient_id
-                                                display_name_en = stage_doc.title_en or stage_doc.title_vn or recipient_id
-                                            except Exception:
-                                                pass
-                                        elif recipient_type == 'grade' and (not recipient_display_name or recipient_display_name == recipient_id):
-                                            # Education Grade (Khối 1, Khối 2, etc.)
-                                            try:
-                                                grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
-                                                display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_id
-                                                display_name_en = grade_doc.title_en or display_name_vn or recipient_id
-                                            except Exception:
-                                                pass
-                                        elif recipient_type == 'class' and (not recipient_display_name or recipient_display_name == recipient_id):
-                                            try:
-                                                class_doc = frappe.get_doc("SIS Class", recipient_id)
-                                                display_name_vn = class_doc.title or recipient_id
-                                                display_name_en = class_doc.title or recipient_id
-                                            except:
-                                                pass
-
-                                    relevant_tags.append({
-                                        "type": recipient_type,
-                                        "name": recipient_id,
-                                        "display_name": display_name_vn,
-                                        "display_name_en": display_name_en
-                                    })
+                                        # Check xem bất kỳ student nào của phụ huynh có thuộc stage này không
+                                        for s_id, s_info in all_student_info.items():
+                                            if s_info.get("stage_id") == recipient_id:
+                                                is_announcement_relevant = True
+                                                break
+                                    except:
+                                        pass
+                                        
+                                elif recipient_type == 'grade':
+                                    try:
+                                        grade_doc = frappe.get_doc("SIS Education Grade", recipient_id)
+                                        display_name_vn = grade_doc.title_vn or grade_doc.title_en or recipient_id
+                                        display_name_en = grade_doc.title_en or display_name_vn or recipient_id
+                                        
+                                        # Check xem bất kỳ student nào của phụ huynh có thuộc grade này không
+                                        for s_id, s_info in all_student_info.items():
+                                            if s_info.get("grade_id") == recipient_id:
+                                                is_announcement_relevant = True
+                                                break
+                                    except:
+                                        pass
+                                        
+                                elif recipient_type == 'class':
+                                    try:
+                                        class_doc = frappe.get_doc("SIS Class", recipient_id)
+                                        display_name_vn = class_doc.title or recipient_id
+                                        display_name_en = class_doc.title or recipient_id
+                                        
+                                        # Check xem bất kỳ student nào của phụ huynh có thuộc class này không
+                                        for s_id, s_info in all_student_info.items():
+                                            if s_info.get("class_id") == recipient_id:
+                                                is_announcement_relevant = True
+                                                break
+                                    except:
+                                        pass
+                                        
+                                elif recipient_type == 'student':
+                                    # Check xem student có trong danh sách students của phụ huynh không
+                                    if recipient_id in all_student_ids:
+                                        is_announcement_relevant = True
+                                    # Resolve student name
+                                    try:
+                                        student_doc = frappe.get_doc("CRM Student", recipient_id)
+                                        display_name_vn = student_doc.full_name or recipient_id
+                                        display_name_en = student_doc.full_name or recipient_id
+                                    except:
+                                        pass
+                                
+                                # Thêm tag vào danh sách (hiển thị TẤT CẢ recipients, không chỉ relevant)
+                                recipient_tags.append({
+                                    "type": recipient_type,
+                                    "name": recipient_id,
+                                    "display_name": display_name_vn,
+                                    "display_name_en": display_name_en
+                                })
+                                
                 except Exception as e:
                     frappe.logger().error(f"Parent portal - Error processing recipients for announcement {announcement.name}: {str(e)}")
 
-            # ⭐ FILTER: If student_id is provided, skip announcements with no relevant tags
-            if student_id and not relevant_tags:
-                frappe.logger().debug(f"Parent portal - Skipping announcement {announcement.name} (no match for student {student_id})")
+            # ⭐ FILTER: Skip announcement nếu không liên quan đến bất kỳ student nào của phụ huynh
+            if all_student_ids and not is_announcement_relevant:
+                frappe.logger().debug(f"Parent portal - Skipping announcement {announcement.name} (no match for any student of user)")
                 continue
 
-            # Note: Always return announcement with relevant_tags (even if empty when no student_id provided)
-            
             # ⭐ DEBUG LOG - per announcement
-            frappe.logger().info(f"Parent portal - Announcement {announcement.name}: recipients={json.dumps(announcement.recipients)}, relevant_tags_count={len(relevant_tags)}")
+            frappe.logger().info(f"Parent portal - Announcement {announcement.name}: recipients={json.dumps(announcement.recipients)}, recipient_tags_count={len(recipient_tags)}")
             
             processed_announcement = {
                 "name": announcement.name,
@@ -384,7 +385,7 @@ def get_announcements():
                 "sent_at": announcement.sent_at,
                 "sent_by": announcement.sent_by,
                 "sender": sender_info,
-                "recipient_tags": relevant_tags,  # Relevant tags for current student
+                "recipient_tags": recipient_tags,  # Tất cả recipients của announcement
                 "created_at": announcement.created_at,
                 "created_by": announcement.created_by,
                 "updated_at": announcement.updated_at,
@@ -428,9 +429,8 @@ def get_announcements():
                     "pages": total_pages
                 },
                 "debug": {
-                    "student_id": student_id,
-                    "student_grade_name": student_grade_name,
-                    "student_class_name": student_class_name,
+                    "user_email": user_email,
+                    "all_student_ids": all_student_ids,
                     "processed_count": len(processed_announcements),
                     "all_announcements": announcements_debug
                 }

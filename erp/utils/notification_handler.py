@@ -388,6 +388,27 @@ def send_bulk_parent_notifications(
         # Get parent emails
         parent_emails = get_parent_emails(guardians)
         
+        # Build mapping: email -> student_id (for setting student_id in notification)
+        # Mỗi guardian có thể có nhiều students, chọn student đầu tiên match với student_ids
+        email_to_student_map = {}
+        for guardian in guardians:
+            email = guardian.get("email")
+            guardian_student_ids = guardian.get("student_ids", [])
+            if email and guardian_student_ids:
+                # Chọn student đầu tiên trong danh sách students của guardian mà có trong student_ids
+                matched_student = None
+                for s_id in guardian_student_ids:
+                    if s_id in student_ids:
+                        matched_student = s_id
+                        break
+                if matched_student:
+                    email_to_student_map[email] = matched_student
+                elif guardian_student_ids:
+                    # Fallback: dùng student đầu tiên của guardian
+                    email_to_student_map[email] = guardian_student_ids[0]
+        
+        frappe.logger().info(f"📧 Built email->student mapping for {len(email_to_student_map)} parents")
+        
         # Create notification data with tracking info
         notification_data = {
             "type": recipient_type,
@@ -441,9 +462,18 @@ def send_bulk_parent_notifications(
             for parent_email in parent_emails:
                 frappe.logger().info(f"👤 [Bulk Handler] Processing parent: {parent_email}")
                 try:
+                    # Get student_id for this parent from mapping
+                    parent_student_id = email_to_student_map.get(parent_email)
+                    
+                    # Create per-parent data with student_id
+                    parent_merged_data = merged_data.copy()
+                    if parent_student_id:
+                        parent_merged_data["student_id"] = parent_student_id
+                        frappe.logger().info(f"📧 [Bulk Handler] Set student_id={parent_student_id} for {parent_email}")
+                    
                     # Create notification record directly to avoid role validation issues
                     from frappe import get_doc
-                    notification_doc = get_doc({
+                    notification_doc_data = {
                         "doctype": "ERP Notification",
                         "title": json.dumps(notification_title) if isinstance(notification_title, dict) else notification_title,
                         "message": json.dumps(notification_body) if isinstance(notification_body, dict) else notification_body,
@@ -451,13 +481,19 @@ def send_bulk_parent_notifications(
                         "recipients": json.dumps([parent_email]),  # Convert list to JSON string
                         "notification_type": recipient_type,
                         "priority": "medium",
-                        "data": json.dumps(merged_data) if isinstance(merged_data, dict) else merged_data,
+                        "data": json.dumps(parent_merged_data) if isinstance(parent_merged_data, dict) else parent_merged_data,
                         "channel": "push",
                         "status": "sent",
                         "delivery_status": "pending",
                         "sent_at": frappe.utils.now(),
                         "event_timestamp": frappe.utils.now()
-                    })
+                    }
+                    
+                    # Set student_id field if doctype has it
+                    if parent_student_id:
+                        notification_doc_data["student_id"] = parent_student_id
+                    
+                    notification_doc = get_doc(notification_doc_data)
                     notification_doc.insert(ignore_permissions=True)
                     frappe.db.commit()
                     
@@ -470,7 +506,8 @@ def send_bulk_parent_notifications(
                         "status": "unread",
                         "priority": "medium",
                         "created_at": frappe.utils.now(),
-                        "data": merged_data
+                        "data": parent_merged_data,
+                        "student_id": parent_student_id
                     })
 
                     # Update unread count
@@ -493,7 +530,7 @@ def send_bulk_parent_notifications(
                             title=final_title,
                             body=final_body,
                             icon="/icon.png",
-                            data=merged_data,
+                            data=parent_merged_data,
                             tag=recipient_type
                         )
 
