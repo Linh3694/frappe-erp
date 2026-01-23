@@ -1092,6 +1092,19 @@ def get_photos_list(photo_type=None, student_id=None, class_id=None, campus_id=N
             page = args.get('page', page)
             limit = args.get('limit', limit)
         
+        # Normalize campus_id: campus-1 -> CAMPUS-00001
+        if campus_id:
+            campus_id = campus_id.strip()
+            # Convert format "campus-1" to "CAMPUS-00001"
+            import re
+            match = re.match(r'^campus-(\d+)$', campus_id, re.IGNORECASE)
+            if match:
+                num = match.group(1).zfill(5)
+                campus_id = f"CAMPUS-{num}"
+            # Convert format "1" to "CAMPUS-00001"  
+            elif campus_id.isdigit():
+                campus_id = f"CAMPUS-{campus_id.zfill(5)}"
+        
         # Debug: Log received params
         frappe.logger().info(f"🔍 get_photos_list called with: photo_type={photo_type}, student_id={student_id}, class_id={class_id}, campus_id={campus_id}, school_year_id={school_year_id}")
         
