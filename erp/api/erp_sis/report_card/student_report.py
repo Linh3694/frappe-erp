@@ -458,7 +458,8 @@ def get_reports_by_class():
         fields=[
             "name", "title", "template_id", "form_id", "class_id", "student_id",
             "school_year", "semester_part", "status", "creation", "modified", 
-            "pdf_file", "is_approved"
+            "pdf_file", "is_approved", "approval_status",
+            "rejection_reason", "rejected_by", "rejected_at"
         ],
         filters=filters,
         order_by="modified desc"

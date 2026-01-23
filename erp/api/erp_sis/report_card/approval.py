@@ -599,20 +599,28 @@ def submit_class_reports():
             try:
                 current_status = report_data.approval_status or 'draft'
                 
-                # Chỉ submit các report ở trạng thái draft hoặc entry
-                if current_status not in ['draft', 'entry']:
+                # Cho phép submit các report ở trạng thái draft, entry, hoặc rejected (re-submit)
+                if current_status not in ['draft', 'entry', 'rejected']:
                     skipped_count += 1
                     continue
                 
                 # Cập nhật trực tiếp bằng SQL để tăng hiệu suất
+                update_values = {
+                    "approval_status": target_status,
+                    "submitted_at": now,
+                    "submitted_by": user
+                }
+                
+                # Clear rejection info khi re-submit
+                if current_status == 'rejected':
+                    update_values["rejection_reason"] = None
+                    update_values["rejected_by"] = None
+                    update_values["rejected_at"] = None
+                
                 frappe.db.set_value(
                     "SIS Student Report Card",
                     report_data.name,
-                    {
-                        "approval_status": target_status,
-                        "submitted_at": now,
-                        "submitted_by": user
-                    },
+                    update_values,
                     update_modified=True
                 )
                 
