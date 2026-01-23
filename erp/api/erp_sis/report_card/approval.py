@@ -2231,3 +2231,185 @@ def get_teacher_class_permissions(class_id: Optional[str] = None):
     except Exception as e:
         frappe.logger().error(f"Error in get_teacher_class_permissions: {str(e)}")
         return error_response(f"Lỗi khi lấy quyền: {str(e)}")
+
+
+# =============================================================================
+# BATCH REVIEW & PUBLISH APIs - Cho Level 3, Level 4
+# =============================================================================
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def review_batch_reports():
+    """
+    Batch review nhiều báo cáo từ level_2_approved -> reviewed (Level 3).
+    
+    Request body:
+        {
+            "report_ids": ["id1", "id2", ...]
+        }
+    """
+    try:
+        data = get_request_payload()
+        report_ids = data.get("report_ids", [])
+        
+        if not report_ids or not isinstance(report_ids, list):
+            return validation_error_response(
+                message="report_ids is required and must be a list",
+                errors={"report_ids": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        reviewed_count = 0
+        skipped_count = 0
+        errors = []
+        now = datetime.now()
+        
+        for report_id in report_ids:
+            try:
+                report = frappe.get_doc("SIS Student Report Card", report_id)
+                
+                # Kiểm tra campus
+                if report.campus_id != campus_id:
+                    errors.append({
+                        "report_id": report_id,
+                        "error": "Không có quyền truy cập báo cáo này"
+                    })
+                    continue
+                
+                # Kiểm tra trạng thái
+                current_status = getattr(report, 'approval_status', 'draft') or 'draft'
+                if current_status != 'level_2_approved':
+                    skipped_count += 1
+                    continue
+                
+                # Cập nhật
+                report.approval_status = "reviewed"
+                report.reviewed_at = now
+                report.reviewed_by = user
+                
+                _add_approval_history(report, "batch_review", user, "approved", "Batch review from ApprovalList")
+                
+                report.save(ignore_permissions=True)
+                reviewed_count += 1
+                
+            except frappe.DoesNotExistError:
+                errors.append({
+                    "report_id": report_id,
+                    "error": "Báo cáo không tồn tại"
+                })
+            except Exception as e:
+                errors.append({
+                    "report_id": report_id,
+                    "error": str(e)
+                })
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "reviewed_count": reviewed_count,
+                "skipped_count": skipped_count,
+                "total_requested": len(report_ids),
+                "errors": errors if errors else None
+            },
+            message=f"Đã review {reviewed_count}/{len(report_ids)} báo cáo"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in review_batch_reports: {str(e)}")
+        return error_response(f"Lỗi khi review batch: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def publish_batch_reports():
+    """
+    Batch publish nhiều báo cáo từ reviewed -> published (Level 4).
+    Không render images - frontend sẽ gọi render riêng nếu cần.
+    
+    Request body:
+        {
+            "report_ids": ["id1", "id2", ...]
+        }
+    """
+    try:
+        data = get_request_payload()
+        report_ids = data.get("report_ids", [])
+        
+        if not report_ids or not isinstance(report_ids, list):
+            return validation_error_response(
+                message="report_ids is required and must be a list",
+                errors={"report_ids": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        published_count = 0
+        skipped_count = 0
+        errors = []
+        now = datetime.now()
+        
+        for report_id in report_ids:
+            try:
+                report = frappe.get_doc("SIS Student Report Card", report_id)
+                
+                # Kiểm tra campus
+                if report.campus_id != campus_id:
+                    errors.append({
+                        "report_id": report_id,
+                        "error": "Không có quyền truy cập báo cáo này"
+                    })
+                    continue
+                
+                # Kiểm tra trạng thái
+                current_status = getattr(report, 'approval_status', 'draft') or 'draft'
+                if current_status != 'reviewed':
+                    skipped_count += 1
+                    continue
+                
+                # Cập nhật
+                report.approval_status = "published"
+                report.status = "published"
+                report.is_approved = 1
+                report.approved_at = now
+                report.approved_by = user
+                
+                _add_approval_history(report, "batch_publish", user, "published", "Batch publish from ApprovalList")
+                
+                report.save(ignore_permissions=True)
+                
+                # Gửi notification
+                try:
+                    _send_report_card_notification(report)
+                except Exception as notif_error:
+                    frappe.logger().error(f"Failed to send notification for {report_id}: {str(notif_error)}")
+                
+                published_count += 1
+                
+            except frappe.DoesNotExistError:
+                errors.append({
+                    "report_id": report_id,
+                    "error": "Báo cáo không tồn tại"
+                })
+            except Exception as e:
+                errors.append({
+                    "report_id": report_id,
+                    "error": str(e)
+                })
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "published_count": published_count,
+                "skipped_count": skipped_count,
+                "total_requested": len(report_ids),
+                "errors": errors if errors else None
+            },
+            message=f"Đã xuất bản {published_count}/{len(report_ids)} báo cáo"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in publish_batch_reports: {str(e)}")
+        return error_response(f"Lỗi khi xuất bản batch: {str(e)}")

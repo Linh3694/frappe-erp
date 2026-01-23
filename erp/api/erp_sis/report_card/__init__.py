@@ -47,6 +47,8 @@ from .approval import (
     get_subject_managers,
     update_subject_managers,
     get_teacher_class_permissions,
+    review_batch_reports,
+    publish_batch_reports,
 )
 
 # Images
@@ -112,6 +114,8 @@ __all__ = [
     "get_subject_managers",
     "update_subject_managers",
     "get_teacher_class_permissions",
+    "review_batch_reports",
+    "publish_batch_reports",
     # Images
     "upload_report_card_images",
     "get_report_card_images",
