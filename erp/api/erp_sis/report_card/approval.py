@@ -1084,13 +1084,13 @@ def get_pending_approvals(level: Optional[str] = None):
                     for tmpl in all_templates:
                         # Check trong scores
                         scores = frappe.get_all(
-                            "Report Card Score",
+                            "SIS Report Card Score Config",
                             filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
                             fields=["subject_id"]
                         )
                         # Check trong subjects (subject_eval)
                         subjects = frappe.get_all(
-                            "Report Card Subject Config",
+                            "SIS Report Card Subject Config",
                             filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
                             fields=["subject_id"]
                         )
