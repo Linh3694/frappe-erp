@@ -1470,9 +1470,7 @@ def get_teacher_active_period(class_id=None):
             SELECT 
                 cs.student_id,
                 s.student_name,
-                s.student_code,
-                s.photo,
-                s.avatar_url
+                s.student_code
             FROM `tabSIS Class Student` cs
             INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
             WHERE cs.class_id = %s
