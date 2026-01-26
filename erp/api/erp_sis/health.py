@@ -524,7 +524,9 @@ def get_porridge_list():
                 es.title_vn as education_stage,
                 hrp.breakfast,
                 hrp.lunch,
-                hrp.afternoon
+                hrp.afternoon,
+                hr.owner as created_by,
+                hr.creation as created_at
             FROM `tabSIS Health Report` hr
             INNER JOIN `tabSIS Health Report Porridge` hrp ON hrp.parent = hr.name
             LEFT JOIN `tabSIS Class` c ON c.name = hr.class_id
