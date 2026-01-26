@@ -709,6 +709,7 @@ def get_meal_tracking_by_date(date=None):
         # If Wednesday, get menu registration data by education stage
         set_a_by_stage = {}
         set_au_by_stage = {}
+        registration_stage_stats = {}  # Thống kê từ registration để hiển thị khi chưa có điểm danh
         
         if is_wednesday:
             # Lấy thông tin đăng ký suất ăn theo education_stage cho ngày này
@@ -732,6 +733,23 @@ def get_meal_tracking_by_date(date=None):
                     set_a_by_stage[stage] = item.count
                 elif item.choice == 'AU':
                     set_au_by_stage[stage] = item.count
+                
+                # Tạo stats cho stage từ registration data (dùng khi chưa có điểm danh)
+                if stage not in registration_stage_stats:
+                    registration_stage_stats[stage] = {
+                        'education_stage': stage,
+                        'total_students': 0,  # Chưa có điểm danh nên = 0
+                        'classes_count': 0,
+                        'set_a': 0,
+                        'set_au': 0,
+                        'present_before_9': 0,
+                        'present_after_9': 0
+                    }
+            
+            # Cập nhật set_a và set_au cho registration_stage_stats
+            for stage_name in registration_stage_stats:
+                registration_stage_stats[stage_name]['set_a'] = set_a_by_stage.get(stage_name, 0)
+                registration_stage_stats[stage_name]['set_au'] = set_au_by_stage.get(stage_name, 0)
 
         # Step 4: Group attendance by class (với thông tin trước/sau 9h)
         from datetime import time as dt_time
@@ -805,6 +823,12 @@ def get_meal_tracking_by_date(date=None):
             for stage_name, stats in education_stage_stats.items():
                 stats['set_a'] = set_a_by_stage.get(stage_name, 0)
                 stats['set_au'] = set_au_by_stage.get(stage_name, 0)
+            
+            # Nếu chưa có điểm danh nhưng có registration data -> merge registration stats
+            # Để admin có thể xem trước tổng hợp đăng ký Á/Âu cho ngày trong tương lai
+            for stage_name, reg_stats in registration_stage_stats.items():
+                if stage_name not in education_stage_stats:
+                    education_stage_stats[stage_name] = reg_stats
 
         # Step 6: Convert to list format for response
         result = {
