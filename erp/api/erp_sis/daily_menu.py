@@ -953,26 +953,60 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
             "stage_id": stage_id
         }, as_dict=True)
 
-        # Lấy thống kê đăng ký suất ăn (Set Á/Âu) cho mỗi lớp
+        # Lấy thống kê đăng ký suất ăn (Set Á/Âu) cho mỗi lớp thuộc education_stage này
         meal_registration_stats = frappe.db.sql("""
             SELECT 
                 r.class_id,
+                c.title as class_title,
+                u.full_name as homeroom_teacher_name,
                 SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as set_a,
                 SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as set_au
             FROM `tabSIS Menu Registration` r
             INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
+            INNER JOIN `tabSIS Class` c ON r.class_id = c.name
+            LEFT JOIN `tabSIS Teacher` t ON c.homeroom_teacher = t.name
+            LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ri.date = %(date)s
-            GROUP BY r.class_id
-        """, {"date": date}, as_dict=True)
+                AND c.campus_id = %(campus_id)s
+                AND c.school_year_id = %(school_year_id)s
+                AND c.education_grade IN (
+                    SELECT name FROM `tabSIS Education Grade` 
+                    WHERE education_stage_id = %(stage_id)s
+                )
+            GROUP BY r.class_id, c.title, u.full_name
+        """, {
+            "date": date,
+            "campus_id": campus_id or "campus-1",
+            "school_year_id": school_year_id,
+            "stage_id": stage_id
+        }, as_dict=True)
         
-        # Tạo map class_id -> stats
+        # Tạo map class_id -> meal stats
         class_meal_stats = {stat.class_id: stat for stat in meal_registration_stats}
         
-        # Gán thống kê suất ăn cho mỗi lớp
+        # Gán thống kê suất ăn cho mỗi lớp có điểm danh
         for cls in class_detail_data:
             stats = class_meal_stats.get(cls.class_id, {})
             cls['set_a'] = stats.get('set_a', 0) or 0
             cls['set_au'] = stats.get('set_au', 0) or 0
+        
+        # Merge: Thêm các lớp có đăng ký Set Á/Âu nhưng chưa có điểm danh
+        existing_class_ids = {cls.class_id for cls in class_detail_data}
+        for stat in meal_registration_stats:
+            if stat.class_id not in existing_class_ids:
+                class_detail_data.append({
+                    'class_id': stat.class_id,
+                    'class_title': stat.class_title,
+                    'homeroom_teacher_name': stat.homeroom_teacher_name,
+                    'present_before_9': 0,
+                    'present_after_9': 0,
+                    'total_present': 0,
+                    'set_a': stat.set_a or 0,
+                    'set_au': stat.set_au or 0
+                })
+        
+        # Sắp xếp lại theo tên lớp
+        class_detail_data.sort(key=lambda x: x.get('class_title', ''))
 
         # Tính tổng summary
         total_before_9 = sum(cls.get('present_before_9', 0) or 0 for cls in class_detail_data)
