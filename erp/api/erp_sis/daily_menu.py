@@ -701,17 +701,19 @@ def get_meal_tracking_by_date(date=None):
                 AND status IN ('present', 'Present', 'PRESENT', 'late', 'Late', 'LATE')
         """, {"date": date}, as_dict=True)
         
-        # Step 3b: Check if date is Wednesday (weekday 2 in Python) to get Set Á/Âu data
-        from datetime import datetime
-        date_obj = datetime.strptime(date, '%Y-%m-%d')
-        is_wednesday = date_obj.weekday() == 2  # 0=Mon, 1=Tue, 2=Wed, ...
+        # Step 3b: Check if date is a registration date (not just Wednesday anymore)
+        # Tìm xem ngày này có nằm trong registration_dates của period nào không
+        is_registration_date = frappe.db.exists(
+            "SIS Menu Registration Period Date",
+            {"date": date}
+        )
         
-        # If Wednesday, get menu registration data by education stage
+        # Get menu registration data by education stage nếu là ngày đăng ký
         set_a_by_stage = {}
         set_au_by_stage = {}
         registration_stage_stats = {}  # Thống kê từ registration để hiển thị khi chưa có điểm danh
         
-        if is_wednesday:
+        if is_registration_date:
             # Lấy thông tin đăng ký suất ăn theo education_stage cho ngày này
             menu_registration_data = frappe.db.sql("""
                 SELECT 
@@ -818,8 +820,8 @@ def get_meal_tracking_by_date(date=None):
             education_stage_stats[education_stage]['present_before_9'] += class_before_9.get(cls.name, 0)
             education_stage_stats[education_stage]['present_after_9'] += class_after_9.get(cls.name, 0)
         
-        # Step 5b: Add Set Á/Âu data if Wednesday
-        if is_wednesday:
+        # Step 5b: Add Set Á/Âu data if is a registration date
+        if is_registration_date:
             for stage_name, stats in education_stage_stats.items():
                 stats['set_a'] = set_a_by_stage.get(stage_name, 0)
                 stats['set_au'] = set_au_by_stage.get(stage_name, 0)
@@ -834,7 +836,7 @@ def get_meal_tracking_by_date(date=None):
         result = {
             'education_stages': list(education_stage_stats.values()),
             'date': date,
-            'is_wednesday': is_wednesday,
+            'is_registration_date': is_registration_date,  # Đổi từ is_wednesday sang is_registration_date
             'total_classes': len(class_present_students),
             'total_students': sum([stage['total_students'] for stage in education_stage_stats.values()])
         }
