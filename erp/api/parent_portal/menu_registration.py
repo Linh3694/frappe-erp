@@ -1409,7 +1409,7 @@ def get_teacher_active_period(class_id=None):
         class_info = frappe.db.get_value(
             "SIS Class",
             class_id,
-            ["homeroom_teacher", "vice_homeroom_teacher", "class_title", "education_grade", "school_year_id"],
+            ["homeroom_teacher", "vice_homeroom_teacher", "title", "education_grade", "school_year_id"],
             as_dict=True
         )
         
@@ -1519,7 +1519,7 @@ def get_teacher_active_period(class_id=None):
                 "students": students,
                 "class_info": {
                     "class_id": class_id,
-                    "class_title": class_info.class_title
+                    "class_title": class_info.title
                 },
                 "can_edit": True  # Đã check trong teacher timeline
             },
