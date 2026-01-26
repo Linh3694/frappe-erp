@@ -224,14 +224,31 @@ def _check_parent_timeline(period):
 
 
 def _check_teacher_timeline(period):
-    """Kiểm tra có trong timeline GVCN không"""
-    from frappe.utils import now_datetime, get_datetime
+    """
+    Kiểm tra có trong timeline GVCN không.
+    Ưu tiên: teacher_timeline > parent_timeline > start_date/end_date
+    """
+    from frappe.utils import now_datetime, get_datetime, getdate
     now = now_datetime()
+    today = getdate()
     
+    # Ưu tiên 1: Teacher timeline
     if period.get("teacher_start_datetime") and period.get("teacher_end_datetime"):
         start = get_datetime(period.teacher_start_datetime)
         end = get_datetime(period.teacher_end_datetime)
         return start <= now <= end
+    
+    # Ưu tiên 2: Parent timeline (GVCN có thể dùng nếu chưa có teacher timeline riêng)
+    if period.get("parent_start_datetime") and period.get("parent_end_datetime"):
+        start = get_datetime(period.parent_start_datetime)
+        end = get_datetime(period.parent_end_datetime)
+        return start <= now <= end
+    
+    # Ưu tiên 3: Legacy start_date/end_date
+    if period.get("start_date") and period.get("end_date"):
+        start = getdate(period.start_date)
+        end = getdate(period.end_date)
+        return start <= today <= end
     
     return False
 
@@ -1236,7 +1253,7 @@ def send_menu_registration_reminder():
                 data={
                     "type": "reminder",
                     "subtype": "menu_registration",
-                    "url": "/menu-registration"  # URL trên parent-portal
+                    "url": "/menu/registration"  # URL trên parent-portal
                 }
             )
             
@@ -1427,14 +1444,17 @@ def get_teacher_active_period(class_id=None):
         )
         
         # Tìm kỳ đăng ký đang trong teacher timeline
-        from frappe.utils import now_datetime
+        from frappe.utils import now_datetime, getdate
         now = now_datetime()
+        today = getdate()
         
+        # Ưu tiên: tìm kỳ có teacher timeline trước
         period = frappe.db.sql("""
             SELECT 
                 p.name, p.title, p.month, p.year,
                 p.parent_start_datetime, p.parent_end_datetime,
                 p.teacher_start_datetime, p.teacher_end_datetime,
+                p.start_date, p.end_date,
                 p.status, p.school_year_id
             FROM `tabSIS Menu Registration Period` p
             INNER JOIN `tabSIS Menu Registration Period Education Stage` es 
@@ -1447,6 +1467,30 @@ def get_teacher_active_period(class_id=None):
             ORDER BY p.creation DESC
             LIMIT 1
         """, (now, now, education_stage_id), as_dict=True)
+        
+        # Fallback: nếu không có teacher timeline, tìm kỳ theo start_date/end_date cũ
+        if not period:
+            logs.append("Không tìm thấy kỳ với teacher timeline, thử fallback...")
+            period = frappe.db.sql("""
+                SELECT 
+                    p.name, p.title, p.month, p.year,
+                    p.parent_start_datetime, p.parent_end_datetime,
+                    p.teacher_start_datetime, p.teacher_end_datetime,
+                    p.start_date, p.end_date,
+                    p.status, p.school_year_id
+                FROM `tabSIS Menu Registration Period` p
+                INNER JOIN `tabSIS Menu Registration Period Education Stage` es 
+                    ON es.parent = p.name
+                WHERE p.status = 'Open'
+                AND (
+                    (p.start_date IS NOT NULL AND p.start_date <= %s AND p.end_date >= %s)
+                    OR
+                    (p.parent_start_datetime IS NOT NULL AND DATE(p.parent_start_datetime) <= %s AND DATE(p.parent_end_datetime) >= %s)
+                )
+                AND es.education_stage_id = %s
+                ORDER BY p.creation DESC
+                LIMIT 1
+            """, (today, today, today, today, education_stage_id), as_dict=True)
         
         if not period:
             logs.append("Không có kỳ đăng ký nào đang mở cho GVCN")
@@ -1502,6 +1546,19 @@ def get_teacher_active_period(class_id=None):
                 student["registrations"] = {}
                 student["registration_id"] = None
         
+        # Xác định timeline để hiển thị (ưu tiên teacher timeline, fallback về parent/legacy)
+        teacher_start = period.teacher_start_datetime or period.parent_start_datetime or period.start_date
+        teacher_end = period.teacher_end_datetime or period.parent_end_datetime or period.end_date
+        
+        # Kiểm tra có thể edit không (có teacher timeline riêng hoặc fallback)
+        can_edit = True
+        if period.teacher_start_datetime and period.teacher_end_datetime:
+            # Có teacher timeline riêng - đã check ở trên
+            can_edit = True
+        else:
+            # Fallback - cho phép edit nếu trong khoảng start_date/end_date
+            can_edit = True
+        
         return success_response(
             data={
                 "period": {
@@ -1509,8 +1566,8 @@ def get_teacher_active_period(class_id=None):
                     "title": period.title,
                     "month": period.month,
                     "year": period.year,
-                    "teacher_start_datetime": str(period.teacher_start_datetime),
-                    "teacher_end_datetime": str(period.teacher_end_datetime)
+                    "teacher_start_datetime": str(teacher_start) if teacher_start else None,
+                    "teacher_end_datetime": str(teacher_end) if teacher_end else None
                 },
                 "registration_dates": registration_dates,
                 "total_days": len(registration_dates),
@@ -1519,7 +1576,7 @@ def get_teacher_active_period(class_id=None):
                     "class_id": class_id,
                     "class_title": class_info.title
                 },
-                "can_edit": True  # Đã check trong teacher timeline
+                "can_edit": can_edit
             },
             message="Lấy kỳ đăng ký thành công",
             logs=logs
@@ -1591,7 +1648,8 @@ def teacher_save_registration():
         period = frappe.db.get_value(
             "SIS Menu Registration Period",
             period_id,
-            ["name", "status", "teacher_start_datetime", "teacher_end_datetime"],
+            ["name", "status", "teacher_start_datetime", "teacher_end_datetime", 
+             "parent_start_datetime", "parent_end_datetime", "start_date", "end_date"],
             as_dict=True
         )
         
