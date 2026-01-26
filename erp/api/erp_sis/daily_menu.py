@@ -951,9 +951,32 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
             "stage_id": stage_id
         }, as_dict=True)
 
+        # Lấy thống kê đăng ký suất ăn (Set Á/Âu) cho mỗi lớp
+        meal_registration_stats = frappe.db.sql("""
+            SELECT 
+                r.class_id,
+                SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as set_a,
+                SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as set_au
+            FROM `tabSIS Menu Registration` r
+            INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
+            WHERE ri.date = %(date)s
+            GROUP BY r.class_id
+        """, {"date": date}, as_dict=True)
+        
+        # Tạo map class_id -> stats
+        class_meal_stats = {stat.class_id: stat for stat in meal_registration_stats}
+        
+        # Gán thống kê suất ăn cho mỗi lớp
+        for cls in class_detail_data:
+            stats = class_meal_stats.get(cls.class_id, {})
+            cls['set_a'] = stats.get('set_a', 0) or 0
+            cls['set_au'] = stats.get('set_au', 0) or 0
+
         # Tính tổng summary
         total_before_9 = sum(cls.get('present_before_9', 0) or 0 for cls in class_detail_data)
         total_after_9 = sum(cls.get('present_after_9', 0) or 0 for cls in class_detail_data)
+        total_set_a = sum(cls.get('set_a', 0) or 0 for cls in class_detail_data)
+        total_set_au = sum(cls.get('set_au', 0) or 0 for cls in class_detail_data)
 
         result = {
             "classes": class_detail_data,
@@ -961,7 +984,9 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
                 "total_classes": len(class_detail_data),
                 "total_before_9": total_before_9,
                 "total_after_9": total_after_9,
-                "total_present": total_before_9 + total_after_9
+                "total_present": total_before_9 + total_after_9,
+                "total_set_a": total_set_a,
+                "total_set_au": total_set_au
             },
             "date": date,
             "education_stage": education_stage

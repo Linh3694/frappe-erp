@@ -176,7 +176,10 @@ def _get_student_photo(student_id):
 
 
 def _get_wednesdays_in_month(year, month):
-    """Lấy danh sách các ngày Thứ 4 trong tháng"""
+    """
+    [DEPRECATED] Lấy danh sách các ngày Thứ 4 trong tháng.
+    Sử dụng registration_dates từ doctype thay thế.
+    """
     wednesdays = []
     
     # Lấy số ngày trong tháng
@@ -191,11 +194,88 @@ def _get_wednesdays_in_month(year, month):
     return wednesdays
 
 
+def _get_registration_dates(period_id):
+    """Lấy danh sách ngày đăng ký từ child table"""
+    dates = frappe.get_all(
+        "SIS Menu Registration Period Date",
+        filters={"parent": period_id},
+        fields=["date"],
+        order_by="date asc"
+    )
+    return [str(d.date) for d in dates]
+
+
+def _check_parent_timeline(period):
+    """Kiểm tra có trong timeline phụ huynh không"""
+    from frappe.utils import now_datetime, get_datetime
+    now = now_datetime()
+    
+    if period.get("parent_start_datetime") and period.get("parent_end_datetime"):
+        start = get_datetime(period.parent_start_datetime)
+        end = get_datetime(period.parent_end_datetime)
+        return start <= now <= end
+    
+    # Fallback: kiểm tra theo deprecated fields
+    if period.get("start_date") and period.get("end_date"):
+        today = getdate(nowdate())
+        return getdate(period.start_date) <= today <= getdate(period.end_date)
+    
+    return False
+
+
+def _check_teacher_timeline(period):
+    """Kiểm tra có trong timeline GVCN không"""
+    from frappe.utils import now_datetime, get_datetime
+    now = now_datetime()
+    
+    if period.get("teacher_start_datetime") and period.get("teacher_end_datetime"):
+        start = get_datetime(period.teacher_start_datetime)
+        end = get_datetime(period.teacher_end_datetime)
+        return start <= now <= end
+    
+    return False
+
+
+def _get_current_teacher_class():
+    """Lấy lớp chủ nhiệm của giáo viên đang đăng nhập"""
+    user_email = frappe.session.user
+    if user_email == "Guest":
+        return None
+    
+    # Lấy teacher từ email
+    teacher = frappe.db.get_value("SIS Teacher", {"user_id": user_email}, "name")
+    if not teacher:
+        return None
+    
+    # Lấy năm học hiện tại
+    current_year = frappe.db.get_value(
+        "SIS School Year",
+        {"is_enable": 1},
+        "name"
+    )
+    
+    if not current_year:
+        return None
+    
+    # Lấy lớp chủ nhiệm
+    homeroom_class = frappe.db.get_value(
+        "SIS Class",
+        {
+            "homeroom_teacher": teacher,
+            "school_year_id": current_year
+        },
+        ["name", "class_title", "education_grade"],
+        as_dict=True
+    )
+    
+    return homeroom_class
+
+
 @frappe.whitelist()
 def get_active_period():
     """
     Lấy kỳ đăng ký suất ăn đang mở cho phụ huynh.
-    Trả về thông tin kỳ đăng ký và các ngày Thứ 4 trong tháng.
+    Trả về thông tin kỳ đăng ký và danh sách ngày đăng ký từ registration_dates.
     """
     logs = []
     
@@ -209,23 +289,30 @@ def get_active_period():
         
         logs.append(f"Parent ID: {parent_id}")
         
-        # Tìm kỳ đăng ký đang mở (status = 'Open')
-        today = getdate(nowdate())
+        # Tìm kỳ đăng ký đang mở (status = 'Open') và trong parent timeline
+        from frappe.utils import now_datetime
+        now = now_datetime()
         
+        # Query kỳ đăng ký - ưu tiên check parent_start_datetime/parent_end_datetime
         period = frappe.db.sql("""
             SELECT 
-                name, title, month, year, start_date, end_date, 
-                status, education_stage_id, school_year_id
+                name, title, month, year, 
+                start_date, end_date,
+                parent_start_datetime, parent_end_datetime,
+                teacher_start_datetime, teacher_end_datetime,
+                status, school_year_id
             FROM `tabSIS Menu Registration Period`
             WHERE status = 'Open'
-            AND start_date <= %s
-            AND end_date >= %s
-            ORDER BY created_at DESC
+            AND (
+                (parent_start_datetime IS NOT NULL AND parent_start_datetime <= %s AND parent_end_datetime >= %s)
+                OR (parent_start_datetime IS NULL AND start_date <= %s AND end_date >= %s)
+            )
+            ORDER BY creation DESC
             LIMIT 1
-        """, (today, today), as_dict=True)
+        """, (now, now, getdate(nowdate()), getdate(nowdate())), as_dict=True)
         
         if not period:
-            logs.append("Không có kỳ đăng ký suất ăn nào đang mở")
+            logs.append("Không có kỳ đăng ký suất ăn nào đang mở cho phụ huynh")
             return success_response(
                 data=None,
                 message="Không có kỳ đăng ký suất ăn nào đang mở",
@@ -235,8 +322,37 @@ def get_active_period():
         period = period[0]
         logs.append(f"Tìm thấy kỳ: {period.name}")
         
-        # Lấy danh sách học sinh thuộc cấp học áp dụng
-        students = _get_parent_students(parent_id, period.education_stage_id)
+        # Kiểm tra có trong parent timeline không
+        if not _check_parent_timeline(period):
+            logs.append("Không trong thời gian đăng ký của phụ huynh")
+            return success_response(
+                data=None,
+                message="Chưa đến hoặc đã hết thời gian đăng ký",
+                logs=logs
+            )
+        
+        # Lấy education_stages từ child table
+        education_stages = frappe.get_all(
+            "SIS Menu Registration Period Education Stage",
+            filters={"parent": period.name},
+            fields=["education_stage_id"]
+        )
+        education_stage_ids = [es.education_stage_id for es in education_stages]
+        
+        # Lấy danh sách học sinh thuộc các cấp học áp dụng
+        students = []
+        for stage_id in education_stage_ids:
+            stage_students = _get_parent_students(parent_id, stage_id)
+            students.extend(stage_students)
+        
+        # Loại bỏ trùng lặp
+        seen = set()
+        unique_students = []
+        for s in students:
+            if s["name"] not in seen:
+                seen.add(s["name"])
+                unique_students.append(s)
+        students = unique_students
         
         if not students:
             logs.append("Không có học sinh nào thuộc cấp học áp dụng")
@@ -246,8 +362,12 @@ def get_active_period():
                 logs=logs
             )
         
-        # Lấy các ngày Thứ 4 trong tháng
-        wednesdays = _get_wednesdays_in_month(period.year, period.month)
+        # Lấy danh sách ngày đăng ký từ registration_dates
+        registration_dates = _get_registration_dates(period.name)
+        
+        # Fallback: nếu chưa có registration_dates, dùng wednesdays
+        if not registration_dates:
+            registration_dates = _get_wednesdays_in_month(period.year, period.month)
         
         # Lấy thông tin đăng ký hiện có cho từng học sinh
         for student in students:
@@ -281,12 +401,14 @@ def get_active_period():
                 student["registrations"] = {}
                 student["registered_count"] = 0
         
-        # Lấy tên cấp học
-        education_stage_name = frappe.db.get_value(
-            "SIS Education Stage",
-            period.education_stage_id,
-            "title_vn"
-        ) or "Tiểu học"
+        # Lấy tên cấp học (lấy cấp đầu tiên nếu có nhiều)
+        education_stage_name = ""
+        if education_stage_ids:
+            education_stage_name = frappe.db.get_value(
+                "SIS Education Stage",
+                education_stage_ids[0],
+                "title_vn"
+            ) or ""
         
         return success_response(
             data={
@@ -295,13 +417,16 @@ def get_active_period():
                     "title": period.title,
                     "month": period.month,
                     "year": period.year,
-                    "start_date": str(period.start_date),
-                    "end_date": str(period.end_date),
-                    "education_stage_id": period.education_stage_id,
+                    "start_date": str(period.start_date) if period.start_date else None,
+                    "end_date": str(period.end_date) if period.end_date else None,
+                    "parent_start_datetime": str(period.parent_start_datetime) if period.parent_start_datetime else None,
+                    "parent_end_datetime": str(period.parent_end_datetime) if period.parent_end_datetime else None,
+                    "education_stage_ids": education_stage_ids,
                     "education_stage_name": education_stage_name
                 },
-                "wednesdays": wednesdays,
-                "total_days": len(wednesdays),
+                "registration_dates": registration_dates,
+                "wednesdays": registration_dates,  # Backward compatibility
+                "total_days": len(registration_dates),
                 "students": students
             },
             message="Lấy kỳ đăng ký thành công",
@@ -482,7 +607,8 @@ def save_registration():
         period = frappe.db.get_value(
             "SIS Menu Registration Period",
             period_id,
-            ["name", "status", "start_date", "end_date", "month", "year"],
+            ["name", "status", "start_date", "end_date", "month", "year",
+             "parent_start_datetime", "parent_end_datetime"],
             as_dict=True
         )
         
@@ -492,8 +618,8 @@ def save_registration():
         if period.status != "Open":
             return error_response("Kỳ đăng ký đã đóng", logs=logs)
         
-        today = getdate(nowdate())
-        if today < getdate(period.start_date) or today > getdate(period.end_date):
+        # Kiểm tra parent timeline
+        if not _check_parent_timeline(period):
             return error_response("Chưa đến hoặc đã hết thời gian đăng ký", logs=logs)
         
         # Lấy thông tin lớp học sinh
@@ -704,9 +830,14 @@ def get_period_stats(period_id=None):
         if not period:
             return not_found_response("Không tìm thấy kỳ đăng ký")
         
-        # Lấy số ngày Thứ 4 trong tháng
-        wednesdays = _get_wednesdays_in_month(period.year, period.month)
-        total_days = len(wednesdays)
+        # Lấy danh sách ngày đăng ký từ registration_dates
+        registration_dates = _get_registration_dates(period_id)
+        
+        # Fallback: nếu chưa có registration_dates, dùng wednesdays
+        if not registration_dates:
+            registration_dates = _get_wednesdays_in_month(period.year, period.month)
+        
+        total_days = len(registration_dates)
         
         # Đếm tổng số học sinh thuộc cấp học
         # TODO: Query từ SIS Class Student theo education_stage và school_year
@@ -749,7 +880,8 @@ def get_period_stats(period_id=None):
                 "not_registered": not_registered if not_registered > 0 else 0,
                 "choice_a": choice_a,
                 "choice_au": choice_au,
-                "wednesdays": wednesdays
+                "registration_dates": registration_dates,
+                "wednesdays": registration_dates  # Backward compatibility
             },
             message="Lấy thống kê thành công",
             logs=logs
@@ -805,8 +937,15 @@ def get_class_registrations(class_id=None, month=None, year=None):
         )
         period_id = period.name if period else None
         
-        # Lấy các ngày Thứ 4
-        wednesdays = _get_wednesdays_in_month(year, month)
+        # Lấy danh sách ngày đăng ký từ period
+        if period_id:
+            wednesdays = _get_registration_dates(period_id)
+        else:
+            wednesdays = []
+        
+        # Fallback: nếu không có registration_dates, dùng wednesdays cũ
+        if not wednesdays:
+            wednesdays = _get_wednesdays_in_month(year, month)
         
         # Lấy danh sách học sinh trong lớp
         class_students = frappe.db.sql("""
@@ -847,7 +986,8 @@ def get_class_registrations(class_id=None, month=None, year=None):
                 "period_id": period_id,
                 "month": month,
                 "year": year,
-                "wednesdays": wednesdays,
+                "registration_dates": wednesdays,
+                "wednesdays": wednesdays,  # Backward compatibility
                 "students": class_students
             },
             message="Lấy danh sách đăng ký thành công",
@@ -1230,5 +1370,320 @@ def delete_period():
         frappe.log_error(frappe.get_traceback(), "Delete Menu Registration Period Error")
         return error_response(
             message=f"Lỗi khi xóa: {str(e)}",
+            logs=logs
+        )
+
+
+# ============================================
+# TEACHER APIs - Cho giáo viên chủ nhiệm
+# ============================================
+
+@frappe.whitelist()
+def get_teacher_active_period(class_id=None):
+    """
+    Lấy kỳ đăng ký suất ăn đang mở cho GVCN.
+    Kiểm tra theo teacher_start_datetime và teacher_end_datetime.
+    """
+    logs = []
+    
+    try:
+        # Lấy class_id từ request nếu không có
+        if not class_id:
+            class_id = frappe.form_dict.get('class_id') or (frappe.request.args.get('class_id') if frappe.request else None)
+        
+        if not class_id:
+            return validation_error_response(
+                "Thiếu class_id",
+                {"class_id": ["Class ID là bắt buộc"]}
+            )
+        
+        logs.append(f"Class ID: {class_id}")
+        
+        # Kiểm tra quyền: user phải là GVCN của lớp này
+        user_email = frappe.session.user
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": user_email}, "name")
+        
+        if not teacher:
+            return error_response("Bạn không phải là giáo viên", logs=logs)
+        
+        class_info = frappe.db.get_value(
+            "SIS Class",
+            class_id,
+            ["homeroom_teacher", "vice_homeroom_teacher", "class_title", "education_grade", "school_year_id"],
+            as_dict=True
+        )
+        
+        if not class_info:
+            return not_found_response("Không tìm thấy lớp")
+        
+        if teacher not in [class_info.homeroom_teacher, class_info.vice_homeroom_teacher]:
+            return error_response("Bạn không phải GVCN của lớp này", logs=logs)
+        
+        # Lấy education_stage từ grade
+        education_stage_id = frappe.db.get_value(
+            "SIS Education Grade",
+            class_info.education_grade,
+            "education_stage_id"
+        )
+        
+        # Tìm kỳ đăng ký đang trong teacher timeline
+        from frappe.utils import now_datetime
+        now = now_datetime()
+        
+        period = frappe.db.sql("""
+            SELECT 
+                p.name, p.title, p.month, p.year,
+                p.parent_start_datetime, p.parent_end_datetime,
+                p.teacher_start_datetime, p.teacher_end_datetime,
+                p.status, p.school_year_id
+            FROM `tabSIS Menu Registration Period` p
+            INNER JOIN `tabSIS Menu Registration Period Education Stage` es 
+                ON es.parent = p.name
+            WHERE p.status = 'Open'
+            AND p.teacher_start_datetime IS NOT NULL
+            AND p.teacher_start_datetime <= %s
+            AND p.teacher_end_datetime >= %s
+            AND es.education_stage_id = %s
+            ORDER BY p.creation DESC
+            LIMIT 1
+        """, (now, now, education_stage_id), as_dict=True)
+        
+        if not period:
+            logs.append("Không có kỳ đăng ký nào đang mở cho GVCN")
+            return success_response(
+                data=None,
+                message="Không có kỳ đăng ký nào đang mở cho GVCN",
+                logs=logs
+            )
+        
+        period = period[0]
+        logs.append(f"Tìm thấy kỳ: {period.name}")
+        
+        # Lấy danh sách ngày đăng ký
+        registration_dates = _get_registration_dates(period.name)
+        
+        if not registration_dates:
+            registration_dates = _get_wednesdays_in_month(period.year, period.month)
+        
+        # Lấy danh sách học sinh trong lớp
+        students = frappe.db.sql("""
+            SELECT 
+                cs.student_id,
+                s.student_name,
+                s.student_code,
+                s.photo,
+                s.avatar_url
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
+            WHERE cs.class_id = %s
+            AND cs.school_year_id = %s
+            ORDER BY s.student_name
+        """, (class_id, class_info.school_year_id), as_dict=True)
+        
+        # Lấy thông tin đăng ký hiện có
+        for student in students:
+            existing_reg = frappe.db.get_value(
+                "SIS Menu Registration",
+                {
+                    "period": period.name,
+                    "student_id": student.student_id
+                },
+                ["name"],
+                as_dict=True
+            )
+            
+            if existing_reg:
+                items = frappe.get_all(
+                    "SIS Menu Registration Item",
+                    filters={"parent": existing_reg.name},
+                    fields=["date", "choice"]
+                )
+                student["registrations"] = {str(item.date): item.choice for item in items}
+                student["registration_id"] = existing_reg.name
+            else:
+                student["registrations"] = {}
+                student["registration_id"] = None
+        
+        return success_response(
+            data={
+                "period": {
+                    "name": period.name,
+                    "title": period.title,
+                    "month": period.month,
+                    "year": period.year,
+                    "teacher_start_datetime": str(period.teacher_start_datetime),
+                    "teacher_end_datetime": str(period.teacher_end_datetime)
+                },
+                "registration_dates": registration_dates,
+                "total_days": len(registration_dates),
+                "students": students,
+                "class_info": {
+                    "class_id": class_id,
+                    "class_title": class_info.class_title
+                },
+                "can_edit": True  # Đã check trong teacher timeline
+            },
+            message="Lấy kỳ đăng ký thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Teacher Get Active Period Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def teacher_save_registration():
+    """
+    GVCN lưu đăng ký suất ăn cho học sinh trong lớp.
+    """
+    logs = []
+    
+    try:
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        logs.append(f"Nhận request: {json.dumps(data, default=str)}")
+        
+        # Validate required fields
+        required_fields = ['period_id', 'class_id', 'student_registrations']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                return validation_error_response(
+                    f"Thiếu trường bắt buộc: {field}",
+                    {field: [f"Trường {field} là bắt buộc"]}
+                )
+        
+        period_id = data['period_id']
+        class_id = data['class_id']
+        student_registrations = data['student_registrations']
+        
+        # Parse nếu là string
+        if isinstance(student_registrations, str):
+            student_registrations = json.loads(student_registrations)
+        
+        # Kiểm tra quyền GVCN
+        user_email = frappe.session.user
+        teacher = frappe.db.get_value("SIS Teacher", {"user_id": user_email}, "name")
+        
+        if not teacher:
+            return error_response("Bạn không phải là giáo viên", logs=logs)
+        
+        class_info = frappe.db.get_value(
+            "SIS Class",
+            class_id,
+            ["homeroom_teacher", "vice_homeroom_teacher", "school_year_id"],
+            as_dict=True
+        )
+        
+        if not class_info:
+            return not_found_response("Không tìm thấy lớp")
+        
+        if teacher not in [class_info.homeroom_teacher, class_info.vice_homeroom_teacher]:
+            return error_response("Bạn không phải GVCN của lớp này", logs=logs)
+        
+        # Kiểm tra kỳ đăng ký và teacher timeline
+        period = frappe.db.get_value(
+            "SIS Menu Registration Period",
+            period_id,
+            ["name", "status", "teacher_start_datetime", "teacher_end_datetime"],
+            as_dict=True
+        )
+        
+        if not period:
+            return not_found_response("Không tìm thấy kỳ đăng ký")
+        
+        if period.status != "Open":
+            return error_response("Kỳ đăng ký đã đóng", logs=logs)
+        
+        if not _check_teacher_timeline(period):
+            return error_response("Không trong thời gian đăng ký của GVCN", logs=logs)
+        
+        # Lưu cho từng học sinh
+        saved_count = 0
+        valid_choices = ["A", "AU", ""]  # Empty string để xóa đăng ký
+        
+        for student_id, registrations in student_registrations.items():
+            if isinstance(registrations, str):
+                registrations = json.loads(registrations)
+            
+            # Kiểm tra học sinh thuộc lớp
+            is_student_in_class = frappe.db.exists(
+                "SIS Class Student",
+                {
+                    "class_id": class_id,
+                    "student_id": student_id,
+                    "school_year_id": class_info.school_year_id
+                }
+            )
+            
+            if not is_student_in_class:
+                logs.append(f"Học sinh {student_id} không thuộc lớp {class_id}")
+                continue
+            
+            # Tìm hoặc tạo registration
+            existing = frappe.db.get_value(
+                "SIS Menu Registration",
+                {"period": period_id, "student_id": student_id},
+                "name"
+            )
+            
+            # Lọc bỏ các ngày không đăng ký (empty string)
+            valid_registrations = {k: v for k, v in registrations.items() if v and v in ["A", "AU"]}
+            
+            if existing:
+                if not valid_registrations:
+                    # Xóa đăng ký nếu không còn item nào
+                    frappe.delete_doc("SIS Menu Registration", existing, force=True)
+                    logs.append(f"Đã xóa đăng ký cho học sinh {student_id}")
+                else:
+                    reg_doc = frappe.get_doc("SIS Menu Registration", existing)
+                    reg_doc.registrations = []
+                    for date_str, choice in valid_registrations.items():
+                        reg_doc.append("registrations", {
+                            "date": date_str,
+                            "choice": choice
+                        })
+                    reg_doc.flags.ignore_permissions = True
+                    reg_doc.save()
+                    saved_count += 1
+            else:
+                if valid_registrations:
+                    reg_doc = frappe.new_doc("SIS Menu Registration")
+                    reg_doc.period = period_id
+                    reg_doc.student_id = student_id
+                    reg_doc.class_id = class_id
+                    reg_doc.registered_by = frappe.session.user
+                    
+                    for date_str, choice in valid_registrations.items():
+                        reg_doc.append("registrations", {
+                            "date": date_str,
+                            "choice": choice
+                        })
+                    
+                    reg_doc.flags.ignore_permissions = True
+                    reg_doc.insert()
+                    saved_count += 1
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={"saved_count": saved_count},
+            message=f"Đã lưu đăng ký cho {saved_count} học sinh",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Teacher Save Registration Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
             logs=logs
         )

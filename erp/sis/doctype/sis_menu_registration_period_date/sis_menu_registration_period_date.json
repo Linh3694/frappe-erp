@@ -1,0 +1,53 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "",
+ "beta": 0,
+ "creation": "2026-01-26 00:00:00.000000",
+ "custom": 0,
+ "description": "Ngày đăng ký suất ăn trong kỳ",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "date",
+  "formatted_date"
+ ],
+ "fields": [
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Ngày",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Ngày đăng ký suất ăn"
+  },
+  {
+   "fieldname": "formatted_date",
+   "fieldtype": "Data",
+   "label": "Ngày hiển thị",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Định dạng dd/MM/yyyy"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-01-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Menu Registration Period Date",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "date",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

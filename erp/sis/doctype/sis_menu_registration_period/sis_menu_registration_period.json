@@ -22,15 +22,24 @@
   "year",
   "column_break_basic",
   "status",
-  "start_date",
-  "end_date",
+  "school_year_id",
+  "parent_timeline_section",
+  "parent_start_datetime",
+  "parent_end_datetime",
+  "teacher_timeline_section",
+  "teacher_start_datetime",
+  "teacher_end_datetime",
+  "registration_dates_section",
+  "registration_dates",
   "config_section",
   "education_stages",
-  "school_year_id",
   "system_information",
   "created_by",
   "created_at",
-  "updated_at"
+  "updated_at",
+  "deprecated_section",
+  "start_date",
+  "end_date"
  ],
  "fields": [
   {
@@ -77,18 +86,63 @@
    "description": "Draft: Nháp, Open: Đang mở, Closed: Đã đóng"
   },
   {
-   "fieldname": "start_date",
-   "fieldtype": "Date",
-   "label": "Ngày bắt đầu đăng ký",
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học",
+   "options": "SIS School Year",
    "reqd": 1,
-   "description": "Ngày bắt đầu cho phép phụ huynh đăng ký"
+   "description": "Năm học áp dụng"
   },
   {
-   "fieldname": "end_date",
-   "fieldtype": "Date",
-   "label": "Ngày kết thúc đăng ký",
+   "fieldname": "parent_timeline_section",
+   "fieldtype": "Section Break",
+   "label": "Thời gian đăng ký - Phụ huynh (Parent Portal)"
+  },
+  {
+   "fieldname": "parent_start_datetime",
+   "fieldtype": "Datetime",
+   "label": "Bắt đầu",
    "reqd": 1,
-   "description": "Ngày kết thúc cho phép phụ huynh đăng ký"
+   "description": "Thời gian bắt đầu cho phép phụ huynh đăng ký"
+  },
+  {
+   "fieldname": "parent_end_datetime",
+   "fieldtype": "Datetime",
+   "label": "Kết thúc",
+   "reqd": 1,
+   "description": "Thời gian kết thúc cho phép phụ huynh đăng ký"
+  },
+  {
+   "fieldname": "teacher_timeline_section",
+   "fieldtype": "Section Break",
+   "label": "Thời gian đăng ký - Giáo viên chủ nhiệm"
+  },
+  {
+   "fieldname": "teacher_start_datetime",
+   "fieldtype": "Datetime",
+   "label": "Bắt đầu",
+   "reqd": 1,
+   "description": "Thời gian bắt đầu cho phép GVCN đăng ký cho học sinh"
+  },
+  {
+   "fieldname": "teacher_end_datetime",
+   "fieldtype": "Datetime",
+   "label": "Kết thúc",
+   "reqd": 1,
+   "description": "Thời gian kết thúc cho phép GVCN đăng ký cho học sinh"
+  },
+  {
+   "fieldname": "registration_dates_section",
+   "fieldtype": "Section Break",
+   "label": "Ngày đăng ký suất ăn"
+  },
+  {
+   "fieldname": "registration_dates",
+   "fieldtype": "Table",
+   "label": "Danh sách ngày",
+   "options": "SIS Menu Registration Period Date",
+   "reqd": 1,
+   "description": "Các ngày mà học sinh có thể chọn Set Á/Âu"
   },
   {
    "fieldname": "config_section",
@@ -102,14 +156,6 @@
    "options": "SIS Menu Registration Period Education Stage",
    "reqd": 1,
    "description": "Danh sách cấp học áp dụng cho kỳ đăng ký"
-  },
-  {
-   "fieldname": "school_year_id",
-   "fieldtype": "Link",
-   "label": "Năm học",
-   "options": "SIS School Year",
-   "reqd": 1,
-   "description": "Năm học áp dụng"
   },
   {
    "fieldname": "system_information",
@@ -135,12 +181,33 @@
    "fieldtype": "Datetime",
    "label": "Ngày cập nhật",
    "read_only": 1
+  },
+  {
+   "fieldname": "deprecated_section",
+   "fieldtype": "Section Break",
+   "label": "Deprecated Fields",
+   "collapsible": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Ngày bắt đầu (deprecated)",
+   "hidden": 1,
+   "description": "Deprecated - Use parent_start_datetime instead"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "Ngày kết thúc (deprecated)",
+   "hidden": 1,
+   "description": "Deprecated - Use parent_end_datetime instead"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2026-01-15 00:00:00.000000",
+ "modified": "2026-01-26 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Menu Registration Period",
