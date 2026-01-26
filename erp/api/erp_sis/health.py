@@ -81,7 +81,7 @@ def get_class_health_reports():
             fields=[
                 "name", "student_id", "student_name", "student_code",
                 "class_id", "class_name", "description",
-                "porridge_registration", "report_date",
+                "porridge_registration", "porridge_note", "report_date",
                 "created_by_user", "created_by_name", "creation"
             ],
             order_by="creation desc"
@@ -135,6 +135,7 @@ def create_health_report():
         description = data.get("description")
         porridge_registration = data.get("porridge_registration", False)
         porridge_dates_str = data.get("porridge_dates")
+        porridge_note = data.get("porridge_note", "")  # Lưu ý về cháo
         
         # Validation
         errors = {}
@@ -201,15 +202,15 @@ def create_health_report():
             INSERT INTO `tabSIS Health Report` 
             (name, creation, modified, modified_by, owner, docstatus,
              student_id, student_name, student_code, class_id, class_name,
-             description, porridge_registration, report_date, 
+             description, porridge_registration, porridge_note, report_date, 
              created_by_user, created_by_name)
             VALUES (%s, NOW(), NOW(), %s, %s, 0,
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s)
         """, (
             report_name, frappe.session.user, frappe.session.user,
             student_id, student_name, student_code, class_id, class_name,
-            description, 1 if porridge_registration else 0, report_date,
+            description, 1 if porridge_registration else 0, porridge_note or "", report_date,
             created_by_user, created_by_name
         ))
         
@@ -271,6 +272,7 @@ def update_health_report():
         description = data.get("description")
         porridge_registration = data.get("porridge_registration")
         porridge_dates_str = data.get("porridge_dates")
+        porridge_note = data.get("porridge_note")  # Lưu ý về cháo
         
         if not report_id:
             return validation_error_response("report_id là bắt buộc", {"report_id": ["report_id là bắt buộc"]})
@@ -281,6 +283,10 @@ def update_health_report():
         # Cập nhật các trường
         if description is not None:
             doc.description = description
+        
+        # Cập nhật lưu ý về cháo
+        if porridge_note is not None:
+            doc.porridge_note = porridge_note
         
         if porridge_registration is not None:
             if isinstance(porridge_registration, str):
@@ -436,7 +442,7 @@ def get_daily_health_summary():
             fields=[
                 "name", "student_id", "student_name", "student_code",
                 "class_id", "class_name", "description",
-                "porridge_registration", "report_date",
+                "porridge_registration", "porridge_note", "report_date",
                 "created_by_user", "created_by_name", "creation"
             ],
             order_by="creation desc",
@@ -525,6 +531,7 @@ def get_porridge_list():
                 hrp.breakfast,
                 hrp.lunch,
                 hrp.afternoon,
+                hr.porridge_note,
                 hr.created_by_name,
                 hr.creation as created_at
             FROM `tabSIS Health Report` hr

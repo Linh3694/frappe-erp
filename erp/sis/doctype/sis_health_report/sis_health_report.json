@@ -19,6 +19,7 @@
   "porridge_section",
   "porridge_registration",
   "porridge_dates",
+  "porridge_note",
   "meta_section",
   "report_date",
   "column_break_2",
@@ -105,6 +106,13 @@
    "fieldtype": "Table",
    "label": "Ngày ăn cháo",
    "options": "SIS Health Report Porridge"
+  },
+  {
+   "depends_on": "eval:doc.porridge_registration",
+   "fieldname": "porridge_note",
+   "fieldtype": "Small Text",
+   "label": "Lưu ý về cháo",
+   "description": "Ghi chú về dị ứng, loại cháo không ăn được..."
   },
   {
    "fieldname": "meta_section",
