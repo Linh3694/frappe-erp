@@ -2368,9 +2368,35 @@ def export_decision_template(config_id=None):
             order_by="deadline asc"
         )
         
+        # Lấy danh sách câu hỏi khảo sát từ config
+        questions = []
+        config_doc = frappe.get_doc("SIS Re-enrollment Config", config_id)
+        if hasattr(config_doc, 'questions') and config_doc.questions:
+            for q in config_doc.questions:
+                # Lấy các options của câu hỏi
+                options = []
+                if hasattr(q, 'options') and q.options:
+                    for idx, opt in enumerate(q.options, 1):
+                        options.append({
+                            "idx": idx,
+                            "name": opt.name,
+                            "option_vn": opt.option_vn,
+                            "option_en": opt.option_en
+                        })
+                questions.append({
+                    "name": q.name,
+                    "question_vn": q.question_vn,
+                    "question_en": q.question_en,
+                    "question_type": q.question_type,  # single_choice / multiple_choice
+                    "is_required": q.is_required,
+                    "options": options
+                })
+        logs.append(f"Số câu hỏi khảo sát: {len(questions)}")
+        
         # Tạo file Excel
         import pandas as pd
         from io import BytesIO
+        import json
         
         # Mapping decision sang tiếng Việt
         decision_map = {
@@ -2393,13 +2419,40 @@ def export_decision_template(config_id=None):
                 deadline_str = d.deadline.strftime('%d/%m/%Y') if hasattr(d.deadline, 'strftime') else str(d.deadline)
                 discount_deadline_map[d.name] = deadline_str
         
-        # Lấy thêm thông tin payment_type từ submissions
+        # Lấy thêm thông tin payment_type từ submissions (bao gồm cả answers)
         submissions_full = frappe.get_all(
             "SIS Re-enrollment",
             filters={"config_id": config_id},
             fields=["name", "student_code", "student_name", "current_class", "decision", "selected_discount_id", "payment_type"],
             order_by="student_code asc"
         )
+        
+        # Lấy câu trả lời của tất cả học sinh
+        # Tạo dict: submission_id -> {question_id -> selected_options_indices}
+        answers_map = {}
+        for sub in submissions_full:
+            sub_doc = frappe.get_doc("SIS Re-enrollment", sub.name)
+            if hasattr(sub_doc, 'answers') and sub_doc.answers:
+                answers_map[sub.name] = {}
+                for ans in sub_doc.answers:
+                    # Parse selected_options JSON để lấy các option đã chọn
+                    selected_indices = []
+                    if ans.selected_options:
+                        try:
+                            selected_opts = json.loads(ans.selected_options) if isinstance(ans.selected_options, str) else ans.selected_options
+                            # selected_opts có thể là list các option_name hoặc option_idx
+                            # Tìm index từ câu hỏi tương ứng
+                            q_match = next((q for q in questions if q['name'] == ans.question_id), None)
+                            if q_match:
+                                for sel in selected_opts:
+                                    # Tìm idx của option đã chọn
+                                    for opt in q_match['options']:
+                                        if opt['name'] == sel or str(opt['idx']) == str(sel):
+                                            selected_indices.append(str(opt['idx']))
+                                            break
+                        except:
+                            pass
+                    answers_map[sub.name][ans.question_id] = selected_indices
         
         # Sheet 1: Danh sách học sinh - dùng tên cột tiếng Việt thân thiện
         students_data = []
@@ -2411,14 +2464,24 @@ def export_decision_template(config_id=None):
             # Chuyển payment_type sang tiếng Việt
             payment_type_vn = payment_type_map.get(sub.payment_type, '') if sub.payment_type else ''
             
-            students_data.append({
+            row_data = {
                 "Mã học sinh": sub.student_code or "",
                 "Họ tên": sub.student_name or "",
                 "Lớp": sub.current_class or "",
                 "Quyết định": decision_vn,
                 "Ưu đãi (hạn đóng)": discount_deadline,
                 "Đóng theo": payment_type_vn
-            })
+            }
+            
+            # Thêm cột cho mỗi câu hỏi khảo sát
+            for q in questions:
+                col_name = q['question_vn']
+                # Lấy câu trả lời hiện có (nếu có)
+                answer_indices = answers_map.get(sub.name, {}).get(q['name'], [])
+                # Format: "1" hoặc "1,2,3" cho multiple choice
+                row_data[col_name] = ",".join(answer_indices) if answer_indices else ""
+            
+            students_data.append(row_data)
         
         df_students = pd.DataFrame(students_data)
         
@@ -2431,6 +2494,15 @@ def export_decision_template(config_id=None):
             {"Cột": "Ưu đãi (hạn đóng)", "Mô tả": "Hạn đóng tiền để hưởng ưu đãi (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Xem bảng ưu đãi bên dưới (điền ngày VD: 05/02/2026)"},
             {"Cột": "Đóng theo", "Mô tả": "Đóng tiền theo năm hay theo kỳ (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Theo năm | Theo kỳ"},
         ]
+        # Thêm hướng dẫn cho các cột câu hỏi khảo sát
+        for q in questions:
+            q_type_desc = "Chọn một số (1,2,3,...)" if q['question_type'] == 'single_choice' else "Chọn nhiều số, cách nhau bằng dấu phẩy (VD: 1,2,3)"
+            required_text = " (BẮT BUỘC nếu Tái ghi danh)" if q['is_required'] else " (không bắt buộc)"
+            guide_data.append({
+                "Cột": q['question_vn'],
+                "Mô tả": f"Câu hỏi khảo sát{required_text}",
+                "Giá trị hợp lệ": f"{q_type_desc} - Xem bảng đáp án bên dưới"
+            })
         df_guide = pd.DataFrame(guide_data)
         
         # Sheet 3: Danh sách ưu đãi - hiển thị rõ ràng hơn
@@ -2447,12 +2519,38 @@ def export_decision_template(config_id=None):
             })
         df_discounts = pd.DataFrame(discounts_data) if discounts_data else pd.DataFrame(columns=["Hạn đóng (điền vào cột Ưu đãi)", "Mô tả", "Giảm giá theo năm (%)", "Giảm giá theo kỳ (%)"])
         
+        # Sheet 4: Danh sách đáp án câu hỏi khảo sát
+        questions_data = []
+        for q in questions:
+            q_type_text = "Chọn 1" if q['question_type'] == 'single_choice' else "Chọn nhiều"
+            required_text = "Bắt buộc" if q['is_required'] else "Không bắt buộc"
+            
+            # Dòng header cho mỗi câu hỏi
+            questions_data.append({
+                "Câu hỏi": q['question_vn'],
+                "Số đáp án": "",
+                "Nội dung đáp án": f"[{q_type_text}] [{required_text}]"
+            })
+            # Liệt kê các đáp án
+            for opt in q['options']:
+                questions_data.append({
+                    "Câu hỏi": "",
+                    "Số đáp án": opt['idx'],
+                    "Nội dung đáp án": opt['option_vn']
+                })
+            # Dòng trống phân cách
+            questions_data.append({"Câu hỏi": "", "Số đáp án": "", "Nội dung đáp án": ""})
+        
+        df_questions = pd.DataFrame(questions_data) if questions_data else pd.DataFrame(columns=["Câu hỏi", "Số đáp án", "Nội dung đáp án"])
+        
         # Ghi file Excel
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_students.to_excel(writer, sheet_name='Danh sách học sinh', index=False)
             df_guide.to_excel(writer, sheet_name='Hướng dẫn', index=False)
             df_discounts.to_excel(writer, sheet_name='Danh sách ưu đãi', index=False)
+            if questions:
+                df_questions.to_excel(writer, sheet_name='Đáp án câu hỏi', index=False)
         
         output.seek(0)
         
@@ -2562,6 +2660,31 @@ def import_decision_from_excel():
             )
         }
         logs.append(f"Số học sinh trong config: {len(valid_students)}")
+        
+        # Lấy danh sách câu hỏi khảo sát từ config
+        import json
+        questions = []
+        config_doc = frappe.get_doc("SIS Re-enrollment Config", config_id)
+        if hasattr(config_doc, 'questions') and config_doc.questions:
+            for q in config_doc.questions:
+                options = []
+                if hasattr(q, 'options') and q.options:
+                    for idx, opt in enumerate(q.options, 1):
+                        options.append({
+                            "idx": idx,
+                            "name": opt.name,
+                            "option_vn": opt.option_vn,
+                            "option_en": opt.option_en
+                        })
+                questions.append({
+                    "name": q.name,
+                    "question_vn": q.question_vn,
+                    "question_en": q.question_en,
+                    "question_type": q.question_type,
+                    "is_required": q.is_required,
+                    "options": options
+                })
+        logs.append(f"Số câu hỏi khảo sát: {len(questions)}")
         
         # Đọc file Excel
         import pandas as pd
@@ -2777,6 +2900,53 @@ def import_decision_from_excel():
                     submission.selected_discount_deadline = None
                     submission.selected_discount_percent = None
                     submission.payment_type = None
+                
+                # Xử lý câu trả lời khảo sát (chỉ khi Tái ghi danh)
+                if decision == 're_enroll' and questions:
+                    # Xóa câu trả lời cũ (nếu có)
+                    submission.answers = []
+                    
+                    for q in questions:
+                        col_name = q['question_vn']
+                        answer_raw = str(row.get(col_name, '')).strip() if col_name in row and pd.notna(row.get(col_name)) else ''
+                        
+                        if answer_raw and answer_raw.lower() != 'nan':
+                            # Parse các số đáp án (1 hoặc 1,2,3)
+                            answer_indices = [a.strip() for a in answer_raw.replace('.', ',').split(',') if a.strip()]
+                            
+                            # Validate và convert sang option names
+                            selected_option_names = []
+                            selected_options_text_vn = []
+                            selected_options_text_en = []
+                            
+                            for ans_idx in answer_indices:
+                                try:
+                                    idx_int = int(ans_idx)
+                                    # Tìm option tương ứng
+                                    opt_match = next((opt for opt in q['options'] if opt['idx'] == idx_int), None)
+                                    if opt_match:
+                                        selected_option_names.append(opt_match['name'])
+                                        selected_options_text_vn.append(opt_match['option_vn'])
+                                        selected_options_text_en.append(opt_match['option_en'])
+                                except ValueError:
+                                    pass  # Bỏ qua nếu không parse được số
+                            
+                            if selected_option_names:
+                                # Validate single_choice chỉ được chọn 1
+                                if q['question_type'] == 'single_choice' and len(selected_option_names) > 1:
+                                    selected_option_names = [selected_option_names[0]]
+                                    selected_options_text_vn = [selected_options_text_vn[0]]
+                                    selected_options_text_en = [selected_options_text_en[0]]
+                                
+                                # Thêm câu trả lời
+                                submission.append('answers', {
+                                    'question_id': q['name'],
+                                    'question_text_vn': q['question_vn'],
+                                    'question_text_en': q['question_en'],
+                                    'selected_options': json.dumps(selected_option_names),
+                                    'selected_options_text_vn': ', '.join(selected_options_text_vn),
+                                    'selected_options_text_en': ', '.join(selected_options_text_en)
+                                })
                 
                 submission.save(ignore_permissions=True)
                 success_count += 1
