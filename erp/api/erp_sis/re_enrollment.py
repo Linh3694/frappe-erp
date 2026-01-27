@@ -2906,12 +2906,44 @@ def import_decision_from_excel():
                     # Xóa câu trả lời cũ (nếu có)
                     submission.answers = []
                     
+                    # Tạo mapping tên cột normalized -> tên cột gốc trong DataFrame
+                    df_columns = list(df.columns)
+                    col_normalized_map = {str(c).strip().lower(): c for c in df_columns}
+                    
                     for q in questions:
                         col_name = q['question_vn']
-                        answer_raw = str(row.get(col_name, '')).strip() if col_name in row and pd.notna(row.get(col_name)) else ''
+                        col_name_normalized = col_name.strip().lower()
+                        
+                        # Tìm cột matching trong DataFrame (so sánh linh hoạt)
+                        actual_col = None
+                        if col_name in df_columns:
+                            actual_col = col_name
+                        elif col_name_normalized in col_normalized_map:
+                            actual_col = col_normalized_map[col_name_normalized]
+                        else:
+                            # Tìm cột chứa tên câu hỏi (cho trường hợp tên bị cắt ngắn)
+                            for c in df_columns:
+                                if col_name_normalized in str(c).strip().lower() or str(c).strip().lower() in col_name_normalized:
+                                    actual_col = c
+                                    break
+                        
+                        answer_raw = ''
+                        if actual_col is not None:
+                            val = row.get(actual_col)
+                            if pd.notna(val):
+                                answer_raw = str(val).strip()
                         
                         if answer_raw and answer_raw.lower() != 'nan':
                             # Parse các số đáp án (1 hoặc 1,2,3)
+                            # Xử lý cả trường hợp số nguyên và số thực (1.0 -> 1)
+                            try:
+                                # Nếu là số, convert sang int trước
+                                num_val = float(answer_raw)
+                                if num_val == int(num_val):
+                                    answer_raw = str(int(num_val))
+                            except:
+                                pass
+                            
                             answer_indices = [a.strip() for a in answer_raw.replace('.', ',').split(',') if a.strip()]
                             
                             # Validate và convert sang option names
@@ -2921,7 +2953,7 @@ def import_decision_from_excel():
                             
                             for ans_idx in answer_indices:
                                 try:
-                                    idx_int = int(ans_idx)
+                                    idx_int = int(float(ans_idx))  # Xử lý cả "1.0" -> 1
                                     # Tìm option tương ứng
                                     opt_match = next((opt for opt in q['options'] if opt['idx'] == idx_int), None)
                                     if opt_match:

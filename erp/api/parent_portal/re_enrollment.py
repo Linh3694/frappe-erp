@@ -9,6 +9,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, getdate, now
 import json
+import requests
 from erp.utils.api_response import (
     validation_error_response, 
     list_response, 
@@ -17,6 +18,12 @@ from erp.utils.api_response import (
     single_item_response,
     not_found_response
 )
+
+# Email nhận thông báo yêu cầu điều chỉnh
+ADJUSTMENT_NOTIFICATION_EMAILS = [
+    "linh.nguyenhai@wellspring.edu.vn",
+    "hieu.nguyenduy@wellspring.edu.vn"
+]
 
 # Decision types cho tái ghi danh
 DECISION_TYPES = ['re_enroll', 'considering', 'not_re_enroll']
@@ -32,6 +39,197 @@ DECISION_DISPLAY_MAP_EN = {
     'considering': 'Considering',
     'not_re_enroll': 'Not Re-enrolling'
 }
+
+
+def _send_email_via_service(to_list, subject, body):
+    """
+    Gửi email qua email service GraphQL API
+    
+    Args:
+        to_list: List các email người nhận
+        subject: Tiêu đề email
+        body: Nội dung email (HTML)
+    
+    Returns:
+        dict: {"success": True/False, "message": "..."}
+    """
+    try:
+        # Lấy URL email service từ config hoặc mặc định
+        email_service_url = frappe.conf.get('email_service_url') or 'http://localhost:5030'
+        graphql_endpoint = f"{email_service_url}/graphql"
+        
+        # GraphQL mutation gửi email
+        graphql_query = """
+        mutation SendEmail($input: SendEmailInput!) {
+            sendEmail(input: $input) {
+                success
+                message
+                messageId
+            }
+        }
+        """
+        
+        # Variables cho GraphQL mutation
+        variables = {
+            "input": {
+                "to": to_list,
+                "subject": subject,
+                "body": body,
+                "contentType": "HTML"
+            }
+        }
+        
+        # GraphQL request payload
+        payload = {
+            "query": graphql_query,
+            "variables": variables
+        }
+        
+        # Gửi request đến email service
+        response = requests.post(
+            graphql_endpoint,
+            json=payload,
+            headers={'Content-Type': 'application/json'},
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Kiểm tra lỗi GraphQL
+            if result.get('errors'):
+                error_messages = [err.get('message', 'Unknown error') for err in result['errors']]
+                frappe.logger().error(f"GraphQL errors: {error_messages}")
+                return {"success": False, "message": f"GraphQL errors: {', '.join(error_messages)}"}
+            
+            # Kiểm tra kết quả mutation
+            send_email_result = result.get('data', {}).get('sendEmail')
+            if send_email_result and send_email_result.get('success'):
+                frappe.logger().info(f"Email sent successfully to {to_list} - MessageId: {send_email_result.get('messageId')}")
+                return {"success": True, "message": send_email_result.get('message')}
+            else:
+                error_msg = send_email_result.get('message', 'Unknown error') if send_email_result else 'No response data'
+                frappe.logger().error(f"Email service returned error: {error_msg}")
+                return {"success": False, "message": error_msg}
+        else:
+            frappe.logger().error(f"Email service HTTP error: {response.status_code} - {response.text}")
+            return {"success": False, "message": f"HTTP {response.status_code}: {response.text}"}
+    
+    except requests.exceptions.RequestException as e:
+        frappe.logger().error(f"Request error sending email: {str(e)}")
+        return {"success": False, "message": f"Request error: {str(e)}"}
+    except Exception as e:
+        frappe.logger().error(f"Error sending email: {str(e)}")
+        return {"success": False, "message": f"Error: {str(e)}"}
+
+
+def _send_adjustment_notification_email(student_name, student_code, requested_at, re_enrollment_id, config_id):
+    """
+    Gửi email thông báo yêu cầu điều chỉnh tái ghi danh đến bộ phận tuyển sinh
+    
+    Args:
+        student_name: Tên học sinh
+        student_code: Mã học sinh
+        requested_at: Thời gian yêu cầu
+        re_enrollment_id: ID đơn tái ghi danh
+        config_id: ID config tái ghi danh
+    """
+    try:
+        # Format thời gian
+        from datetime import datetime
+        if isinstance(requested_at, str):
+            dt = datetime.fromisoformat(requested_at.replace('Z', '+00:00')) if 'T' in requested_at else datetime.strptime(requested_at, '%Y-%m-%d %H:%M:%S.%f')
+        else:
+            dt = requested_at
+        
+        time_str = dt.strftime('%H:%M')
+        date_str = dt.strftime('%d/%m/%Y')
+        
+        # Tạo link điều chỉnh - trỏ đến trang danh sách submissions với filter theo config
+        # Lấy URL frontend từ allow_cors (ưu tiên wis.wellspring.edu.vn) hoặc mặc định production
+        allow_cors = frappe.conf.get('allow_cors') or []
+        base_url = 'https://wis.wellspring.edu.vn'  # Mặc định production
+        for cors_url in allow_cors:
+            if 'wis.wellspring.edu.vn' in cors_url or 'wis-staging.wellspring.edu.vn' in cors_url:
+                base_url = cors_url
+                break
+        adjustment_link = f"{base_url}/admission/re-enrollment/submissions?config={config_id}"
+        
+        # Tiêu đề email
+        subject = "YÊU CẦU ĐIỀU CHỈNH TÁI GHI DANH"
+        
+        # Nội dung email HTML
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #002855; border-bottom: 2px solid #F05023; padding-bottom: 10px;">
+                    YÊU CẦU ĐIỀU CHỈNH TÁI GHI DANH
+                </h2>
+                
+                <p>Hệ thống nhận được yêu cầu điều chỉnh Tái ghi danh của Học sinh:</p>
+                
+                <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold; width: 40%;">
+                            Họ và Tên Học sinh:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {student_name} ({student_code})
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Thời gian yêu cầu:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {time_str}, Ngày {date_str}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Link điều chỉnh:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            <a href="{adjustment_link}" style="color: #F05023; text-decoration: none;">
+                                Xem và điều chỉnh đơn
+                            </a>
+                        </td>
+                    </tr>
+                </table>
+                
+                <p style="color: #F05023; font-weight: bold;">
+                    Vui lòng liên hệ hỗ trợ Phụ huynh trong thời gian sớm nhất.
+                </p>
+                
+                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                
+                <p style="font-size: 12px; color: #666;">
+                    Email này được gửi tự động từ hệ thống Wellspring SIS.<br>
+                    Vui lòng không reply trực tiếp vào email này.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Gửi email
+        result = _send_email_via_service(
+            to_list=ADJUSTMENT_NOTIFICATION_EMAILS,
+            subject=subject,
+            body=body
+        )
+        
+        if result.get('success'):
+            frappe.logger().info(f"Adjustment notification email sent for {re_enrollment_id}")
+        else:
+            frappe.logger().error(f"Failed to send adjustment notification email: {result.get('message')}")
+        
+        return result
+        
+    except Exception as e:
+        frappe.logger().error(f"Error sending adjustment notification email: {str(e)}")
+        return {"success": False, "message": str(e)}
 
 
 def _create_re_enrollment_announcement(
@@ -1284,6 +1482,24 @@ def request_adjustment():
         frappe.db.commit()
         
         logs.append(f"Đã cập nhật trạng thái điều chỉnh cho đơn: {re_enrollment_id}")
+        
+        # Gửi email thông báo đến bộ phận tuyển sinh
+        try:
+            email_result = _send_adjustment_notification_email(
+                student_name=re_enrollment.student_name,
+                student_code=re_enrollment.student_code,
+                requested_at=re_enrollment.adjustment_requested_at,
+                re_enrollment_id=re_enrollment_id,
+                config_id=re_enrollment.config_id
+            )
+            if email_result.get('success'):
+                logs.append("Đã gửi email thông báo đến bộ phận tuyển sinh")
+            else:
+                logs.append(f"Không thể gửi email thông báo: {email_result.get('message')}")
+        except Exception as email_err:
+            # Không throw lỗi nếu gửi email thất bại - vẫn trả về success cho user
+            logs.append(f"Lỗi gửi email thông báo: {str(email_err)}")
+            frappe.logger().error(f"Failed to send adjustment notification email: {str(email_err)}")
         
         return success_response(
             data={
