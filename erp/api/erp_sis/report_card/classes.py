@@ -208,14 +208,57 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         return error_response("Error fetching classes for report card")
 
 
+# Thứ tự ưu tiên trạng thái (thấp đến cao)
+STATUS_PRIORITY = {
+    "draft": 0,
+    "entry": 1,
+    "submitted": 2,
+    "level_1_approved": 3,
+    "level_2_approved": 4,
+    "reviewed": 5,
+    "published": 6,
+    "rejected": -1,  # Rejected có ưu tiên đặc biệt
+}
+
+
+def _get_min_status(statuses: list) -> str:
+    """
+    Lấy trạng thái thấp nhất trong danh sách.
+    Nếu có rejected thì ưu tiên hiển thị rejected.
+    """
+    if not statuses:
+        return "draft"
+    
+    # Nếu có rejected thì trả về rejected
+    if "rejected" in statuses:
+        return "rejected"
+    
+    # Lọc bỏ None và rỗng
+    valid_statuses = [s for s in statuses if s]
+    if not valid_statuses:
+        return "draft"
+    
+    # Lấy status có priority thấp nhất
+    min_status = min(valid_statuses, key=lambda s: STATUS_PRIORITY.get(s, 0))
+    return min_status
+
+
 @frappe.whitelist(allow_guest=False)
 def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str] = None):
     """
     Lấy danh sách templates có student reports thực tế cho một lớp.
+    Bao gồm trạng thái phê duyệt tổng hợp cho homeroom và scores.
     
     Args:
         class_id: ID lớp
         school_year: Năm học (optional)
+    
+    Returns:
+        Danh sách templates với:
+        - homeroom_status: Trạng thái tổng hợp homeroom (status thấp nhất)
+        - scores_status: Trạng thái tổng hợp scores (status thấp nhất)
+        - is_homeroom_teacher: User hiện tại có phải GVCN không
+        - is_subject_teacher: User hiện tại có phải GVBM không
     """
     try:
         # Resolve class_id
@@ -234,6 +277,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             )
 
         campus_id = get_current_campus_id()
+        user = frappe.session.user
 
         # Verify class exists
         try:
@@ -242,6 +286,29 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             return not_found_response("Class not found")
         if c.campus_id != campus_id:
             return forbidden_response("Access denied: Class belongs to another campus")
+
+        # Lấy teacher_id của user hiện tại
+        teacher_rows = frappe.get_all(
+            "SIS Teacher",
+            fields=["name"],
+            filters={"user_id": user, "campus_id": campus_id},
+            limit=1
+        )
+        teacher_id = teacher_rows[0].name if teacher_rows else None
+
+        # Kiểm tra user có phải GVCN của lớp không
+        is_homeroom_teacher = False
+        if teacher_id and getattr(c, "homeroom_teacher", None) == teacher_id:
+            is_homeroom_teacher = True
+
+        # Kiểm tra user có phải GVBM của lớp không (có subject assignment)
+        is_subject_teacher = False
+        if teacher_id:
+            subject_assignment_count = frappe.db.count(
+                "SIS Subject Assignment",
+                {"teacher_id": teacher_id, "class_id": class_id, "campus_id": campus_id}
+            )
+            is_subject_teacher = subject_assignment_count > 0
 
         # Find templates with actual student reports
         student_report_query = """
@@ -279,14 +346,30 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             order_by="title asc",
         )
         
-        # Add student report count
+        # Thêm thông tin cho mỗi template
         for row in rows:
-            report_count = frappe.db.count("SIS Student Report Card", {
-                "template_id": row["name"],
-                "class_id": class_id,
-                "campus_id": campus_id
-            })
-            row["student_report_count"] = report_count
+            template_id = row["name"]
+            
+            # Lấy tất cả student reports của lớp+template
+            student_reports = frappe.get_all(
+                "SIS Student Report Card",
+                fields=["homeroom_approval_status", "scores_approval_status"],
+                filters={
+                    "template_id": template_id,
+                    "class_id": class_id,
+                    "campus_id": campus_id
+                }
+            )
+            
+            # Tính toán trạng thái tổng hợp
+            homeroom_statuses = [r.get("homeroom_approval_status") or "draft" for r in student_reports]
+            scores_statuses = [r.get("scores_approval_status") or "draft" for r in student_reports]
+            
+            row["homeroom_status"] = _get_min_status(homeroom_statuses)
+            row["scores_status"] = _get_min_status(scores_statuses)
+            row["student_report_count"] = len(student_reports)
+            row["is_homeroom_teacher"] = is_homeroom_teacher
+            row["is_subject_teacher"] = is_subject_teacher
         
         return success_response(data=rows, message="Templates with student reports fetched successfully")
     except Exception as e:
