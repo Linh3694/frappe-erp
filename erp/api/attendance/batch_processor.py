@@ -378,7 +378,16 @@ def process_employee_events(key, events, logger, existing_name=None):
 		should_notify = False
 		latest_timestamp = sorted_events[-1].get("parsed_timestamp")
 		
-		if not is_historical_attendance(latest_timestamp):
+		# Check nếu có bất kỳ event nào là Invalid Time Period (subEventType = 7) thì skip notification
+		INVALID_TIME_PERIOD_SUB_EVENT = 7
+		has_invalid_time_period = any(
+			evt.get("sub_event_type") == INVALID_TIME_PERIOD_SUB_EVENT 
+			for evt in events
+		)
+		
+		if has_invalid_time_period:
+			logger.info(f"⏭️ [SKIP NOTIFICATION] Invalid Time Period event detected for {employee_code}")
+		elif not is_historical_attendance(latest_timestamp):
 			should_notify = True
 		
 		notification_data = None
