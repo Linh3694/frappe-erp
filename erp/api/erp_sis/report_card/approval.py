@@ -1680,7 +1680,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             "campus_id": campus_id
                         },
                         fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by", 
-                                "rejection_reason", "rejected_from_level", "rejected_at"]
+                                "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section"]
                     )
                     for r in reports:
                         r["template_id"] = tmpl.name
@@ -1749,7 +1749,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     "campus_id": campus_id
                                 },
                                 fields=["name", "class_id", "scores_submitted_at", "scores_submitted_by",
-                                        "rejection_reason", "rejected_from_level", "rejected_at"]
+                                        "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section"]
                             )
                             for r in reports:
                                 for sid in matching_subjects:
@@ -1806,7 +1806,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     "campus_id": campus_id
                                 },
                                 fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at",
-                                        "rejection_reason", "rejected_from_level", "rejected_at"]
+                                        "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section"]
                             )
                             for r in reports:
                                 r["template_id"] = tmpl.name
@@ -1878,6 +1878,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     "rejection_reason": r.get("rejection_reason"),  # Lý do trả về
                     "was_rejected": r.get("was_rejected", False),  # Flag bị trả về
                     "rejected_from_level": r.get("rejected_from_level"),  # Level mà bị reject
+                    "rejected_section": r.get("rejected_section"),  # Section bị reject: homeroom/scores/both
                     "report_ids": set()  # Để tránh duplicate
                 }
             if r["name"] not in grouped[key]["report_ids"]:
@@ -1892,6 +1893,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     grouped[key]["rejection_reason"] = r["rejection_reason"]
                     grouped[key]["was_rejected"] = True
                     grouped[key]["rejected_from_level"] = r.get("rejected_from_level")
+                    grouped[key]["rejected_section"] = r.get("rejected_section")
         
         # Convert to list và enrich với thông tin class
         results = []
@@ -2572,18 +2574,20 @@ def reject_single_report():
     Trả về level ngay dưới để duyệt lại, kèm lý do reject.
     
     - Reject từ L4 (reviewed) -> quay về L3 (level_2_approved)
-    - Reject từ L3 (level_2_approved) -> quay về L2 (level_1_approved hoặc submitted)
+    - Reject từ L3 (level_2_approved) -> quay về L2, chỉ reject section được chọn
     
     Request body:
         {
             "report_id": "...",
-            "reason": "Lý do trả lại"
+            "reason": "Lý do trả lại",
+            "section": "homeroom" | "scores" | "both" (mặc định "both" nếu không cung cấp)
         }
     """
     try:
         data = get_request_payload()
         report_id = data.get("report_id")
         reason = data.get("reason", "").strip()
+        section = data.get("section", "both")  # homeroom | scores | both
         
         if not report_id:
             return validation_error_response(
@@ -2595,6 +2599,12 @@ def reject_single_report():
             return validation_error_response(
                 message="reason is required",
                 errors={"reason": ["Required"]}
+            )
+        
+        if section not in ['homeroom', 'scores', 'both']:
+            return validation_error_response(
+                message="section must be 'homeroom', 'scores', or 'both'",
+                errors={"section": ["Invalid value"]}
             )
         
         user = frappe.session.user
@@ -2618,48 +2628,73 @@ def reject_single_report():
                 code="INVALID_STATUS"
             )
         
-        # Xác định level mới dựa trên current status
-        # Reject từ L4 (reviewed) -> quay về L3 (level_2_approved)
-        # Reject từ L3 (level_2_approved) -> quay về L2 (level_1_approved)
-        if current_status == 'reviewed':
-            # Từ L4 -> quay về L3
-            new_status = 'level_2_approved'
-            rejected_from_level = 4
-            target_level = 3
-        else:  # level_2_approved
-            # Từ L3 -> quay về L2 (set section status về level_1_approved)
-            new_status = 'level_1_approved'
-            rejected_from_level = 3
-            target_level = 2
-        
-        # Lưu thông tin rejection
+        # Lưu thông tin rejection chung
         report.rejection_reason = reason
         report.rejected_by = user
         report.rejected_at = now
-        report.rejected_from_level = rejected_from_level  # Field mới để biết reject từ level nào
+        report.rejected_section = section  # Field mới: section nào bị reject
+        
+        # Xác định section name cho message
+        section_names = {
+            'homeroom': 'Nhận xét GVCN',
+            'scores': 'Điểm/Đánh giá GVBM', 
+            'both': 'Toàn bộ'
+        }
+        section_name = section_names.get(section, section)
         
         if current_status == 'reviewed':
-            # Từ L4 -> quay về L3: chỉ đổi approval_status
-            report.approval_status = new_status
-        else:
-            # Từ L3 -> quay về L2: đổi cả approval_status và section statuses
-            report.approval_status = new_status
-            report.homeroom_approval_status = new_status
-            report.scores_approval_status = new_status
-            # Cũng lưu rejection info cho từng section
-            report.homeroom_rejection_reason = reason
-            report.homeroom_rejected_by = user
-            report.homeroom_rejected_at = now
-            report.scores_rejection_reason = reason
-            report.scores_rejected_by = user
-            report.scores_rejected_at = now
+            # Từ L4 -> quay về L3: chỉ đổi approval_status chung
+            # L4 reject không phân biệt section (vì L3 review toàn bộ)
+            report.approval_status = 'level_2_approved'
+            report.rejected_from_level = 4
+            rejected_from_level = 4
+            target_level = 3
+            
+        else:  # level_2_approved (từ L3)
+            # Từ L3 -> quay về L2: CHỈ reject section được chọn
+            report.rejected_from_level = 3
+            rejected_from_level = 3
+            target_level = 2
+            
+            if section == 'homeroom':
+                # Chỉ reject homeroom -> quay về L2 cho Tổ trưởng
+                report.homeroom_approval_status = 'level_1_approved'
+                report.homeroom_rejection_reason = reason
+                report.homeroom_rejected_by = user
+                report.homeroom_rejected_at = now
+                # Giữ nguyên scores_approval_status
+                # approval_status chung đặt về level_1_approved nếu homeroom bị reject
+                report.approval_status = 'level_1_approved'
+                
+            elif section == 'scores':
+                # Chỉ reject scores -> quay về L2 cho Subject Manager  
+                report.scores_approval_status = 'level_1_approved'
+                report.scores_rejection_reason = reason
+                report.scores_rejected_by = user
+                report.scores_rejected_at = now
+                # Giữ nguyên homeroom_approval_status
+                # approval_status chung đặt về level_1_approved nếu scores bị reject
+                report.approval_status = 'level_1_approved'
+                
+            else:  # both
+                # Reject cả hai section
+                report.approval_status = 'level_1_approved'
+                report.homeroom_approval_status = 'level_1_approved'
+                report.scores_approval_status = 'level_1_approved'
+                # Lưu rejection info cho cả hai
+                report.homeroom_rejection_reason = reason
+                report.homeroom_rejected_by = user
+                report.homeroom_rejected_at = now
+                report.scores_rejection_reason = reason
+                report.scores_rejected_by = user
+                report.scores_rejected_at = now
         
         _add_approval_history(
             report,
             f"reject_from_level_{rejected_from_level}",
             user,
             "rejected",
-            f"Trả lại từ Level {rejected_from_level} về Level {target_level}. Lý do: {reason}"
+            f"Trả lại [{section_name}] từ Level {rejected_from_level} về Level {target_level}. Lý do: {reason}"
         )
         
         report.save(ignore_permissions=True)
@@ -2669,12 +2704,13 @@ def reject_single_report():
             data={
                 "report_id": report_id,
                 "previous_status": current_status,
-                "new_status": new_status,
+                "new_status": report.approval_status,
                 "rejected_from_level": rejected_from_level,
                 "target_level": target_level,
+                "rejected_section": section,
                 "reason": reason
             },
-            message=f"Đã trả lại báo cáo từ Level {rejected_from_level} về Level {target_level}"
+            message=f"Đã trả lại [{section_name}] từ Level {rejected_from_level} về Level {target_level}"
         )
         
     except Exception as e:

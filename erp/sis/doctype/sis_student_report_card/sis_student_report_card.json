@@ -60,7 +60,8 @@
   "rejected_at",
   "rejected_by",
   "rejection_reason",
-  "rejected_from_level"
+  "rejected_from_level",
+  "rejected_section"
  ],
  "fields": [
   {"fieldname": "title", "fieldtype": "Data", "label": "Tiêu đề", "in_list_view": 1},
@@ -118,7 +119,8 @@
   {"fieldname": "rejected_at", "fieldtype": "Datetime", "label": "Thời gian trả về", "read_only": 1},
   {"fieldname": "rejected_by", "fieldtype": "Link", "label": "Người trả về", "options": "User", "read_only": 1},
   {"fieldname": "rejection_reason", "fieldtype": "Small Text", "label": "Lý do trả về", "read_only": 1},
-  {"fieldname": "rejected_from_level", "fieldtype": "Int", "label": "Trả về từ Level", "read_only": 1, "description": "Level mà báo cáo bị reject (3 hoặc 4)"}
+  {"fieldname": "rejected_from_level", "fieldtype": "Int", "label": "Trả về từ Level", "read_only": 1, "description": "Level mà báo cáo bị reject (3 hoặc 4)"},
+  {"fieldname": "rejected_section", "fieldtype": "Select", "label": "Section bị trả về", "options": "\nhomeroom\nscores\nboth", "read_only": 1, "description": "Section nào bị reject: homeroom (GVCN), scores (GVBM), hoặc both (cả hai)"}
  ],
  "permissions": [
   {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},
