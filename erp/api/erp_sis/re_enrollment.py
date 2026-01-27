@@ -2372,40 +2372,62 @@ def export_decision_template(config_id=None):
         import pandas as pd
         from io import BytesIO
         
-        # Sheet 1: Danh sách học sinh
+        # Mapping decision sang tiếng Việt
+        decision_map = {
+            're_enroll': 'Tái ghi danh',
+            'considering': 'Cân nhắc', 
+            'not_re_enroll': 'Không tái ghi danh'
+        }
+        
+        # Tạo mapping từ discount_id sang deadline (format dd/mm/yyyy)
+        discount_deadline_map = {}
+        for d in discounts:
+            if d.deadline:
+                # Format: dd/mm/yyyy
+                deadline_str = d.deadline.strftime('%d/%m/%Y') if hasattr(d.deadline, 'strftime') else str(d.deadline)
+                discount_deadline_map[d.name] = deadline_str
+        
+        # Sheet 1: Danh sách học sinh - dùng tên cột tiếng Việt thân thiện
         students_data = []
         for sub in submissions:
+            # Chuyển decision sang tiếng Việt
+            decision_vn = decision_map.get(sub.decision, '') if sub.decision else ''
+            # Chuyển discount_id sang deadline
+            discount_deadline = discount_deadline_map.get(sub.selected_discount_id, '') if sub.selected_discount_id else ''
+            
             students_data.append({
-                "student_code": sub.student_code or "",
-                "student_name": sub.student_name or "",
-                "current_class": sub.current_class or "",
-                "decision": sub.decision or "",  # Để trống nếu chưa có
-                "selected_discount_id": sub.selected_discount_id or ""  # Để trống nếu chưa có
+                "Mã học sinh": sub.student_code or "",
+                "Họ tên": sub.student_name or "",
+                "Lớp": sub.current_class or "",
+                "Quyết định": decision_vn,
+                "Ưu đãi (hạn đóng)": discount_deadline
             })
         
         df_students = pd.DataFrame(students_data)
         
         # Sheet 2: Hướng dẫn
         guide_data = [
-            {"Cột": "student_code", "Mô tả": "Mã học sinh (BẮT BUỘC, KHÔNG ĐƯỢC SỬA)", "Giá trị hợp lệ": "Mã học sinh trong hệ thống"},
-            {"Cột": "student_name", "Mô tả": "Tên học sinh (chỉ để tham khảo)", "Giá trị hợp lệ": "Không cần điền"},
-            {"Cột": "current_class", "Mô tả": "Lớp hiện tại (chỉ để tham khảo)", "Giá trị hợp lệ": "Không cần điền"},
-            {"Cột": "decision", "Mô tả": "Quyết định tái ghi danh (BẮT BUỘC)", "Giá trị hợp lệ": "re_enroll | considering | not_re_enroll"},
-            {"Cột": "selected_discount_id", "Mô tả": "ID ưu đãi (BẮT BUỘC nếu decision = re_enroll)", "Giá trị hợp lệ": "Xem danh sách ưu đãi bên dưới"},
+            {"Cột": "Mã học sinh", "Mô tả": "Mã học sinh (KHÔNG ĐƯỢC SỬA)", "Giá trị hợp lệ": "Giữ nguyên"},
+            {"Cột": "Họ tên", "Mô tả": "Tên học sinh (chỉ để tham khảo)", "Giá trị hợp lệ": "Không cần điền"},
+            {"Cột": "Lớp", "Mô tả": "Lớp hiện tại (chỉ để tham khảo)", "Giá trị hợp lệ": "Không cần điền"},
+            {"Cột": "Quyết định", "Mô tả": "Quyết định tái ghi danh (BẮT BUỘC)", "Giá trị hợp lệ": "Tái ghi danh | Cân nhắc | Không tái ghi danh"},
+            {"Cột": "Ưu đãi (hạn đóng)", "Mô tả": "Hạn đóng tiền để hưởng ưu đãi (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Xem bảng ưu đãi bên dưới (điền ngày VD: 05/02/2026)"},
         ]
         df_guide = pd.DataFrame(guide_data)
         
-        # Sheet 3: Danh sách ưu đãi
+        # Sheet 3: Danh sách ưu đãi - hiển thị rõ ràng hơn
         discounts_data = []
         for d in discounts:
+            deadline_str = ""
+            if d.deadline:
+                deadline_str = d.deadline.strftime('%d/%m/%Y') if hasattr(d.deadline, 'strftime') else str(d.deadline)
             discounts_data.append({
-                "discount_id": d.name,
-                "deadline": str(d.deadline) if d.deadline else "",
-                "description": d.description or "",
-                "annual_discount": f"{d.annual_discount}%" if d.annual_discount else "",
-                "semester_discount": f"{d.semester_discount}%" if d.semester_discount else ""
+                "Hạn đóng (điền vào cột Ưu đãi)": deadline_str,
+                "Mô tả": d.description or "",
+                "Giảm giá theo năm (%)": d.annual_discount or 0,
+                "Giảm giá theo kỳ (%)": d.semester_discount or 0
             })
-        df_discounts = pd.DataFrame(discounts_data) if discounts_data else pd.DataFrame(columns=["discount_id", "deadline", "description", "annual_discount", "semester_discount"])
+        df_discounts = pd.DataFrame(discounts_data) if discounts_data else pd.DataFrame(columns=["Hạn đóng (điền vào cột Ưu đãi)", "Mô tả", "Giảm giá theo năm (%)", "Giảm giá theo kỳ (%)"])
         
         # Ghi file Excel
         output = BytesIO()
@@ -2484,13 +2506,33 @@ def import_decision_from_excel():
         
         logs.append(f"Import quyết định cho config: {config_id}")
         
-        # Lấy danh sách ưu đãi hợp lệ
-        valid_discount_ids = [d.name for d in frappe.get_all(
+        # Lấy danh sách ưu đãi với đầy đủ thông tin
+        discounts = frappe.get_all(
             "SIS Re-enrollment Discount",
             filters={"parent": config_id},
-            fields=["name"]
-        )]
+            fields=["name", "deadline", "description", "annual_discount", "semester_discount"]
+        )
+        valid_discount_ids = [d.name for d in discounts]
+        
+        # Tạo mapping từ deadline (nhiều format) sang discount_id
+        deadline_to_discount = {}
+        for d in discounts:
+            if d.deadline:
+                # Format chuẩn: yyyy-mm-dd
+                deadline_str = str(d.deadline)
+                deadline_to_discount[deadline_str] = d.name
+                
+                # Format dd/mm/yyyy
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(deadline_str, '%Y-%m-%d')
+                    deadline_to_discount[date_obj.strftime('%d/%m/%Y')] = d.name
+                    deadline_to_discount[date_obj.strftime('%d-%m-%Y')] = d.name
+                except:
+                    pass
+        
         logs.append(f"Ưu đãi hợp lệ: {valid_discount_ids}")
+        logs.append(f"Deadline mapping: {list(deadline_to_discount.keys())}")
         
         # Lấy danh sách student_code trong config
         valid_students = {
@@ -2507,16 +2549,58 @@ def import_decision_from_excel():
         import pandas as pd
         df = pd.read_excel(file)
         
-        # Validate columns
-        required_cols = ['student_code', 'decision']
-        missing_cols = [col for col in required_cols if col not in df.columns]
-        if missing_cols:
+        # Mapping tên cột tiếng Việt sang tên cột chuẩn
+        column_mapping = {
+            'Mã học sinh': 'student_code',
+            'mã học sinh': 'student_code',
+            'Họ tên': 'student_name',
+            'họ tên': 'student_name',
+            'Lớp': 'current_class',
+            'lớp': 'current_class',
+            'Quyết định': 'decision',
+            'quyết định': 'decision',
+            'Ưu đãi (hạn đóng)': 'discount_deadline',
+            'ưu đãi (hạn đóng)': 'discount_deadline',
+            'Ưu đãi': 'discount_deadline',
+            'ưu đãi': 'discount_deadline',
+            'selected_discount_id': 'discount_deadline',  # Hỗ trợ cả tên cột cũ
+        }
+        df = df.rename(columns=column_mapping)
+        
+        logs.append(f"Columns sau rename: {list(df.columns)}")
+        
+        # Kiểm tra có cột student_code và decision không
+        if 'student_code' not in df.columns:
             return validation_error_response(
-                f"File thiếu các cột: {', '.join(missing_cols)}",
-                {"file": [f"Cần có các cột: student_code, decision, selected_discount_id"]}
+                "File thiếu cột Mã học sinh",
+                {"file": ["Cần có cột 'Mã học sinh' hoặc 'student_code'"]}
+            )
+        if 'decision' not in df.columns:
+            return validation_error_response(
+                "File thiếu cột Quyết định",
+                {"file": ["Cần có cột 'Quyết định' hoặc 'decision'"]}
             )
         
-        # Các giá trị hợp lệ cho decision
+        # Mapping decision từ tiếng Việt sang giá trị chuẩn
+        decision_mapping = {
+            # Tiếng Việt
+            'tái ghi danh': 're_enroll',
+            'tai ghi danh': 're_enroll',
+            'cân nhắc': 'considering',
+            'can nhac': 'considering',
+            'đang cân nhắc': 'considering',
+            'không tái ghi danh': 'not_re_enroll',
+            'khong tai ghi danh': 'not_re_enroll',
+            # Tiếng Anh/Giá trị gốc
+            're_enroll': 're_enroll',
+            're-enroll': 're_enroll',
+            'reenroll': 're_enroll',
+            'considering': 'considering',
+            'not_re_enroll': 'not_re_enroll',
+            'not_re-enroll': 'not_re_enroll',
+            'not re enroll': 'not_re_enroll',
+        }
+        
         valid_decisions = ['re_enroll', 'considering', 'not_re_enroll']
         
         success_count = 0
@@ -2528,16 +2612,19 @@ def import_decision_from_excel():
             
             try:
                 student_code = str(row.get('student_code', '')).strip()
-                decision = str(row.get('decision', '')).strip().lower()
-                selected_discount_id = str(row.get('selected_discount_id', '')).strip() if pd.notna(row.get('selected_discount_id')) else ''
+                decision_raw = str(row.get('decision', '')).strip()
+                discount_value = str(row.get('discount_deadline', '')).strip() if pd.notna(row.get('discount_deadline')) else ''
                 
                 # Bỏ qua dòng trống
                 if not student_code or pd.isna(row.get('student_code')):
                     continue
                 
                 # Bỏ qua dòng không có decision
-                if not decision or pd.isna(row.get('decision')) or decision == 'nan':
+                if not decision_raw or pd.isna(row.get('decision')) or decision_raw.lower() == 'nan':
                     continue
+                
+                # Map decision từ tiếng Việt/các biến thể sang giá trị chuẩn
+                decision = decision_mapping.get(decision_raw.lower(), decision_raw.lower())
                 
                 # Validate student_code
                 if student_code not in valid_students:
@@ -2553,28 +2640,48 @@ def import_decision_from_excel():
                 if decision not in valid_decisions:
                     errors.append({
                         "row": row_num,
-                        "error": f"Quyết định '{decision}' không hợp lệ. Giá trị hợp lệ: {', '.join(valid_decisions)}",
-                        "data": {"student_code": student_code, "decision": decision}
+                        "error": f"Quyết định '{decision_raw}' không hợp lệ. Giá trị hợp lệ: Tái ghi danh, Cân nhắc, Không tái ghi danh",
+                        "data": {"student_code": student_code, "decision": decision_raw}
                     })
                     error_count += 1
                     continue
                 
-                # Validate selected_discount_id nếu decision = re_enroll
+                # Xử lý ưu đãi nếu decision = re_enroll
+                selected_discount_id = None
                 if decision == 're_enroll':
-                    if not selected_discount_id or selected_discount_id == 'nan':
+                    if not discount_value or discount_value.lower() == 'nan':
                         errors.append({
                             "row": row_num,
-                            "error": f"Cần chọn ưu đãi khi quyết định tái ghi danh",
-                            "data": {"student_code": student_code, "decision": decision}
+                            "error": f"Cần điền ưu đãi (hạn đóng) khi quyết định Tái ghi danh",
+                            "data": {"student_code": student_code, "decision": decision_raw}
                         })
                         error_count += 1
                         continue
                     
-                    if selected_discount_id not in valid_discount_ids:
+                    # Thử tìm discount theo nhiều cách
+                    # 1. Tìm trực tiếp theo discount_id
+                    if discount_value in valid_discount_ids:
+                        selected_discount_id = discount_value
+                    # 2. Tìm theo deadline (nhiều format)
+                    elif discount_value in deadline_to_discount:
+                        selected_discount_id = deadline_to_discount[discount_value]
+                    else:
+                        # 3. Thử parse ngày từ Excel (có thể là datetime object)
+                        try:
+                            if isinstance(row.get('discount_deadline'), pd.Timestamp):
+                                date_str = row.get('discount_deadline').strftime('%Y-%m-%d')
+                                if date_str in deadline_to_discount:
+                                    selected_discount_id = deadline_to_discount[date_str]
+                        except:
+                            pass
+                    
+                    if not selected_discount_id:
+                        # Liệt kê các hạn đóng hợp lệ
+                        valid_deadlines = [str(d.deadline) for d in discounts if d.deadline]
                         errors.append({
                             "row": row_num,
-                            "error": f"ID ưu đãi '{selected_discount_id}' không hợp lệ",
-                            "data": {"student_code": student_code, "selected_discount_id": selected_discount_id}
+                            "error": f"Ưu đãi '{discount_value}' không hợp lệ. Hạn đóng hợp lệ: {', '.join(valid_deadlines)}",
+                            "data": {"student_code": student_code, "discount": discount_value}
                         })
                         error_count += 1
                         continue
@@ -2589,7 +2696,7 @@ def import_decision_from_excel():
                 submission.admin_modified_at = now()
                 submission.agreement_accepted = 1  # Đánh dấu đã xác nhận
                 
-                if decision == 're_enroll':
+                if decision == 're_enroll' and selected_discount_id:
                     submission.selected_discount_id = selected_discount_id
                     # Lấy thông tin ưu đãi
                     discount_info = frappe.db.get_value(
