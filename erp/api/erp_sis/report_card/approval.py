@@ -572,6 +572,16 @@ def submit_class_reports():
                 target_status = "level_2_approved"
                 approval_message = "Đang chờ Review (Level 3)"
         
+        # Xác định field để check và update dựa trên section
+        # Homeroom có field riêng, Scores/Subject có field riêng
+        if section == "homeroom":
+            status_field = "homeroom_approval_status"
+        elif section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
+            status_field = "scores_approval_status"
+        else:
+            # Fallback: dùng approval_status chung
+            status_field = "approval_status"
+        
         # Lấy tất cả reports của class với template này
         reports = frappe.get_all(
             "SIS Student Report Card",
@@ -580,7 +590,7 @@ def submit_class_reports():
                 "class_id": class_id,
                 "campus_id": campus_id
             },
-            fields=["name", "approval_status", "student_id"]
+            fields=["name", "approval_status", "homeroom_approval_status", "scores_approval_status", "student_id"]
         )
         
         if not reports:
@@ -597,22 +607,29 @@ def submit_class_reports():
         
         for report_data in reports:
             try:
-                current_status = report_data.approval_status or 'draft'
+                # ✅ Check section-specific status thay vì approval_status chung
+                current_section_status = getattr(report_data, status_field, None) or 'draft'
                 
                 # Cho phép submit các report ở trạng thái draft, entry, hoặc rejected (re-submit)
-                if current_status not in ['draft', 'entry', 'rejected']:
+                if current_section_status not in ['draft', 'entry', 'rejected']:
                     skipped_count += 1
                     continue
                 
-                # Cập nhật trực tiếp bằng SQL để tăng hiệu suất
+                # Cập nhật section-specific field
                 update_values = {
-                    "approval_status": target_status,
+                    status_field: target_status,
                     "submitted_at": now,
                     "submitted_by": user
                 }
                 
+                # Cũng cập nhật approval_status chung nếu cả 2 section đều ở trạng thái tốt
+                # Hoặc nếu đây là lần đầu submit
+                current_general_status = report_data.approval_status or 'draft'
+                if current_general_status in ['draft', 'entry']:
+                    update_values["approval_status"] = target_status
+                
                 # Clear rejection info khi re-submit
-                if current_status == 'rejected':
+                if current_section_status == 'rejected':
                     update_values["rejection_reason"] = None
                     update_values["rejected_by"] = None
                     update_values["rejected_at"] = None
@@ -631,7 +648,7 @@ def submit_class_reports():
                     "batch_submit", 
                     user, 
                     target_status, 
-                    f"Section: {section}, Subject: {subject_id or 'N/A'}"
+                    f"Section: {section} ({status_field}), Subject: {subject_id or 'N/A'}"
                 )
                 report.save(ignore_permissions=True)
                 
@@ -646,15 +663,28 @@ def submit_class_reports():
         
         frappe.db.commit()
         
-        result_message = f"Đã submit {submitted_count} báo cáo. {approval_message}"
+        # Tên section cho thông báo
+        section_name_map = {
+            "homeroom": "Nhận xét GVCN",
+            "scores": "Bảng điểm",
+            "subject_eval": "Đánh giá môn học",
+            "main_scores": "Điểm INTL",
+            "ielts": "IELTS",
+            "comments": "Nhận xét",
+            "all": "Tất cả"
+        }
+        section_name = section_name_map.get(section, section)
+        
+        result_message = f"Đã submit {submitted_count} báo cáo [{section_name}]. {approval_message}"
         if skipped_count > 0:
-            result_message += f" ({skipped_count} báo cáo đã được submit trước đó)"
+            result_message += f" ({skipped_count} báo cáo đã được submit trước đó cho section này)"
         
         return success_response(
             data={
                 "template_id": template_id,
                 "class_id": class_id,
                 "section": section,
+                "status_field": status_field,
                 "target_status": target_status,
                 "submitted_count": submitted_count,
                 "skipped_count": skipped_count,
