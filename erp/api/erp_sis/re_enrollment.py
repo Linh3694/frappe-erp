@@ -2379,6 +2379,12 @@ def export_decision_template(config_id=None):
             'not_re_enroll': 'Không tái ghi danh'
         }
         
+        # Mapping payment_type sang tiếng Việt
+        payment_type_map = {
+            'annual': 'Theo năm',
+            'semester': 'Theo kỳ'
+        }
+        
         # Tạo mapping từ discount_id sang deadline (format dd/mm/yyyy)
         discount_deadline_map = {}
         for d in discounts:
@@ -2387,20 +2393,31 @@ def export_decision_template(config_id=None):
                 deadline_str = d.deadline.strftime('%d/%m/%Y') if hasattr(d.deadline, 'strftime') else str(d.deadline)
                 discount_deadline_map[d.name] = deadline_str
         
+        # Lấy thêm thông tin payment_type từ submissions
+        submissions_full = frappe.get_all(
+            "SIS Re-enrollment",
+            filters={"config_id": config_id},
+            fields=["name", "student_code", "student_name", "current_class", "decision", "selected_discount_id", "payment_type"],
+            order_by="student_code asc"
+        )
+        
         # Sheet 1: Danh sách học sinh - dùng tên cột tiếng Việt thân thiện
         students_data = []
-        for sub in submissions:
+        for sub in submissions_full:
             # Chuyển decision sang tiếng Việt
             decision_vn = decision_map.get(sub.decision, '') if sub.decision else ''
             # Chuyển discount_id sang deadline
             discount_deadline = discount_deadline_map.get(sub.selected_discount_id, '') if sub.selected_discount_id else ''
+            # Chuyển payment_type sang tiếng Việt
+            payment_type_vn = payment_type_map.get(sub.payment_type, '') if sub.payment_type else ''
             
             students_data.append({
                 "Mã học sinh": sub.student_code or "",
                 "Họ tên": sub.student_name or "",
                 "Lớp": sub.current_class or "",
                 "Quyết định": decision_vn,
-                "Ưu đãi (hạn đóng)": discount_deadline
+                "Ưu đãi (hạn đóng)": discount_deadline,
+                "Đóng theo": payment_type_vn
             })
         
         df_students = pd.DataFrame(students_data)
@@ -2412,6 +2429,7 @@ def export_decision_template(config_id=None):
             {"Cột": "Lớp", "Mô tả": "Lớp hiện tại (chỉ để tham khảo)", "Giá trị hợp lệ": "Không cần điền"},
             {"Cột": "Quyết định", "Mô tả": "Quyết định tái ghi danh (BẮT BUỘC)", "Giá trị hợp lệ": "Tái ghi danh | Cân nhắc | Không tái ghi danh"},
             {"Cột": "Ưu đãi (hạn đóng)", "Mô tả": "Hạn đóng tiền để hưởng ưu đãi (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Xem bảng ưu đãi bên dưới (điền ngày VD: 05/02/2026)"},
+            {"Cột": "Đóng theo", "Mô tả": "Đóng tiền theo năm hay theo kỳ (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Theo năm | Theo kỳ"},
         ]
         df_guide = pd.DataFrame(guide_data)
         
@@ -2564,8 +2582,25 @@ def import_decision_from_excel():
             'Ưu đãi': 'discount_deadline',
             'ưu đãi': 'discount_deadline',
             'selected_discount_id': 'discount_deadline',  # Hỗ trợ cả tên cột cũ
+            'Đóng theo': 'payment_type',
+            'đóng theo': 'payment_type',
+            'Đóng Theo': 'payment_type',
         }
         df = df.rename(columns=column_mapping)
+        
+        # Mapping payment_type từ tiếng Việt sang giá trị chuẩn
+        payment_type_mapping = {
+            'theo năm': 'annual',
+            'theo nam': 'annual',
+            'năm': 'annual',
+            'nam': 'annual',
+            'annual': 'annual',
+            'theo kỳ': 'semester',
+            'theo ky': 'semester',
+            'kỳ': 'semester',
+            'ky': 'semester',
+            'semester': 'semester',
+        }
         
         logs.append(f"Columns sau rename: {list(df.columns)}")
         
@@ -2646,9 +2681,12 @@ def import_decision_from_excel():
                     error_count += 1
                     continue
                 
-                # Xử lý ưu đãi nếu decision = re_enroll
+                # Xử lý ưu đãi và payment_type nếu decision = re_enroll
                 selected_discount_id = None
+                payment_type = None
+                
                 if decision == 're_enroll':
+                    # Lấy discount_value
                     if not discount_value or discount_value.lower() == 'nan':
                         errors.append({
                             "row": row_num,
@@ -2657,6 +2695,22 @@ def import_decision_from_excel():
                         })
                         error_count += 1
                         continue
+                    
+                    # Lấy payment_type từ Excel
+                    payment_type_raw = str(row.get('payment_type', '')).strip() if pd.notna(row.get('payment_type')) else ''
+                    if payment_type_raw and payment_type_raw.lower() != 'nan':
+                        payment_type = payment_type_mapping.get(payment_type_raw.lower())
+                        if not payment_type:
+                            errors.append({
+                                "row": row_num,
+                                "error": f"'Đóng theo' = '{payment_type_raw}' không hợp lệ. Giá trị hợp lệ: Theo năm, Theo kỳ",
+                                "data": {"student_code": student_code, "payment_type": payment_type_raw}
+                            })
+                            error_count += 1
+                            continue
+                    else:
+                        # Mặc định là theo năm nếu không điền
+                        payment_type = 'annual'
                     
                     # Thử tìm discount theo nhiều cách
                     # 1. Tìm trực tiếp theo discount_id
@@ -2698,6 +2752,8 @@ def import_decision_from_excel():
                 
                 if decision == 're_enroll' and selected_discount_id:
                     submission.selected_discount_id = selected_discount_id
+                    submission.payment_type = payment_type  # Sử dụng payment_type từ Excel
+                    
                     # Lấy thông tin ưu đãi
                     discount_info = frappe.db.get_value(
                         "SIS Re-enrollment Discount",
@@ -2708,10 +2764,8 @@ def import_decision_from_excel():
                     if discount_info:
                         submission.selected_discount_name = discount_info.get("description") or selected_discount_id
                         submission.selected_discount_deadline = discount_info.get("deadline")
-                        # Mặc định payment_type = annual nếu chưa có
-                        if not submission.payment_type:
-                            submission.payment_type = "annual"
-                        if submission.payment_type == "annual":
+                        # Áp dụng đúng % discount dựa trên payment_type
+                        if payment_type == "annual":
                             submission.selected_discount_percent = discount_info.get("annual_discount")
                         else:
                             submission.selected_discount_percent = discount_info.get("semester_discount")
