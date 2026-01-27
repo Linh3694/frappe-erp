@@ -1633,6 +1633,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
         all_reports = []
         
         # Level 1: Khối trưởng duyệt homeroom
+        # Query theo homeroom_approval_status thay vì approval_status chung
         if not level or level == "level_1":
             if teacher_id:
                 templates_l1 = frappe.get_all(
@@ -1645,10 +1646,10 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         "SIS Student Report Card",
                         filters={
                             "template_id": tmpl.name,
-                            "approval_status": "submitted",
+                            "homeroom_approval_status": "submitted",
                             "campus_id": campus_id
                         },
-                        fields=["name", "class_id", "submitted_at", "submitted_by"]
+                        fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by"]
                     )
                     for r in reports:
                         r["template_id"] = tmpl.name
@@ -1656,12 +1657,14 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         r["pending_level"] = "level_1"
                         r["subject_id"] = None  # Homeroom không có subject
                         r["subject_title"] = "Nhận xét chủ nhiệm"
+                        r["submitted_at"] = r.get("homeroom_submitted_at")
+                        r["submitted_by"] = r.get("homeroom_submitted_by")
                         all_reports.append(r)
         
         # Level 2: Tổ trưởng hoặc Subject Manager
         if not level or level == "level_2":
             if teacher_id:
-                # Tổ trưởng duyệt homeroom
+                # Tổ trưởng duyệt homeroom - query theo homeroom_approval_status
                 templates_l2 = frappe.get_all(
                     "SIS Report Card Template",
                     filters={"homeroom_reviewer_level_2": teacher_id, "campus_id": campus_id},
@@ -1672,10 +1675,10 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         "SIS Student Report Card",
                         filters={
                             "template_id": tmpl.name,
-                            "approval_status": ["in", ["submitted", "level_1_approved"]],
+                            "homeroom_approval_status": ["in", ["submitted", "level_1_approved"]],
                             "campus_id": campus_id
                         },
-                        fields=["name", "class_id", "submitted_at", "submitted_by"]
+                        fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by"]
                     )
                     for r in reports:
                         r["template_id"] = tmpl.name
@@ -1683,9 +1686,11 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         r["pending_level"] = "level_2"
                         r["subject_id"] = None
                         r["subject_title"] = "Nhận xét chủ nhiệm"
+                        r["submitted_at"] = r.get("homeroom_submitted_at")
+                        r["submitted_by"] = r.get("homeroom_submitted_by")
                         all_reports.append(r)
                 
-                # Subject Manager - Lấy reports có subjects mà user là manager
+                # Subject Manager - Query theo scores_approval_status
                 managed_subjects = frappe.get_all(
                     "SIS Actual Subject Manager",
                     filters={"teacher_id": teacher_id},
@@ -1729,15 +1734,15 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         matching_subjects = [sid for sid in subject_ids if sid in template_subjects]
                         
                         if matching_subjects:
-                            # Lấy reports level_1_approved
+                            # Lấy reports theo scores_approval_status = submitted
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "approval_status": "level_1_approved",
+                                    "scores_approval_status": "submitted",
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "class_id", "submitted_at", "submitted_by"]
+                                fields=["name", "class_id", "scores_submitted_at", "scores_submitted_by"]
                             )
                             for r in reports:
                                 for sid in matching_subjects:
@@ -1747,9 +1752,13 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     r_copy["pending_level"] = "level_2"
                                     r_copy["subject_id"] = sid
                                     r_copy["subject_title"] = subject_info_map.get(sid, sid)
+                                    r_copy["submitted_at"] = r.get("scores_submitted_at")
+                                    r_copy["submitted_by"] = r.get("scores_submitted_by")
                                     all_reports.append(r_copy)
         
         # Level 3 & 4: Kiểm tra approval config
+        # Level 3, 4 duyệt toàn bộ report card
+        # Điều kiện để đến Level 3: cả homeroom và scores đều đã level_2_approved
         if not level or level in ["review", "publish"]:
             configs = frappe.get_all(
                 "SIS Report Card Approval Config",
@@ -1776,14 +1785,16 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             fields=["name", "title"]
                         )
                         for tmpl in templates:
+                            # Lấy reports có cả 2 sections đều level_2_approved
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "approval_status": "level_2_approved",
+                                    "homeroom_approval_status": "level_2_approved",
+                                    "scores_approval_status": "level_2_approved",
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "class_id", "submitted_at", "submitted_by"]
+                                fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at"]
                             )
                             for r in reports:
                                 r["template_id"] = tmpl.name
@@ -1791,6 +1802,11 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 r["pending_level"] = "review"
                                 r["subject_id"] = None
                                 r["subject_title"] = "Toàn bộ báo cáo"
+                                # Lấy submitted_at muộn nhất giữa 2 sections
+                                r["submitted_at"] = max(
+                                    r.get("homeroom_submitted_at") or "",
+                                    r.get("scores_submitted_at") or ""
+                                ) or None
                                 all_reports.append(r)
                 
                 # Check if user is L4 approver
@@ -1811,6 +1827,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             fields=["name", "title"]
                         )
                         for tmpl in templates:
+                            # Level 4: approval_status = reviewed (toàn bộ report đã qua review)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
@@ -1894,6 +1911,12 @@ def approve_class_reports():
     Batch approve tất cả reports trong 1 class cho 1 subject.
     Chuyển trạng thái sang level tiếp theo.
     
+    Level 1, 2 sử dụng section-specific fields:
+    - subject_id = null -> homeroom_approval_status
+    - subject_id != null -> scores_approval_status
+    
+    Level 3, 4 (review, publish) dùng approval_status chung (toàn bộ report).
+    
     Request body:
         {
             "template_id": "...",
@@ -1932,13 +1955,34 @@ def approve_class_reports():
         user = frappe.session.user
         campus_id = get_current_campus_id()
         
-        # Xác định current_status và next_status dựa trên pending_level
-        status_map = {
-            "level_1": {"current": ["submitted"], "next": "level_1_approved"},
-            "level_2": {"current": ["submitted", "level_1_approved"], "next": "level_2_approved"},
-            "review": {"current": ["level_2_approved"], "next": "reviewed"},
-            "publish": {"current": ["reviewed"], "next": "published"}
-        }
+        # Xác định section dựa trên subject_id
+        is_homeroom = not subject_id
+        section = "homeroom" if is_homeroom else "scores"
+        
+        # Mapping status field theo section và level
+        if pending_level in ["level_1", "level_2"]:
+            # Level 1, 2 dùng section-specific fields
+            status_field = f"{section}_approval_status"
+            status_map = {
+                "level_1": {"current": ["submitted"], "next": "level_1_approved"},
+                "level_2": {"current": ["submitted", "level_1_approved"], "next": "level_2_approved"}
+            }
+            # Field mapping cho section-specific
+            field_map = {
+                "level_1": (f"{section}_level_1_approved_at", f"{section}_level_1_approved_by"),
+                "level_2": (f"{section}_level_2_approved_at", f"{section}_level_2_approved_by")
+            }
+        else:
+            # Level 3, 4 dùng approval_status chung
+            status_field = "approval_status"
+            status_map = {
+                "review": {"current": ["level_2_approved"], "next": "reviewed"},
+                "publish": {"current": ["reviewed"], "next": "published"}
+            }
+            field_map = {
+                "review": ("reviewed_at", "reviewed_by"),
+                "publish": ("approved_at", "approved_by")
+            }
         
         if pending_level not in status_map:
             return error_response(f"Invalid pending_level: {pending_level}", code="INVALID_LEVEL")
@@ -1950,14 +1994,14 @@ def approve_class_reports():
         filters = {
             "template_id": template_id,
             "class_id": class_id,
-            "approval_status": ["in", current_statuses],
+            status_field: ["in", current_statuses],
             "campus_id": campus_id
         }
         
         reports = frappe.get_all(
             "SIS Student Report Card",
             filters=filters,
-            fields=["name", "student_id", "approval_status"]
+            fields=["name", "student_id", status_field]
         )
         
         if not reports:
@@ -1970,20 +2014,12 @@ def approve_class_reports():
         errors = []
         now = datetime.now()
         
-        # Field mapping cho mỗi level
-        field_map = {
-            "level_1": ("level_1_approved_at", "level_1_approved_by"),
-            "level_2": ("level_2_approved_at", "level_2_approved_by"),
-            "review": ("reviewed_at", "reviewed_by"),
-            "publish": ("approved_at", "approved_by")
-        }
-        
         at_field, by_field = field_map.get(pending_level, ("approved_at", "approved_by"))
         
         for report_data in reports:
             try:
                 update_values = {
-                    "approval_status": next_status,
+                    status_field: next_status,
                     at_field: now,
                     by_field: user
                 }
@@ -2004,10 +2040,10 @@ def approve_class_reports():
                 report = frappe.get_doc("SIS Student Report Card", report_data.name)
                 _add_approval_history(
                     report,
-                    f"batch_{pending_level}",
+                    f"batch_{pending_level}_{section}",
                     user,
                     "approved",
-                    f"Class: {class_id}, Subject: {subject_id or 'homeroom'}. {comment}"
+                    f"Section: {section}, Class: {class_id}, Subject: {subject_id or 'homeroom'}. {comment}"
                 )
                 report.save(ignore_permissions=True)
                 
@@ -2036,13 +2072,14 @@ def approve_class_reports():
                 "template_id": template_id,
                 "class_id": class_id,
                 "subject_id": subject_id,
+                "section": section,
                 "pending_level": pending_level,
                 "next_status": next_status,
                 "approved_count": approved_count,
                 "total_reports": len(reports),
                 "errors": errors if errors else None
             },
-            message=f"Đã duyệt {approved_count}/{len(reports)} báo cáo thành công"
+            message=f"Đã duyệt {approved_count}/{len(reports)} báo cáo ({section}) thành công"
         )
         
     except Exception as e:
@@ -2055,6 +2092,12 @@ def reject_class_reports():
     """
     Batch reject tất cả reports trong 1 class cho 1 subject.
     Chuyển trạng thái về 'rejected' và lưu lý do.
+    
+    Level 1, 2 sử dụng section-specific fields:
+    - subject_id = null -> homeroom_approval_status
+    - subject_id != null -> scores_approval_status
+    
+    Level 3, 4 dùng approval_status chung.
     
     Request body:
         {
@@ -2100,13 +2143,36 @@ def reject_class_reports():
         user = frappe.session.user
         campus_id = get_current_campus_id()
         
-        # Xác định current_status dựa trên pending_level
-        status_map = {
-            "level_1": ["submitted"],
-            "level_2": ["submitted", "level_1_approved"],
-            "review": ["level_2_approved"],
-            "publish": ["reviewed"]
-        }
+        # Xác định section dựa trên subject_id
+        is_homeroom = not subject_id
+        section = "homeroom" if is_homeroom else "scores"
+        
+        # Xác định status field và current_status dựa trên pending_level
+        if pending_level in ["level_1", "level_2"]:
+            status_field = f"{section}_approval_status"
+            status_map = {
+                "level_1": ["submitted"],
+                "level_2": ["submitted", "level_1_approved"]
+            }
+            # Rejection fields cho section-specific
+            rejection_fields = {
+                "status_field": status_field,
+                "rejected_at": f"{section}_rejected_at",
+                "rejected_by": f"{section}_rejected_by",
+                "rejection_reason": f"{section}_rejection_reason"
+            }
+        else:
+            status_field = "approval_status"
+            status_map = {
+                "review": ["level_2_approved"],
+                "publish": ["reviewed"]
+            }
+            rejection_fields = {
+                "status_field": status_field,
+                "rejected_at": "rejected_at",
+                "rejected_by": "rejected_by",
+                "rejection_reason": "rejection_reason"
+            }
         
         if pending_level not in status_map:
             return error_response(f"Invalid pending_level: {pending_level}", code="INVALID_LEVEL")
@@ -2117,14 +2183,14 @@ def reject_class_reports():
         filters = {
             "template_id": template_id,
             "class_id": class_id,
-            "approval_status": ["in", current_statuses],
+            status_field: ["in", current_statuses],
             "campus_id": campus_id
         }
         
         reports = frappe.get_all(
             "SIS Student Report Card",
             filters=filters,
-            fields=["name", "student_id", "approval_status"]
+            fields=["name", "student_id", status_field]
         )
         
         if not reports:
@@ -2139,15 +2205,17 @@ def reject_class_reports():
         
         for report_data in reports:
             try:
+                update_values = {
+                    rejection_fields["status_field"]: "rejected",
+                    rejection_fields["rejected_at"]: now,
+                    rejection_fields["rejected_by"]: user,
+                    rejection_fields["rejection_reason"]: reason
+                }
+                
                 frappe.db.set_value(
                     "SIS Student Report Card",
                     report_data.name,
-                    {
-                        "approval_status": "rejected",
-                        "rejected_at": now,
-                        "rejected_by": user,
-                        "rejection_reason": reason
-                    },
+                    update_values,
                     update_modified=True
                 )
                 
@@ -2155,10 +2223,10 @@ def reject_class_reports():
                 report = frappe.get_doc("SIS Student Report Card", report_data.name)
                 _add_approval_history(
                     report,
-                    f"batch_reject_{pending_level}",
+                    f"batch_reject_{pending_level}_{section}",
                     user,
                     "rejected",
-                    f"Class: {class_id}, Subject: {subject_id or 'homeroom'}. Reason: {reason}"
+                    f"Section: {section}, Class: {class_id}, Subject: {subject_id or 'homeroom'}. Reason: {reason}"
                 )
                 report.save(ignore_permissions=True)
                 
@@ -2178,13 +2246,14 @@ def reject_class_reports():
                 "template_id": template_id,
                 "class_id": class_id,
                 "subject_id": subject_id,
+                "section": section,
                 "pending_level": pending_level,
                 "rejected_count": rejected_count,
                 "total_reports": len(reports),
                 "reason": reason,
                 "errors": errors if errors else None
             },
-            message=f"Đã trả về {rejected_count}/{len(reports)} báo cáo"
+            message=f"Đã trả về {rejected_count}/{len(reports)} báo cáo ({section})"
         )
         
     except Exception as e:
