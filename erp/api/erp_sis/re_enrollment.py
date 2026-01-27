@@ -1386,14 +1386,17 @@ def update_submission():
         
         # Chỉ gửi thông báo khi có thay đổi quan trọng (Trạng thái hoặc Khảo sát)
         # KHÔNG gửi khi chỉ thay đổi payment_status hoặc thêm note
+        # KHÔNG gửi khi config đã đóng (is_active = false)
         if important_changes:
             try:
                 from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
                 
-                # Lấy thông tin năm học
+                # Lấy thông tin config và năm học
                 school_year = ""
+                config_is_active = False
                 try:
                     config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+                    config_is_active = config_doc.is_active
                     school_year_info = frappe.db.get_value(
                         "SIS School Year",
                         config_doc.school_year_id,
@@ -1405,35 +1408,39 @@ def update_submission():
                 except:
                     pass
                 
-                # Lấy answers từ submission để gửi vào announcement
-                answers_for_announcement = []
-                for answer in submission.answers:
-                    answers_for_announcement.append({
-                        'question_text_vn': answer.question_text_vn,
-                        'question_text_en': answer.question_text_en,
-                        'selected_options_text_vn': answer.selected_options_text_vn,
-                        'selected_options_text_en': answer.selected_options_text_en
-                    })
-                
-                _create_re_enrollment_announcement(
-                    student_id=submission.student_id,
-                    student_name=submission.student_name,
-                    student_code=submission.student_code,
-                    submission_data={
-                        'decision': submission.decision,
-                        'payment_type': submission.payment_type,
-                        'discount_name': submission.selected_discount_name,
-                        'discount_percent': submission.selected_discount_percent,
-                        'discount_deadline': str(submission.selected_discount_deadline) if submission.selected_discount_deadline else None,
-                        'reason': submission.not_re_enroll_reason,
-                        'school_year': school_year,
-                        'submitted_at': str(now()),
-                        'status': submission.status or 'pending',
-                        'answers': answers_for_announcement  # Câu trả lời khảo sát
-                    },
-                    is_update=True
-                )
-                logs.append(f"Đã gửi thông báo cập nhật cho phụ huynh (thay đổi: {', '.join(important_changes)})")
+                # Chỉ gửi notification nếu config còn active
+                if not config_is_active:
+                    logs.append("Không gửi thông báo (kỳ tái ghi danh đã đóng)")
+                else:
+                    # Lấy answers từ submission để gửi vào announcement
+                    answers_for_announcement = []
+                    for answer in submission.answers:
+                        answers_for_announcement.append({
+                            'question_text_vn': answer.question_text_vn,
+                            'question_text_en': answer.question_text_en,
+                            'selected_options_text_vn': answer.selected_options_text_vn,
+                            'selected_options_text_en': answer.selected_options_text_en
+                        })
+                    
+                    _create_re_enrollment_announcement(
+                        student_id=submission.student_id,
+                        student_name=submission.student_name,
+                        student_code=submission.student_code,
+                        submission_data={
+                            'decision': submission.decision,
+                            'payment_type': submission.payment_type,
+                            'discount_name': submission.selected_discount_name,
+                            'discount_percent': submission.selected_discount_percent,
+                            'discount_deadline': str(submission.selected_discount_deadline) if submission.selected_discount_deadline else None,
+                            'reason': submission.not_re_enroll_reason,
+                            'school_year': school_year,
+                            'submitted_at': str(now()),
+                            'status': submission.status or 'pending',
+                            'answers': answers_for_announcement  # Câu trả lời khảo sát
+                        },
+                        is_update=True
+                    )
+                    logs.append(f"Đã gửi thông báo cập nhật cho phụ huynh (thay đổi: {', '.join(important_changes)})")
             except Exception as notif_err:
                 logs.append(f"Lỗi gửi thông báo: {str(notif_err)}")
                 frappe.logger().error(f"Error sending admin update notification: {str(notif_err)}")
@@ -2120,13 +2127,16 @@ def update_submission_decision():
         logs.append(f"Đã cập nhật decision thành công")
         
         # Gửi thông báo cho phụ huynh về việc cập nhật quyết định
+        # Gửi thông báo nếu config còn active
         try:
             from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
             
-            # Lấy thông tin năm học
+            # Lấy thông tin config và năm học
             school_year = ""
+            config_is_active = False
             try:
                 config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+                config_is_active = config_doc.is_active
                 school_year_info = frappe.db.get_value(
                     "SIS School Year",
                     config_doc.school_year_id,
@@ -2138,35 +2148,39 @@ def update_submission_decision():
             except:
                 pass
             
-            # Lấy answers từ submission để gửi vào announcement
-            answers_for_announcement = []
-            for answer in submission.answers:
-                answers_for_announcement.append({
-                    'question_text_vn': answer.question_text_vn,
-                    'question_text_en': answer.question_text_en,
-                    'selected_options_text_vn': answer.selected_options_text_vn,
-                    'selected_options_text_en': answer.selected_options_text_en
-                })
-            
-            _create_re_enrollment_announcement(
-                student_id=submission.student_id,
-                student_name=submission.student_name,
-                student_code=submission.student_code,
-                submission_data={
-                    'decision': submission.decision,
-                    'payment_type': submission.payment_type,
-                    'discount_name': submission.selected_discount_name,
-                    'discount_percent': submission.selected_discount_percent,
-                    'discount_deadline': str(submission.selected_discount_deadline) if submission.selected_discount_deadline else None,
-                    'reason': submission.not_re_enroll_reason,
-                    'school_year': school_year,
-                    'submitted_at': str(now()),
-                    'status': submission.status or 'pending',
-                    'answers': answers_for_announcement  # Câu trả lời khảo sát
-                },
-                is_update=True
-            )
-            logs.append("Đã gửi thông báo cập nhật quyết định cho phụ huynh")
+            # Chỉ gửi notification nếu config còn active
+            if not config_is_active:
+                logs.append("Không gửi thông báo (kỳ tái ghi danh đã đóng)")
+            else:
+                # Lấy answers từ submission để gửi vào announcement
+                answers_for_announcement = []
+                for answer in submission.answers:
+                    answers_for_announcement.append({
+                        'question_text_vn': answer.question_text_vn,
+                        'question_text_en': answer.question_text_en,
+                        'selected_options_text_vn': answer.selected_options_text_vn,
+                        'selected_options_text_en': answer.selected_options_text_en
+                    })
+                
+                _create_re_enrollment_announcement(
+                    student_id=submission.student_id,
+                    student_name=submission.student_name,
+                    student_code=submission.student_code,
+                    submission_data={
+                        'decision': submission.decision,
+                        'payment_type': submission.payment_type,
+                        'discount_name': submission.selected_discount_name,
+                        'discount_percent': submission.selected_discount_percent,
+                        'discount_deadline': str(submission.selected_discount_deadline) if submission.selected_discount_deadline else None,
+                        'reason': submission.not_re_enroll_reason,
+                        'school_year': school_year,
+                        'submitted_at': str(now()),
+                        'status': submission.status or 'pending',
+                        'answers': answers_for_announcement  # Câu trả lời khảo sát
+                    },
+                    is_update=True
+                )
+                logs.append("Đã gửi thông báo cập nhật quyết định cho phụ huynh")
         except Exception as notif_err:
             logs.append(f"Lỗi gửi thông báo: {str(notif_err)}")
             frappe.logger().error(f"Error sending decision update notification: {str(notif_err)}")
@@ -2459,9 +2473,17 @@ def export_decision_template(config_id=None):
                             pass
                     answers_map[sub.name][ans.question_id] = selected_indices
         
+        # Lấy thêm thông tin not_re_enroll_reason từ submissions
+        submissions_with_reason = frappe.get_all(
+            "SIS Re-enrollment",
+            filters={"config_id": config_id},
+            fields=["name", "student_code", "student_name", "current_class", "decision", "selected_discount_id", "payment_type", "not_re_enroll_reason"],
+            order_by="student_code asc"
+        )
+        
         # Sheet 1: Danh sách học sinh - dùng tên cột tiếng Việt thân thiện
         students_data = []
-        for sub in submissions_full:
+        for sub in submissions_with_reason:
             # Chuyển decision sang tiếng Việt
             decision_vn = decision_map.get(sub.decision, '') if sub.decision else ''
             # Chuyển discount_id sang deadline
@@ -2475,10 +2497,11 @@ def export_decision_template(config_id=None):
                 "Lớp": sub.current_class or "",
                 "Quyết định": decision_vn,
                 "Ưu đãi (hạn đóng)": discount_deadline,
-                "Đóng theo": payment_type_vn
+                "Đóng theo": payment_type_vn,
+                "Lý do": sub.not_re_enroll_reason or ""  # Lý do cho Cân nhắc / Không tái ghi danh
             }
             
-            # Thêm cột cho mỗi câu hỏi khảo sát
+            # Thêm cột cho mỗi câu hỏi khảo sát (chỉ khi Tái ghi danh)
             for q in questions:
                 col_name = q['question_vn']
                 # Lấy câu trả lời hiện có (nếu có)
@@ -2498,6 +2521,7 @@ def export_decision_template(config_id=None):
             {"Cột": "Quyết định", "Mô tả": "Quyết định tái ghi danh (BẮT BUỘC)", "Giá trị hợp lệ": "Tái ghi danh | Cân nhắc | Không tái ghi danh"},
             {"Cột": "Ưu đãi (hạn đóng)", "Mô tả": "Hạn đóng tiền để hưởng ưu đãi (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Xem bảng ưu đãi bên dưới (điền ngày VD: 05/02/2026)"},
             {"Cột": "Đóng theo", "Mô tả": "Đóng tiền theo năm hay theo kỳ (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Theo năm | Theo kỳ"},
+            {"Cột": "Lý do", "Mô tả": "Lý do (BẮT BUỘC nếu Cân nhắc hoặc Không tái ghi danh)", "Giá trị hợp lệ": "Điền lý do tự do"},
         ]
         # Thêm hướng dẫn cho các cột câu hỏi khảo sát
         for q in questions:
@@ -2718,6 +2742,10 @@ def import_decision_from_excel():
             'Đóng theo': 'payment_type',
             'đóng theo': 'payment_type',
             'Đóng Theo': 'payment_type',
+            'Lý do': 'reason',
+            'lý do': 'reason',
+            'Ly do': 'reason',
+            'reason': 'reason',
         }
         df = df.rename(columns=column_mapping)
         
@@ -2910,6 +2938,13 @@ def import_decision_from_excel():
                     submission.selected_discount_deadline = None
                     submission.selected_discount_percent = None
                     submission.payment_type = None
+                    
+                    # Lấy lý do từ Excel
+                    reason_raw = str(row.get('reason', '')).strip() if pd.notna(row.get('reason')) else ''
+                    if reason_raw and reason_raw.lower() != 'nan':
+                        submission.not_re_enroll_reason = reason_raw
+                    else:
+                        submission.not_re_enroll_reason = None
                 
                 # Xử lý câu trả lời khảo sát (chỉ khi Tái ghi danh)
                 if decision == 're_enroll' and questions:
@@ -2924,8 +2959,8 @@ def import_decision_from_excel():
                         logs.append(f"Các câu hỏi khảo sát: {[q['question_vn'] for q in questions]}")
                     
                     # Lấy các cột ngoài các cột chuẩn (có thể là cột câu hỏi)
-                    standard_cols = ['student_code', 'student_name', 'current_class', 'decision', 'discount_deadline', 'payment_type',
-                                     'Mã học sinh', 'Họ tên', 'Lớp', 'Quyết định', 'Ưu đãi (hạn đóng)', 'Đóng theo']
+                    standard_cols = ['student_code', 'student_name', 'current_class', 'decision', 'discount_deadline', 'payment_type', 'reason',
+                                     'Mã học sinh', 'Họ tên', 'Lớp', 'Quyết định', 'Ưu đãi (hạn đóng)', 'Đóng theo', 'Lý do']
                     extra_cols = [c for c in df_columns if c not in standard_cols]
                     
                     for q in questions:
