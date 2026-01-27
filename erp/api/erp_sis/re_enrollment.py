@@ -2986,6 +2986,10 @@ def import_decision_from_excel():
                                         selected_option_names.append(opt_match['name'])
                                         selected_options_text_vn.append(opt_match['option_vn'])
                                         selected_options_text_en.append(opt_match['option_en'])
+                                    else:
+                                        # Log để debug khi không tìm thấy option
+                                        if row_num == 2:
+                                            logs.append(f"KHÔNG tìm thấy option idx={idx_int} cho câu hỏi '{q['question_vn']}'. Options hiện có: {q['options']}")
                                 except ValueError:
                                     pass  # Bỏ qua nếu không parse được số
                             
