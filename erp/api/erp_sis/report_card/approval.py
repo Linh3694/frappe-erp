@@ -1665,6 +1665,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
         if not level or level == "level_2":
             if teacher_id:
                 # Tổ trưởng duyệt homeroom - query theo homeroom_approval_status
+                # Bao gồm cả reports bị trả về từ Level 3 (có rejection_reason)
                 templates_l2 = frappe.get_all(
                     "SIS Report Card Template",
                     filters={"homeroom_reviewer_level_2": teacher_id, "campus_id": campus_id},
@@ -1678,7 +1679,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             "homeroom_approval_status": ["in", ["submitted", "level_1_approved"]],
                             "campus_id": campus_id
                         },
-                        fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by"]
+                        fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by", 
+                                "rejection_reason", "rejected_from_level", "rejected_at"]
                     )
                     for r in reports:
                         r["template_id"] = tmpl.name
@@ -1688,6 +1690,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         r["subject_title"] = "Nhận xét chủ nhiệm"
                         r["submitted_at"] = r.get("homeroom_submitted_at")
                         r["submitted_by"] = r.get("homeroom_submitted_by")
+                        # Kiểm tra nếu bị reject từ L3 (rejected_from_level = 3)
+                        if r.get("rejected_from_level") == 3:
+                            r["was_rejected"] = True
                         all_reports.append(r)
                 
                 # Subject Manager - Query theo scores_approval_status
@@ -1735,6 +1740,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         
                         if matching_subjects:
                             # Lấy reports theo scores_approval_status = submitted
+                            # Bao gồm cả reports bị trả về từ Level 3 (có rejection_reason)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
@@ -1742,7 +1748,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     "scores_approval_status": "submitted",
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "class_id", "scores_submitted_at", "scores_submitted_by"]
+                                fields=["name", "class_id", "scores_submitted_at", "scores_submitted_by",
+                                        "rejection_reason", "rejected_from_level", "rejected_at"]
                             )
                             for r in reports:
                                 for sid in matching_subjects:
@@ -1754,6 +1761,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     r_copy["subject_title"] = subject_info_map.get(sid, sid)
                                     r_copy["submitted_at"] = r.get("scores_submitted_at")
                                     r_copy["submitted_by"] = r.get("scores_submitted_by")
+                                    # Kiểm tra nếu bị reject từ L3
+                                    if r.get("rejected_from_level") == 3:
+                                        r_copy["was_rejected"] = True
                                     all_reports.append(r_copy)
         
         # Level 3 & 4: Kiểm tra approval config
@@ -1786,6 +1796,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         )
                         for tmpl in templates:
                             # Lấy reports có cả 2 sections đều level_2_approved
+                            # Bao gồm cả reports bị reject từ Level 4 (có rejection_reason)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
@@ -1794,7 +1805,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     "scores_approval_status": "level_2_approved",
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at"]
+                                fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at",
+                                        "rejection_reason", "rejected_from_level", "rejected_at"]
                             )
                             for r in reports:
                                 r["template_id"] = tmpl.name
@@ -1807,6 +1819,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     r.get("homeroom_submitted_at") or "",
                                     r.get("scores_submitted_at") or ""
                                 ) or None
+                                # Kiểm tra nếu bị reject từ L4
+                                if r.get("rejected_from_level") == 4:
+                                    r["was_rejected"] = True
                                 all_reports.append(r)
                 
                 # Check if user is L4 approver
@@ -1860,6 +1875,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     "student_count": 0,
                     "submitted_at": r.get("submitted_at"),
                     "submitted_by": r.get("submitted_by"),
+                    "rejection_reason": r.get("rejection_reason"),  # Lý do trả về
+                    "was_rejected": r.get("was_rejected", False),  # Flag bị trả về
+                    "rejected_from_level": r.get("rejected_from_level"),  # Level mà bị reject
                     "report_ids": set()  # Để tránh duplicate
                 }
             if r["name"] not in grouped[key]["report_ids"]:
@@ -1869,6 +1887,11 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                 if r.get("submitted_at") and (not grouped[key]["submitted_at"] or r["submitted_at"] > grouped[key]["submitted_at"]):
                     grouped[key]["submitted_at"] = r["submitted_at"]
                     grouped[key]["submitted_by"] = r.get("submitted_by")
+                # Cập nhật rejection info nếu có
+                if r.get("rejection_reason"):
+                    grouped[key]["rejection_reason"] = r["rejection_reason"]
+                    grouped[key]["was_rejected"] = True
+                    grouped[key]["rejected_from_level"] = r.get("rejected_from_level")
         
         # Convert to list và enrich với thông tin class
         results = []
@@ -2546,8 +2569,10 @@ def publish_batch_reports():
 def reject_single_report():
     """
     Reject (trả lại) một báo cáo từ Level 3 hoặc Level 4.
-    - Level 3 (level_2_approved) -> trả về level_1_approved hoặc submitted
-    - Level 4 (reviewed) -> trả về level_2_approved
+    Trả về level ngay dưới để duyệt lại, kèm lý do reject.
+    
+    - Reject từ L4 (reviewed) -> quay về L3 (level_2_approved)
+    - Reject từ L3 (level_2_approved) -> quay về L2 (level_1_approved hoặc submitted)
     
     Request body:
         {
@@ -2586,31 +2611,55 @@ def reject_single_report():
         current_status = getattr(report, 'approval_status', 'draft') or 'draft'
         now = datetime.now()
         
-        # Xác định target status dựa vào current status
-        if current_status == 'level_2_approved':
-            # Level 3 -> trả về level_1_approved (hoặc submitted nếu không có L1)
-            new_status = 'level_1_approved'
-        elif current_status == 'reviewed':
-            # Level 4 -> trả về level_2_approved
-            new_status = 'level_2_approved'
-        else:
+        # Chỉ cho phép reject từ Level 3 hoặc Level 4
+        if current_status not in ['level_2_approved', 'reviewed']:
             return error_response(
                 message=f"Không thể trả lại báo cáo ở trạng thái '{current_status}'",
                 code="INVALID_STATUS"
             )
         
-        # Cập nhật báo cáo
-        report.approval_status = new_status
+        # Xác định level mới dựa trên current status
+        # Reject từ L4 (reviewed) -> quay về L3 (level_2_approved)
+        # Reject từ L3 (level_2_approved) -> quay về L2 (level_1_approved)
+        if current_status == 'reviewed':
+            # Từ L4 -> quay về L3
+            new_status = 'level_2_approved'
+            rejected_from_level = 4
+            target_level = 3
+        else:  # level_2_approved
+            # Từ L3 -> quay về L2 (set section status về level_1_approved)
+            new_status = 'level_1_approved'
+            rejected_from_level = 3
+            target_level = 2
+        
+        # Lưu thông tin rejection
         report.rejection_reason = reason
         report.rejected_by = user
         report.rejected_at = now
+        report.rejected_from_level = rejected_from_level  # Field mới để biết reject từ level nào
+        
+        if current_status == 'reviewed':
+            # Từ L4 -> quay về L3: chỉ đổi approval_status
+            report.approval_status = new_status
+        else:
+            # Từ L3 -> quay về L2: đổi cả approval_status và section statuses
+            report.approval_status = new_status
+            report.homeroom_approval_status = new_status
+            report.scores_approval_status = new_status
+            # Cũng lưu rejection info cho từng section
+            report.homeroom_rejection_reason = reason
+            report.homeroom_rejected_by = user
+            report.homeroom_rejected_at = now
+            report.scores_rejection_reason = reason
+            report.scores_rejected_by = user
+            report.scores_rejected_at = now
         
         _add_approval_history(
             report,
-            f"reject_from_{current_status}",
+            f"reject_from_level_{rejected_from_level}",
             user,
             "rejected",
-            f"Trả lại từ {current_status} về {new_status}. Lý do: {reason}"
+            f"Trả lại từ Level {rejected_from_level} về Level {target_level}. Lý do: {reason}"
         )
         
         report.save(ignore_permissions=True)
@@ -2621,9 +2670,11 @@ def reject_single_report():
                 "report_id": report_id,
                 "previous_status": current_status,
                 "new_status": new_status,
+                "rejected_from_level": rejected_from_level,
+                "target_level": target_level,
                 "reason": reason
             },
-            message=f"Đã trả lại báo cáo về trạng thái '{new_status}'"
+            message=f"Đã trả lại báo cáo từ Level {rejected_from_level} về Level {target_level}"
         )
         
     except Exception as e:

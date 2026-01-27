@@ -59,7 +59,8 @@
   "rejection_section",
   "rejected_at",
   "rejected_by",
-  "rejection_reason"
+  "rejection_reason",
+  "rejected_from_level"
  ],
  "fields": [
   {"fieldname": "title", "fieldtype": "Data", "label": "Tiêu đề", "in_list_view": 1},
@@ -116,7 +117,8 @@
   {"fieldname": "rejection_section", "fieldtype": "Section Break", "label": "Thông tin trả về (chung)", "collapsible": 1},
   {"fieldname": "rejected_at", "fieldtype": "Datetime", "label": "Thời gian trả về", "read_only": 1},
   {"fieldname": "rejected_by", "fieldtype": "Link", "label": "Người trả về", "options": "User", "read_only": 1},
-  {"fieldname": "rejection_reason", "fieldtype": "Small Text", "label": "Lý do trả về", "read_only": 1}
+  {"fieldname": "rejection_reason", "fieldtype": "Small Text", "label": "Lý do trả về", "read_only": 1},
+  {"fieldname": "rejected_from_level", "fieldtype": "Int", "label": "Trả về từ Level", "read_only": 1, "description": "Level mà báo cáo bị reject (3 hoặc 4)"}
  ],
  "permissions": [
   {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "print": 1, "email": 1, "export": 1, "report": 1, "share": 1},
