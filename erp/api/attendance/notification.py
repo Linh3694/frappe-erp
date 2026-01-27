@@ -604,42 +604,42 @@ def should_skip_due_to_debounce_with_lock(employee_code, current_timestamp, chec
 				if isinstance(last_timestamp, str):
 					last_timestamp = frappe.utils.get_datetime(last_timestamp)
 				
-			# Tính time diff
-			time_diff = (current_timestamp - last_timestamp).total_seconds()
-			time_diff_min = time_diff / 60
-			
-			frappe.logger().info(f"⏱️ [Debounce-Lock] {employee_code} - diff: {time_diff:.1f}s ({time_diff_min:.2f} min)")
-			
-			# FIX: Tăng debounce time để tránh duplicate khi giờ cao điểm
-			# Nếu trong 45 giây và cùng event type, skip (tăng từ 30s lên 45s)
-			if time_diff < 45 and current_is_checkin == last_is_checkin:
-				frappe.logger().info(f"⏭️ [Debounce-Lock] SKIPPING {employee_code} - same event within 45s")
-				return (True, False)
-			
-			# Nếu trong 90 giây và total_check_ins không đổi, skip (tăng từ 60s lên 90s)
-			if time_diff < 90 and total_check_ins and last_check_ins == total_check_ins:
-				frappe.logger().info(f"⏭️ [Debounce-Lock] SKIPPING {employee_code} - same check_ins within 90s")
-				return (True, False)
+				# Tính time diff
+				time_diff = (current_timestamp - last_timestamp).total_seconds()
+				time_diff_min = time_diff / 60
 				
+				frappe.logger().info(f"⏱️ [Debounce-Lock] {employee_code} - diff: {time_diff:.1f}s ({time_diff_min:.2f} min)")
+				
+				# FIX: Tăng debounce time để tránh duplicate khi giờ cao điểm
+				# Nếu trong 45 giây và cùng event type, skip (tăng từ 30s lên 45s)
+				if time_diff < 45 and current_is_checkin == last_is_checkin:
+					frappe.logger().info(f"⏭️ [Debounce-Lock] SKIPPING {employee_code} - same event within 45s")
+					return (True, False)
+				
+				# Nếu trong 90 giây và total_check_ins không đổi, skip (tăng từ 60s lên 90s)
+				if time_diff < 90 and total_check_ins and last_check_ins == total_check_ins:
+					frappe.logger().info(f"⏭️ [Debounce-Lock] SKIPPING {employee_code} - same check_ins within 90s")
+					return (True, False)
+					
 			except Exception as parse_error:
 				frappe.logger().warning(f"⚠️ [Debounce-Lock] Cache parse error: {str(parse_error)}")
 		
-	# Step 2: Try to acquire lock
-	# Sử dụng Redis SETNX pattern: set lock nếu chưa tồn tại
-	lock_value = f"{request_id}:{current_timestamp.isoformat()}"
-	
-	# Kiểm tra lock hiện tại
-	existing_lock = redis.get_value(lock_key)
-	
-	if existing_lock:
-		# Lock đang tồn tại, nghĩa là có request khác đang xử lý
-		frappe.logger().info(f"🔒 [Debounce-Lock] {employee_code} - Lock exists, SKIPPING (existing: {existing_lock})")
-		return (True, False)
-	
-	# FIX: Tăng TTL lên 60 giây để tránh race condition khi xử lý notification lâu
-	# (gửi push notification có thể mất 2-5 giây, nếu có retry còn lâu hơn)
-	redis.set_value(lock_key, lock_value, expires_in_sec=60)
-	frappe.logger().info(f"🔓 [Debounce-Lock] {employee_code} - Acquired lock: {request_id} (TTL: 60s)")
+		# Step 2: Try to acquire lock
+		# Sử dụng Redis SETNX pattern: set lock nếu chưa tồn tại
+		lock_value = f"{request_id}:{current_timestamp.isoformat()}"
+		
+		# Kiểm tra lock hiện tại
+		existing_lock = redis.get_value(lock_key)
+		
+		if existing_lock:
+			# Lock đang tồn tại, nghĩa là có request khác đang xử lý
+			frappe.logger().info(f"🔒 [Debounce-Lock] {employee_code} - Lock exists, SKIPPING (existing: {existing_lock})")
+			return (True, False)
+		
+		# FIX: Tăng TTL lên 60 giây để tránh race condition khi xử lý notification lâu
+		# (gửi push notification có thể mất 2-5 giây, nếu có retry còn lâu hơn)
+		redis.set_value(lock_key, lock_value, expires_in_sec=60)
+		frappe.logger().info(f"🔓 [Debounce-Lock] {employee_code} - Acquired lock: {request_id} (TTL: 60s)")
 		
 		# Step 3: Update cache NGAY LẬP TỨC (trước khi gửi notification)
 		# Điều này đảm bảo request tiếp theo sẽ thấy cache mới
