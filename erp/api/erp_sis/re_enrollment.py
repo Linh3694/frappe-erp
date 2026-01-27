@@ -3003,24 +3003,25 @@ def import_decision_from_excel():
                                 except ValueError:
                                     pass  # Bỏ qua nếu không parse được số
                             
-                            if selected_option_names:
+                            if selected_options_text_vn:
                                 # Validate single_choice chỉ được chọn 1
-                                if q['question_type'] == 'single_choice' and len(selected_option_names) > 1:
+                                if q['question_type'] == 'single_choice' and len(selected_options_text_vn) > 1:
                                     selected_option_names = [selected_option_names[0]]
                                     selected_options_text_vn = [selected_options_text_vn[0]]
                                     selected_options_text_en = [selected_options_text_en[0]]
                                 
                                 # Thêm câu trả lời
+                                # Frontend expect selected_options chứa option_vn (text), không phải ID
                                 submission.append('answers', {
                                     'question_id': q['name'],
                                     'question_text_vn': q['question_vn'],
                                     'question_text_en': q['question_en'],
-                                    'selected_options': json.dumps(selected_option_names),
+                                    'selected_options': json.dumps(selected_options_text_vn),  # Lưu text, không phải ID
                                     'selected_options_text_vn': ', '.join(selected_options_text_vn),
                                     'selected_options_text_en': ', '.join(selected_options_text_en)
                                 })
                                 if row_num == 2:
-                                    logs.append(f"Đã thêm câu trả lời cho '{q['question_vn']}': options={selected_option_names}, text={selected_options_text_vn}")
+                                    logs.append(f"Đã thêm câu trả lời cho '{q['question_vn']}': options={selected_options_text_vn}")
                             else:
                                 if row_num == 2:
                                     logs.append(f"KHÔNG có option nào được chọn cho câu hỏi '{q['question_vn']}' với giá trị '{answer_raw}'")
