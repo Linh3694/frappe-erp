@@ -2369,20 +2369,25 @@ def export_decision_template(config_id=None):
         )
         
         # Lấy danh sách câu hỏi khảo sát từ config
+        import json as json_lib
         questions = []
         config_doc = frappe.get_doc("SIS Re-enrollment Config", config_id)
         if hasattr(config_doc, 'questions') and config_doc.questions:
             for q in config_doc.questions:
-                # Lấy các options của câu hỏi
+                # Options được lưu trong options_json (JSON string)
                 options = []
-                if hasattr(q, 'options') and q.options:
-                    for idx, opt in enumerate(q.options, 1):
-                        options.append({
-                            "idx": idx,
-                            "name": opt.name,
-                            "option_vn": opt.option_vn,
-                            "option_en": opt.option_en
-                        })
+                if q.options_json:
+                    try:
+                        options_data = json_lib.loads(q.options_json) if isinstance(q.options_json, str) else q.options_json
+                        for idx, opt in enumerate(options_data, 1):
+                            options.append({
+                                "idx": idx,
+                                "name": opt.get('name') or f"opt_{idx}",
+                                "option_vn": opt.get('option_vn') or opt.get('text_vn') or '',
+                                "option_en": opt.get('option_en') or opt.get('text_en') or ''
+                            })
+                    except Exception as e:
+                        logs.append(f"Lỗi parse options_json: {str(e)}")
                 questions.append({
                     "name": q.name,
                     "question_vn": q.question_vn,
@@ -2668,14 +2673,19 @@ def import_decision_from_excel():
         if hasattr(config_doc, 'questions') and config_doc.questions:
             for q in config_doc.questions:
                 options = []
-                if hasattr(q, 'options') and q.options:
-                    for idx, opt in enumerate(q.options, 1):
-                        options.append({
-                            "idx": idx,
-                            "name": opt.name,
-                            "option_vn": opt.option_vn,
-                            "option_en": opt.option_en
-                        })
+                # Options được lưu trong options_json (JSON string)
+                if q.options_json:
+                    try:
+                        options_data = json.loads(q.options_json) if isinstance(q.options_json, str) else q.options_json
+                        for idx, opt in enumerate(options_data, 1):
+                            options.append({
+                                "idx": idx,
+                                "name": opt.get('name') or f"opt_{idx}",
+                                "option_vn": opt.get('option_vn') or opt.get('text_vn') or '',
+                                "option_en": opt.get('option_en') or opt.get('text_en') or ''
+                            })
+                    except Exception as e:
+                        logs.append(f"Lỗi parse options_json cho câu hỏi '{q.question_vn}': {str(e)}")
                 questions.append({
                     "name": q.name,
                     "question_vn": q.question_vn,
