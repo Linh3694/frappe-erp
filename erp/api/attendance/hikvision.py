@@ -278,57 +278,58 @@ def handle_hikvision_event():
 			events_processed = 0
 			errors = []
 			
-		for post in posts_to_process:
-			try:
-				# Extract employee information
-				employee_code = (
-					post.get("employeeNoString") or 
-					post.get("FPID") or 
-					post.get("cardNo") or 
-					post.get("employeeCode") or 
-					post.get("userID")
-				)
-				employee_name = post.get("name")
-				timestamp = post.get("dateTime") or date_time
-				device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
-				device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
-				
-				# Skip if no employee data
-				if not employee_code or not timestamp:
-					logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
-					continue
-				
-				# Xử lý trực tiếp
-				# Lấy subEventType để xác định loại sự kiện (7 = Invalid Time Period)
-				sub_event_type = post.get("subEventType")
-				
-				event_data_direct = {
-					"employee_code": employee_code,
-					"employee_name": employee_name,
-					"timestamp": timestamp,
-					"device_id": device_id,
-					"device_name": device_name,
-					"event_type": event_type,
-					"sub_event_type": sub_event_type,  # Thêm subEventType để check Invalid Time Period
-					"similarity": post.get("similarity"),
-					"face_id_name": post.get("name"),
-					"received_at": frappe.utils.now()
-				}
-				
-				success = process_single_attendance_event(event_data_direct)
-				if success:
-					events_processed += 1
-					logger.info(f"✅ Processed event for {employee_code} at {timestamp}")
-				else:
-					errors.append({"employee_code": employee_code, "error": "Processing failed"})
-				
-			except Exception as post_error:
-				logger.error(f"❌ Error processing post: {str(post_error)}")
-				errors.append({
-					"post": str(post)[:200],
-					"error": str(post_error)
-				})
+			for post in posts_to_process:
+				try:
+					# Extract employee information
+					employee_code = (
+						post.get("employeeNoString") or 
+						post.get("FPID") or 
+						post.get("cardNo") or 
+						post.get("employeeCode") or 
+						post.get("userID")
+					)
+					employee_name = post.get("name")
+					timestamp = post.get("dateTime") or date_time
+					device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
+					device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
+					
+					# Skip if no employee data
+					if not employee_code or not timestamp:
+						logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
+						continue
+					
+					# Xử lý trực tiếp
+					# Lấy subEventType để xác định loại sự kiện (7 = Invalid Time Period)
+					sub_event_type = post.get("subEventType")
+					
+					event_data_direct = {
+						"employee_code": employee_code,
+						"employee_name": employee_name,
+						"timestamp": timestamp,
+						"device_id": device_id,
+						"device_name": device_name,
+						"event_type": event_type,
+						"sub_event_type": sub_event_type,  # Thêm subEventType để check Invalid Time Period
+						"similarity": post.get("similarity"),
+						"face_id_name": post.get("name"),
+						"received_at": frappe.utils.now()
+					}
+					
+					success = process_single_attendance_event(event_data_direct)
+					if success:
+						events_processed += 1
+						logger.info(f"✅ Processed event for {employee_code} at {timestamp}")
+					else:
+						errors.append({"employee_code": employee_code, "error": "Processing failed"})
+					
+				except Exception as post_error:
+					logger.error(f"❌ Error processing post: {str(post_error)}")
+					errors.append({
+						"post": str(post)[:200],
+						"error": str(post_error)
+					})
 			
+			# Return response sau khi xử lý TẤT CẢ posts
 			response = {
 				"status": "success",
 				"message": f"Processed {events_processed} attendance events directly",
@@ -353,57 +354,57 @@ def handle_hikvision_event():
 			events_buffered = 0
 			errors = []
 			
-		for post in posts_to_process:
-			try:
-				# Extract employee information - prioritize employeeNoString
-				employee_code = (
-					post.get("employeeNoString") or 
-					post.get("FPID") or 
-					post.get("cardNo") or 
-					post.get("employeeCode") or 
-					post.get("userID")
-				)
-				employee_name = post.get("name")
-				timestamp = post.get("dateTime") or date_time
-				device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
-				device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
-				
-				# Skip if no employee data
-				if not employee_code or not timestamp:
-					logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
-					continue
-				
-				# Tạo event data để push vào buffer
-				# Lấy subEventType để xác định loại sự kiện (7 = Invalid Time Period)
-				sub_event_type = post.get("subEventType")
-				
-				buffer_event = {
-					"employee_code": employee_code,
-					"employee_name": employee_name,
-					"timestamp": timestamp,
-					"device_id": device_id,
-					"device_name": device_name,
-					"event_type": event_type,
-					"sub_event_type": sub_event_type,  # Thêm subEventType để check Invalid Time Period
-					"similarity": post.get("similarity"),
-					"face_id_name": post.get("name"),
-					"received_at": frappe.utils.now()
-				}
-				
-				# Push vào Redis buffer (O(1) operation - rất nhanh)
-				push_to_attendance_buffer(buffer_event)
-				events_buffered += 1
-				
-				logger.info(f"📥 Buffered event for {employee_code} at {timestamp}")
-				
-			except Exception as post_error:
-				logger.error(f"❌ Error buffering post: {str(post_error)}")
-				errors.append({
-					"post": str(post)[:200],
-					"error": str(post_error)
-				})
+			for post in posts_to_process:
+				try:
+					# Extract employee information - prioritize employeeNoString
+					employee_code = (
+						post.get("employeeNoString") or 
+						post.get("FPID") or 
+						post.get("cardNo") or 
+						post.get("employeeCode") or 
+						post.get("userID")
+					)
+					employee_name = post.get("name")
+					timestamp = post.get("dateTime") or date_time
+					device_id = post.get("ipAddress") or event_data.get("ipAddress") or post.get("deviceID")
+					device_name = post.get("deviceName") or event_data.get("deviceName") or "Unknown Device"
+					
+					# Skip if no employee data
+					if not employee_code or not timestamp:
+						logger.warning(f"⚠️ Skipping post - missing employee_code or timestamp")
+						continue
+					
+					# Tạo event data để push vào buffer
+					# Lấy subEventType để xác định loại sự kiện (7 = Invalid Time Period)
+					sub_event_type = post.get("subEventType")
+					
+					buffer_event = {
+						"employee_code": employee_code,
+						"employee_name": employee_name,
+						"timestamp": timestamp,
+						"device_id": device_id,
+						"device_name": device_name,
+						"event_type": event_type,
+						"sub_event_type": sub_event_type,  # Thêm subEventType để check Invalid Time Period
+						"similarity": post.get("similarity"),
+						"face_id_name": post.get("name"),
+						"received_at": frappe.utils.now()
+					}
+					
+					# Push vào Redis buffer (O(1) operation - rất nhanh)
+					push_to_attendance_buffer(buffer_event)
+					events_buffered += 1
+					
+					logger.info(f"📥 Buffered event for {employee_code} at {timestamp}")
+					
+				except Exception as post_error:
+					logger.error(f"❌ Error buffering post: {str(post_error)}")
+					errors.append({
+						"post": str(post)[:200],
+						"error": str(post_error)
+					})
 			
-			# Return response ngay lập tức - không đợi DB
+			# Return response sau khi buffer TẤT CẢ posts
 			response = {
 				"status": "success",
 				"message": f"Buffered {events_buffered} attendance events for processing",
