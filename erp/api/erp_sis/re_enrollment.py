@@ -2311,3 +2311,343 @@ def send_reminder_notification():
             logs=logs
         )
 
+
+# ==================== IMPORT/EXPORT DECISION EXCEL APIs ====================
+
+@frappe.whitelist(allow_guest=False, methods=['GET'])
+def export_decision_template(config_id=None):
+    """
+    Xuất file Excel mẫu để import quyết định tái ghi danh.
+    File Excel gồm:
+    - Sheet 1: Danh sách học sinh với các cột cần điền
+    - Sheet 2: Hướng dẫn với các giá trị hợp lệ
+    
+    GET params:
+        config_id: ID của đợt tái ghi danh
+    
+    Returns:
+        File Excel (.xlsx)
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        if not config_id:
+            config_id = frappe.request.args.get('config_id')
+        
+        if not config_id:
+            return validation_error_response(
+                "Thiếu config_id",
+                {"config_id": ["Config ID là bắt buộc"]}
+            )
+        
+        # Kiểm tra config tồn tại
+        if not frappe.db.exists("SIS Re-enrollment Config", config_id):
+            return not_found_response("Không tìm thấy cấu hình tái ghi danh")
+        
+        config = frappe.get_doc("SIS Re-enrollment Config", config_id)
+        logs.append(f"Xuất template cho config: {config.title}")
+        
+        # Lấy danh sách học sinh từ config
+        submissions = frappe.get_all(
+            "SIS Re-enrollment",
+            filters={"config_id": config_id},
+            fields=["name", "student_code", "student_name", "current_class", "decision", "selected_discount_id"],
+            order_by="student_code asc"
+        )
+        
+        logs.append(f"Số học sinh: {len(submissions)}")
+        
+        # Lấy bảng ưu đãi
+        discounts = frappe.get_all(
+            "SIS Re-enrollment Discount",
+            filters={"parent": config_id},
+            fields=["name", "deadline", "description", "annual_discount", "semester_discount"],
+            order_by="deadline asc"
+        )
+        
+        # Tạo file Excel
+        import pandas as pd
+        from io import BytesIO
+        
+        # Sheet 1: Danh sách học sinh
+        students_data = []
+        for sub in submissions:
+            students_data.append({
+                "student_code": sub.student_code or "",
+                "student_name": sub.student_name or "",
+                "current_class": sub.current_class or "",
+                "decision": sub.decision or "",  # Để trống nếu chưa có
+                "selected_discount_id": sub.selected_discount_id or ""  # Để trống nếu chưa có
+            })
+        
+        df_students = pd.DataFrame(students_data)
+        
+        # Sheet 2: Hướng dẫn
+        guide_data = [
+            {"Cột": "student_code", "Mô tả": "Mã học sinh (BẮT BUỘC, KHÔNG ĐƯỢC SỬA)", "Giá trị hợp lệ": "Mã học sinh trong hệ thống"},
+            {"Cột": "student_name", "Mô tả": "Tên học sinh (chỉ để tham khảo)", "Giá trị hợp lệ": "Không cần điền"},
+            {"Cột": "current_class", "Mô tả": "Lớp hiện tại (chỉ để tham khảo)", "Giá trị hợp lệ": "Không cần điền"},
+            {"Cột": "decision", "Mô tả": "Quyết định tái ghi danh (BẮT BUỘC)", "Giá trị hợp lệ": "re_enroll | considering | not_re_enroll"},
+            {"Cột": "selected_discount_id", "Mô tả": "ID ưu đãi (BẮT BUỘC nếu decision = re_enroll)", "Giá trị hợp lệ": "Xem danh sách ưu đãi bên dưới"},
+        ]
+        df_guide = pd.DataFrame(guide_data)
+        
+        # Sheet 3: Danh sách ưu đãi
+        discounts_data = []
+        for d in discounts:
+            discounts_data.append({
+                "discount_id": d.name,
+                "deadline": str(d.deadline) if d.deadline else "",
+                "description": d.description or "",
+                "annual_discount": f"{d.annual_discount}%" if d.annual_discount else "",
+                "semester_discount": f"{d.semester_discount}%" if d.semester_discount else ""
+            })
+        df_discounts = pd.DataFrame(discounts_data) if discounts_data else pd.DataFrame(columns=["discount_id", "deadline", "description", "annual_discount", "semester_discount"])
+        
+        # Ghi file Excel
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_students.to_excel(writer, sheet_name='Danh sách học sinh', index=False)
+            df_guide.to_excel(writer, sheet_name='Hướng dẫn', index=False)
+            df_discounts.to_excel(writer, sheet_name='Danh sách ưu đãi', index=False)
+        
+        output.seek(0)
+        
+        # Trả về file Excel
+        frappe.local.response.filename = f"re_enrollment_template_{config_id}.xlsx"
+        frappe.local.response.filecontent = output.getvalue()
+        frappe.local.response.type = "binary"
+        
+        logs.append("Xuất file thành công")
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Export Decision Template Error")
+        return error_response(
+            message=f"Lỗi khi xuất file: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=['POST'])
+def import_decision_from_excel():
+    """
+    Import quyết định tái ghi danh từ file Excel.
+    KHÔNG gửi notification đến phụ huynh.
+    
+    POST body (form-data):
+        file: File Excel (.xlsx, .xls)
+        config_id: ID của đợt tái ghi danh
+    
+    File Excel cần có các cột:
+        - student_code: Mã học sinh (BẮT BUỘC)
+        - decision: Quyết định (BẮT BUỘC): re_enroll | considering | not_re_enroll
+        - selected_discount_id: ID ưu đãi (BẮT BUỘC nếu decision = re_enroll)
+    
+    Returns:
+        {
+            "success_count": 10,
+            "error_count": 2,
+            "total_count": 12,
+            "errors": [{"row": 3, "error": "...", "data": {...}}]
+        }
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy file từ request
+        files = frappe.request.files
+        if 'file' not in files:
+            return validation_error_response(
+                "Thiếu file",
+                {"file": ["File Excel là bắt buộc"]}
+            )
+        
+        file = files['file']
+        config_id = frappe.form_dict.get('config_id') or frappe.request.form.get('config_id')
+        
+        if not config_id:
+            return validation_error_response(
+                "Thiếu config_id",
+                {"config_id": ["Config ID là bắt buộc"]}
+            )
+        
+        # Kiểm tra config tồn tại
+        if not frappe.db.exists("SIS Re-enrollment Config", config_id):
+            return not_found_response("Không tìm thấy cấu hình tái ghi danh")
+        
+        logs.append(f"Import quyết định cho config: {config_id}")
+        
+        # Lấy danh sách ưu đãi hợp lệ
+        valid_discount_ids = [d.name for d in frappe.get_all(
+            "SIS Re-enrollment Discount",
+            filters={"parent": config_id},
+            fields=["name"]
+        )]
+        logs.append(f"Ưu đãi hợp lệ: {valid_discount_ids}")
+        
+        # Lấy danh sách student_code trong config
+        valid_students = {
+            s.student_code: s.name
+            for s in frappe.get_all(
+                "SIS Re-enrollment",
+                filters={"config_id": config_id},
+                fields=["name", "student_code"]
+            )
+        }
+        logs.append(f"Số học sinh trong config: {len(valid_students)}")
+        
+        # Đọc file Excel
+        import pandas as pd
+        df = pd.read_excel(file)
+        
+        # Validate columns
+        required_cols = ['student_code', 'decision']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            return validation_error_response(
+                f"File thiếu các cột: {', '.join(missing_cols)}",
+                {"file": [f"Cần có các cột: student_code, decision, selected_discount_id"]}
+            )
+        
+        # Các giá trị hợp lệ cho decision
+        valid_decisions = ['re_enroll', 'considering', 'not_re_enroll']
+        
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            row_num = idx + 2  # Excel row number (1-indexed + header)
+            
+            try:
+                student_code = str(row.get('student_code', '')).strip()
+                decision = str(row.get('decision', '')).strip().lower()
+                selected_discount_id = str(row.get('selected_discount_id', '')).strip() if pd.notna(row.get('selected_discount_id')) else ''
+                
+                # Bỏ qua dòng trống
+                if not student_code or pd.isna(row.get('student_code')):
+                    continue
+                
+                # Bỏ qua dòng không có decision
+                if not decision or pd.isna(row.get('decision')) or decision == 'nan':
+                    continue
+                
+                # Validate student_code
+                if student_code not in valid_students:
+                    errors.append({
+                        "row": row_num,
+                        "error": f"Mã học sinh '{student_code}' không tồn tại trong đợt tái ghi danh này",
+                        "data": {"student_code": student_code}
+                    })
+                    error_count += 1
+                    continue
+                
+                # Validate decision
+                if decision not in valid_decisions:
+                    errors.append({
+                        "row": row_num,
+                        "error": f"Quyết định '{decision}' không hợp lệ. Giá trị hợp lệ: {', '.join(valid_decisions)}",
+                        "data": {"student_code": student_code, "decision": decision}
+                    })
+                    error_count += 1
+                    continue
+                
+                # Validate selected_discount_id nếu decision = re_enroll
+                if decision == 're_enroll':
+                    if not selected_discount_id or selected_discount_id == 'nan':
+                        errors.append({
+                            "row": row_num,
+                            "error": f"Cần chọn ưu đãi khi quyết định tái ghi danh",
+                            "data": {"student_code": student_code, "decision": decision}
+                        })
+                        error_count += 1
+                        continue
+                    
+                    if selected_discount_id not in valid_discount_ids:
+                        errors.append({
+                            "row": row_num,
+                            "error": f"ID ưu đãi '{selected_discount_id}' không hợp lệ",
+                            "data": {"student_code": student_code, "selected_discount_id": selected_discount_id}
+                        })
+                        error_count += 1
+                        continue
+                
+                # Cập nhật SIS Re-enrollment
+                submission_id = valid_students[student_code]
+                submission = frappe.get_doc("SIS Re-enrollment", submission_id)
+                
+                submission.decision = decision
+                submission.submitted_at = now()
+                submission.modified_by_admin = frappe.session.user
+                submission.admin_modified_at = now()
+                submission.agreement_accepted = 1  # Đánh dấu đã xác nhận
+                
+                if decision == 're_enroll':
+                    submission.selected_discount_id = selected_discount_id
+                    # Lấy thông tin ưu đãi
+                    discount_info = frappe.db.get_value(
+                        "SIS Re-enrollment Discount",
+                        selected_discount_id,
+                        ["deadline", "description", "annual_discount", "semester_discount"],
+                        as_dict=True
+                    )
+                    if discount_info:
+                        submission.selected_discount_name = discount_info.get("description") or selected_discount_id
+                        submission.selected_discount_deadline = discount_info.get("deadline")
+                        # Mặc định payment_type = annual nếu chưa có
+                        if not submission.payment_type:
+                            submission.payment_type = "annual"
+                        if submission.payment_type == "annual":
+                            submission.selected_discount_percent = discount_info.get("annual_discount")
+                        else:
+                            submission.selected_discount_percent = discount_info.get("semester_discount")
+                    submission.not_re_enroll_reason = None
+                else:
+                    # Không tái ghi danh hoặc đang cân nhắc
+                    submission.selected_discount_id = None
+                    submission.selected_discount_name = None
+                    submission.selected_discount_deadline = None
+                    submission.selected_discount_percent = None
+                    submission.payment_type = None
+                
+                submission.save(ignore_permissions=True)
+                success_count += 1
+                
+            except Exception as row_err:
+                errors.append({
+                    "row": row_num,
+                    "error": str(row_err),
+                    "data": {"student_code": str(row.get('student_code', ''))}
+                })
+                error_count += 1
+        
+        frappe.db.commit()
+        
+        logs.append(f"Import hoàn tất: {success_count} thành công, {error_count} lỗi")
+        
+        return success_response(
+            data={
+                "success_count": success_count,
+                "error_count": error_count,
+                "total_count": success_count + error_count,
+                "errors": errors[:50]  # Giới hạn 50 lỗi để tránh response quá lớn
+            },
+            message=f"Import hoàn tất: {success_count} thành công, {error_count} lỗi",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Import Decision Excel Error")
+        return error_response(
+            message=f"Lỗi khi import: {str(e)}",
+            logs=logs
+        )
+
