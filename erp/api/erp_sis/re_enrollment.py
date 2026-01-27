@@ -3009,6 +3009,11 @@ def import_decision_from_excel():
                                     'selected_options_text_vn': ', '.join(selected_options_text_vn),
                                     'selected_options_text_en': ', '.join(selected_options_text_en)
                                 })
+                                if row_num == 2:
+                                    logs.append(f"Đã thêm câu trả lời cho '{q['question_vn']}': options={selected_option_names}, text={selected_options_text_vn}")
+                            else:
+                                if row_num == 2:
+                                    logs.append(f"KHÔNG có option nào được chọn cho câu hỏi '{q['question_vn']}' với giá trị '{answer_raw}'")
                 
                 submission.save(ignore_permissions=True)
                 success_count += 1
