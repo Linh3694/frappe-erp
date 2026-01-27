@@ -361,7 +361,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                 }
             )
             
-            # Tính toán trạng thái tổng hợp
+            # Tính toán trạng thái tổng hợp phê duyệt
             homeroom_statuses = [r.get("homeroom_approval_status") or "draft" for r in student_reports]
             scores_statuses = [r.get("scores_approval_status") or "draft" for r in student_reports]
             
@@ -370,6 +370,15 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             row["student_report_count"] = len(student_reports)
             row["is_homeroom_teacher"] = is_homeroom_teacher
             row["is_subject_teacher"] = is_subject_teacher
+            
+            # Tính toán trạng thái hoàn thành nhập liệu
+            # GVCN: Đã hoàn thành nếu tất cả HS đều có homeroom_status != "draft"
+            # GVBM: Đã hoàn thành nếu tất cả HS đều có scores_status != "draft"
+            homeroom_completed = all(s != "draft" for s in homeroom_statuses) if homeroom_statuses else False
+            scores_completed = all(s != "draft" for s in scores_statuses) if scores_statuses else False
+            
+            row["homeroom_completed"] = homeroom_completed
+            row["scores_completed"] = scores_completed
         
         return success_response(data=rows, message="Templates with student reports fetched successfully")
     except Exception as e:
