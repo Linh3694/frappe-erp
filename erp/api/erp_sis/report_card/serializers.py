@@ -212,6 +212,9 @@ def doc_to_template_dict(doc) -> Dict[str, Any]:
         "conduct_ranking_year": getattr(doc, "conduct_ranking_year", None),
         "homeroom_titles": homeroom_titles,
         "homeroom_comment_options": homeroom_comment_options,
+        # Homeroom Approvers
+        "homeroom_reviewer_level_1": getattr(doc, "homeroom_reviewer_level_1", None) or '',
+        "homeroom_reviewer_level_2": getattr(doc, "homeroom_reviewer_level_2", None) or '',
         "subject_eval_enabled": 1 if getattr(doc, "subject_eval_enabled", 0) else 0,
         "intl_overall_mark_enabled": 1 if getattr(doc, "intl_overall_mark_enabled", 0) else 0,
         "intl_overall_grade_enabled": 1 if getattr(doc, "intl_overall_grade_enabled", 0) else 0,

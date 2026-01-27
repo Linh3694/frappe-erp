@@ -251,6 +251,9 @@ def create_template():
             "homeroom_conduct_year_enabled": 1 if data.get("homeroom_conduct_year_enabled") else 0,
             "conduct_ranking": data.get("conduct_ranking"),
             "conduct_ranking_year": data.get("conduct_ranking_year"),
+            # Homeroom Approvers
+            "homeroom_reviewer_level_1": data.get("homeroom_reviewer_level_1") or None,
+            "homeroom_reviewer_level_2": data.get("homeroom_reviewer_level_2") or None,
             "subject_eval_enabled": 1 if data.get("subject_eval_enabled") else 0,
         }
         
@@ -348,6 +351,8 @@ def update_template(template_id: Optional[str] = None):
             "scores_enabled", "academic_ranking", "academic_ranking_year",
             "student_achievement", "homeroom_enabled", "homeroom_conduct_enabled",
             "homeroom_conduct_year_enabled", "conduct_ranking", "conduct_ranking_year",
+            # Homeroom Approvers
+            "homeroom_reviewer_level_1", "homeroom_reviewer_level_2",
             "subject_eval_enabled", "intl_overall_mark_enabled", "intl_overall_grade_enabled",
             "intl_comment_enabled", "intl_scoreboard_enabled",
         ]
