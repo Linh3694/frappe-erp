@@ -1259,21 +1259,49 @@ def get_approval_config(education_stage_id: Optional[str] = None):
             fields=["name", "campus_id", "education_stage_id", "school_year_id", "is_active"]
         )
         
+        # Helper: Lấy full_name từ User qua teacher_id
+        def get_approver_with_full_name(approvers):
+            """Bổ sung full_name cho mỗi approver từ User doctype"""
+            result_approvers = []
+            for approver in approvers:
+                teacher_id = approver.get("teacher_id")
+                user_id = approver.get("user_id")
+                
+                # Nếu chưa có user_id, lấy từ SIS Teacher
+                if not user_id and teacher_id:
+                    user_id = frappe.db.get_value("SIS Teacher", teacher_id, "user_id")
+                
+                # Lấy full_name từ User doctype
+                full_name = None
+                if user_id:
+                    full_name = frappe.db.get_value("User", user_id, "full_name")
+                
+                result_approvers.append({
+                    "teacher_id": teacher_id,
+                    "teacher_name": full_name or approver.get("teacher_name") or user_id,
+                    "user_id": user_id
+                })
+            return result_approvers
+        
         result = []
         for config in configs:
             # Lấy L3 reviewers
-            l3_reviewers = frappe.get_all(
+            l3_reviewers_raw = frappe.get_all(
                 "SIS Report Card Approver",
                 filters={"parent": config.name, "parentfield": "level_3_reviewers"},
                 fields=["teacher_id", "teacher_name", "user_id"]
             )
             
             # Lấy L4 approvers
-            l4_approvers = frappe.get_all(
+            l4_approvers_raw = frappe.get_all(
                 "SIS Report Card Approver",
                 filters={"parent": config.name, "parentfield": "level_4_approvers"},
                 fields=["teacher_id", "teacher_name", "user_id"]
             )
+            
+            # Bổ sung full_name cho reviewers và approvers
+            l3_reviewers = get_approver_with_full_name(l3_reviewers_raw)
+            l4_approvers = get_approver_with_full_name(l4_approvers_raw)
             
             # Lấy tên education_stage (dùng title_vn hoặc title_en)
             education_stage_title = frappe.db.get_value(
