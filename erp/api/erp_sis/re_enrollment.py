@@ -2906,32 +2906,58 @@ def import_decision_from_excel():
                     # Xóa câu trả lời cũ (nếu có)
                     submission.answers = []
                     
-                    # Tạo mapping tên cột normalized -> tên cột gốc trong DataFrame
+                    # Lấy tất cả tên cột trong DataFrame
                     df_columns = list(df.columns)
-                    col_normalized_map = {str(c).strip().lower(): c for c in df_columns}
+                    # Log để debug
+                    if row_num == 2:  # Chỉ log 1 lần cho row đầu tiên
+                        logs.append(f"Các cột trong Excel: {df_columns}")
+                        logs.append(f"Các câu hỏi khảo sát: {[q['question_vn'] for q in questions]}")
+                    
+                    # Lấy các cột ngoài các cột chuẩn (có thể là cột câu hỏi)
+                    standard_cols = ['student_code', 'student_name', 'current_class', 'decision', 'discount_deadline', 'payment_type',
+                                     'Mã học sinh', 'Họ tên', 'Lớp', 'Quyết định', 'Ưu đãi (hạn đóng)', 'Đóng theo']
+                    extra_cols = [c for c in df_columns if c not in standard_cols]
                     
                     for q in questions:
                         col_name = q['question_vn']
-                        col_name_normalized = col_name.strip().lower()
                         
-                        # Tìm cột matching trong DataFrame (so sánh linh hoạt)
+                        # Tìm cột matching trong DataFrame
                         actual_col = None
+                        
+                        # 1. Khớp chính xác
                         if col_name in df_columns:
                             actual_col = col_name
-                        elif col_name_normalized in col_normalized_map:
-                            actual_col = col_normalized_map[col_name_normalized]
                         else:
-                            # Tìm cột chứa tên câu hỏi (cho trường hợp tên bị cắt ngắn)
+                            # 2. So sánh normalized (strip + lowercase)
+                            col_name_normalized = col_name.strip().lower()
                             for c in df_columns:
-                                if col_name_normalized in str(c).strip().lower() or str(c).strip().lower() in col_name_normalized:
+                                if str(c).strip().lower() == col_name_normalized:
                                     actual_col = c
                                     break
+                            
+                            # 3. Tìm cột chứa tên câu hỏi hoặc ngược lại
+                            if actual_col is None:
+                                for c in extra_cols:
+                                    c_norm = str(c).strip().lower()
+                                    if col_name_normalized in c_norm or c_norm in col_name_normalized:
+                                        actual_col = c
+                                        break
+                            
+                            # 4. So sánh theo index (cột thứ 7, 8, 9... là câu hỏi 1, 2, 3...)
+                            if actual_col is None and extra_cols:
+                                q_index = questions.index(q)
+                                if q_index < len(extra_cols):
+                                    actual_col = extra_cols[q_index]
+                                    if row_num == 2:
+                                        logs.append(f"Matching câu hỏi '{col_name}' với cột '{actual_col}' theo index {q_index}")
                         
                         answer_raw = ''
                         if actual_col is not None:
                             val = row.get(actual_col)
                             if pd.notna(val):
                                 answer_raw = str(val).strip()
+                                if row_num == 2:
+                                    logs.append(f"Câu hỏi '{col_name}' -> cột '{actual_col}' -> giá trị '{answer_raw}'")
                         
                         if answer_raw and answer_raw.lower() != 'nan':
                             # Parse các số đáp án (1 hoặc 1,2,3)
