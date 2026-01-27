@@ -455,7 +455,37 @@ def send_bulk_parent_notifications(
             
             success_count = 0
             failed_count = 0
+            skipped_count = 0
             results = []
+            
+            # FIX: Debounce key cho parent notification để tránh duplicate
+            # Key: student_id + notification_type + timestamp (rounded to minute)
+            student_ids_str = ",".join(sorted(student_ids[:5]))  # Lấy 5 student đầu tiên làm key
+            event_ts = data.get("timestamp", "") if data else ""
+            # Round timestamp to minute để debounce trong cùng 1 phút
+            if event_ts and len(event_ts) > 16:
+                event_ts = event_ts[:16]  # YYYY-MM-DDTHH:MM
+            debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{event_ts}"
+            
+            # Check debounce
+            redis = frappe.cache()
+            existing_notif = redis.get_value(debounce_key)
+            if existing_notif:
+                frappe.logger().info(f"⏭️ [Notification Handler] DEBOUNCE SKIP - notification already sent for {debounce_key}")
+                return {
+                    "success": True,
+                    "message": "Notification already sent (debounce)",
+                    "parent_emails": parent_emails,
+                    "success_count": 0,
+                    "failed_count": 0,
+                    "skipped_count": len(parent_emails),
+                    "total_parents": len(parent_emails),
+                    "debounce_skipped": True
+                }
+            
+            # Set debounce key với TTL 60 giây
+            redis.set_value(debounce_key, frappe.utils.now(), expires_in_sec=60)
+            frappe.logger().info(f"🔓 [Notification Handler] Set debounce key: {debounce_key} (TTL: 60s)")
             
             # Create notification for each parent
             frappe.logger().info(f"📧 [Bulk Handler] Processing {len(parent_emails)} parent emails")
@@ -495,7 +525,7 @@ def send_bulk_parent_notifications(
                     
                     notification_doc = get_doc(notification_doc_data)
                     notification_doc.insert(ignore_permissions=True)
-                    frappe.db.commit()
+                    # FIX: Không commit sau mỗi insert - commit 1 lần ở cuối để tối ưu performance
                     
                     # Send realtime notification via SocketIO
                     emit_notification_to_user(parent_email, {
@@ -534,30 +564,17 @@ def send_bulk_parent_notifications(
                             tag=recipient_type
                         )
 
-                        print(f"📤 DEBUG: Push result for {parent_email}: {push_result}")
-                        frappe.logger().info(f"📤 [Bulk Push] Push result for {parent_email}: {push_result}")
-
-                        # Check response status
-                        response = push_result.get('response')
-                        if response:
-                            try:
-                                status_code = getattr(response, 'status_code', None)
-                                frappe.logger().info(f"📤 [Bulk Push] HTTP status for {parent_email}: {status_code}")
-                                if status_code == 201:
-                                    frappe.logger().info(f"✅ [Bulk Push] Push notification sent successfully to {parent_email}")
-                                elif status_code in [400, 410]:
-                                    frappe.logger().warning(f"❌ [Bulk Push] Push subscription invalid for {parent_email} (status: {status_code})")
-                                else:
-                                    frappe.logger().warning(f"⚠️ [Bulk Push] Unexpected status for {parent_email}: {status_code}")
-                            except Exception as status_error:
-                                frappe.logger().info(f"✅ [Bulk Push] Push notification sent (status check failed) to {parent_email}")
+                        # FIX: Simplified push result logging - chỉ log key info
+                        devices_sent = push_result.get('devices_sent', 0)
+                        devices_failed = push_result.get('devices_failed', 0)
+                        push_success = push_result.get('success', False)
+                        
+                        if push_success and devices_sent > 0:
+                            frappe.logger().info(f"✅ [Bulk Push] Push OK for {parent_email}: {devices_sent} device(s)")
+                        elif devices_sent == 0 and devices_failed == 0:
+                            frappe.logger().warning(f"⚠️ [Bulk Push] No push subscription for {parent_email}")
                         else:
-                            frappe.logger().warning(f"❌ [Bulk Push] No response object for {parent_email}")
-
-                        if push_result.get("success"):
-                            frappe.logger().info(f"✅ [Bulk Push] Push notification sent successfully to {parent_email}")
-                        else:
-                            frappe.logger().warning(f"❌ [Bulk Push] Push notification failed for {parent_email}: {push_result.get('message')}")
+                            frappe.logger().warning(f"❌ [Bulk Push] Push FAILED for {parent_email}: sent={devices_sent}, failed={devices_failed}, msg={push_result.get('message')}")
 
                     except Exception as push_error:
                         frappe.logger().error(f"💥 [Bulk Push] Exception sending push to {parent_email}: {str(push_error)}")

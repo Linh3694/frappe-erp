@@ -492,6 +492,7 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
         devices_sent = 0
         devices_failed = 0
         expired_subscriptions = []
+        successful_subscriptions = []  # Track để update last_used
         device_results = []
         
         for sub_doc in subscription_docs:
@@ -507,10 +508,19 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
             
             if result["success"]:
                 devices_sent += 1
+                successful_subscriptions.append(result["subscription_name"])
             else:
                 devices_failed += 1
                 if result["expired"]:
                     expired_subscriptions.append(result["subscription_name"])
+        
+        # Update last_used cho các subscription gửi thành công
+        if successful_subscriptions:
+            try:
+                for sub_name in successful_subscriptions:
+                    frappe.db.set_value("Push Subscription", sub_name, "last_used", frappe.utils.now(), update_modified=False)
+            except Exception as update_error:
+                frappe.logger().warning(f"⚠️ [Push Notification] Failed to update last_used: {str(update_error)}")
         
         # Xóa các subscriptions đã expired
         if expired_subscriptions:
@@ -767,4 +777,171 @@ def send_notification_on_communication(doc, method=None):
             pass
     except Exception as e:
         frappe.log_error(f"Error sending notification on communication: {str(e)}")
+
+
+# ============================================================================
+# SCHEDULED JOB: Cleanup stale push subscriptions
+# ============================================================================
+
+def cleanup_stale_push_subscriptions():
+    """
+    Scheduled job để cleanup push subscriptions cũ không sử dụng.
+    Chạy hàng ngày để:
+    1. Xóa subscriptions không dùng trong 30 ngày
+    2. Test và xóa subscriptions đã expired
+    
+    Thêm vào hooks.py:
+        scheduler_events = {
+            "daily": [
+                "erp.api.parent_portal.push_notification.cleanup_stale_push_subscriptions"
+            ]
+        }
+    """
+    try:
+        frappe.logger().info("🧹 [Push Cleanup] Starting cleanup of stale push subscriptions...")
+        
+        # 1. Tìm subscriptions không dùng trong 30 ngày
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.now() - timedelta(days=30)
+        
+        stale_subscriptions = frappe.db.sql("""
+            SELECT name, user, device_name, last_used, created_at
+            FROM `tabPush Subscription`
+            WHERE (last_used IS NULL AND created_at < %(cutoff)s)
+               OR (last_used IS NOT NULL AND last_used < %(cutoff)s)
+        """, {"cutoff": cutoff_date}, as_dict=True)
+        
+        frappe.logger().info(f"🧹 [Push Cleanup] Found {len(stale_subscriptions)} stale subscriptions (>30 days inactive)")
+        
+        deleted_count = 0
+        tested_count = 0
+        
+        for sub in stale_subscriptions:
+            try:
+                # Thử gửi test push để verify subscription còn valid không
+                # Nếu fail với 410/400, xóa luôn
+                sub_doc = frappe.get_doc("Push Subscription", sub.name)
+                
+                # Load subscription JSON
+                subscription = json.loads(sub_doc.subscription_json)
+                
+                vapid_private_key = frappe.conf.get("vapid_private_key")
+                vapid_claims_email = frappe.conf.get("vapid_claims_email", "admin@example.com")
+                
+                if not vapid_private_key:
+                    frappe.logger().warning("🧹 [Push Cleanup] VAPID keys not configured, skipping test")
+                    continue
+                
+                # Test push với empty payload
+                try:
+                    if USE_PYWEBPUSH:
+                        webpush(
+                            subscription_info=subscription,
+                            data=json.dumps({"test": True, "silent": True}),
+                            vapid_private_key=vapid_private_key,
+                            vapid_claims={
+                                "sub": f"mailto:{vapid_claims_email}"
+                            }
+                        )
+                    else:
+                        send_web_push(
+                            subscription_info=subscription,
+                            data=json.dumps({"test": True, "silent": True}),
+                            vapid_private_key=vapid_private_key,
+                            vapid_claims={
+                                "sub": f"mailto:{vapid_claims_email}"
+                            }
+                        )
+                    
+                    # Push OK - subscription still valid, update last_used
+                    frappe.db.set_value("Push Subscription", sub.name, "last_used", frappe.utils.now(), update_modified=False)
+                    tested_count += 1
+                    frappe.logger().info(f"✅ [Push Cleanup] Subscription {sub.name} ({sub.user}) still valid")
+                    
+                except WebPushException as e:
+                    error_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') else None
+                    
+                    if error_code in [400, 410]:
+                        # Subscription expired/invalid - delete it
+                        frappe.delete_doc("Push Subscription", sub.name, ignore_permissions=True)
+                        deleted_count += 1
+                        frappe.logger().info(f"🗑️ [Push Cleanup] Deleted expired subscription {sub.name} ({sub.user}) - HTTP {error_code}")
+                    else:
+                        frappe.logger().warning(f"⚠️ [Push Cleanup] Test failed for {sub.name}: HTTP {error_code}")
+                        
+            except Exception as sub_error:
+                frappe.logger().error(f"❌ [Push Cleanup] Error processing subscription {sub.name}: {str(sub_error)}")
+                continue
+        
+        frappe.db.commit()
+        
+        frappe.logger().info(f"🧹 [Push Cleanup] Completed: {deleted_count} deleted, {tested_count} verified")
+        
+        return {
+            "success": True,
+            "stale_found": len(stale_subscriptions),
+            "deleted": deleted_count,
+            "verified": tested_count
+        }
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [Push Cleanup] Error in cleanup job: {str(e)}")
+        frappe.log_error(message=str(e), title="Push Subscription Cleanup Error")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@frappe.whitelist(allow_guest=False)
+def manual_cleanup_subscriptions():
+    """
+    API để trigger cleanup thủ công (chỉ System Manager)
+    """
+    if not frappe.has_permission("System Manager"):
+        frappe.throw(_("Not permitted"), frappe.PermissionError)
+    
+    return cleanup_stale_push_subscriptions()
+
+
+@frappe.whitelist(allow_guest=False)
+def get_subscription_stats():
+    """
+    API để lấy thống kê push subscriptions
+    """
+    try:
+        total = frappe.db.count("Push Subscription")
+        
+        # Count by last_used
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        
+        active_7d = frappe.db.count("Push Subscription", {
+            "last_used": [">=", now - timedelta(days=7)]
+        })
+        
+        active_30d = frappe.db.count("Push Subscription", {
+            "last_used": [">=", now - timedelta(days=30)]
+        })
+        
+        never_used = frappe.db.count("Push Subscription", {
+            "last_used": ["is", "not set"]
+        })
+        
+        return {
+            "success": True,
+            "stats": {
+                "total": total,
+                "active_7_days": active_7d,
+                "active_30_days": active_30d,
+                "never_used": never_used,
+                "stale_30_days": total - active_30d - never_used
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 

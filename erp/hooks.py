@@ -807,7 +807,9 @@ scheduler_events = {
         ]
     },
     # Project Management - Auto-expire pending invitations
+    # Push Subscription cleanup - Xóa subscriptions không dùng trong 30 ngày
     "daily": [
-        "erp.project_management.cron.expire_pending_invitations"
+        "erp.project_management.cron.expire_pending_invitations",
+        "erp.api.parent_portal.push_notification.cleanup_stale_push_subscriptions"
     ]
 }
