@@ -699,7 +699,8 @@ def submit_class_reports():
                     new_approval = {
                         "status": target_status,
                         "submitted_at": str(now),
-                        "submitted_by": user
+                        "submitted_by": user,
+                        "board_type": section  # ✅ Lưu board_type để phân biệt khi query pending
                     }
                     
                     # Clear rejection info nếu re-submit
@@ -2018,30 +2019,25 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     found_board_type = None  # Board type cụ thể (scores, subject_eval, main_scores, ielts, comments)
                                     found_section = None  # Section chung (scores, subject_eval, intl) - cho backward compatibility
                                     
-                                    # Danh sách tất cả sections cần check
-                                    # (board_type, section_display)
-                                    sections_to_check = [
-                                        ("scores", "scores"),
-                                        ("subject_eval", "subject_eval"),
-                                        ("main_scores", "intl"),  # INTL main scores
-                                        ("ielts", "intl"),        # INTL IELTS
-                                        ("comments", "intl"),     # INTL comments
-                                    ]
-                                    
-                                    for board_type_key, section_display in sections_to_check:
+                                    # ✅ FIX: Check scores và subject_eval trước (non-INTL)
+                                    for board_type_key in ["scores", "subject_eval"]:
                                         section_approval = _get_subject_approval_from_data_json(report_data_json, board_type_key, sid)
-                                        if section_approval.get("status"):
-                                            # Ưu tiên section có status pending (submitted hoặc level_1_approved)
-                                            if section_approval.get("status") in ["submitted", "level_1_approved"]:
-                                                subject_approval = section_approval
-                                                found_board_type = board_type_key  # ✅ Lưu board_type cụ thể
-                                                found_section = section_display
-                                                break  # Tìm thấy section pending, dừng lại
-                                            elif not found_board_type:
-                                                # Nếu chưa có, lưu lại section này
-                                                subject_approval = section_approval
-                                                found_board_type = board_type_key
-                                                found_section = section_display
+                                        if section_approval.get("status") in ["submitted", "level_1_approved"]:
+                                            subject_approval = section_approval
+                                            found_board_type = board_type_key
+                                            found_section = board_type_key
+                                            break
+                                    
+                                    # ✅ FIX: Check INTL - tất cả INTL boards share cùng một approval trong intl_scores
+                                    # Sử dụng board_type đã được lưu trong approval info
+                                    if not found_board_type:
+                                        # Query một lần từ intl_scores (vì main_scores, ielts, comments share cùng approval)
+                                        intl_approval = _get_subject_approval_from_data_json(report_data_json, "main_scores", sid)
+                                        if intl_approval.get("status") in ["submitted", "level_1_approved"]:
+                                            subject_approval = intl_approval
+                                            # ✅ Lấy board_type từ approval info (đã được lưu khi submit)
+                                            found_board_type = intl_approval.get("board_type", "main_scores")
+                                            found_section = "intl"
                                     
                                     subject_status = subject_approval.get("status", "draft")
                                     

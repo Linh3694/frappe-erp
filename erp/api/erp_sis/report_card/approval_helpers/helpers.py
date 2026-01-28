@@ -100,11 +100,12 @@ def get_subject_approval_from_data_json(data_json: dict, section: str, subject_i
         subject_data = section_data.get(subject_id, {})
         return subject_data.get("approval", {})
     
-    # INTL sections: main_scores, ielts, comments
+    # ✅ FIX: INTL sections (main_scores, ielts, comments) 
+    # Data được lưu tại intl_scores.{subject_id}, không phải intl.{section}.{subject_id}
+    # Approval cũng được lưu chung tại intl_scores.{subject_id}.approval
     if section in [SectionType.MAIN_SCORES, SectionType.IELTS, SectionType.COMMENTS]:
-        intl_data = data_json.get("intl", {})
-        section_data = intl_data.get(section, {})
-        subject_data = section_data.get(subject_id, {})
+        intl_scores_data = data_json.get("intl_scores", {})
+        subject_data = intl_scores_data.get(subject_id, {})
         return subject_data.get("approval", {})
     
     return {}
@@ -137,15 +138,14 @@ def set_subject_approval_in_data_json(data_json: dict, section: str, subject_id:
         data_json[section][subject_id]["approval"] = approval_info
         return data_json
     
-    # INTL sections
+    # ✅ FIX: INTL sections (main_scores, ielts, comments)
+    # Lưu approval vào intl_scores.{subject_id}.approval để đồng bộ với data
     if section in [SectionType.MAIN_SCORES, SectionType.IELTS, SectionType.COMMENTS]:
-        if "intl" not in data_json:
-            data_json["intl"] = {}
-        if section not in data_json["intl"]:
-            data_json["intl"][section] = {}
-        if subject_id not in data_json["intl"][section]:
-            data_json["intl"][section][subject_id] = {}
-        data_json["intl"][section][subject_id]["approval"] = approval_info
+        if "intl_scores" not in data_json:
+            data_json["intl_scores"] = {}
+        if subject_id not in data_json["intl_scores"]:
+            data_json["intl_scores"][subject_id] = {}
+        data_json["intl_scores"][subject_id]["approval"] = approval_info
         return data_json
     
     return data_json
