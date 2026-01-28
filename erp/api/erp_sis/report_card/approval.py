@@ -1181,25 +1181,41 @@ def get_pending_approvals(level: Optional[str] = None):
                         for r in l3_reviewers
                     )
                     if is_l3:
-                        # Lấy templates của education_stage này
+                        # Lấy templates của education_stage này với homeroom_enabled và scores_enabled
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
-                            fields=["name"]
+                            fields=["name", "homeroom_enabled", "scores_enabled"]
                         )
-                        if templates:
+                        for tmpl in templates:
+                            # Build filter động dựa trên sections được enable
+                            base_filters = {
+                                "template_id": tmpl.name,
+                                "campus_id": campus_id
+                            }
+                            
+                            homeroom_enabled = tmpl.get("homeroom_enabled")
+                            scores_enabled = tmpl.get("scores_enabled")
+                            
+                            # Skip nếu cả 2 đều disabled
+                            if not homeroom_enabled and not scores_enabled:
+                                continue
+                            
+                            # Chỉ check sections được enable
+                            if homeroom_enabled:
+                                base_filters["homeroom_approval_status"] = "level_2_approved"
+                            if scores_enabled:
+                                base_filters["scores_approval_status"] = "level_2_approved"
+                            
                             reports_l3 = frappe.get_all(
                                 "SIS Student Report Card",
-                                filters={
-                                    "template_id": ["in", [t.name for t in templates]],
-                                    "approval_status": "level_2_approved",
-                                    "campus_id": campus_id
-                                },
-                                fields=["name", "title", "student_id", "class_id", "approval_status"]
+                                filters=base_filters,
+                                fields=["name", "title", "student_id", "class_id", "approval_status",
+                                        "homeroom_approval_status", "scores_approval_status"]
                             )
                             for r in reports_l3:
                                 r["pending_level"] = "review"
-                                if r not in results:
+                                if not any(existing["name"] == r["name"] for existing in results):
                                     results.append(r)
                 
                 # Check if user is L4 approver
