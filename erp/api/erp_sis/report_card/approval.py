@@ -31,8 +31,8 @@ from erp.utils.api_response import (
 from .utils import get_request_payload, get_current_campus_id
 from .constants import ApprovalStatus, SectionType, SECTION_NAME_MAP, Messages
 
-# Import helpers từ approval submodule
-from .approval.helpers import (
+# Import helpers từ approval_helpers submodule
+from .approval_helpers.helpers import (
     # Data JSON helpers
     get_subject_approval_from_data_json,
     set_subject_approval_in_data_json,
