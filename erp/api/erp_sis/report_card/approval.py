@@ -767,8 +767,20 @@ def submit_class_reports():
                     update_values["approval_status"] = target_status
                 
                 # Clear rejection info khi re-submit
+                # ✅ FIX: Check cả status_field chung VÀ per-subject status trong data_json
+                # INTL per-subject rejection được lưu trong data_json, không phải status_field chung
+                should_clear_rejection = False
                 current_section_status = getattr(report_data, status_field, None) or 'draft'
+                
                 if current_section_status == 'rejected':
+                    should_clear_rejection = True
+                elif subject_id and section in ["main_scores", "ielts", "comments"]:
+                    # Check per-subject status trong data_json cho INTL sections
+                    subject_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
+                    if subject_approval.get("status") == "rejected":
+                        should_clear_rejection = True
+                
+                if should_clear_rejection:
                     # Clear general rejection info
                     update_values["rejection_reason"] = None
                     update_values["rejected_by"] = None
