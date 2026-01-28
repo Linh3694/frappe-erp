@@ -892,13 +892,34 @@ def submit_class_reports():
                         data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, new_approval)
                 
                 # ========== UPDATE DATABASE ==========
-                # Cập nhật section-specific field (giữ backward compatibility)
+                # Cập nhật data_json (luôn luôn)
                 update_values = {
-                    status_field: target_status,
                     "submitted_at": now,
                     "submitted_by": user,
                     "data_json": json.dumps(data_json, ensure_ascii=False)
                 }
+                
+                # CHỈ update scores_approval_status chung NẾU:
+                # - Đây là homeroom (không có subject_id)
+                # - HOẶC scores_approval_status hiện tại chưa ở level cao hơn target_status
+                current_section_status = getattr(report_data, status_field, None) or 'draft'
+                status_order = ['draft', 'entry', 'rejected', 'submitted', 'level_1_approved', 'level_2_approved', 'reviewed', 'published']
+                
+                # Nếu là homeroom hoặc không có subject_id → update field chung
+                if section == "homeroom" or not subject_id:
+                    update_values[status_field] = target_status
+                else:
+                    # Có subject_id (per-subject submit):
+                    # Chỉ update field chung nếu nó chưa ở level cao hơn
+                    current_idx = status_order.index(current_section_status) if current_section_status in status_order else 0
+                    target_idx = status_order.index(target_status) if target_status in status_order else 0
+                    
+                    if target_idx >= current_idx:
+                        # Target >= current → có thể update (không downgrade)
+                        # Nhưng vẫn không nên update vì subject khác có thể ở level cao hơn
+                        # Giữ nguyên field chung, chỉ update data_json per-subject
+                        pass
+                    # Không update scores_approval_status để tránh DOWNGRADE
                 
                 # Cũng cập nhật approval_status chung nếu cả 2 section đều ở trạng thái tốt
                 current_general_status = report_data.approval_status or 'draft'
@@ -2124,38 +2145,50 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         matching_subjects = [sid for sid in subject_ids if sid in template_subjects]
                         
                         if matching_subjects:
-                            # Lấy reports theo scores_approval_status = submitted hoặc level_1_approved
-                            # (level_1_approved khi submit đã skip L1 vì có Subject Manager)
-                            # Bao gồm cả reports bị trả về từ Level 3 (có rejection_reason)
-                            # Level 2 cho scores: query submitted hoặc level_1_approved
-                            # (level_1_approved khi submit đã skip L1 vì có Subject Manager)
+                            # ========== FILTER DỰA TRÊN DATA_JSON PER-SUBJECT ==========
+                            # Lấy tất cả reports của template (không filter theo scores_approval_status chung)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "scores_approval_status": ["in", ["submitted", "level_1_approved"]],
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "class_id", "scores_submitted_at", "scores_submitted_by",
+                                fields=["name", "class_id", "data_json", "scores_submitted_at", "scores_submitted_by",
                                         "scores_rejection_reason", "scores_rejected_by", "scores_rejected_at",
                                         "rejected_from_level", "rejected_section"]
                             )
+                            
                             for r in reports:
+                                # Parse data_json để check approval status per-subject
+                                try:
+                                    report_data_json = json.loads(r.get("data_json") or "{}")
+                                except json.JSONDecodeError:
+                                    report_data_json = {}
+                                
                                 for sid in matching_subjects:
+                                    # Lấy approval status của subject này từ data_json
+                                    subject_approval = _get_subject_approval_from_data_json(report_data_json, "scores", sid)
+                                    subject_status = subject_approval.get("status", "draft")
+                                    
+                                    # Chỉ hiển thị nếu subject này đang ở trạng thái chờ L2 duyệt
+                                    # (submitted hoặc level_1_approved)
+                                    if subject_status not in ["submitted", "level_1_approved"]:
+                                        continue
+                                    
                                     r_copy = r.copy()
+                                    del r_copy["data_json"]  # Không cần trả về data_json
                                     r_copy["template_id"] = tmpl.name
                                     r_copy["template_title"] = tmpl.title
                                     r_copy["pending_level"] = "level_2"
                                     r_copy["subject_id"] = sid
                                     r_copy["subject_title"] = subject_info_map.get(sid, sid)
-                                    r_copy["submitted_at"] = r.get("scores_submitted_at")
-                                    r_copy["submitted_by"] = r.get("scores_submitted_by")
-                                    # Sử dụng scores-specific rejection info
-                                    if r.get("scores_rejection_reason"):
+                                    r_copy["submitted_at"] = subject_approval.get("submitted_at") or r.get("scores_submitted_at")
+                                    r_copy["submitted_by"] = subject_approval.get("submitted_by") or r.get("scores_submitted_by")
+                                    # Sử dụng subject-specific rejection info từ data_json
+                                    if subject_approval.get("rejection_reason"):
                                         r_copy["was_rejected"] = True
-                                        r_copy["rejection_reason"] = r.get("scores_rejection_reason")
-                                    elif r.get("rejected_from_level") == 3 and r.get("rejected_section") in ["scores", "both"]:
-                                        r_copy["was_rejected"] = True
+                                        r_copy["rejection_reason"] = subject_approval.get("rejection_reason")
+                                        r_copy["rejected_from_level"] = subject_approval.get("rejected_from_level")
                                     all_reports.append(r_copy)
         
         # Level 3 & 4: Kiểm tra approval config
