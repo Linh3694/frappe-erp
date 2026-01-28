@@ -2745,11 +2745,18 @@ def reject_class_reports():
         # (scores, subject_eval, main_scores, ielts, comments)
         # Nếu không có, sẽ auto-detect sau
         
-        # ========== LEVEL 1/2 VỚI SUBJECT_ID: FILTER PER-SUBJECT ==========
+        # ========== FILTER PER-SUBJECT CHO INTL ==========
         # Giống như approve_class_reports, không filter theo status_field chung
         # mà sẽ lấy tất cả reports rồi check per-subject approval trong data_json
         use_per_subject_filter = False
+        
+        # L1/L2: Dùng per-subject filter khi có subject_id
         if pending_level in ["level_1", "level_2"] and subject_id and section == "scores":
+            use_per_subject_filter = True
+        
+        # ✅ L3 (review): Dùng per-subject filter khi board_type là INTL section
+        # INTL approval được lưu trong data_json, không phải approval_status field
+        if pending_level == "review" and board_type in ["main_scores", "ielts", "comments"]:
             use_per_subject_filter = True
         
         # Xác định status field và current_status dựa trên pending_level
@@ -2832,26 +2839,40 @@ def reject_class_reports():
                 
                 # ✅ Nếu dùng per-subject filter, check approval của subject cụ thể trong data_json
                 # Skip nếu subject không ở trạng thái cần reject
-                if use_per_subject_filter and subject_id:
-                    # Xác định board_type để check
-                    check_board_type = board_type
-                    if not check_board_type:
-                        # Auto-detect board_type từ data_json
-                        for section_key in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
-                            section_approval = _get_subject_approval_from_data_json(data_json, section_key, subject_id)
-                            if section_approval.get("status") in current_statuses:
-                                check_board_type = section_key
-                                break
+                if use_per_subject_filter:
+                    found_valid_subject = False
                     
-                    if check_board_type:
-                        subject_approval = _get_subject_approval_from_data_json(data_json, check_board_type, subject_id)
-                        current_subject_status = subject_approval.get("status", "")
+                    if subject_id:
+                        # Có subject_id: check subject cụ thể
+                        check_board_type = board_type
+                        if not check_board_type:
+                            # Auto-detect board_type từ data_json
+                            for section_key in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
+                                section_approval = _get_subject_approval_from_data_json(data_json, section_key, subject_id)
+                                if section_approval.get("status") in current_statuses:
+                                    check_board_type = section_key
+                                    break
                         
-                        # Skip nếu subject không ở trạng thái cần reject
-                        if current_subject_status not in current_statuses:
-                            continue
-                    else:
-                        # Không tìm thấy subject trong bất kỳ section nào với status phù hợp
+                        if check_board_type:
+                            subject_approval = _get_subject_approval_from_data_json(data_json, check_board_type, subject_id)
+                            current_subject_status = subject_approval.get("status", "")
+                            
+                            if current_subject_status in current_statuses:
+                                found_valid_subject = True
+                    
+                    elif board_type in ["main_scores", "ielts", "comments"]:
+                        # ✅ L3 INTL không có subject_id: check tất cả subjects trong intl_scores
+                        intl_scores_data = data_json.get("intl_scores", {})
+                        approval_key = f"{board_type}_approval"
+                        
+                        for subj_id, subj_data in intl_scores_data.items():
+                            if isinstance(subj_data, dict):
+                                approval = subj_data.get(approval_key, {})
+                                if isinstance(approval, dict) and approval.get("status") in current_statuses:
+                                    found_valid_subject = True
+                                    break
+                    
+                    if not found_valid_subject:
                         continue
                 
                 # Tạo rejection info cho data_json
@@ -2869,8 +2890,9 @@ def reject_class_reports():
                     # Update homeroom approval
                     data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, rejection_info.copy())
                     detected_board_type = "homeroom"
+                    
                 elif subject_id and pending_level in ["level_1", "level_2"]:
-                    # ========== AUTO-DETECT BOARD_TYPE TỪ DATA_JSON ==========
+                    # ========== L1/L2: AUTO-DETECT BOARD_TYPE TỪ DATA_JSON ==========
                     # Subject có thể ở trong: scores, subject_eval, hoặc intl (main_scores, ielts, comments)
                     detected_board_type = board_type  # Ưu tiên nếu frontend truyền
                     subject_approval = {}
@@ -2899,8 +2921,24 @@ def reject_class_reports():
                     # ✅ CHỈ reject subject cụ thể trong board_type cụ thể (PER-SUBJECT)
                     data_json = _set_subject_approval_in_data_json(data_json, detected_board_type, subject_id, rejection_info.copy())
                     frappe.logger().info(f"[REJECT] Per-subject reject: board_type={detected_board_type}, subject={subject_id}")
+                    
+                elif pending_level == "review" and board_type in ["main_scores", "ielts", "comments"]:
+                    # ========== L3 INTL: REJECT TẤT CẢ SUBJECTS TRONG BOARD_TYPE ==========
+                    detected_board_type = board_type
+                    intl_scores_data = data_json.get("intl_scores", {})
+                    approval_key = f"{board_type}_approval"
+                    
+                    # Reject tất cả subjects có approval status trong current_statuses
+                    for subj_id, subj_data in intl_scores_data.items():
+                        if isinstance(subj_data, dict):
+                            existing_approval = subj_data.get(approval_key, {})
+                            if isinstance(existing_approval, dict) and existing_approval.get("status") in current_statuses:
+                                subj_data[approval_key] = rejection_info.copy()
+                    
+                    frappe.logger().info(f"[REJECT] L3 INTL reject: board_type={board_type}")
+                    
                 else:
-                    # Level 3, 4: Reject toàn bộ report (không có subject_id)
+                    # Level 3, 4: Reject toàn bộ report (không có subject_id, không phải INTL cụ thể)
                     # Vẫn reject tất cả sections như trước
                     detected_board_type = "all"
                     for section_key in ["scores", "subject_eval"]:
@@ -3353,6 +3391,28 @@ def reject_single_report():
         except json.JSONDecodeError:
             data_json = {}
         
+        # ✅ Auto-detect INTL section từ template
+        detected_intl_section = None
+        try:
+            template = frappe.get_doc("SIS Report Card Template", report.template_id)
+            is_intl_template = getattr(template, 'program_type', 'vn') == 'intl'
+            if is_intl_template and section == 'scores':
+                # INTL template nhưng section='scores' → Cần check INTL sections
+                # Tìm INTL section nào có L2 approved
+                intl_scores_data = data_json.get("intl_scores", {})
+                for intl_section in ["main_scores", "ielts", "comments"]:
+                    approval_key = f"{intl_section}_approval"
+                    for subj_id, subj_data in intl_scores_data.items():
+                        if isinstance(subj_data, dict):
+                            approval = subj_data.get(approval_key, {})
+                            if isinstance(approval, dict) and approval.get("status") == "level_2_approved":
+                                detected_intl_section = intl_section
+                                break
+                    if detected_intl_section:
+                        break
+        except Exception:
+            is_intl_template = False
+        
         if approval_status == 'reviewed':
             # Có thể reject từ Level 4
             can_reject = True
@@ -3363,6 +3423,11 @@ def reject_single_report():
             current_status = 'level_2_approved'
         elif section == 'scores' and scores_status == 'level_2_approved':
             # Có thể reject scores từ Level 3
+            can_reject = True
+            current_status = 'level_2_approved'
+        elif section == 'scores' and detected_intl_section:
+            # ✅ INTL template với section='scores' nhưng đã detect được INTL section có L2 approved
+            section = detected_intl_section  # Override section thành INTL section cụ thể
             can_reject = True
             current_status = 'level_2_approved'
         elif section in ['main_scores', 'ielts', 'comments']:
