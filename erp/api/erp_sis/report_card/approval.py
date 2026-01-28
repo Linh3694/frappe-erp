@@ -1228,6 +1228,34 @@ def get_pending_approvals(level: Optional[str] = None):
                                 if r not in results:
                                     results.append(r)
         
+        # Validate: Lọc bỏ orphan records (reports có template đã bị xóa)
+        # Lấy danh sách template_id từ results để check
+        template_ids_to_check = set()
+        for r in results:
+            report_doc = frappe.db.get_value("SIS Student Report Card", r["name"], "template_id")
+            if report_doc:
+                template_ids_to_check.add(report_doc)
+        
+        valid_template_ids = set()
+        if template_ids_to_check:
+            existing_templates = frappe.get_all(
+                "SIS Report Card Template",
+                filters={"name": ["in", list(template_ids_to_check)]},
+                fields=["name"]
+            )
+            valid_template_ids = set(t["name"] for t in existing_templates)
+        
+        # Filter ra orphan records
+        filtered_results = []
+        for report in results:
+            report_template_id = frappe.db.get_value("SIS Student Report Card", report["name"], "template_id")
+            if report_template_id and report_template_id not in valid_template_ids:
+                frappe.logger().warning(f"Skipping orphan report: {report['name']}, template_id={report_template_id} không còn tồn tại")
+                continue
+            filtered_results.append(report)
+        
+        results = filtered_results
+        
         # Enrich với thông tin học sinh
         for report in results:
             student_info = frappe.db.get_value(
@@ -1896,8 +1924,24 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     grouped[key]["rejected_section"] = r.get("rejected_section")
         
         # Convert to list và enrich với thông tin class
+        # Validate: chỉ giữ những reports có template_id còn tồn tại (bỏ qua orphan records)
+        valid_template_ids = set()
+        template_ids_to_check = set(data["template_id"] for data in grouped.values())
+        if template_ids_to_check:
+            existing_templates = frappe.get_all(
+                "SIS Report Card Template",
+                filters={"name": ["in", list(template_ids_to_check)]},
+                fields=["name"]
+            )
+            valid_template_ids = set(t["name"] for t in existing_templates)
+        
         results = []
         for key, data in grouped.items():
+            # Bỏ qua orphan records (template đã bị xóa)
+            if data["template_id"] not in valid_template_ids:
+                frappe.logger().warning(f"Skipping orphan report group: template_id={data['template_id']} không còn tồn tại")
+                continue
+            
             # Remove set (not JSON serializable)
             del data["report_ids"]
             

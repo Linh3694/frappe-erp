@@ -518,36 +518,49 @@ def delete_template(template_id: Optional[str] = None):
                 }
             }
 
-        # Cascade delete linked reports
-        deleted_reports = []
+        # Cascade delete linked reports bằng SQL trực tiếp để đảm bảo xóa được
+        deleted_reports_count = 0
         failed_reports = []
         
         if linked_reports:
-            for report in linked_reports:
-                try:
-                    frappe.delete_doc("SIS Student Report Card", report["name"], ignore_permissions=True)
-                    deleted_reports.append(report["name"])
-                except Exception as report_error:
-                    failed_reports.append({
-                        "report_id": report["name"],
-                        "error": str(report_error)[:100]
-                    })
-                    frappe.logger().error(f"Failed to delete student report {report['name']}: {str(report_error)}")
+            try:
+                # Xóa bằng SQL trực tiếp - đảm bảo xóa tất cả reports liên kết
+                frappe.db.sql("""
+                    DELETE FROM `tabSIS Student Report Card` 
+                    WHERE template_id = %s
+                """, template_id)
+                frappe.db.commit()
+                deleted_reports_count = len(linked_reports)
+                frappe.logger().info(f"Deleted {deleted_reports_count} student reports for template {template_id} using SQL")
+            except Exception as sql_error:
+                frappe.logger().error(f"SQL delete failed for template {template_id}: {str(sql_error)}")
+                # Fallback: xóa từng record nếu SQL fail
+                for report in linked_reports:
+                    try:
+                        frappe.delete_doc("SIS Student Report Card", report["name"], ignore_permissions=True, force=True)
+                        deleted_reports_count += 1
+                    except Exception as report_error:
+                        failed_reports.append({
+                            "report_id": report["name"],
+                            "error": str(report_error)[:100]
+                        })
+                        frappe.logger().error(f"Failed to delete student report {report['name']}: {str(report_error)}")
+                frappe.db.commit()
 
         # Delete template
-        frappe.delete_doc("SIS Report Card Template", template_id, ignore_permissions=True)
+        frappe.delete_doc("SIS Report Card Template", template_id, ignore_permissions=True, force=True)
         frappe.db.commit()
         
         result_message = f"Template deleted successfully"
-        if deleted_reports:
-            result_message += f". Đã xóa {len(deleted_reports)} báo cáo học sinh liên kết"
+        if deleted_reports_count > 0:
+            result_message += f". Đã xóa {deleted_reports_count} báo cáo học sinh liên kết"
         if failed_reports:
             result_message += f". {len(failed_reports)} báo cáo không thể xóa"
 
         return success_response(
             message=result_message,
             data={
-                "deleted_reports_count": len(deleted_reports),
+                "deleted_reports_count": deleted_reports_count,
                 "failed_reports_count": len(failed_reports),
                 "failed_reports": failed_reports if failed_reports else None
             }
