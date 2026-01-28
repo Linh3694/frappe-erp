@@ -1422,11 +1422,30 @@ def get_report_data(report_id: Optional[str] = None, filter_l2_approved: Optiona
                     for subject_id, subject_data in intl_data.items():
                         if not isinstance(subject_data, dict):
                             continue
-                        approval = subject_data.get("approval", {})
-                        approval_status = approval.get("status", "") if isinstance(approval, dict) else ""
-                        if approval_status == "level_2_approved":
+                        
+                        # ✅ INTL has multiple approval keys per section
+                        # Check new format: {subject_id}.{section}_approval (main_scores_approval, ielts_approval, comments_approval)
+                        has_l2_approval = False
+                        
+                        # Check new format approval keys
+                        for approval_key in ["main_scores_approval", "ielts_approval", "comments_approval"]:
+                            approval = subject_data.get(approval_key, {})
+                            approval_status = approval.get("status", "") if isinstance(approval, dict) else ""
+                            if approval_status == "level_2_approved":
+                                has_l2_approval = True
+                                break
+                        
+                        # Fallback: Check old format {subject_id}.approval
+                        if not has_l2_approval:
+                            approval = subject_data.get("approval", {})
+                            approval_status = approval.get("status", "") if isinstance(approval, dict) else ""
+                            if approval_status == "level_2_approved":
+                                has_l2_approval = True
+                        
+                        if has_l2_approval:
                             filtered_intl[subject_id] = subject_data
                         elif not subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
+                            # Giữ lại các key không phải subject (metadata, etc.)
                             filtered_intl[subject_id] = subject_data
                     data[intl_key] = filtered_intl
                     frappe.logger().info(f"[FILTER_L2] Filtered {intl_key}: {original_count} -> {len(filtered_intl)} (L2 approved)")
