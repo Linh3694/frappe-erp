@@ -2562,7 +2562,8 @@ def approve_class_reports():
                 
                 # Chỉ giữ nếu subject đang ở trạng thái cần approve
                 if subject_status in current_statuses:
-                    filtered_reports.append({"name": r.name, "student_id": r.student_id})
+                    # Sử dụng frappe._dict để có thể truy cập cả .name và ["name"]
+                    filtered_reports.append(frappe._dict({"name": r.name, "student_id": r.student_id}))
             
             reports = filtered_reports
         else:
