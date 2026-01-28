@@ -301,41 +301,44 @@ def test_pending_approvals_api():
     # Test gọi API không có level filter
     # Lưu ý: API này cần request context, có thể fail khi gọi trực tiếp từ bench execute
     try:
-        # Mock request context nếu cần
-        if not hasattr(frappe, 'request') or frappe.request is None:
-            # Create minimal mock request
+        # Mock request context đầy đủ
+        original_request = getattr(frappe, 'request', None)
+        try:
             from werkzeug.test import EnvironBuilder
             from werkzeug.wrappers import Request
-            builder = EnvironBuilder(method='GET')
+            builder = EnvironBuilder(method='GET', query_string='')
             frappe.request = Request(builder.get_environ())
-        
-        response = get_pending_approvals_grouped()
-        
-        if isinstance(response, dict):
-            if response.get("success"):
-                data = response.get("data", {})
-                reports = data.get("reports", [])
-                result.add_pass(f"API call success - {len(reports)} pending items")
-                
-                # Check structure của mỗi item
-                if reports:
-                    item = reports[0]
-                    required_fields = ["template_id", "class_id", "pending_level"]
-                    missing = [f for f in required_fields if f not in item]
-                    if missing:
-                        result.add_fail("Item structure", f"Missing fields: {missing}")
-                    else:
-                        result.add_pass("Item structure valid")
+            
+            response = get_pending_approvals_grouped()
+            
+            if isinstance(response, dict):
+                if response.get("success"):
+                    data = response.get("data", {})
+                    reports = data.get("reports", [])
+                    result.add_pass(f"API call success - {len(reports)} pending items")
                     
-                    # Check board_type field mới
-                    if "board_type" in item:
-                        result.add_pass(f"board_type field present: {item.get('board_type')}")
-                    else:
-                        result.add_pass("board_type field: N/A (homeroom or old data)")
+                    # Check structure của mỗi item
+                    if reports:
+                        item = reports[0]
+                        required_fields = ["template_id", "class_id", "pending_level"]
+                        missing = [f for f in required_fields if f not in item]
+                        if missing:
+                            result.add_fail("Item structure", f"Missing fields: {missing}")
+                        else:
+                            result.add_pass("Item structure valid")
+                        
+                        # Check board_type field mới
+                        if "board_type" in item:
+                            result.add_pass(f"board_type field present: {item.get('board_type')}")
+                        else:
+                            result.add_pass("board_type field: N/A (homeroom or old data)")
+                else:
+                    result.add_fail("API call", response.get("message", "Unknown error"))
             else:
-                result.add_fail("API call", response.get("message", "Unknown error"))
-        else:
-            result.add_fail("API response", "Invalid response format")
+                result.add_fail("API response", "Invalid response format")
+        finally:
+            # Restore original request
+            frappe.request = original_request
             
     except Exception as e:
         # Nếu lỗi "object is not bound", skip test này
@@ -345,8 +348,15 @@ def test_pending_approvals_api():
             result.add_fail("API call", e)
     
     # Test với level filter
+    original_request = getattr(frappe, 'request', None)
     for level in ["level_1", "level_2", "review", "publish"]:
         try:
+            # Mock request context
+            from werkzeug.test import EnvironBuilder
+            from werkzeug.wrappers import Request
+            builder = EnvironBuilder(method='GET', query_string=f'level={level}')
+            frappe.request = Request(builder.get_environ())
+            
             # Simulate form_dict
             frappe.form_dict.level = level
             response = get_pending_approvals_grouped(level=level)
@@ -365,6 +375,9 @@ def test_pending_approvals_api():
                 result.add_fail(f"Filter {level}", e)
         finally:
             frappe.form_dict.pop("level", None)
+    
+    # Restore original request
+    frappe.request = original_request
     
     return result.summary()
 
