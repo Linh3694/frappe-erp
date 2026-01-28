@@ -3427,7 +3427,8 @@ def reject_single_report():
             current_status = 'level_2_approved'
         elif section == 'scores' and detected_intl_section:
             # ✅ INTL template với section='scores' nhưng đã detect được INTL section có L2 approved
-            section = detected_intl_section  # Override section thành INTL section cụ thể
+            # Không override section (vì rejected_section field chỉ chấp nhận 'homeroom', 'scores', 'both')
+            # Sử dụng detected_intl_section để xử lý reject INTL
             can_reject = True
             current_status = 'level_2_approved'
         elif section in ['main_scores', 'ielts', 'comments']:
@@ -3525,10 +3526,13 @@ def reject_single_report():
                     }
                 
             elif section in ['scores', 'subject_eval', 'main_scores', 'ielts', 'comments']:
+                # ✅ Xác định actual section để xử lý (ưu tiên detected_intl_section)
+                actual_section = detected_intl_section if detected_intl_section else section
+                
                 # Reject môn cụ thể hoặc toàn bộ section
                 if subject_id:
                     # Reject 1 môn cụ thể -> update trong data_json
-                    subject_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
+                    subject_approval = _get_subject_approval_from_data_json(data_json, actual_section, subject_id)
                     if subject_approval.get("status") == "level_2_approved":
                         # Update approval trong data_json
                         new_approval = {
@@ -3538,10 +3542,10 @@ def reject_single_report():
                             "rejected_by": user,
                             "rejected_at": str(now)
                         }
-                        data_json = _set_subject_approval_in_data_json(data_json, section, subject_id, new_approval)
+                        data_json = _set_subject_approval_in_data_json(data_json, actual_section, subject_id, new_approval)
                         
                         # Giữ backward compatibility: update section-level status
-                        if section in ['scores', 'subject_eval']:
+                        if actual_section in ['scores', 'subject_eval']:
                             report.scores_approval_status = 'level_1_approved'
                             report.scores_rejection_reason = reason
                             report.scores_rejected_by = user
@@ -3553,7 +3557,7 @@ def reject_single_report():
                     report.approval_status = 'level_1_approved'
                     
                     # ✅ Xử lý khác nhau cho VN sections và INTL sections
-                    if section in ['scores', 'subject_eval']:
+                    if actual_section in ['scores', 'subject_eval']:
                         # VN sections: Update field riêng
                         report.scores_approval_status = 'level_1_approved'
                         report.scores_rejection_reason = reason
@@ -3561,7 +3565,7 @@ def reject_single_report():
                         report.scores_rejected_at = now
                         
                         # Update tất cả môn trong section
-                        section_data = data_json.get(section, {})
+                        section_data = data_json.get(actual_section, {})
                         for subj_id in section_data:
                             if isinstance(section_data[subj_id], dict):
                                 section_data[subj_id]["approval"] = {
@@ -3572,10 +3576,10 @@ def reject_single_report():
                                     "rejected_at": str(now)
                                 }
                     
-                    elif section in ['main_scores', 'ielts', 'comments']:
+                    elif actual_section in ['main_scores', 'ielts', 'comments']:
                         # ✅ INTL sections: Update tất cả subjects trong intl_scores
                         intl_scores_data = data_json.get("intl_scores", {})
-                        approval_key = f"{section}_approval"
+                        approval_key = f"{actual_section}_approval"
                         rejection_info = {
                             "status": "level_1_approved",
                             "rejection_reason": reason,
