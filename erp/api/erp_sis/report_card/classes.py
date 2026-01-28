@@ -324,21 +324,15 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
         taught_subjects = []
         if teacher_id:
             # ✅ Lấy danh sách môn học user dạy trong lớp này
+            # Field đúng là actual_subject_id (không phải subject_id)
             subject_assignments = frappe.get_all(
                 "SIS Subject Assignment",
                 filters={"teacher_id": teacher_id, "class_id": class_id, "campus_id": campus_id},
-                fields=["subject_id"]
+                fields=["actual_subject_id"]
             )
-            taught_subjects = [sa.subject_id for sa in subject_assignments if sa.subject_id]
+            taught_subjects = [sa.actual_subject_id for sa in subject_assignments if sa.actual_subject_id]
             is_subject_teacher = len(taught_subjects) > 0
         
-        # ✅ PERMISSION CHECK: Nếu không phải SIS Manager và không có quyền gì với lớp này
-        if not is_sis_manager and not is_homeroom_teacher and not is_vice_homeroom_teacher and not is_subject_teacher:
-            return success_response(
-                data=[], 
-                message="Bạn không có quyền xem báo cáo học tập của lớp này. Vui lòng liên hệ quản trị viên nếu bạn cần truy cập."
-            )
-
         # Find templates with actual student reports
         student_report_query = """
             SELECT DISTINCT template_id
@@ -374,6 +368,58 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             },
             order_by="title asc",
         )
+        
+        # ✅ PERMISSION FILTER: Chỉ giữ lại các báo cáo mà user có quyền thao tác
+        # - SIS Manager: xem tất cả
+        # - GVCN/Phó GVCN: chỉ xem nếu template có homeroom_enabled
+        # - GVBM: chỉ xem nếu có môn dạy trong template
+        if not is_sis_manager:
+            filtered_rows = []
+            for row in rows:
+                template_id = row["name"]
+                
+                # Lấy thông tin template để check quyền
+                tmpl = frappe.get_doc("SIS Report Card Template", template_id)
+                homeroom_enabled = getattr(tmpl, "homeroom_enabled", 0)
+                scores_enabled = getattr(tmpl, "scores_enabled", 0)
+                subject_eval_enabled = getattr(tmpl, "subject_eval_enabled", 0)
+                is_intl = getattr(tmpl, "program_type", "vn") == "intl"
+                
+                can_access = False
+                
+                # GVCN/Phó GVCN: chỉ xem nếu template có homeroom_enabled
+                if (is_homeroom_teacher or is_vice_homeroom_teacher) and homeroom_enabled:
+                    can_access = True
+                
+                # GVBM: chỉ xem nếu có môn dạy trong template
+                if is_subject_teacher and taught_subjects:
+                    # Lấy danh sách môn trong template
+                    template_subject_ids = set()
+                    
+                    # Từ template.subjects (cho subject_eval và INTL)
+                    for s in (getattr(tmpl, "subjects", None) or []):
+                        subj_id = getattr(s, "subject_id", None)
+                        if subj_id:
+                            template_subject_ids.add(subj_id)
+                    
+                    # Từ template.scores (cho VN scores)
+                    for s in (getattr(tmpl, "scores", None) or []):
+                        subj_id = getattr(s, "subject_id", None)
+                        if subj_id:
+                            template_subject_ids.add(subj_id)
+                    
+                    # Check xem có môn nào user dạy trong template không
+                    if any(subj in template_subject_ids for subj in taught_subjects):
+                        can_access = True
+                
+                if can_access:
+                    filtered_rows.append(row)
+            
+            rows = filtered_rows
+        
+        # Nếu không còn báo cáo nào sau filter
+        if not rows:
+            return success_response(data=[], message="Không có báo cáo nào phù hợp với quyền của bạn")
         
         # Thêm thông tin cho mỗi template
         for row in rows:
