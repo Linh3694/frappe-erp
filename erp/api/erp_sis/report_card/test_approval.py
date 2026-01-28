@@ -428,6 +428,8 @@ def test_compute_approval_counters():
         result.add_fail("Compute counters (empty data_json)", e)
     
     # Test với VN program (scores + homeroom)
+    # Lưu ý: scores_submitted_count đếm TẤT CẢ status KHÔNG phải draft/entry
+    # (bao gồm submitted, level_1_approved, level_2_approved)
     try:
         data_json = {
             "homeroom": {
@@ -452,12 +454,14 @@ def test_compute_approval_counters():
         assert counters["homeroom_l2_approved"] == 1, f"Expected 1, got {counters['homeroom_l2_approved']}"
         assert counters["scores_total_count"] == 3, f"Expected 3, got {counters['scores_total_count']}"
         assert counters["scores_l2_approved_count"] == 1, f"Expected 1, got {counters['scores_l2_approved_count']}"
-        assert counters["scores_submitted_count"] == 1, f"Expected 1, got {counters['scores_submitted_count']}"
+        # submitted_count = 2 (level_2_approved + submitted, không tính draft)
+        assert counters["scores_submitted_count"] == 2, f"Expected 2, got {counters['scores_submitted_count']}"
         result.add_pass("Compute counters (VN program)")
     except Exception as e:
         result.add_fail("Compute counters (VN program)", e)
     
     # Test với INTL program (main_scores, ielts, comments)
+    # Lưu ý: intl_submitted_count đếm TẤT CẢ status KHÔNG phải draft/entry
     try:
         data_json = {
             "homeroom": {
@@ -492,13 +496,14 @@ def test_compute_approval_counters():
         assert counters["intl_total_count"] == 6, f"Expected 6, got {counters['intl_total_count']}"
         # INTL L2 approved: 4 (2 main_scores + 1 ielts + 1 comments)
         assert counters["intl_l2_approved_count"] == 4, f"Expected 4, got {counters['intl_l2_approved_count']}"
-        # INTL submitted: 1 (ielts SUBJ_001)
-        assert counters["intl_submitted_count"] == 1, f"Expected 1, got {counters['intl_submitted_count']}"
+        # INTL submitted: 5 (tất cả không phải draft: 2 main + 2 ielts + 1 comments)
+        assert counters["intl_submitted_count"] == 5, f"Expected 5, got {counters['intl_submitted_count']}"
         result.add_pass("Compute counters (INTL program)")
     except Exception as e:
         result.add_fail("Compute counters (INTL program)", e)
     
     # Test với subject_eval
+    # Lưu ý: submitted_count đếm TẤT CẢ status KHÔNG phải draft/entry
     try:
         data_json = {
             "subject_eval": {
@@ -517,9 +522,10 @@ def test_compute_approval_counters():
         
         counters = _compute_approval_counters(data_json, template)
         
-        assert counters["subject_eval_total_count"] == 3
-        assert counters["subject_eval_l2_approved_count"] == 1
-        assert counters["subject_eval_submitted_count"] == 2  # submitted + level_1_approved
+        assert counters["subject_eval_total_count"] == 3, f"Expected 3, got {counters['subject_eval_total_count']}"
+        assert counters["subject_eval_l2_approved_count"] == 1, f"Expected 1, got {counters['subject_eval_l2_approved_count']}"
+        # submitted_count = 3 (tất cả đều không phải draft/entry)
+        assert counters["subject_eval_submitted_count"] == 3, f"Expected 3, got {counters['subject_eval_submitted_count']}"
         result.add_pass("Compute counters (subject_eval)")
     except Exception as e:
         result.add_fail("Compute counters (subject_eval)", e)
