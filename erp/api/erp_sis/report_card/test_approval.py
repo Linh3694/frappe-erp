@@ -72,6 +72,11 @@ def test_module_imports():
         ("utils", "erp.api.erp_sis.report_card.utils"),
         ("template", "erp.api.erp_sis.report_card.template"),
         ("student_report", "erp.api.erp_sis.report_card.student_report"),
+        # New modules after refactoring
+        ("constants", "erp.api.erp_sis.report_card.constants"),
+        ("validators", "erp.api.erp_sis.report_card.validators"),
+        ("approval_helpers", "erp.api.erp_sis.report_card.approval_helpers"),
+        ("approval_helpers.helpers", "erp.api.erp_sis.report_card.approval_helpers.helpers"),
     ]
     
     for name, module_path in modules_to_test:
@@ -786,6 +791,292 @@ def test_board_type_consistency():
 
 
 # ============================================================================
+# TEST: CONSTANTS MODULE
+# ============================================================================
+
+def test_constants_module():
+    """
+    Test 7: Kiểm tra constants module
+    Đảm bảo tất cả constants được define đúng
+    """
+    print("\n" + "="*60)
+    print("🧪 TEST 7: CONSTANTS MODULE")
+    print("="*60)
+    
+    result = TestResult()
+    
+    # Test import constants
+    try:
+        from erp.api.erp_sis.report_card.constants import (
+            ApprovalStatus,
+            SectionType,
+            STATUS_PRIORITY,
+            SECTION_NAME_MAP,
+            Messages,
+            ErrorCode
+        )
+        result.add_pass("Import all constants")
+    except Exception as e:
+        result.add_fail("Import all constants", e)
+        return result.summary()
+    
+    # Test ApprovalStatus values
+    try:
+        assert ApprovalStatus.DRAFT == "draft"
+        assert ApprovalStatus.SUBMITTED == "submitted"
+        assert ApprovalStatus.LEVEL_1_APPROVED == "level_1_approved"
+        assert ApprovalStatus.LEVEL_2_APPROVED == "level_2_approved"
+        assert ApprovalStatus.PUBLISHED == "published"
+        assert ApprovalStatus.REJECTED == "rejected"
+        result.add_pass("ApprovalStatus values correct")
+    except Exception as e:
+        result.add_fail("ApprovalStatus values correct", e)
+    
+    # Test SectionType values
+    try:
+        assert SectionType.HOMEROOM == "homeroom"
+        assert SectionType.SCORES == "scores"
+        assert SectionType.SUBJECT_EVAL == "subject_eval"
+        assert SectionType.MAIN_SCORES == "main_scores"
+        assert SectionType.IELTS == "ielts"
+        assert SectionType.COMMENTS == "comments"
+        result.add_pass("SectionType values correct")
+    except Exception as e:
+        result.add_fail("SectionType values correct", e)
+    
+    # Test STATUS_PRIORITY ordering
+    try:
+        assert STATUS_PRIORITY["draft"] < STATUS_PRIORITY["submitted"]
+        assert STATUS_PRIORITY["submitted"] < STATUS_PRIORITY["level_1_approved"]
+        assert STATUS_PRIORITY["level_1_approved"] < STATUS_PRIORITY["level_2_approved"]
+        assert STATUS_PRIORITY["level_2_approved"] < STATUS_PRIORITY["published"]
+        assert STATUS_PRIORITY["rejected"] < STATUS_PRIORITY["draft"]
+        result.add_pass("STATUS_PRIORITY ordering correct")
+    except Exception as e:
+        result.add_fail("STATUS_PRIORITY ordering correct", e)
+    
+    # Test SECTION_NAME_MAP has all sections
+    try:
+        assert "homeroom" in SECTION_NAME_MAP
+        assert "scores" in SECTION_NAME_MAP
+        assert "ielts" in SECTION_NAME_MAP
+        result.add_pass("SECTION_NAME_MAP has all sections")
+    except Exception as e:
+        result.add_fail("SECTION_NAME_MAP has all sections", e)
+    
+    # Test Messages
+    try:
+        assert hasattr(Messages, 'TEMPLATE_NOT_FOUND')
+        assert hasattr(Messages, 'REPORT_NOT_FOUND')
+        assert hasattr(Messages, 'PERMISSION_DENIED')
+        result.add_pass("Messages class has required messages")
+    except Exception as e:
+        result.add_fail("Messages class has required messages", e)
+    
+    return result.summary()
+
+
+# ============================================================================
+# TEST: HELPERS MODULE (approval_helpers)
+# ============================================================================
+
+def test_helpers_module():
+    """
+    Test 8: Kiểm tra approval_helpers module
+    Đảm bảo helpers từ module mới hoạt động giống từ approval.py
+    """
+    print("\n" + "="*60)
+    print("🧪 TEST 8: APPROVAL_HELPERS MODULE")
+    print("="*60)
+    
+    result = TestResult()
+    
+    # Test import helpers
+    try:
+        from erp.api.erp_sis.report_card.approval_helpers.helpers import (
+            get_subject_approval_from_data_json,
+            set_subject_approval_in_data_json,
+            compute_approval_counters,
+            add_approval_history,
+            batch_operation_savepoint,
+            detect_board_type_for_subject,
+        )
+        result.add_pass("Import helpers from approval_helpers module")
+    except Exception as e:
+        result.add_fail("Import helpers from approval_helpers module", e)
+        return result.summary()
+    
+    # Test get/set consistency with approval.py aliases
+    try:
+        from erp.api.erp_sis.report_card.approval import (
+            _get_subject_approval_from_data_json,
+            _set_subject_approval_in_data_json
+        )
+        
+        # Test cùng logic
+        data_json = {}
+        approval_info = {"status": "submitted"}
+        
+        # Using helpers module
+        result1 = set_subject_approval_in_data_json({}, "scores", "SUBJ_1", approval_info)
+        # Using approval.py aliases
+        result2 = _set_subject_approval_in_data_json({}, "scores", "SUBJ_1", approval_info)
+        
+        assert result1 == result2, "set_subject_approval should be consistent"
+        result.add_pass("Helpers consistent with approval.py aliases")
+    except Exception as e:
+        result.add_fail("Helpers consistent with approval.py aliases", e)
+    
+    # Test detect_board_type_for_subject
+    try:
+        data_json = {
+            "scores": {
+                "SUBJ_1": {"approval": {"status": "submitted"}}
+            },
+            "intl": {
+                "ielts": {
+                    "SUBJ_1": {"approval": {"status": "level_1_approved"}}
+                }
+            }
+        }
+        
+        # Should detect scores first for SUBJ_1 with status submitted
+        board_type, approval = detect_board_type_for_subject(data_json, "SUBJ_1", ["submitted"])
+        assert board_type == "scores", f"Expected scores, got {board_type}"
+        assert approval.get("status") == "submitted"
+        result.add_pass("detect_board_type_for_subject works correctly")
+    except Exception as e:
+        result.add_fail("detect_board_type_for_subject works correctly", e)
+    
+    return result.summary()
+
+
+# ============================================================================
+# TEST: VALIDATORS MODULE
+# ============================================================================
+
+def test_validators_module():
+    """
+    Test 9: Kiểm tra validators module
+    """
+    print("\n" + "="*60)
+    print("🧪 TEST 9: VALIDATORS MODULE")
+    print("="*60)
+    
+    result = TestResult()
+    
+    # Test import validators
+    try:
+        from erp.api.erp_sis.report_card.validators import (
+            validate_comment_title_exists,
+            validate_actual_subject_exists,
+            validate_report_access,
+            validate_template_access,
+            validate_class_access,
+            validate_approval_status_transition,
+        )
+        result.add_pass("Import all validators")
+    except Exception as e:
+        result.add_fail("Import all validators", e)
+        return result.summary()
+    
+    # Test validate_approval_status_transition
+    try:
+        # Valid transition
+        is_valid, error = validate_approval_status_transition(
+            "submitted", "level_1_approved", ["submitted"]
+        )
+        assert is_valid == True, "submitted -> level_1_approved should be valid"
+        
+        # Invalid transition
+        is_valid, error = validate_approval_status_transition(
+            "draft", "level_1_approved", ["submitted"]
+        )
+        assert is_valid == False, "draft -> level_1_approved should be invalid"
+        assert error is not None
+        
+        result.add_pass("validate_approval_status_transition works correctly")
+    except Exception as e:
+        result.add_fail("validate_approval_status_transition works correctly", e)
+    
+    return result.summary()
+
+
+# ============================================================================
+# TEST: UTILS MODULE (new helpers)
+# ============================================================================
+
+def test_utils_new_helpers():
+    """
+    Test 10: Kiểm tra utils module với helpers mới
+    """
+    print("\n" + "="*60)
+    print("🧪 TEST 10: UTILS NEW HELPERS")
+    print("="*60)
+    
+    result = TestResult()
+    
+    # Test import new helpers
+    try:
+        from erp.api.erp_sis.report_card.utils import (
+            parse_report_data_json,
+            safe_json_loads,
+            parse_json_field,
+        )
+        result.add_pass("Import new utils helpers")
+    except Exception as e:
+        result.add_fail("Import new utils helpers", e)
+        return result.summary()
+    
+    # Test parse_report_data_json
+    try:
+        # Mock report with data_json string
+        class MockReport:
+            data_json = '{"scores": {"SUBJ_1": {"value": 85}}}'
+        
+        parsed = parse_report_data_json(MockReport())
+        assert "scores" in parsed
+        assert parsed["scores"]["SUBJ_1"]["value"] == 85
+        result.add_pass("parse_report_data_json with string")
+    except Exception as e:
+        result.add_fail("parse_report_data_json with string", e)
+    
+    # Test parse_report_data_json with dict
+    try:
+        class MockReport:
+            data_json = {"already": "parsed"}
+        
+        parsed = parse_report_data_json(MockReport())
+        assert parsed.get("already") == "parsed"
+        result.add_pass("parse_report_data_json with dict")
+    except Exception as e:
+        result.add_fail("parse_report_data_json with dict", e)
+    
+    # Test parse_report_data_json with empty
+    try:
+        class MockReport:
+            data_json = None
+        
+        parsed = parse_report_data_json(MockReport())
+        assert parsed == {}
+        result.add_pass("parse_report_data_json with None")
+    except Exception as e:
+        result.add_fail("parse_report_data_json with None", e)
+    
+    # Test safe_json_loads
+    try:
+        assert safe_json_loads('{"key": "value"}') == {"key": "value"}
+        assert safe_json_loads(None) == {}
+        assert safe_json_loads("invalid json") == {}
+        assert safe_json_loads({"already": "dict"}) == {"already": "dict"}
+        result.add_pass("safe_json_loads handles all cases")
+    except Exception as e:
+        result.add_fail("safe_json_loads handles all cases", e)
+    
+    return result.summary()
+
+
+# ============================================================================
 # RUN ALL TESTS
 # ============================================================================
 
@@ -810,6 +1101,11 @@ def run_all_tests():
         ("Compute Approval Counters", test_compute_approval_counters),
         ("Per-Subject Reject Logic", test_per_subject_reject_logic),
         ("Board Type Consistency", test_board_type_consistency),
+        # New tests after refactoring
+        ("Constants Module", test_constants_module),
+        ("Helpers Module", test_helpers_module),
+        ("Validators Module", test_validators_module),
+        ("Utils New Helpers", test_utils_new_helpers),
     ]
     
     for test_name, test_func in tests:
