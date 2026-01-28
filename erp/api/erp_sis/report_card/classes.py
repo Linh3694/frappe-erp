@@ -7,6 +7,7 @@ APIs liên quan đến lớp học cho Report Card.
 """
 
 import frappe
+import json
 from typing import Any, Dict, Optional
 
 from erp.utils.api_response import (
@@ -407,12 +408,51 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             
             # Tính toán trạng thái hoàn thành nhập liệu
             # GVCN: Đã hoàn thành nếu tất cả HS đều có homeroom_status != "draft"
-            # GVBM: Đã hoàn thành nếu tất cả HS đều có scores_status != "draft"
+            # GVBM: Đã hoàn thành nếu:
+            #   - scores: tất cả HS có scores_status != "draft"
+            #   - subject_eval: tất cả HS có ít nhất 1 subject với approval.status != "draft"
             homeroom_completed = all(s != "draft" for s in homeroom_statuses) if homeroom_statuses else False
             scores_completed = all(s != "draft" for s in scores_statuses) if scores_statuses else False
             
+            # ✅ Check subject_eval completion từ data_json
+            # Lấy reports có data_json để check subject_eval
+            subject_eval_reports = frappe.get_all(
+                "SIS Student Report Card",
+                fields=["data_json"],
+                filters={
+                    "template_id": template_id,
+                    "class_id": class_id,
+                    "campus_id": campus_id
+                }
+            )
+            
+            subject_eval_completed = False
+            if subject_eval_reports:
+                subject_eval_statuses = []
+                for r in subject_eval_reports:
+                    try:
+                        data = json.loads(r.get("data_json") or "{}")
+                        subject_eval_data = data.get("subject_eval", {})
+                        # Tìm bất kỳ subject nào có approval.status != "draft"
+                        has_non_draft_subject = False
+                        for subject_id, subject_data in subject_eval_data.items():
+                            if not subject_id.startswith("SIS_ACTUAL_SUBJECT"):
+                                continue
+                            approval = subject_data.get("approval", {}) if isinstance(subject_data, dict) else {}
+                            status = approval.get("status", "draft")
+                            if status and status != "draft":
+                                has_non_draft_subject = True
+                                break
+                        subject_eval_statuses.append(has_non_draft_subject)
+                    except json.JSONDecodeError:
+                        subject_eval_statuses.append(False)
+                
+                # subject_eval_completed nếu TẤT CẢ reports đều có ít nhất 1 subject với status != draft
+                subject_eval_completed = all(subject_eval_statuses) if subject_eval_statuses else False
+            
             row["homeroom_completed"] = homeroom_completed
             row["scores_completed"] = scores_completed
+            row["subject_eval_completed"] = subject_eval_completed
         
         return success_response(data=rows, message="Templates with student reports fetched successfully")
     except Exception as e:
