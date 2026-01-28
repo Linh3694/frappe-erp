@@ -338,7 +338,7 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                     except Exception:
                         pass
 
-            # Check duplicate
+            # Check duplicate - Fixed: Batch query templates thay vì N+1
             existing_reports = frappe.get_all(
                 "SIS Student Report Card",
                 fields=["name", "template_id"],
@@ -353,16 +353,22 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
             program_type_conflict = False
             current_program_type = getattr(template, "program_type", "vn") or "vn"
             
-            for existing_report in existing_reports:
-                try:
-                    existing_template = frappe.get_doc("SIS Report Card Template", existing_report.get("template_id"))
-                    existing_program_type = getattr(existing_template, "program_type", "vn") or "vn"
+            # FIX N+1: Batch fetch program_type của tất cả templates
+            if existing_reports:
+                existing_template_ids = [r.get("template_id") for r in existing_reports if r.get("template_id")]
+                if existing_template_ids:
+                    existing_templates = frappe.get_all(
+                        "SIS Report Card Template",
+                        filters={"name": ["in", existing_template_ids]},
+                        fields=["name", "program_type"]
+                    )
+                    template_program_map = {t.name: (t.program_type or "vn") for t in existing_templates}
                     
-                    if existing_program_type == current_program_type:
-                        program_type_conflict = True
-                        break
-                except Exception:
-                    continue
+                    for existing_report in existing_reports:
+                        existing_program_type = template_program_map.get(existing_report.get("template_id"), "vn")
+                        if existing_program_type == current_program_type:
+                            program_type_conflict = True
+                            break
             
             if program_type_conflict:
                 program_type_label = "Chương trình Việt Nam" if current_program_type == "vn" else "Chương trình Quốc tế"

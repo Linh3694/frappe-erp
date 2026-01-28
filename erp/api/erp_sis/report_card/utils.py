@@ -191,3 +191,62 @@ def resolve_homeroom_teacher_name(teacher_id: str) -> str:
             
     except Exception:
         return teacher_id
+
+
+def parse_report_data_json(report) -> dict:
+    """
+    Parse data_json từ report một cách an toàn.
+    
+    Args:
+        report: SIS Student Report Card document hoặc dict có field data_json
+    
+    Returns:
+        Dict từ data_json, trả về {} nếu invalid hoặc empty
+    
+    Example:
+        data = parse_report_data_json(report)
+        scores = data.get("scores", {})
+    """
+    try:
+        data_json = getattr(report, 'data_json', None)
+        if data_json is None and isinstance(report, dict):
+            data_json = report.get('data_json')
+        
+        if not data_json:
+            return {}
+        
+        if isinstance(data_json, str):
+            return json.loads(data_json)
+        
+        if isinstance(data_json, dict):
+            return data_json
+        
+        return {}
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        return {}
+
+
+def safe_json_loads(value: Any, default: Any = None) -> Any:
+    """
+    Parse JSON string an toàn với default value.
+    
+    Args:
+        value: String JSON hoặc dict/list
+        default: Giá trị mặc định nếu parse thất bại
+    
+    Returns:
+        Parsed value hoặc default
+    """
+    if value is None:
+        return default if default is not None else {}
+    
+    if isinstance(value, (dict, list)):
+        return value
+    
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return default if default is not None else {}
+    
+    return default if default is not None else {}

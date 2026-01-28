@@ -9,6 +9,9 @@ Multi-level approval flow:
 - Level 2: Subject Managers / Tổ trưởng
 - Level 3: Reviewers (theo educational_stage)
 - Level 4: Final Approvers (theo educational_stage)
+
+NOTE: Helper functions đã được tách ra approval/helpers.py
+Để duy trì backward compatibility, các hàm được import và alias lại.
 """
 
 import frappe
@@ -26,231 +29,67 @@ from erp.utils.api_response import (
 )
 
 from .utils import get_request_payload, get_current_campus_id
+from .constants import ApprovalStatus, SectionType, SECTION_NAME_MAP, Messages
+
+# Import helpers từ approval submodule
+from .approval.helpers import (
+    # Data JSON helpers
+    get_subject_approval_from_data_json,
+    set_subject_approval_in_data_json,
+    detect_board_type_for_subject,
+    
+    # Counters
+    compute_approval_counters,
+    update_report_counters,
+    
+    # Permission checks
+    check_user_is_level_1_approver,
+    check_user_is_level_2_approver,
+    check_user_is_level_3_reviewer,
+    check_user_is_level_4_approver,
+    check_user_has_manager_role,
+    
+    # Level 3 check
+    can_approve_level_3,
+    
+    # Notification
+    send_report_card_notification,
+    
+    # Approval history
+    add_approval_history,
+    
+    # Utility
+    get_section_name,
+    get_teacher_for_user,
+)
+
+# ============================================================================
+# BACKWARD COMPATIBILITY ALIASES
+# Các hàm cũ được alias để code gọi từ bên ngoài vẫn hoạt động
+# ============================================================================
+_get_subject_approval_from_data_json = get_subject_approval_from_data_json
+_set_subject_approval_in_data_json = set_subject_approval_in_data_json
+_compute_approval_counters = compute_approval_counters
+_update_report_counters = update_report_counters
+_can_approve_level_3 = can_approve_level_3
+_check_user_is_level_1_approver = check_user_is_level_1_approver
+_check_user_is_level_2_approver = check_user_is_level_2_approver
+_check_user_is_level_3_reviewer = check_user_is_level_3_reviewer
+_check_user_is_level_4_approver = check_user_is_level_4_approver
+_add_approval_history = add_approval_history
+_send_report_card_notification = send_report_card_notification
 
 
 # ============================================================================
-# HELPER FUNCTIONS FOR SUBJECT-LEVEL APPROVAL
+# ORIGINAL APPROVAL APIs - GIỮ LẠI ĐỂ BACKWARD COMPATIBILITY
 # ============================================================================
-
-def _get_subject_approval_from_data_json(data_json: dict, section: str, subject_id: str) -> dict:
-    """
-    Lấy approval info từ data_json cho một môn cụ thể.
-    
-    Args:
-        data_json: Parsed data_json object
-        section: scores, subject_eval, hoặc intl board type (main_scores, ielts, comments)
-        subject_id: ID của môn học
-    
-    Returns:
-        Dict với approval info, hoặc {} nếu không tìm thấy
-    """
-    if section == "homeroom":
-        homeroom_data = data_json.get("homeroom", {})
-        return homeroom_data.get("approval", {})
-    
-    if section in ["scores", "subject_eval"]:
-        section_data = data_json.get(section, {})
-        subject_data = section_data.get(subject_id, {})
-        return subject_data.get("approval", {})
-    
-    # INTL sections: main_scores, ielts, comments
-    if section in ["main_scores", "ielts", "comments"]:
-        intl_data = data_json.get("intl", {})
-        section_data = intl_data.get(section, {})
-        subject_data = section_data.get(subject_id, {})
-        return subject_data.get("approval", {})
-    
-    return {}
+# NOTE: Các API functions được giữ nguyên trong file này
+# để đảm bảo routes frappe.whitelist vẫn hoạt động.
+# Trong tương lai có thể tách sang các submodules nếu cần.
 
 
-def _set_subject_approval_in_data_json(data_json: dict, section: str, subject_id: str, approval_info: dict) -> dict:
-    """
-    Set approval info trong data_json cho một môn cụ thể.
-    
-    Args:
-        data_json: Parsed data_json object (sẽ được modify in-place)
-        section: scores, subject_eval, homeroom, hoặc intl board type
-        subject_id: ID của môn học (None cho homeroom)
-        approval_info: Dict với approval info
-    
-    Returns:
-        Modified data_json
-    """
-    if section == "homeroom":
-        if "homeroom" not in data_json:
-            data_json["homeroom"] = {}
-        data_json["homeroom"]["approval"] = approval_info
-        return data_json
-    
-    if section in ["scores", "subject_eval"]:
-        if section not in data_json:
-            data_json[section] = {}
-        if subject_id not in data_json[section]:
-            data_json[section][subject_id] = {}
-        data_json[section][subject_id]["approval"] = approval_info
-        return data_json
-    
-    # INTL sections
-    if section in ["main_scores", "ielts", "comments"]:
-        if "intl" not in data_json:
-            data_json["intl"] = {}
-        if section not in data_json["intl"]:
-            data_json["intl"][section] = {}
-        if subject_id not in data_json["intl"][section]:
-            data_json["intl"][section][subject_id] = {}
-        data_json["intl"][section][subject_id]["approval"] = approval_info
-        return data_json
-    
-    return data_json
-
-
-def _compute_approval_counters(data_json: dict, template) -> dict:
-    """
-    Tính toán các counters dựa trên approval status trong data_json.
-    
-    Returns:
-        Dict với các counters:
-        - homeroom_l2_approved
-        - scores_submitted_count, scores_l2_approved_count, scores_total_count
-        - subject_eval_submitted_count, subject_eval_l2_approved_count, subject_eval_total_count
-        - intl_submitted_count, intl_l2_approved_count, intl_total_count
-        - all_sections_l2_approved
-    """
-    counters = {
-        "homeroom_l2_approved": 0,
-        "scores_submitted_count": 0,
-        "scores_l2_approved_count": 0,
-        "scores_total_count": 0,
-        "subject_eval_submitted_count": 0,
-        "subject_eval_l2_approved_count": 0,
-        "subject_eval_total_count": 0,
-        "intl_submitted_count": 0,
-        "intl_l2_approved_count": 0,
-        "intl_total_count": 0,
-    }
-    
-    # Homeroom
-    if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
-        h_approval = data_json["homeroom"].get("approval", {})
-        if h_approval.get("status") == "level_2_approved":
-            counters["homeroom_l2_approved"] = 1
-    
-    # Scores
-    if "scores" in data_json and isinstance(data_json["scores"], dict):
-        for subject_id, subject_data in data_json["scores"].items():
-            if isinstance(subject_data, dict):
-                counters["scores_total_count"] += 1
-                approval = subject_data.get("approval", {})
-                status = approval.get("status", "draft")
-                if status not in ["draft", "entry"]:
-                    counters["scores_submitted_count"] += 1
-                if status == "level_2_approved":
-                    counters["scores_l2_approved_count"] += 1
-    
-    # Subject Eval
-    if "subject_eval" in data_json and isinstance(data_json["subject_eval"], dict):
-        for subject_id, subject_data in data_json["subject_eval"].items():
-            if isinstance(subject_data, dict):
-                counters["subject_eval_total_count"] += 1
-                approval = subject_data.get("approval", {})
-                status = approval.get("status", "draft")
-                if status not in ["draft", "entry"]:
-                    counters["subject_eval_submitted_count"] += 1
-                if status == "level_2_approved":
-                    counters["subject_eval_l2_approved_count"] += 1
-    
-    # INTL
-    if "intl" in data_json and isinstance(data_json["intl"], dict):
-        for section_key in ["main_scores", "ielts", "comments"]:
-            if section_key in data_json["intl"] and isinstance(data_json["intl"][section_key], dict):
-                for subject_id, subject_data in data_json["intl"][section_key].items():
-                    if isinstance(subject_data, dict):
-                        counters["intl_total_count"] += 1
-                        approval = subject_data.get("approval", {})
-                        status = approval.get("status", "draft")
-                        if status not in ["draft", "entry"]:
-                            counters["intl_submitted_count"] += 1
-                        if status == "level_2_approved":
-                            counters["intl_l2_approved_count"] += 1
-    
-    # Compute all_sections_l2_approved
-    all_l2 = True
-    
-    # Check homeroom nếu enabled
-    homeroom_enabled = getattr(template, 'homeroom_enabled', False) if template else False
-    if homeroom_enabled and counters["homeroom_l2_approved"] != 1:
-        all_l2 = False
-    
-    # Check scores nếu enabled (VN program)
-    scores_enabled = getattr(template, 'scores_enabled', False) if template else False
-    program_type = getattr(template, 'program_type', 'vn') if template else 'vn'
-    if scores_enabled and program_type != 'intl':
-        if counters["scores_total_count"] > 0 and counters["scores_l2_approved_count"] < counters["scores_total_count"]:
-            all_l2 = False
-    
-    # Check subject_eval nếu enabled
-    subject_eval_enabled = getattr(template, 'subject_eval_enabled', False) if template else False
-    if subject_eval_enabled:
-        if counters["subject_eval_total_count"] > 0 and counters["subject_eval_l2_approved_count"] < counters["subject_eval_total_count"]:
-            all_l2 = False
-    
-    # Check INTL
-    if program_type == 'intl':
-        if counters["intl_total_count"] > 0 and counters["intl_l2_approved_count"] < counters["intl_total_count"]:
-            all_l2 = False
-    
-    counters["all_sections_l2_approved"] = 1 if all_l2 else 0
-    
-    return counters
-
-
-def _update_report_counters(report_name: str, data_json: dict, template):
-    """
-    Cập nhật counters trong database cho một report.
-    """
-    counters = _compute_approval_counters(data_json, template)
-    
-    frappe.db.set_value(
-        "SIS Student Report Card",
-        report_name,
-        counters,
-        update_modified=True
-    )
-    
-    return counters
-
-
-def _can_approve_level_3(report, template) -> tuple:
-    """
-    Kiểm tra xem report có đủ điều kiện để approve ở Level 3 không.
-    
-    Returns:
-        (can_approve, missing_items) - Tuple với bool và list các phần còn thiếu
-    """
-    missing = []
-    
-    # Check homeroom
-    if template.homeroom_enabled:
-        if not report.homeroom_l2_approved:
-            missing.append("Homeroom (Nhận xét GVCN)")
-    
-    # Check scores (VN program)
-    if template.scores_enabled and template.program_type != 'intl':
-        if report.scores_total_count > 0 and report.scores_l2_approved_count < report.scores_total_count:
-            missing.append(f"Scores ({report.scores_l2_approved_count}/{report.scores_total_count} môn)")
-    
-    # Check subject_eval
-    if template.subject_eval_enabled:
-        if report.subject_eval_total_count > 0 and report.subject_eval_l2_approved_count < report.subject_eval_total_count:
-            missing.append(f"Subject Eval ({report.subject_eval_l2_approved_count}/{report.subject_eval_total_count} môn)")
-    
-    # Check INTL
-    if template.program_type == 'intl':
-        if report.intl_total_count > 0 and report.intl_l2_approved_count < report.intl_total_count:
-            missing.append(f"INTL ({report.intl_l2_approved_count}/{report.intl_total_count} phần)")
-    
-    can_approve = len(missing) == 0
-    return (can_approve, missing)
+# NOTE: Các helper functions đã được move sang approval/helpers.py
+# và import ở trên. Code cũ đã được xóa để tránh duplicate.
 
 
 # ============================================================================
@@ -1601,32 +1440,38 @@ def get_pending_approvals(level: Optional[str] = None):
                                     results.append(r)
         
         # Validate: Lọc bỏ orphan records (reports có template đã bị xóa)
-        # Lấy danh sách template_id từ results để check
-        template_ids_to_check = set()
-        for r in results:
-            report_doc = frappe.db.get_value("SIS Student Report Card", r["name"], "template_id")
-            if report_doc:
-                template_ids_to_check.add(report_doc)
-        
-        valid_template_ids = set()
-        if template_ids_to_check:
-            existing_templates = frappe.get_all(
-                "SIS Report Card Template",
-                filters={"name": ["in", list(template_ids_to_check)]},
-                fields=["name"]
+        # FIX N+1: Batch fetch template_id cho tất cả reports
+        if results:
+            report_names = [r["name"] for r in results]
+            report_templates = frappe.get_all(
+                "SIS Student Report Card",
+                filters={"name": ["in", report_names]},
+                fields=["name", "template_id"]
             )
-            valid_template_ids = set(t["name"] for t in existing_templates)
-        
-        # Filter ra orphan records
-        filtered_results = []
-        for report in results:
-            report_template_id = frappe.db.get_value("SIS Student Report Card", report["name"], "template_id")
-            if report_template_id and report_template_id not in valid_template_ids:
-                frappe.logger().warning(f"Skipping orphan report: {report['name']}, template_id={report_template_id} không còn tồn tại")
-                continue
-            filtered_results.append(report)
-        
-        results = filtered_results
+            report_template_map = {r.name: r.template_id for r in report_templates}
+            
+            # Lấy danh sách template_id unique để check
+            template_ids_to_check = set(tid for tid in report_template_map.values() if tid)
+            
+            valid_template_ids = set()
+            if template_ids_to_check:
+                existing_templates = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"name": ["in", list(template_ids_to_check)]},
+                    fields=["name"]
+                )
+                valid_template_ids = set(t["name"] for t in existing_templates)
+            
+            # Filter ra orphan records
+            filtered_results = []
+            for report in results:
+                report_template_id = report_template_map.get(report["name"])
+                if report_template_id and report_template_id not in valid_template_ids:
+                    frappe.logger().warning(f"Skipping orphan report: {report['name']}, template_id={report_template_id} không còn tồn tại")
+                    continue
+                filtered_results.append(report)
+            
+            results = filtered_results
         
         # Enrich với thông tin học sinh
         for report in results:

@@ -142,3 +142,144 @@ def validate_comment_titles():
             message=f"Lỗi khi kiểm tra tiêu đề nhận xét: {error_msg}",
             code="VALIDATION_ERROR"
         )
+
+
+# =============================================================================
+# VALIDATION HELPERS
+# =============================================================================
+
+def validate_report_access(report_id: str, campus_id: str) -> tuple:
+    """
+    Validate report tồn tại và thuộc về campus.
+    
+    Args:
+        report_id: ID của báo cáo học tập
+        campus_id: ID campus
+    
+    Returns:
+        (report_doc, error_response) - report nếu valid, None và error response nếu invalid
+    
+    Example:
+        report, error = validate_report_access(report_id, campus_id)
+        if error:
+            return error
+        # ... continue với report
+    """
+    from .constants import Messages
+    
+    if not report_id:
+        return None, validation_error_response(
+            message=Messages.REPORT_ID_REQUIRED,
+            errors={"report_id": ["Required"]}
+        )
+    
+    try:
+        report = frappe.get_doc("SIS Student Report Card", report_id)
+    except frappe.DoesNotExistError:
+        return None, not_found_response(Messages.REPORT_NOT_FOUND)
+    
+    if report.campus_id != campus_id:
+        return None, forbidden_response(Messages.ACCESS_DENIED_REPORT)
+    
+    return report, None
+
+
+def validate_template_access(template_id: str, campus_id: str) -> tuple:
+    """
+    Validate template tồn tại và thuộc về campus.
+    
+    Args:
+        template_id: ID của template
+        campus_id: ID campus
+    
+    Returns:
+        (template_doc, error_response) - template nếu valid, None và error response nếu invalid
+    
+    Example:
+        template, error = validate_template_access(template_id, campus_id)
+        if error:
+            return error
+        # ... continue với template
+    """
+    from .constants import Messages
+    
+    if not template_id:
+        return None, validation_error_response(
+            message=Messages.TEMPLATE_ID_REQUIRED,
+            errors={"template_id": ["Required"]}
+        )
+    
+    try:
+        template = frappe.get_doc("SIS Report Card Template", template_id)
+    except frappe.DoesNotExistError:
+        return None, not_found_response(Messages.TEMPLATE_NOT_FOUND)
+    
+    if template.campus_id != campus_id:
+        return None, forbidden_response(Messages.ACCESS_DENIED_TEMPLATE)
+    
+    return template, None
+
+
+def validate_class_access(class_id: str, campus_id: str) -> tuple:
+    """
+    Validate class tồn tại và thuộc về campus.
+    
+    Args:
+        class_id: ID của lớp
+        campus_id: ID campus
+    
+    Returns:
+        (class_doc, error_response) - class nếu valid, None và error response nếu invalid
+    """
+    from .constants import Messages
+    
+    if not class_id:
+        return None, validation_error_response(
+            message=Messages.CLASS_ID_REQUIRED,
+            errors={"class_id": ["Required"]}
+        )
+    
+    try:
+        class_doc = frappe.get_doc("SIS Class", class_id)
+    except frappe.DoesNotExistError:
+        return None, not_found_response(Messages.CLASS_NOT_FOUND)
+    
+    if class_doc.campus_id != campus_id:
+        return None, forbidden_response(Messages.ACCESS_DENIED_CAMPUS)
+    
+    return class_doc, None
+
+
+def validate_approval_status_transition(current_status: str, target_status: str, allowed_from: List[str]) -> tuple:
+    """
+    Validate trạng thái chuyển đổi có hợp lệ không.
+    
+    Args:
+        current_status: Trạng thái hiện tại
+        target_status: Trạng thái muốn chuyển đến
+        allowed_from: List các trạng thái được phép chuyển từ
+    
+    Returns:
+        (is_valid, error_message)
+    """
+    from .constants import Messages
+    
+    if current_status not in allowed_from:
+        return False, Messages.INVALID_STATUS_FOR_APPROVAL.format(
+            required=", ".join(allowed_from),
+            current=current_status
+        )
+    
+    return True, None
+
+
+def not_found_response(message: str):
+    """Trả về response 404."""
+    from erp.utils.api_response import not_found_response as api_not_found
+    return api_not_found(message)
+
+
+def forbidden_response(message: str):
+    """Trả về response 403."""
+    from erp.utils.api_response import forbidden_response as api_forbidden
+    return api_forbidden(message)
