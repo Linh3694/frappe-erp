@@ -167,11 +167,11 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         
         try:
             assignment_classes = frappe.db.sql(sa_query, tuple(params), as_dict=True) or []
-                for assignment in assignment_classes:
-                    if assignment.class_id:
-                        teaching_class_ids.add(assignment.class_id)
-            except Exception:
-                pass
+            for assignment in assignment_classes:
+                if assignment.class_id:
+                    teaching_class_ids.add(assignment.class_id)
+        except Exception:
+            pass
         
         # Get teaching class details
         teaching_classes = []
