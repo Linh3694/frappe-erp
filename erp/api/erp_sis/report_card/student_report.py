@@ -461,10 +461,6 @@ def get_reports_by_class():
     if not template_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
         template_id = frappe.request.args.get("template_id")
     
-    # 🔍 DEBUG: Log để kiểm tra filter
-    frappe.logger().info(f"[get_reports_by_class] class_id={class_id}, template_id={template_id}")
-    frappe.logger().info(f"[get_reports_by_class] form_dict={dict(frappe.form_dict)}")
-    
     if template_id:
         filters["template_id"] = template_id
             

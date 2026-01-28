@@ -274,8 +274,46 @@ def compute_approval_counters(data_json: dict, template) -> dict:
                 if status == ApprovalStatus.LEVEL_2_APPROVED:
                     counters["subject_eval_l2_approved_count"] += 1
     
-    # INTL
-    if "intl" in data_json and isinstance(data_json["intl"], dict):
+    # INTL - ✅ FIX: Read from new intl_scores structure
+    # New structure: intl_scores.{subject_id}.{section}_approval (main_scores_approval, ielts_approval, comments_approval)
+    # Old structure (backward compat): intl.{section}.{subject_id}.approval
+    
+    # Check new structure first (intl_scores)
+    if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
+        for subject_id, subject_data in data_json["intl_scores"].items():
+            if not isinstance(subject_data, dict):
+                continue
+            # Skip non-subject keys (like metadata)
+            if not subject_id.startswith("SIS_ACTUAL_SUBJECT-") and not subject_id.startswith("SIS-ACTUAL-SUBJECT-"):
+                continue
+            
+            # Check each INTL section's approval
+            for section_key in ["main_scores", "ielts", "comments"]:
+                approval_key = f"{section_key}_approval"
+                
+                # Check if this section has data (main_scores, ielts_scores, or comment)
+                has_section_data = False
+                if section_key == "main_scores" and subject_data.get("main_scores"):
+                    has_section_data = True
+                elif section_key == "ielts" and subject_data.get("ielts_scores"):
+                    has_section_data = True
+                elif section_key == "comments" and (subject_data.get("comment") or subject_data.get("intl_comment")):
+                    has_section_data = True
+                
+                # Only count if section has data or has approval (submitted)
+                if has_section_data or approval_key in subject_data:
+                    counters["intl_total_count"] += 1
+                    
+                    if approval_key in subject_data:
+                        approval = subject_data.get(approval_key, {})
+                        status = approval.get("status", ApprovalStatus.DRAFT)
+                        if status not in [ApprovalStatus.DRAFT, ApprovalStatus.ENTRY]:
+                            counters["intl_submitted_count"] += 1
+                        if status == ApprovalStatus.LEVEL_2_APPROVED:
+                            counters["intl_l2_approved_count"] += 1
+    
+    # Backward compatibility: Also check old structure (intl.{section}.{subject_id})
+    elif "intl" in data_json and isinstance(data_json["intl"], dict):
         for section_key in [SectionType.MAIN_SCORES, SectionType.IELTS, SectionType.COMMENTS]:
             if section_key in data_json["intl"] and isinstance(data_json["intl"][section_key], dict):
                 for subject_id, subject_data in data_json["intl"][section_key].items():
