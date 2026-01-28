@@ -936,3 +936,151 @@ def get_previous_semester_score():
     except Exception as e:
         frappe.log_error(f"get_previous_semester_score error: {str(e)}")
         return error_response(f"Lỗi khi lấy điểm kỳ trước: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def debug_report_data():
+    """
+    Debug endpoint để kiểm tra data_json của một report.
+    Trả về raw data để debug.
+    """
+    try:
+        report_id = frappe.form_dict.get("report_id")
+        subject_id = frappe.form_dict.get("subject_id")
+        
+        if not report_id:
+            return validation_error_response(
+                message="report_id is required",
+                errors={"report_id": ["Required"]}
+            )
+        
+        campus_id = get_current_campus_id()
+        
+        # Lấy report
+        report = frappe.db.sql("""
+            SELECT name, student_id, class_id, template_id, data_json
+            FROM `tabSIS Student Report Card`
+            WHERE name = %s AND campus_id = %s
+        """, [report_id, campus_id], as_dict=True)
+        
+        if not report:
+            return not_found_response("Report không tồn tại hoặc không có quyền truy cập")
+        
+        report = report[0]
+        
+        # Parse data_json
+        try:
+            data_json = json.loads(report.get("data_json") or "{}")
+        except json.JSONDecodeError:
+            data_json = {}
+        
+        result = {
+            "report_id": report.get("name"),
+            "student_id": report.get("student_id"),
+            "class_id": report.get("class_id"),
+            "template_id": report.get("template_id"),
+            "data_json_keys": list(data_json.keys()),
+            "has_intl_scores": "intl_scores" in data_json,
+            "has_scores": "scores" in data_json,
+            "has_homeroom": "homeroom" in data_json,
+            "has_subject_eval": "subject_eval" in data_json,
+        }
+        
+        # Nếu có subject_id, lấy data cho subject đó
+        if subject_id:
+            result["subject_id"] = subject_id
+            
+            # Check intl_scores
+            intl_scores = data_json.get("intl_scores", {})
+            subject_intl = intl_scores.get(subject_id, {})
+            result["intl_scores_subject_keys"] = list(subject_intl.keys()) if subject_intl else []
+            result["intl_scores_data"] = subject_intl
+            
+            # Check scores
+            scores = data_json.get("scores", {})
+            subject_scores = scores.get(subject_id, {})
+            result["scores_subject_keys"] = list(subject_scores.keys()) if subject_scores else []
+            result["scores_data"] = subject_scores
+        else:
+            # Liệt kê tất cả subjects có data
+            result["intl_scores_subjects"] = list(data_json.get("intl_scores", {}).keys())
+            result["scores_subjects"] = list(data_json.get("scores", {}).keys())
+            result["subject_eval_subjects"] = list(data_json.get("subject_eval", {}).keys())
+        
+        return success_response(data=result, message="Debug data loaded")
+    
+    except Exception as e:
+        frappe.log_error(f"debug_report_data error: {str(e)}")
+        return error_response(f"Lỗi debug: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def debug_class_intl_data():
+    """
+    Debug endpoint để kiểm tra data_json của tất cả reports trong một class.
+    Trả về summary về INTL data cho từng student.
+    """
+    try:
+        class_id = frappe.form_dict.get("class_id")
+        template_id = frappe.form_dict.get("template_id")
+        subject_id = frappe.form_dict.get("subject_id")
+        
+        if not class_id or not template_id:
+            return validation_error_response(
+                message="class_id và template_id là bắt buộc",
+                errors={"class_id": ["Required"], "template_id": ["Required"]}
+            )
+        
+        campus_id = get_current_campus_id()
+        
+        # Lấy tất cả reports
+        reports = frappe.db.sql("""
+            SELECT name, student_id, data_json
+            FROM `tabSIS Student Report Card`
+            WHERE class_id = %s AND template_id = %s AND campus_id = %s
+        """, [class_id, template_id, campus_id], as_dict=True)
+        
+        results = []
+        for report in reports:
+            try:
+                data_json = json.loads(report.get("data_json") or "{}")
+            except json.JSONDecodeError:
+                data_json = {}
+            
+            intl_scores = data_json.get("intl_scores", {})
+            
+            item = {
+                "report_id": report.get("name"),
+                "student_id": report.get("student_id"),
+                "has_intl_scores": bool(intl_scores),
+                "intl_subjects": list(intl_scores.keys()),
+            }
+            
+            if subject_id and subject_id in intl_scores:
+                subject_data = intl_scores[subject_id]
+                item["subject_data"] = {
+                    "keys": list(subject_data.keys()),
+                    "has_main_scores": "main_scores" in subject_data,
+                    "main_scores": subject_data.get("main_scores"),
+                    "overall_mark": subject_data.get("overall_mark"),
+                    "overall_grade": subject_data.get("overall_grade"),
+                    "approval": subject_data.get("approval"),
+                }
+            
+            results.append(item)
+        
+        return success_response(
+            data={
+                "class_id": class_id,
+                "template_id": template_id,
+                "subject_id": subject_id,
+                "total_reports": len(reports),
+                "reports_with_intl_data": len([r for r in results if r["has_intl_scores"]]),
+                "reports": results
+            },
+            message="Debug class data loaded"
+        )
+    
+    except Exception as e:
+        frappe.log_error(f"debug_class_intl_data error: {str(e)}")
+        return error_response(f"Lỗi debug: {str(e)}")
