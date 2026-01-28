@@ -1181,19 +1181,13 @@ def get_pending_approvals(level: Optional[str] = None):
                         for r in l3_reviewers
                     )
                     if is_l3:
-                        # Lấy templates của education_stage này với homeroom_enabled và scores_enabled
+                        # Lấy templates của education_stage này
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
                             fields=["name", "homeroom_enabled", "scores_enabled"]
                         )
                         for tmpl in templates:
-                            # Build filter động dựa trên sections được enable
-                            base_filters = {
-                                "template_id": tmpl.name,
-                                "campus_id": campus_id
-                            }
-                            
                             homeroom_enabled = tmpl.get("homeroom_enabled")
                             scores_enabled = tmpl.get("scores_enabled")
                             
@@ -1201,15 +1195,26 @@ def get_pending_approvals(level: Optional[str] = None):
                             if not homeroom_enabled and not scores_enabled:
                                 continue
                             
-                            # Chỉ check sections được enable
+                            # Level 3: Hiển thị khi ÍT NHẤT MỘT section đã level_2_approved
+                            # (bỏ qua sections còn ở draft - chưa submit)
+                            # Dùng OR condition: homeroom_approval_status = level_2_approved OR scores_approval_status = level_2_approved
+                            or_filters = []
                             if homeroom_enabled:
-                                base_filters["homeroom_approval_status"] = "level_2_approved"
+                                or_filters.append(["homeroom_approval_status", "=", "level_2_approved"])
                             if scores_enabled:
-                                base_filters["scores_approval_status"] = "level_2_approved"
+                                or_filters.append(["scores_approval_status", "=", "level_2_approved"])
                             
+                            if not or_filters:
+                                continue
+                            
+                            # Query với OR condition
                             reports_l3 = frappe.get_all(
                                 "SIS Student Report Card",
-                                filters=base_filters,
+                                filters={
+                                    "template_id": tmpl.name,
+                                    "campus_id": campus_id
+                                },
+                                or_filters=or_filters,
                                 fields=["name", "title", "student_id", "class_id", "approval_status",
                                         "homeroom_approval_status", "scores_approval_status"]
                             )
@@ -1847,13 +1852,6 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             fields=["name", "title", "homeroom_enabled", "scores_enabled"]
                         )
                         for tmpl in templates:
-                            # Build filter động dựa trên sections được enable trong template
-                            # Level 3 chỉ cần những sections được enable đều level_2_approved
-                            base_filters = {
-                                "template_id": tmpl.name,
-                                "campus_id": campus_id
-                            }
-                            
                             homeroom_enabled = tmpl.get("homeroom_enabled")
                             scores_enabled = tmpl.get("scores_enabled")
                             
@@ -1861,17 +1859,26 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             if not homeroom_enabled and not scores_enabled:
                                 continue
                             
-                            # Chỉ check những sections được enable
+                            # Level 3: Hiển thị khi ÍT NHẤT MỘT section đã level_2_approved
+                            # (bỏ qua sections còn ở draft - chưa submit)
+                            or_filters = []
                             if homeroom_enabled:
-                                base_filters["homeroom_approval_status"] = "level_2_approved"
+                                or_filters.append(["homeroom_approval_status", "=", "level_2_approved"])
                             if scores_enabled:
-                                base_filters["scores_approval_status"] = "level_2_approved"
+                                or_filters.append(["scores_approval_status", "=", "level_2_approved"])
                             
-                            # Lấy reports thỏa mãn điều kiện
+                            if not or_filters:
+                                continue
+                            
+                            # Lấy reports với OR condition
                             # Bao gồm cả reports bị reject từ Level 4 (có rejection_reason)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
-                                filters=base_filters,
+                                filters={
+                                    "template_id": tmpl.name,
+                                    "campus_id": campus_id
+                                },
+                                or_filters=or_filters,
                                 fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at",
                                         "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section"]
                             )
@@ -2113,27 +2120,38 @@ def approve_class_reports():
             homeroom_enabled = getattr(template, 'homeroom_enabled', False)
             scores_enabled = getattr(template, 'scores_enabled', False)
             
-            # Filter dựa trên sections được enable
-            if homeroom_enabled:
-                filters["homeroom_approval_status"] = "level_2_approved"
-            if scores_enabled:
-                filters["scores_approval_status"] = "level_2_approved"
-            
             # Nếu cả 2 đều disabled thì không có gì để approve
             if not homeroom_enabled and not scores_enabled:
                 return error_response(
                     message="Template không có section nào được bật",
                     code="NO_SECTIONS"
                 )
+            
+            # Level 3: Filter với OR condition - ÍT NHẤT MỘT section đã level_2_approved
+            or_filters = []
+            if homeroom_enabled:
+                or_filters.append(["homeroom_approval_status", "=", "level_2_approved"])
+            if scores_enabled:
+                or_filters.append(["scores_approval_status", "=", "level_2_approved"])
         else:
             # Level 1, 2, publish: dùng status_field như trước
             filters[status_field] = ["in", current_statuses]
+            or_filters = None
         
-        reports = frappe.get_all(
-            "SIS Student Report Card",
-            filters=filters,
-            fields=["name", "student_id"]
-        )
+        # Query reports - sử dụng or_filters nếu có (cho Level 3)
+        if or_filters:
+            reports = frappe.get_all(
+                "SIS Student Report Card",
+                filters=filters,
+                or_filters=or_filters,
+                fields=["name", "student_id"]
+            )
+        else:
+            reports = frappe.get_all(
+                "SIS Student Report Card",
+                filters=filters,
+                fields=["name", "student_id"]
+            )
         
         if not reports:
             return error_response(
