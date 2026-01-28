@@ -353,7 +353,11 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             # Lấy tất cả student reports của lớp+template
             student_reports = frappe.get_all(
                 "SIS Student Report Card",
-                fields=["homeroom_approval_status", "scores_approval_status"],
+                fields=[
+                    "homeroom_approval_status", "scores_approval_status",
+                    "rejection_reason", "rejected_section", "rejected_from_level",
+                    "homeroom_rejection_reason", "scores_rejection_reason"
+                ],
                 filters={
                     "template_id": template_id,
                     "class_id": class_id,
@@ -370,6 +374,36 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             row["student_report_count"] = len(student_reports)
             row["is_homeroom_teacher"] = is_homeroom_teacher
             row["is_subject_teacher"] = is_subject_teacher
+            
+            # Kiểm tra có reports nào bị reject không
+            has_homeroom_rejection = any(
+                r.get("homeroom_rejection_reason") or 
+                (r.get("rejected_section") in ["homeroom", "both"] and r.get("rejection_reason"))
+                for r in student_reports
+            )
+            has_scores_rejection = any(
+                r.get("scores_rejection_reason") or 
+                (r.get("rejected_section") in ["scores", "both"] and r.get("rejection_reason"))
+                for r in student_reports
+            )
+            
+            row["has_homeroom_rejection"] = has_homeroom_rejection
+            row["has_scores_rejection"] = has_scores_rejection
+            
+            # Lấy thông tin rejection đầu tiên (nếu có) để hiển thị
+            if has_homeroom_rejection or has_scores_rejection:
+                rejected_report = next(
+                    (r for r in student_reports if r.get("rejection_reason") or r.get("homeroom_rejection_reason") or r.get("scores_rejection_reason")),
+                    None
+                )
+                if rejected_report:
+                    row["rejection_reason"] = (
+                        rejected_report.get("rejection_reason") or 
+                        rejected_report.get("homeroom_rejection_reason") or 
+                        rejected_report.get("scores_rejection_reason")
+                    )
+                    row["rejected_section"] = rejected_report.get("rejected_section")
+                    row["rejected_from_level"] = rejected_report.get("rejected_from_level")
             
             # Tính toán trạng thái hoàn thành nhập liệu
             # GVCN: Đã hoàn thành nếu tất cả HS đều có homeroom_status != "draft"

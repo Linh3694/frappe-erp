@@ -544,7 +544,15 @@ def get_report(report_id=None, **kwargs):
         "SIS Student Report Card",
         fields=[
             "name", "title", "template_id", "form_id", "class_id", "student_id",
-            "school_year", "semester_part", "status", "data_json", "creation", "modified"
+            "school_year", "semester_part", "status", "data_json", "creation", "modified",
+            # Approval status fields
+            "approval_status", "homeroom_approval_status", "scores_approval_status",
+            # Rejection fields (chung)
+            "rejection_reason", "rejected_by", "rejected_at", "rejected_section", "rejected_from_level",
+            # Rejection fields (homeroom-specific)
+            "homeroom_rejection_reason", "homeroom_rejected_by", "homeroom_rejected_at",
+            # Rejection fields (scores-specific)
+            "scores_rejection_reason", "scores_rejected_by", "scores_rejected_at"
         ],
         filters={"name": report_id, "campus_id": campus_id}
     )
