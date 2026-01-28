@@ -459,7 +459,12 @@ def get_reports_by_class():
             "name", "title", "template_id", "form_id", "class_id", "student_id",
             "school_year", "semester_part", "status", "creation", "modified", 
             "pdf_file", "is_approved", "approval_status",
-            "rejection_reason", "rejected_by", "rejected_at"
+            "rejection_reason", "rejected_by", "rejected_at",
+            # Thêm data_json để hiển thị trong ApprovalView
+            "data_json",
+            # Thêm các fields approval status theo section
+            "homeroom_approval_status", "homeroom_submitted_at", "homeroom_submitted_by",
+            "scores_approval_status", "scores_submitted_at", "scores_submitted_by"
         ],
         filters=filters,
         order_by="modified desc"
