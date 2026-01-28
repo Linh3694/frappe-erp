@@ -2742,13 +2742,38 @@ def reject_single_report():
         if report.campus_id != campus_id:
             return forbidden_response("Không có quyền truy cập báo cáo này")
         
-        current_status = getattr(report, 'approval_status', 'draft') or 'draft'
+        # Lấy các status fields
+        approval_status = getattr(report, 'approval_status', 'draft') or 'draft'
+        homeroom_status = getattr(report, 'homeroom_approval_status', 'draft') or 'draft'
+        scores_status = getattr(report, 'scores_approval_status', 'draft') or 'draft'
         now = datetime.now()
         
-        # Chỉ cho phép reject từ Level 3 hoặc Level 4
-        if current_status not in ['level_2_approved', 'reviewed']:
+        # Xác định status cần check dựa trên section
+        # Level 3 reject theo section-specific status
+        # Level 4 reject theo approval_status chung (đã reviewed)
+        can_reject = False
+        current_status = approval_status  # Default cho error message
+        
+        if approval_status == 'reviewed':
+            # Có thể reject từ Level 4
+            can_reject = True
+            current_status = 'reviewed'
+        elif section == 'homeroom' and homeroom_status == 'level_2_approved':
+            # Có thể reject homeroom từ Level 3
+            can_reject = True
+            current_status = 'level_2_approved'
+        elif section == 'scores' and scores_status == 'level_2_approved':
+            # Có thể reject scores từ Level 3
+            can_reject = True
+            current_status = 'level_2_approved'
+        elif section == 'both' and (homeroom_status == 'level_2_approved' or scores_status == 'level_2_approved'):
+            # Có thể reject both nếu ÍT NHẤT một section đã level_2_approved
+            can_reject = True
+            current_status = 'level_2_approved'
+        
+        if not can_reject:
             return error_response(
-                message=f"Không thể trả lại báo cáo ở trạng thái '{current_status}'",
+                message=f"Không thể trả lại báo cáo. Section '{section}' chưa ở trạng thái 'level_2_approved' hoặc 'reviewed'",
                 code="INVALID_STATUS"
             )
         
