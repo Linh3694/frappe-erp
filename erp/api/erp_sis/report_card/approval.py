@@ -2687,8 +2687,8 @@ def reject_class_reports():
     Chuyển trạng thái về 'rejected' và lưu lý do.
     
     Level 1, 2 sử dụng section-specific fields:
-    - subject_id = null -> homeroom_approval_status
-    - subject_id != null -> scores_approval_status
+    - section_type = "homeroom" -> homeroom_approval_status
+    - section_type = "scores" -> scores_approval_status
     
     Level 3, 4 dùng approval_status chung.
     
@@ -2697,6 +2697,7 @@ def reject_class_reports():
             "template_id": "...",
             "class_id": "...",
             "subject_id": "...",  # Optional, null cho homeroom
+            "section_type": "homeroom" | "scores",  # Required để phân biệt rõ
             "pending_level": "level_1" | "level_2" | "review" | "publish",
             "reason": "..."  # Required - Lý do trả về
         }
@@ -2706,6 +2707,7 @@ def reject_class_reports():
         template_id = data.get("template_id")
         class_id = data.get("class_id")
         subject_id = data.get("subject_id")
+        section_type = data.get("section_type")  # Mới: phân biệt homeroom vs scores
         pending_level = data.get("pending_level")
         reason = data.get("reason", "").strip()
         
@@ -2736,9 +2738,14 @@ def reject_class_reports():
         user = frappe.session.user
         campus_id = get_current_campus_id()
         
-        # Xác định section dựa trên subject_id
-        is_homeroom = not subject_id
-        section = "homeroom" if is_homeroom else "scores"
+        # Xác định section: ưu tiên section_type, fallback về logic cũ
+        if section_type:
+            is_homeroom = (section_type == "homeroom")
+            section = section_type
+        else:
+            # Fallback: infer từ subject_id (backward compatibility)
+            is_homeroom = not subject_id
+            section = "homeroom" if is_homeroom else "scores"
         
         # Xác định status field và current_status dựa trên pending_level
         if pending_level in ["level_1", "level_2"]:
