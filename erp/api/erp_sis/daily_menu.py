@@ -336,7 +336,8 @@ def convert_items_to_meals_structure(items, menu_name):
 def get_all_daily_menus():
     """Get all daily menus with pagination support"""
     try:
-        fetch_all = frappe.local.form_dict.get('fetch_all') == '1'
+        # Sử dụng get_request_param để lấy parameter từ cả query string và form_dict
+        fetch_all = get_request_param('fetch_all') == '1'
 
         if fetch_all:
             daily_menus = frappe.get_all(
@@ -345,8 +346,8 @@ def get_all_daily_menus():
                 order_by="menu_date desc"
             )
         else:
-            page = int(frappe.local.form_dict.get('page', 1))
-            page_size = int(frappe.local.form_dict.get('page_size', 20))
+            page = int(get_request_param('page') or 1)
+            page_size = int(get_request_param('page_size') or 20)
             start = (page - 1) * page_size
 
             daily_menus = frappe.get_all(
