@@ -1773,13 +1773,14 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         matching_subjects = [sid for sid in subject_ids if sid in template_subjects]
                         
                         if matching_subjects:
-                            # Lấy reports theo scores_approval_status = submitted
+                            # Lấy reports theo scores_approval_status = submitted hoặc level_1_approved
+                            # (level_1_approved khi submit đã skip L1 vì có Subject Manager)
                             # Bao gồm cả reports bị trả về từ Level 3 (có rejection_reason)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "scores_approval_status": "submitted",
+                                    "scores_approval_status": ["in", ["submitted", "level_1_approved"]],
                                     "campus_id": campus_id
                                 },
                                 fields=["name", "class_id", "scores_submitted_at", "scores_submitted_by",
