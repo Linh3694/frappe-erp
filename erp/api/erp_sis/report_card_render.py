@@ -340,9 +340,16 @@ def _get_template_config_for_subject(template_id: str, subject_id: str) -> Dict[
         return {'_debug_extraction': debug_info}
 
 
-def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, Any]:
+def _standardize_report_data(data: Dict[str, Any], report, form, l2_approved_subject_ids: Optional[set] = None) -> Dict[str, Any]:
     """
     Standardize report data into consistent structure for frontend consumption
+    
+    Args:
+        data: Raw report data
+        report: Report document
+        form: Form document
+        l2_approved_subject_ids: Optional set of subject IDs đã qua L2 approval.
+                                 Nếu có, chỉ include subjects trong set này (giữ thứ tự template).
     """
     standardized = {}
     template_id = getattr(report, "template_id", "")
@@ -551,6 +558,12 @@ def _standardize_report_data(data: Dict[str, Any], report, form) -> Dict[str, An
     for subject_info in subjects_to_process:
         subject_id = subject_info.get("subject_id", "")
         source = subject_info.get("source", "")
+        
+        # ✨ Skip subject nếu đang filter L2 và subject chưa được L2 approved
+        # Điều này đảm bảo L3 chỉ hiển thị các môn đã qua L2, giữ thứ tự theo template
+        if l2_approved_subject_ids is not None and subject_id not in l2_approved_subject_ids:
+            frappe.logger().info(f"[FILTER_L2] Skipping subject {subject_id} - not in L2 approved set")
+            continue
         
         # ✨ NOTE: Không cần check has_data_structure nữa!
         # subjects_to_process ĐÃ LÀ danh sách từ template
@@ -1418,6 +1431,19 @@ def get_report_data(report_id: Optional[str] = None, filter_l2_approved: Optiona
                     data[intl_key] = filtered_intl
                     frappe.logger().info(f"[FILTER_L2] Filtered {intl_key}: {original_count} -> {len(filtered_intl)} (L2 approved)")
         
+        # ========== TẠO SET L2 APPROVED SUBJECT IDS (GIỮ THỨ TỰ TEMPLATE) ==========
+        # Sau khi filter, tạo set các subject_ids đã L2 approved để truyền vào _standardize_report_data
+        l2_approved_subject_ids = None
+        if filter_l2:
+            l2_approved_subject_ids = set()
+            for section_key in ["scores", "subject_eval", "intl_scores", "intl"]:
+                section_data = data.get(section_key, {})
+                if isinstance(section_data, dict):
+                    for subject_id in section_data.keys():
+                        if subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
+                            l2_approved_subject_ids.add(subject_id)
+            frappe.logger().info(f"[FILTER_L2] L2 approved subject IDs: {l2_approved_subject_ids}")
+        
         # Transform data to match frontend layout binding expectations
         # ✨ Sau khi filter, transform data sẽ chỉ tạo subjects từ data đã được filter
         try:
@@ -1440,7 +1466,8 @@ def get_report_data(report_id: Optional[str] = None, filter_l2_approved: Optiona
             }
 
         # Return structured data for frontend React rendering
-        standardized_data = _standardize_report_data(transformed_data, report, form)
+        # Truyền l2_approved_subject_ids để filter subjects theo L2 approval (giữ thứ tự template)
+        standardized_data = _standardize_report_data(transformed_data, report, form, l2_approved_subject_ids=l2_approved_subject_ids)
         
         # === ENRICH INTL_SCORES WITH SCOREBOARD_CONFIG FROM TEMPLATE ===
         # This is critical for displaying weights on report cards
