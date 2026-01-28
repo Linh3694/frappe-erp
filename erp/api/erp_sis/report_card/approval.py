@@ -931,8 +931,8 @@ def submit_class_reports():
                     if current_rejected_section:
                         if (section == "homeroom" and current_rejected_section in ["homeroom", "both"]) or \
                            (section in ["scores", "subject_eval", "main_scores", "ielts", "comments"] and current_rejected_section in ["scores", "both"]):
-                            update_values["rejected_section"] = None
-                            update_values["rejected_from_level"] = None
+                            update_values["rejected_section"] = ""  # Empty string thay vì None
+                            update_values["rejected_from_level"] = 0  # 0 thay vì None
                 
                 frappe.db.set_value(
                     "SIS Student Report Card",
