@@ -2681,11 +2681,33 @@ def approve_class_reports():
                 
                 # ========== UPDATE APPROVAL TRONG DATA_JSON (CHO LEVEL 1, 2) ==========
                 if pending_level in ["level_1", "level_2"] and subject_id:
-                    # Xác định section dựa vào board_type nếu được truyền, fallback là scores
-                    board_type = data.get("board_type", "scores")
+                    # ========== AUTO-DETECT BOARD_TYPE TỪ DATA_JSON ==========
+                    # Subject có thể ở trong: scores, subject_eval, hoặc intl (main_scores, ielts, comments)
+                    # Check tất cả sections và tìm section có subject này với status pending
+                    board_type = data.get("board_type")  # Ưu tiên nếu frontend truyền
+                    subject_approval = {}
                     
-                    # Check approval status hiện tại trong data_json
-                    subject_approval = _get_subject_approval_from_data_json(data_json, board_type, subject_id)
+                    if not board_type:
+                        # Auto-detect từ data_json
+                        sections_to_check = ["scores", "subject_eval", "main_scores", "ielts", "comments"]
+                        for section_key in sections_to_check:
+                            section_approval = _get_subject_approval_from_data_json(data_json, section_key, subject_id)
+                            if section_approval.get("status"):
+                                # Ưu tiên section có status trong current_statuses
+                                if section_approval.get("status") in current_statuses:
+                                    board_type = section_key
+                                    subject_approval = section_approval
+                                    break
+                                elif not board_type:
+                                    board_type = section_key
+                                    subject_approval = section_approval
+                        
+                        # Fallback nếu không tìm thấy
+                        if not board_type:
+                            board_type = "scores"
+                    else:
+                        subject_approval = _get_subject_approval_from_data_json(data_json, board_type, subject_id)
+                    
                     current_status = subject_approval.get("status", "draft")
                     
                     # Update approval trong data_json
@@ -2695,6 +2717,7 @@ def approve_class_reports():
                     new_approval[f"level_{pending_level[-1]}_approved_by"] = user
                     
                     data_json = _set_subject_approval_in_data_json(data_json, board_type, subject_id, new_approval)
+                    frappe.logger().info(f"[APPROVE] Auto-detected board_type={board_type} for subject {subject_id}")
                 
                 elif pending_level in ["level_1", "level_2"] and not subject_id:
                     # Homeroom approval
