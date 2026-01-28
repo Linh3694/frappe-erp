@@ -1187,13 +1187,25 @@ def _transform_data_for_bindings(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @frappe.whitelist(allow_guest=False)
-def get_report_data(report_id: Optional[str] = None):
-    """New API: Get structured report data for frontend React rendering"""
+def get_report_data(report_id: Optional[str] = None, filter_l2_approved: Optional[str] = None):
+    """
+    New API: Get structured report data for frontend React rendering
+    
+    Args:
+        report_id: ID của báo cáo
+        filter_l2_approved: "true" để chỉ trả về data của các môn đã qua L2 approval (cho Level 3 preview)
+    """
     try:
+        # Parse params
         report_id = report_id or (frappe.local.form_dict or {}).get("report_id") or ((frappe.request.args.get("report_id") if getattr(frappe, "request", None) and getattr(frappe.request, "args", None) else None))
+        filter_l2 = filter_l2_approved or (frappe.local.form_dict or {}).get("filter_l2_approved") or ((frappe.request.args.get("filter_l2_approved") if getattr(frappe, "request", None) and getattr(frappe.request, "args", None) else None))
+        filter_l2 = str(filter_l2).lower() == "true" if filter_l2 else False
+        
         if not report_id:
             payload = _payload()
             report_id = payload.get("report_id")
+            if not filter_l2:
+                filter_l2 = str(payload.get("filter_l2_approved", "")).lower() == "true"
         if not report_id:
             return validation_error_response(message="report_id is required", errors={"report_id": ["Required"]})
         
@@ -1346,6 +1358,65 @@ def get_report_data(report_id: Optional[str] = None):
             except Exception as e:
                 frappe.logger().error(f"[FILTER_SUBJECTS] Error filtering subjects: {str(e)}")
                 pass  # Nếu không load được template, giữ nguyên subjects
+        
+        # ========== FILTER THEO L2 APPROVAL STATUS (CHO LEVEL 3 PREVIEW) ==========
+        # Chỉ hiển thị các môn đã được duyệt L2 khi filter_l2 = true
+        if filter_l2:
+            frappe.logger().info(f"[FILTER_L2] Filtering data by L2 approval status...")
+            
+            # Filter scores - chỉ giữ môn có approval.status = "level_2_approved"
+            scores = data.get("scores", {})
+            if isinstance(scores, dict):
+                original_count = len(scores)
+                filtered_scores = {}
+                for subject_id, subject_data in scores.items():
+                    if not isinstance(subject_data, dict):
+                        continue
+                    # Check approval status
+                    approval = subject_data.get("approval", {})
+                    approval_status = approval.get("status", "") if isinstance(approval, dict) else ""
+                    if approval_status == "level_2_approved":
+                        filtered_scores[subject_id] = subject_data
+                    elif not subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
+                        # Giữ lại các key không phải subject (metadata, etc.)
+                        filtered_scores[subject_id] = subject_data
+                data["scores"] = filtered_scores
+                frappe.logger().info(f"[FILTER_L2] Filtered scores: {original_count} -> {len(filtered_scores)} (L2 approved)")
+            
+            # Filter subject_eval - chỉ giữ môn có approval.status = "level_2_approved"
+            subject_eval = data.get("subject_eval", {})
+            if isinstance(subject_eval, dict):
+                original_count = len(subject_eval)
+                filtered_subject_eval = {}
+                for subject_id, subject_data in subject_eval.items():
+                    if not isinstance(subject_data, dict):
+                        continue
+                    approval = subject_data.get("approval", {})
+                    approval_status = approval.get("status", "") if isinstance(approval, dict) else ""
+                    if approval_status == "level_2_approved":
+                        filtered_subject_eval[subject_id] = subject_data
+                    elif not subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
+                        filtered_subject_eval[subject_id] = subject_data
+                data["subject_eval"] = filtered_subject_eval
+                frappe.logger().info(f"[FILTER_L2] Filtered subject_eval: {original_count} -> {len(filtered_subject_eval)} (L2 approved)")
+            
+            # Filter intl sections (intl_scores, intl)
+            for intl_key in ["intl_scores", "intl"]:
+                intl_data = data.get(intl_key, {})
+                if isinstance(intl_data, dict):
+                    original_count = len(intl_data)
+                    filtered_intl = {}
+                    for subject_id, subject_data in intl_data.items():
+                        if not isinstance(subject_data, dict):
+                            continue
+                        approval = subject_data.get("approval", {})
+                        approval_status = approval.get("status", "") if isinstance(approval, dict) else ""
+                        if approval_status == "level_2_approved":
+                            filtered_intl[subject_id] = subject_data
+                        elif not subject_id.startswith("SIS_ACTUAL_SUBJECT-"):
+                            filtered_intl[subject_id] = subject_data
+                    data[intl_key] = filtered_intl
+                    frappe.logger().info(f"[FILTER_L2] Filtered {intl_key}: {original_count} -> {len(filtered_intl)} (L2 approved)")
         
         # Transform data to match frontend layout binding expectations
         # ✨ Sau khi filter, transform data sẽ chỉ tạo subjects từ data đã được filter
