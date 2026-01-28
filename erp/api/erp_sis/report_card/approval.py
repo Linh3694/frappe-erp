@@ -602,7 +602,7 @@ def submit_class_reports():
         target_status = "submitted"  # Default
         approval_message = "Đang chờ phê duyệt"
         
-        if section in ["scores", "subject_eval", "main_scores", "ielts"]:
+        if section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
             # Kiểm tra subject có managers không
             has_managers = False
             if subject_id:
