@@ -3347,6 +3347,12 @@ def reject_single_report():
         can_reject = False
         current_status = approval_status  # Default cho error message
         
+        # ✅ Parse data_json để check INTL approval (nếu cần)
+        try:
+            data_json = json.loads(report.data_json or "{}")
+        except json.JSONDecodeError:
+            data_json = {}
+        
         if approval_status == 'reviewed':
             # Có thể reject từ Level 4
             can_reject = True
@@ -3357,6 +3363,30 @@ def reject_single_report():
             current_status = 'level_2_approved'
         elif section == 'scores' and scores_status == 'level_2_approved':
             # Có thể reject scores từ Level 3
+            can_reject = True
+            current_status = 'level_2_approved'
+        elif section in ['main_scores', 'ielts', 'comments']:
+            # ✅ INTL sections: Check approval trong data_json
+            # INTL approval được lưu tại intl_scores.{subject_id}.{section}_approval
+            if subject_id:
+                intl_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
+                intl_status = intl_approval.get("status", "")
+                if intl_status == "level_2_approved":
+                    can_reject = True
+                    current_status = 'level_2_approved'
+            else:
+                # Không có subject_id, check xem có bất kỳ subject nào đã L2 approved trong section này không
+                intl_scores_data = data_json.get("intl_scores", {})
+                for subj_id, subj_data in intl_scores_data.items():
+                    if isinstance(subj_data, dict):
+                        approval_key = f"{section}_approval"
+                        approval = subj_data.get(approval_key, {})
+                        if isinstance(approval, dict) and approval.get("status") == "level_2_approved":
+                            can_reject = True
+                            current_status = 'level_2_approved'
+                            break
+        elif section == 'subject_eval' and scores_status == 'level_2_approved':
+            # Có thể reject subject_eval từ Level 3
             can_reject = True
             current_status = 'level_2_approved'
         elif section == 'both' and (homeroom_status == 'level_2_approved' or scores_status == 'level_2_approved'):
@@ -3455,23 +3485,46 @@ def reject_single_report():
                         report.approval_status = 'level_1_approved'
                 else:
                     # Reject toàn bộ section (fallback behavior)
-                    report.scores_approval_status = 'level_1_approved'
-                    report.scores_rejection_reason = reason
-                    report.scores_rejected_by = user
-                    report.scores_rejected_at = now
                     report.approval_status = 'level_1_approved'
                     
-                    # Update tất cả môn trong section
-                    if section == "scores" and "scores" in data_json:
-                        for subj_id in data_json["scores"]:
-                            if isinstance(data_json["scores"][subj_id], dict):
-                                data_json["scores"][subj_id]["approval"] = {
+                    # ✅ Xử lý khác nhau cho VN sections và INTL sections
+                    if section in ['scores', 'subject_eval']:
+                        # VN sections: Update field riêng
+                        report.scores_approval_status = 'level_1_approved'
+                        report.scores_rejection_reason = reason
+                        report.scores_rejected_by = user
+                        report.scores_rejected_at = now
+                        
+                        # Update tất cả môn trong section
+                        section_data = data_json.get(section, {})
+                        for subj_id in section_data:
+                            if isinstance(section_data[subj_id], dict):
+                                section_data[subj_id]["approval"] = {
                                     "status": "level_1_approved",
                                     "rejection_reason": reason,
                                     "rejected_from_level": 3,
                                     "rejected_by": user,
                                     "rejected_at": str(now)
                                 }
+                    
+                    elif section in ['main_scores', 'ielts', 'comments']:
+                        # ✅ INTL sections: Update tất cả subjects trong intl_scores
+                        intl_scores_data = data_json.get("intl_scores", {})
+                        approval_key = f"{section}_approval"
+                        rejection_info = {
+                            "status": "level_1_approved",
+                            "rejection_reason": reason,
+                            "rejected_from_level": 3,
+                            "rejected_by": user,
+                            "rejected_at": str(now)
+                        }
+                        
+                        for subj_id, subj_data in intl_scores_data.items():
+                            if isinstance(subj_data, dict):
+                                # Check xem subject này có section approval là level_2_approved không
+                                existing_approval = subj_data.get(approval_key, {})
+                                if isinstance(existing_approval, dict) and existing_approval.get("status") == "level_2_approved":
+                                    subj_data[approval_key] = rejection_info.copy()
                 
             else:  # both
                 # Reject cả homeroom và scores
