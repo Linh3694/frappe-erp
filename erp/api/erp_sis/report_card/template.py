@@ -88,13 +88,28 @@ def get_all_templates(
             fields=[
                 "name", "title", "campus_id", "curriculum", "education_stage",
                 "education_grade", "school_year", "semester_part", "is_published",
-                "creation", "modified", "owner",  # Thêm owner để hiển thị người tạo
+                "creation", "modified", "owner",
             ],
             filters=filters,
             order_by="modified desc",
             limit_start=offset,
             limit_page_length=limit,
         )
+
+        # Lấy full_name của owner từ bảng User
+        owner_emails = list(set([r.get("owner") for r in rows if r.get("owner")]))
+        owner_map = {}
+        if owner_emails:
+            users = frappe.get_all(
+                "User",
+                filters={"name": ["in", owner_emails]},
+                fields=["name", "full_name"]
+            )
+            owner_map = {u["name"]: u.get("full_name") or u["name"] for u in users}
+        
+        # Thêm owner_full_name vào mỗi row
+        for row in rows:
+            row["owner_full_name"] = owner_map.get(row.get("owner"), row.get("owner"))
 
         total_count = frappe.db.count("SIS Report Card Template", filters=filters)
         return paginated_response(
