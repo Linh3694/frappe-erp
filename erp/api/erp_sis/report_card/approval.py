@@ -2481,6 +2481,9 @@ def approve_class_reports():
             "campus_id": campus_id
         }
         
+        # ========== FILTER DỰA TRÊN LEVEL VÀ SECTION ==========
+        use_per_subject_filter = False  # Flag để biết cần filter per-subject
+        
         # Level 3 (review) - Filter theo counters và check all_sections_l2_approved
         if pending_level == "review":
             # Lấy template config để biết sections nào được enable
@@ -2512,8 +2515,16 @@ def approve_class_reports():
             # Nếu không có filter nào (edge case)
             if not or_filters:
                 or_filters = None
+        
+        elif pending_level in ["level_1", "level_2"] and subject_id and section == "scores":
+            # ========== LEVEL 1/2 VỚI SUBJECT_ID: FILTER PER-SUBJECT ==========
+            # Không filter theo scores_approval_status chung
+            # Sẽ lấy tất cả reports và check per-subject trong data_json
+            or_filters = None
+            use_per_subject_filter = True
+        
         else:
-            # Level 1, 2, publish: dùng status_field như trước
+            # Level 1, 2 (homeroom), publish: dùng status_field như trước
             filters[status_field] = ["in", current_statuses]
             or_filters = None
         
@@ -2529,6 +2540,31 @@ def approve_class_reports():
                         "intl_l2_approved_count", "intl_total_count",
                         "homeroom_l2_approved"]
             )
+        elif use_per_subject_filter:
+            # Lấy tất cả reports với data_json để filter per-subject
+            reports = frappe.get_all(
+                "SIS Student Report Card",
+                filters=filters,
+                fields=["name", "student_id", "data_json"]
+            )
+            
+            # Filter reports dựa trên per-subject status trong data_json
+            filtered_reports = []
+            for r in reports:
+                try:
+                    report_data_json = json.loads(r.get("data_json") or "{}")
+                except json.JSONDecodeError:
+                    report_data_json = {}
+                
+                # Check approval status của subject này
+                subject_approval = _get_subject_approval_from_data_json(report_data_json, "scores", subject_id)
+                subject_status = subject_approval.get("status", "draft")
+                
+                # Chỉ giữ nếu subject đang ở trạng thái cần approve
+                if subject_status in current_statuses:
+                    filtered_reports.append({"name": r.name, "student_id": r.student_id})
+            
+            reports = filtered_reports
         else:
             reports = frappe.get_all(
                 "SIS Student Report Card",
@@ -2632,12 +2668,24 @@ def approve_class_reports():
                     data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, new_approval)
                 
                 # ========== UPDATE DATABASE ==========
-                update_values = {
-                    status_field: next_status,
-                    at_field: now,
-                    by_field: user,
-                    "data_json": json.dumps(data_json, ensure_ascii=False)
-                }
+                # CHỈ update scores_approval_status chung NẾU:
+                # - Đây là homeroom (không có subject_id)
+                # - HOẶC Level 3, 4 (approve toàn bộ)
+                if subject_id and pending_level in ["level_1", "level_2"]:
+                    # Per-subject approve: CHỈ update data_json, KHÔNG update field chung
+                    update_values = {
+                        at_field: now,
+                        by_field: user,
+                        "data_json": json.dumps(data_json, ensure_ascii=False)
+                    }
+                else:
+                    # Homeroom hoặc Level 3, 4: update field chung như cũ
+                    update_values = {
+                        status_field: next_status,
+                        at_field: now,
+                        by_field: user,
+                        "data_json": json.dumps(data_json, ensure_ascii=False)
+                    }
                 
                 # Nếu publish, cũng cập nhật status và is_approved
                 if pending_level == "publish":
