@@ -908,9 +908,31 @@ def submit_class_reports():
                 # Clear rejection info khi re-submit
                 current_section_status = getattr(report_data, status_field, None) or 'draft'
                 if current_section_status == 'rejected':
+                    # Clear general rejection info
                     update_values["rejection_reason"] = None
                     update_values["rejected_by"] = None
                     update_values["rejected_at"] = None
+                    
+                    # Clear section-specific rejection info dựa vào section đang submit
+                    if section == "homeroom":
+                        update_values["homeroom_rejection_reason"] = None
+                        update_values["homeroom_rejected_by"] = None
+                        update_values["homeroom_rejected_at"] = None
+                    elif section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
+                        update_values["scores_rejection_reason"] = None
+                        update_values["scores_rejected_by"] = None
+                        update_values["scores_rejected_at"] = None
+                    
+                    # Clear rejected_section và rejected_from_level nếu match
+                    # Lấy rejected_section hiện tại
+                    current_rejected_section = frappe.db.get_value(
+                        "SIS Student Report Card", report_data.name, "rejected_section"
+                    )
+                    if current_rejected_section:
+                        if (section == "homeroom" and current_rejected_section in ["homeroom", "both"]) or \
+                           (section in ["scores", "subject_eval", "main_scores", "ielts", "comments"] and current_rejected_section in ["scores", "both"]):
+                            update_values["rejected_section"] = None
+                            update_values["rejected_from_level"] = None
                 
                 frappe.db.set_value(
                     "SIS Student Report Card",
@@ -2029,15 +2051,18 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     fields=["name", "title"]
                 )
                 for tmpl in templates_l2:
+                    # Level 2 cho homeroom: CHỈ query khi đã qua Level 1 (level_1_approved)
+                    # KHÔNG query "submitted" - đó là cho Level 1
                     reports = frappe.get_all(
                         "SIS Student Report Card",
                         filters={
                             "template_id": tmpl.name,
-                            "homeroom_approval_status": ["in", ["submitted", "level_1_approved"]],
+                            "homeroom_approval_status": "level_1_approved",
                             "campus_id": campus_id
                         },
                         fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by", 
-                                "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section"]
+                                "homeroom_rejection_reason", "homeroom_rejected_by", "homeroom_rejected_at",
+                                "rejected_from_level", "rejected_section"]
                     )
                     for r in reports:
                         r["template_id"] = tmpl.name
@@ -2047,8 +2072,11 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         r["subject_title"] = "Nhận xét chủ nhiệm"
                         r["submitted_at"] = r.get("homeroom_submitted_at")
                         r["submitted_by"] = r.get("homeroom_submitted_by")
-                        # Kiểm tra nếu bị reject từ L3 (rejected_from_level = 3)
-                        if r.get("rejected_from_level") == 3:
+                        # Sử dụng homeroom-specific rejection info
+                        if r.get("homeroom_rejection_reason"):
+                            r["was_rejected"] = True
+                            r["rejection_reason"] = r.get("homeroom_rejection_reason")
+                        elif r.get("rejected_from_level") == 3 and r.get("rejected_section") in ["homeroom", "both"]:
                             r["was_rejected"] = True
                         all_reports.append(r)
                 
@@ -2099,6 +2127,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             # Lấy reports theo scores_approval_status = submitted hoặc level_1_approved
                             # (level_1_approved khi submit đã skip L1 vì có Subject Manager)
                             # Bao gồm cả reports bị trả về từ Level 3 (có rejection_reason)
+                            # Level 2 cho scores: query submitted hoặc level_1_approved
+                            # (level_1_approved khi submit đã skip L1 vì có Subject Manager)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
@@ -2107,7 +2137,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     "campus_id": campus_id
                                 },
                                 fields=["name", "class_id", "scores_submitted_at", "scores_submitted_by",
-                                        "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section"]
+                                        "scores_rejection_reason", "scores_rejected_by", "scores_rejected_at",
+                                        "rejected_from_level", "rejected_section"]
                             )
                             for r in reports:
                                 for sid in matching_subjects:
@@ -2119,8 +2150,11 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     r_copy["subject_title"] = subject_info_map.get(sid, sid)
                                     r_copy["submitted_at"] = r.get("scores_submitted_at")
                                     r_copy["submitted_by"] = r.get("scores_submitted_by")
-                                    # Kiểm tra nếu bị reject từ L3
-                                    if r.get("rejected_from_level") == 3:
+                                    # Sử dụng scores-specific rejection info
+                                    if r.get("scores_rejection_reason"):
+                                        r_copy["was_rejected"] = True
+                                        r_copy["rejection_reason"] = r.get("scores_rejection_reason")
+                                    elif r.get("rejected_from_level") == 3 and r.get("rejected_section") in ["scores", "both"]:
                                         r_copy["was_rejected"] = True
                                     all_reports.append(r_copy)
         
