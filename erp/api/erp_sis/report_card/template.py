@@ -88,7 +88,7 @@ def get_all_templates(
             fields=[
                 "name", "title", "campus_id", "curriculum", "education_stage",
                 "education_grade", "school_year", "semester_part", "is_published",
-                "creation", "modified",
+                "creation", "modified", "owner",  # Thêm owner để hiển thị người tạo
             ],
             filters=filters,
             order_by="modified desc",
