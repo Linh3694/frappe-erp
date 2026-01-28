@@ -2166,8 +2166,34 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     report_data_json = {}
                                 
                                 for sid in matching_subjects:
-                                    # Lấy approval status của subject này từ data_json
-                                    subject_approval = _get_subject_approval_from_data_json(report_data_json, "scores", sid)
+                                    # ========== CHECK TẤT CẢ SECTIONS ==========
+                                    # Subject có thể ở trong: scores, subject_eval, hoặc intl (main_scores, ielts, comments)
+                                    # Check tất cả sections và lấy approval từ section có status pending
+                                    subject_approval = {}
+                                    found_section = None
+                                    
+                                    # Danh sách tất cả sections cần check
+                                    sections_to_check = [
+                                        ("scores", "scores"),
+                                        ("subject_eval", "subject_eval"),
+                                        ("main_scores", "intl"),  # INTL main scores
+                                        ("ielts", "intl"),        # INTL IELTS
+                                        ("comments", "intl"),     # INTL comments
+                                    ]
+                                    
+                                    for section_key, section_display in sections_to_check:
+                                        section_approval = _get_subject_approval_from_data_json(report_data_json, section_key, sid)
+                                        if section_approval.get("status"):
+                                            # Ưu tiên section có status pending (submitted hoặc level_1_approved)
+                                            if section_approval.get("status") in ["submitted", "level_1_approved"]:
+                                                subject_approval = section_approval
+                                                found_section = section_display
+                                                break  # Tìm thấy section pending, dừng lại
+                                            elif not found_section:
+                                                # Nếu chưa có, lưu lại section này
+                                                subject_approval = section_approval
+                                                found_section = section_display
+                                    
                                     subject_status = subject_approval.get("status", "draft")
                                     
                                     # Chỉ hiển thị nếu subject này đang ở trạng thái chờ L2 duyệt
@@ -2182,6 +2208,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     r_copy["pending_level"] = "level_2"
                                     r_copy["subject_id"] = sid
                                     r_copy["subject_title"] = subject_info_map.get(sid, sid)
+                                    r_copy["section_type"] = found_section  # Để biết section nào đang pending
                                     r_copy["submitted_at"] = subject_approval.get("submitted_at") or r.get("scores_submitted_at")
                                     r_copy["submitted_by"] = subject_approval.get("submitted_by") or r.get("scores_submitted_by")
                                     # Sử dụng subject-specific rejection info từ data_json
@@ -2556,9 +2583,20 @@ def approve_class_reports():
                 except json.JSONDecodeError:
                     report_data_json = {}
                 
-                # Check approval status của subject này
-                subject_approval = _get_subject_approval_from_data_json(report_data_json, "scores", subject_id)
-                subject_status = subject_approval.get("status", "draft")
+                # ========== CHECK TẤT CẢ SECTIONS ==========
+                # Subject có thể ở trong: scores, subject_eval, hoặc intl (main_scores, ielts, comments)
+                sections_to_check = ["scores", "subject_eval", "main_scores", "ielts", "comments"]
+                subject_status = "draft"
+                
+                for section_key in sections_to_check:
+                    section_approval = _get_subject_approval_from_data_json(report_data_json, section_key, subject_id)
+                    if section_approval.get("status"):
+                        # Ưu tiên section có status trong current_statuses
+                        if section_approval.get("status") in current_statuses:
+                            subject_status = section_approval.get("status")
+                            break
+                        elif subject_status == "draft":
+                            subject_status = section_approval.get("status")
                 
                 # Chỉ giữ nếu subject đang ở trạng thái cần approve
                 if subject_status in current_statuses:
