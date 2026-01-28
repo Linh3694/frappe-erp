@@ -2028,16 +2028,16 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                             found_section = board_type_key
                                             break
                                     
-                                    # ✅ FIX: Check INTL - tất cả INTL boards share cùng một approval trong intl_scores
-                                    # Sử dụng board_type đã được lưu trong approval info
+                                    # ✅ FIX: Check INTL - mỗi INTL section có approval riêng
+                                    # Check từng section: main_scores, ielts, comments
                                     if not found_board_type:
-                                        # Query một lần từ intl_scores (vì main_scores, ielts, comments share cùng approval)
-                                        intl_approval = _get_subject_approval_from_data_json(report_data_json, "main_scores", sid)
-                                        if intl_approval.get("status") in ["submitted", "level_1_approved"]:
-                                            subject_approval = intl_approval
-                                            # ✅ Lấy board_type từ approval info (đã được lưu khi submit)
-                                            found_board_type = intl_approval.get("board_type", "main_scores")
-                                            found_section = "intl"
+                                        for intl_board_type in ["main_scores", "ielts", "comments"]:
+                                            intl_approval = _get_subject_approval_from_data_json(report_data_json, intl_board_type, sid)
+                                            if intl_approval.get("status") in ["submitted", "level_1_approved"]:
+                                                subject_approval = intl_approval
+                                                found_board_type = intl_approval.get("board_type", intl_board_type)
+                                                found_section = "intl"
+                                                break
                                     
                                     subject_status = subject_approval.get("status", "draft")
                                     
@@ -2877,7 +2877,16 @@ def reject_class_reports():
                     if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
                         data_json["homeroom"]["approval"] = rejection_info.copy()
                     
-                    # Update intl subsections
+                    # ✅ FIX: Update intl_scores với approval keys riêng cho từng section
+                    if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
+                        for subj_id in data_json["intl_scores"]:
+                            if isinstance(data_json["intl_scores"][subj_id], dict):
+                                # Reject tất cả INTL sections của subject này
+                                for intl_section in ["main_scores", "ielts", "comments"]:
+                                    approval_key = f"{intl_section}_approval"
+                                    data_json["intl_scores"][subj_id][approval_key] = rejection_info.copy()
+                    
+                    # Backward compatible: cũng update cấu trúc cũ nếu có
                     if "intl" in data_json and isinstance(data_json["intl"], dict):
                         for intl_section in ["main_scores", "ielts", "comments"]:
                             if intl_section in data_json["intl"] and isinstance(data_json["intl"][intl_section], dict):

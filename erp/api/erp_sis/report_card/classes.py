@@ -132,13 +132,13 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
             class_filters["school_year_id"] = school_year
 
         # 1) Homeroom classes (GVCN)
-        homeroom_classes = frappe.get_all(
-            "SIS Class",
-            fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
-            filters={**class_filters, "homeroom_teacher": teacher_id},
-            order_by="title asc",
+            homeroom_classes = frappe.get_all(
+                "SIS Class",
+                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+                filters={**class_filters, "homeroom_teacher": teacher_id},
+                order_by="title asc",
         ) or []
-        
+
         # 2) Vice homeroom classes (Phó GVCN)
         vice_homeroom_classes = frappe.get_all(
             "SIS Class",
@@ -154,10 +154,10 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         
         # ✅ Filter theo school_year nếu có
         sa_query = """
-            SELECT DISTINCT sa.class_id
-            FROM `tabSIS Subject Assignment` sa
+                    SELECT DISTINCT sa.class_id
+                    FROM `tabSIS Subject Assignment` sa
             INNER JOIN `tabSIS Class` c ON c.name = sa.class_id
-            WHERE sa.teacher_id = %s AND sa.campus_id = %s
+                    WHERE sa.teacher_id = %s AND sa.campus_id = %s
         """
         params = [teacher_id, campus_id]
         
@@ -167,11 +167,11 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
         
         try:
             assignment_classes = frappe.db.sql(sa_query, tuple(params), as_dict=True) or []
-            for assignment in assignment_classes:
-                if assignment.class_id:
-                    teaching_class_ids.add(assignment.class_id)
-        except Exception:
-            pass
+                for assignment in assignment_classes:
+                    if assignment.class_id:
+                        teaching_class_ids.add(assignment.class_id)
+            except Exception:
+                pass
         
         # Get teaching class details
         teaching_classes = []
@@ -332,7 +332,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             )
             taught_subjects = [sa.actual_subject_id for sa in subject_assignments if sa.actual_subject_id]
             is_subject_teacher = len(taught_subjects) > 0
-        
+
         # Find templates with actual student reports
         student_report_query = """
             SELECT DISTINCT template_id

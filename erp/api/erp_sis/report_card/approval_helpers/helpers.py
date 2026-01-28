@@ -101,12 +101,24 @@ def get_subject_approval_from_data_json(data_json: dict, section: str, subject_i
         return subject_data.get("approval", {})
     
     # ✅ FIX: INTL sections (main_scores, ielts, comments) 
-    # Data được lưu tại intl_scores.{subject_id}, không phải intl.{section}.{subject_id}
-    # Approval cũng được lưu chung tại intl_scores.{subject_id}.approval
+    # Mỗi INTL section có approval riêng để tránh ghi đè lẫn nhau:
+    # - intl_scores.{subject_id}.main_scores_approval
+    # - intl_scores.{subject_id}.ielts_approval
+    # - intl_scores.{subject_id}.comments_approval
+    # Backward compatible: fallback về approval chung nếu không có approval riêng
     if section in [SectionType.MAIN_SCORES, SectionType.IELTS, SectionType.COMMENTS]:
         intl_scores_data = data_json.get("intl_scores", {})
         subject_data = intl_scores_data.get(subject_id, {})
-        return subject_data.get("approval", {})
+        
+        # Lấy approval riêng cho section này
+        approval_key = f"{section}_approval"
+        section_approval = subject_data.get(approval_key, {})
+        
+        # Backward compatible: fallback về approval chung
+        if not section_approval:
+            section_approval = subject_data.get("approval", {})
+        
+        return section_approval
     
     return {}
 
@@ -139,13 +151,19 @@ def set_subject_approval_in_data_json(data_json: dict, section: str, subject_id:
         return data_json
     
     # ✅ FIX: INTL sections (main_scores, ielts, comments)
-    # Lưu approval vào intl_scores.{subject_id}.approval để đồng bộ với data
+    # Mỗi INTL section có approval riêng để tránh ghi đè lẫn nhau:
+    # - intl_scores.{subject_id}.main_scores_approval
+    # - intl_scores.{subject_id}.ielts_approval  
+    # - intl_scores.{subject_id}.comments_approval
     if section in [SectionType.MAIN_SCORES, SectionType.IELTS, SectionType.COMMENTS]:
         if "intl_scores" not in data_json:
             data_json["intl_scores"] = {}
         if subject_id not in data_json["intl_scores"]:
             data_json["intl_scores"][subject_id] = {}
-        data_json["intl_scores"][subject_id]["approval"] = approval_info
+        
+        # Lưu approval vào key riêng cho từng section
+        approval_key = f"{section}_approval"
+        data_json["intl_scores"][subject_id][approval_key] = approval_info
         return data_json
     
     return data_json
