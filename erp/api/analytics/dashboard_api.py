@@ -590,3 +590,93 @@ def debug_analytics():
 			"error": str(e),
 			"traceback": traceback.format_exc()
 		}
+
+
+@frappe.whitelist()
+def get_student_activation_stats():
+	"""
+	Thống kê học sinh theo parent activation.
+	
+	Học sinh "có parent login" là học sinh có ít nhất 1 guardian với portal_activated = 1.
+	
+	Returns:
+		- total_students: Tổng số học sinh đang học (có trong Class Student)
+		- students_with_parent_login: HS có ít nhất 1 parent đã login
+		- students_without_parent_login: HS chưa có parent nào login
+		- activation_rate: Tỷ lệ %
+		- by_class: Thống kê chi tiết theo từng lớp
+	"""
+	try:
+		# Query lấy tất cả học sinh đang học và check xem có guardian nào activated không
+		# Sử dụng subquery để check MAX(portal_activated) cho mỗi student
+		students_data = frappe.db.sql("""
+			SELECT 
+				cs.class_id,
+				c.title as class_name,
+				cs.student_id,
+				s.student_name,
+				COALESCE(MAX(g.portal_activated), 0) as has_parent_login
+			FROM `tabClass Student` cs
+			INNER JOIN `tabClass` c ON c.name = cs.class_id
+			INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
+			LEFT JOIN `tabCRM Family Relationship` fr ON fr.student = s.name
+			LEFT JOIN `tabCRM Guardian` g ON g.name = fr.parent
+			WHERE c.status = 'Active'
+			GROUP BY cs.class_id, c.title, cs.student_id, s.student_name
+			ORDER BY c.title ASC, s.student_name ASC
+		""", as_dict=True)
+		
+		# Tính toán thống kê tổng
+		total_students = len(students_data)
+		students_with_parent = sum(1 for s in students_data if s.has_parent_login == 1)
+		students_without_parent = total_students - students_with_parent
+		activation_rate = round((students_with_parent / total_students * 100), 1) if total_students > 0 else 0
+		
+		# Group theo lớp
+		class_stats = {}
+		for student in students_data:
+			class_id = student.class_id
+			if class_id not in class_stats:
+				class_stats[class_id] = {
+					'class_id': class_id,
+					'class_name': student.class_name,
+					'total_students': 0,
+					'with_parent_login': 0,
+					'without_parent_login': 0
+				}
+			
+			class_stats[class_id]['total_students'] += 1
+			if student.has_parent_login == 1:
+				class_stats[class_id]['with_parent_login'] += 1
+			else:
+				class_stats[class_id]['without_parent_login'] += 1
+		
+		# Tính tỷ lệ cho mỗi lớp và convert sang list
+		by_class = []
+		for class_id, stats in class_stats.items():
+			stats['activation_rate'] = round(
+				(stats['with_parent_login'] / stats['total_students'] * 100), 1
+			) if stats['total_students'] > 0 else 0
+			by_class.append(stats)
+		
+		# Sort theo tên lớp
+		by_class.sort(key=lambda x: x['class_name'])
+		
+		return {
+			"success": True,
+			"data": {
+				"total_students": total_students,
+				"students_with_parent_login": students_with_parent,
+				"students_without_parent_login": students_without_parent,
+				"activation_rate": activation_rate,
+				"by_class": by_class
+			}
+		}
+		
+	except Exception as e:
+		import traceback
+		frappe.log_error(f"Error getting student activation stats: {str(e)}\n{traceback.format_exc()}", "Dashboard API Error")
+		return {
+			"success": False,
+			"message": str(e)
+		}
