@@ -414,9 +414,9 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             homeroom_completed = all(s != "draft" for s in homeroom_statuses) if homeroom_statuses else False
             scores_completed = all(s != "draft" for s in scores_statuses) if scores_statuses else False
             
-            # ✅ Check subject_eval completion từ data_json
-            # Lấy reports có data_json để check subject_eval
-            subject_eval_reports = frappe.get_all(
+            # ✅ Check completion từ data_json cho các sections: subject_eval, intl (main_scores, ielts, comments)
+            # Lấy reports có data_json để check
+            data_json_reports = frappe.get_all(
                 "SIS Student Report Card",
                 fields=["data_json"],
                 filters={
@@ -426,33 +426,62 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                 }
             )
             
+            # Helper function để check section có ít nhất 1 subject với approval.status != "draft"
+            def check_section_has_non_draft(data: dict, section_key: str) -> bool:
+                """Check xem section có ít nhất 1 subject với approval.status != 'draft' không"""
+                section_data = data.get(section_key, {})
+                if not isinstance(section_data, dict):
+                    return False
+                for subject_id, subject_data in section_data.items():
+                    if not subject_id.startswith("SIS_ACTUAL_SUBJECT"):
+                        continue
+                    if isinstance(subject_data, dict):
+                        approval = subject_data.get("approval", {})
+                        status = approval.get("status", "draft") if isinstance(approval, dict) else "draft"
+                        if status and status != "draft":
+                            return True
+                return False
+            
             subject_eval_completed = False
-            if subject_eval_reports:
+            intl_completed = False  # ✅ Thêm check cho INTL sections
+            
+            if data_json_reports:
                 subject_eval_statuses = []
-                for r in subject_eval_reports:
+                intl_statuses = []  # Track INTL completion
+                
+                for r in data_json_reports:
                     try:
                         data = json.loads(r.get("data_json") or "{}")
-                        subject_eval_data = data.get("subject_eval", {})
-                        # Tìm bất kỳ subject nào có approval.status != "draft"
-                        has_non_draft_subject = False
-                        for subject_id, subject_data in subject_eval_data.items():
-                            if not subject_id.startswith("SIS_ACTUAL_SUBJECT"):
-                                continue
-                            approval = subject_data.get("approval", {}) if isinstance(subject_data, dict) else {}
-                            status = approval.get("status", "draft")
-                            if status and status != "draft":
-                                has_non_draft_subject = True
-                                break
-                        subject_eval_statuses.append(has_non_draft_subject)
+                        
+                        # Check subject_eval section
+                        has_subject_eval = check_section_has_non_draft(data, "subject_eval")
+                        subject_eval_statuses.append(has_subject_eval)
+                        
+                        # ✅ Check INTL sections: intl_scores (main_scores, ielts) và intl (comments)
+                        # intl_scores chứa data cho main_scores và ielts per-subject
+                        has_intl_scores = check_section_has_non_draft(data, "intl_scores")
+                        
+                        # intl chứa data cho comments per-subject
+                        has_intl_comments = check_section_has_non_draft(data, "intl")
+                        
+                        # INTL completed nếu có ít nhất 1 section có data
+                        has_intl = has_intl_scores or has_intl_comments
+                        intl_statuses.append(has_intl)
+                        
                     except json.JSONDecodeError:
                         subject_eval_statuses.append(False)
+                        intl_statuses.append(False)
                 
                 # subject_eval_completed nếu TẤT CẢ reports đều có ít nhất 1 subject với status != draft
                 subject_eval_completed = all(subject_eval_statuses) if subject_eval_statuses else False
+                
+                # ✅ intl_completed nếu TẤT CẢ reports đều có ít nhất 1 INTL section với status != draft
+                intl_completed = all(intl_statuses) if intl_statuses else False
             
             row["homeroom_completed"] = homeroom_completed
             row["scores_completed"] = scores_completed
             row["subject_eval_completed"] = subject_eval_completed
+            row["intl_completed"] = intl_completed  # ✅ Thêm field mới
         
         return success_response(data=rows, message="Templates with student reports fetched successfully")
     except Exception as e:
