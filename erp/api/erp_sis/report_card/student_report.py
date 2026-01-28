@@ -460,8 +460,6 @@ def get_reports_by_class():
             "school_year", "semester_part", "status", "creation", "modified", 
             "pdf_file", "is_approved", "approval_status",
             "rejection_reason", "rejected_by", "rejected_at",
-            # Thêm data_json để hiển thị trong ApprovalView
-            "data_json",
             # Thêm các fields approval status theo section
             "homeroom_approval_status", "homeroom_submitted_at", "homeroom_submitted_by",
             "scores_approval_status", "scores_submitted_at", "scores_submitted_by"
@@ -476,6 +474,19 @@ def get_reports_by_class():
     start = (page - 1) * page_size
     end = start + page_size
     paginated = reports[start:end]
+    
+    # Load data_json riêng cho các reports trong page (vì frappe.get_all không trả về Long Text đầy đủ)
+    if paginated:
+        report_names = [r["name"] for r in paginated]
+        data_json_records = frappe.db.sql("""
+            SELECT name, data_json 
+            FROM `tabSIS Student Report Card` 
+            WHERE name IN %s
+        """, [report_names], as_dict=True)
+        
+        data_json_map = {r["name"]: r["data_json"] for r in data_json_records}
+        for report in paginated:
+            report["data_json"] = data_json_map.get(report["name"])
     
     return paginated_response(paginated, total, page, page_size)
 
