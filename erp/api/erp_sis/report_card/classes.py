@@ -132,11 +132,11 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
             class_filters["school_year_id"] = school_year
 
         # 1) Homeroom classes (GVCN)
-            homeroom_classes = frappe.get_all(
-                "SIS Class",
-                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
-                filters={**class_filters, "homeroom_teacher": teacher_id},
-                order_by="title asc",
+        homeroom_classes = frappe.get_all(
+            "SIS Class",
+            fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+            filters={**class_filters, "homeroom_teacher": teacher_id},
+            order_by="title asc",
         ) or []
 
         # 2) Vice homeroom classes (Phó GVCN)
