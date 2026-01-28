@@ -71,7 +71,7 @@ def sync_new_subjects_to_reports():
         except frappe.DoesNotExistError:
             return not_found_response("Report card template not found")
         
-        sections_to_sync = data.get("sections", ["scores", "subject_eval", "intl_scoreboard"])
+        sections_to_sync = data.get("sections", ["scores", "subject_eval", "intl_scoreboard", "intl_scores"])
         dry_run = data.get("dry_run", False)
         
         # Get new_subject_ids
@@ -198,10 +198,16 @@ def sync_new_subjects_to_reports():
                         
                         data_json["subject_eval"] = existing_subject_eval
                 
-                # Sync intl_scoreboard section
-                if "intl_scoreboard" in sections_to_sync and template.program_type == 'intl':
+                # Sync intl_scoreboard/intl_scores section (handles both keys for consistency)
+                # ✅ FIX: Accept both "intl_scoreboard" and "intl_scores" as valid section names
+                should_sync_intl = ("intl_scoreboard" in sections_to_sync or "intl_scores" in sections_to_sync) and template.program_type == 'intl'
+                if should_sync_intl:
+                    # ✅ FIX: Sync vào cả intl_scoreboard (legacy) và intl_scores (current)
                     existing_intl_scoreboard = data_json.get("intl_scoreboard", {})
-                    existing_subject_ids = set(existing_intl_scoreboard.keys())
+                    existing_intl_scores = data_json.get("intl_scores", {})
+                    
+                    # Check cả 2 để xác định subjects đã có
+                    existing_subject_ids = set(existing_intl_scoreboard.keys()) | set(existing_intl_scores.keys())
                     new_subjects_in_intl = subjects_to_sync - existing_subject_ids
                     
                     if new_subjects_in_intl and hasattr(template, 'subjects') and template.subjects:
@@ -220,12 +226,16 @@ def sync_new_subjects_to_reports():
                                     "main_scores": {}
                                 }
                                 
+                                # ✅ FIX: Sync vào cả 2 keys để đảm bảo tương thích
                                 existing_intl_scoreboard[subject_id] = scoreboard_data
+                                existing_intl_scores[subject_id] = scoreboard_data.copy()
+                                
                                 report_updated = True
                                 new_subjects_for_this_report.append(subject_id)
                                 all_new_subjects_added.add(subject_id)
                         
                         data_json["intl_scoreboard"] = existing_intl_scoreboard
+                        data_json["intl_scores"] = existing_intl_scores
                 
                 # Save if updated
                 if report_updated:
@@ -446,8 +456,15 @@ def get_reports_by_class():
         "class_id": class_id
     }
     
-    # Optional filters
+    # Optional filters - ✅ FIX: Also check request.args for GET params
     template_id = frappe.form_dict.get("template_id")
+    if not template_id and hasattr(frappe, 'request') and hasattr(frappe.request, 'args'):
+        template_id = frappe.request.args.get("template_id")
+    
+    # 🔍 DEBUG: Log để kiểm tra filter
+    frappe.logger().info(f"[get_reports_by_class] class_id={class_id}, template_id={template_id}")
+    frappe.logger().info(f"[get_reports_by_class] form_dict={dict(frappe.form_dict)}")
+    
     if template_id:
         filters["template_id"] = template_id
             
@@ -475,7 +492,8 @@ def get_reports_by_class():
     )
     
     page = int(frappe.form_dict.get("page", 1))
-    page_size = int(frappe.form_dict.get("page_size", 200))
+    # ✅ FIX: Accept both "limit" and "page_size" for compatibility
+    page_size = int(frappe.form_dict.get("page_size") or frappe.form_dict.get("limit") or 200)
     total = len(reports)
     start = (page - 1) * page_size
     end = start + page_size
