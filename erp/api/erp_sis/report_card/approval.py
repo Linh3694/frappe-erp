@@ -1036,6 +1036,12 @@ def get_pending_approvals(level: Optional[str] = None):
         level: Filter theo level (level_1, level_2, review, publish)
     """
     try:
+        # Lấy params từ nhiều nguồn cho GET requests
+        if not level:
+            level = frappe.form_dict.get("level")
+        if not level and hasattr(frappe.request, 'args'):
+            level = frappe.request.args.get("level")
+        
         user = frappe.session.user
         campus_id = get_current_campus_id()
         
