@@ -2796,13 +2796,59 @@ def reject_class_reports():
         errors = []
         now = datetime.now()
         
+        # Xác định rejected_from_level dựa trên pending_level
+        rejected_from_level_value = 2 if pending_level == "level_2" else 1
+        
         for report_data in reports:
             try:
+                # Load full report để update data_json
+                report = frappe.get_doc("SIS Student Report Card", report_data.name)
+                
+                # Parse data_json
+                try:
+                    data_json = json.loads(report.data_json or "{}")
+                except json.JSONDecodeError:
+                    data_json = {}
+                
+                # Tạo rejection info cho data_json
+                rejection_info = {
+                    "status": "rejected",
+                    "rejection_reason": reason,
+                    "rejected_from_level": rejected_from_level_value,
+                    "rejected_by": user,
+                    "rejected_at": str(now)
+                }
+                
+                # Update approval trong data_json dựa trên section
+                if is_homeroom:
+                    # Update homeroom approval
+                    if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
+                        data_json["homeroom"]["approval"] = rejection_info.copy()
+                else:
+                    # Update cho tất cả subjects trong các scores sections
+                    for section_key in ["scores", "subject_eval", "intl"]:
+                        if section_key in data_json and isinstance(data_json[section_key], dict):
+                            for subj_id in data_json[section_key]:
+                                if isinstance(data_json[section_key][subj_id], dict):
+                                    data_json[section_key][subj_id]["approval"] = rejection_info.copy()
+                    
+                    # Cũng update trong intl subsections nếu có (main_scores, ielts, comments)
+                    if "intl" in data_json and isinstance(data_json["intl"], dict):
+                        for intl_section in ["main_scores", "ielts", "comments"]:
+                            if intl_section in data_json["intl"] and isinstance(data_json["intl"][intl_section], dict):
+                                for subj_id in data_json["intl"][intl_section]:
+                                    if isinstance(data_json["intl"][intl_section][subj_id], dict):
+                                        data_json["intl"][intl_section][subj_id]["approval"] = rejection_info.copy()
+                
+                # Update database fields bao gồm data_json và rejected_from_level
                 update_values = {
                     rejection_fields["status_field"]: "rejected",
                     rejection_fields["rejected_at"]: now,
                     rejection_fields["rejected_by"]: user,
-                    rejection_fields["rejection_reason"]: reason
+                    rejection_fields["rejection_reason"]: reason,
+                    "rejected_from_level": rejected_from_level_value,
+                    "rejected_section": section,
+                    "data_json": json.dumps(data_json, ensure_ascii=False)
                 }
                 
                 frappe.db.set_value(
@@ -2813,7 +2859,7 @@ def reject_class_reports():
                 )
                 
                 # Thêm approval history
-                report = frappe.get_doc("SIS Student Report Card", report_data.name)
+                report.reload()
                 _add_approval_history(
                     report,
                     f"batch_reject_{pending_level}_{section}",
@@ -2826,6 +2872,7 @@ def reject_class_reports():
                 rejected_count += 1
                 
             except Exception as e:
+                frappe.logger().error(f"Error rejecting report {report_data.name}: {str(e)}")
                 errors.append({
                     "report_id": report_data.name,
                     "student_id": report_data.student_id,
