@@ -2745,6 +2745,13 @@ def reject_class_reports():
         # (scores, subject_eval, main_scores, ielts, comments)
         # Nếu không có, sẽ auto-detect sau
         
+        # ========== LEVEL 1/2 VỚI SUBJECT_ID: FILTER PER-SUBJECT ==========
+        # Giống như approve_class_reports, không filter theo status_field chung
+        # mà sẽ lấy tất cả reports rồi check per-subject approval trong data_json
+        use_per_subject_filter = False
+        if pending_level in ["level_1", "level_2"] and subject_id and section == "scores":
+            use_per_subject_filter = True
+        
         # Xác định status field và current_status dựa trên pending_level
         if pending_level in ["level_1", "level_2"]:
             status_field = f"{section}_approval_status"
@@ -2781,9 +2788,14 @@ def reject_class_reports():
         filters = {
             "template_id": template_id,
             "class_id": class_id,
-            status_field: ["in", current_statuses],
             "campus_id": campus_id
         }
+        
+        # ✅ Chỉ filter theo status_field nếu KHÔNG dùng per-subject filter
+        # Với INTL boards (main_scores, ielts, comments), approval status được lưu trong data_json
+        # nên không thể filter bằng SQL query trên status_field
+        if not use_per_subject_filter:
+            filters[status_field] = ["in", current_statuses]
         
         reports = frappe.get_all(
             "SIS Student Report Card",
@@ -2817,6 +2829,30 @@ def reject_class_reports():
                     data_json = json.loads(report.data_json or "{}")
                 except json.JSONDecodeError:
                     data_json = {}
+                
+                # ✅ Nếu dùng per-subject filter, check approval của subject cụ thể trong data_json
+                # Skip nếu subject không ở trạng thái cần reject
+                if use_per_subject_filter and subject_id:
+                    # Xác định board_type để check
+                    check_board_type = board_type
+                    if not check_board_type:
+                        # Auto-detect board_type từ data_json
+                        for section_key in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
+                            section_approval = _get_subject_approval_from_data_json(data_json, section_key, subject_id)
+                            if section_approval.get("status") in current_statuses:
+                                check_board_type = section_key
+                                break
+                    
+                    if check_board_type:
+                        subject_approval = _get_subject_approval_from_data_json(data_json, check_board_type, subject_id)
+                        current_subject_status = subject_approval.get("status", "")
+                        
+                        # Skip nếu subject không ở trạng thái cần reject
+                        if current_subject_status not in current_statuses:
+                            continue
+                    else:
+                        # Không tìm thấy subject trong bất kỳ section nào với status phù hợp
+                        continue
                 
                 # Tạo rejection info cho data_json
                 rejection_info = {
@@ -2932,6 +2968,14 @@ def reject_class_reports():
                     "student_id": report_data.student_id,
                     "error": str(e)
                 })
+        
+        # ✅ Khi dùng per-subject filter, có thể không reject được báo cáo nào
+        # vì không có subject nào ở trạng thái cần reject
+        if rejected_count == 0 and not errors:
+            return error_response(
+                message="Không tìm thấy báo cáo nào để trả về",
+                code="NO_REPORTS"
+            )
         
         frappe.db.commit()
         
