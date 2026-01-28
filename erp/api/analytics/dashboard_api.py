@@ -600,13 +600,29 @@ def get_student_activation_stats():
 	Học sinh "có parent login" là học sinh có ít nhất 1 guardian với portal_activated = 1.
 	
 	Returns:
-		- total_students: Tổng số học sinh đang học (có trong Class Student)
+		- total_students: Tổng số học sinh đang học (có trong SIS Class Student)
 		- students_with_parent_login: HS có ít nhất 1 parent đã login
 		- students_without_parent_login: HS chưa có parent nào login
 		- activation_rate: Tỷ lệ %
 		- by_class: Thống kê chi tiết theo từng lớp
 	"""
 	try:
+		# Lấy school year hiện tại (active)
+		current_school_year = frappe.db.get_value(
+			"SIS School Year", 
+			{"is_active": 1}, 
+			"name"
+		)
+		
+		if not current_school_year:
+			# Fallback: lấy school year mới nhất
+			current_school_year = frappe.db.get_value(
+				"SIS School Year",
+				{},
+				"name",
+				order_by="start_date DESC"
+			)
+		
 		# Query lấy tất cả học sinh đang học và check xem có guardian nào activated không
 		# Sử dụng subquery để check MAX(portal_activated) cho mỗi student
 		students_data = frappe.db.sql("""
@@ -616,15 +632,16 @@ def get_student_activation_stats():
 				cs.student_id,
 				s.student_name,
 				COALESCE(MAX(g.portal_activated), 0) as has_parent_login
-			FROM `tabClass Student` cs
-			INNER JOIN `tabClass` c ON c.name = cs.class_id
+			FROM `tabSIS Class Student` cs
+			INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
 			INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
 			LEFT JOIN `tabCRM Family Relationship` fr ON fr.student = s.name
 			LEFT JOIN `tabCRM Guardian` g ON g.name = fr.parent
-			WHERE c.status = 'Active'
+			WHERE cs.school_year_id = %s
+			AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
 			GROUP BY cs.class_id, c.title, cs.student_id, s.student_name
 			ORDER BY c.title ASC, s.student_name ASC
-		""", as_dict=True)
+		""", (current_school_year,), as_dict=True)
 		
 		# Tính toán thống kê tổng
 		total_students = len(students_data)
