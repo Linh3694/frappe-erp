@@ -67,8 +67,14 @@ def get_all_classes_for_reports(school_year: Optional[str] = None, page: int = 1
 @frappe.whitelist(allow_guest=False)
 def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int = 50):
     """
-    Lấy các lớp mà user hiện tại là GVCN hoặc dạy môn.
+    Lấy các lớp mà user hiện tại là GVCN, Phó GVCN hoặc dạy môn.
     Nếu user có role 'SIS Manager', trả về tất cả lớp.
+    
+    ✅ PERMISSION CHECK:
+    - SIS Manager: Xem tất cả lớp
+    - GVCN/Phó GVCN: Xem lớp mình làm chủ nhiệm
+    - GVBM: Xem lớp mình có Subject Assignment
+    - Không có quyền: Trả về danh sách rỗng
     
     Args:
         school_year: Năm học (optional)
@@ -111,68 +117,61 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
             limit=1
         )
         teacher_id = teacher_rows[0].name if teacher_rows else None
+        
+        # ✅ Nếu không có teacher record và không phải SIS Manager → không có quyền
+        if not teacher_id:
+            return {
+                "success": True,
+                "data": [],
+                "total_count": 0,
+                "message": "Không tìm thấy thông tin giáo viên. Vui lòng liên hệ quản trị viên.",
+            }
 
         class_filters = {"campus_id": campus_id}
         if school_year:
             class_filters["school_year_id"] = school_year
 
-        # 1) Homeroom classes
-        homeroom_classes = []
-        if teacher_id:
-            homeroom_classes = frappe.get_all(
-                "SIS Class",
-                fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
-                filters={**class_filters, "homeroom_teacher": teacher_id},
-                order_by="title asc",
-            )
+        # 1) Homeroom classes (GVCN)
+        homeroom_classes = frappe.get_all(
+            "SIS Class",
+            fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+            filters={**class_filters, "homeroom_teacher": teacher_id},
+            order_by="title asc",
+        ) or []
+        
+        # 2) Vice homeroom classes (Phó GVCN)
+        vice_homeroom_classes = frappe.get_all(
+            "SIS Class",
+            fields=["name", "title", "short_title", "education_grade", "school_year_id", "class_type"],
+            filters={**class_filters, "vice_homeroom_teacher": teacher_id},
+            order_by="title asc",
+        ) or []
 
-        # 2) Teaching classes
+        # 3) Teaching classes từ Subject Assignment
+        # ✅ CHỈ dùng Subject Assignment (nguồn chính xác nhất)
+        # Không dùng Teacher Timetable vì có thể có dữ liệu cũ hoặc thay thế
         teaching_class_ids = set()
-        if teacher_id:
-            # From Teacher Timetable
-            try:
-                from datetime import datetime, timedelta
-                now = datetime.now()
-                day = now.weekday()
-                monday = now - timedelta(days=day)
-                sunday = monday + timedelta(days=6)
-                week_start = monday.strftime('%Y-%m-%d')
-                week_end = sunday.strftime('%Y-%m-%d')
-                
-                teacher_timetable_classes = frappe.get_all(
-                    "SIS Teacher Timetable",
-                    fields=["class_id"],
-                    filters={
-                        "teacher_id": teacher_id,
-                        "date": ["between", [week_start, week_end]]
-                    },
-                    distinct=True,
-                    limit=1000
-                ) or []
-                
-                for record in teacher_timetable_classes:
-                    if record.class_id:
-                        teaching_class_ids.add(record.class_id)
-            except Exception:
-                pass
-                
-            # From Subject Assignment
-            try:
-                assignment_classes = frappe.db.sql(
-                    """
-                    SELECT DISTINCT sa.class_id
-                    FROM `tabSIS Subject Assignment` sa
-                    WHERE sa.teacher_id = %s AND sa.campus_id = %s
-                    """,
-                    (teacher_id, campus_id),
-                    as_dict=True,
-                ) or []
-                
-                for assignment in assignment_classes:
-                    if assignment.class_id:
-                        teaching_class_ids.add(assignment.class_id)
-            except Exception:
-                pass
+        
+        # ✅ Filter theo school_year nếu có
+        sa_query = """
+            SELECT DISTINCT sa.class_id
+            FROM `tabSIS Subject Assignment` sa
+            INNER JOIN `tabSIS Class` c ON c.name = sa.class_id
+            WHERE sa.teacher_id = %s AND sa.campus_id = %s
+        """
+        params = [teacher_id, campus_id]
+        
+        if school_year:
+            sa_query += " AND c.school_year_id = %s"
+            params.append(school_year)
+        
+        try:
+            assignment_classes = frappe.db.sql(sa_query, tuple(params), as_dict=True) or []
+            for assignment in assignment_classes:
+                if assignment.class_id:
+                    teaching_class_ids.add(assignment.class_id)
+        except Exception:
+            pass
         
         # Get teaching class details
         teaching_classes = []
@@ -191,12 +190,15 @@ def get_my_classes(school_year: Optional[str] = None, page: int = 1, limit: int 
                 order_by="title asc"
             ) or []
 
-        # Merge & unique
+        # Merge & unique (ưu tiên theo tên)
         by_name: Dict[str, Dict[str, Any]] = {}
-        for row in homeroom_classes + teaching_classes:
+        for row in homeroom_classes + vice_homeroom_classes + teaching_classes:
             by_name[row["name"]] = row
 
         all_rows = list(by_name.values())
+        
+        # ✅ Sort theo title
+        all_rows.sort(key=lambda x: x.get("title", ""))
 
         return {
             "success": True,
@@ -250,6 +252,12 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
     Lấy danh sách templates có student reports thực tế cho một lớp.
     Bao gồm trạng thái phê duyệt tổng hợp cho homeroom và scores.
     
+    ✅ PERMISSION CHECK:
+    - SIS Manager: Xem tất cả báo cáo
+    - GVCN: Xem báo cáo của lớp mình làm GVCN
+    - GVBM: Xem báo cáo của lớp mình có subject assignment
+    - Không có quyền: Trả về danh sách rỗng
+    
     Args:
         class_id: ID lớp
         school_year: Năm học (optional)
@@ -288,6 +296,10 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
         if c.campus_id != campus_id:
             return forbidden_response("Access denied: Class belongs to another campus")
 
+        # ✅ Check if SIS Manager - có quyền xem tất cả
+        user_roles = frappe.get_roles(user)
+        is_sis_manager = "SIS Manager" in user_roles
+
         # Lấy teacher_id của user hiện tại
         teacher_rows = frappe.get_all(
             "SIS Teacher",
@@ -301,15 +313,31 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
         is_homeroom_teacher = False
         if teacher_id and getattr(c, "homeroom_teacher", None) == teacher_id:
             is_homeroom_teacher = True
+        
+        # Kiểm tra user có phải Phó GVCN của lớp không
+        is_vice_homeroom_teacher = False
+        if teacher_id and getattr(c, "vice_homeroom_teacher", None) == teacher_id:
+            is_vice_homeroom_teacher = True
 
         # Kiểm tra user có phải GVBM của lớp không (có subject assignment)
         is_subject_teacher = False
+        taught_subjects = []
         if teacher_id:
-            subject_assignment_count = frappe.db.count(
+            # ✅ Lấy danh sách môn học user dạy trong lớp này
+            subject_assignments = frappe.get_all(
                 "SIS Subject Assignment",
-                {"teacher_id": teacher_id, "class_id": class_id, "campus_id": campus_id}
+                filters={"teacher_id": teacher_id, "class_id": class_id, "campus_id": campus_id},
+                fields=["subject_id"]
             )
-            is_subject_teacher = subject_assignment_count > 0
+            taught_subjects = [sa.subject_id for sa in subject_assignments if sa.subject_id]
+            is_subject_teacher = len(taught_subjects) > 0
+        
+        # ✅ PERMISSION CHECK: Nếu không phải SIS Manager và không có quyền gì với lớp này
+        if not is_sis_manager and not is_homeroom_teacher and not is_vice_homeroom_teacher and not is_subject_teacher:
+            return success_response(
+                data=[], 
+                message="Bạn không có quyền xem báo cáo học tập của lớp này. Vui lòng liên hệ quản trị viên nếu bạn cần truy cập."
+            )
 
         # Find templates with actual student reports
         student_report_query = """

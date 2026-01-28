@@ -3,11 +3,35 @@
 ## Cách chạy Automated Tests
 
 ```bash
-# Unit Tests (không cần database)
+# Unit Tests (không cần database) - Bao gồm tests cho refactored modules
 bench --site [sitename] execute erp.api.erp_sis.report_card.test_approval.run_all_tests
+
+# Chạy từng test riêng lẻ:
+bench --site [sitename] execute erp.api.erp_sis.report_card.test_approval.test_module_imports
+bench --site [sitename] execute erp.api.erp_sis.report_card.test_approval.test_constants_module
+bench --site [sitename] execute erp.api.erp_sis.report_card.test_approval.test_helpers_module
+bench --site [sitename] execute erp.api.erp_sis.report_card.test_approval.test_validators_module
+bench --site [sitename] execute erp.api.erp_sis.report_card.test_approval.test_utils_new_helpers
 
 # Integration Tests (cần database có data)
 bench --site [sitename] execute erp.api.erp_sis.report_card.test_integration.run_all_tests
+```
+
+## Module Structure After Refactoring
+
+```
+report_card/
+├── __init__.py
+├── approval.py              # API endpoints (giữ nguyên interface)
+├── approval_helpers/        # Helper functions (NEW)
+│   ├── __init__.py
+│   └── helpers.py
+├── constants.py             # Centralized constants (NEW)
+├── utils.py                 # Utilities (extended)
+├── validators.py            # Validators (extended)
+├── test_approval.py         # Unit tests (updated)
+├── test_integration.py
+└── TEST_CHECKLIST.md
 ```
 
 ---
