@@ -643,16 +643,24 @@ def update_report_section():
             
         # Handle intl_scores section
         elif section == "intl_scores":
+            # 🔍 DEBUG: Log nhận được
+            frappe.logger().info(f"[INTL_SCORES] Received payload: {payload}")
+            frappe.logger().info(f"[INTL_SCORES] Payload type: {type(payload)}")
+            
             subject_id = None
             if isinstance(payload, dict):
                 subject_id = payload.get("subject_id")
+                frappe.logger().info(f"[INTL_SCORES] subject_id from payload.get: {subject_id}")
             
             if not subject_id:
                 for key, value in payload.items():
                     if key.startswith("SIS_ACTUAL_SUBJECT-"):
                         subject_id = key
                         payload = value
+                        frappe.logger().info(f"[INTL_SCORES] subject_id from key scan: {subject_id}")
                         break
+            
+            frappe.logger().info(f"[INTL_SCORES] Final subject_id: {subject_id}")
             
             if subject_id:
                 existing_intl_scores = json_data.get("intl_scores")
@@ -689,6 +697,10 @@ def update_report_section():
                 
                 existing_intl_scores[subject_id] = existing_subject_data
                 json_data["intl_scores"] = existing_intl_scores
+                
+                # 🔍 DEBUG: Log sau khi merge
+                frappe.logger().info(f"[INTL_SCORES] Merged data for {subject_id}: {existing_subject_data}")
+                frappe.logger().info(f"[INTL_SCORES] json_data keys after merge: {list(json_data.keys())}")
             else:
                 return validation_error_response(
                     message="subject_id is required for intl_scores updates",
@@ -792,10 +804,22 @@ def update_report_section():
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         
+        # 🔍 DEBUG: Log sau khi save
+        frappe.logger().info(f"[UPDATE_SECTION] Saved report {report_id}, section={section}, json_data keys={list(json_data.keys())}")
+        
+        # Trả về debug info trong response
+        debug_info = {
+            "json_data_keys": list(json_data.keys()),
+            "has_intl_scores": "intl_scores" in json_data,
+        }
+        if section == "intl_scores" and "intl_scores" in json_data:
+            debug_info["intl_scores_subjects"] = list(json_data["intl_scores"].keys())
+        
         return success_response({
             "report_id": report_id, 
             "section": section, 
-            "message": f"Section '{section}' updated successfully"
+            "message": f"Section '{section}' updated successfully",
+            "debug": debug_info
         })
 
     except frappe.DoesNotExistError:
