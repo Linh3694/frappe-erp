@@ -607,11 +607,12 @@ def get_student_activation_stats():
 		- by_class: Thống kê chi tiết theo từng lớp
 	"""
 	try:
-		# Lấy school year hiện tại (active)
+		# Lấy school year hiện tại (is_enable = 1, mới nhất theo start_date)
 		current_school_year = frappe.db.get_value(
 			"SIS School Year", 
-			{"is_active": 1}, 
-			"name"
+			{"is_enable": 1}, 
+			"name",
+			order_by="start_date DESC"
 		)
 		
 		if not current_school_year:
