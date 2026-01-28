@@ -10,7 +10,7 @@ Cách chạy trong bench console:
     >>> cleanup_orphan_reports(dry_run=False)  # Xóa thật
 
 Hoặc chạy trực tiếp:
-    bench --site [site_name] execute erp.commands.cleanup_orphan_report_cards.cleanup_orphan_reports --kwargs "{'dry_run': False}"
+    bench --site admin.sis.wellspring.edu.vn execute erp.commands.cleanup_orphan_report_cards.cleanup_orphan_reports --kwargs "{'dry_run': False}"
 """
 
 import frappe

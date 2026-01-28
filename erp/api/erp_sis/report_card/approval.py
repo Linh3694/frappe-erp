@@ -2170,9 +2170,11 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     # Subject có thể ở trong: scores, subject_eval, hoặc intl (main_scores, ielts, comments)
                                     # Check tất cả sections và lấy approval từ section có status pending
                                     subject_approval = {}
-                                    found_section = None
+                                    found_board_type = None  # Board type cụ thể (scores, subject_eval, main_scores, ielts, comments)
+                                    found_section = None  # Section chung (scores, subject_eval, intl) - cho backward compatibility
                                     
                                     # Danh sách tất cả sections cần check
+                                    # (board_type, section_display)
                                     sections_to_check = [
                                         ("scores", "scores"),
                                         ("subject_eval", "subject_eval"),
@@ -2181,17 +2183,19 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                         ("comments", "intl"),     # INTL comments
                                     ]
                                     
-                                    for section_key, section_display in sections_to_check:
-                                        section_approval = _get_subject_approval_from_data_json(report_data_json, section_key, sid)
+                                    for board_type_key, section_display in sections_to_check:
+                                        section_approval = _get_subject_approval_from_data_json(report_data_json, board_type_key, sid)
                                         if section_approval.get("status"):
                                             # Ưu tiên section có status pending (submitted hoặc level_1_approved)
                                             if section_approval.get("status") in ["submitted", "level_1_approved"]:
                                                 subject_approval = section_approval
+                                                found_board_type = board_type_key  # ✅ Lưu board_type cụ thể
                                                 found_section = section_display
                                                 break  # Tìm thấy section pending, dừng lại
-                                            elif not found_section:
+                                            elif not found_board_type:
                                                 # Nếu chưa có, lưu lại section này
                                                 subject_approval = section_approval
+                                                found_board_type = board_type_key
                                                 found_section = section_display
                                     
                                     subject_status = subject_approval.get("status", "draft")
@@ -2208,7 +2212,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                     r_copy["pending_level"] = "level_2"
                                     r_copy["subject_id"] = sid
                                     r_copy["subject_title"] = subject_info_map.get(sid, sid)
-                                    r_copy["section_type"] = found_section  # Để biết section nào đang pending
+                                    r_copy["section_type"] = found_section  # Backward compatibility (scores, subject_eval, intl)
+                                    r_copy["board_type"] = found_board_type  # ✅ Board type cụ thể (scores, subject_eval, main_scores, ielts, comments)
                                     r_copy["submitted_at"] = subject_approval.get("submitted_at") or r.get("scores_submitted_at")
                                     r_copy["submitted_by"] = subject_approval.get("submitted_by") or r.get("scores_submitted_by")
                                     # Sử dụng subject-specific rejection info từ data_json
@@ -2835,12 +2840,15 @@ def reject_class_reports():
     
     Level 3, 4 dùng approval_status chung.
     
+    ✅ PER-SUBJECT REJECT: Chỉ reject subject cụ thể trong board_type cụ thể.
+    
     Request body:
         {
             "template_id": "...",
             "class_id": "...",
             "subject_id": "...",  # Optional, null cho homeroom
-            "section_type": "homeroom" | "scores",  # Required để phân biệt rõ
+            "section_type": "homeroom" | "scores",  # Deprecated, dùng cho backward compatibility
+            "board_type": "scores" | "subject_eval" | "main_scores" | "ielts" | "comments",  # Optional, auto-detect nếu không có
             "pending_level": "level_1" | "level_2" | "review" | "publish",
             "reason": "..."  # Required - Lý do trả về
         }
@@ -2850,7 +2858,8 @@ def reject_class_reports():
         template_id = data.get("template_id")
         class_id = data.get("class_id")
         subject_id = data.get("subject_id")
-        section_type = data.get("section_type")  # Mới: phân biệt homeroom vs scores
+        section_type = data.get("section_type")  # Deprecated: dùng cho backward compatibility
+        board_type = data.get("board_type")  # Mới: board type cụ thể (scores, subject_eval, main_scores, ielts, comments)
         pending_level = data.get("pending_level")
         reason = data.get("reason", "").strip()
         
@@ -2882,6 +2891,7 @@ def reject_class_reports():
         campus_id = get_current_campus_id()
         
         # Xác định section: ưu tiên section_type, fallback về logic cũ
+        # section dùng để xác định status_field (homeroom_approval_status vs scores_approval_status)
         if section_type:
             is_homeroom = (section_type == "homeroom")
             section = section_type
@@ -2889,6 +2899,10 @@ def reject_class_reports():
             # Fallback: infer từ subject_id (backward compatibility)
             is_homeroom = not subject_id
             section = "homeroom" if is_homeroom else "scores"
+        
+        # ✅ board_type dùng để xác định section cụ thể trong data_json
+        # (scores, subject_eval, main_scores, ielts, comments)
+        # Nếu không có, sẽ auto-detect sau
         
         # Xác định status field và current_status dựa trên pending_level
         if pending_level in ["level_1", "level_2"]:
@@ -2949,6 +2963,9 @@ def reject_class_reports():
         # Xác định rejected_from_level dựa trên pending_level
         rejected_from_level_value = 2 if pending_level == "level_2" else 1
         
+        # Biến để track board_type đã detect (dùng cho response)
+        detected_board_type = board_type or section
+        
         for report_data in reports:
             try:
                 # Load full report để update data_json
@@ -2969,20 +2986,57 @@ def reject_class_reports():
                     "rejected_at": str(now)
                 }
                 
-                # Update approval trong data_json dựa trên section
+                # ========== PER-SUBJECT REJECT (GIỐNG APPROVE FLOW) ==========
+                # Update approval trong data_json dựa trên section và subject_id
                 if is_homeroom:
                     # Update homeroom approval
-                    if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
-                        data_json["homeroom"]["approval"] = rejection_info.copy()
+                    data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, rejection_info.copy())
+                    detected_board_type = "homeroom"
+                elif subject_id and pending_level in ["level_1", "level_2"]:
+                    # ========== AUTO-DETECT BOARD_TYPE TỪ DATA_JSON ==========
+                    # Subject có thể ở trong: scores, subject_eval, hoặc intl (main_scores, ielts, comments)
+                    detected_board_type = board_type  # Ưu tiên nếu frontend truyền
+                    subject_approval = {}
+                    
+                    if not detected_board_type:
+                        # Auto-detect từ data_json (giống approve flow)
+                        sections_to_check = ["scores", "subject_eval", "main_scores", "ielts", "comments"]
+                        for section_key in sections_to_check:
+                            section_approval = _get_subject_approval_from_data_json(data_json, section_key, subject_id)
+                            if section_approval.get("status"):
+                                # Ưu tiên section có status trong current_statuses
+                                if section_approval.get("status") in current_statuses:
+                                    detected_board_type = section_key
+                                    subject_approval = section_approval
+                                    break
+                                elif not detected_board_type:
+                                    detected_board_type = section_key
+                                    subject_approval = section_approval
+                        
+                        # Fallback nếu không tìm thấy
+                        if not detected_board_type:
+                            detected_board_type = "scores"
+                    else:
+                        subject_approval = _get_subject_approval_from_data_json(data_json, detected_board_type, subject_id)
+                    
+                    # ✅ CHỈ reject subject cụ thể trong board_type cụ thể (PER-SUBJECT)
+                    data_json = _set_subject_approval_in_data_json(data_json, detected_board_type, subject_id, rejection_info.copy())
+                    frappe.logger().info(f"[REJECT] Per-subject reject: board_type={detected_board_type}, subject={subject_id}")
                 else:
-                    # Update cho tất cả subjects trong các scores sections
-                    for section_key in ["scores", "subject_eval", "intl"]:
+                    # Level 3, 4: Reject toàn bộ report (không có subject_id)
+                    # Vẫn reject tất cả sections như trước
+                    detected_board_type = "all"
+                    for section_key in ["scores", "subject_eval"]:
                         if section_key in data_json and isinstance(data_json[section_key], dict):
                             for subj_id in data_json[section_key]:
                                 if isinstance(data_json[section_key][subj_id], dict):
                                     data_json[section_key][subj_id]["approval"] = rejection_info.copy()
                     
-                    # Cũng update trong intl subsections nếu có (main_scores, ielts, comments)
+                    # Cũng update homeroom
+                    if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
+                        data_json["homeroom"]["approval"] = rejection_info.copy()
+                    
+                    # Update intl subsections
                     if "intl" in data_json and isinstance(data_json["intl"], dict):
                         for intl_section in ["main_scores", "ielts", "comments"]:
                             if intl_section in data_json["intl"] and isinstance(data_json["intl"][intl_section], dict):
@@ -3008,14 +3062,14 @@ def reject_class_reports():
                     update_modified=True
                 )
                 
-                # Thêm approval history
+                # Thêm approval history với board_type info
                 report.reload()
                 _add_approval_history(
                     report,
-                    f"batch_reject_{pending_level}_{section}",
+                    f"batch_reject_{pending_level}_{detected_board_type}",
                     user,
                     "rejected",
-                    f"Section: {section}, Class: {class_id}, Subject: {subject_id or 'homeroom'}. Reason: {reason}"
+                    f"Board: {detected_board_type}, Class: {class_id}, Subject: {subject_id or 'homeroom'}. Reason: {reason}"
                 )
                 report.save(ignore_permissions=True)
                 
@@ -3037,13 +3091,14 @@ def reject_class_reports():
                 "class_id": class_id,
                 "subject_id": subject_id,
                 "section": section,
+                "board_type": detected_board_type,
                 "pending_level": pending_level,
                 "rejected_count": rejected_count,
                 "total_reports": len(reports),
                 "reason": reason,
                 "errors": errors if errors else None
             },
-            message=f"Đã trả về {rejected_count}/{len(reports)} báo cáo ({section})"
+            message=f"Đã trả về {rejected_count}/{len(reports)} báo cáo ({detected_board_type})"
         )
         
     except Exception as e:
