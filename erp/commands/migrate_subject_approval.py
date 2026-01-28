@@ -5,7 +5,7 @@ Chạy bằng command:
     bench --site [sitename] execute erp.commands.migrate_subject_approval.migrate
 
 Hoặc dry-run:
-    bench --site [sitename] execute erp.commands.migrate_subject_approval.migrate --kwargs "{'dry_run': True}"
+    bench --site admin.sis.wellspring.edu.vn execute erp.commands.migrate_subject_approval.migrate --kwargs "{'dry_run': False}"
 """
 
 import frappe
