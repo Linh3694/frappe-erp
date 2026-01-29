@@ -744,12 +744,11 @@ def submit_class_reports():
                         data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, new_approval)
                 
                 # ========== UPDATE DATABASE ==========
-                # Cập nhật data_json (luôn luôn)
-                update_values = {
-                    "submitted_at": now,
-                    "submitted_by": user,
-                    "data_json": json.dumps(data_json, ensure_ascii=False)
-                }
+                # ✅ FIX: Update trực tiếp trên report object thay vì dùng set_value() + reload()
+                # Điều này tránh conflict giữa set_value() và save()
+                report.data_json = json.dumps(data_json, ensure_ascii=False)
+                report.submitted_at = now
+                report.submitted_by = user
                 
                 # CHỈ update scores_approval_status chung NẾU:
                 # - Đây là homeroom (không có subject_id)
@@ -759,7 +758,7 @@ def submit_class_reports():
                 
                 # Nếu là homeroom hoặc không có subject_id → update field chung
                 if section == "homeroom" or not subject_id:
-                    update_values[status_field] = target_status
+                    setattr(report, status_field, target_status)
                 else:
                     # Có subject_id (per-subject submit):
                     # Chỉ update field chung nếu nó chưa ở level cao hơn
@@ -776,7 +775,7 @@ def submit_class_reports():
                 # Cũng cập nhật approval_status chung nếu cả 2 section đều ở trạng thái tốt
                 current_general_status = report_data.approval_status or 'draft'
                 if current_general_status in ['draft', 'entry']:
-                    update_values["approval_status"] = target_status
+                    report.approval_status = target_status
                 
                 # Clear rejection info khi re-submit
                 # ✅ FIX: Check cả status_field chung VÀ per-subject status trong data_json
@@ -794,43 +793,32 @@ def submit_class_reports():
                 
                 if should_clear_rejection:
                     # Clear general rejection info
-                    update_values["rejection_reason"] = None
-                    update_values["rejected_by"] = None
-                    update_values["rejected_at"] = None
+                    report.rejection_reason = None
+                    report.rejected_by = None
+                    report.rejected_at = None
                     
                     # Clear section-specific rejection info dựa vào section đang submit
                     if section == "homeroom":
-                        update_values["homeroom_rejection_reason"] = None
-                        update_values["homeroom_rejected_by"] = None
-                        update_values["homeroom_rejected_at"] = None
+                        report.homeroom_rejection_reason = None
+                        report.homeroom_rejected_by = None
+                        report.homeroom_rejected_at = None
                     elif section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
-                        update_values["scores_rejection_reason"] = None
-                        update_values["scores_rejected_by"] = None
-                        update_values["scores_rejected_at"] = None
+                        report.scores_rejection_reason = None
+                        report.scores_rejected_by = None
+                        report.scores_rejected_at = None
                     
                     # Clear rejected_section và rejected_from_level nếu match
-                    # Lấy rejected_section hiện tại
-                    current_rejected_section = frappe.db.get_value(
-                        "SIS Student Report Card", report_data.name, "rejected_section"
-                    )
+                    current_rejected_section = report.rejected_section or ""
                     if current_rejected_section:
                         if (section == "homeroom" and current_rejected_section in ["homeroom", "both"]) or \
                            (section in ["scores", "subject_eval", "main_scores", "ielts", "comments"] and current_rejected_section in ["scores", "both"]):
-                            update_values["rejected_section"] = ""  # Empty string thay vì None
-                            update_values["rejected_from_level"] = 0  # 0 thay vì None
-                
-                frappe.db.set_value(
-                    "SIS Student Report Card",
-                    report_data.name,
-                    update_values,
-                    update_modified=True
-                )
+                            report.rejected_section = ""
+                            report.rejected_from_level = 0
                 
                 # Update counters
-                _update_report_counters(report_data.name, data_json, template)
+                _update_report_counters(report.name, data_json, template)
                 
                 # Thêm approval history
-                report.reload()
                 _add_approval_history(
                     report, 
                     "batch_submit", 
@@ -838,17 +826,9 @@ def submit_class_reports():
                     target_status, 
                     f"Section: {section} ({status_field}), Subject: {subject_id or 'N/A'}"
                 )
-                report.save(ignore_permissions=True)
                 
-                # 🔍 DEBUG: Verify data_json after save
-                if submitted_count == 0:  # Chỉ log cho report đầu tiên
-                    saved_data_json = frappe.db.get_value("SIS Student Report Card", report_data.name, "data_json")
-                    try:
-                        saved_parsed = json.loads(saved_data_json or "{}")
-                        subject_eval_data = saved_parsed.get(section, {}).get(subject_id, {}) if subject_id else {}
-                        frappe.logger().info(f"[SUBMIT_CLASS] VERIFY after save - report={report_data.name}, {section}.{subject_id}={subject_eval_data}")
-                    except:
-                        frappe.logger().error(f"[SUBMIT_CLASS] VERIFY failed to parse saved data_json")
+                # ✅ FIX: Save một lần duy nhất sau khi tất cả changes đã được apply
+                report.save(ignore_permissions=True)
                 
                 submitted_count += 1
                 
