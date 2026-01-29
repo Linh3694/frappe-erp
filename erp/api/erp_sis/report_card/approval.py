@@ -1900,6 +1900,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     fields=["name", "title"]
                 )
                 for tmpl in templates_l1:
+                    # ✅ FIX: Thêm fields rejection để hiển thị khi L2 trả về
                     reports = frappe.get_all(
                         "SIS Student Report Card",
                         filters={
@@ -1907,7 +1908,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             "homeroom_approval_status": "submitted",
                             "campus_id": campus_id
                         },
-                        fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by"]
+                        fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by",
+                                "homeroom_rejection_reason", "homeroom_rejected_by", "homeroom_rejected_at",
+                                "rejected_from_level", "rejected_section"]
                     )
                     for r in reports:
                         r["template_id"] = tmpl.name
@@ -1917,6 +1920,10 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         r["subject_title"] = "Nhận xét chủ nhiệm"
                         r["submitted_at"] = r.get("homeroom_submitted_at")
                         r["submitted_by"] = r.get("homeroom_submitted_by")
+                        # ✅ FIX: Set was_rejected flag nếu bị L2 trả về
+                        if r.get("homeroom_rejection_reason") and r.get("rejected_from_level") == 2:
+                            r["was_rejected"] = True
+                            r["rejection_reason"] = r.get("homeroom_rejection_reason")
                         all_reports.append(r)
         
         # Level 2: Tổ trưởng hoặc Subject Manager
@@ -1951,11 +1958,13 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         r["subject_title"] = "Nhận xét chủ nhiệm"
                         r["submitted_at"] = r.get("homeroom_submitted_at")
                         r["submitted_by"] = r.get("homeroom_submitted_by")
-                        # Sử dụng homeroom-specific rejection info
-                        if r.get("homeroom_rejection_reason"):
+                        # ✅ FIX: Set was_rejected flag nếu bị L3 trả về
+                        # L3 reject -> homeroom_approval_status = "level_1_approved" (quay về L2)
+                        if r.get("homeroom_rejection_reason") and r.get("rejected_from_level") == 3:
                             r["was_rejected"] = True
                             r["rejection_reason"] = r.get("homeroom_rejection_reason")
                         elif r.get("rejected_from_level") == 3 and r.get("rejected_section") in ["homeroom", "both"]:
+                            # Fallback: có rejected_from_level nhưng không có reason cụ thể
                             r["was_rejected"] = True
                         all_reports.append(r)
                 
@@ -2833,7 +2842,9 @@ def reject_class_reports():
         now = datetime.now()
         
         # Xác định rejected_from_level dựa trên pending_level
-        rejected_from_level_value = 2 if pending_level == "level_2" else 1
+        # L1 = 1, L2 = 2, review (L3) = 3, publish (L4) = 4
+        level_map = {"level_1": 1, "level_2": 2, "review": 3, "publish": 4}
+        rejected_from_level_value = level_map.get(pending_level, 1)
         
         # Biến để track board_type đã detect (dùng cho response)
         detected_board_type = board_type or section
@@ -2981,8 +2992,21 @@ def reject_class_reports():
                                         data_json["intl"][intl_section][subj_id]["approval"] = rejection_info.copy()
                 
                 # Update database fields bao gồm data_json và rejected_from_level
+                # ✅ FIX: Set status để quay về level trước đó thay vì "rejected"
+                # - L1 reject -> "rejected" (về Entry)
+                # - L2 reject -> "submitted" (về L1)
+                # - L3 (review) reject -> "level_1_approved" (về L2)
+                # - L4 (publish) reject -> "level_2_approved" (về L3)
+                status_rollback_map = {
+                    "level_1": "rejected",           # L1 reject -> về Entry
+                    "level_2": "submitted",          # L2 reject -> về L1
+                    "review": "level_1_approved",    # L3 reject -> về L2
+                    "publish": "level_2_approved"    # L4 reject -> về L3
+                }
+                new_status = status_rollback_map.get(pending_level, "rejected")
+                
                 update_values = {
-                    rejection_fields["status_field"]: "rejected",
+                    rejection_fields["status_field"]: new_status,
                     rejection_fields["rejected_at"]: now,
                     rejection_fields["rejected_by"]: user,
                     rejection_fields["rejection_reason"]: reason,
