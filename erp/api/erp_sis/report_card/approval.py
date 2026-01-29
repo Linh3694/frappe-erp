@@ -800,27 +800,32 @@ def submit_class_reports():
                             update_values["rejected_section"] = ""
                             update_values["rejected_from_level"] = 0
                 
-                # Update database trực tiếp (không qua document save)
+                # Compute counters và gộp vào update_values
+                counters = _compute_approval_counters(data_json, template)
+                update_values.update(counters)
+                
+                # Thêm approval history trực tiếp vào update_values
+                try:
+                    history = json.loads(report.approval_history or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    history = []
+                
+                history.append({
+                    "level": "batch_submit",
+                    "user": user,
+                    "action": target_status,
+                    "comment": f"Section: {section} ({status_field}), Subject: {subject_id or 'N/A'}",
+                    "timestamp": now.isoformat()
+                })
+                update_values["approval_history"] = json.dumps(history, ensure_ascii=False)
+                
+                # Update database một lần duy nhất
                 frappe.db.set_value(
                     "SIS Student Report Card",
                     report_data.name,
                     update_values,
                     update_modified=True
                 )
-                
-                # Update counters (có thể modify document)
-                _update_report_counters(report_data.name, data_json, template)
-                
-                # Thêm approval history - reload document để có version mới nhất
-                report.reload()
-                _add_approval_history(
-                    report, 
-                    "batch_submit", 
-                    user, 
-                    target_status, 
-                    f"Section: {section} ({status_field}), Subject: {subject_id or 'N/A'}"
-                )
-                report.save(ignore_permissions=True)
                 
                 submitted_count += 1
                 
