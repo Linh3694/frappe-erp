@@ -518,22 +518,151 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             row["has_homeroom_rejection"] = has_homeroom_rejection
             row["has_scores_rejection"] = has_scores_rejection
             
-            # Lấy thông tin rejection đầu tiên (nếu có) để hiển thị
+            # ✅ Fetch data_json_reports để lấy rejection info chính xác từ data_json
+            # Di chuyển lên đây để dùng cho cả rejection info và completion check
+            data_json_reports = frappe.get_all(
+                "SIS Student Report Card",
+                fields=["data_json", "name"],
+                filters={
+                    "template_id": template_id,
+                    "class_id": class_id,
+                    "campus_id": campus_id
+                }
+            )
+            
+            # ✅ Helper function để extract rejection info từ data_json
+            # Đảm bảo rejection_reason và rejected_from_level luôn đồng bộ
+            def _get_rejection_info_from_data_json(data: dict, check_homeroom: bool, check_scores: bool):
+                """
+                Extract rejection info từ data_json, đảm bảo reason và from_level đồng bộ.
+                Returns: dict với keys: reason, section, from_level hoặc None
+                """
+                result = None
+                
+                # Check homeroom rejection
+                if check_homeroom:
+                    homeroom_data = data.get("homeroom", {})
+                    if isinstance(homeroom_data, dict):
+                        approval = homeroom_data.get("approval", {})
+                        if isinstance(approval, dict):
+                            reason = approval.get("rejection_reason")
+                            from_level = approval.get("rejected_from_level")
+                            if reason and from_level:
+                                # Check status chưa vượt qua level bị reject
+                                status = approval.get("status", "draft")
+                                status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
+                                current_level = status_to_level.get(status, 0)
+                                if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                    result = {"reason": reason, "section": "homeroom", "from_level": from_level}
+                
+                # Check scores rejection (VN scores, subject_eval, INTL boards)
+                if check_scores and not result:
+                    # Check VN scores
+                    scores_data = data.get("scores", {})
+                    if isinstance(scores_data, dict):
+                        for subject_id, subject_data in scores_data.items():
+                            if not subject_id.startswith("SIS_ACTUAL_SUBJECT"):
+                                continue
+                            if isinstance(subject_data, dict):
+                                approval = subject_data.get("approval", {})
+                                if isinstance(approval, dict):
+                                    reason = approval.get("rejection_reason")
+                                    from_level = approval.get("rejected_from_level")
+                                    if reason and from_level:
+                                        status = approval.get("status", "draft")
+                                        status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
+                                        current_level = status_to_level.get(status, 0)
+                                        if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                            result = {"reason": reason, "section": "scores", "from_level": from_level}
+                                            break
+                    
+                    # Check subject_eval
+                    if not result:
+                        subject_eval_data = data.get("subject_eval", {})
+                        if isinstance(subject_eval_data, dict):
+                            for subject_id, subject_data in subject_eval_data.items():
+                                if not subject_id.startswith("SIS_ACTUAL_SUBJECT"):
+                                    continue
+                                if isinstance(subject_data, dict):
+                                    approval = subject_data.get("approval", {})
+                                    if isinstance(approval, dict):
+                                        reason = approval.get("rejection_reason")
+                                        from_level = approval.get("rejected_from_level")
+                                        if reason and from_level:
+                                            status = approval.get("status", "draft")
+                                            status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
+                                            current_level = status_to_level.get(status, 0)
+                                            if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                                result = {"reason": reason, "section": "subject_eval", "from_level": from_level}
+                                                break
+                    
+                    # Check INTL boards (main_scores, ielts, comments)
+                    if not result:
+                        intl_scores_data = data.get("intl_scores", {})
+                        if isinstance(intl_scores_data, dict):
+                            for subject_id, subject_data in intl_scores_data.items():
+                                if not subject_id.startswith("SIS_ACTUAL_SUBJECT"):
+                                    continue
+                                if isinstance(subject_data, dict):
+                                    # Check each INTL board: main_scores, ielts, comments
+                                    for board_key in ["main_scores_approval", "ielts_approval", "comments_approval"]:
+                                        approval = subject_data.get(board_key, {})
+                                        if isinstance(approval, dict):
+                                            reason = approval.get("rejection_reason")
+                                            from_level = approval.get("rejected_from_level")
+                                            if reason and from_level:
+                                                status = approval.get("status", "draft")
+                                                status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
+                                                current_level = status_to_level.get(status, 0)
+                                                if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                                    # Map board_key to section name
+                                                    section_map = {
+                                                        "main_scores_approval": "main_scores",
+                                                        "ielts_approval": "ielts", 
+                                                        "comments_approval": "comments"
+                                                    }
+                                                    result = {"reason": reason, "section": section_map.get(board_key, "scores"), "from_level": from_level}
+                                                    break
+                                    if result:
+                                        break
+                
+                return result
+            
+            # ✅ Lấy thông tin rejection từ data_json (đảm bảo đồng bộ reason và from_level)
             if has_homeroom_rejection or has_scores_rejection:
-                rejected_report = next(
-                    (r for r in student_reports 
-                     if (_is_still_rejected(r, 'homeroom') if has_homeroom_rejection else False) or 
-                        (_is_still_rejected(r, 'scores') if has_scores_rejection else False)),
-                    None
-                )
-                if rejected_report:
-                    row["rejection_reason"] = (
-                        rejected_report.get("rejection_reason") or 
-                        rejected_report.get("homeroom_rejection_reason") or 
-                        rejected_report.get("scores_rejection_reason")
+                rejection_info_found = None
+                
+                # Tìm trong data_json trước
+                for r in data_json_reports:
+                    try:
+                        data = json.loads(r.get("data_json") or "{}")
+                        rejection_info = _get_rejection_info_from_data_json(data, has_homeroom_rejection, has_scores_rejection)
+                        if rejection_info:
+                            rejection_info_found = rejection_info
+                            break
+                    except (json.JSONDecodeError, Exception):
+                        pass
+                
+                if rejection_info_found:
+                    row["rejection_reason"] = rejection_info_found.get("reason")
+                    row["rejected_section"] = rejection_info_found.get("section")
+                    row["rejected_from_level"] = rejection_info_found.get("from_level")
+                else:
+                    # Fallback về document-level fields nếu không tìm thấy trong data_json
+                    rejected_report = next(
+                        (r for r in student_reports 
+                         if (_is_still_rejected(r, 'homeroom') if has_homeroom_rejection else False) or 
+                            (_is_still_rejected(r, 'scores') if has_scores_rejection else False)),
+                        None
                     )
-                    row["rejected_section"] = rejected_report.get("rejected_section")
-                    row["rejected_from_level"] = rejected_report.get("rejected_from_level")
+                    if rejected_report:
+                        row["rejection_reason"] = (
+                            rejected_report.get("rejection_reason") or 
+                            rejected_report.get("homeroom_rejection_reason") or 
+                            rejected_report.get("scores_rejection_reason")
+                        )
+                        row["rejected_section"] = rejected_report.get("rejected_section")
+                        row["rejected_from_level"] = rejected_report.get("rejected_from_level")
             
             # Tính toán trạng thái hoàn thành nhập liệu
             # GVCN: Đã hoàn thành nếu tất cả HS đều có homeroom_status != "draft"
@@ -544,16 +673,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             scores_completed = all(s != "draft" for s in scores_statuses) if scores_statuses else False
             
             # ✅ Check completion từ data_json cho các sections: subject_eval, intl (main_scores, ielts, comments)
-            # Lấy reports có data_json để check
-            data_json_reports = frappe.get_all(
-                "SIS Student Report Card",
-                fields=["data_json"],
-                filters={
-                    "template_id": template_id,
-                    "class_id": class_id,
-                    "campus_id": campus_id
-                }
-            )
+            # data_json_reports đã được fetch ở trên cho rejection info
             
             # Helper function để check section có ít nhất 1 subject với approval.status != "draft"
             def check_section_has_non_draft(data: dict, section_key: str) -> bool:
