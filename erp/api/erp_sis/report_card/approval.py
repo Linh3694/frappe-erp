@@ -574,9 +574,6 @@ def submit_class_reports():
         section = data.get("section", "all")
         subject_id = data.get("subject_id")
         
-        # 🔍 DEBUG: Log received params
-        frappe.logger().info(f"[SUBMIT_CLASS] Received params: template_id={template_id}, class_id={class_id}, section={section}, subject_id={subject_id}")
-        
         if not template_id:
             return validation_error_response(
                 message="template_id is required",
@@ -690,14 +687,8 @@ def submit_class_reports():
                 # ========== CHECK APPROVAL STATUS TRONG DATA_JSON ==========
                 # Nếu có subject_id, check approval status của môn cụ thể
                 if subject_id and section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
-                    # 🔍 DEBUG
-                    frappe.logger().info(f"[SUBMIT_CLASS] Processing report {report.name} with subject_id={subject_id}, section={section}")
-                    
                     subject_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
                     current_subject_status = subject_approval.get("status", "draft")
-                    
-                    # 🔍 DEBUG
-                    frappe.logger().info(f"[SUBMIT_CLASS] Current subject status: {current_subject_status}")
                     
                     # Cho phép submit nếu môn đang ở draft, entry, hoặc rejected
                     if current_subject_status not in ["draft", "entry", "rejected"]:
@@ -709,7 +700,7 @@ def submit_class_reports():
                         "status": target_status,
                         "submitted_at": str(now),
                         "submitted_by": user,
-                        "board_type": section  # ✅ Lưu board_type để phân biệt khi query pending
+                        "board_type": section  # Lưu board_type để phân biệt khi query pending
                     }
                     
                     # Clear rejection info nếu re-submit
@@ -718,9 +709,6 @@ def submit_class_reports():
                         new_approval["rejected_from_level"] = None
                     
                     data_json = _set_subject_approval_in_data_json(data_json, section, subject_id, new_approval)
-                    
-                    # 🔍 DEBUG: Log data_json after update
-                    frappe.logger().info(f"[SUBMIT_CLASS] data_json.{section} after update: {data_json.get(section, {})}")
                     
                 else:
                     # ========== LOGIC CŨ CHO HOMEROOM HOẶC KHI KHÔNG CÓ SUBJECT_ID ==========
@@ -744,11 +732,12 @@ def submit_class_reports():
                         data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, new_approval)
                 
                 # ========== UPDATE DATABASE ==========
-                # ✅ FIX: Update trực tiếp trên report object thay vì dùng set_value() + reload()
-                # Điều này tránh conflict giữa set_value() và save()
-                report.data_json = json.dumps(data_json, ensure_ascii=False)
-                report.submitted_at = now
-                report.submitted_by = user
+                # Chuẩn bị update values
+                update_values = {
+                    "submitted_at": now,
+                    "submitted_by": user,
+                    "data_json": json.dumps(data_json, ensure_ascii=False)
+                }
                 
                 # CHỈ update scores_approval_status chung NẾU:
                 # - Đây là homeroom (không có subject_id)
@@ -758,7 +747,7 @@ def submit_class_reports():
                 
                 # Nếu là homeroom hoặc không có subject_id → update field chung
                 if section == "homeroom" or not subject_id:
-                    setattr(report, status_field, target_status)
+                    update_values[status_field] = target_status
                 else:
                     # Có subject_id (per-subject submit):
                     # Chỉ update field chung nếu nó chưa ở level cao hơn
@@ -775,14 +764,10 @@ def submit_class_reports():
                 # Cũng cập nhật approval_status chung nếu cả 2 section đều ở trạng thái tốt
                 current_general_status = report_data.approval_status or 'draft'
                 if current_general_status in ['draft', 'entry']:
-                    report.approval_status = target_status
+                    update_values["approval_status"] = target_status
                 
                 # Clear rejection info khi re-submit
-                # ✅ FIX: Check cả status_field chung VÀ per-subject status trong data_json
-                # INTL per-subject rejection được lưu trong data_json, không phải status_field chung
                 should_clear_rejection = False
-                current_section_status = getattr(report_data, status_field, None) or 'draft'
-                
                 if current_section_status == 'rejected':
                     should_clear_rejection = True
                 elif subject_id and section in ["main_scores", "ielts", "comments"]:
@@ -793,32 +778,41 @@ def submit_class_reports():
                 
                 if should_clear_rejection:
                     # Clear general rejection info
-                    report.rejection_reason = None
-                    report.rejected_by = None
-                    report.rejected_at = None
+                    update_values["rejection_reason"] = None
+                    update_values["rejected_by"] = None
+                    update_values["rejected_at"] = None
                     
                     # Clear section-specific rejection info dựa vào section đang submit
                     if section == "homeroom":
-                        report.homeroom_rejection_reason = None
-                        report.homeroom_rejected_by = None
-                        report.homeroom_rejected_at = None
+                        update_values["homeroom_rejection_reason"] = None
+                        update_values["homeroom_rejected_by"] = None
+                        update_values["homeroom_rejected_at"] = None
                     elif section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
-                        report.scores_rejection_reason = None
-                        report.scores_rejected_by = None
-                        report.scores_rejected_at = None
+                        update_values["scores_rejection_reason"] = None
+                        update_values["scores_rejected_by"] = None
+                        update_values["scores_rejected_at"] = None
                     
                     # Clear rejected_section và rejected_from_level nếu match
                     current_rejected_section = report.rejected_section or ""
                     if current_rejected_section:
                         if (section == "homeroom" and current_rejected_section in ["homeroom", "both"]) or \
                            (section in ["scores", "subject_eval", "main_scores", "ielts", "comments"] and current_rejected_section in ["scores", "both"]):
-                            report.rejected_section = ""
-                            report.rejected_from_level = 0
+                            update_values["rejected_section"] = ""
+                            update_values["rejected_from_level"] = 0
                 
-                # Update counters
-                _update_report_counters(report.name, data_json, template)
+                # Update database trực tiếp (không qua document save)
+                frappe.db.set_value(
+                    "SIS Student Report Card",
+                    report_data.name,
+                    update_values,
+                    update_modified=True
+                )
                 
-                # Thêm approval history
+                # Update counters (có thể modify document)
+                _update_report_counters(report_data.name, data_json, template)
+                
+                # Thêm approval history - reload document để có version mới nhất
+                report.reload()
                 _add_approval_history(
                     report, 
                     "batch_submit", 
@@ -826,8 +820,6 @@ def submit_class_reports():
                     target_status, 
                     f"Section: {section} ({status_field}), Subject: {subject_id or 'N/A'}"
                 )
-                
-                # ✅ FIX: Save một lần duy nhất sau khi tất cả changes đã được apply
                 report.save(ignore_permissions=True)
                 
                 submitted_count += 1
@@ -858,24 +850,6 @@ def submit_class_reports():
         if skipped_count > 0:
             result_message += f" ({skipped_count} báo cáo đã được submit trước đó cho section này)"
         
-        # 🔍 DEBUG: Verify data_json của report đầu tiên sau commit
-        debug_info = None
-        if subject_id and reports:
-            first_report_id = reports[0].name
-            try:
-                saved_data_json = frappe.db.get_value("SIS Student Report Card", first_report_id, "data_json")
-                saved_parsed = json.loads(saved_data_json or "{}")
-                section_data = saved_parsed.get(section, {})
-                subject_data = section_data.get(subject_id, {}) if subject_id else {}
-                debug_info = {
-                    "first_report_id": first_report_id,
-                    "section_keys": list(section_data.keys()) if section_data else [],
-                    "subject_approval": subject_data.get("approval", {}),
-                    "has_subject_in_section": subject_id in section_data if subject_id else False
-                }
-            except Exception as e:
-                debug_info = {"error": str(e)}
-        
         return success_response(
             data={
                 "template_id": template_id,
@@ -887,8 +861,7 @@ def submit_class_reports():
                 "skipped_count": skipped_count,
                 "total_reports": len(reports),
                 "errors": errors if errors else None,
-                "subject_id": subject_id,  # 🔍 DEBUG
-                "debug_info": debug_info  # 🔍 DEBUG
+                "subject_id": subject_id
             },
             message=result_message
         )
