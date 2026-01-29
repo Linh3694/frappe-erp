@@ -1529,6 +1529,26 @@ def get_report_data(report_id: Optional[str] = None, filter_l2_approved: Optiona
             del transformed_data["intl_scoreboard"]
             frappe.logger().info("[get_report_data] Removed deprecated intl_scoreboard from response")
         
+        # ✅ Build template_config để frontend biết sections nào được enable
+        template_config = {
+            "homeroom_enabled": False,
+            "scores_enabled": False,
+            "subject_eval_enabled": False,
+            "program_type": "vn",
+        }
+        try:
+            template_id = getattr(report, "template_id", "")
+            if template_id:
+                tmpl = frappe.get_doc("SIS Report Card Template", template_id)
+                template_config = {
+                    "homeroom_enabled": getattr(tmpl, 'homeroom_enabled', False) or False,
+                    "scores_enabled": getattr(tmpl, 'scores_enabled', False) or False,
+                    "subject_eval_enabled": getattr(tmpl, 'subject_eval_enabled', False) or False,
+                    "program_type": getattr(tmpl, 'program_type', 'vn') or 'vn',
+                }
+        except Exception as tmpl_err:
+            frappe.logger().warning(f"[get_report_data] Could not load template config: {str(tmpl_err)}")
+        
         response_data = {
             "form_code": form.code or "PRIM_VN", 
             "student": standardized_data.get("student", {}),
@@ -1537,6 +1557,8 @@ def get_report_data(report_id: Optional[str] = None, filter_l2_approved: Optiona
             "subjects": standardized_data.get("subjects", []),
             "homeroom": standardized_data.get("homeroom", {}),
             "form_config": standardized_data.get("form_config", {}),
+            # ✅ Template config cho frontend reject dialog
+            "template_config": template_config,
             # ✨ REMOVED: Xóa scores ở top level để tránh trùng lặp với data.scores
             # Frontend nên đọc từ data.scores hoặc subjects array đã được chuẩn hóa
             # ✨ QUAN TRỌNG: Update data.subjects với standardized data để đảm bảo frontend không đọc subjects cũ
