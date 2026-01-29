@@ -905,7 +905,7 @@ def get_campus_leave_requests_by_submitted_date(campus_id=None, start_date=None,
 
 
 @frappe.whitelist(allow_guest=False)
-def get_hikvision_class_attendance_mismatch(campus_id=None, date=None):
+def get_hikvision_class_attendance_mismatch(campus_id=None, date=None, mode=None):
     """
     Lấy danh sách học sinh đã được điểm danh có mặt (Class Attendance) 
     nhưng KHÔNG check Face ID (ERP Time Attendance)
@@ -916,6 +916,8 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None):
     Args:
         campus_id: ID của campus
         date: Ngày cần xem (YYYY-MM-DD)
+        mode: 'check_in' (mặc định) - không check Face ID vào
+              'check_out' - có mặt nhưng không check Face ID ra
     
     Returns:
         {
@@ -936,6 +938,8 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None):
             campus_id = frappe.request.args.get('campus_id')
         if not date:
             date = frappe.request.args.get('date')
+        if not mode:
+            mode = frappe.request.args.get('mode') or 'check_in'
         
         if not campus_id or not date:
             return error_response(
@@ -1055,10 +1059,15 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None):
         student_codes = [s['student_code'].upper() for s in class_attendance_students if s.get('student_code')]
         
         # Step 2: Lấy danh sách học sinh đã check FaceID (ERP Time Attendance)
+        # Phân biệt check_in (buổi sáng <12h) và check_out (buổi chiều >=12h)
         faceid_students = set()
         if student_codes:
             faceid_records = frappe.db.sql("""
-                SELECT UPPER(employee_code) as code
+                SELECT 
+                    UPPER(employee_code) as code,
+                    check_in_time,
+                    check_out_time,
+                    raw_data
                 FROM `tabERP Time Attendance`
                 WHERE UPPER(employee_code) IN %(codes)s
                     AND date = %(date)s
@@ -1067,7 +1076,49 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None):
                 "date": date_obj
             }, as_dict=True)
             
-            faceid_students = {r['code'] for r in faceid_records}
+            # Phân loại theo mode
+            for r in faceid_records:
+                morning_times = []
+                afternoon_times = []
+                
+                # Phân loại từ raw_data
+                if r.get('raw_data'):
+                    try:
+                        raw_data = json.loads(r['raw_data']) if isinstance(r['raw_data'], str) else r['raw_data']
+                        if raw_data:
+                            for item in raw_data:
+                                ts_str = item.get('timestamp')
+                                if ts_str:
+                                    ts = frappe.utils.get_datetime(ts_str)
+                                    if ts.hour < 12:
+                                        morning_times.append(ts)
+                                    else:
+                                        afternoon_times.append(ts)
+                    except Exception:
+                        pass
+                
+                # Fallback nếu không có raw_data
+                if not morning_times and not afternoon_times:
+                    if r.get('check_in_time'):
+                        if r['check_in_time'].hour < 12:
+                            morning_times.append(r['check_in_time'])
+                        else:
+                            afternoon_times.append(r['check_in_time'])
+                    if r.get('check_out_time') and r.get('check_out_time') != r.get('check_in_time'):
+                        if r['check_out_time'].hour < 12:
+                            morning_times.append(r['check_out_time'])
+                        else:
+                            afternoon_times.append(r['check_out_time'])
+                
+                # Thêm vào set tùy theo mode
+                if mode == 'check_out':
+                    # Mode check_out: học sinh có quẹt Face ID buổi chiều
+                    if len(afternoon_times) > 0:
+                        faceid_students.add(r['code'])
+                else:
+                    # Mode check_in: học sinh có quẹt Face ID buổi sáng
+                    if len(morning_times) > 0:
+                        faceid_students.add(r['code'])
         
         # Step 3: Tìm học sinh có mặt trong lớp nhưng KHÔNG check FaceID
         mismatch_students = []
@@ -1092,15 +1143,22 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None):
         # Sắp xếp theo lớp và tên học sinh
         mismatch_students.sort(key=lambda x: (x.get('class_title') or '', x.get('student_name') or ''))
         
+        # Message tùy theo mode
+        if mode == 'check_out':
+            msg = "Lấy danh sách học sinh có mặt nhưng không check Face ID ra thành công"
+        else:
+            msg = "Lấy danh sách học sinh không check Face ID vào thành công"
+        
         return success_response(
             data={
                 "summary": {
                     "total": len(mismatch_students),
-                    "by_class_count": len(class_count)
+                    "by_class_count": len(class_count),
+                    "mode": mode
                 },
                 "students": mismatch_students
             },
-            message="Lấy danh sách học sinh không check Face ID thành công"
+            message=msg
         )
         
     except Exception as e:
