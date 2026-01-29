@@ -479,6 +479,11 @@ def get_reports_by_class():
             "school_year", "semester_part", "status", "creation", "modified", 
             "pdf_file", "is_approved", "approval_status",
             "rejection_reason", "rejected_by", "rejected_at",
+            # ✅ Thêm rejected_section và rejected_from_level để highlight student bị reject
+            "rejected_section", "rejected_from_level",
+            # Thêm section-specific rejection info
+            "homeroom_rejection_reason", "homeroom_rejected_by", "homeroom_rejected_at",
+            "scores_rejection_reason", "scores_rejected_by", "scores_rejected_at",
             # Thêm các fields approval status theo section
             "homeroom_approval_status", "homeroom_submitted_at", "homeroom_submitted_by",
             "scores_approval_status", "scores_submitted_at", "scores_submitted_by"

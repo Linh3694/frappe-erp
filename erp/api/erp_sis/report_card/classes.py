@@ -450,15 +450,68 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             row["is_homeroom_teacher"] = is_homeroom_teacher
             row["is_subject_teacher"] = is_subject_teacher
             
-            # Kiểm tra có reports nào bị reject không
+            # ✅ Kiểm tra có reports nào ĐANG bị reject không (chưa được approve lại)
+            # Chỉ hiển thị rejection nếu status chưa vượt qua level bị reject
+            def _is_still_rejected(report, section_type):
+                """
+                Kiểm tra xem section có đang ở trạng thái rejected không.
+                section_type: 'homeroom' hoặc 'scores'
+                """
+                rejected_from_level = report.get("rejected_from_level") or 0
+                rejected_section = report.get("rejected_section")
+                
+                # Không có rejection info
+                if not rejected_section:
+                    # Check section-specific rejection reason
+                    if section_type == 'homeroom':
+                        if not report.get("homeroom_rejection_reason"):
+                            return False
+                    else:  # scores
+                        if not report.get("scores_rejection_reason"):
+                            return False
+                else:
+                    # Check chung rejection
+                    if section_type == 'homeroom':
+                        if rejected_section not in ["homeroom", "both"]:
+                            return False
+                    else:  # scores
+                        # scores bao gồm cả INTL boards: scores, subject_eval, main_scores, ielts, comments
+                        if rejected_section == "homeroom":
+                            return False
+                
+                # Xác định current level của section
+                if section_type == 'homeroom':
+                    status = report.get("homeroom_approval_status") or "draft"
+                else:
+                    status = report.get("scores_approval_status") or "draft"
+                
+                # Map status sang level number
+                status_to_level = {
+                    "draft": 0,
+                    "submitted": 0.5,
+                    "level_1_approved": 1,
+                    "level_2_approved": 2,
+                    "reviewed": 3,
+                    "published": 4
+                }
+                current_level = status_to_level.get(status, 0)
+                
+                # Nếu bị reject từ L3, chỉ hiển thị nếu chưa được L2 approve lại
+                # Nếu bị reject từ L2, chỉ hiển thị nếu chưa được L1 approve lại
+                if rejected_from_level == 3:
+                    return current_level < 2
+                elif rejected_from_level == 2:
+                    return current_level < 1
+                else:
+                    # Không có rejected_from_level → check có rejection reason không
+                    return True
+            
             has_homeroom_rejection = any(
-                r.get("homeroom_rejection_reason") or 
-                (r.get("rejected_section") in ["homeroom", "both"] and r.get("rejection_reason"))
+                _is_still_rejected(r, 'homeroom')
                 for r in student_reports
             )
             has_scores_rejection = any(
-                r.get("scores_rejection_reason") or 
-                (r.get("rejected_section") in ["scores", "both"] and r.get("rejection_reason"))
+                _is_still_rejected(r, 'scores')
                 for r in student_reports
             )
             
@@ -468,7 +521,9 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             # Lấy thông tin rejection đầu tiên (nếu có) để hiển thị
             if has_homeroom_rejection or has_scores_rejection:
                 rejected_report = next(
-                    (r for r in student_reports if r.get("rejection_reason") or r.get("homeroom_rejection_reason") or r.get("scores_rejection_reason")),
+                    (r for r in student_reports 
+                     if (_is_still_rejected(r, 'homeroom') if has_homeroom_rejection else False) or 
+                        (_is_still_rejected(r, 'scores') if has_scores_rejection else False)),
                     None
                 )
                 if rejected_report:
