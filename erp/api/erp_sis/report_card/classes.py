@@ -451,11 +451,15 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             row["is_subject_teacher"] = is_subject_teacher
             
             # ✅ Kiểm tra có reports nào ĐANG bị reject không (chưa được approve lại)
-            # Chỉ hiển thị rejection nếu status chưa vượt qua level bị reject
+            # ✅ FIX: API này dùng cho Entry page - chỉ hiển thị rejection khi Entry cần action
             def _is_still_rejected(report, section_type):
                 """
-                Kiểm tra xem section có đang ở trạng thái rejected không.
+                Kiểm tra xem section có đang ở trạng thái rejected VÀ Entry cần action không.
                 section_type: 'homeroom' hoặc 'scores'
+                
+                Logic cho Entry page:
+                - Bị reject từ L3 → L2 xử lý, Entry KHÔNG cần action → return False
+                - Bị reject từ L2 → Entry cần resubmit → return True khi chưa resubmit
                 """
                 rejected_from_level = report.get("rejected_from_level") or 0
                 rejected_section = report.get("rejected_section")
@@ -479,32 +483,25 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                         if rejected_section == "homeroom":
                             return False
                 
-                # Xác định current level của section
+                # Xác định current status của section
                 if section_type == 'homeroom':
                     status = report.get("homeroom_approval_status") or "draft"
                 else:
                     status = report.get("scores_approval_status") or "draft"
                 
-                # Map status sang level number
-                status_to_level = {
-                    "draft": 0,
-                    "submitted": 0.5,
-                    "level_1_approved": 1,
-                    "level_2_approved": 2,
-                    "reviewed": 3,
-                    "published": 4
-                }
-                current_level = status_to_level.get(status, 0)
-                
-                # Nếu bị reject từ L3, chỉ hiển thị nếu chưa được L2 approve lại
-                # Nếu bị reject từ L2, chỉ hiển thị nếu chưa được L1 approve lại
+                # ✅ FIX: Logic cho Entry page
+                # Bị reject từ L3 → Entry KHÔNG cần action (L2 xử lý)
                 if rejected_from_level == 3:
-                    return current_level < 2
-                elif rejected_from_level == 2:
-                    return current_level < 1
-                else:
-                    # Không có rejected_from_level → check có rejection reason không
-                    return True
+                    return False
+                
+                # Bị reject từ L2 → Entry cần resubmit
+                # Chỉ hiển thị rejection khi chưa resubmit (status = draft hoặc level_1_approved)
+                # Nếu status = submitted hoặc cao hơn → đã resubmit → không hiển thị
+                if rejected_from_level == 2:
+                    return status in ["draft", "level_1_approved"]
+                
+                # Fallback: hiển thị nếu có rejection và status = draft
+                return status == "draft"
             
             has_homeroom_rejection = any(
                 _is_still_rejected(r, 'homeroom')
@@ -532,12 +529,42 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
             
             # ✅ Helper function để extract rejection info từ data_json
             # Đảm bảo rejection_reason và rejected_from_level luôn đồng bộ
+            # ✅ FIX: API này dùng cho Entry page (ReportCard.tsx)
+            # Entry chỉ cần thấy rejection khi CHƯA resubmit
+            # Sau khi resubmit (status >= submitted), KHÔNG hiển thị rejection nữa
             def _get_rejection_info_from_data_json(data: dict, check_homeroom: bool, check_scores: bool):
                 """
                 Extract rejection info từ data_json, đảm bảo reason và from_level đồng bộ.
+                Chỉ trả về rejection nếu Entry chưa resubmit (status = draft hoặc level_1_approved).
                 Returns: dict với keys: reason, section, from_level hoặc None
                 """
                 result = None
+                
+                # Helper để check xem Entry đã resubmit chưa
+                def _entry_needs_action(status: str, from_level: int) -> bool:
+                    """
+                    Entry cần action (hiển thị rejection) khi:
+                    - Bị reject từ L2/L3 VÀ chưa resubmit lại
+                    - "Chưa resubmit" = status KHÔNG phải submitted trở lên SAU khi reject
+                    
+                    Logic:
+                    - Bị reject từ L2 → Entry nhận, cần resubmit → hiển thị khi status != submitted
+                    - Bị reject từ L3 → L2 nhận, Entry KHÔNG cần action → không hiển thị
+                    """
+                    # Nếu bị reject từ L3, Entry không cần action (L2 xử lý)
+                    if from_level == 3:
+                        return False
+                    
+                    # Bị reject từ L2, Entry cần resubmit
+                    # Chỉ hiển thị nếu chưa resubmit (status chưa phải submitted)
+                    # Lưu ý: khi L2 reject, status có thể về level_1_approved, sau đó Entry resubmit → submitted
+                    if from_level == 2:
+                        # Nếu status = submitted hoặc cao hơn → đã resubmit → không hiển thị
+                        # Nếu status = draft hoặc level_1_approved → chưa resubmit → hiển thị
+                        return status in ["draft", "level_1_approved"]
+                    
+                    # Fallback cho các level khác
+                    return status == "draft"
                 
                 # Check homeroom rejection
                 if check_homeroom:
@@ -548,11 +575,8 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                             reason = approval.get("rejection_reason")
                             from_level = approval.get("rejected_from_level")
                             if reason and from_level:
-                                # Check status chưa vượt qua level bị reject
                                 status = approval.get("status", "draft")
-                                status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
-                                current_level = status_to_level.get(status, 0)
-                                if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                if _entry_needs_action(status, from_level):
                                     result = {"reason": reason, "section": "homeroom", "from_level": from_level}
                 
                 # Check scores rejection (VN scores, subject_eval, INTL boards)
@@ -570,9 +594,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                                     from_level = approval.get("rejected_from_level")
                                     if reason and from_level:
                                         status = approval.get("status", "draft")
-                                        status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
-                                        current_level = status_to_level.get(status, 0)
-                                        if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                        if _entry_needs_action(status, from_level):
                                             result = {"reason": reason, "section": "scores", "from_level": from_level}
                                             break
                     
@@ -590,9 +612,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                                         from_level = approval.get("rejected_from_level")
                                         if reason and from_level:
                                             status = approval.get("status", "draft")
-                                            status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
-                                            current_level = status_to_level.get(status, 0)
-                                            if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                            if _entry_needs_action(status, from_level):
                                                 result = {"reason": reason, "section": "subject_eval", "from_level": from_level}
                                                 break
                     
@@ -612,9 +632,7 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                                             from_level = approval.get("rejected_from_level")
                                             if reason and from_level:
                                                 status = approval.get("status", "draft")
-                                                status_to_level = {"draft": 0, "submitted": 0.5, "level_1_approved": 1, "level_2_approved": 2, "reviewed": 3, "published": 4}
-                                                current_level = status_to_level.get(status, 0)
-                                                if (from_level == 3 and current_level < 2) or (from_level == 2 and current_level < 1) or from_level not in [2, 3]:
+                                                if _entry_needs_action(status, from_level):
                                                     # Map board_key to section name
                                                     section_map = {
                                                         "main_scores_approval": "main_scores",
