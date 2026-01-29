@@ -902,3 +902,210 @@ def get_campus_leave_requests_by_submitted_date(campus_id=None, start_date=None,
             message=f"Lỗi khi lấy danh sách đơn nghỉ phép: {str(e)}",
             code="GET_LEAVE_REQUESTS_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_hikvision_class_attendance_mismatch(campus_id=None, date=None):
+    """
+    Lấy danh sách học sinh đã được điểm danh có mặt (Class Attendance) 
+    nhưng KHÔNG check Face ID (ERP Time Attendance)
+    
+    Mục đích: Check chéo giữa điểm danh trong lớp và điểm danh qua cổng FaceID
+    để phát hiện học sinh đến trường nhưng không check FaceID
+    
+    Args:
+        campus_id: ID của campus
+        date: Ngày cần xem (YYYY-MM-DD)
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                summary: { total, by_class_count },
+                students: [
+                    {
+                        student_id, student_name, student_code,
+                        class_id, class_title, attendance_period
+                    }
+                ]
+            }
+        }
+    """
+    try:
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        if not date:
+            date = frappe.request.args.get('date')
+        
+        if not campus_id or not date:
+            return error_response(
+                message="Thiếu tham số: campus_id và date là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        # Parse date
+        date_obj = frappe.utils.getdate(date)
+        
+        # Tìm campus_id thực sự (logic giống get_campus_faceid_summary)
+        original_campus_id = campus_id
+        campus_exists = frappe.db.exists("SIS Campus", campus_id)
+        if not campus_exists:
+            campus_id = frappe.db.get_value(
+                "SIS Campus",
+                {"title_vn": original_campus_id},
+                "name"
+            ) or frappe.db.get_value(
+                "SIS Campus",
+                {"title_en": original_campus_id},
+                "name"
+            )
+            
+            if not campus_id:
+                school_year_campus = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "campus_id"
+                )
+                if school_year_campus:
+                    campus_id = school_year_campus
+            
+            if not campus_id:
+                campus_id = frappe.db.get_value(
+                    "SIS School Year",
+                    {},
+                    "campus_id",
+                    order_by="creation desc"
+                )
+            
+            if not campus_id:
+                return error_response(
+                    message="Không tìm thấy campus nào trong hệ thống",
+                    code="NO_CAMPUS"
+                )
+        
+        # Tìm năm học
+        school_year = frappe.db.get_value(
+            "SIS School Year",
+            {"campus_id": campus_id, "is_enable": 1},
+            "name"
+        )
+        
+        if not school_year:
+            school_year = frappe.db.get_value(
+                "SIS School Year",
+                {
+                    "campus_id": campus_id,
+                    "start_date": ["<=", date_obj],
+                    "end_date": [">=", date_obj]
+                },
+                "name"
+            )
+        
+        if not school_year:
+            school_year = frappe.db.get_value(
+                "SIS School Year",
+                {"campus_id": campus_id},
+                "name",
+                order_by="start_date desc"
+            )
+        
+        if not school_year:
+            return error_response(
+                message=f"Không tìm thấy năm học cho campus: {campus_id}",
+                code="NO_SCHOOL_YEAR"
+            )
+        
+        # Step 1: Lấy tất cả học sinh có mặt trong SIS Class Attendance (present/late)
+        # Chỉ lấy lớp regular, không lấy mixed
+        class_attendance_students = frappe.db.sql("""
+            SELECT DISTINCT
+                ca.student_id,
+                ca.student_name,
+                ca.student_code,
+                ca.class_id,
+                c.title as class_title,
+                GROUP_CONCAT(DISTINCT ca.period ORDER BY ca.period SEPARATOR ', ') as attendance_periods
+            FROM `tabSIS Class Attendance` ca
+            INNER JOIN `tabSIS Class` c ON ca.class_id = c.name
+            WHERE ca.date = %(date)s
+                AND ca.status IN ('present', 'late')
+                AND c.campus_id = %(campus_id)s
+                AND c.school_year_id = %(school_year)s
+                AND c.class_type = 'regular'
+            GROUP BY ca.student_id, ca.student_name, ca.student_code, ca.class_id, c.title
+        """, {
+            "date": date_obj,
+            "campus_id": campus_id,
+            "school_year": school_year
+        }, as_dict=True)
+        
+        if not class_attendance_students:
+            return success_response(
+                data={
+                    "summary": {
+                        "total": 0,
+                        "by_class_count": 0
+                    },
+                    "students": []
+                },
+                message="Không có dữ liệu điểm danh lớp trong ngày này"
+            )
+        
+        # Lấy tất cả mã học sinh để query FaceID
+        student_codes = [s['student_code'].upper() for s in class_attendance_students if s.get('student_code')]
+        
+        # Step 2: Lấy danh sách học sinh đã check FaceID (ERP Time Attendance)
+        faceid_students = set()
+        if student_codes:
+            faceid_records = frappe.db.sql("""
+                SELECT UPPER(employee_code) as code
+                FROM `tabERP Time Attendance`
+                WHERE UPPER(employee_code) IN %(codes)s
+                    AND date = %(date)s
+            """, {
+                "codes": student_codes,
+                "date": date_obj
+            }, as_dict=True)
+            
+            faceid_students = {r['code'] for r in faceid_records}
+        
+        # Step 3: Tìm học sinh có mặt trong lớp nhưng KHÔNG check FaceID
+        mismatch_students = []
+        class_count = {}
+        
+        for student in class_attendance_students:
+            code = (student.get('student_code') or '').upper()
+            if code and code not in faceid_students:
+                mismatch_students.append({
+                    "student_id": student.get('student_id'),
+                    "student_name": student.get('student_name'),
+                    "student_code": student.get('student_code'),
+                    "class_id": student.get('class_id'),
+                    "class_title": student.get('class_title'),
+                    "attendance_periods": student.get('attendance_periods')
+                })
+                
+                # Đếm theo lớp
+                class_id = student.get('class_id')
+                class_count[class_id] = class_count.get(class_id, 0) + 1
+        
+        # Sắp xếp theo lớp và tên học sinh
+        mismatch_students.sort(key=lambda x: (x.get('class_title') or '', x.get('student_name') or ''))
+        
+        return success_response(
+            data={
+                "summary": {
+                    "total": len(mismatch_students),
+                    "by_class_count": len(class_count)
+                },
+                "students": mismatch_students
+            },
+            message="Lấy danh sách học sinh không check Face ID thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_hikvision_class_attendance_mismatch error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách mismatch: {str(e)}",
+            code="GET_MISMATCH_ERROR"
+        )
