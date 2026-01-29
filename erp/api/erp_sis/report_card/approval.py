@@ -3015,6 +3015,19 @@ def reject_class_reports():
                     "data_json": json.dumps(data_json, ensure_ascii=False)
                 }
                 
+                # ✅ FIX: Reset counters khi L3/L4 reject để báo cáo không còn xuất hiện trong list L3/L4
+                # Điều này đảm bảo báo cáo chỉ xuất hiện ở level đúng (level được rollback về)
+                if pending_level == "review":
+                    # L3 reject -> về L2: reset các counters L2 approved
+                    if is_homeroom:
+                        update_values["homeroom_l2_approved"] = 0
+                    # Reset all_sections_l2_approved vì không còn đủ điều kiện
+                    update_values["all_sections_l2_approved"] = 0
+                elif pending_level == "publish":
+                    # L4 reject -> về L3: không cần reset L2 counters
+                    # Chỉ cần đảm bảo approval_status quay về level_2_approved
+                    pass
+                
                 frappe.db.set_value(
                     "SIS Student Report Card",
                     report_data.name,
@@ -3024,6 +3037,23 @@ def reject_class_reports():
                 
                 # Thêm approval history với board_type info
                 report.reload()
+                
+                # ✅ FIX: Recompute counters sau khi reject để đảm bảo báo cáo xuất hiện đúng level
+                # Đặc biệt quan trọng cho L3 reject (scores_l2_approved_count, subject_eval_l2_approved_count, etc.)
+                if pending_level in ["review", "publish"]:
+                    try:
+                        template = frappe.get_doc("SIS Report Card Template", template_id)
+                        # Parse data_json từ report đã reload (đã được update)
+                        updated_data_json = json.loads(report.data_json or "{}")
+                        new_counters = _compute_approval_counters(updated_data_json, template)
+                        report.homeroom_l2_approved = new_counters.get("homeroom_l2_approved", 0)
+                        report.scores_l2_approved_count = new_counters.get("scores_l2_approved_count", 0)
+                        report.subject_eval_l2_approved_count = new_counters.get("subject_eval_l2_approved_count", 0)
+                        report.intl_l2_approved_count = new_counters.get("intl_l2_approved_count", 0)
+                        report.all_sections_l2_approved = new_counters.get("all_sections_l2_approved", 0)
+                    except Exception as counter_err:
+                        frappe.logger().warning(f"Could not recompute counters: {str(counter_err)}")
+                
                 _add_approval_history(
                     report,
                     f"batch_reject_{pending_level}_{detected_board_type}",
