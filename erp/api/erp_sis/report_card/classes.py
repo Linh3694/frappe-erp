@@ -709,6 +709,39 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                             return True
                 return False
             
+            # ✅ Helper function riêng cho INTL sections vì cấu trúc approval khác
+            # INTL boards lưu trong: main_scores_approval, ielts_approval, comments_approval
+            def check_intl_section_has_non_draft(data: dict) -> bool:
+                """
+                Check xem intl_scores có ít nhất 1 subject với any board submitted không.
+                Cấu trúc: intl_scores.{subject_id}.{board}_approval.status
+                Boards: main_scores_approval, ielts_approval, comments_approval
+                """
+                intl_scores_data = data.get("intl_scores", {})
+                if not isinstance(intl_scores_data, dict):
+                    return False
+                
+                for subject_id, subject_data in intl_scores_data.items():
+                    if not subject_id.startswith("SIS_ACTUAL_SUBJECT"):
+                        continue
+                    if isinstance(subject_data, dict):
+                        # Check từng board: main_scores, ielts, comments
+                        for board_key in ["main_scores_approval", "ielts_approval", "comments_approval"]:
+                            approval = subject_data.get(board_key, {})
+                            if isinstance(approval, dict):
+                                status = approval.get("status", "draft")
+                                if status and status != "draft":
+                                    return True
+                        
+                        # Cũng check approval chung (fallback)
+                        general_approval = subject_data.get("approval", {})
+                        if isinstance(general_approval, dict):
+                            status = general_approval.get("status", "draft")
+                            if status and status != "draft":
+                                return True
+                
+                return False
+            
             subject_eval_completed = False
             intl_completed = False  # ✅ Thêm check cho INTL sections
             
@@ -724,15 +757,8 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                         has_subject_eval = check_section_has_non_draft(data, "subject_eval")
                         subject_eval_statuses.append(has_subject_eval)
                         
-                        # ✅ Check INTL sections: intl_scores (main_scores, ielts) và intl (comments)
-                        # intl_scores chứa data cho main_scores và ielts per-subject
-                        has_intl_scores = check_section_has_non_draft(data, "intl_scores")
-                        
-                        # intl chứa data cho comments per-subject
-                        has_intl_comments = check_section_has_non_draft(data, "intl")
-                        
-                        # INTL completed nếu có ít nhất 1 section có data
-                        has_intl = has_intl_scores or has_intl_comments
+                        # ✅ Check INTL sections với function riêng
+                        has_intl = check_intl_section_has_non_draft(data)
                         intl_statuses.append(has_intl)
                         
                     except json.JSONDecodeError:
