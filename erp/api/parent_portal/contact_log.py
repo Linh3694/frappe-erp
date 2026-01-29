@@ -235,9 +235,26 @@ def get_student_contact_logs():
         # Enrich logs with class and teacher information
         enriched_logs = []
         for log in logs:
-            # Get class info from class_student_id
-            class_student = frappe.get_doc("SIS Class Student", log['class_student_id'])
-            class_info = _get_class_info(class_student.class_id)
+            # Get class info - ưu tiên từ class_student_id, fallback về subject_id
+            class_id = None
+            
+            if log['class_student_id']:
+                try:
+                    class_student = frappe.get_doc("SIS Class Student", log['class_student_id'])
+                    class_id = class_student.class_id
+                except Exception:
+                    pass
+            
+            # Fallback: lấy class_id từ subject_id nếu không có class_student_id
+            if not class_id and log['subject_id']:
+                class_id = frappe.db.get_value("SIS Class Log Subject", log['subject_id'], "class_id")
+            
+            # Skip log nếu không xác định được class_id
+            if not class_id:
+                print(f"⚠️ Skipping log {log['name']}: cannot determine class_id")
+                continue
+            
+            class_info = _get_class_info(class_id)
             
             # Get log date from subject
             log_date = None
