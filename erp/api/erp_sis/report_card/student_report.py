@@ -1122,3 +1122,174 @@ def debug_class_intl_data():
     except Exception as e:
         frappe.log_error(f"debug_class_intl_data error: {str(e)}")
         return error_response(f"Lỗi debug: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def update_report_field():
+    """
+    Update single field trong report card từ Approval flow.
+    Cho phép L1/L2 approvers chỉnh sửa data trước khi approve.
+    
+    Request payload:
+        {
+            "template_id": "TEMPLATE-XXX",
+            "class_id": "CLASS-XXX", 
+            "student_id": "STUDENT-XXX",
+            "section": "homeroom" | "scores" | "subject_eval" | "intl_scores",
+            "subject_id": "SUBJECT-XXX" (required for scores/subject_eval/intl_scores),
+            "field": "conduct" | "comments.key1" | "hs1_scores.0" | "main_scores.Title",
+            "value": "tot" | "Comment text" | 8.5
+        }
+    """
+    try:
+        data = get_request_payload()
+        campus_id = get_current_campus_id()
+        
+        # Validate required fields
+        template_id = data.get("template_id")
+        class_id = data.get("class_id")
+        student_id = data.get("student_id")
+        section = data.get("section")
+        field = data.get("field")
+        value = data.get("value")
+        subject_id = data.get("subject_id")
+        
+        if not all([template_id, class_id, student_id, section, field]):
+            return validation_error_response(
+                "Validation failed",
+                {"error": ["template_id, class_id, student_id, section, field là bắt buộc"]}
+            )
+        
+        # Validate section-specific requirements
+        if section in ["scores", "subject_eval", "intl_scores"] and not subject_id:
+            return validation_error_response(
+                "Validation failed",
+                {"subject_id": ["subject_id là bắt buộc cho section: " + section]}
+            )
+        
+        # Tìm report
+        report_name = frappe.db.get_value(
+            "SIS Student Report Card",
+            {
+                "template_id": template_id,
+                "class_id": class_id,
+                "student_id": student_id,
+                "campus_id": campus_id
+            },
+            "name"
+        )
+        
+        if not report_name:
+            return not_found_response("Report not found")
+        
+        # Load report
+        report_doc = frappe.get_doc("SIS Student Report Card", report_name)
+        
+        # Parse data_json
+        try:
+            data_json = json.loads(report_doc.data_json or "{}")
+        except json.JSONDecodeError:
+            data_json = {}
+        
+        # Update field based on section
+        if section == "homeroom":
+            if "homeroom" not in data_json:
+                data_json["homeroom"] = {}
+            
+            # Handle nested field như "comments.key1"
+            if "." in field:
+                parent_key, child_key = field.split(".", 1)
+                if parent_key not in data_json["homeroom"]:
+                    data_json["homeroom"][parent_key] = {}
+                data_json["homeroom"][parent_key][child_key] = value
+            else:
+                data_json["homeroom"][field] = value
+        
+        elif section == "scores":
+            if "scores" not in data_json:
+                data_json["scores"] = {}
+            if subject_id not in data_json["scores"]:
+                data_json["scores"][subject_id] = {}
+            
+            # Handle array field như "hs1_scores.0"
+            if "." in field:
+                array_key, index_str = field.split(".", 1)
+                try:
+                    index = int(index_str)
+                    if array_key not in data_json["scores"][subject_id]:
+                        data_json["scores"][subject_id][array_key] = []
+                    # Đảm bảo array đủ dài
+                    while len(data_json["scores"][subject_id][array_key]) <= index:
+                        data_json["scores"][subject_id][array_key].append(None)
+                    data_json["scores"][subject_id][array_key][index] = value
+                except ValueError:
+                    # Không phải index number, treat như nested object
+                    parent_key, child_key = field.split(".", 1)
+                    if parent_key not in data_json["scores"][subject_id]:
+                        data_json["scores"][subject_id][parent_key] = {}
+                    data_json["scores"][subject_id][parent_key][child_key] = value
+            else:
+                data_json["scores"][subject_id][field] = value
+        
+        elif section == "subject_eval":
+            if "subject_eval" not in data_json:
+                data_json["subject_eval"] = {}
+            if subject_id not in data_json["subject_eval"]:
+                data_json["subject_eval"][subject_id] = {}
+            
+            # Handle nested field như "criteria.key1"
+            if "." in field:
+                parent_key, child_key = field.split(".", 1)
+                # Handle test_point_values.{index}
+                try:
+                    index = int(child_key)
+                    if parent_key not in data_json["subject_eval"][subject_id]:
+                        data_json["subject_eval"][subject_id][parent_key] = []
+                    while len(data_json["subject_eval"][subject_id][parent_key]) <= index:
+                        data_json["subject_eval"][subject_id][parent_key].append(None)
+                    data_json["subject_eval"][subject_id][parent_key][index] = value
+                except ValueError:
+                    # Nested object
+                    if parent_key not in data_json["subject_eval"][subject_id]:
+                        data_json["subject_eval"][subject_id][parent_key] = {}
+                    data_json["subject_eval"][subject_id][parent_key][child_key] = value
+            else:
+                data_json["subject_eval"][subject_id][field] = value
+        
+        elif section == "intl_scores":
+            if "intl_scores" not in data_json:
+                data_json["intl_scores"] = {}
+            if subject_id not in data_json["intl_scores"]:
+                data_json["intl_scores"][subject_id] = {}
+            
+            # Handle nested field như "main_scores.Title" hoặc "ielts.listening"
+            if "." in field:
+                parent_key, child_key = field.split(".", 1)
+                if parent_key not in data_json["intl_scores"][subject_id]:
+                    data_json["intl_scores"][subject_id][parent_key] = {}
+                data_json["intl_scores"][subject_id][parent_key][child_key] = value
+            else:
+                data_json["intl_scores"][subject_id][field] = value
+        
+        else:
+            return validation_error_response(
+                "Invalid section",
+                {"section": [f"Section '{section}' không hợp lệ"]}
+            )
+        
+        # Save report
+        report_doc.data_json = json.dumps(data_json, ensure_ascii=False)
+        report_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "updated": True,
+                "report_id": report_name
+            },
+            message="Field updated successfully"
+        )
+    
+    except Exception as e:
+        frappe.log_error(f"update_report_field error: {str(e)}")
+        return error_response(f"Lỗi cập nhật: {str(e)}")
