@@ -3487,8 +3487,15 @@ def reject_single_report():
             # Có thể reject homeroom từ Level 3
             can_reject = True
             current_status = 'level_2_approved'
+        elif section == 'scores' and subject_id:
+            # ✅ VN scores với môn cụ thể: check approval trong data_json
+            subject_approval = _get_subject_approval_from_data_json(data_json, 'scores', subject_id)
+            subject_status = subject_approval.get("status", "draft")
+            if subject_status == 'level_2_approved':
+                can_reject = True
+                current_status = 'level_2_approved'
         elif section == 'scores' and scores_status == 'level_2_approved':
-            # Có thể reject scores từ Level 3
+            # Có thể reject scores từ Level 3 (toàn bộ)
             can_reject = True
             current_status = 'level_2_approved'
         elif section == 'scores' and detected_intl_section:
@@ -3517,8 +3524,15 @@ def reject_single_report():
                             can_reject = True
                             current_status = 'level_2_approved'
                             break
+        elif section == 'subject_eval' and subject_id:
+            # ✅ VN subject_eval với môn cụ thể: check approval trong data_json
+            subject_approval = _get_subject_approval_from_data_json(data_json, 'subject_eval', subject_id)
+            subject_status = subject_approval.get("status", "draft")
+            if subject_status == 'level_2_approved':
+                can_reject = True
+                current_status = 'level_2_approved'
         elif section == 'subject_eval' and scores_status == 'level_2_approved':
-            # Có thể reject subject_eval từ Level 3
+            # Có thể reject subject_eval từ Level 3 (toàn bộ)
             can_reject = True
             current_status = 'level_2_approved'
         elif section == 'both' and (homeroom_status == 'level_2_approved' or scores_status == 'level_2_approved'):
