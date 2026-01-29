@@ -574,6 +574,9 @@ def submit_class_reports():
         section = data.get("section", "all")
         subject_id = data.get("subject_id")
         
+        # 🔍 DEBUG: Log received params
+        frappe.logger().info(f"[SUBMIT_CLASS] Received params: template_id={template_id}, class_id={class_id}, section={section}, subject_id={subject_id}")
+        
         if not template_id:
             return validation_error_response(
                 message="template_id is required",
@@ -687,8 +690,14 @@ def submit_class_reports():
                 # ========== CHECK APPROVAL STATUS TRONG DATA_JSON ==========
                 # Nếu có subject_id, check approval status của môn cụ thể
                 if subject_id and section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
+                    # 🔍 DEBUG
+                    frappe.logger().info(f"[SUBMIT_CLASS] Processing report {report.name} with subject_id={subject_id}, section={section}")
+                    
                     subject_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
                     current_subject_status = subject_approval.get("status", "draft")
+                    
+                    # 🔍 DEBUG
+                    frappe.logger().info(f"[SUBMIT_CLASS] Current subject status: {current_subject_status}")
                     
                     # Cho phép submit nếu môn đang ở draft, entry, hoặc rejected
                     if current_subject_status not in ["draft", "entry", "rejected"]:
@@ -709,6 +718,9 @@ def submit_class_reports():
                         new_approval["rejected_from_level"] = None
                     
                     data_json = _set_subject_approval_in_data_json(data_json, section, subject_id, new_approval)
+                    
+                    # 🔍 DEBUG: Log data_json after update
+                    frappe.logger().info(f"[SUBMIT_CLASS] data_json.{section} after update: {data_json.get(section, {})}")
                     
                 else:
                     # ========== LOGIC CŨ CHO HOMEROOM HOẶC KHI KHÔNG CÓ SUBJECT_ID ==========
@@ -828,6 +840,16 @@ def submit_class_reports():
                 )
                 report.save(ignore_permissions=True)
                 
+                # 🔍 DEBUG: Verify data_json after save
+                if submitted_count == 0:  # Chỉ log cho report đầu tiên
+                    saved_data_json = frappe.db.get_value("SIS Student Report Card", report_data.name, "data_json")
+                    try:
+                        saved_parsed = json.loads(saved_data_json or "{}")
+                        subject_eval_data = saved_parsed.get(section, {}).get(subject_id, {}) if subject_id else {}
+                        frappe.logger().info(f"[SUBMIT_CLASS] VERIFY after save - report={report_data.name}, {section}.{subject_id}={subject_eval_data}")
+                    except:
+                        frappe.logger().error(f"[SUBMIT_CLASS] VERIFY failed to parse saved data_json")
+                
                 submitted_count += 1
                 
             except Exception as e:
@@ -856,6 +878,24 @@ def submit_class_reports():
         if skipped_count > 0:
             result_message += f" ({skipped_count} báo cáo đã được submit trước đó cho section này)"
         
+        # 🔍 DEBUG: Verify data_json của report đầu tiên sau commit
+        debug_info = None
+        if subject_id and reports:
+            first_report_id = reports[0].name
+            try:
+                saved_data_json = frappe.db.get_value("SIS Student Report Card", first_report_id, "data_json")
+                saved_parsed = json.loads(saved_data_json or "{}")
+                section_data = saved_parsed.get(section, {})
+                subject_data = section_data.get(subject_id, {}) if subject_id else {}
+                debug_info = {
+                    "first_report_id": first_report_id,
+                    "section_keys": list(section_data.keys()) if section_data else [],
+                    "subject_approval": subject_data.get("approval", {}),
+                    "has_subject_in_section": subject_id in section_data if subject_id else False
+                }
+            except Exception as e:
+                debug_info = {"error": str(e)}
+        
         return success_response(
             data={
                 "template_id": template_id,
@@ -866,7 +906,9 @@ def submit_class_reports():
                 "submitted_count": submitted_count,
                 "skipped_count": skipped_count,
                 "total_reports": len(reports),
-                "errors": errors if errors else None
+                "errors": errors if errors else None,
+                "subject_id": subject_id,  # 🔍 DEBUG
+                "debug_info": debug_info  # 🔍 DEBUG
             },
             message=result_message
         )
