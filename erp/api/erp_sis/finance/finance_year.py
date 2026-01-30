@@ -415,51 +415,52 @@ def delete_finance_year():
                 
                 logs.append(f"Force delete được kích hoạt bởi System Manager")
                 
-                # Xóa tất cả SIS Finance Order Items trước (child của Order)
-                order_items = frappe.db.get_all(
-                    "SIS Finance Order Item",
-                    filters={"order_id": ("in", frappe.db.get_all("SIS Finance Order", {"finance_year_id": finance_year_id}, "name"))},
-                    fields=["name"]
-                )
-                for item in order_items:
-                    try:
-                        frappe.delete_doc("SIS Finance Order Item", item.name, ignore_permissions=True)
-                    except Exception as e:
-                        logs.append(f"Lỗi xóa Order Item {item.name}: {str(e)}")
+                # Lấy danh sách Order IDs trước
+                order_ids = [o.name for o in frappe.db.get_all("SIS Finance Order", {"finance_year_id": finance_year_id}, "name")]
                 
-                if order_items:
-                    logs.append(f"Đã xóa {len(order_items)} mục đơn hàng")
-                
-                # Xóa tất cả SIS Finance Order Student (child của Order)
-                order_students = frappe.db.get_all(
-                    "SIS Finance Order Student",
-                    filters={"order_id": ("in", frappe.db.get_all("SIS Finance Order", {"finance_year_id": finance_year_id}, "name"))},
-                    fields=["name"]
-                )
-                for os in order_students:
-                    try:
-                        frappe.delete_doc("SIS Finance Order Student", os.name, ignore_permissions=True)
-                    except Exception as e:
-                        logs.append(f"Lỗi xóa Order Student {os.name}: {str(e)}")
-                
-                if order_students:
-                    logs.append(f"Đã xóa {len(order_students)} học sinh trong đơn hàng")
-                
-                # Xóa tất cả SIS Finance Order liên quan
-                if order_count > 0:
-                    orders = frappe.db.get_all(
-                        "SIS Finance Order",
-                        filters={"finance_year_id": finance_year_id},
+                # Bước 1: Xóa tất cả SIS Finance Order Student (reference tới Order)
+                if order_ids:
+                    order_students = frappe.db.get_all(
+                        "SIS Finance Order Student",
+                        filters={"order_id": ("in", order_ids)},
                         fields=["name"]
                     )
-                    for order in orders:
+                    for os in order_students:
                         try:
-                            frappe.delete_doc("SIS Finance Order", order.name, ignore_permissions=True)
+                            frappe.delete_doc("SIS Finance Order Student", os.name, ignore_permissions=True)
                         except Exception as e:
-                            logs.append(f"Lỗi xóa Order {order.name}: {str(e)}")
-                    logs.append(f"Đã xóa {len(orders)} đơn hàng")
+                            logs.append(f"⚠️ Lỗi xóa Order Student {os.name}: {str(e)}")
+                    
+                    if order_students:
+                        logs.append(f"✓ Đã xóa {len(order_students)} học sinh trong đơn hàng")
                 
-                # Xóa tất cả SIS Finance Student liên quan
+                # Bước 2: Xóa tất cả SIS Finance Order Items (reference tới Order)
+                if order_ids:
+                    order_items = frappe.db.get_all(
+                        "SIS Finance Order Item",
+                        filters={"order_id": ("in", order_ids)},
+                        fields=["name"]
+                    )
+                    for item in order_items:
+                        try:
+                            frappe.delete_doc("SIS Finance Order Item", item.name, ignore_permissions=True)
+                        except Exception as e:
+                            logs.append(f"⚠️ Lỗi xóa Order Item {item.name}: {str(e)}")
+                    
+                    if order_items:
+                        logs.append(f"✓ Đã xóa {len(order_items)} mục đơn hàng")
+                
+                # Bước 3: Xóa tất cả SIS Finance Order
+                for order_id in order_ids:
+                    try:
+                        frappe.delete_doc("SIS Finance Order", order_id, ignore_permissions=True)
+                    except Exception as e:
+                        logs.append(f"⚠️ Lỗi xóa Order {order_id}: {str(e)}")
+                
+                if order_ids:
+                    logs.append(f"✓ Đã xóa {len(order_ids)} đơn hàng")
+                
+                # Bước 4: Xóa tất cả SIS Finance Student
                 if student_count > 0:
                     students = frappe.db.get_all(
                         "SIS Finance Student",
@@ -470,8 +471,10 @@ def delete_finance_year():
                         try:
                             frappe.delete_doc("SIS Finance Student", student.name, ignore_permissions=True)
                         except Exception as e:
-                            logs.append(f"Lỗi xóa Finance Student {student.name}: {str(e)}")
-                    logs.append(f"Đã xóa {len(students)} học sinh trong năm tài chính")
+                            logs.append(f"⚠️ Lỗi xóa Finance Student {student.name}: {str(e)}")
+                    
+                    if students:
+                        logs.append(f"✓ Đã xóa {len(students)} học sinh trong năm tài chính")
                 
                 frappe.db.commit()
             else:
