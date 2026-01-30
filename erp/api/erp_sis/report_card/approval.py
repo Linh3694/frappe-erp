@@ -1714,11 +1714,12 @@ def get_pending_approvals(level: Optional[str] = None):
                             fields=["name"]
                         )
                         if templates:
+                            # ✅ FIX: Bao gồm cả reviewed (chờ xuất bản) và published (đã xuất bản)
                             reports_l4 = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": ["in", [t.name for t in templates]],
-                                    "approval_status": "reviewed",
+                                    "approval_status": ["in", ["reviewed", "published"]],
                                     "campus_id": campus_id
                                 },
                                 fields=["name", "title", "student_id", "class_id", "approval_status"]
@@ -2457,15 +2458,15 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             fields=["name", "title"]
                         )
                         for tmpl in templates:
-                            # Level 4: approval_status = reviewed (toàn bộ report đã qua review)
+                            # Level 4: reviewed (chờ xuất bản) và published (đã xuất bản)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "approval_status": "reviewed",
+                                    "approval_status": ["in", ["reviewed", "published"]],
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "class_id", "submitted_at", "submitted_by"]
+                                fields=["name", "class_id", "submitted_at", "submitted_by", "approval_status"]
                             )
                             for r in reports:
                                 r["template_id"] = tmpl.name
