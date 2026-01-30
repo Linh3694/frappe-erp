@@ -185,6 +185,29 @@ def get_pending_approvals(level: Optional[str] = None):
                     for r in reports_l1:
                         r["pending_level"] = "level_1"
                         results.append(r)
+            
+            # Manager xem tất cả L1 reports (viewer only)
+            elif is_manager:
+                all_l1_templates = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"campus_id": campus_id},
+                    fields=["name", "homeroom_reviewer_level_1"]
+                )
+                template_ids_with_l1 = [t.name for t in all_l1_templates if t.get("homeroom_reviewer_level_1")]
+                if template_ids_with_l1:
+                    reports_l1 = frappe.get_all(
+                        "SIS Student Report Card",
+                        filters={
+                            "template_id": ["in", template_ids_with_l1],
+                            "approval_status": "submitted",
+                            "campus_id": campus_id
+                        },
+                        fields=["name", "title", "student_id", "class_id", "approval_status", "submitted_at"]
+                    )
+                    for r in reports_l1:
+                        r["pending_level"] = "level_1"
+                        r["is_viewer_only"] = True
+                        results.append(r)
         
         # Level 2: Kiểm tra templates có homeroom_reviewer_level_2 hoặc subject managers
         if not level or level == "level_2":
@@ -257,6 +280,53 @@ def get_pending_approvals(level: Optional[str] = None):
                             r["pending_level"] = "level_2"
                             if not any(existing["name"] == r["name"] for existing in results):
                                 results.append(r)
+            
+            # Manager xem tất cả L2 reports (viewer only)
+            elif is_manager:
+                # L2 Homeroom
+                all_l2_templates = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"campus_id": campus_id},
+                    fields=["name", "homeroom_reviewer_level_2"]
+                )
+                template_ids_with_l2 = [t.name for t in all_l2_templates if t.get("homeroom_reviewer_level_2")]
+                if template_ids_with_l2:
+                    reports_l2 = frappe.get_all(
+                        "SIS Student Report Card",
+                        filters={
+                            "template_id": ["in", template_ids_with_l2],
+                            "approval_status": ["in", ["submitted", "level_1_approved"]],
+                            "campus_id": campus_id
+                        },
+                        fields=["name", "title", "student_id", "class_id", "approval_status", "submitted_at"]
+                    )
+                    for r in reports_l2:
+                        r["pending_level"] = "level_2"
+                        r["is_viewer_only"] = True
+                        if not any(existing["name"] == r["name"] for existing in results):
+                            results.append(r)
+                
+                # L2 Subject - Lấy reports có subject pending L2
+                all_templates = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"campus_id": campus_id},
+                    fields=["name"]
+                )
+                if all_templates:
+                    reports_all = frappe.get_all(
+                        "SIS Student Report Card",
+                        filters={
+                            "template_id": ["in", [t.name for t in all_templates]],
+                            "approval_status": "level_1_approved",
+                            "campus_id": campus_id
+                        },
+                        fields=["name", "title", "student_id", "class_id", "approval_status", "submitted_at"]
+                    )
+                    for r in reports_all:
+                        r["pending_level"] = "level_2"
+                        r["is_viewer_only"] = True
+                        if not any(existing["name"] == r["name"] for existing in results):
+                            results.append(r)
         
         # Level 3 & 4: Kiểm tra approval config
         if not level or level in ["review", "publish"]:
@@ -714,6 +784,143 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                         r_copy["rejection_reason"] = subject_approval.get("rejection_reason")
                                         r_copy["rejected_from_level"] = subject_approval.get("rejected_from_level")
                                     all_reports.append(r_copy)
+            
+            # Manager xem tất cả L2 reports (viewer only)
+            elif is_manager:
+                # L2 Homeroom - Lấy tất cả templates có người duyệt L2
+                all_l2_templates = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"campus_id": campus_id},
+                    fields=["name", "title", "homeroom_reviewer_level_2"]
+                )
+                for tmpl in all_l2_templates:
+                    if not tmpl.get("homeroom_reviewer_level_2"):
+                        continue
+                    if tmpl.name not in template_cache:
+                        template_cache[tmpl.name] = tmpl
+                    
+                    reports = frappe.get_all(
+                        "SIS Student Report Card",
+                        filters={
+                            "template_id": tmpl.name,
+                            "homeroom_approval_status": "level_1_approved",
+                            "campus_id": campus_id
+                        },
+                        fields=["name", "class_id", "homeroom_submitted_at", "homeroom_submitted_by",
+                                "homeroom_rejection_reason", "homeroom_rejected_by", "homeroom_rejected_at",
+                                "rejected_from_level", "rejected_section"]
+                    )
+                    for r in reports:
+                        r["template_id"] = tmpl.name
+                        r["template_title"] = tmpl.title
+                        r["pending_level"] = "level_2"
+                        r["subject_id"] = None
+                        r["subject_title"] = "Nhận xét chủ nhiệm"
+                        r["submitted_at"] = r.get("homeroom_submitted_at")
+                        r["submitted_by"] = r.get("homeroom_submitted_by")
+                        if r.get("homeroom_rejection_reason") and r.get("rejected_from_level") == 3:
+                            r["was_rejected"] = True
+                            r["rejection_reason"] = r.get("homeroom_rejection_reason")
+                        elif r.get("rejected_from_level") == 3 and r.get("rejected_section") in ["homeroom", "both"]:
+                            r["was_rejected"] = True
+                        r["is_viewer_only"] = True
+                        all_reports.append(r)
+                
+                # L2 Subject - Lấy tất cả subjects có pending L2
+                all_subjects = frappe.get_all(
+                    "SIS Actual Subject",
+                    filters={"campus_id": campus_id},
+                    fields=["name", "title_vn", "title_en"]
+                )
+                subject_info_map = {s.name: s.title_vn or s.title_en or s.name for s in all_subjects}
+                all_subject_ids = [s.name for s in all_subjects]
+                
+                all_templates = frappe.get_all(
+                    "SIS Report Card Template",
+                    filters={"campus_id": campus_id},
+                    fields=["name", "title"]
+                )
+                
+                for tmpl in all_templates:
+                    scores = frappe.get_all(
+                        "SIS Report Card Score Config",
+                        filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
+                        fields=["subject_id"]
+                    )
+                    subjects = frappe.get_all(
+                        "SIS Report Card Subject Config",
+                        filters={"parent": tmpl.name, "parenttype": "SIS Report Card Template"},
+                        fields=["subject_id"]
+                    )
+                    
+                    template_subjects = set([s.subject_id for s in scores] + [s.subject_id for s in subjects])
+                    if not template_subjects:
+                        continue
+                    
+                    reports = frappe.get_all(
+                        "SIS Student Report Card",
+                        filters={
+                            "template_id": tmpl.name,
+                            "campus_id": campus_id
+                        },
+                        fields=["name", "class_id", "data_json", "scores_submitted_at", "scores_submitted_by",
+                                "scores_rejection_reason", "scores_rejected_by", "scores_rejected_at",
+                                "rejected_from_level", "rejected_section"]
+                    )
+                    
+                    for r in reports:
+                        try:
+                            report_data_json = json.loads(r.get("data_json") or "{}")
+                        except json.JSONDecodeError:
+                            report_data_json = {}
+                        
+                        for sid in template_subjects:
+                            if sid not in all_subject_ids:
+                                continue
+                            
+                            subject_approval = {}
+                            found_board_type = None
+                            found_section = None
+                            
+                            for board_type_key in ["scores", "subject_eval"]:
+                                section_approval = get_subject_approval_from_data_json(report_data_json, board_type_key, sid)
+                                if section_approval.get("status") in ["submitted", "level_1_approved"]:
+                                    subject_approval = section_approval
+                                    found_board_type = board_type_key
+                                    found_section = board_type_key
+                                    break
+                            
+                            if not found_board_type:
+                                for intl_board_type in ["main_scores", "ielts", "comments"]:
+                                    intl_approval = get_subject_approval_from_data_json(report_data_json, intl_board_type, sid)
+                                    if intl_approval.get("status") in ["submitted", "level_1_approved"]:
+                                        subject_approval = intl_approval
+                                        found_board_type = intl_approval.get("board_type", intl_board_type)
+                                        found_section = "intl"
+                                        break
+                            
+                            subject_status = subject_approval.get("status", "draft")
+                            
+                            if subject_status not in ["submitted", "level_1_approved"]:
+                                continue
+                            
+                            r_copy = r.copy()
+                            del r_copy["data_json"]
+                            r_copy["template_id"] = tmpl.name
+                            r_copy["template_title"] = tmpl.title
+                            r_copy["pending_level"] = "level_2"
+                            r_copy["subject_id"] = sid
+                            r_copy["subject_title"] = subject_info_map.get(sid, sid)
+                            r_copy["section_type"] = found_section
+                            r_copy["board_type"] = found_board_type
+                            r_copy["submitted_at"] = subject_approval.get("submitted_at") or r.get("scores_submitted_at")
+                            r_copy["submitted_by"] = subject_approval.get("submitted_by") or r.get("scores_submitted_by")
+                            if subject_approval.get("rejection_reason"):
+                                r_copy["was_rejected"] = True
+                                r_copy["rejection_reason"] = subject_approval.get("rejection_reason")
+                                r_copy["rejected_from_level"] = subject_approval.get("rejected_from_level")
+                            r_copy["is_viewer_only"] = True
+                            all_reports.append(r_copy)
         
         # Level 3 & 4
         if not level or level in ["review", "publish"]:
