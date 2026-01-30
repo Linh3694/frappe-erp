@@ -274,10 +274,17 @@ def get_pending_approvals(level: Optional[str] = None):
                         filters={"parent": config.name, "parentfield": "level_3_reviewers"},
                         fields=["teacher_id", "user_id"]
                     )
-                    is_l3 = any(
-                        (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
-                        for r in l3_reviewers
-                    )
+                    # Safe check for is_l3
+                    is_l3 = False
+                    for r in l3_reviewers:
+                        if r.user_id == user:
+                            is_l3 = True
+                            break
+                        if r.teacher_id:
+                            teacher_user = frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id")
+                            if teacher_user == user:
+                                is_l3 = True
+                                break
                     # Manager có thể xem tất cả hoặc user là L3 reviewer
                     if is_manager or is_l3:
                         templates = frappe.get_all(
@@ -349,10 +356,17 @@ def get_pending_approvals(level: Optional[str] = None):
                         filters={"parent": config.name, "parentfield": "level_4_approvers"},
                         fields=["teacher_id", "user_id"]
                     )
-                    is_l4 = any(
-                        (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
-                        for r in l4_approvers
-                    )
+                    # Safe check for is_l4
+                    is_l4 = False
+                    for r in l4_approvers:
+                        if r.user_id == user:
+                            is_l4 = True
+                            break
+                        if r.teacher_id:
+                            teacher_user = frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id")
+                            if teacher_user == user:
+                                is_l4 = True
+                                break
                     # Manager có thể xem tất cả hoặc user là L4 approver
                     if is_manager or is_l4:
                         templates = frappe.get_all(
@@ -494,14 +508,16 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                 l1_filters = {"campus_id": campus_id}
                 if not is_manager:
                     l1_filters["homeroom_reviewer_level_1"] = teacher_id
-                else:
-                    l1_filters["homeroom_reviewer_level_1"] = ["is", "set"]  # Có người duyệt L1
+                # Manager: không filter theo reviewer, lấy tất cả rồi filter sau
                 
                 templates_l1 = frappe.get_all(
                     "SIS Report Card Template",
                     filters=l1_filters,
                     fields=["name", "title", "homeroom_reviewer_level_1"]
                 )
+                # Manager: chỉ lấy templates có homeroom_reviewer_level_1 được set
+                if is_manager:
+                    templates_l1 = [t for t in templates_l1 if t.get("homeroom_reviewer_level_1")]
                 for tmpl in templates_l1:
                     # Cache template cho approvers lookup
                     template_cache[tmpl.name] = tmpl
@@ -540,14 +556,16 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                 l2_filters = {"campus_id": campus_id}
                 if not is_manager:
                     l2_filters["homeroom_reviewer_level_2"] = teacher_id
-                else:
-                    l2_filters["homeroom_reviewer_level_2"] = ["is", "set"]
+                # Manager: không filter theo reviewer, lấy tất cả rồi filter sau
                 
                 templates_l2 = frappe.get_all(
                     "SIS Report Card Template",
                     filters=l2_filters,
                     fields=["name", "title", "homeroom_reviewer_level_2"]
                 )
+                # Manager: chỉ lấy templates có homeroom_reviewer_level_2 được set
+                if is_manager:
+                    templates_l2 = [t for t in templates_l2 if t.get("homeroom_reviewer_level_2")]
                 for tmpl in templates_l2:
                     # Cache template
                     if tmpl.name not in template_cache:
@@ -720,10 +738,17 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         filters={"parent": config.name, "parentfield": "level_3_reviewers"},
                         fields=["teacher_id", "user_id"]
                     )
-                    is_l3 = any(
-                        (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
-                        for r in l3_reviewers
-                    )
+                    # Safe check for is_l3
+                    is_l3 = False
+                    for r in l3_reviewers:
+                        if r.user_id == user:
+                            is_l3 = True
+                            break
+                        if r.teacher_id:
+                            teacher_user = frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id")
+                            if teacher_user == user:
+                                is_l3 = True
+                                break
                     # Manager có thể xem tất cả hoặc user là L3 reviewer
                     if is_manager or is_l3:
                         templates = frappe.get_all(
@@ -789,10 +814,17 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         filters={"parent": config.name, "parentfield": "level_4_approvers"},
                         fields=["teacher_id", "user_id"]
                     )
-                    is_l4 = any(
-                        (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
-                        for r in l4_approvers
-                    )
+                    # Safe check for is_l4
+                    is_l4 = False
+                    for r in l4_approvers:
+                        if r.user_id == user:
+                            is_l4 = True
+                            break
+                        if r.teacher_id:
+                            teacher_user = frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id")
+                            if teacher_user == user:
+                                is_l4 = True
+                                break
                     # Manager có thể xem tất cả hoặc user là L4 approver
                     if is_manager or is_l4:
                         templates = frappe.get_all(
