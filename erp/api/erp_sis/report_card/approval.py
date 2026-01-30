@@ -3860,10 +3860,19 @@ def reject_single_report():
             homeroom_approval = _get_subject_approval_from_data_json(data_json, 'homeroom', None)
             actual_homeroom_status = homeroom_approval.get('status') or homeroom_status
             
+            # ✅ FIX: Homeroom có thể skip L2, nên cho phép reject nếu:
+            # - status = 'level_2_approved' (đi qua L2)
+            # - status = 'level_1_approved' VÀ report đã đến L3 (approval_status = 'level_2_approved')
+            #   → tức là homeroom skip L2 nhưng report đã sẵn sàng cho L3
             if actual_homeroom_status == 'level_2_approved':
-                # Homeroom đang ở L2 approved → có thể reject từ L3
+                # Homeroom đi qua L2 approved → có thể reject từ L3
                 can_reject = True
                 current_status = 'level_2_approved'
+                reject_from_l3 = True
+            elif actual_homeroom_status == 'level_1_approved' and approval_status == 'level_2_approved':
+                # Homeroom skip L2 (chỉ duyệt L1) nhưng report đã đến L3 → cho phép reject về L1
+                can_reject = True
+                current_status = 'level_1_approved'
                 reject_from_l3 = True
         
         elif section == 'scores':
@@ -3998,15 +4007,27 @@ def reject_single_report():
             was_reviewed = (approval_status == 'reviewed')
             
             if section == 'homeroom':
-                # Reject homeroom -> quay về L2 cho Tổ trưởng
-                report.homeroom_approval_status = 'level_1_approved'
+                # ✅ FIX: Xác định target status dựa vào homeroom có skip L2 hay không
+                # - Nếu homeroom đã qua L2 (level_2_approved): reject về level_1_approved (chờ L2 duyệt lại)
+                # - Nếu homeroom skip L2 (level_1_approved): reject về submitted (chờ L1 duyệt lại)
+                homeroom_approval = _get_subject_approval_from_data_json(data_json, 'homeroom', None)
+                homeroom_was_l2 = (homeroom_approval.get('status') == 'level_2_approved') or (homeroom_status == 'level_2_approved')
+                
+                if homeroom_was_l2:
+                    # Homeroom đã qua L2 → reject về level_1_approved (chờ L2 duyệt lại)
+                    target_homeroom_status = 'level_1_approved'
+                else:
+                    # Homeroom skip L2 → reject về submitted (chờ L1 duyệt lại)
+                    target_homeroom_status = 'submitted'
+                
+                report.homeroom_approval_status = target_homeroom_status
                 report.homeroom_rejection_reason = reason
                 report.homeroom_rejected_by = user
                 report.homeroom_rejected_at = now
                 report.homeroom_l2_approved = 0
                 
                 # ✅ FIX: approval_status chung đặt về level_2_approved nếu đã reviewed
-                # để báo cáo quay lại queue L3 sau khi L2 approve lại
+                # để báo cáo quay lại queue L3 sau khi section được approve lại
                 report.approval_status = 'level_2_approved' if was_reviewed else 'level_1_approved'
                 
                 # Update approval trong data_json
@@ -4015,7 +4036,7 @@ def reject_single_report():
                 if not isinstance(data_json["homeroom"], dict):
                     data_json["homeroom"] = {}
                 data_json["homeroom"]["approval"] = {
-                    "status": "level_1_approved",
+                    "status": target_homeroom_status,
                     "rejection_reason": reason,
                     "rejected_from_level": 3,
                     "rejected_by": user,
