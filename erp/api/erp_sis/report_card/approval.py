@@ -1297,15 +1297,7 @@ def review_report():
             if not is_manager:
                 return forbidden_response("Bạn không có quyền Review (Level 3) cho báo cáo này")
         
-        # Kiểm tra trạng thái
-        current_status = getattr(report, 'approval_status', 'draft') or 'draft'
-        if current_status != 'level_2_approved':
-            return error_response(
-                message=f"Báo cáo cần ở trạng thái 'level_2_approved'. Hiện tại: '{current_status}'",
-                code="INVALID_STATUS"
-            )
-        
-        # ✅ FIX: Recompute counters từ data_json để có số liệu chính xác
+        # ✅ FIX: Recompute counters từ data_json để có số liệu chính xác TRƯỚC KHI check status
         try:
             data_json = json.loads(report.data_json or "{}")
         except json.JSONDecodeError:
@@ -1313,6 +1305,25 @@ def review_report():
         
         counters = _compute_approval_counters(data_json, template)
         all_sections_approved = counters.get("all_sections_l2_approved", 0)
+        
+        # Kiểm tra trạng thái
+        current_status = getattr(report, 'approval_status', 'draft') or 'draft'
+        
+        # ✅ FIX: Cho phép review nếu:
+        # 1. approval_status == 'level_2_approved' (trường hợp bình thường)
+        # 2. HOẶC all_sections_l2_approved = 1 (backward compatibility cho reports đã approve trước fix)
+        if current_status != 'level_2_approved' and not all_sections_approved:
+            # Build debug info để hiểu tại sao không thể review
+            debug_info = {
+                "approval_status": current_status,
+                "all_sections_l2_approved": all_sections_approved,
+                "counters": counters
+            }
+            return error_response(
+                message=f"Báo cáo cần ở trạng thái 'level_2_approved'. Hiện tại: '{current_status}'. all_sections_l2_approved={all_sections_approved}",
+                code="INVALID_STATUS",
+                data=debug_info
+            )
         
         # ✅ FIX: Check all_sections_l2_approved
         # Chỉ cho phép bypass nếu là SIS Manager và có force=True
