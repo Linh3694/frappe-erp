@@ -223,6 +223,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                     "student_code": student.student_code,
                     "current_class": student.class_title or student.class_name,
                     "campus_id": campus_id,
+                    "finance_student_id": student.get("finance_student_id"),  # Link nếu từ Finance Year
                     "status": "pending"
                     # decision và submitted_at để trống = chưa làm đơn
                 })
@@ -3092,6 +3093,143 @@ def import_decision_from_excel():
         frappe.log_error(frappe.get_traceback(), "Import Decision Excel Error")
         return error_response(
             message=f"Lỗi khi import: {str(e)}",
+            logs=logs
+        )
+
+
+# ==================== PAYMENT SYNC APIs ====================
+
+@frappe.whitelist()
+def sync_payment_status(config_id):
+    """
+    Đồng bộ trạng thái thanh toán từ Finance Student → Re-enrollment.
+    
+    Chỉ sync cho các Re-enrollment có liên kết finance_student_id.
+    
+    Đồng bộ chính xác trạng thái (không mapping):
+    - Finance "paid" → Re-enrollment "paid"
+    - Finance "partial" → Re-enrollment "partial"
+    - Finance "unpaid" → Re-enrollment "unpaid"
+    - Finance "no_fee" → Re-enrollment "unpaid"
+    
+    Args:
+        config_id: ID của Re-enrollment Config
+    
+    Returns:
+        Số lượng đã đồng bộ
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền đồng bộ", logs=logs)
+        
+        logs.append(f"Đồng bộ payment status cho config: {config_id}")
+        
+        # Kiểm tra config có tồn tại và có finance_year_id không
+        config = frappe.db.get_value(
+            "SIS Re-enrollment Config",
+            config_id,
+            ["name", "finance_year_id", "title"],
+            as_dict=True
+        )
+        
+        if not config:
+            return not_found_response(f"Không tìm thấy config: {config_id}")
+        
+        if not config.finance_year_id:
+            return error_response(
+                "Config này không có liên kết với Năm tài chính. Không thể đồng bộ payment status.",
+                logs=logs
+            )
+        
+        logs.append(f"Finance Year: {config.finance_year_id}")
+        
+        # Lấy danh sách Re-enrollment có finance_student_id (đã link với Finance Student)
+        reenrollments = frappe.db.sql("""
+            SELECT 
+                re.name as reenrollment_id,
+                re.student_code,
+                re.payment_status as current_payment_status,
+                re.finance_student_id,
+                fs.payment_status as finance_payment_status,
+                fs.total_amount,
+                fs.paid_amount
+            FROM `tabSIS Re-enrollment` re
+            INNER JOIN `tabSIS Finance Student` fs ON re.finance_student_id = fs.name
+            WHERE re.config_id = %(config_id)s
+              AND re.finance_student_id IS NOT NULL
+              AND re.finance_student_id != ''
+        """, {
+            "config_id": config_id
+        }, as_dict=True)
+        
+        logs.append(f"Tìm thấy {len(reenrollments)} Re-enrollment có liên kết Finance Student")
+        
+        if not reenrollments:
+            return success_response(
+                data={"synced_count": 0, "updated_count": 0},
+                message="Không có Re-enrollment nào được liên kết với Finance Student",
+                logs=logs
+            )
+        
+        # Mapping trạng thái - giữ nguyên trạng thái
+        def map_payment_status(finance_status):
+            """
+            Đồng bộ chính xác payment_status từ Finance → Re-enrollment
+            Finance: paid, partial, unpaid, no_fee
+            Re-enrollment: paid, partial, unpaid, refunded
+            """
+            # Giữ nguyên trạng thái, chỉ chuyển no_fee → unpaid
+            if finance_status in ['paid', 'partial', 'unpaid']:
+                return finance_status
+            else:
+                # no_fee → unpaid
+                return 'unpaid'
+        
+        updated_count = 0
+        for re in reenrollments:
+            try:
+                # Map status
+                new_status = map_payment_status(re.finance_payment_status)
+                
+                # Chỉ update nếu status thay đổi
+                if re.current_payment_status != new_status:
+                    frappe.db.set_value(
+                        "SIS Re-enrollment",
+                        re.reenrollment_id,
+                        "payment_status",
+                        new_status,
+                        update_modified=False  # Không update modified time
+                    )
+                    updated_count += 1
+                    logs.append(
+                        f"✓ {re.student_code}: {re.current_payment_status} → {new_status} "
+                        f"(Finance: {re.finance_payment_status})"
+                    )
+                
+            except Exception as e:
+                logs.append(f"⚠️ Lỗi sync {re.student_code}: {str(e)}")
+                continue
+        
+        frappe.db.commit()
+        
+        logs.append(f"✓ Đã đồng bộ: {updated_count} / {len(reenrollments)} records")
+        
+        return success_response(
+            data={
+                "synced_count": len(reenrollments),
+                "updated_count": updated_count
+            },
+            message=f"Đã đồng bộ {updated_count} trạng thái thanh toán",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Sync Payment Status Error")
+        return error_response(
+            message=f"Lỗi khi đồng bộ: {str(e)}",
             logs=logs
         )
 

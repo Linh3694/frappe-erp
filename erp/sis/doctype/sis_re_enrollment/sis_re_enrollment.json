@@ -26,6 +26,7 @@
   "guardian_name",
   "current_class",
   "campus_id",
+  "finance_student_id",
   "decision_section",
   "decision",
   "payment_type",
@@ -121,6 +122,15 @@
    "label": "Campus",
    "options": "SIS Campus",
    "read_only": 1
+  },
+  {
+   "fieldname": "finance_student_id",
+   "fieldtype": "Link",
+   "label": "Finance Student ID",
+   "options": "SIS Finance Student",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Link đến học sinh trong năm tài chính (nếu Config có liên kết Finance Year)"
   },
   {
    "fieldname": "decision_section",
@@ -221,10 +231,10 @@
    "fieldname": "payment_status",
    "fieldtype": "Select",
    "label": "Trạng thái thanh toán",
-   "options": "\nunpaid\npaid\nrefunded",
+   "options": "\nunpaid\npartial\npaid\nrefunded",
    "default": "unpaid",
    "in_list_view": 1,
-   "description": "unpaid: Chưa đóng, paid: Đã đóng, refunded: Hoàn tiền"
+   "description": "unpaid: Chưa đóng, partial: Đóng một phần, paid: Đã đóng, refunded: Hoàn tiền"
   },
   {
    "fieldname": "adjustment_section",
