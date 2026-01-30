@@ -490,6 +490,26 @@ def delete_finance_year():
         if not frappe.db.exists("SIS Finance Year", finance_year_id):
             return not_found_response(f"Không tìm thấy năm tài chính: {finance_year_id}")
         
+        # Kiểm tra xem Finance Year có được liên kết với Re-enrollment Config không
+        linked_reenrollment = frappe.db.get_all(
+            "SIS Re-enrollment Config",
+            filters={"finance_year_id": finance_year_id},
+            fields=["name", "title"],
+            limit=1
+        )
+        
+        if linked_reenrollment:
+            config = linked_reenrollment[0]
+            return error_response(
+                f"Không thể xóa năm tài chính vì đang được liên kết với đợt tái ghi danh '{config.title}' ({config.name}). "
+                f"Vui lòng vào cấu hình tái ghi danh và bỏ liên kết (xóa trường Năm tài chính) trước khi xóa năm tài chính này.",
+                logs=logs,
+                debug_info={
+                    "linked_reenrollment_config": config.name,
+                    "linked_reenrollment_title": config.title
+                }
+            )
+        
         # Kiểm tra có học sinh hay đơn hàng không
         student_count = frappe.db.count("SIS Finance Student", {"finance_year_id": finance_year_id})
         order_count = frappe.db.count("SIS Finance Order", {"finance_year_id": finance_year_id})
