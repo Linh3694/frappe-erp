@@ -2408,12 +2408,14 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 continue
                             
                             # Lấy reports với OR condition
-                            # Bao gồm cả reports bị reject từ Level 4 (có rejection_reason)
+                            # ✅ FIX: LOẠI TRỪ reports đã reviewed/published (chỉ hiển thị ở L4)
+                            # Bao gồm cả reports bị reject từ Level 4 (approval_status sẽ = 'level_2_approved' sau reject)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "campus_id": campus_id
+                                    "campus_id": campus_id,
+                                    "approval_status": ["not in", ["reviewed", "published"]]  # ✅ FIX: Loại trừ L4
                                 },
                                 or_filters=or_filters,
                                 fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at",
