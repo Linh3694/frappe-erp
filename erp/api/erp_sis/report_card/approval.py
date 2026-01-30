@@ -3834,16 +3834,23 @@ def reject_single_report():
             is_intl_template = False
         
         # ============================================================================
-        # ✅ FIX: Check section-specific status từ data_json TRƯỚC
-        # Điều này cho phép reject section cụ thể từ L3 ngay cả khi approval_status == 'reviewed'
-        # Logic: Nếu section status trong data_json là 'level_2_approved' → reject từ L3
-        #        Nếu không tìm thấy và approval_status == 'reviewed' → reject từ L4
+        # ✅ FIX: L4 reject chỉ chuyển trạng thái, KHÔNG reject section cụ thể
+        # - Nếu approval_status == 'reviewed' → luôn là L4 reject (về L3)
+        # - Chỉ khi approval_status != 'reviewed' mới check section để L3 reject
         # ============================================================================
         can_reject = False
         current_status = approval_status  # Default cho error message
         reject_from_l3 = False  # Flag để biết đây là reject section cụ thể từ L3
         
-        if section == 'homeroom':
+        # ✅ FIX: L4 reject - chỉ chuyển trạng thái, không đụng section
+        if approval_status == 'reviewed':
+            # Đang ở L4 (reviewed) → luôn là L4 reject, bỏ qua section parameter
+            can_reject = True
+            current_status = 'reviewed'
+            reject_from_l3 = False  # L4 reject, không phải L3
+        
+        # L3 reject - check section cụ thể
+        elif section == 'homeroom':
             # ✅ Homeroom: Check từ data_json trước, fallback về doc field
             homeroom_approval = _get_subject_approval_from_data_json(data_json, 'homeroom', None)
             actual_homeroom_status = homeroom_approval.get('status') or homeroom_status
@@ -3853,11 +3860,6 @@ def reject_single_report():
                 can_reject = True
                 current_status = 'level_2_approved'
                 reject_from_l3 = True
-            elif approval_status == 'reviewed':
-                # Báo cáo đã reviewed nhưng homeroom không còn ở L2 approved
-                # → reject từ L4 (toàn bộ báo cáo quay về L3)
-                can_reject = True
-                current_status = 'reviewed'
         
         elif section == 'scores':
             if subject_id:
@@ -3868,9 +3870,6 @@ def reject_single_report():
                     can_reject = True
                     current_status = 'level_2_approved'
                     reject_from_l3 = True
-                elif approval_status == 'reviewed':
-                    can_reject = True
-                    current_status = 'reviewed'
             elif detected_intl_section:
                 # ✅ INTL template với section='scores' nhưng đã detect được INTL section có L2 approved
                 can_reject = True
@@ -3892,9 +3891,6 @@ def reject_single_report():
                     can_reject = True
                     current_status = 'level_2_approved'
                     reject_from_l3 = True
-                elif approval_status == 'reviewed':
-                    can_reject = True
-                    current_status = 'reviewed'
         
         elif section == 'subject_eval':
             if subject_id:
@@ -3905,9 +3901,6 @@ def reject_single_report():
                     can_reject = True
                     current_status = 'level_2_approved'
                     reject_from_l3 = True
-                elif approval_status == 'reviewed':
-                    can_reject = True
-                    current_status = 'reviewed'
             else:
                 # Tìm bất kỳ subject nào trong subject_eval có level_2_approved
                 subject_eval_data = data_json.get('subject_eval', {})
@@ -3923,9 +3916,6 @@ def reject_single_report():
                     can_reject = True
                     current_status = 'level_2_approved'
                     reject_from_l3 = True
-                elif approval_status == 'reviewed':
-                    can_reject = True
-                    current_status = 'reviewed'
         
         elif section in ['main_scores', 'ielts', 'comments']:
             # ✅ INTL sections: Check approval trong data_json
@@ -3936,9 +3926,6 @@ def reject_single_report():
                     can_reject = True
                     current_status = 'level_2_approved'
                     reject_from_l3 = True
-                elif approval_status == 'reviewed':
-                    can_reject = True
-                    current_status = 'reviewed'
             else:
                 # Không có subject_id, check xem có bất kỳ subject nào đã L2 approved
                 intl_scores_data = data_json.get("intl_scores", {})
@@ -3955,9 +3942,6 @@ def reject_single_report():
                     can_reject = True
                     current_status = 'level_2_approved'
                     reject_from_l3 = True
-                elif approval_status == 'reviewed':
-                    can_reject = True
-                    current_status = 'reviewed'
         
         elif section == 'both':
             # Check nếu có ít nhất 1 section level_2_approved
@@ -3969,9 +3953,6 @@ def reject_single_report():
                 can_reject = True
                 current_status = 'level_2_approved'
                 reject_from_l3 = True
-            elif approval_status == 'reviewed':
-                can_reject = True
-                current_status = 'reviewed'
         
         if not can_reject:
             return error_response(
