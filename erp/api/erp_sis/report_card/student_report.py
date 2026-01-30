@@ -588,6 +588,14 @@ def get_report(report_id=None, **kwargs):
     except Exception:
         data_json = {}
     
+    # ✅ DEBUG: Log subject_eval approval info
+    subject_eval_data = data_json.get("subject_eval", {})
+    print(f"[GET_REPORT DEBUG] report_id={report_id}")
+    print(f"[GET_REPORT DEBUG] subject_eval keys: {list(subject_eval_data.keys())}")
+    for subj_id, subj_data in subject_eval_data.items():
+        approval = subj_data.get("approval", {})
+        print(f"[GET_REPORT DEBUG] subject_eval[{subj_id}].approval = {approval}")
+    
     item["data"] = data_json
     item["data_json"] = data_json
 
@@ -639,6 +647,10 @@ def update_report_section():
             if not isinstance(existing, dict):
                 existing = {}
             if subject_id:
+                # ✅ FIX: MERGE thay vì OVERWRITE để giữ lại approval
+                # Lấy data cũ của subject này (nếu có)
+                old_subject_data = existing.get(subject_id, {})
+                
                 subject_data = {
                     "subject_id": subject_id,
                     "criteria": payload.get("criteria") or {},
@@ -653,6 +665,10 @@ def update_report_section():
                 elif payload.get("test_point_values"):
                     test_point_values = payload.get("test_point_values") or []
                     subject_data["test_point_values"] = test_point_values
+                
+                # ✅ GIỮ LẠI approval từ data cũ (nếu có)
+                if "approval" in old_subject_data:
+                    subject_data["approval"] = old_subject_data["approval"]
                 
                 existing[subject_id] = subject_data
             json_data["subject_eval"] = existing
