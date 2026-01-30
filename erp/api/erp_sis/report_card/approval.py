@@ -4124,6 +4124,10 @@ def reject_single_report():
                 report.subject_eval_submitted_count = counters.get("subject_eval_submitted_count", 0)
                 report.subject_eval_l2_approved_count = counters.get("subject_eval_l2_approved_count", 0)
                 report.subject_eval_total_count = counters.get("subject_eval_total_count", 0)
+                report.intl_submitted_count = counters.get("intl_submitted_count", 0)
+                report.intl_l2_approved_count = counters.get("intl_l2_approved_count", 0)
+                report.intl_total_count = counters.get("intl_total_count", 0)
+                report.all_sections_l2_approved = counters.get("all_sections_l2_approved", 0)
         
         else:
             # Từ L4 -> quay về L3: chỉ đổi approval_status chung
@@ -4132,10 +4136,6 @@ def reject_single_report():
             report.rejected_from_level = 4
             rejected_from_level = 4
             target_level = 3
-                report.intl_submitted_count = counters.get("intl_submitted_count", 0)
-                report.intl_l2_approved_count = counters.get("intl_l2_approved_count", 0)
-                report.intl_total_count = counters.get("intl_total_count", 0)
-                report.all_sections_l2_approved = counters.get("all_sections_l2_approved", 0)
         
         _add_approval_history(
             report,
