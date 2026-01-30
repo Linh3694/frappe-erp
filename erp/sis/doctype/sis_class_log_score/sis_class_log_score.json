@@ -15,16 +15,18 @@
   "color",
   "education_stage",
   "is_active",
+  "is_default",
   "campus_id"
  ],
  "fields": [
   {"fieldname": "type", "label": "Type", "fieldtype": "Select", "options": "homework\nbehavior\nparticipation\nissue\ntop_performance", "reqd": 1},
   {"fieldname": "title_vn", "label": "Title (VI)", "fieldtype": "Data", "reqd": 1},
   {"fieldname": "title_en", "label": "Title (EN)", "fieldtype": "Data"},
- {"fieldname": "value", "label": "Value", "fieldtype": "Float", "default": 0},
- {"fieldname": "color", "label": "Color", "fieldtype": "Data", "description": "Hex color code like #002855"},
- {"fieldname": "education_stage", "label": "Education Stage", "fieldtype": "Link", "options": "SIS Education Stage"},
+  {"fieldname": "value", "label": "Value", "fieldtype": "Float", "default": 0},
+  {"fieldname": "color", "label": "Color", "fieldtype": "Data", "description": "Hex color code like #002855"},
+  {"fieldname": "education_stage", "label": "Education Stage", "fieldtype": "Link", "options": "SIS Education Stage"},
   {"fieldname": "is_active", "label": "Active", "fieldtype": "Check", "default": 1},
+  {"fieldname": "is_default", "label": "Default", "fieldtype": "Check", "default": 0, "description": "Mark as default option for this education stage and type"},
   {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"}
  ],
  "permissions": [

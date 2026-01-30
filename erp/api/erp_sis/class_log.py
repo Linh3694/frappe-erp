@@ -48,7 +48,7 @@ def get_class_log_options(education_stage=None):
         rows = frappe.get_all(
             "SIS Class Log Score",
             filters=filters,
-            fields=["name", "type", "title_vn", "title_en", "value", "color", "education_stage"],
+            fields=["name", "type", "title_vn", "title_en", "value", "color", "education_stage", "is_default"],
             order_by="type asc, value desc, title_vn asc"
         )
 
@@ -70,6 +70,76 @@ def get_class_log_options(education_stage=None):
     except Exception as e:
         frappe.log_error(f"get_class_log_options error: {str(e)}")
         return error_response(message="Failed to fetch class log options", code="GET_LOG_OPTIONS_ERROR")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def set_class_log_score_default():
+    """Set a class log score as default for its education_stage + type combination.
+    
+    Khi set is_default=1 cho một record, tự động set is_default=0 cho các record khác
+    cùng education_stage + type để đảm bảo chỉ có 1 default per education_stage + type.
+    
+    POST body:
+    {
+        "name": "SIS-CLS-LOG-SCORE-00001",
+        "is_default": 1  // 0 hoặc 1
+    }
+    """
+    try:
+        body = _get_body() or {}
+        name = body.get('name')
+        is_default = body.get('is_default', 0)
+        
+        if not name:
+            return error_response(message="Missing required parameter: name", code="MISSING_PARAMS")
+        
+        # Lấy thông tin record hiện tại
+        score_doc = frappe.get_doc("SIS Class Log Score", name)
+        education_stage = score_doc.education_stage
+        score_type = score_doc.type
+        
+        # Nếu set is_default = 1, cần unset các record khác cùng education_stage + type
+        if is_default:
+            # Unset all other defaults for same education_stage + type
+            frappe.db.sql("""
+                UPDATE `tabSIS Class Log Score`
+                SET is_default = 0
+                WHERE education_stage = %(education_stage)s
+                    AND type = %(type)s
+                    AND name != %(name)s
+                    AND is_default = 1
+            """, {
+                "education_stage": education_stage,
+                "type": score_type,
+                "name": name
+            })
+        
+        # Update the target record
+        frappe.db.set_value("SIS Class Log Score", name, "is_default", 1 if is_default else 0)
+        frappe.db.commit()
+        
+        # Clear cache để frontend nhận được data mới
+        try:
+            # Clear cache cho education_stage cụ thể
+            cache_key_stage = f"class_log_options:{education_stage}"
+            frappe.cache().delete_key(cache_key_stage)
+            
+            # Clear cache "all" (khi không có filter education_stage)
+            cache_key_all = "class_log_options:all"
+            frappe.cache().delete_key(cache_key_all)
+            
+            frappe.logger().info(f"✅ Cleared class_log_options cache after setting default: {name}")
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache clear failed: {cache_error}")
+        
+        return success_response(
+            message=f"Default {'set' if is_default else 'unset'} successfully",
+            data={"name": name, "is_default": 1 if is_default else 0}
+        )
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(f"set_class_log_score_default error: {str(e)}")
+        return error_response(message="Failed to set default", code="SET_DEFAULT_ERROR")
 
 
 @frappe.whitelist(allow_guest=False)
