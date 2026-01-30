@@ -2925,9 +2925,23 @@ def reject_class_reports():
                     if not found_valid_subject:
                         continue
                 
+                # ✅ FIX: Tính rollback status TRƯỚC để dùng trong rejection_info
+                # - L1 reject -> "rejected" (về Entry, Entry cần submit lại)
+                # - L2 reject -> "submitted" (về L1, Entry KHÔNG cần biết)
+                # - L3 reject -> "level_1_approved" (về L2, Entry KHÔNG cần biết)
+                # - L4 reject -> "level_2_approved" (về L3, Entry KHÔNG cần biết)
+                status_rollback_map = {
+                    "level_1": "rejected",           # L1 reject -> về Entry
+                    "level_2": "submitted",          # L2 reject -> về L1
+                    "review": "level_1_approved",    # L3 reject -> về L2
+                    "publish": "level_2_approved"    # L4 reject -> về L3
+                }
+                rollback_status = status_rollback_map.get(pending_level, "rejected")
+                
                 # Tạo rejection info cho data_json
+                # ✅ FIX: Dùng rollback_status thay vì "rejected" để Entry chỉ thấy "Gửi lại" khi L1 reject
                 rejection_info = {
-                    "status": "rejected",
+                    "status": rollback_status,
                     "rejection_reason": reason,
                     "rejected_from_level": rejected_from_level_value,
                     "rejected_by": user,
@@ -3019,21 +3033,10 @@ def reject_class_reports():
                                         data_json["intl"][intl_section][subj_id]["approval"] = rejection_info.copy()
                 
                 # Update database fields bao gồm data_json và rejected_from_level
-                # ✅ FIX: Set status để quay về level trước đó thay vì "rejected"
-                # - L1 reject -> "rejected" (về Entry)
-                # - L2 reject -> "submitted" (về L1)
-                # - L3 (review) reject -> "level_1_approved" (về L2)
-                # - L4 (publish) reject -> "level_2_approved" (về L3)
-                status_rollback_map = {
-                    "level_1": "rejected",           # L1 reject -> về Entry
-                    "level_2": "submitted",          # L2 reject -> về L1
-                    "review": "level_1_approved",    # L3 reject -> về L2
-                    "publish": "level_2_approved"    # L4 reject -> về L3
-                }
-                new_status = status_rollback_map.get(pending_level, "rejected")
+                # rollback_status đã được tính ở trên (dùng chung cho cả data_json và doc-level)
                 
                 update_values = {
-                    rejection_fields["status_field"]: new_status,
+                    rejection_fields["status_field"]: rollback_status,
                     rejection_fields["rejected_at"]: now,
                     rejection_fields["rejected_by"]: user,
                     rejection_fields["rejection_reason"]: reason,
