@@ -1664,11 +1664,13 @@ def get_pending_approvals(level: Optional[str] = None):
                                 continue
                             
                             # Query với OR condition, include counters cho progress display
+                            # ✅ FIX: Loại trừ reports đã reviewed/published (chỉ hiển thị ở L4)
                             reports_l3 = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "campus_id": campus_id
+                                    "campus_id": campus_id,
+                                    "approval_status": ["not in", ["reviewed", "published"]]  # ✅ FIX
                                 },
                                 or_filters=or_filters,
                                 fields=[
