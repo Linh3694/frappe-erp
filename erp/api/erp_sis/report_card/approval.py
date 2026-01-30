@@ -3104,7 +3104,18 @@ def reject_class_reports():
                 
                 # ✅ FIX: Reset counters khi L3/L4 reject để báo cáo không còn xuất hiện trong list L3/L4
                 # Điều này đảm bảo báo cáo chỉ xuất hiện ở level đúng (level được rollback về)
-                if pending_level == "review":
+                if pending_level == "level_2":
+                    # L2 reject -> về Entry (L1 không có): reset scores_approval_status về "rejected"
+                    # Điều này cho phép Entry thấy nút "Gửi lại" và L2 không còn thấy report
+                    if detected_board_type in ["scores", "subject_eval"]:
+                        update_values["scores_approval_status"] = "rejected"
+                        # ✅ Cũng update data_json approval status về rejected
+                        if subject_id:
+                            rejection_info_with_rejected = rejection_info.copy()
+                            rejection_info_with_rejected["status"] = "rejected"
+                            data_json = _set_subject_approval_in_data_json(data_json, detected_board_type, subject_id, rejection_info_with_rejected)
+                            update_values["data_json"] = json.dumps(data_json, ensure_ascii=False)
+                elif pending_level == "review":
                     # L3 reject -> về L2: reset các counters L2 approved
                     if is_homeroom:
                         update_values["homeroom_l2_approved"] = 0
