@@ -2882,6 +2882,12 @@ def reject_class_reports():
         # Biến để track board_type đã detect (dùng cho response)
         detected_board_type = board_type or section
         
+        # ✅ FIX: Load template trước vòng lặp để check homeroom reviewers config
+        try:
+            template_for_rollback = frappe.get_doc("SIS Report Card Template", template_id)
+        except frappe.DoesNotExistError:
+            template_for_rollback = None
+        
         for report_data in reports:
             try:
                 # Load full report để update data_json
@@ -3028,15 +3034,32 @@ def reject_class_reports():
                 # ✅ FIX: Set status để quay về level trước đó thay vì "rejected"
                 # - L1 reject -> "rejected" (về Entry)
                 # - L2 reject -> "submitted" (về L1)
-                # - L3 (review) reject -> "level_1_approved" (về L2)
+                # - L3 (review) reject -> tùy thuộc vào template config
                 # - L4 (publish) reject -> "level_2_approved" (về L3)
                 status_rollback_map = {
                     "level_1": "rejected",           # L1 reject -> về Entry
                     "level_2": "submitted",          # L2 reject -> về L1
-                    "review": "level_1_approved",    # L3 reject -> về L2
+                    "review": "level_1_approved",    # L3 reject -> về L2 (default)
                     "publish": "level_2_approved"    # L4 reject -> về L3
                 }
                 new_status = status_rollback_map.get(pending_level, "rejected")
+                
+                # ✅ FIX: Khi L3 reject homeroom, kiểm tra template config để xác định target_status
+                if pending_level == "review" and is_homeroom and template_for_rollback:
+                    has_homeroom_l2 = bool(getattr(template_for_rollback, 'homeroom_reviewer_level_2', None))
+                    has_homeroom_l1 = bool(getattr(template_for_rollback, 'homeroom_reviewer_level_1', None))
+                    
+                    if has_homeroom_l2:
+                        # Có L2 → quay về level_1_approved (cho L2 review lại)
+                        new_status = "level_1_approved"
+                    elif has_homeroom_l1:
+                        # Không L2 nhưng có L1 → quay về submitted (cho L1 review lại)
+                        new_status = "submitted"
+                    else:
+                        # Không có cả L1 và L2 → quay về draft (cho Entry sửa lại)
+                        new_status = "draft"
+                    
+                    frappe.logger().info(f"[REJECT_CLASS] L3 reject homeroom: has_L1={has_homeroom_l1}, has_L2={has_homeroom_l2} → new_status={new_status}")
                 
                 update_values = {
                     rejection_fields["status_field"]: new_status,
@@ -3606,18 +3629,37 @@ def reject_single_report():
                 template = None
             
             if section == 'homeroom':
-                # Reject homeroom -> quay về L2 cho Tổ trưởng
-                report.homeroom_approval_status = 'level_1_approved'
+                # ✅ FIX: Xác định target_status dựa trên template config
+                # Kiểm tra template có L2, L1 để quyết định quay về level nào
+                has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None)) if template else False
+                has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None)) if template else False
+                
+                if has_level_2:
+                    # Có L2 → quay về level_1_approved (cho L2 review lại)
+                    homeroom_target_status = 'level_1_approved'
+                    target_level = 2
+                elif has_level_1:
+                    # Không L2 nhưng có L1 → quay về submitted (cho L1 review lại)
+                    homeroom_target_status = 'submitted'
+                    target_level = 1
+                else:
+                    # Không có cả L1 và L2 → quay về draft (cho Entry sửa lại)
+                    homeroom_target_status = 'draft'
+                    target_level = 0  # Entry level
+                
+                frappe.logger().info(f"[REJECT] L3 reject homeroom: has_L1={has_level_1}, has_L2={has_level_2} → target_status={homeroom_target_status}")
+                
+                report.homeroom_approval_status = homeroom_target_status
                 report.homeroom_rejection_reason = reason
                 report.homeroom_rejected_by = user
                 report.homeroom_rejected_at = now
                 report.homeroom_l2_approved = 0
-                report.approval_status = 'level_1_approved'
+                report.approval_status = homeroom_target_status
                 
                 # Update approval trong data_json
                 if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
                     data_json["homeroom"]["approval"] = {
-                        "status": "level_1_approved",
+                        "status": homeroom_target_status,
                         "rejection_reason": reason,
                         "rejected_from_level": 3,
                         "rejected_by": user,
@@ -3696,9 +3738,28 @@ def reject_single_report():
                 
             else:  # both
                 # Reject cả homeroom và scores
-                report.approval_status = 'level_1_approved'
-                report.homeroom_approval_status = 'level_1_approved'
-                report.scores_approval_status = 'level_1_approved'
+                # ✅ FIX: Xác định target_status cho homeroom dựa trên template config
+                has_homeroom_l2 = bool(getattr(template, 'homeroom_reviewer_level_2', None)) if template else False
+                has_homeroom_l1 = bool(getattr(template, 'homeroom_reviewer_level_1', None)) if template else False
+                
+                if has_homeroom_l2:
+                    homeroom_target_status = 'level_1_approved'
+                elif has_homeroom_l1:
+                    homeroom_target_status = 'submitted'
+                else:
+                    homeroom_target_status = 'draft'
+                
+                # Scores luôn về level_1_approved (có Subject Manager system)
+                scores_target_status = 'level_1_approved'
+                
+                # approval_status chung lấy status thấp hơn
+                overall_status = homeroom_target_status if homeroom_target_status in ['draft', 'submitted'] else scores_target_status
+                
+                frappe.logger().info(f"[REJECT] L3 reject both: homeroom_status={homeroom_target_status}, scores_status={scores_target_status}")
+                
+                report.approval_status = overall_status
+                report.homeroom_approval_status = homeroom_target_status
+                report.scores_approval_status = scores_target_status
                 report.homeroom_l2_approved = 0
                 
                 # Lưu rejection info cho cả hai
@@ -3712,7 +3773,7 @@ def reject_single_report():
                 # Update data_json cho homeroom
                 if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
                     data_json["homeroom"]["approval"] = {
-                        "status": "level_1_approved",
+                        "status": homeroom_target_status,
                         "rejection_reason": reason,
                         "rejected_from_level": 3,
                         "rejected_by": user,
@@ -3724,7 +3785,7 @@ def reject_single_report():
                     for subj_id in data_json["scores"]:
                         if isinstance(data_json["scores"][subj_id], dict):
                             data_json["scores"][subj_id]["approval"] = {
-                                "status": "level_1_approved",
+                                "status": scores_target_status,
                                 "rejection_reason": reason,
                                 "rejected_from_level": 3,
                                 "rejected_by": user,
