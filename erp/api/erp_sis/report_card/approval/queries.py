@@ -186,8 +186,9 @@ def get_pending_approvals(level: Optional[str] = None):
                         r["pending_level"] = "level_1"
                         results.append(r)
             
-            # Manager xem tất cả L1 reports (viewer only)
-            elif is_manager:
+            # Manager xem tất cả L1 reports (viewer only) - THÊM reports chưa có
+            if is_manager:
+                existing_l1_names = set(r["name"] for r in results if r.get("pending_level") == "level_1")
                 all_l1_templates = frappe.get_all(
                     "SIS Report Card Template",
                     filters={"campus_id": campus_id},
@@ -205,6 +206,8 @@ def get_pending_approvals(level: Optional[str] = None):
                         fields=["name", "title", "student_id", "class_id", "approval_status", "submitted_at"]
                     )
                     for r in reports_l1:
+                        if r["name"] in existing_l1_names:
+                            continue
                         r["pending_level"] = "level_1"
                         r["is_viewer_only"] = True
                         results.append(r)
@@ -281,8 +284,10 @@ def get_pending_approvals(level: Optional[str] = None):
                             if not any(existing["name"] == r["name"] for existing in results):
                                 results.append(r)
             
-            # Manager xem tất cả L2 reports (viewer only)
-            elif is_manager:
+            # Manager xem tất cả L2 reports (viewer only) - THÊM reports chưa có
+            if is_manager:
+                existing_l2_names = set(r["name"] for r in results if r.get("pending_level") == "level_2")
+                
                 # L2 Homeroom
                 all_l2_templates = frappe.get_all(
                     "SIS Report Card Template",
@@ -301,10 +306,12 @@ def get_pending_approvals(level: Optional[str] = None):
                         fields=["name", "title", "student_id", "class_id", "approval_status", "submitted_at"]
                     )
                     for r in reports_l2:
+                        if r["name"] in existing_l2_names:
+                            continue
                         r["pending_level"] = "level_2"
                         r["is_viewer_only"] = True
-                        if not any(existing["name"] == r["name"] for existing in results):
-                            results.append(r)
+                        results.append(r)
+                        existing_l2_names.add(r["name"])
                 
                 # L2 Subject - Lấy reports có subject pending L2
                 all_templates = frappe.get_all(
@@ -323,10 +330,12 @@ def get_pending_approvals(level: Optional[str] = None):
                         fields=["name", "title", "student_id", "class_id", "approval_status", "submitted_at"]
                     )
                     for r in reports_all:
+                        if r["name"] in existing_l2_names:
+                            continue
                         r["pending_level"] = "level_2"
                         r["is_viewer_only"] = True
-                        if not any(existing["name"] == r["name"] for existing in results):
-                            results.append(r)
+                        results.append(r)
+                        existing_l2_names.add(r["name"])
         
         # Level 3 & 4: Kiểm tra approval config
         if not level or level in ["review", "publish"]:
@@ -606,14 +615,16 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             r["rejection_reason"] = r.get("homeroom_rejection_reason")
                         all_reports.append(r)
             
-            # Manager xem tất cả L1 reports (viewer only)
-            elif is_manager:
+            # Manager xem tất cả L1 reports (viewer only) - THÊM các reports manager chưa thấy
+            if is_manager:
                 all_l1_templates = frappe.get_all(
                     "SIS Report Card Template",
                     filters={"campus_id": campus_id},
                     fields=["name", "title", "homeroom_reviewer_level_1"]
                 )
-                # Chỉ lấy templates có người duyệt L1
+                # Track report names đã có
+                existing_report_names = set(r.get("name") for r in all_reports if r.get("pending_level") == "level_1")
+                
                 for tmpl in all_l1_templates:
                     if not tmpl.get("homeroom_reviewer_level_1"):
                         continue
@@ -631,6 +642,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 "rejected_from_level", "rejected_section"]
                     )
                     for r in reports:
+                        # Skip nếu đã có (teacher đã là approver)
+                        if r["name"] in existing_report_names:
+                            continue
                         r["template_id"] = tmpl.name
                         r["template_title"] = tmpl.title
                         r["pending_level"] = "level_1"
@@ -643,6 +657,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             r["rejection_reason"] = r.get("homeroom_rejection_reason")
                         r["is_viewer_only"] = True
                         all_reports.append(r)
+                        existing_report_names.add(r["name"])
         
         # Level 2: Tổ trưởng hoặc Subject Manager
         if not level or level == "level_2":
@@ -785,8 +800,15 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                         r_copy["rejected_from_level"] = subject_approval.get("rejected_from_level")
                                     all_reports.append(r_copy)
             
-            # Manager xem tất cả L2 reports (viewer only)
-            elif is_manager:
+            # Manager xem tất cả L2 reports (viewer only) - THÊM các reports manager chưa thấy
+            if is_manager:
+                # Track existing (report_name, subject_id) đã có
+                existing_l2_keys = set(
+                    (r.get("name"), r.get("subject_id")) 
+                    for r in all_reports 
+                    if r.get("pending_level") == "level_2"
+                )
+                
                 # L2 Homeroom - Lấy tất cả templates có người duyệt L2
                 all_l2_templates = frappe.get_all(
                     "SIS Report Card Template",
@@ -811,6 +833,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 "rejected_from_level", "rejected_section"]
                     )
                     for r in reports:
+                        key = (r["name"], None)
+                        if key in existing_l2_keys:
+                            continue
                         r["template_id"] = tmpl.name
                         r["template_title"] = tmpl.title
                         r["pending_level"] = "level_2"
@@ -825,6 +850,7 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             r["was_rejected"] = True
                         r["is_viewer_only"] = True
                         all_reports.append(r)
+                        existing_l2_keys.add(key)
                 
                 # L2 Subject - Lấy tất cả subjects có pending L2
                 all_subjects = frappe.get_all(
@@ -876,6 +902,11 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         
                         for sid in template_subjects:
                             if sid not in all_subject_ids:
+                                continue
+                            
+                            # Skip nếu đã có (teacher đã là approver)
+                            key = (r["name"], sid)
+                            if key in existing_l2_keys:
                                 continue
                             
                             subject_approval = {}
