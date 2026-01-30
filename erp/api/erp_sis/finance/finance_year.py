@@ -7,6 +7,7 @@ import frappe
 from frappe import _
 from frappe.utils import now
 import json
+import time
 
 from erp.utils.api_response import (
     validation_error_response,
@@ -18,6 +19,96 @@ from erp.utils.api_response import (
 )
 
 from .utils import _check_admin_permission, _resolve_campus_id
+
+
+def _delete_doc_with_retry(doctype, name, max_retries=3, delay=0.5, logs=None):
+    """
+    Xóa document với cơ chế retry để xử lý lỗi lock.
+    
+    Args:
+        doctype: Loại document cần xóa
+        name: Tên document cần xóa
+        max_retries: Số lần retry tối đa
+        delay: Thời gian chờ giữa các lần retry (giây)
+        logs: List để ghi log
+    
+    Returns:
+        True nếu xóa thành công, False nếu thất bại
+    """
+    if logs is None:
+        logs = []
+    
+    for attempt in range(max_retries):
+        try:
+            # Kiểm tra document có tồn tại không
+            if not frappe.db.exists(doctype, name):
+                return True
+            
+            # Thử xóa document
+            frappe.delete_doc(doctype, name, ignore_permissions=True, force=True)
+            return True
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Nếu là lỗi lock và còn retry
+            if "being modified by another user" in error_msg and attempt < max_retries - 1:
+                if logs:
+                    logs.append(f"⏳ Retry {attempt + 1}/{max_retries} cho {doctype} {name}")
+                time.sleep(delay)
+                continue
+            else:
+                # Hết retry hoặc lỗi khác
+                if logs:
+                    logs.append(f"⚠️ Lỗi xóa {doctype} {name}: {error_msg}")
+                return False
+    
+    return False
+
+
+def _delete_documents_in_batches(doctype, doc_ids, batch_size=50, logs=None):
+    """
+    Xóa nhiều documents theo batch để tránh lock issues.
+    
+    Args:
+        doctype: Loại document cần xóa
+        doc_ids: List các ID cần xóa
+        batch_size: Số lượng docs trong mỗi batch
+        logs: List để ghi log
+    
+    Returns:
+        Tuple (success_count, failed_count)
+    """
+    if logs is None:
+        logs = []
+    
+    success_count = 0
+    failed_count = 0
+    total = len(doc_ids)
+    
+    # Chia thành các batch
+    for i in range(0, total, batch_size):
+        batch = doc_ids[i:i + batch_size]
+        batch_num = (i // batch_size) + 1
+        total_batches = (total + batch_size - 1) // batch_size
+        
+        logs.append(f"🔄 Đang xử lý batch {batch_num}/{total_batches} ({len(batch)} documents)...")
+        
+        for doc_id in batch:
+            if _delete_doc_with_retry(doctype, doc_id, max_retries=3, delay=0.5, logs=logs):
+                success_count += 1
+            else:
+                failed_count += 1
+        
+        # Commit sau mỗi batch để release locks
+        frappe.db.commit()
+        logs.append(f"✓ Hoàn thành batch {batch_num}: {len(batch)} documents")
+        
+        # Sleep ngắn giữa các batch
+        if i + batch_size < total:
+            time.sleep(0.2)
+    
+    return success_count, failed_count
 
 
 @frappe.whitelist()
@@ -438,87 +529,110 @@ def delete_finance_year():
                 
                 # Bước 2: Xóa tất cả SIS Finance Debit Note History
                 if order_student_ids:
-                    debit_histories = frappe.db.get_all(
-                        "SIS Finance Debit Note History",
-                        filters={"order_student_id": ("in", order_student_ids)},
-                        fields=["name"]
-                    )
-                    for history in debit_histories:
-                        try:
-                            frappe.delete_doc("SIS Finance Debit Note History", history.name, ignore_permissions=True)
-                        except Exception as e:
-                            logs.append(f"⚠️ Lỗi xóa Debit Note History {history.name}: {str(e)}")
+                    debit_history_ids = [
+                        h.name for h in frappe.db.get_all(
+                            "SIS Finance Debit Note History",
+                            filters={"order_student_id": ("in", order_student_ids)},
+                            fields=["name"]
+                        )
+                    ]
                     
-                    if debit_histories:
-                        logs.append(f"✓ Đã xóa {len(debit_histories)} Debit Note History")
+                    if debit_history_ids:
+                        logs.append(f"📋 Tìm thấy {len(debit_history_ids)} Debit Note History cần xóa")
+                        success, failed = _delete_documents_in_batches(
+                            "SIS Finance Debit Note History",
+                            debit_history_ids,
+                            batch_size=50,
+                            logs=logs
+                        )
+                        logs.append(f"✓ Đã xóa {success} Debit Note History (thất bại: {failed})")
                 
                 # Bước 3: Xóa tất cả SIS Finance Send Batch
                 if order_ids:
-                    send_batches = frappe.db.get_all(
-                        "SIS Finance Send Batch",
-                        filters={"order_id": ("in", order_ids)},
-                        fields=["name"]
-                    )
-                    for batch in send_batches:
-                        try:
-                            frappe.delete_doc("SIS Finance Send Batch", batch.name, ignore_permissions=True)
-                        except Exception as e:
-                            logs.append(f"⚠️ Lỗi xóa Send Batch {batch.name}: {str(e)}")
+                    send_batch_ids = [
+                        b.name for b in frappe.db.get_all(
+                            "SIS Finance Send Batch",
+                            filters={"order_id": ("in", order_ids)},
+                            fields=["name"]
+                        )
+                    ]
                     
-                    if send_batches:
-                        logs.append(f"✓ Đã xóa {len(send_batches)} Send Batch")
+                    if send_batch_ids:
+                        logs.append(f"📋 Tìm thấy {len(send_batch_ids)} Send Batch cần xóa")
+                        success, failed = _delete_documents_in_batches(
+                            "SIS Finance Send Batch",
+                            send_batch_ids,
+                            batch_size=50,
+                            logs=logs
+                        )
+                        logs.append(f"✓ Đã xóa {success} Send Batch (thất bại: {failed})")
                 
-                # Bước 4: Xóa tất cả SIS Finance Order Student
+                # Bước 4: Xóa tất cả SIS Finance Order Student (xử lý batch để tránh lock)
                 if order_student_ids:
-                    for os_id in order_student_ids:
-                        try:
-                            frappe.delete_doc("SIS Finance Order Student", os_id, ignore_permissions=True)
-                        except Exception as e:
-                            logs.append(f"⚠️ Lỗi xóa Order Student {os_id}: {str(e)}")
-                    logs.append(f"✓ Đã xóa {len(order_student_ids)} học sinh trong đơn hàng")
+                    logs.append(f"📋 Bắt đầu xóa {len(order_student_ids)} Order Student")
+                    success, failed = _delete_documents_in_batches(
+                        "SIS Finance Order Student",
+                        order_student_ids,
+                        batch_size=50,  # Xóa 50 docs mỗi batch
+                        logs=logs
+                    )
+                    logs.append(f"✓ Đã xóa {success} Order Student (thất bại: {failed})")
+                    
+                    if failed > 0:
+                        logs.append(f"⚠️ Có {failed} Order Student không xóa được, có thể cần retry thủ công")
                 
                 # Bước 5: Xóa tất cả SIS Finance Order Items
                 if order_ids:
-                    order_items = frappe.db.get_all(
-                        "SIS Finance Order Item",
-                        filters={"order_id": ("in", order_ids)},
-                        fields=["name"]
-                    )
-                    for item in order_items:
-                        try:
-                            frappe.delete_doc("SIS Finance Order Item", item.name, ignore_permissions=True)
-                        except Exception as e:
-                            logs.append(f"⚠️ Lỗi xóa Order Item {item.name}: {str(e)}")
+                    order_item_ids = [
+                        item.name for item in frappe.db.get_all(
+                            "SIS Finance Order Item",
+                            filters={"order_id": ("in", order_ids)},
+                            fields=["name"]
+                        )
+                    ]
                     
-                    if order_items:
-                        logs.append(f"✓ Đã xóa {len(order_items)} mục đơn hàng")
+                    if order_item_ids:
+                        logs.append(f"📋 Tìm thấy {len(order_item_ids)} Order Item cần xóa")
+                        success, failed = _delete_documents_in_batches(
+                            "SIS Finance Order Item",
+                            order_item_ids,
+                            batch_size=100,
+                            logs=logs
+                        )
+                        logs.append(f"✓ Đã xóa {success} Order Item (thất bại: {failed})")
                 
                 # Bước 6: Xóa tất cả SIS Finance Order
-                for order_id in order_ids:
-                    try:
-                        frappe.delete_doc("SIS Finance Order", order_id, ignore_permissions=True)
-                    except Exception as e:
-                        logs.append(f"⚠️ Lỗi xóa Order {order_id}: {str(e)}")
-                
                 if order_ids:
-                    logs.append(f"✓ Đã xóa {len(order_ids)} đơn hàng")
+                    logs.append(f"📋 Bắt đầu xóa {len(order_ids)} Order")
+                    success, failed = _delete_documents_in_batches(
+                        "SIS Finance Order",
+                        order_ids,
+                        batch_size=20,
+                        logs=logs
+                    )
+                    logs.append(f"✓ Đã xóa {success} Order (thất bại: {failed})")
                 
                 # Bước 7: Xóa tất cả SIS Finance Student
                 if student_count > 0:
-                    students = frappe.db.get_all(
-                        "SIS Finance Student",
-                        filters={"finance_year_id": finance_year_id},
-                        fields=["name"]
-                    )
-                    for student in students:
-                        try:
-                            frappe.delete_doc("SIS Finance Student", student.name, ignore_permissions=True)
-                        except Exception as e:
-                            logs.append(f"⚠️ Lỗi xóa Finance Student {student.name}: {str(e)}")
+                    student_ids = [
+                        s.name for s in frappe.db.get_all(
+                            "SIS Finance Student",
+                            filters={"finance_year_id": finance_year_id},
+                            fields=["name"]
+                        )
+                    ]
                     
-                    if students:
-                        logs.append(f"✓ Đã xóa {len(students)} học sinh trong năm tài chính")
+                    if student_ids:
+                        logs.append(f"📋 Bắt đầu xóa {len(student_ids)} Finance Student")
+                        success, failed = _delete_documents_in_batches(
+                            "SIS Finance Student",
+                            student_ids,
+                            batch_size=100,
+                            logs=logs
+                        )
+                        logs.append(f"✓ Đã xóa {success} Finance Student (thất bại: {failed})")
                 
+                # Commit cuối cùng
                 frappe.db.commit()
             else:
                 # Không cho phép xóa, trả về thông tin để frontend hiển thị
