@@ -875,18 +875,30 @@ def submit_class_reports():
         
         frappe.db.commit()
         
-        # ✅ DEBUG: Verify data was persisted
+        # ✅ Clear cache để đảm bảo các request sau đọc data mới từ DB
+        frappe.clear_cache(doctype="SIS Student Report Card")
+        
+        # ✅ DEBUG: Verify data was persisted using RAW SQL (bypass cache)
         verify_info = {"committed": True}
         if submitted_count > 0 and subject_id:
-            # Re-read first report to verify
             try:
                 first_report = reports[0]
-                verify_report = frappe.get_doc("SIS Student Report Card", first_report.name)
-                verify_data_json = json.loads(verify_report.data_json or "{}")
-                verify_approval = _get_subject_approval_from_data_json(verify_data_json, section, subject_id)
-                verify_info["sample_report"] = first_report.name
-                verify_info["scores_approval_status"] = verify_report.scores_approval_status
-                verify_info["data_json_approval"] = verify_approval
+                # ✅ RAW SQL to bypass any ORM caching
+                raw_result = frappe.db.sql("""
+                    SELECT name, scores_approval_status, data_json 
+                    FROM `tabSIS Student Report Card` 
+                    WHERE name = %s
+                """, (first_report.name,), as_dict=True)
+                
+                if raw_result:
+                    raw_row = raw_result[0]
+                    raw_data_json = json.loads(raw_row.get("data_json") or "{}")
+                    raw_approval = _get_subject_approval_from_data_json(raw_data_json, section, subject_id)
+                    verify_info["sample_report"] = first_report.name
+                    verify_info["raw_sql_scores_approval_status"] = raw_row.get("scores_approval_status")
+                    verify_info["raw_sql_data_json_approval"] = raw_approval
+                else:
+                    verify_info["raw_sql_error"] = "No rows returned"
             except Exception as ve:
                 verify_info["verify_error"] = str(ve)
         
