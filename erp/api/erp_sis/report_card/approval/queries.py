@@ -46,13 +46,13 @@ def _get_teacher_name(teacher_id):
     """Lấy tên teacher từ teacher_id"""
     if not teacher_id:
         return None
-    teacher_data = frappe.db.get_value(
-        "SIS Teacher", teacher_id, 
-        ["first_name", "last_name"], 
-        as_dict=True
-    )
-    if teacher_data:
-        return f"{teacher_data.get('first_name', '')} {teacher_data.get('last_name', '')}".strip()
+    # Lấy user_id từ SIS Teacher
+    user_id = frappe.db.get_value("SIS Teacher", teacher_id, "user_id")
+    if user_id:
+        # Lấy full_name từ User doctype
+        full_name = frappe.db.get_value("User", user_id, "full_name")
+        if full_name:
+            return full_name
     return teacher_id
 
 
