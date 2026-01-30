@@ -878,27 +878,41 @@ def submit_class_reports():
         # ✅ Clear cache để đảm bảo các request sau đọc data mới từ DB
         frappe.clear_cache(doctype="SIS Student Report Card")
         
-        # ✅ DEBUG: Verify data was persisted using RAW SQL (bypass cache)
-        verify_info = {"committed": True}
+        # ✅ DEBUG: Verify ALL reports after commit using RAW SQL
+        verify_info = {"committed": True, "total_verified": 0, "missing_approval": []}
         if submitted_count > 0 and subject_id:
             try:
-                first_report = reports[0]
-                # ✅ RAW SQL to bypass any ORM caching
-                raw_result = frappe.db.sql("""
+                report_names = [r.name for r in reports]
+                # ✅ RAW SQL to verify ALL reports
+                raw_results = frappe.db.sql("""
                     SELECT name, scores_approval_status, data_json 
                     FROM `tabSIS Student Report Card` 
-                    WHERE name = %s
-                """, (first_report.name,), as_dict=True)
+                    WHERE name IN %s
+                """, (report_names,), as_dict=True)
                 
-                if raw_result:
-                    raw_row = raw_result[0]
+                verify_info["total_verified"] = len(raw_results)
+                for raw_row in raw_results:
                     raw_data_json = json.loads(raw_row.get("data_json") or "{}")
                     raw_approval = _get_subject_approval_from_data_json(raw_data_json, section, subject_id)
-                    verify_info["sample_report"] = first_report.name
-                    verify_info["raw_sql_scores_approval_status"] = raw_row.get("scores_approval_status")
-                    verify_info["raw_sql_data_json_approval"] = raw_approval
-                else:
-                    verify_info["raw_sql_error"] = "No rows returned"
+                    
+                    # Check nếu approval không có hoặc không đúng
+                    if not raw_approval or raw_approval.get("status") != target_status:
+                        verify_info["missing_approval"].append({
+                            "report": raw_row.get("name"),
+                            "scores_approval_status": raw_row.get("scores_approval_status"),
+                            "approval_status": raw_approval.get("status") if raw_approval else None,
+                            "has_subject_key": subject_id in raw_data_json.get(section, {})
+                        })
+                
+                # Sample first report for display
+                if raw_results:
+                    sample = raw_results[0]
+                    sample_data_json = json.loads(sample.get("data_json") or "{}")
+                    sample_approval = _get_subject_approval_from_data_json(sample_data_json, section, subject_id)
+                    verify_info["sample_report"] = sample.get("name")
+                    verify_info["sample_scores_approval_status"] = sample.get("scores_approval_status")
+                    verify_info["sample_approval"] = sample_approval
+                    
             except Exception as ve:
                 verify_info["verify_error"] = str(ve)
         
@@ -931,8 +945,10 @@ def submit_class_reports():
                 "errors": errors if errors else None,
                 "subject_id": subject_id,
                 # ✅ DEBUG INFO
-                "debug_info": debug_info[:3] if len(debug_info) > 3 else debug_info,  # Chỉ lấy 3 reports đầu
-                "verify_after_commit": verify_info
+                "debug_info": debug_info[:3] if len(debug_info) > 3 else debug_info,
+                "verify_after_commit": verify_info,
+                # ✅ List all report names được process
+                "all_report_names": [r.name for r in reports]
             },
             message=result_message
         )
