@@ -315,6 +315,8 @@ def get_subjects_by_students_in_classes():
         frappe.logger().info(f"[get_subjects_by_students_in_classes] Found {len(student_ids)} students: {student_ids[:5]}...")
         
         # STEP 3: Get ALL subjects for these students (from all their classes)
+        # Lấy TẤT CẢ môn học của học sinh, bao gồm cả môn học từ lớp Mixed
+        # Vì học sinh vẫn cần làm báo cáo học tập cho những môn học ở lớp khác
         subject_filters = {
             "campus_id": campus_id,
             "student_id": ["in", student_ids]
