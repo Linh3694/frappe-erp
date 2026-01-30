@@ -12,7 +12,10 @@
   "class_id",
   "log_date",
   "period",
+  "lesson_name",
+  "lesson_score",
   "general_comment",
+  "homework_assignment",
   "campus_id",
   "recorded_by"
  ],
@@ -21,7 +24,10 @@
   {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "reqd": 1},
   {"fieldname": "log_date", "label": "Date", "fieldtype": "Date"},
   {"fieldname": "period", "label": "Period", "fieldtype": "Data"},
+  {"fieldname": "lesson_name", "label": "Lesson Name", "fieldtype": "Data", "description": "Tên bài dạy"},
+  {"fieldname": "lesson_score", "label": "Lesson Score", "fieldtype": "Select", "options": "\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10", "description": "Điểm tiết học (1-10)"},
   {"fieldname": "general_comment", "label": "General Comment", "fieldtype": "Small Text"},
+  {"fieldname": "homework_assignment", "label": "Homework Assignment", "fieldtype": "Small Text", "description": "Bài tập về nhà"},
   {"fieldname": "campus_id", "label": "Campus", "fieldtype": "Link", "options": "SIS Campus"},
   {"fieldname": "recorded_by", "label": "Recorded By", "fieldtype": "Link", "options": "User"}
  ],

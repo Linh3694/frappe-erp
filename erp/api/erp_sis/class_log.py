@@ -199,13 +199,16 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
         subject_rows = frappe.get_all(
             "SIS Class Log Subject",
             filters=filters,
-            fields=["name", "class_id", "general_comment"],
+            fields=["name", "class_id", "general_comment", "lesson_name", "lesson_score", "homework_assignment"],
             limit=1
         )
         if subject_rows:
             subject_id = subject_rows[0]['name']
             class_id = subject_rows[0]['class_id']
             general_comment = subject_rows[0].get('general_comment')
+            lesson_name = subject_rows[0].get('lesson_name')
+            lesson_score = subject_rows[0].get('lesson_score')
+            homework_assignment = subject_rows[0].get('homework_assignment')
         else:
             # Resolve class from instance
             inst = frappe.get_doc("SIS Timetable Instance", timetable_instance)
@@ -231,6 +234,9 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             doc.insert()
             subject_id = doc.name
             general_comment = None
+            lesson_name = None
+            lesson_score = None
+            homework_assignment = None
 
         # Load student logs
         student_logs = frappe.get_all(
@@ -267,6 +273,9 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
                 "timetable_instance_id": timetable_instance,
                 "class_id": class_id,
                 "general_comment": general_comment,
+                "lesson_name": lesson_name,
+                "lesson_score": lesson_score,
+                "homework_assignment": homework_assignment,
             },
             "students": student_logs
         }
@@ -294,6 +303,9 @@ def save_class_log():
         date = body.get('date')
         period = body.get('period')
         general_comment = body.get('general_comment')
+        lesson_name = body.get('lesson_name')
+        lesson_score = body.get('lesson_score')
+        homework_assignment = body.get('homework_assignment')
         items = body.get('students') or []
         if not timetable_instance:
             if not class_id or not date:
@@ -349,9 +361,19 @@ def save_class_log():
             doc.insert()
             subject_id = doc.name
 
-        # Update general comment if provided
+        # Update subject fields if provided
+        update_fields = {}
         if general_comment is not None:
-            frappe.db.set_value("SIS Class Log Subject", subject_id, {"general_comment": general_comment}, update_modified=True)
+            update_fields["general_comment"] = general_comment
+        if lesson_name is not None:
+            update_fields["lesson_name"] = lesson_name
+        if lesson_score is not None:
+            update_fields["lesson_score"] = lesson_score
+        if homework_assignment is not None:
+            update_fields["homework_assignment"] = homework_assignment
+        
+        if update_fields:
+            frappe.db.set_value("SIS Class Log Subject", subject_id, update_fields, update_modified=True)
 
         upserts = 0
         for it in items:
