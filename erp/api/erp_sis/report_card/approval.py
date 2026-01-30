@@ -3862,18 +3862,36 @@ def reject_single_report():
             
             # ✅ FIX: Homeroom có thể skip L2, nên cho phép reject nếu:
             # - status = 'level_2_approved' (đi qua L2)
-            # - status = 'level_1_approved' VÀ report đã đến L3 (approval_status = 'level_2_approved')
+            # - status = 'level_1_approved' VÀ report đã đến L3 
+            #   (approval_status = 'level_2_approved' hoặc 'reviewed')
             #   → tức là homeroom skip L2 nhưng report đã sẵn sàng cho L3
+            # - status = 'level_1_approved' VÀ overall approval_status = 'level_1_approved' 
+            #   nhưng homeroom đã skip L2 (kiểm tra template config)
             if actual_homeroom_status == 'level_2_approved':
                 # Homeroom đi qua L2 approved → có thể reject từ L3
                 can_reject = True
                 current_status = 'level_2_approved'
                 reject_from_l3 = True
-            elif actual_homeroom_status == 'level_1_approved' and approval_status == 'level_2_approved':
+            elif actual_homeroom_status == 'level_1_approved' and approval_status in ['level_2_approved', 'reviewed']:
                 # Homeroom skip L2 (chỉ duyệt L1) nhưng report đã đến L3 → cho phép reject về L1
                 can_reject = True
                 current_status = 'level_1_approved'
                 reject_from_l3 = True
+            elif actual_homeroom_status == 'level_1_approved':
+                # ✅ FIX: Homeroom có thể đã skip cả L1 và L2, hoặc skip L2
+                # Kiểm tra template config để xác nhận homeroom có skip L2 không
+                try:
+                    template = frappe.get_doc("SIS Report Card Template", report.template_id)
+                    has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None))
+                    has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None))
+                    
+                    # Nếu không có L2 reviewer → homeroom skip L2 → cho phép reject từ L3
+                    if not has_level_2:
+                        can_reject = True
+                        current_status = 'level_1_approved'
+                        reject_from_l3 = True
+                except Exception:
+                    pass
         
         elif section == 'scores':
             if subject_id:
@@ -4007,17 +4025,31 @@ def reject_single_report():
             was_reviewed = (approval_status == 'reviewed')
             
             if section == 'homeroom':
-                # ✅ FIX: Xác định target status dựa vào homeroom có skip L2 hay không
-                # - Nếu homeroom đã qua L2 (level_2_approved): reject về level_1_approved (chờ L2 duyệt lại)
-                # - Nếu homeroom skip L2 (level_1_approved): reject về submitted (chờ L1 duyệt lại)
+                # ✅ FIX: Xác định target status dựa vào template config và homeroom status hiện tại
+                # - Có L2 reviewer: reject về level_1_approved (chờ L2 duyệt lại)
+                # - Có L1 nhưng không L2: reject về submitted (chờ L1 duyệt lại)  
+                # - Không L1, không L2: reject về submitted (Entry resubmit)
                 homeroom_approval = _get_subject_approval_from_data_json(data_json, 'homeroom', None)
                 homeroom_was_l2 = (homeroom_approval.get('status') == 'level_2_approved') or (homeroom_status == 'level_2_approved')
+                
+                # ✅ FIX: Kiểm tra template config để xác định target status chính xác
+                has_level_1 = False
+                has_level_2 = False
+                if template:
+                    has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None))
+                    has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None))
                 
                 if homeroom_was_l2:
                     # Homeroom đã qua L2 → reject về level_1_approved (chờ L2 duyệt lại)
                     target_homeroom_status = 'level_1_approved'
+                elif has_level_2:
+                    # Có L2 reviewer → reject về level_1_approved (chờ L2 duyệt lại)
+                    target_homeroom_status = 'level_1_approved'
+                elif has_level_1:
+                    # Chỉ có L1 → reject về submitted (chờ L1 duyệt lại)
+                    target_homeroom_status = 'submitted'
                 else:
-                    # Homeroom skip L2 → reject về submitted (chờ L1 duyệt lại)
+                    # Không có L1 lẫn L2 → reject về submitted (Entry resubmit)
                     target_homeroom_status = 'submitted'
                 
                 report.homeroom_approval_status = target_homeroom_status
