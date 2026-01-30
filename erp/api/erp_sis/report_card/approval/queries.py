@@ -30,6 +30,105 @@ from ..approval_helpers.helpers import (
 
 
 # =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def _is_manager_role(user):
+    """
+    Check if user has SIS Manager, SIS BOD, or System Manager role.
+    Những roles này có quyền xem TẤT CẢ báo cáo chờ duyệt (nhưng không có quyền duyệt).
+    """
+    user_roles = frappe.get_roles(user)
+    return any(role in user_roles for role in ["SIS Manager", "SIS BOD", "System Manager"])
+
+
+def _get_teacher_name(teacher_id):
+    """Lấy tên teacher từ teacher_id"""
+    if not teacher_id:
+        return None
+    teacher_data = frappe.db.get_value(
+        "SIS Teacher", teacher_id, 
+        ["first_name", "last_name"], 
+        as_dict=True
+    )
+    if teacher_data:
+        return f"{teacher_data.get('first_name', '')} {teacher_data.get('last_name', '')}".strip()
+    return teacher_id
+
+
+def _get_approvers_for_level(level, template=None, config=None, subject_id=None, campus_id=None):
+    """
+    Lấy danh sách người có quyền duyệt cho một level cụ thể.
+    
+    Args:
+        level: level_1, level_2, review, publish
+        template: SIS Report Card Template doc (cho L1, L2)
+        config: SIS Report Card Approval Config doc (cho L3, L4)
+        subject_id: ID môn học (cho L2 subject manager)
+        campus_id: Campus ID
+    
+    Returns:
+        List of approver names
+    """
+    approvers = []
+    
+    if level == "level_1" and template:
+        # L1: Khối trưởng từ template
+        reviewer_id = template.get("homeroom_reviewer_level_1")
+        if reviewer_id:
+            name = _get_teacher_name(reviewer_id)
+            if name:
+                approvers.append(name)
+    
+    elif level == "level_2":
+        if template:
+            # L2 Homeroom: Tổ trưởng từ template
+            reviewer_id = template.get("homeroom_reviewer_level_2")
+            if reviewer_id:
+                name = _get_teacher_name(reviewer_id)
+                if name:
+                    approvers.append(name)
+        
+        if subject_id:
+            # L2 Subject: Subject Managers
+            managers = frappe.get_all(
+                "SIS Actual Subject Manager",
+                filters={"parent": subject_id},
+                fields=["teacher_id"]
+            )
+            for m in managers:
+                name = _get_teacher_name(m.teacher_id)
+                if name and name not in approvers:
+                    approvers.append(name)
+    
+    elif level == "review" and config:
+        # L3: Reviewers từ approval config
+        l3_reviewers = frappe.get_all(
+            "SIS Report Card Approver",
+            filters={"parent": config.name, "parentfield": "level_3_reviewers"},
+            fields=["teacher_id"]
+        )
+        for r in l3_reviewers:
+            name = _get_teacher_name(r.teacher_id)
+            if name and name not in approvers:
+                approvers.append(name)
+    
+    elif level == "publish" and config:
+        # L4: Approvers từ approval config
+        l4_approvers = frappe.get_all(
+            "SIS Report Card Approver",
+            filters={"parent": config.name, "parentfield": "level_4_approvers"},
+            fields=["teacher_id"]
+        )
+        for a in l4_approvers:
+            name = _get_teacher_name(a.teacher_id)
+            if name and name not in approvers:
+                approvers.append(name)
+    
+    return approvers
+
+
+# =============================================================================
 # PENDING APPROVALS - FLAT LIST
 # =============================================================================
 
@@ -50,6 +149,9 @@ def get_pending_approvals(level: Optional[str] = None):
         
         user = frappe.session.user
         campus_id = get_current_campus_id()
+        
+        # Check if user is manager (can view all reports)
+        is_manager = _is_manager_role(user)
         
         # Lấy teacher của user
         teacher = frappe.get_all(
@@ -176,7 +278,8 @@ def get_pending_approvals(level: Optional[str] = None):
                         (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
                         for r in l3_reviewers
                     )
-                    if is_l3:
+                    # Manager có thể xem tất cả hoặc user là L3 reviewer
+                    if is_manager or is_l3:
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
@@ -230,6 +333,12 @@ def get_pending_approvals(level: Optional[str] = None):
                                     "subject_eval": f"{r.get('subject_eval_l2_approved_count', 0)}/{r.get('subject_eval_total_count', 0)}",
                                     "intl": f"{r.get('intl_l2_approved_count', 0)}/{r.get('intl_total_count', 0)}"
                                 }
+                                # Mark as viewer only if manager không phải là actual L3 reviewer
+                                if is_manager and not is_l3:
+                                    r["is_viewer_only"] = True
+                                # Lấy approvers
+                                config_doc = frappe.get_doc("SIS Report Card Approval Config", config.name)
+                                r["approvers"] = _get_approvers_for_level("review", config=config_doc, campus_id=campus_id)
                                 if not any(existing["name"] == r["name"] for existing in results):
                                     results.append(r)
                 
@@ -244,7 +353,8 @@ def get_pending_approvals(level: Optional[str] = None):
                         (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
                         for r in l4_approvers
                     )
-                    if is_l4:
+                    # Manager có thể xem tất cả hoặc user là L4 approver
+                    if is_manager or is_l4:
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
@@ -262,6 +372,12 @@ def get_pending_approvals(level: Optional[str] = None):
                             )
                             for r in reports_l4:
                                 r["pending_level"] = "publish"
+                                # Mark as viewer only if manager không phải là actual L4 approver
+                                if is_manager and not is_l4:
+                                    r["is_viewer_only"] = True
+                                # Lấy approvers
+                                config_doc = frappe.get_doc("SIS Report Card Approval Config", config.name)
+                                r["approvers"] = _get_approvers_for_level("publish", config=config_doc, campus_id=campus_id)
                                 if r not in results:
                                     results.append(r)
         
@@ -352,6 +468,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
         user = frappe.session.user
         campus_id = get_current_campus_id()
         
+        # Check if user is manager (can view all reports)
+        is_manager = _is_manager_role(user)
+        
         teacher = frappe.get_all(
             "SIS Teacher",
             filters={"user_id": user, "campus_id": campus_id},
@@ -362,15 +481,31 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
         
         all_reports = []
         
+        # Cache templates và configs cho approvers lookup (dùng sau khi group)
+        template_cache = {}
+        config_cache = {}
+        
         # Level 1: Khối trưởng duyệt homeroom
         if not level or level == "level_1":
-            if teacher_id:
+            # Manager có thể xem tất cả, hoặc teacher có quyền duyệt
+            if is_manager or teacher_id:
+                # Manager xem tất cả templates có homeroom_reviewer_level_1
+                # Teacher chỉ xem templates mà mình là reviewer
+                l1_filters = {"campus_id": campus_id}
+                if not is_manager:
+                    l1_filters["homeroom_reviewer_level_1"] = teacher_id
+                else:
+                    l1_filters["homeroom_reviewer_level_1"] = ["is", "set"]  # Có người duyệt L1
+                
                 templates_l1 = frappe.get_all(
                     "SIS Report Card Template",
-                    filters={"homeroom_reviewer_level_1": teacher_id, "campus_id": campus_id},
-                    fields=["name", "title"]
+                    filters=l1_filters,
+                    fields=["name", "title", "homeroom_reviewer_level_1"]
                 )
                 for tmpl in templates_l1:
+                    # Cache template cho approvers lookup
+                    template_cache[tmpl.name] = tmpl
+                    
                     reports = frappe.get_all(
                         "SIS Student Report Card",
                         filters={
@@ -393,18 +528,31 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         if r.get("homeroom_rejection_reason") and r.get("rejected_from_level") == 2:
                             r["was_rejected"] = True
                             r["rejection_reason"] = r.get("homeroom_rejection_reason")
+                        # Mark as viewer only if manager không phải là actual approver
+                        if is_manager and tmpl.get("homeroom_reviewer_level_1") != teacher_id:
+                            r["is_viewer_only"] = True
                         all_reports.append(r)
         
         # Level 2: Tổ trưởng hoặc Subject Manager
         if not level or level == "level_2":
-            if teacher_id:
+            if is_manager or teacher_id:
                 # Tổ trưởng duyệt homeroom
+                l2_filters = {"campus_id": campus_id}
+                if not is_manager:
+                    l2_filters["homeroom_reviewer_level_2"] = teacher_id
+                else:
+                    l2_filters["homeroom_reviewer_level_2"] = ["is", "set"]
+                
                 templates_l2 = frappe.get_all(
                     "SIS Report Card Template",
-                    filters={"homeroom_reviewer_level_2": teacher_id, "campus_id": campus_id},
-                    fields=["name", "title"]
+                    filters=l2_filters,
+                    fields=["name", "title", "homeroom_reviewer_level_2"]
                 )
                 for tmpl in templates_l2:
+                    # Cache template
+                    if tmpl.name not in template_cache:
+                        template_cache[tmpl.name] = tmpl
+                    
                     reports = frappe.get_all(
                         "SIS Student Report Card",
                         filters={
@@ -429,25 +577,43 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             r["rejection_reason"] = r.get("homeroom_rejection_reason")
                         elif r.get("rejected_from_level") == 3 and r.get("rejected_section") in ["homeroom", "both"]:
                             r["was_rejected"] = True
+                        # Mark as viewer only if manager không phải là actual approver
+                        if is_manager and tmpl.get("homeroom_reviewer_level_2") != teacher_id:
+                            r["is_viewer_only"] = True
                         all_reports.append(r)
                 
                 # Subject Manager
-                managed_subjects = frappe.get_all(
-                    "SIS Actual Subject Manager",
-                    filters={"teacher_id": teacher_id},
-                    fields=["parent"]
-                )
+                # Lấy subjects mà teacher quản lý
+                managed_subjects = []
+                if teacher_id:
+                    managed_subjects = frappe.get_all(
+                        "SIS Actual Subject Manager",
+                        filters={"teacher_id": teacher_id},
+                        fields=["parent"]
+                    )
                 
-                if managed_subjects:
-                    subject_ids = [s.parent for s in managed_subjects]
-                    
-                    subject_info_map = {}
-                    for sid in subject_ids:
-                        subject_data = frappe.db.get_value(
-                            "SIS Actual Subject", sid, ["title_vn", "title_en"], as_dict=True
+                managed_subject_ids = [s.parent for s in managed_subjects] if managed_subjects else []
+                
+                # Manager xem tất cả subjects có pending L2
+                if is_manager or managed_subject_ids:
+                    # Lấy tất cả subjects (cho manager) hoặc chỉ managed subjects
+                    if is_manager:
+                        all_subjects = frappe.get_all(
+                            "SIS Actual Subject",
+                            filters={"campus_id": campus_id},
+                            fields=["name", "title_vn", "title_en"]
                         )
-                        if subject_data:
-                            subject_info_map[sid] = subject_data.title_vn or subject_data.title_en or sid
+                        subject_ids = [s.name for s in all_subjects]
+                        subject_info_map = {s.name: (s.title_vn or s.title_en or s.name) for s in all_subjects}
+                    else:
+                        subject_ids = managed_subject_ids
+                        subject_info_map = {}
+                        for sid in subject_ids:
+                            subject_data = frappe.db.get_value(
+                                "SIS Actual Subject", sid, ["title_vn", "title_en"], as_dict=True
+                            )
+                            if subject_data:
+                                subject_info_map[sid] = subject_data.title_vn or subject_data.title_en or sid
                     
                     all_templates = frappe.get_all(
                         "SIS Report Card Template",
@@ -530,6 +696,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                         r_copy["was_rejected"] = True
                                         r_copy["rejection_reason"] = subject_approval.get("rejection_reason")
                                         r_copy["rejected_from_level"] = subject_approval.get("rejected_from_level")
+                                    # Mark as viewer only if manager không phải là actual subject manager
+                                    if is_manager and sid not in managed_subject_ids:
+                                        r_copy["is_viewer_only"] = True
                                     all_reports.append(r_copy)
         
         # Level 3 & 4
@@ -541,6 +710,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
             )
             
             for config in configs:
+                # Cache config
+                config_cache[config.name] = config
+                
                 # L3 reviewer
                 if not level or level == "review":
                     l3_reviewers = frappe.get_all(
@@ -552,7 +724,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
                         for r in l3_reviewers
                     )
-                    if is_l3:
+                    # Manager có thể xem tất cả hoặc user là L3 reviewer
+                    if is_manager or is_l3:
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
@@ -603,6 +776,10 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 ) or None
                                 if r.get("rejected_from_level") == 4:
                                     r["was_rejected"] = True
+                                # Mark as viewer only if manager không phải là actual L3 reviewer
+                                if is_manager and not is_l3:
+                                    r["is_viewer_only"] = True
+                                r["_config_name"] = config.name  # Store để lấy approvers sau
                                 all_reports.append(r)
                 
                 # L4 approver
@@ -616,7 +793,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         (r.user_id == user or frappe.db.get_value("SIS Teacher", r.teacher_id, "user_id") == user)
                         for r in l4_approvers
                     )
-                    if is_l4:
+                    # Manager có thể xem tất cả hoặc user là L4 approver
+                    if is_manager or is_l4:
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
@@ -638,6 +816,10 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 r["pending_level"] = "publish"
                                 r["subject_id"] = None
                                 r["subject_title"] = "Toàn bộ báo cáo"
+                                # Mark as viewer only if manager không phải là actual L4 approver
+                                if is_manager and not is_l4:
+                                    r["is_viewer_only"] = True
+                                r["_config_name"] = config.name  # Store để lấy approvers sau
                                 all_reports.append(r)
         
         # Group by (template_id, class_id, subject_id, pending_level)
@@ -659,7 +841,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     "was_rejected": r.get("was_rejected", False),
                     "rejected_from_level": r.get("rejected_from_level"),
                     "rejected_section": r.get("rejected_section"),
-                    "report_ids": set()
+                    "report_ids": set(),
+                    "is_viewer_only": r.get("is_viewer_only", False),
+                    "_config_name": r.get("_config_name")  # Temporary for approvers lookup
                 }
             if r["name"] not in grouped[key]["report_ids"]:
                 grouped[key]["report_ids"].add(r["name"])
@@ -672,6 +856,9 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     grouped[key]["was_rejected"] = True
                     grouped[key]["rejected_from_level"] = r.get("rejected_from_level")
                     grouped[key]["rejected_section"] = r.get("rejected_section")
+                # Merge is_viewer_only - nếu bất kỳ report nào không phải viewer_only thì group không phải viewer_only
+                if not r.get("is_viewer_only", False):
+                    grouped[key]["is_viewer_only"] = False
         
         # Validate orphan records
         valid_template_ids = set()
@@ -700,6 +887,54 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
             )
             if class_info:
                 data["class_title"] = class_info.short_title or class_info.title
+            
+            # Lấy template doc nếu chưa có
+            template = template_cache.get(data["template_id"])
+            if not template:
+                template = frappe.db.get_value(
+                    "SIS Report Card Template",
+                    data["template_id"],
+                    ["name", "homeroom_reviewer_level_1", "homeroom_reviewer_level_2", "education_stage"],
+                    as_dict=True
+                )
+                if template:
+                    template_cache[data["template_id"]] = template
+            
+            # Lấy config doc nếu cần (cho L3, L4)
+            config = None
+            config_name = data.get("_config_name")
+            if config_name:
+                config = config_cache.get(config_name)
+                if not config:
+                    config = frappe.get_doc("SIS Report Card Approval Config", config_name)
+                    config_cache[config_name] = config
+            elif template and data["pending_level"] in ["review", "publish"]:
+                # Tìm config theo education_stage
+                config_results = frappe.get_all(
+                    "SIS Report Card Approval Config",
+                    filters={
+                        "education_stage_id": template.get("education_stage"),
+                        "campus_id": campus_id,
+                        "is_active": 1
+                    },
+                    fields=["name"]
+                )
+                if config_results:
+                    config = frappe.get_doc("SIS Report Card Approval Config", config_results[0].name)
+            
+            # Lấy danh sách approvers
+            approvers = _get_approvers_for_level(
+                level=data["pending_level"],
+                template=template,
+                config=config,
+                subject_id=data.get("subject_id"),
+                campus_id=campus_id
+            )
+            data["approvers"] = approvers
+            
+            # Clean up temporary field
+            if "_config_name" in data:
+                del data["_config_name"]
             
             results.append(data)
         
