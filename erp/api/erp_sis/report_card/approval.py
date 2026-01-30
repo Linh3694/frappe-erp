@@ -3011,7 +3011,9 @@ def reject_class_reports():
                     rejection_fields["rejected_by"]: user,
                     rejection_fields["rejection_reason"]: reason,
                     "rejected_from_level": rejected_from_level_value,
-                    "rejected_section": section,
+                    # ✅ FIX: Dùng detected_board_type thay vì section để Frontend hiển thị Alert đúng
+                    # Khi reject subject_eval, rejected_section phải = "subject_eval", không phải "scores"
+                    "rejected_section": detected_board_type if detected_board_type and detected_board_type != "all" else section,
                     "data_json": json.dumps(data_json, ensure_ascii=False)
                 }
                 
@@ -3023,6 +3025,11 @@ def reject_class_reports():
                         update_values["homeroom_l2_approved"] = 0
                     # Reset all_sections_l2_approved vì không còn đủ điều kiện
                     update_values["all_sections_l2_approved"] = 0
+                    
+                    # ✅ FIX: Reset scores_approval_status khi L3 reject VN boards (scores, subject_eval)
+                    # Điều này cho phép L2 filter được reports để approve/reject sau khi Entry submit lại
+                    if detected_board_type in ["scores", "subject_eval"]:
+                        update_values["scores_approval_status"] = "level_1_approved"
                 elif pending_level == "publish":
                     # L4 reject -> về L3: không cần reset L2 counters
                     # Chỉ cần đảm bảo approval_status quay về level_2_approved
