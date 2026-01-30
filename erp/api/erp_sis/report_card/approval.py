@@ -1086,11 +1086,16 @@ def review_report():
             if "SIS Manager" not in user_roles and "System Manager" not in user_roles:
                 return forbidden_response("Bạn không có quyền Review (Level 3) cho báo cáo này")
         
-        # Kiểm tra trạng thái
+        # Kiểm tra trạng thái - sử dụng cả approval_status và all_sections_l2_approved
         current_status = getattr(report, 'approval_status', 'draft') or 'draft'
-        if current_status != 'level_2_approved':
+        all_sections_approved = getattr(report, 'all_sections_l2_approved', 0)
+        
+        # ✅ FIX: Cho phép approve L3 nếu:
+        # 1. approval_status = 'level_2_approved' (cách cũ)
+        # 2. HOẶC all_sections_l2_approved = 1 (tất cả sections đã L2 approved)
+        if current_status != 'level_2_approved' and not all_sections_approved:
             return error_response(
-                message=f"Báo cáo cần ở trạng thái 'level_2_approved'. Hiện tại: '{current_status}'",
+                message=f"Báo cáo chưa đủ điều kiện Review. Trạng thái: '{current_status}', all_sections_l2_approved: {all_sections_approved}",
                 code="INVALID_STATUS"
             )
         
@@ -3306,9 +3311,12 @@ def review_batch_reports():
                     })
                     continue
                 
-                # Kiểm tra trạng thái
+                # Kiểm tra trạng thái - sử dụng cả approval_status và all_sections_l2_approved
                 current_status = getattr(report, 'approval_status', 'draft') or 'draft'
-                if current_status != 'level_2_approved':
+                all_sections_approved = getattr(report, 'all_sections_l2_approved', 0)
+                
+                # ✅ FIX: Cho phép review nếu approval_status = 'level_2_approved' HOẶC all_sections_l2_approved = 1
+                if current_status != 'level_2_approved' and not all_sections_approved:
                     skipped_count += 1
                     continue
                 
