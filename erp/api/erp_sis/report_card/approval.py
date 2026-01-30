@@ -2368,6 +2368,21 @@ def approve_class_reports():
         current_statuses = status_map[pending_level]["current"]
         next_status = status_map[pending_level]["next"]
         
+        # ✅ FIX: Check skip Level 2 cho homeroom khi approve Level 1
+        # Nếu template không có homeroom_reviewer_level_2, skip thẳng lên level_2_approved
+        skip_l2 = False
+        if pending_level == "level_1" and is_homeroom:
+            try:
+                template_for_skip = frappe.get_doc("SIS Report Card Template", template_id)
+                has_level_2 = bool(getattr(template_for_skip, 'homeroom_reviewer_level_2', None))
+                if not has_level_2:
+                    # Skip Level 2 - chuyển thẳng lên level_2_approved (chờ L3 review)
+                    next_status = "level_2_approved"
+                    skip_l2 = True
+                    frappe.logger().info(f"[APPROVE] Skip L2 cho homeroom - template {template_id} không có homeroom_reviewer_level_2")
+            except Exception as skip_check_err:
+                frappe.logger().warning(f"[APPROVE] Lỗi khi check skip L2: {str(skip_check_err)}")
+        
         # Lấy tất cả reports matching
         filters = {
             "template_id": template_id,
@@ -2594,6 +2609,12 @@ def approve_class_reports():
                     new_approval[f"level_{pending_level[-1]}_approved_at"] = str(now)
                     new_approval[f"level_{pending_level[-1]}_approved_by"] = user
                     
+                    # ✅ FIX: Khi skip L2 (pending_level = level_1 nhưng next_status = level_2_approved)
+                    # Cần set cả level_2_approved_at/by để timestamps đầy đủ
+                    if pending_level == "level_1" and next_status == "level_2_approved":
+                        new_approval["level_2_approved_at"] = str(now)
+                        new_approval["level_2_approved_by"] = user
+                    
                     data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, new_approval)
                 
                 # ========== UPDATE DATABASE ==========
@@ -2615,6 +2636,18 @@ def approve_class_reports():
                         by_field: user,
                         "data_json": json.dumps(data_json, ensure_ascii=False)
                     }
+                    
+                    # ✅ FIX: Khi skip L2 (homeroom L1 approve nhưng next_status = level_2_approved)
+                    # Cần update counters và check all_sections_l2_approved
+                    if next_status == "level_2_approved" and section == "homeroom":
+                        counters = _compute_approval_counters(data_json, template)
+                        update_values["homeroom_l2_approved"] = counters.get("homeroom_l2_approved", 0)
+                        # Cũng set level_2 timestamps
+                        update_values["homeroom_level_2_approved_at"] = now
+                        update_values["homeroom_level_2_approved_by"] = user
+                        if counters.get("all_sections_l2_approved", 0):
+                            update_values["approval_status"] = "level_2_approved"
+                            update_values["all_sections_l2_approved"] = 1
                 
                 # Nếu publish, cũng cập nhật status và is_approved
                 if pending_level == "publish":
