@@ -565,22 +565,19 @@ def get_report(report_id=None, **kwargs):
         )
 
     campus_id = get_current_campus_id()
-    report = frappe.get_all(
-        "SIS Student Report Card",
-        fields=[
-            "name", "title", "template_id", "form_id", "class_id", "student_id",
-            "school_year", "semester_part", "status", "data_json", "creation", "modified",
-            # Approval status fields
-            "approval_status", "homeroom_approval_status", "scores_approval_status",
-            # Rejection fields (chung)
-            "rejection_reason", "rejected_by", "rejected_at", "rejected_section", "rejected_from_level",
-            # Rejection fields (homeroom-specific)
-            "homeroom_rejection_reason", "homeroom_rejected_by", "homeroom_rejected_at",
-            # Rejection fields (scores-specific)
-            "scores_rejection_reason", "scores_rejected_by", "scores_rejected_at"
-        ],
-        filters={"name": report_id, "campus_id": campus_id}
-    )
+    
+    # ✅ FIX: Use raw SQL to bypass any ORM caching
+    report = frappe.db.sql("""
+        SELECT 
+            name, title, template_id, form_id, class_id, student_id,
+            school_year, semester_part, status, data_json, creation, modified,
+            approval_status, homeroom_approval_status, scores_approval_status,
+            rejection_reason, rejected_by, rejected_at, rejected_section, rejected_from_level,
+            homeroom_rejection_reason, homeroom_rejected_by, homeroom_rejected_at,
+            scores_rejection_reason, scores_rejected_by, scores_rejected_at
+        FROM `tabSIS Student Report Card`
+        WHERE name = %s AND campus_id = %s
+    """, (report_id, campus_id), as_dict=True)
 
     if not report:
         return not_found_response("Report card not found")
