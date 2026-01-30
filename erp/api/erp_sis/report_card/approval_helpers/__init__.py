@@ -31,6 +31,9 @@ from .helpers import (
     # Approval history
     add_approval_history,
     
+    # Data sync helpers
+    sync_data_json_with_db,
+    
     # Data JSON helpers
     get_subject_approval_from_data_json,
     set_subject_approval_in_data_json,
@@ -62,6 +65,7 @@ __all__ = [
     # Helpers
     "batch_operation_savepoint",
     "add_approval_history",
+    "sync_data_json_with_db",
     "get_subject_approval_from_data_json",
     "set_subject_approval_in_data_json",
     "detect_board_type_for_subject",

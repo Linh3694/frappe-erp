@@ -556,13 +556,15 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
-                            fields=["name", "title", "homeroom_enabled", "scores_enabled"]
+                            fields=["name", "title", "homeroom_enabled", "scores_enabled", "subject_eval_enabled"]
                         )
                         for tmpl in templates:
                             homeroom_enabled = tmpl.get("homeroom_enabled")
                             scores_enabled = tmpl.get("scores_enabled")
+                            subject_eval_enabled = tmpl.get("subject_eval_enabled")
                             
-                            if not homeroom_enabled and not scores_enabled:
+                            # ✅ FIX: Check cả subject_eval_enabled
+                            if not homeroom_enabled and not scores_enabled and not subject_eval_enabled:
                                 continue
                             
                             or_filters = []
@@ -570,6 +572,10 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 or_filters.append(["homeroom_approval_status", "=", "level_2_approved"])
                             if scores_enabled:
                                 or_filters.append(["scores_approval_status", "=", "level_2_approved"])
+                            # ✅ FIX: Thêm filter cho subject_eval (dùng scores_approval_status vì subject_eval share field này)
+                            # Hoặc check homeroom_l2_approved = 1 để bắt case homeroom đã L2 approved
+                            if subject_eval_enabled:
+                                or_filters.append(["homeroom_l2_approved", "=", 1])
                             
                             if not or_filters:
                                 continue
@@ -582,7 +588,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 },
                                 or_filters=or_filters,
                                 fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at",
-                                        "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section"]
+                                        "rejection_reason", "rejected_from_level", "rejected_at", "rejected_section",
+                                        "homeroom_l2_approved", "all_sections_l2_approved"]
                             )
                             for r in reports:
                                 r["template_id"] = tmpl.name

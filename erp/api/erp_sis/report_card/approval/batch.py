@@ -39,6 +39,7 @@ from ..approval_helpers.helpers import (
     update_report_counters,
     add_approval_history,
     send_report_card_notification,
+    sync_data_json_with_db,
 )
 
 
@@ -265,6 +266,10 @@ def submit_class_reports():
                            (section in ["scores", "subject_eval", "main_scores", "ielts", "comments"] and current_rejected_section in ["scores", "both"]):
                             update_values["rejected_section"] = ""
                             update_values["rejected_from_level"] = 0
+                
+                # ✅ FIX: Sync data_json với DB trước khi compute counters
+                # Đảm bảo homeroom approval không bị mất khi submit subject_eval
+                data_json = sync_data_json_with_db(report_data.name, data_json)
                 
                 # Compute counters
                 counters = compute_approval_counters(data_json, template)
@@ -654,6 +659,8 @@ def approve_class_reports():
                     }
                     
                     if next_status == "level_2_approved" and section == "homeroom":
+                        # ✅ FIX: Sync data_json trước khi compute counters
+                        data_json = sync_data_json_with_db(report_data.name, data_json)
                         counters = compute_approval_counters(data_json, template)
                         update_values["homeroom_l2_approved"] = counters.get("homeroom_l2_approved", 0)
                         update_values["homeroom_level_2_approved_at"] = now
@@ -1027,6 +1034,8 @@ def reject_class_reports():
                     try:
                         template = frappe.get_doc("SIS Report Card Template", template_id)
                         updated_data_json = json.loads(report.data_json or "{}")
+                        # ✅ FIX: Sync data_json trước khi compute counters
+                        updated_data_json = sync_data_json_with_db(report_data.name, updated_data_json)
                         new_counters = compute_approval_counters(updated_data_json, template)
                         report.homeroom_l2_approved = new_counters.get("homeroom_l2_approved", 0)
                         report.scores_l2_approved_count = new_counters.get("scores_l2_approved_count", 0)
@@ -1592,6 +1601,8 @@ def reject_single_report():
             report.data_json = json.dumps(data_json, ensure_ascii=False)
             
             if template:
+                # ✅ FIX: Sync data_json trước khi compute counters
+                data_json = sync_data_json_with_db(report.name, data_json)
                 counters = compute_approval_counters(data_json, template)
                 report.homeroom_l2_approved = counters.get("homeroom_l2_approved", 0)
                 report.scores_submitted_count = counters.get("scores_submitted_count", 0)
