@@ -2864,12 +2864,22 @@ def approve_class_reports():
                 # - Đây là homeroom (không có subject_id)
                 # - HOẶC Level 3, 4 (approve toàn bộ)
                 if subject_id and pending_level in ["level_1", "level_2"]:
-                    # Per-subject approve: CHỈ update data_json, KHÔNG update field chung
+                    # Per-subject approve: update data_json
                     update_values = {
                         at_field: now,
                         by_field: user,
                         "data_json": json.dumps(data_json, ensure_ascii=False)
                     }
+                    
+                    # ✅ FIX: Sau khi L2 approve per-subject, check all_sections_l2_approved
+                    # Nếu tất cả sections đã L2 approved, update approval_status chung
+                    if pending_level == "level_2":
+                        counters = _compute_approval_counters(data_json, template)
+                        if counters.get("all_sections_l2_approved", 0):
+                            update_values["approval_status"] = "level_2_approved"
+                            update_values["all_sections_l2_approved"] = 1
+                        # Cũng update scores_approval_status để consistent
+                        update_values["scores_approval_status"] = next_status
                 else:
                     # Homeroom hoặc Level 3, 4: update field chung như cũ
                     update_values = {
@@ -2878,6 +2888,13 @@ def approve_class_reports():
                         by_field: user,
                         "data_json": json.dumps(data_json, ensure_ascii=False)
                     }
+                    
+                    # ✅ FIX: Khi L2 approve homeroom, cũng check all_sections_l2_approved
+                    if pending_level == "level_2" and section == "homeroom":
+                        counters = _compute_approval_counters(data_json, template)
+                        if counters.get("all_sections_l2_approved", 0):
+                            update_values["approval_status"] = "level_2_approved"
+                            update_values["all_sections_l2_approved"] = 1
                 
                 # Nếu publish, cũng cập nhật status và is_approved
                 if pending_level == "publish":
