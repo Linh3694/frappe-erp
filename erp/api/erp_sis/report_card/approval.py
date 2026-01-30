@@ -685,6 +685,13 @@ def submit_class_reports():
                 except json.JSONDecodeError:
                     data_json = {}
                 
+                # ✅ FIX: Khởi tạo report_debug ở đầu loop để tránh lỗi "referenced before assignment"
+                report_debug = {
+                    "report": report_data.name,
+                    "section": section,
+                    "subject_id": subject_id
+                }
+                
                 # ========== CHECK APPROVAL STATUS TRONG DATA_JSON ==========
                 # Nếu có subject_id, check approval status của môn cụ thể
                 if subject_id and section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
@@ -692,11 +699,8 @@ def submit_class_reports():
                     current_subject_status = subject_approval.get("status", "draft")
                     
                     # ✅ DEBUG - collect info
-                    report_debug = {
-                        "report": report_data.name,
-                        "current_subject_status": current_subject_status,
-                        "target_status": target_status
-                    }
+                    report_debug["current_subject_status"] = current_subject_status
+                    report_debug["target_status"] = target_status
                     
                     # Cho phép submit nếu môn đang ở draft, entry, hoặc rejected
                     if current_subject_status not in ["draft", "entry", "rejected"]:
@@ -728,7 +732,13 @@ def submit_class_reports():
                     # ========== LOGIC CŨ CHO HOMEROOM HOẶC KHI KHÔNG CÓ SUBJECT_ID ==========
                     current_section_status = getattr(report_data, status_field, None) or 'draft'
                     
+                    # ✅ DEBUG - track homeroom status
+                    report_debug["current_section_status"] = current_section_status
+                    report_debug["target_status"] = target_status
+                    
                     if current_section_status not in ['draft', 'entry', 'rejected']:
+                        report_debug["action"] = f"SKIPPED - status '{current_section_status}' not in submittable list"
+                        debug_info.append(report_debug)
                         skipped_count += 1
                         continue
                     
