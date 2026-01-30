@@ -490,8 +490,8 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                     status = report.get("scores_approval_status") or "draft"
                 
                 # ✅ FIX: Logic cho Entry page
-                # Bị reject từ L3 → Entry KHÔNG cần action (L2 xử lý)
-                if rejected_from_level == 3:
+                # Bị reject từ L3/L4 → Entry KHÔNG cần action (L2 xử lý)
+                if rejected_from_level >= 3:
                     return False
                 
                 # Bị reject từ L2 → Entry cần resubmit
@@ -500,8 +500,14 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                 if rejected_from_level == 2:
                     return status in ["draft", "level_1_approved"]
                 
-                # Fallback: hiển thị nếu có rejection và status = draft
-                return status == "draft"
+                # ✅ FIX: Bị reject từ L1 → Entry cần sửa và resubmit
+                # L1 reject → status = "rejected", Entry cần hiển thị "Bị trả về"
+                # Chỉ hiển thị khi status = draft hoặc rejected (chưa resubmit)
+                if rejected_from_level == 1:
+                    return status in ["draft", "rejected"]
+                
+                # Fallback: hiển thị nếu có rejection và status = draft hoặc rejected
+                return status in ["draft", "rejected"]
             
             has_homeroom_rejection = any(
                 _is_still_rejected(r, 'homeroom')
@@ -544,15 +550,16 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                 def _entry_needs_action(status: str, from_level: int) -> bool:
                     """
                     Entry cần action (hiển thị rejection) khi:
-                    - Bị reject từ L2/L3 VÀ chưa resubmit lại
+                    - Bị reject từ L1/L2 VÀ chưa resubmit lại
                     - "Chưa resubmit" = status KHÔNG phải submitted trở lên SAU khi reject
                     
                     Logic:
+                    - Bị reject từ L1 → Entry nhận, cần sửa và resubmit → hiển thị khi status = draft/rejected
                     - Bị reject từ L2 → Entry nhận, cần resubmit → hiển thị khi status != submitted
-                    - Bị reject từ L3 → L2 nhận, Entry KHÔNG cần action → không hiển thị
+                    - Bị reject từ L3/L4 → L2 nhận, Entry KHÔNG cần action → không hiển thị
                     """
-                    # Nếu bị reject từ L3, Entry không cần action (L2 xử lý)
-                    if from_level == 3:
+                    # Nếu bị reject từ L3/L4, Entry không cần action (L2 xử lý)
+                    if from_level >= 3:
                         return False
                     
                     # Bị reject từ L2, Entry cần resubmit
@@ -563,8 +570,13 @@ def get_class_reports(class_id: Optional[str] = None, school_year: Optional[str]
                         # Nếu status = draft hoặc level_1_approved → chưa resubmit → hiển thị
                         return status in ["draft", "level_1_approved"]
                     
+                    # ✅ FIX: Bị reject từ L1, Entry cần sửa và resubmit
+                    # L1 reject → status = "rejected", Entry cần hiển thị "Bị trả về"
+                    if from_level == 1:
+                        return status in ["draft", "rejected"]
+                    
                     # Fallback cho các level khác
-                    return status == "draft"
+                    return status in ["draft", "rejected"]
                 
                 # Check homeroom rejection
                 if check_homeroom:
