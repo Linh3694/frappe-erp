@@ -690,8 +690,14 @@ def submit_class_reports():
                     subject_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
                     current_subject_status = subject_approval.get("status", "draft")
                     
+                    # ✅ DEBUG LOG
+                    frappe.logger().info(f"[SUBMIT_DEBUG] Report: {report_data.name}, Section: {section}, Subject: {subject_id}")
+                    frappe.logger().info(f"[SUBMIT_DEBUG] Current subject_status in data_json: {current_subject_status}")
+                    frappe.logger().info(f"[SUBMIT_DEBUG] Target status: {target_status}")
+                    
                     # Cho phép submit nếu môn đang ở draft, entry, hoặc rejected
                     if current_subject_status not in ["draft", "entry", "rejected"]:
+                        frappe.logger().info(f"[SUBMIT_DEBUG] SKIPPED - status not in submittable list")
                         skipped_count += 1
                         continue
                     
@@ -709,6 +715,10 @@ def submit_class_reports():
                         new_approval["rejected_from_level"] = None
                     
                     data_json = _set_subject_approval_in_data_json(data_json, section, subject_id, new_approval)
+                    
+                    # ✅ DEBUG LOG - verify data_json was updated
+                    updated_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
+                    frappe.logger().info(f"[SUBMIT_DEBUG] After update, data_json approval: {updated_approval}")
                     
                 else:
                     # ========== LOGIC CŨ CHO HOMEROOM HOẶC KHI KHÔNG CÓ SUBJECT_ID ==========
@@ -745,9 +755,13 @@ def submit_class_reports():
                 current_section_status = getattr(report_data, status_field, None) or 'draft'
                 status_order = ['draft', 'entry', 'rejected', 'submitted', 'level_1_approved', 'level_2_approved', 'reviewed', 'published']
                 
+                # ✅ DEBUG LOG
+                frappe.logger().info(f"[SUBMIT_DEBUG] Current {status_field}: {current_section_status}")
+                
                 # Nếu là homeroom hoặc không có subject_id → update field chung
                 if section == "homeroom" or not subject_id:
                     update_values[status_field] = target_status
+                    frappe.logger().info(f"[SUBMIT_DEBUG] Will update {status_field} to {target_status} (homeroom/no subject)")
                 else:
                     # Có subject_id (per-subject submit):
                     # ✅ FIX: Update field chung nếu target > current (upgrade, không downgrade)
@@ -755,10 +769,15 @@ def submit_class_reports():
                     current_idx = status_order.index(current_section_status) if current_section_status in status_order else 0
                     target_idx = status_order.index(target_status) if target_status in status_order else 0
                     
+                    frappe.logger().info(f"[SUBMIT_DEBUG] current_idx={current_idx}, target_idx={target_idx}")
+                    
                     if target_idx > current_idx:
                         # Target > current → upgrade scores_approval_status
                         # Cho phép L2 filter được reports
                         update_values[status_field] = target_status
+                        frappe.logger().info(f"[SUBMIT_DEBUG] Will UPGRADE {status_field} to {target_status}")
+                    else:
+                        frappe.logger().info(f"[SUBMIT_DEBUG] Will NOT update {status_field} (target <= current)")
                     # Nếu target <= current → giữ nguyên (tránh downgrade)
                 
                 # Cũng cập nhật approval_status chung nếu cả 2 section đều ở trạng thái tốt
@@ -819,6 +838,11 @@ def submit_class_reports():
                 })
                 update_values["approval_history"] = json.dumps(history, ensure_ascii=False)
                 
+                # ✅ DEBUG LOG - log update_values (without data_json which is too long)
+                debug_values = {k: v for k, v in update_values.items() if k != "data_json" and k != "approval_history"}
+                frappe.logger().info(f"[SUBMIT_DEBUG] Update values (excluding data_json): {debug_values}")
+                frappe.logger().info(f"[SUBMIT_DEBUG] data_json length: {len(update_values.get('data_json', ''))}")
+                
                 # Update database một lần duy nhất
                 frappe.db.set_value(
                     "SIS Student Report Card",
@@ -826,6 +850,9 @@ def submit_class_reports():
                     update_values,
                     update_modified=True
                 )
+                
+                # ✅ DEBUG LOG - verify after update
+                frappe.logger().info(f"[SUBMIT_DEBUG] Database updated for report {report_data.name}")
                 
                 submitted_count += 1
                 
