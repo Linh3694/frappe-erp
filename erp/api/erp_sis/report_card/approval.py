@@ -1440,11 +1440,12 @@ def get_pending_approvals(level: Optional[str] = None):
                             fields=["name"]
                         )
                         if templates:
+                            # ✅ FIX: Hiển thị cả reports đã reviewed (chờ publish) và published (để xem lại)
                             reports_l4 = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": ["in", [t.name for t in templates]],
-                                    "approval_status": "reviewed",
+                                    "approval_status": ["in", ["reviewed", "published"]],
                                     "campus_id": campus_id
                                 },
                                 fields=["name", "title", "student_id", "class_id", "approval_status"]
