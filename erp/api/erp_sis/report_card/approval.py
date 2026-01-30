@@ -2864,17 +2864,25 @@ def reject_class_reports():
         
         # Xác định status field và current_status dựa trên pending_level
         if pending_level in ["level_1", "level_2"]:
-            status_field = f"{section}_approval_status"
+            # ✅ FIX: Dùng cùng field với submit flow
+            # Homeroom có field riêng, còn VN boards (scores, subject_eval) và INTL đều dùng scores_approval_status
+            if section == "homeroom":
+                status_field = "homeroom_approval_status"
+            else:
+                status_field = "scores_approval_status"
+            
             status_map = {
                 "level_1": ["submitted"],
                 "level_2": ["submitted", "level_1_approved"]
             }
             # Rejection fields cho section-specific
+            # ✅ FIX: Dùng scores_ prefix cho VN boards (scores, subject_eval)
+            rejection_field_prefix = "homeroom" if section == "homeroom" else "scores"
             rejection_fields = {
                 "status_field": status_field,
-                "rejected_at": f"{section}_rejected_at",
-                "rejected_by": f"{section}_rejected_by",
-                "rejection_reason": f"{section}_rejection_reason"
+                "rejected_at": f"{rejection_field_prefix}_rejected_at",
+                "rejected_by": f"{rejection_field_prefix}_rejected_by",
+                "rejection_reason": f"{rejection_field_prefix}_rejection_reason"
             }
         else:
             status_field = "approval_status"
