@@ -750,16 +750,16 @@ def submit_class_reports():
                     update_values[status_field] = target_status
                 else:
                     # Có subject_id (per-subject submit):
-                    # Chỉ update field chung nếu nó chưa ở level cao hơn
+                    # ✅ FIX: Update field chung nếu target > current (upgrade, không downgrade)
+                    # Điều này đảm bảo L2 có thể filter được reports sau khi Entry submit
                     current_idx = status_order.index(current_section_status) if current_section_status in status_order else 0
                     target_idx = status_order.index(target_status) if target_status in status_order else 0
                     
-                    if target_idx >= current_idx:
-                        # Target >= current → có thể update (không downgrade)
-                        # Nhưng vẫn không nên update vì subject khác có thể ở level cao hơn
-                        # Giữ nguyên field chung, chỉ update data_json per-subject
-                        pass
-                    # Không update scores_approval_status để tránh DOWNGRADE
+                    if target_idx > current_idx:
+                        # Target > current → upgrade scores_approval_status
+                        # Cho phép L2 filter được reports
+                        update_values[status_field] = target_status
+                    # Nếu target <= current → giữ nguyên (tránh downgrade)
                 
                 # Cũng cập nhật approval_status chung nếu cả 2 section đều ở trạng thái tốt
                 current_general_status = report_data.approval_status or 'draft'
