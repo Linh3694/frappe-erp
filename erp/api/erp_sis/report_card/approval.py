@@ -670,7 +670,6 @@ def submit_class_reports():
         submitted_count = 0
         skipped_count = 0
         errors = []
-        debug_info = []  # ✅ Collect debug info to return in response
         
         now = datetime.now()
         
@@ -685,27 +684,14 @@ def submit_class_reports():
                 except json.JSONDecodeError:
                     data_json = {}
                 
-                # ✅ FIX: Khởi tạo report_debug ở đầu loop để tránh lỗi "referenced before assignment"
-                report_debug = {
-                    "report": report_data.name,
-                    "section": section,
-                    "subject_id": subject_id
-                }
-                
                 # ========== CHECK APPROVAL STATUS TRONG DATA_JSON ==========
                 # Nếu có subject_id, check approval status của môn cụ thể
                 if subject_id and section in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
                     subject_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
                     current_subject_status = subject_approval.get("status", "draft")
                     
-                    # ✅ DEBUG - collect info
-                    report_debug["current_subject_status"] = current_subject_status
-                    report_debug["target_status"] = target_status
-                    
                     # Cho phép submit nếu môn đang ở draft, entry, hoặc rejected
                     if current_subject_status not in ["draft", "entry", "rejected"]:
-                        report_debug["action"] = f"SKIPPED - status '{current_subject_status}' not in submittable list"
-                        debug_info.append(report_debug)
                         skipped_count += 1
                         continue
                     
@@ -724,21 +710,11 @@ def submit_class_reports():
                     
                     data_json = _set_subject_approval_in_data_json(data_json, section, subject_id, new_approval)
                     
-                    # ✅ DEBUG - verify data_json was updated
-                    updated_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
-                    report_debug["after_update_approval"] = updated_approval
-                    
                 else:
                     # ========== LOGIC CŨ CHO HOMEROOM HOẶC KHI KHÔNG CÓ SUBJECT_ID ==========
                     current_section_status = getattr(report_data, status_field, None) or 'draft'
                     
-                    # ✅ DEBUG - track homeroom status
-                    report_debug["current_section_status"] = current_section_status
-                    report_debug["target_status"] = target_status
-                    
                     if current_section_status not in ['draft', 'entry', 'rejected']:
-                        report_debug["action"] = f"SKIPPED - status '{current_section_status}' not in submittable list"
-                        debug_info.append(report_debug)
                         skipped_count += 1
                         continue
                     
@@ -769,31 +745,21 @@ def submit_class_reports():
                 current_section_status = getattr(report_data, status_field, None) or 'draft'
                 status_order = ['draft', 'entry', 'rejected', 'submitted', 'level_1_approved', 'level_2_approved', 'reviewed', 'published']
                 
-                # ✅ DEBUG - track current and target status
-                if subject_id:
-                    report_debug["current_doc_status"] = current_section_status
-                
                 # Nếu là homeroom hoặc không có subject_id → update field chung
                 if section == "homeroom" or not subject_id:
                     update_values[status_field] = target_status
                 else:
                     # Có subject_id (per-subject submit):
-                    # ✅ FIX: Update field chung nếu target > current (upgrade, không downgrade)
-                    # Điều này đảm bảo L2 có thể filter được reports sau khi Entry submit
+                    # Chỉ update field chung nếu nó chưa ở level cao hơn
                     current_idx = status_order.index(current_section_status) if current_section_status in status_order else 0
                     target_idx = status_order.index(target_status) if target_status in status_order else 0
                     
-                    report_debug["current_idx"] = current_idx
-                    report_debug["target_idx"] = target_idx
-                    
-                    if target_idx > current_idx:
-                        # Target > current → upgrade scores_approval_status
-                        # Cho phép L2 filter được reports
-                        update_values[status_field] = target_status
-                        report_debug["action"] = f"UPGRADE {status_field} from {current_section_status} to {target_status}"
-                    else:
-                        report_debug["action"] = f"KEEP {status_field} at {current_section_status} (target <= current)"
-                    # Nếu target <= current → giữ nguyên (tránh downgrade)
+                    if target_idx >= current_idx:
+                        # Target >= current → có thể update (không downgrade)
+                        # Nhưng vẫn không nên update vì subject khác có thể ở level cao hơn
+                        # Giữ nguyên field chung, chỉ update data_json per-subject
+                        pass
+                    # Không update scores_approval_status để tránh DOWNGRADE
                 
                 # Cũng cập nhật approval_status chung nếu cả 2 section đều ở trạng thái tốt
                 current_general_status = report_data.approval_status or 'draft'
@@ -853,11 +819,6 @@ def submit_class_reports():
                 })
                 update_values["approval_history"] = json.dumps(history, ensure_ascii=False)
                 
-                # ✅ DEBUG LOG - collect update_values (without data_json which is too long)
-                debug_values = {k: v for k, v in update_values.items() if k != "data_json" and k != "approval_history"}
-                if subject_id:
-                    report_debug["update_values"] = {k: str(v)[:100] for k, v in debug_values.items()}  # Truncate long values
-                
                 # Update database một lần duy nhất
                 frappe.db.set_value(
                     "SIS Student Report Card",
@@ -866,17 +827,10 @@ def submit_class_reports():
                     update_modified=True
                 )
                 
-                # ✅ DEBUG - add to debug_info
-                if subject_id:
-                    report_debug["db_updated"] = True
-                    debug_info.append(report_debug)
-                
                 submitted_count += 1
                 
             except Exception as e:
-                if subject_id:
-                    report_debug["error"] = str(e)
-                    debug_info.append(report_debug)
+                frappe.logger().error(f"Error submitting report {report_data.name}: {str(e)}")
                 errors.append({
                     "report_id": report_data.name,
                     "student_id": report_data.student_id,
@@ -884,47 +838,6 @@ def submit_class_reports():
                 })
         
         frappe.db.commit()
-        
-        # ✅ Clear cache để đảm bảo các request sau đọc data mới từ DB
-        frappe.clear_cache(doctype="SIS Student Report Card")
-        
-        # ✅ DEBUG: Verify ALL reports after commit using RAW SQL
-        verify_info = {"committed": True, "total_verified": 0, "missing_approval": []}
-        if submitted_count > 0 and subject_id:
-            try:
-                report_names = [r.name for r in reports]
-                # ✅ RAW SQL to verify ALL reports
-                raw_results = frappe.db.sql("""
-                    SELECT name, scores_approval_status, data_json 
-                    FROM `tabSIS Student Report Card` 
-                    WHERE name IN %s
-                """, (report_names,), as_dict=True)
-                
-                verify_info["total_verified"] = len(raw_results)
-                for raw_row in raw_results:
-                    raw_data_json = json.loads(raw_row.get("data_json") or "{}")
-                    raw_approval = _get_subject_approval_from_data_json(raw_data_json, section, subject_id)
-                    
-                    # Check nếu approval không có hoặc không đúng
-                    if not raw_approval or raw_approval.get("status") != target_status:
-                        verify_info["missing_approval"].append({
-                            "report": raw_row.get("name"),
-                            "scores_approval_status": raw_row.get("scores_approval_status"),
-                            "approval_status": raw_approval.get("status") if raw_approval else None,
-                            "has_subject_key": subject_id in raw_data_json.get(section, {})
-                        })
-                
-                # Sample first report for display
-                if raw_results:
-                    sample = raw_results[0]
-                    sample_data_json = json.loads(sample.get("data_json") or "{}")
-                    sample_approval = _get_subject_approval_from_data_json(sample_data_json, section, subject_id)
-                    verify_info["sample_report"] = sample.get("name")
-                    verify_info["sample_scores_approval_status"] = sample.get("scores_approval_status")
-                    verify_info["sample_approval"] = sample_approval
-                    
-            except Exception as ve:
-                verify_info["verify_error"] = str(ve)
         
         # Tên section cho thông báo
         section_name_map = {
@@ -953,12 +866,7 @@ def submit_class_reports():
                 "skipped_count": skipped_count,
                 "total_reports": len(reports),
                 "errors": errors if errors else None,
-                "subject_id": subject_id,
-                # ✅ DEBUG INFO
-                "debug_info": debug_info[:3] if len(debug_info) > 3 else debug_info,
-                "verify_after_commit": verify_info,
-                # ✅ List all report names được process
-                "all_report_names": [r.name for r in reports]
+                "subject_id": subject_id
             },
             message=result_message
         )
@@ -1050,13 +958,10 @@ def approve_level_2():
     """
     Subject Manager / Tổ trưởng duyệt (Level 2).
     
-    ✅ FIX: Đồng bộ cả approval_status, section-specific fields, và data_json
-    
     Request body:
         {
             "report_id": "...",
-            "subject_id": "..."  # Optional - cho Subject Manager (scores/subject_eval)
-            "board_type": "..."  # Optional - scores, subject_eval, main_scores, ielts, comments
+            "subject_id": "..."  # Optional - cho Subject Manager
             "comment": "..."  # Optional
         }
     """
@@ -1064,7 +969,6 @@ def approve_level_2():
         data = get_request_payload()
         report_id = data.get("report_id")
         subject_id = data.get("subject_id")
-        board_type = data.get("board_type")  # Để chỉ định rõ board type (scores, subject_eval, main_scores, ielts, comments)
         comment = data.get("comment", "")
         
         if not report_id:
@@ -1075,7 +979,6 @@ def approve_level_2():
         
         user = frappe.session.user
         campus_id = get_current_campus_id()
-        now = datetime.now()
         
         try:
             report = frappe.get_doc("SIS Student Report Card", report_id)
@@ -1088,20 +991,16 @@ def approve_level_2():
         # Lấy template
         template = frappe.get_doc("SIS Report Card Template", report.template_id)
         
-        # Parse data_json
+        # Lấy danh sách subject_ids từ data_json
+        subject_ids = []
         try:
             data_json = json.loads(report.data_json or "{}")
-        except json.JSONDecodeError:
-            data_json = {}
-        
-        # Lấy danh sách subject_ids từ data_json cho permission check
-        subject_ids = []
-        if "scores" in data_json:
-            subject_ids.extend(data_json["scores"].keys())
-        if "subject_eval" in data_json:
-            subject_ids.extend(data_json["subject_eval"].keys())
-        if "intl_scores" in data_json:
-            subject_ids.extend(data_json["intl_scores"].keys())
+            if "scores" in data_json:
+                subject_ids.extend(data_json["scores"].keys())
+            if "subject_eval" in data_json:
+                subject_ids.extend(data_json["subject_eval"].keys())
+        except Exception:
+            pass
         
         # Kiểm tra quyền Level 2
         if not _check_user_is_level_2_approver(user, template, subject_ids):
@@ -1109,123 +1008,21 @@ def approve_level_2():
             if "SIS Manager" not in user_roles and "System Manager" not in user_roles:
                 return forbidden_response("Bạn không có quyền duyệt Level 2 cho báo cáo này")
         
-        # ✅ FIX: Xác định section đang approve và kiểm tra trạng thái phù hợp
-        is_homeroom = not subject_id and not board_type
+        # Kiểm tra trạng thái
+        current_status = getattr(report, 'approval_status', 'draft') or 'draft'
+        # Cho phép duyệt từ submitted (nếu môn học skip L1) hoặc level_1_approved
+        if current_status not in ['submitted', 'level_1_approved']:
+            return error_response(
+                message=f"Báo cáo cần ở trạng thái 'submitted' hoặc 'level_1_approved'. Hiện tại: '{current_status}'",
+                code="INVALID_STATUS"
+            )
         
-        if is_homeroom:
-            # Homeroom approval - check homeroom_approval_status
-            homeroom_status = getattr(report, 'homeroom_approval_status', 'draft') or 'draft'
-            if homeroom_status not in ['submitted', 'level_1_approved']:
-                return error_response(
-                    message=f"Homeroom cần ở trạng thái 'submitted' hoặc 'level_1_approved'. Hiện tại: '{homeroom_status}'",
-                    code="INVALID_STATUS"
-                )
-            
-            # Update homeroom_approval_status
-            report.homeroom_approval_status = "level_2_approved"
-            report.homeroom_level_2_approved_at = now
-            report.homeroom_level_2_approved_by = user
-            
-            # Update data_json
-            if "homeroom" not in data_json:
-                data_json["homeroom"] = {}
-            if not isinstance(data_json["homeroom"], dict):
-                data_json["homeroom"] = {}
-            data_json["homeroom"]["approval"] = {
-                "status": "level_2_approved",
-                "level_2_approved_at": str(now),
-                "level_2_approved_by": user
-            }
-            
-            section_approved = "homeroom"
-        else:
-            # Scores/Subject approval
-            # Auto-detect board_type nếu không được chỉ định
-            if not board_type and subject_id:
-                # Tìm board_type từ data_json
-                for section_key in ["scores", "subject_eval", "main_scores", "ielts", "comments"]:
-                    section_approval = _get_subject_approval_from_data_json(data_json, section_key, subject_id)
-                    if section_approval.get("status") in ["submitted", "level_1_approved"]:
-                        board_type = section_key
-                        break
-                
-                if not board_type:
-                    board_type = "scores"  # Default
-            
-            # Check section-specific status
-            if board_type in ["scores", "subject_eval"]:
-                # VN boards - check từ data_json
-                if subject_id:
-                    subject_approval = _get_subject_approval_from_data_json(data_json, board_type, subject_id)
-                    subject_status = subject_approval.get("status", "draft")
-                    if subject_status not in ["submitted", "level_1_approved"]:
-                        return error_response(
-                            message=f"Môn học cần ở trạng thái 'submitted' hoặc 'level_1_approved'. Hiện tại: '{subject_status}'",
-                            code="INVALID_STATUS"
-                        )
-                else:
-                    scores_status = getattr(report, 'scores_approval_status', 'draft') or 'draft'
-                    if scores_status not in ['submitted', 'level_1_approved']:
-                        return error_response(
-                            message=f"Scores cần ở trạng thái 'submitted' hoặc 'level_1_approved'. Hiện tại: '{scores_status}'",
-                            code="INVALID_STATUS"
-                        )
-                
-                # Update scores_approval_status
-                report.scores_approval_status = "level_2_approved"
-                report.scores_level_2_approved_at = now
-                report.scores_level_2_approved_by = user
-                
-            elif board_type in ["main_scores", "ielts", "comments"]:
-                # INTL boards - check từ data_json
-                if subject_id:
-                    intl_approval = _get_subject_approval_from_data_json(data_json, board_type, subject_id)
-                    intl_status = intl_approval.get("status", "draft")
-                    if intl_status not in ["submitted", "level_1_approved"]:
-                        return error_response(
-                            message=f"Section {board_type} cần ở trạng thái 'submitted' hoặc 'level_1_approved'. Hiện tại: '{intl_status}'",
-                            code="INVALID_STATUS"
-                        )
-                
-                # INTL boards cũng dùng scores_approval_status cho backward compatibility
-                report.scores_approval_status = "level_2_approved"
-                report.scores_level_2_approved_at = now
-                report.scores_level_2_approved_by = user
-            
-            # Update data_json
-            if subject_id:
-                new_approval = {
-                    "status": "level_2_approved",
-                    "level_2_approved_at": str(now),
-                    "level_2_approved_by": user
-                }
-                data_json = _set_subject_approval_in_data_json(data_json, board_type, subject_id, new_approval)
-            
-            section_approved = board_type or "scores"
-        
-        # ✅ FIX: Update approval_status chung
+        # Cập nhật
         report.approval_status = "level_2_approved"
-        report.level_2_approved_at = now
+        report.level_2_approved_at = datetime.now()
         report.level_2_approved_by = user
         
-        # Save data_json
-        report.data_json = json.dumps(data_json, ensure_ascii=False)
-        
-        # ✅ FIX: Recompute counters
-        counters = _compute_approval_counters(data_json, template)
-        report.homeroom_l2_approved = counters.get("homeroom_l2_approved", 0)
-        report.scores_submitted_count = counters.get("scores_submitted_count", 0)
-        report.scores_l2_approved_count = counters.get("scores_l2_approved_count", 0)
-        report.scores_total_count = counters.get("scores_total_count", 0)
-        report.subject_eval_submitted_count = counters.get("subject_eval_submitted_count", 0)
-        report.subject_eval_l2_approved_count = counters.get("subject_eval_l2_approved_count", 0)
-        report.subject_eval_total_count = counters.get("subject_eval_total_count", 0)
-        report.intl_submitted_count = counters.get("intl_submitted_count", 0)
-        report.intl_l2_approved_count = counters.get("intl_l2_approved_count", 0)
-        report.intl_total_count = counters.get("intl_total_count", 0)
-        report.all_sections_l2_approved = counters.get("all_sections_l2_approved", 0)
-        
-        _add_approval_history(report, "level_2", user, "approved", f"Section: {section_approved}. {comment}")
+        _add_approval_history(report, "level_2", user, "approved", comment)
         
         report.save(ignore_permissions=True)
         frappe.db.commit()
@@ -1234,12 +1031,10 @@ def approve_level_2():
             data={
                 "report_id": report_id,
                 "approval_status": "level_2_approved",
-                "section_approved": section_approved,
-                "approved_at": str(now),
-                "approved_by": user,
-                "all_sections_l2_approved": report.all_sections_l2_approved
+                "approved_at": report.level_2_approved_at,
+                "approved_by": user
             },
-            message=f"Đã duyệt Level 2 [{section_approved}] thành công. Chuyển sang Review."
+            message="Đã duyệt Level 2 thành công. Chuyển sang Review."
         )
         
     except Exception as e:
@@ -1253,20 +1048,16 @@ def review_report():
     L3 Reviewer duyệt toàn bộ báo cáo.
     Chuyển approval_status -> 'reviewed'
     
-    ✅ FIX: Thêm check all_sections_l2_approved để đảm bảo tất cả sections đã L2 approved
-    
     Request body:
         {
             "report_id": "...",
             "comment": "..."  # Optional
-            "force": false  # Optional - bypass all_sections_l2_approved check (for SIS Manager)
         }
     """
     try:
         data = get_request_payload()
         report_id = data.get("report_id")
         comment = data.get("comment", "")
-        force = data.get("force", False)  # Cho phép SIS Manager bypass check
         
         if not report_id:
             return validation_error_response(
@@ -1276,7 +1067,6 @@ def review_report():
         
         user = frappe.session.user
         campus_id = get_current_campus_id()
-        now = datetime.now()
         
         try:
             report = frappe.get_doc("SIS Student Report Card", report_id)
@@ -1286,91 +1076,28 @@ def review_report():
         if report.campus_id != campus_id:
             return forbidden_response("Không có quyền truy cập báo cáo này")
         
-        # Lấy template
+        # Lấy education_stage từ template
         template = frappe.get_doc("SIS Report Card Template", report.template_id)
         education_stage = getattr(template, 'education_stage', None)
         
         # Kiểm tra quyền Level 3
-        user_roles = frappe.get_roles(user)
-        is_manager = "SIS Manager" in user_roles or "System Manager" in user_roles
         if not _check_user_is_level_3_reviewer(user, education_stage, campus_id):
-            if not is_manager:
+            user_roles = frappe.get_roles(user)
+            if "SIS Manager" not in user_roles and "System Manager" not in user_roles:
                 return forbidden_response("Bạn không có quyền Review (Level 3) cho báo cáo này")
-        
-        # ✅ FIX: Recompute counters từ data_json để có số liệu chính xác TRƯỚC KHI check status
-        try:
-            data_json = json.loads(report.data_json or "{}")
-        except json.JSONDecodeError:
-            data_json = {}
-        
-        counters = _compute_approval_counters(data_json, template)
-        all_sections_approved = counters.get("all_sections_l2_approved", 0)
         
         # Kiểm tra trạng thái
         current_status = getattr(report, 'approval_status', 'draft') or 'draft'
-        
-        # ✅ FIX: Cho phép review nếu:
-        # 1. approval_status == 'level_2_approved' (trường hợp bình thường)
-        # 2. HOẶC all_sections_l2_approved = 1 (backward compatibility cho reports đã approve trước fix)
-        if current_status != 'level_2_approved' and not all_sections_approved:
-            # Build debug info để hiểu tại sao không thể review
-            debug_info = {
-                "approval_status": current_status,
-                "all_sections_l2_approved": all_sections_approved,
-                "counters": counters
-            }
+        if current_status != 'level_2_approved':
             return error_response(
-                message=f"Báo cáo cần ở trạng thái 'level_2_approved'. Hiện tại: '{current_status}'. all_sections_l2_approved={all_sections_approved}",
-                code="INVALID_STATUS",
-                data=debug_info
-            )
-        
-        # ✅ FIX: Check all_sections_l2_approved
-        # Chỉ cho phép bypass nếu là SIS Manager và có force=True
-        if not all_sections_approved and not (is_manager and force):
-            # Build progress info cho error message
-            progress_info = []
-            homeroom_enabled = getattr(template, 'homeroom_enabled', False)
-            scores_enabled = getattr(template, 'scores_enabled', False)
-            subject_eval_enabled = getattr(template, 'subject_eval_enabled', False)
-            is_intl = getattr(template, 'program_type', 'vn') == 'intl'
-            
-            if homeroom_enabled:
-                h_status = "✓" if counters.get("homeroom_l2_approved", 0) else "✗"
-                progress_info.append(f"Homeroom: {h_status}")
-            if scores_enabled and not is_intl:
-                s_approved = counters.get("scores_l2_approved_count", 0)
-                s_total = counters.get("scores_total_count", 0)
-                progress_info.append(f"Scores: {s_approved}/{s_total}")
-            if subject_eval_enabled:
-                e_approved = counters.get("subject_eval_l2_approved_count", 0)
-                e_total = counters.get("subject_eval_total_count", 0)
-                progress_info.append(f"Eval: {e_approved}/{e_total}")
-            if is_intl:
-                i_approved = counters.get("intl_l2_approved_count", 0)
-                i_total = counters.get("intl_total_count", 0)
-                progress_info.append(f"INTL: {i_approved}/{i_total}")
-            
-            return error_response(
-                message=f"Chưa đủ điều kiện Review. Một số section chưa được L2 approve: {', '.join(progress_info)}",
-                code="INCOMPLETE_L2_APPROVAL",
-                data={"progress": progress_info, "counters": counters}
+                message=f"Báo cáo cần ở trạng thái 'level_2_approved'. Hiện tại: '{current_status}'",
+                code="INVALID_STATUS"
             )
         
         # Cập nhật
         report.approval_status = "reviewed"
-        report.reviewed_at = now
+        report.reviewed_at = datetime.now()
         report.reviewed_by = user
-        
-        # ✅ Update counters vào report
-        report.homeroom_l2_approved = counters.get("homeroom_l2_approved", 0)
-        report.scores_l2_approved_count = counters.get("scores_l2_approved_count", 0)
-        report.scores_total_count = counters.get("scores_total_count", 0)
-        report.subject_eval_l2_approved_count = counters.get("subject_eval_l2_approved_count", 0)
-        report.subject_eval_total_count = counters.get("subject_eval_total_count", 0)
-        report.intl_l2_approved_count = counters.get("intl_l2_approved_count", 0)
-        report.intl_total_count = counters.get("intl_total_count", 0)
-        report.all_sections_l2_approved = all_sections_approved
         
         _add_approval_history(report, "review", user, "approved", comment)
         
@@ -1381,9 +1108,8 @@ def review_report():
             data={
                 "report_id": report_id,
                 "approval_status": "reviewed",
-                "reviewed_at": str(now),
-                "reviewed_by": user,
-                "all_sections_l2_approved": all_sections_approved
+                "reviewed_at": report.reviewed_at,
+                "reviewed_by": user
             },
             message="Đã Review thành công. Chuyển sang phê duyệt xuất bản."
         )
@@ -1664,13 +1390,11 @@ def get_pending_approvals(level: Optional[str] = None):
                                 continue
                             
                             # Query với OR condition, include counters cho progress display
-                            # ✅ FIX: Loại trừ reports đã reviewed/published (chỉ hiển thị ở L4)
                             reports_l3 = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "campus_id": campus_id,
-                                    "approval_status": ["not in", ["reviewed", "published"]]  # ✅ FIX
+                                    "campus_id": campus_id
                                 },
                                 or_filters=or_filters,
                                 fields=[
@@ -1714,12 +1438,11 @@ def get_pending_approvals(level: Optional[str] = None):
                             fields=["name"]
                         )
                         if templates:
-                            # ✅ FIX: Bao gồm cả reviewed (chờ xuất bản) và published (đã xuất bản)
                             reports_l4 = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": ["in", [t.name for t in templates]],
-                                    "approval_status": ["in", ["reviewed", "published"]],
+                                    "approval_status": "reviewed",
                                     "campus_id": campus_id
                                 },
                                 fields=["name", "title", "student_id", "class_id", "approval_status"]
@@ -2411,14 +2134,12 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                                 continue
                             
                             # Lấy reports với OR condition
-                            # ✅ FIX: LOẠI TRỪ reports đã reviewed/published (chỉ hiển thị ở L4)
-                            # Bao gồm cả reports bị reject từ Level 4 (approval_status sẽ = 'level_2_approved' sau reject)
+                            # Bao gồm cả reports bị reject từ Level 4 (có rejection_reason)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "campus_id": campus_id,
-                                    "approval_status": ["not in", ["reviewed", "published"]]  # ✅ FIX: Loại trừ L4
+                                    "campus_id": campus_id
                                 },
                                 or_filters=or_filters,
                                 fields=["name", "class_id", "homeroom_submitted_at", "scores_submitted_at",
@@ -2458,15 +2179,15 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                             fields=["name", "title"]
                         )
                         for tmpl in templates:
-                            # Level 4: reviewed (chờ xuất bản) và published (đã xuất bản)
+                            # Level 4: approval_status = reviewed (toàn bộ report đã qua review)
                             reports = frappe.get_all(
                                 "SIS Student Report Card",
                                 filters={
                                     "template_id": tmpl.name,
-                                    "approval_status": ["in", ["reviewed", "published"]],
+                                    "approval_status": "reviewed",
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "class_id", "submitted_at", "submitted_by", "approval_status"]
+                                fields=["name", "class_id", "submitted_at", "submitted_by"]
                             )
                             for r in reports:
                                 r["template_id"] = tmpl.name
@@ -2880,22 +2601,12 @@ def approve_class_reports():
                 # - Đây là homeroom (không có subject_id)
                 # - HOẶC Level 3, 4 (approve toàn bộ)
                 if subject_id and pending_level in ["level_1", "level_2"]:
-                    # Per-subject approve: update data_json
+                    # Per-subject approve: CHỈ update data_json, KHÔNG update field chung
                     update_values = {
                         at_field: now,
                         by_field: user,
                         "data_json": json.dumps(data_json, ensure_ascii=False)
                     }
-                    
-                    # ✅ FIX: Sau khi L2 approve per-subject, check all_sections_l2_approved
-                    # Nếu tất cả sections đã L2 approved, update approval_status chung
-                    if pending_level == "level_2":
-                        counters = _compute_approval_counters(data_json, template)
-                        if counters.get("all_sections_l2_approved", 0):
-                            update_values["approval_status"] = "level_2_approved"
-                            update_values["all_sections_l2_approved"] = 1
-                        # Cũng update scores_approval_status để consistent
-                        update_values["scores_approval_status"] = next_status
                 else:
                     # Homeroom hoặc Level 3, 4: update field chung như cũ
                     update_values = {
@@ -2904,13 +2615,6 @@ def approve_class_reports():
                         by_field: user,
                         "data_json": json.dumps(data_json, ensure_ascii=False)
                     }
-                    
-                    # ✅ FIX: Khi L2 approve homeroom, cũng check all_sections_l2_approved
-                    if pending_level == "level_2" and section == "homeroom":
-                        counters = _compute_approval_counters(data_json, template)
-                        if counters.get("all_sections_l2_approved", 0):
-                            update_values["approval_status"] = "level_2_approved"
-                            update_values["all_sections_l2_approved"] = 1
                 
                 # Nếu publish, cũng cập nhật status và is_approved
                 if pending_level == "publish":
@@ -3071,33 +2775,24 @@ def reject_class_reports():
         if pending_level in ["level_1", "level_2"] and subject_id and section == "scores":
             use_per_subject_filter = True
         
-        # ✅ FIX: L3 (review): Dùng per-subject filter cho TẤT CẢ board_types
-        # Điều này cho phép reject section cụ thể từ L3 ngay cả khi approval_status == 'reviewed'
-        # (tương tự fix ở reject_single_report)
-        if pending_level == "review" and board_type:
+        # ✅ L3 (review): Dùng per-subject filter khi board_type là INTL section
+        # INTL approval được lưu trong data_json, không phải approval_status field
+        if pending_level == "review" and board_type in ["main_scores", "ielts", "comments"]:
             use_per_subject_filter = True
         
         # Xác định status field và current_status dựa trên pending_level
         if pending_level in ["level_1", "level_2"]:
-            # ✅ FIX: Dùng cùng field với submit flow
-            # Homeroom có field riêng, còn VN boards (scores, subject_eval) và INTL đều dùng scores_approval_status
-            if section == "homeroom":
-                status_field = "homeroom_approval_status"
-            else:
-                status_field = "scores_approval_status"
-            
+            status_field = f"{section}_approval_status"
             status_map = {
                 "level_1": ["submitted"],
                 "level_2": ["submitted", "level_1_approved"]
             }
             # Rejection fields cho section-specific
-            # ✅ FIX: Dùng scores_ prefix cho VN boards (scores, subject_eval)
-            rejection_field_prefix = "homeroom" if section == "homeroom" else "scores"
             rejection_fields = {
                 "status_field": status_field,
-                "rejected_at": f"{rejection_field_prefix}_rejected_at",
-                "rejected_by": f"{rejection_field_prefix}_rejected_by",
-                "rejection_reason": f"{rejection_field_prefix}_rejection_reason"
+                "rejected_at": f"{section}_rejected_at",
+                "rejected_by": f"{section}_rejected_by",
+                "rejection_reason": f"{section}_rejection_reason"
             }
         else:
             status_field = "approval_status"
@@ -3188,22 +2883,6 @@ def reject_class_reports():
                             if current_subject_status in current_statuses:
                                 found_valid_subject = True
                     
-                    elif board_type == "homeroom":
-                        # ✅ FIX: L3 homeroom không có subject_id: check homeroom approval
-                        homeroom_approval = _get_subject_approval_from_data_json(data_json, "homeroom", None)
-                        if homeroom_approval.get("status") in current_statuses:
-                            found_valid_subject = True
-                    
-                    elif board_type in ["scores", "subject_eval"]:
-                        # ✅ FIX: L3 VN boards không có subject_id: check tất cả subjects trong section
-                        section_data = data_json.get(board_type, {})
-                        for subj_id, subj_data in section_data.items():
-                            if isinstance(subj_data, dict):
-                                approval = subj_data.get("approval", {})
-                                if isinstance(approval, dict) and approval.get("status") in current_statuses:
-                                    found_valid_subject = True
-                                    break
-                    
                     elif board_type in ["main_scores", "ielts", "comments"]:
                         # ✅ L3 INTL không có subject_id: check tất cả subjects trong intl_scores
                         intl_scores_data = data_json.get("intl_scores", {})
@@ -3219,23 +2898,9 @@ def reject_class_reports():
                     if not found_valid_subject:
                         continue
                 
-                # ✅ FIX: Tính rollback status TRƯỚC để dùng trong rejection_info
-                # - L1 reject -> "rejected" (về Entry, Entry cần submit lại)
-                # - L2 reject -> "submitted" (về L1, Entry KHÔNG cần biết)
-                # - L3 reject -> "level_1_approved" (về L2, Entry KHÔNG cần biết)
-                # - L4 reject -> "level_2_approved" (về L3, Entry KHÔNG cần biết)
-                status_rollback_map = {
-                    "level_1": "rejected",           # L1 reject -> về Entry
-                    "level_2": "submitted",          # L2 reject -> về L1
-                    "review": "level_1_approved",    # L3 reject -> về L2
-                    "publish": "level_2_approved"    # L4 reject -> về L3
-                }
-                rollback_status = status_rollback_map.get(pending_level, "rejected")
-                
                 # Tạo rejection info cho data_json
-                # ✅ FIX: Dùng rollback_status thay vì "rejected" để Entry chỉ thấy "Gửi lại" khi L1 reject
                 rejection_info = {
-                    "status": rollback_status,
+                    "status": "rejected",
                     "rejection_reason": reason,
                     "rejected_from_level": rejected_from_level_value,
                     "rejected_by": user,
@@ -3280,29 +2945,6 @@ def reject_class_reports():
                     data_json = _set_subject_approval_in_data_json(data_json, detected_board_type, subject_id, rejection_info.copy())
                     frappe.logger().info(f"[REJECT] Per-subject reject: board_type={detected_board_type}, subject={subject_id}")
                     
-                elif pending_level == "review" and board_type == "homeroom":
-                    # ========== L3 HOMEROOM: REJECT HOMEROOM ==========
-                    detected_board_type = "homeroom"
-                    homeroom_approval = _get_subject_approval_from_data_json(data_json, "homeroom", None)
-                    if homeroom_approval.get("status") in current_statuses:
-                        data_json = _set_subject_approval_in_data_json(data_json, "homeroom", None, rejection_info.copy())
-                    
-                    frappe.logger().info(f"[REJECT] L3 homeroom reject")
-                
-                elif pending_level == "review" and board_type in ["scores", "subject_eval"]:
-                    # ========== L3 VN BOARDS: REJECT TẤT CẢ SUBJECTS TRONG BOARD_TYPE ==========
-                    detected_board_type = board_type
-                    section_data = data_json.get(board_type, {})
-                    
-                    # Reject tất cả subjects có approval status trong current_statuses
-                    for subj_id, subj_data in section_data.items():
-                        if isinstance(subj_data, dict):
-                            existing_approval = subj_data.get("approval", {})
-                            if isinstance(existing_approval, dict) and existing_approval.get("status") in current_statuses:
-                                subj_data["approval"] = rejection_info.copy()
-                    
-                    frappe.logger().info(f"[REJECT] L3 VN board reject: board_type={board_type}")
-                
                 elif pending_level == "review" and board_type in ["main_scores", "ielts", "comments"]:
                     # ========== L3 INTL: REJECT TẤT CẢ SUBJECTS TRONG BOARD_TYPE ==========
                     detected_board_type = board_type
@@ -3350,44 +2992,37 @@ def reject_class_reports():
                                         data_json["intl"][intl_section][subj_id]["approval"] = rejection_info.copy()
                 
                 # Update database fields bao gồm data_json và rejected_from_level
-                # rollback_status đã được tính ở trên (dùng chung cho cả data_json và doc-level)
+                # ✅ FIX: Set status để quay về level trước đó thay vì "rejected"
+                # - L1 reject -> "rejected" (về Entry)
+                # - L2 reject -> "submitted" (về L1)
+                # - L3 (review) reject -> "level_1_approved" (về L2)
+                # - L4 (publish) reject -> "level_2_approved" (về L3)
+                status_rollback_map = {
+                    "level_1": "rejected",           # L1 reject -> về Entry
+                    "level_2": "submitted",          # L2 reject -> về L1
+                    "review": "level_1_approved",    # L3 reject -> về L2
+                    "publish": "level_2_approved"    # L4 reject -> về L3
+                }
+                new_status = status_rollback_map.get(pending_level, "rejected")
                 
                 update_values = {
-                    rejection_fields["status_field"]: rollback_status,
+                    rejection_fields["status_field"]: new_status,
                     rejection_fields["rejected_at"]: now,
                     rejection_fields["rejected_by"]: user,
                     rejection_fields["rejection_reason"]: reason,
                     "rejected_from_level": rejected_from_level_value,
-                    # ✅ FIX: Dùng detected_board_type thay vì section để Frontend hiển thị Alert đúng
-                    # Khi reject subject_eval, rejected_section phải = "subject_eval", không phải "scores"
-                    "rejected_section": detected_board_type if detected_board_type and detected_board_type != "all" else section,
+                    "rejected_section": section,
                     "data_json": json.dumps(data_json, ensure_ascii=False)
                 }
                 
                 # ✅ FIX: Reset counters khi L3/L4 reject để báo cáo không còn xuất hiện trong list L3/L4
                 # Điều này đảm bảo báo cáo chỉ xuất hiện ở level đúng (level được rollback về)
-                if pending_level == "level_2":
-                    # L2 reject -> về Entry (L1 không có): reset scores_approval_status về "rejected"
-                    # Điều này cho phép Entry thấy nút "Gửi lại" và L2 không còn thấy report
-                    if detected_board_type in ["scores", "subject_eval"]:
-                        update_values["scores_approval_status"] = "rejected"
-                        # ✅ Cũng update data_json approval status về rejected
-                        if subject_id:
-                            rejection_info_with_rejected = rejection_info.copy()
-                            rejection_info_with_rejected["status"] = "rejected"
-                            data_json = _set_subject_approval_in_data_json(data_json, detected_board_type, subject_id, rejection_info_with_rejected)
-                            update_values["data_json"] = json.dumps(data_json, ensure_ascii=False)
-                elif pending_level == "review":
+                if pending_level == "review":
                     # L3 reject -> về L2: reset các counters L2 approved
                     if is_homeroom:
                         update_values["homeroom_l2_approved"] = 0
                     # Reset all_sections_l2_approved vì không còn đủ điều kiện
                     update_values["all_sections_l2_approved"] = 0
-                    
-                    # ✅ FIX: Reset scores_approval_status khi L3 reject VN boards (scores, subject_eval)
-                    # Điều này cho phép L2 filter được reports để approve/reject sau khi Entry submit lại
-                    if detected_board_type in ["scores", "subject_eval"]:
-                        update_values["scores_approval_status"] = "level_1_approved"
                 elif pending_level == "publish":
                     # L4 reject -> về L3: không cần reset L2 counters
                     # Chỉ cần đảm bảo approval_status quay về level_2_approved
@@ -3810,7 +3445,13 @@ def reject_single_report():
         scores_status = getattr(report, 'scores_approval_status', 'draft') or 'draft'
         now = datetime.now()
         
-        # ✅ Parse data_json để check approval (nguồn chính xác nhất)
+        # Xác định status cần check dựa trên section
+        # Level 3 reject theo section-specific status
+        # Level 4 reject theo approval_status chung (đã reviewed)
+        can_reject = False
+        current_status = approval_status  # Default cho error message
+        
+        # ✅ Parse data_json để check INTL approval (nếu cần)
         try:
             data_json = json.loads(report.data_json or "{}")
         except json.JSONDecodeError:
@@ -3838,153 +3479,52 @@ def reject_single_report():
         except Exception:
             is_intl_template = False
         
-        # ============================================================================
-        # ✅ FIX: L4 reject chỉ chuyển trạng thái, KHÔNG reject section cụ thể
-        # - Nếu approval_status == 'reviewed' → luôn là L4 reject (về L3)
-        # - Chỉ khi approval_status != 'reviewed' mới check section để L3 reject
-        # ============================================================================
-        can_reject = False
-        current_status = approval_status  # Default cho error message
-        reject_from_l3 = False  # Flag để biết đây là reject section cụ thể từ L3
-        
-        # ✅ FIX: L4 reject - chỉ chuyển trạng thái, không đụng section
         if approval_status == 'reviewed':
-            # Đang ở L4 (reviewed) → luôn là L4 reject, bỏ qua section parameter
+            # Có thể reject từ Level 4
             can_reject = True
             current_status = 'reviewed'
-            reject_from_l3 = False  # L4 reject, không phải L3
-        
-        # L3 reject - check section cụ thể
-        elif section == 'homeroom':
-            # ✅ Homeroom: Check từ data_json trước, fallback về doc field
-            homeroom_approval = _get_subject_approval_from_data_json(data_json, 'homeroom', None)
-            actual_homeroom_status = homeroom_approval.get('status') or homeroom_status
-            
-            # ✅ FIX: Homeroom có thể skip L2, nên cho phép reject nếu:
-            # - status = 'level_2_approved' (đi qua L2)
-            # - status = 'level_1_approved' VÀ report đã đến L3 
-            #   (approval_status = 'level_2_approved' hoặc 'reviewed')
-            #   → tức là homeroom skip L2 nhưng report đã sẵn sàng cho L3
-            # - status = 'level_1_approved' VÀ overall approval_status = 'level_1_approved' 
-            #   nhưng homeroom đã skip L2 (kiểm tra template config)
-            if actual_homeroom_status == 'level_2_approved':
-                # Homeroom đi qua L2 approved → có thể reject từ L3
-                can_reject = True
-                current_status = 'level_2_approved'
-                reject_from_l3 = True
-            elif actual_homeroom_status == 'level_1_approved' and approval_status in ['level_2_approved', 'reviewed']:
-                # Homeroom skip L2 (chỉ duyệt L1) nhưng report đã đến L3 → cho phép reject về L1
-                can_reject = True
-                current_status = 'level_1_approved'
-                reject_from_l3 = True
-            elif actual_homeroom_status == 'level_1_approved':
-                # ✅ FIX: Homeroom có thể đã skip cả L1 và L2, hoặc skip L2
-                # Kiểm tra template config để xác nhận homeroom có skip L2 không
-                try:
-                    template = frappe.get_doc("SIS Report Card Template", report.template_id)
-                    has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None))
-                    has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None))
-                    
-                    # Nếu không có L2 reviewer → homeroom skip L2 → cho phép reject từ L3
-                    if not has_level_2:
-                        can_reject = True
-                        current_status = 'level_1_approved'
-                        reject_from_l3 = True
-                except Exception:
-                    pass
-        
-        elif section == 'scores':
-            if subject_id:
-                # ✅ VN scores với môn cụ thể: check approval trong data_json
-                subject_approval = _get_subject_approval_from_data_json(data_json, 'scores', subject_id)
-                subject_status = subject_approval.get("status", "draft")
-                if subject_status == 'level_2_approved':
-                    can_reject = True
-                    current_status = 'level_2_approved'
-                    reject_from_l3 = True
-            elif detected_intl_section:
-                # ✅ INTL template với section='scores' nhưng đã detect được INTL section có L2 approved
-                can_reject = True
-                current_status = 'level_2_approved'
-                reject_from_l3 = True
-            else:
-                # Check từ doc field hoặc data_json
-                # Tìm bất kỳ subject nào trong scores có level_2_approved
-                scores_data = data_json.get('scores', {})
-                found_l2 = False
-                for subj_id, subj_data in scores_data.items():
-                    if isinstance(subj_data, dict):
-                        approval = subj_data.get('approval', {})
-                        if isinstance(approval, dict) and approval.get('status') == 'level_2_approved':
-                            found_l2 = True
-                            break
-                
-                if found_l2 or scores_status == 'level_2_approved':
-                    can_reject = True
-                    current_status = 'level_2_approved'
-                    reject_from_l3 = True
-        
-        elif section == 'subject_eval':
-            if subject_id:
-                # ✅ VN subject_eval với môn cụ thể: check approval trong data_json
-                subject_approval = _get_subject_approval_from_data_json(data_json, 'subject_eval', subject_id)
-                subject_status = subject_approval.get("status", "draft")
-                if subject_status == 'level_2_approved':
-                    can_reject = True
-                    current_status = 'level_2_approved'
-                    reject_from_l3 = True
-            else:
-                # Tìm bất kỳ subject nào trong subject_eval có level_2_approved
-                subject_eval_data = data_json.get('subject_eval', {})
-                found_l2 = False
-                for subj_id, subj_data in subject_eval_data.items():
-                    if isinstance(subj_data, dict):
-                        approval = subj_data.get('approval', {})
-                        if isinstance(approval, dict) and approval.get('status') == 'level_2_approved':
-                            found_l2 = True
-                            break
-                
-                if found_l2 or scores_status == 'level_2_approved':
-                    can_reject = True
-                    current_status = 'level_2_approved'
-                    reject_from_l3 = True
-        
+        elif section == 'homeroom' and homeroom_status == 'level_2_approved':
+            # Có thể reject homeroom từ Level 3
+            can_reject = True
+            current_status = 'level_2_approved'
+        elif section == 'scores' and scores_status == 'level_2_approved':
+            # Có thể reject scores từ Level 3
+            can_reject = True
+            current_status = 'level_2_approved'
+        elif section == 'scores' and detected_intl_section:
+            # ✅ INTL template với section='scores' nhưng đã detect được INTL section có L2 approved
+            # Không override section (vì rejected_section field chỉ chấp nhận 'homeroom', 'scores', 'both')
+            # Sử dụng detected_intl_section để xử lý reject INTL
+            can_reject = True
+            current_status = 'level_2_approved'
         elif section in ['main_scores', 'ielts', 'comments']:
             # ✅ INTL sections: Check approval trong data_json
+            # INTL approval được lưu tại intl_scores.{subject_id}.{section}_approval
             if subject_id:
                 intl_approval = _get_subject_approval_from_data_json(data_json, section, subject_id)
                 intl_status = intl_approval.get("status", "")
                 if intl_status == "level_2_approved":
                     can_reject = True
                     current_status = 'level_2_approved'
-                    reject_from_l3 = True
             else:
-                # Không có subject_id, check xem có bất kỳ subject nào đã L2 approved
+                # Không có subject_id, check xem có bất kỳ subject nào đã L2 approved trong section này không
                 intl_scores_data = data_json.get("intl_scores", {})
-                found_l2 = False
                 for subj_id, subj_data in intl_scores_data.items():
                     if isinstance(subj_data, dict):
                         approval_key = f"{section}_approval"
                         approval = subj_data.get(approval_key, {})
                         if isinstance(approval, dict) and approval.get("status") == "level_2_approved":
-                            found_l2 = True
+                            can_reject = True
+                            current_status = 'level_2_approved'
                             break
-                
-                if found_l2:
-                    can_reject = True
-                    current_status = 'level_2_approved'
-                    reject_from_l3 = True
-        
-        elif section == 'both':
-            # Check nếu có ít nhất 1 section level_2_approved
-            homeroom_approval = _get_subject_approval_from_data_json(data_json, 'homeroom', None)
-            homeroom_l2 = (homeroom_approval.get('status') == 'level_2_approved') or (homeroom_status == 'level_2_approved')
-            scores_l2 = scores_status == 'level_2_approved'
-            
-            if homeroom_l2 or scores_l2:
-                can_reject = True
-                current_status = 'level_2_approved'
-                reject_from_l3 = True
+        elif section == 'subject_eval' and scores_status == 'level_2_approved':
+            # Có thể reject subject_eval từ Level 3
+            can_reject = True
+            current_status = 'level_2_approved'
+        elif section == 'both' and (homeroom_status == 'level_2_approved' or scores_status == 'level_2_approved'):
+            # Có thể reject both nếu ÍT NHẤT một section đã level_2_approved
+            can_reject = True
+            current_status = 'level_2_approved'
         
         if not can_reject:
             return error_response(
@@ -4006,12 +3546,25 @@ def reject_single_report():
         }
         section_name = section_names.get(section, section)
         
-        # ✅ FIX: Sử dụng reject_from_l3 flag để xác định reject từ L3 hay L4
-        if reject_from_l3:
+        if current_status == 'reviewed':
+            # Từ L4 -> quay về L3: chỉ đổi approval_status chung
+            # L4 reject không phân biệt section (vì L3 review toàn bộ)
+            report.approval_status = 'level_2_approved'
+            report.rejected_from_level = 4
+            rejected_from_level = 4
+            target_level = 3
+            
+        else:  # level_2_approved (từ L3)
             # Từ L3 -> quay về L2: CHỈ reject section/môn được chọn
             report.rejected_from_level = 3
             rejected_from_level = 3
             target_level = 2
+            
+            # Parse data_json để update approval của môn cụ thể
+            try:
+                data_json = json.loads(report.data_json or "{}")
+            except json.JSONDecodeError:
+                data_json = {}
             
             # Lấy template để compute counters
             try:
@@ -4019,61 +3572,24 @@ def reject_single_report():
             except frappe.DoesNotExistError:
                 template = None
             
-            # ✅ FIX: Khi reject section cụ thể từ L3 nhưng báo cáo đã reviewed,
-            # approval_status chung cần quay về level_2_approved (chờ L3 review lại)
-            # Không phải level_1_approved (vì các section khác vẫn ở L2 approved)
-            was_reviewed = (approval_status == 'reviewed')
-            
             if section == 'homeroom':
-                # ✅ FIX: Xác định target status dựa vào template config và homeroom status hiện tại
-                # - Có L2 reviewer: reject về level_1_approved (chờ L2 duyệt lại)
-                # - Có L1 nhưng không L2: reject về submitted (chờ L1 duyệt lại)  
-                # - Không L1, không L2: reject về submitted (Entry resubmit)
-                homeroom_approval = _get_subject_approval_from_data_json(data_json, 'homeroom', None)
-                homeroom_was_l2 = (homeroom_approval.get('status') == 'level_2_approved') or (homeroom_status == 'level_2_approved')
-                
-                # ✅ FIX: Kiểm tra template config để xác định target status chính xác
-                has_level_1 = False
-                has_level_2 = False
-                if template:
-                    has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None))
-                    has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None))
-                
-                if homeroom_was_l2:
-                    # Homeroom đã qua L2 → reject về level_1_approved (chờ L2 duyệt lại)
-                    target_homeroom_status = 'level_1_approved'
-                elif has_level_2:
-                    # Có L2 reviewer → reject về level_1_approved (chờ L2 duyệt lại)
-                    target_homeroom_status = 'level_1_approved'
-                elif has_level_1:
-                    # Chỉ có L1 → reject về submitted (chờ L1 duyệt lại)
-                    target_homeroom_status = 'submitted'
-                else:
-                    # Không có L1 lẫn L2 → reject về submitted (Entry resubmit)
-                    target_homeroom_status = 'submitted'
-                
-                report.homeroom_approval_status = target_homeroom_status
+                # Reject homeroom -> quay về L2 cho Tổ trưởng
+                report.homeroom_approval_status = 'level_1_approved'
                 report.homeroom_rejection_reason = reason
                 report.homeroom_rejected_by = user
                 report.homeroom_rejected_at = now
                 report.homeroom_l2_approved = 0
-                
-                # ✅ FIX: approval_status chung đặt về level_2_approved nếu đã reviewed
-                # để báo cáo quay lại queue L3 sau khi section được approve lại
-                report.approval_status = 'level_2_approved' if was_reviewed else 'level_1_approved'
+                report.approval_status = 'level_1_approved'
                 
                 # Update approval trong data_json
-                if "homeroom" not in data_json:
-                    data_json["homeroom"] = {}
-                if not isinstance(data_json["homeroom"], dict):
-                    data_json["homeroom"] = {}
-                data_json["homeroom"]["approval"] = {
-                    "status": target_homeroom_status,
-                    "rejection_reason": reason,
-                    "rejected_from_level": 3,
-                    "rejected_by": user,
-                    "rejected_at": str(now)
-                }
+                if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
+                    data_json["homeroom"]["approval"] = {
+                        "status": "level_1_approved",
+                        "rejection_reason": reason,
+                        "rejected_from_level": 3,
+                        "rejected_by": user,
+                        "rejected_at": str(now)
+                    }
                 
             elif section in ['scores', 'subject_eval', 'main_scores', 'ielts', 'comments']:
                 # ✅ Xác định actual section để xử lý (ưu tiên detected_intl_section)
@@ -4101,12 +3617,10 @@ def reject_single_report():
                             report.scores_rejected_by = user
                             report.scores_rejected_at = now
                         
-                        # ✅ FIX: approval_status đặt về level_2_approved nếu đã reviewed
-                        report.approval_status = 'level_2_approved' if was_reviewed else 'level_1_approved'
+                        report.approval_status = 'level_1_approved'
                 else:
                     # Reject toàn bộ section (fallback behavior)
-                    # ✅ FIX: approval_status đặt về level_2_approved nếu đã reviewed
-                    report.approval_status = 'level_2_approved' if was_reviewed else 'level_1_approved'
+                    report.approval_status = 'level_1_approved'
                     
                     # ✅ Xử lý khác nhau cho VN sections và INTL sections
                     if actual_section in ['scores', 'subject_eval']:
@@ -4149,8 +3663,7 @@ def reject_single_report():
                 
             else:  # both
                 # Reject cả homeroom và scores
-                # ✅ FIX: approval_status đặt về level_2_approved nếu đã reviewed
-                report.approval_status = 'level_2_approved' if was_reviewed else 'level_1_approved'
+                report.approval_status = 'level_1_approved'
                 report.homeroom_approval_status = 'level_1_approved'
                 report.scores_approval_status = 'level_1_approved'
                 report.homeroom_l2_approved = 0
@@ -4164,17 +3677,14 @@ def reject_single_report():
                 report.scores_rejected_at = now
                 
                 # Update data_json cho homeroom
-                if "homeroom" not in data_json:
-                    data_json["homeroom"] = {}
-                if not isinstance(data_json["homeroom"], dict):
-                    data_json["homeroom"] = {}
-                data_json["homeroom"]["approval"] = {
-                    "status": "level_1_approved",
-                    "rejection_reason": reason,
-                    "rejected_from_level": 3,
-                    "rejected_by": user,
-                    "rejected_at": str(now)
-                }
+                if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
+                    data_json["homeroom"]["approval"] = {
+                        "status": "level_1_approved",
+                        "rejection_reason": reason,
+                        "rejected_from_level": 3,
+                        "rejected_by": user,
+                        "rejected_at": str(now)
+                    }
                 
                 # Update data_json cho scores
                 if "scores" in data_json:
@@ -4205,14 +3715,6 @@ def reject_single_report():
                 report.intl_l2_approved_count = counters.get("intl_l2_approved_count", 0)
                 report.intl_total_count = counters.get("intl_total_count", 0)
                 report.all_sections_l2_approved = counters.get("all_sections_l2_approved", 0)
-        
-        else:
-            # Từ L4 -> quay về L3: chỉ đổi approval_status chung
-            # L4 reject không phân biệt section (vì L3 review toàn bộ)
-            report.approval_status = 'level_2_approved'
-            report.rejected_from_level = 4
-            rejected_from_level = 4
-            target_level = 3
         
         _add_approval_history(
             report,
