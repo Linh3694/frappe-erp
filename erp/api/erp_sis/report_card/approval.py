@@ -3584,14 +3584,38 @@ def reject_single_report():
                             can_reject = True
                             current_status = 'level_2_approved'
                             break
-        elif section == 'subject_eval' and scores_status == 'level_2_approved':
-            # Có thể reject subject_eval từ Level 3
-            can_reject = True
-            current_status = 'level_2_approved'
-        elif section == 'both' and (homeroom_status == 'level_2_approved' or scores_status == 'level_2_approved'):
-            # Có thể reject both nếu ÍT NHẤT một section đã level_2_approved
-            can_reject = True
-            current_status = 'level_2_approved'
+        elif section == 'subject_eval':
+            # ✅ FIX: subject_eval có approval riêng trong data_json
+            # Check approval trong data_json hoặc counter field
+            subject_eval_l2_count = getattr(report, 'subject_eval_l2_approved_count', 0) or 0
+            
+            if subject_id:
+                # Check approval của môn cụ thể trong data_json
+                subject_eval_approval = _get_subject_approval_from_data_json(data_json, 'subject_eval', subject_id)
+                if subject_eval_approval.get("status") == "level_2_approved":
+                    can_reject = True
+                    current_status = 'level_2_approved'
+            elif subject_eval_l2_count > 0:
+                # Có ít nhất 1 môn subject_eval đã L2 approved
+                can_reject = True
+                current_status = 'level_2_approved'
+            else:
+                # Fallback: Check tất cả môn trong data_json
+                subject_eval_data = data_json.get("subject_eval", {})
+                for subj_id, subj_data in subject_eval_data.items():
+                    if isinstance(subj_data, dict):
+                        approval = subj_data.get("approval", {})
+                        if isinstance(approval, dict) and approval.get("status") == "level_2_approved":
+                            can_reject = True
+                            current_status = 'level_2_approved'
+                            break
+        elif section == 'both':
+            # ✅ FIX: Có thể reject both nếu ÍT NHẤT một section đã level_2_approved
+            # Bao gồm cả subject_eval
+            subject_eval_l2_count = getattr(report, 'subject_eval_l2_approved_count', 0) or 0
+            if homeroom_status == 'level_2_approved' or scores_status == 'level_2_approved' or subject_eval_l2_count > 0:
+                can_reject = True
+                current_status = 'level_2_approved'
         
         if not can_reject:
             return error_response(
@@ -3797,6 +3821,18 @@ def reject_single_report():
                         if isinstance(data_json["scores"][subj_id], dict):
                             data_json["scores"][subj_id]["approval"] = {
                                 "status": scores_target_status,
+                                "rejection_reason": reason,
+                                "rejected_from_level": 3,
+                                "rejected_by": user,
+                                "rejected_at": str(now)
+                            }
+                
+                # ✅ FIX: Update data_json cho subject_eval (nếu có)
+                if "subject_eval" in data_json:
+                    for subj_id in data_json["subject_eval"]:
+                        if isinstance(data_json["subject_eval"][subj_id], dict):
+                            data_json["subject_eval"][subj_id]["approval"] = {
+                                "status": scores_target_status,  # Cùng target với scores
                                 "rejection_reason": reason,
                                 "rejected_from_level": 3,
                                 "rejected_by": user,
