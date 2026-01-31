@@ -45,6 +45,58 @@ def batch_operation_savepoint():
 
 
 # =============================================================================
+# DATA SYNC HELPERS
+# =============================================================================
+
+def sync_data_json_with_db(report_name: str, data_json: dict) -> dict:
+    """
+    Sync data_json với database fields để tránh mismatch.
+    
+    Khi update homeroom/scores content, có thể data_json approval bị mất.
+    Function này đảm bảo approval status trong data_json match với database.
+    
+    Args:
+        report_name: ID của report
+        data_json: Parsed data_json object (sẽ được modify in-place)
+    
+    Returns:
+        data_json đã được sync
+    """
+    try:
+        db_fields = frappe.db.get_value(
+            "SIS Student Report Card",
+            report_name,
+            ["homeroom_approval_status", "scores_approval_status"],
+            as_dict=True
+        )
+        
+        if not db_fields:
+            return data_json
+        
+        l2_passed = [ApprovalStatus.LEVEL_2_APPROVED, ApprovalStatus.REVIEWED, ApprovalStatus.PUBLISHED]
+        
+        # Sync homeroom approval
+        homeroom_db_status = db_fields.get("homeroom_approval_status")
+        if homeroom_db_status and homeroom_db_status in l2_passed:
+            if "homeroom" not in data_json:
+                data_json["homeroom"] = {}
+            if "approval" not in data_json["homeroom"]:
+                data_json["homeroom"]["approval"] = {}
+            
+            # Chỉ sync nếu data_json chưa có status hoặc status thấp hơn
+            current_data_status = data_json["homeroom"].get("approval", {}).get("status")
+            if not current_data_status or current_data_status not in l2_passed:
+                data_json["homeroom"]["approval"]["status"] = homeroom_db_status
+                frappe.logger().info(f"[SYNC] Synced homeroom approval: {homeroom_db_status} for {report_name}")
+        
+        return data_json
+        
+    except Exception as sync_err:
+        frappe.logger().warning(f"[SYNC] Failed to sync data_json for {report_name}: {str(sync_err)}")
+        return data_json
+
+
+# =============================================================================
 # APPROVAL HISTORY
 # =============================================================================
 
