@@ -413,12 +413,19 @@ def get_pending_approvals(level: Optional[str] = None):
                             for r in reports_l3:
                                 r["pending_level"] = "review"
                                 r["is_complete"] = bool(r.get("all_sections_l2_approved"))
-                                r["progress"] = {
-                                    "homeroom_l2_approved": r.get("homeroom_l2_approved"),
-                                    "scores": f"{r.get('scores_l2_approved_count', 0)}/{r.get('scores_total_count', 0)}",
-                                    "subject_eval": f"{r.get('subject_eval_l2_approved_count', 0)}/{r.get('subject_eval_total_count', 0)}",
-                                    "intl": f"{r.get('intl_l2_approved_count', 0)}/{r.get('intl_total_count', 0)}"
+                                # Xây dựng progress object - loại bỏ các section không áp dụng cho program type
+                                progress_obj = {
+                                    "program_type": tmpl.get("program_type", "vn")
                                 }
+                                # Homeroom: chỉ thêm nếu không phải INTL (INTL không có homeroom section)
+                                if not is_intl:
+                                    progress_obj["homeroom_l2_approved"] = r.get("homeroom_l2_approved")
+                                    progress_obj["scores"] = f"{r.get('scores_l2_approved_count', 0)}/{r.get('scores_total_count', 0)}"
+                                    progress_obj["subject_eval"] = f"{r.get('subject_eval_l2_approved_count', 0)}/{r.get('subject_eval_total_count', 0)}"
+                                else:
+                                    # INTL: chỉ có intl progress
+                                    progress_obj["intl"] = f"{r.get('intl_l2_approved_count', 0)}/{r.get('intl_total_count', 0)}"
+                                r["progress"] = progress_obj
                                 # Mark as viewer only if manager không phải là actual L3 reviewer
                                 if is_manager and not is_l3:
                                     r["is_viewer_only"] = True
