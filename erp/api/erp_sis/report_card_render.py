@@ -1559,6 +1559,9 @@ def get_report_data(report_id: Optional[str] = None, filter_l2_approved: Optiona
             "form_config": standardized_data.get("form_config", {}),
             # ✅ Template config cho frontend reject dialog
             "template_config": template_config,
+            # ✅ Approval status để frontend biết trạng thái phê duyệt (cho nút Thu hồi)
+            "approval_status": getattr(report, "approval_status", "draft") or "draft",
+            "is_approved": getattr(report, "is_approved", 0) or 0,
             # ✨ REMOVED: Xóa scores ở top level để tránh trùng lặp với data.scores
             # Frontend nên đọc từ data.scores hoặc subjects array đã được chuẩn hóa
             # ✨ QUAN TRỌNG: Update data.subjects với standardized data để đảm bảo frontend không đọc subjects cũ
