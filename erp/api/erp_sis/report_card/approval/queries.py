@@ -439,15 +439,18 @@ def get_pending_approvals(level: Optional[str] = None):
                             for r in reports_l3:
                                 r["pending_level"] = "review"
                                 r["is_complete"] = bool(r.get("all_sections_l2_approved"))
-                                # Xây dựng progress object - loại bỏ các section không áp dụng cho program type
+                                # Xây dựng progress object - chỉ thêm các section được bật trong template
                                 progress_obj = {
                                     "program_type": tmpl.get("program_type", "vn")
                                 }
-                                # Homeroom: chỉ thêm nếu không phải INTL (INTL không có homeroom section)
                                 if not is_intl:
-                                    progress_obj["homeroom_l2_approved"] = r.get("homeroom_l2_approved")
-                                    progress_obj["scores"] = f"{r.get('scores_l2_approved_count', 0)}/{r.get('scores_total_count', 0)}"
-                                    progress_obj["subject_eval"] = f"{r.get('subject_eval_l2_approved_count', 0)}/{r.get('subject_eval_total_count', 0)}"
+                                    # VN program: chỉ thêm section nếu được bật trong template
+                                    if homeroom_enabled:
+                                        progress_obj["homeroom_l2_approved"] = r.get("homeroom_l2_approved")
+                                    if scores_enabled:
+                                        progress_obj["scores"] = f"{r.get('scores_l2_approved_count', 0)}/{r.get('scores_total_count', 0)}"
+                                    if subject_eval_enabled:
+                                        progress_obj["subject_eval"] = f"{r.get('subject_eval_l2_approved_count', 0)}/{r.get('subject_eval_total_count', 0)}"
                                 else:
                                     # INTL: chỉ có intl progress
                                     progress_obj["intl"] = f"{r.get('intl_l2_approved_count', 0)}/{r.get('intl_total_count', 0)}"

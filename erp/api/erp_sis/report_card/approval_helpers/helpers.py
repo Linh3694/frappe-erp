@@ -296,13 +296,14 @@ def compute_approval_counters(data_json: dict, template) -> dict:
         "intl_total_count": 0,
     }
     
-    # Homeroom
+    # Homeroom - check nếu status >= level_2_approved (bao gồm reviewed, published)
+    l2_passed_statuses = [ApprovalStatus.LEVEL_2_APPROVED, ApprovalStatus.REVIEWED, ApprovalStatus.PUBLISHED]
     if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
         h_approval = data_json["homeroom"].get("approval", {})
-        if h_approval.get("status") == ApprovalStatus.LEVEL_2_APPROVED:
+        if h_approval.get("status") in l2_passed_statuses:
             counters["homeroom_l2_approved"] = 1
     
-    # Scores
+    # Scores - check nếu status >= level_2_approved
     if "scores" in data_json and isinstance(data_json["scores"], dict):
         for subject_id, subject_data in data_json["scores"].items():
             if isinstance(subject_data, dict):
@@ -311,10 +312,10 @@ def compute_approval_counters(data_json: dict, template) -> dict:
                 status = approval.get("status", ApprovalStatus.DRAFT)
                 if status not in [ApprovalStatus.DRAFT, ApprovalStatus.ENTRY]:
                     counters["scores_submitted_count"] += 1
-                if status == ApprovalStatus.LEVEL_2_APPROVED:
+                if status in l2_passed_statuses:
                     counters["scores_l2_approved_count"] += 1
     
-    # Subject Eval
+    # Subject Eval - check nếu status >= level_2_approved
     if "subject_eval" in data_json and isinstance(data_json["subject_eval"], dict):
         for subject_id, subject_data in data_json["subject_eval"].items():
             if isinstance(subject_data, dict):
@@ -323,7 +324,7 @@ def compute_approval_counters(data_json: dict, template) -> dict:
                 status = approval.get("status", ApprovalStatus.DRAFT)
                 if status not in [ApprovalStatus.DRAFT, ApprovalStatus.ENTRY]:
                     counters["subject_eval_submitted_count"] += 1
-                if status == ApprovalStatus.LEVEL_2_APPROVED:
+                if status in l2_passed_statuses:
                     counters["subject_eval_l2_approved_count"] += 1
     
     # INTL - ✅ FIX: Read from new intl_scores structure
@@ -378,7 +379,7 @@ def compute_approval_counters(data_json: dict, template) -> dict:
                         status = approval.get("status", ApprovalStatus.DRAFT)
                         if status not in [ApprovalStatus.DRAFT, ApprovalStatus.ENTRY]:
                             counters["intl_submitted_count"] += 1
-                        if status == ApprovalStatus.LEVEL_2_APPROVED:
+                        if status in l2_passed_statuses:
                             counters["intl_l2_approved_count"] += 1
     
     # Backward compatibility: Also check old structure (intl.{section}.{subject_id})
@@ -392,7 +393,7 @@ def compute_approval_counters(data_json: dict, template) -> dict:
                         status = approval.get("status", ApprovalStatus.DRAFT)
                         if status not in [ApprovalStatus.DRAFT, ApprovalStatus.ENTRY]:
                             counters["intl_submitted_count"] += 1
-                        if status == ApprovalStatus.LEVEL_2_APPROVED:
+                        if status in l2_passed_statuses:
                             counters["intl_l2_approved_count"] += 1
     
     # Compute all_sections_l2_approved
