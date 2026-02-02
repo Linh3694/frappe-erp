@@ -534,3 +534,90 @@ def final_publish():
     except Exception as e:
         frappe.logger().error(f"Error in final_publish: {str(e)}")
         return error_response(f"Lỗi khi xuất bản: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def revoke_report():
+    """
+    Thu hồi báo cáo đã xuất bản.
+    Chuyển approval_status từ 'published' -> 'reviewed', set is_approved = 0.
+    Báo cáo sẽ ẩn khỏi Parent Portal và có thể trả về L3 hoặc xuất bản lại.
+    
+    Request body:
+        {
+            "report_id": "...",
+            "reason": "..."  # Optional - Lý do thu hồi
+        }
+    """
+    try:
+        data = get_request_payload()
+        report_id = data.get("report_id")
+        reason = data.get("reason", "").strip()
+        
+        if not report_id:
+            return validation_error_response(
+                message="report_id is required",
+                errors={"report_id": ["Required"]}
+            )
+        
+        user = frappe.session.user
+        campus_id = get_current_campus_id()
+        
+        try:
+            report = frappe.get_doc("SIS Student Report Card", report_id)
+        except frappe.DoesNotExistError:
+            return not_found_response("Báo cáo học tập không tồn tại")
+        
+        if report.campus_id != campus_id:
+            return forbidden_response("Không có quyền truy cập báo cáo này")
+        
+        # Lấy education_stage từ template để kiểm tra quyền
+        template = frappe.get_doc("SIS Report Card Template", report.template_id)
+        education_stage = getattr(template, 'education_stage', None)
+        
+        # Kiểm tra quyền Level 4 (chỉ người có quyền xuất bản mới được thu hồi)
+        if not check_user_is_level_4_approver(user, education_stage, campus_id):
+            user_roles = frappe.get_roles(user)
+            if "SIS Manager" not in user_roles and "System Manager" not in user_roles and "SIS BOD" not in user_roles:
+                return forbidden_response("Bạn không có quyền thu hồi báo cáo này. Chỉ người có quyền xuất bản (Level 4) mới được thu hồi.")
+        
+        # Kiểm tra trạng thái - chỉ cho phép thu hồi báo cáo đã published
+        current_status = getattr(report, 'approval_status', 'draft') or 'draft'
+        if current_status != 'published':
+            return error_response(
+                message=f"Chỉ có thể thu hồi báo cáo đã xuất bản. Trạng thái hiện tại: '{current_status}'",
+                code="INVALID_STATUS"
+            )
+        
+        # Cập nhật trạng thái - chuyển về reviewed để có thể trả lại hoặc xuất bản lại
+        report.approval_status = "reviewed"
+        report.is_approved = 0  # Ẩn khỏi Parent Portal
+        
+        # Thêm history với đầy đủ thông tin thu hồi
+        now = datetime.now()
+        comment = f"Thu hồi báo cáo đã xuất bản."
+        if reason:
+            comment += f" Lý do: {reason}"
+        add_approval_history(report, "revoke", user, "revoked", comment)
+        
+        report.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        frappe.logger().info(f"[REVOKE] Report {report_id} revoked by {user}. Reason: {reason or 'N/A'}")
+        
+        return success_response(
+            data={
+                "report_id": report_id,
+                "previous_status": "published",
+                "new_status": "reviewed",
+                "is_approved": 0,
+                "revoked_at": str(now),
+                "revoked_by": user,
+                "reason": reason or None
+            },
+            message="Đã thu hồi báo cáo thành công. Báo cáo đã ẩn khỏi Parent Portal và có thể trả về Level 3 hoặc xuất bản lại."
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error in revoke_report: {str(e)}")
+        return error_response(f"Lỗi khi thu hồi: {str(e)}")

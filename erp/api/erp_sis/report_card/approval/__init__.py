@@ -33,6 +33,7 @@ from .single import (
     approve_level_2,
     review_report,
     final_publish,
+    revoke_report,
 )
 
 # Batch operations
@@ -124,6 +125,7 @@ __all__ = [
     "approve_level_2",
     "review_report",
     "final_publish",
+    "revoke_report",
     
     # Batch operations
     "submit_class_reports",
