@@ -64,8 +64,8 @@
   {"fieldname": "homeroom_comment_options", "fieldtype": "Long Text", "label": "Homeroom Comment Options (JSON)"},
 
   {"fieldname": "homeroom_approvers_section", "fieldtype": "Section Break", "label": "Người duyệt Homeroom", "collapsible": 1},
-  {"fieldname": "homeroom_reviewer_level_1", "fieldtype": "Link", "label": "Khối trưởng (Level 1)", "options": "SIS Teacher"},
-  {"fieldname": "homeroom_reviewer_level_2", "fieldtype": "Link", "label": "Tổ trưởng (Level 2)", "options": "SIS Teacher"},
+  {"fieldname": "homeroom_reviewer_level_1", "fieldtype": "Small Text", "label": "Khối trưởng (Level 1) - JSON array"},
+  {"fieldname": "homeroom_reviewer_level_2", "fieldtype": "Small Text", "label": "Tổ trưởng (Level 2) - JSON array"},
 
   {"fieldname": "subject_eval_enabled", "fieldtype": "Check", "label": "Bật đánh giá môn học"},
   {"fieldname": "subjects", "fieldtype": "Table", "label": "Cấu hình môn học", "options": "SIS Report Card Subject Config"},

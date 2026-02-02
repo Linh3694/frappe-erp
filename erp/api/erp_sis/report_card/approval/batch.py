@@ -43,6 +43,20 @@ from ..approval_helpers.helpers import (
 )
 
 
+def _parse_reviewer_list(json_str):
+    """
+    Parse JSON string thành list teacher IDs.
+    Dùng cho homeroom_reviewer_level_1/2 multi-select.
+    """
+    if not json_str:
+        return []
+    try:
+        result = json.loads(json_str)
+        return result if isinstance(result, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 # =============================================================================
 # BATCH SUBMIT
 # =============================================================================
@@ -120,9 +134,9 @@ def submit_class_reports():
                 approval_message = "Đang chờ phê duyệt"
         
         elif section == "homeroom":
-            # Kiểm tra homeroom reviewers trong template
-            has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None))
-            has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None))
+            # Kiểm tra homeroom reviewers trong template (multi-select - JSON array)
+            has_level_1 = bool(_parse_reviewer_list(getattr(template, 'homeroom_reviewer_level_1', None)))
+            has_level_2 = bool(_parse_reviewer_list(getattr(template, 'homeroom_reviewer_level_2', None)))
             
             if has_level_1:
                 # Có L1 → chờ L1 duyệt
@@ -435,7 +449,8 @@ def approve_class_reports():
         if pending_level == "level_1" and is_homeroom:
             try:
                 template_for_skip = frappe.get_doc("SIS Report Card Template", template_id)
-                has_level_2 = bool(getattr(template_for_skip, 'homeroom_reviewer_level_2', None))
+                # Multi-select: check có ít nhất 1 reviewer L2
+                has_level_2 = bool(_parse_reviewer_list(getattr(template_for_skip, 'homeroom_reviewer_level_2', None)))
                 if not has_level_2:
                     next_status = "level_2_approved"
                     skip_l2 = True
@@ -994,8 +1009,9 @@ def reject_class_reports():
                 new_status = status_rollback_map.get(pending_level, "rejected")
                 
                 if pending_level == "review" and is_homeroom and template_for_rollback:
-                    has_homeroom_l2 = bool(getattr(template_for_rollback, 'homeroom_reviewer_level_2', None))
-                    has_homeroom_l1 = bool(getattr(template_for_rollback, 'homeroom_reviewer_level_1', None))
+                    # Multi-select: check có ít nhất 1 reviewer
+                    has_homeroom_l2 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_2', None)))
+                    has_homeroom_l1 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_1', None)))
                     
                     if has_homeroom_l2:
                         new_status = "level_1_approved"
@@ -1448,8 +1464,9 @@ def reject_single_report():
                 template = None
             
             if section == 'homeroom':
-                has_level_2 = bool(getattr(template, 'homeroom_reviewer_level_2', None)) if template else False
-                has_level_1 = bool(getattr(template, 'homeroom_reviewer_level_1', None)) if template else False
+                # Multi-select: check có ít nhất 1 reviewer
+                has_level_2 = bool(_parse_reviewer_list(getattr(template, 'homeroom_reviewer_level_2', None))) if template else False
+                has_level_1 = bool(_parse_reviewer_list(getattr(template, 'homeroom_reviewer_level_1', None))) if template else False
                 
                 if has_level_2:
                     homeroom_target_status = 'level_1_approved'
@@ -1539,8 +1556,9 @@ def reject_single_report():
                                     subj_data[approval_key] = rejection_info.copy()
                 
             else:  # both
-                has_homeroom_l2 = bool(getattr(template, 'homeroom_reviewer_level_2', None)) if template else False
-                has_homeroom_l1 = bool(getattr(template, 'homeroom_reviewer_level_1', None)) if template else False
+                # Multi-select: check có ít nhất 1 reviewer
+                has_homeroom_l2 = bool(_parse_reviewer_list(getattr(template, 'homeroom_reviewer_level_2', None))) if template else False
+                has_homeroom_l1 = bool(_parse_reviewer_list(getattr(template, 'homeroom_reviewer_level_1', None))) if template else False
                 
                 if has_homeroom_l2:
                     homeroom_target_status = 'level_1_approved'

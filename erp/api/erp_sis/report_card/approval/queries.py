@@ -33,6 +33,27 @@ from ..approval_helpers.helpers import (
 # HELPER FUNCTIONS
 # =============================================================================
 
+def _parse_reviewer_list(json_str):
+    """
+    Parse JSON string thành list teacher IDs.
+    Dùng cho homeroom_reviewer_level_1/2 multi-select.
+    """
+    if not json_str:
+        return []
+    try:
+        result = json.loads(json_str)
+        return result if isinstance(result, list) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _teacher_in_reviewers(teacher_id, json_str):
+    """
+    Check teacher có trong danh sách reviewers không.
+    """
+    return teacher_id in _parse_reviewer_list(json_str)
+
+
 def _is_manager_role(user):
     """
     Check if user has SIS Manager, SIS BOD, or System Manager role.
@@ -73,20 +94,20 @@ def _get_approvers_for_level(level, template=None, config=None, subject_id=None,
     approvers = []
     
     if level == "level_1" and template:
-        # L1: Khối trưởng từ template
-        reviewer_id = template.get("homeroom_reviewer_level_1")
-        if reviewer_id:
+        # L1: Khối trưởng từ template (multi-select - JSON array)
+        reviewer_ids = _parse_reviewer_list(template.get("homeroom_reviewer_level_1"))
+        for reviewer_id in reviewer_ids:
             name = _get_teacher_name(reviewer_id)
-            if name:
+            if name and name not in approvers:
                 approvers.append(name)
     
     elif level == "level_2":
         if template:
-            # L2 Homeroom: Tổ trưởng từ template
-            reviewer_id = template.get("homeroom_reviewer_level_2")
-            if reviewer_id:
+            # L2 Homeroom: Tổ trưởng từ template (multi-select - JSON array)
+            reviewer_ids = _parse_reviewer_list(template.get("homeroom_reviewer_level_2"))
+            for reviewer_id in reviewer_ids:
                 name = _get_teacher_name(reviewer_id)
-                if name:
+                if name and name not in approvers:
                     approvers.append(name)
         
         if subject_id:
@@ -164,14 +185,16 @@ def get_pending_approvals(level: Optional[str] = None):
         
         results = []
         
-        # Level 1: Kiểm tra các template có homeroom_reviewer_level_1 là teacher này
+        # Level 1: Kiểm tra các template có homeroom_reviewer_level_1 chứa teacher này (multi-select)
         if not level or level == "level_1":
             if teacher_id:
-                templates_l1 = frappe.get_all(
+                # Lấy tất cả templates và filter bằng Python (vì field là JSON)
+                all_templates_for_l1 = frappe.get_all(
                     "SIS Report Card Template",
-                    filters={"homeroom_reviewer_level_1": teacher_id, "campus_id": campus_id},
-                    fields=["name"]
+                    filters={"campus_id": campus_id},
+                    fields=["name", "homeroom_reviewer_level_1"]
                 )
+                templates_l1 = [t for t in all_templates_for_l1 if _teacher_in_reviewers(teacher_id, t.homeroom_reviewer_level_1)]
                 if templates_l1:
                     reports_l1 = frappe.get_all(
                         "SIS Student Report Card",
@@ -194,7 +217,8 @@ def get_pending_approvals(level: Optional[str] = None):
                     filters={"campus_id": campus_id},
                     fields=["name", "homeroom_reviewer_level_1"]
                 )
-                template_ids_with_l1 = [t.name for t in all_l1_templates if t.get("homeroom_reviewer_level_1")]
+                # Check có ít nhất 1 reviewer trong danh sách (multi-select)
+                template_ids_with_l1 = [t.name for t in all_l1_templates if _parse_reviewer_list(t.get("homeroom_reviewer_level_1"))]
                 if template_ids_with_l1:
                     reports_l1 = frappe.get_all(
                         "SIS Student Report Card",
@@ -212,15 +236,16 @@ def get_pending_approvals(level: Optional[str] = None):
                         r["is_viewer_only"] = True
                         results.append(r)
         
-        # Level 2: Kiểm tra templates có homeroom_reviewer_level_2 hoặc subject managers
+        # Level 2: Kiểm tra templates có homeroom_reviewer_level_2 chứa teacher hoặc subject managers
         if not level or level == "level_2":
             if teacher_id:
-                # Tổ trưởng
-                templates_l2 = frappe.get_all(
+                # Tổ trưởng (multi-select - lấy tất cả và filter bằng Python)
+                all_templates_for_l2 = frappe.get_all(
                     "SIS Report Card Template",
-                    filters={"homeroom_reviewer_level_2": teacher_id, "campus_id": campus_id},
-                    fields=["name"]
+                    filters={"campus_id": campus_id},
+                    fields=["name", "homeroom_reviewer_level_2"]
                 )
+                templates_l2 = [t for t in all_templates_for_l2 if _teacher_in_reviewers(teacher_id, t.homeroom_reviewer_level_2)]
                 if templates_l2:
                     reports_l2 = frappe.get_all(
                         "SIS Student Report Card",
@@ -288,13 +313,14 @@ def get_pending_approvals(level: Optional[str] = None):
             if is_manager:
                 existing_l2_names = set(r["name"] for r in results if r.get("pending_level") == "level_2")
                 
-                # L2 Homeroom
+                # L2 Homeroom (multi-select)
                 all_l2_templates = frappe.get_all(
                     "SIS Report Card Template",
                     filters={"campus_id": campus_id},
                     fields=["name", "homeroom_reviewer_level_2"]
                 )
-                template_ids_with_l2 = [t.name for t in all_l2_templates if t.get("homeroom_reviewer_level_2")]
+                # Check có ít nhất 1 reviewer trong danh sách (multi-select)
+                template_ids_with_l2 = [t.name for t in all_l2_templates if _parse_reviewer_list(t.get("homeroom_reviewer_level_2"))]
                 if template_ids_with_l2:
                     reports_l2 = frappe.get_all(
                         "SIS Student Report Card",
@@ -585,15 +611,16 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
         template_cache = {}
         config_cache = {}
         
-        # Level 1: Khối trưởng duyệt homeroom
+        # Level 1: Khối trưởng duyệt homeroom (multi-select)
         if not level or level == "level_1":
-            # Teacher có quyền duyệt L1
+            # Teacher có quyền duyệt L1 (filter bằng Python vì field là JSON)
             if teacher_id:
-                templates_l1 = frappe.get_all(
+                all_templates_for_l1 = frappe.get_all(
                     "SIS Report Card Template",
-                    filters={"homeroom_reviewer_level_1": teacher_id, "campus_id": campus_id},
+                    filters={"campus_id": campus_id},
                     fields=["name", "title", "homeroom_reviewer_level_1"]
                 )
+                templates_l1 = [t for t in all_templates_for_l1 if _teacher_in_reviewers(teacher_id, t.homeroom_reviewer_level_1)]
                 for tmpl in templates_l1:
                     # Cache template cho approvers lookup
                     template_cache[tmpl.name] = tmpl
@@ -633,7 +660,8 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                 existing_report_names = set(r.get("name") for r in all_reports if r.get("pending_level") == "level_1")
                 
                 for tmpl in all_l1_templates:
-                    if not tmpl.get("homeroom_reviewer_level_1"):
+                    # Check có ít nhất 1 reviewer (multi-select)
+                    if not _parse_reviewer_list(tmpl.get("homeroom_reviewer_level_1")):
                         continue
                     template_cache[tmpl.name] = tmpl
                     
@@ -666,15 +694,16 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                         all_reports.append(r)
                         existing_report_names.add(r["name"])
         
-        # Level 2: Tổ trưởng hoặc Subject Manager
+        # Level 2: Tổ trưởng hoặc Subject Manager (multi-select)
         if not level or level == "level_2":
             if teacher_id:
-                # Tổ trưởng duyệt homeroom
-                templates_l2 = frappe.get_all(
+                # Tổ trưởng duyệt homeroom (filter bằng Python vì field là JSON)
+                all_templates_for_l2 = frappe.get_all(
                     "SIS Report Card Template",
-                    filters={"homeroom_reviewer_level_2": teacher_id, "campus_id": campus_id},
+                    filters={"campus_id": campus_id},
                     fields=["name", "title", "homeroom_reviewer_level_2"]
                 )
+                templates_l2 = [t for t in all_templates_for_l2 if _teacher_in_reviewers(teacher_id, t.homeroom_reviewer_level_2)]
                 for tmpl in templates_l2:
                     # Cache template
                     if tmpl.name not in template_cache:
@@ -816,14 +845,15 @@ def get_pending_approvals_grouped(level: Optional[str] = None):
                     if r.get("pending_level") == "level_2"
                 )
                 
-                # L2 Homeroom - Lấy tất cả templates có người duyệt L2
+                # L2 Homeroom - Lấy tất cả templates có người duyệt L2 (multi-select)
                 all_l2_templates = frappe.get_all(
                     "SIS Report Card Template",
                     filters={"campus_id": campus_id},
                     fields=["name", "title", "homeroom_reviewer_level_2"]
                 )
                 for tmpl in all_l2_templates:
-                    if not tmpl.get("homeroom_reviewer_level_2"):
+                    # Check có ít nhất 1 reviewer (multi-select)
+                    if not _parse_reviewer_list(tmpl.get("homeroom_reviewer_level_2")):
                         continue
                     if tmpl.name not in template_cache:
                         template_cache[tmpl.name] = tmpl
