@@ -396,71 +396,63 @@ def get_student_subject_teachers():
         class_ids = [cs.class_id for cs in class_students if cs.class_id]
         logs.append(f"✅ Found {len(class_ids)} classes for student: {class_ids}")
 
-        # Step 2: Get all subjects for this student from SIS Student Subject
-        student_subjects = frappe.get_all(
-            "SIS Student Subject",
-            filters={
-                "student_id": student_id,
-                "class_id": ["in", class_ids]
-            },
-            fields=["subject_id", "actual_subject_id", "class_id"],
-            ignore_permissions=True
-        )
+        # Step 2: Get all subject assignments for these classes
+        # Query trực tiếp từ SIS Subject Assignment thay vì đi qua SIS Student Subject
+        # Cách này lấy được TẤT CẢ môn học được dạy trong lớp, không phụ thuộc vào việc
+        # học sinh đã có records trong SIS Student Subject hay chưa
+        subject_assignments = frappe.db.sql("""
+            SELECT DISTINCT
+                sa.actual_subject_id,
+                sa.class_id,
+                sa.teacher_id
+            FROM `tabSIS Subject Assignment` sa
+            WHERE sa.class_id IN %(class_ids)s
+            ORDER BY sa.actual_subject_id, sa.class_id
+        """, {"class_ids": class_ids}, as_dict=True)
 
-        if not student_subjects:
-            logs.append("⚠️ No subjects found for student")
+        if not subject_assignments:
+            logs.append("⚠️ No subject assignments found for these classes")
             return list_response(
                 data=[],
-                message="No subjects found for student",
+                message="No subject assignments found",
                 logs=logs
             )
 
-        logs.append(f"✅ Found {len(student_subjects)} subjects for student")
+        logs.append(f"✅ Found {len(subject_assignments)} subject assignments")
 
-        # Step 3: Get subject assignments and teacher info
-        subject_teachers = []
-
-        # Group subjects by actual_subject_id and class_id to avoid duplicates
+        # Step 3: Group by actual_subject_id and class_id, collect all teachers
         subject_groups = {}
-        for ss in student_subjects:
-            key = f"{ss.actual_subject_id}_{ss.class_id}"
+        for sa in subject_assignments:
+            if not sa.actual_subject_id:
+                continue
+            
+            key = f"{sa.actual_subject_id}_{sa.class_id}"
             if key not in subject_groups:
                 subject_groups[key] = {
-                    "actual_subject_id": ss.actual_subject_id,
-                    "class_id": ss.class_id,
-                    "subject_ids": []
+                    "actual_subject_id": sa.actual_subject_id,
+                    "class_id": sa.class_id,
+                    "teacher_ids": []
                 }
-            if ss.subject_id not in subject_groups[key]["subject_ids"]:
-                subject_groups[key]["subject_ids"].append(ss.subject_id)
+            
+            # Collect all teachers for this subject-class combination
+            if sa.teacher_id and sa.teacher_id not in subject_groups[key]["teacher_ids"]:
+                subject_groups[key]["teacher_ids"].append(sa.teacher_id)
 
         logs.append(f"✅ Grouped into {len(subject_groups)} unique subject-class combinations")
 
-        # Process each subject-class combination
+        # Step 4: Build response with subject and teacher info
+        subject_teachers = []
+        
         for key, group in subject_groups.items():
             try:
-                # Skip if actual_subject_id is None
-                if not group["actual_subject_id"]:
-                    logs.append(f"⚠️ Skipping subject with None actual_subject_id for class {group['class_id']}")
-                    continue
-
                 # Get actual subject details
                 actual_subject = frappe.get_doc("SIS Actual Subject", group["actual_subject_id"])
                 actual_subject_name = actual_subject.title_vn or actual_subject.title_en
 
-                # Get subject assignment for this actual_subject and class
-                assignments = frappe.get_all(
-                    "SIS Subject Assignment",
-                    filters={
-                        "actual_subject_id": group["actual_subject_id"],
-                        "class_id": group["class_id"]
-                    },
-                    fields=["teacher_id"],
-                    ignore_permissions=True
-                )
-
+                # Get first teacher info (or None if no teachers assigned)
                 teacher_info = None
-                if assignments and assignments[0].teacher_id:
-                    teacher_id = assignments[0].teacher_id
+                if group["teacher_ids"]:
+                    teacher_id = group["teacher_ids"][0]  # Lấy teacher đầu tiên
                     try:
                         teacher_doc = frappe.get_doc("SIS Teacher", teacher_id)
 
