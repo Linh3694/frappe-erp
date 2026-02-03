@@ -324,6 +324,87 @@ def get_active_period():
 
 
 @frappe.whitelist()
+def get_student_subject_teachers_international(student_id=None):
+    """
+    Lấy danh sách giáo viên bộ môn của học sinh - CHỈ GIÁO VIÊN DẠY CHƯƠNG TRÌNH QUỐC TẾ.
+    Dùng riêng cho trang Scholarship.
+    """
+    logs = []
+    
+    try:
+        if not student_id:
+            student_id = frappe.request.args.get('student_id')
+        
+        if not student_id:
+            return validation_error_response(
+                "Thiếu student_id",
+                {"student_id": ["Student ID là bắt buộc"]}
+            )
+        
+        logs.append(f"🔍 Getting International curriculum teachers for student: {student_id}")
+        
+        # ID của chương trình Quốc tế
+        INTERNATIONAL_CURRICULUM_ID = "SIS_CURRICULUM-00011"
+        
+        # Lấy các lớp của học sinh
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"student_id": student_id},
+            fields=["class_id"],
+            ignore_permissions=True
+        )
+        
+        if not class_students:
+            logs.append("⚠️ No classes found for student")
+            return list_response(data=[], message="No classes found", logs=logs)
+        
+        class_ids = [cs.class_id for cs in class_students if cs.class_id]
+        logs.append(f"✅ Found {len(class_ids)} classes for student")
+        
+        # Lấy giáo viên chủ nhiệm để loại trừ
+        homeroom_teacher_ids = []
+        for class_id in class_ids:
+            homeroom = frappe.db.get_value("SIS Class", class_id, "homeroom_teacher")
+            if homeroom:
+                homeroom_teacher_ids.append(homeroom)
+        
+        # Lấy giáo viên dạy môn Quốc tế cho các lớp này
+        teachers = frappe.db.sql("""
+            SELECT DISTINCT 
+                t.name as teacher_id,
+                u.full_name as teacher_name
+            FROM `tabSIS Teacher` t
+            INNER JOIN `tabUser` u ON t.user_id = u.name
+            INNER JOIN `tabSIS Subject Assignment` sa ON t.name = sa.teacher_id
+            INNER JOIN `tabSIS Actual Subject` subj ON sa.actual_subject_id = subj.name
+            WHERE sa.class_id IN %(class_ids)s
+              AND subj.curriculum_id = %(curriculum_id)s
+              AND t.name NOT IN %(homeroom_ids)s
+            ORDER BY u.full_name
+        """, {
+            "class_ids": class_ids,
+            "curriculum_id": INTERNATIONAL_CURRICULUM_ID,
+            "homeroom_ids": homeroom_teacher_ids if homeroom_teacher_ids else [""]
+        }, as_dict=True)
+        
+        logs.append(f"✅ Found {len(teachers)} International curriculum teachers")
+        
+        return success_response(
+            data=teachers,
+            message=f"Retrieved {len(teachers)} teachers",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"❌ Error: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Get Student International Teachers Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
 def get_teachers_for_class(class_id=None):
     """
     Lấy danh sách giáo viên dạy một lớp để PHHS chọn làm người giới thiệu thứ 2.
