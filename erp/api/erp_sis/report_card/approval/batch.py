@@ -673,16 +673,69 @@ def approve_class_reports():
                         "data_json": json.dumps(data_json, ensure_ascii=False)
                     }
                     
+                    # ✅ Flag để biết đã set counters hay chưa (tránh double compute)
+                    counters_already_set = False
+                    
                     if next_status == "level_2_approved" and section == "homeroom":
                         # ✅ FIX: Sync data_json trước khi compute counters
                         data_json = sync_data_json_with_db(report_data.name, data_json)
                         counters = compute_approval_counters(data_json, template)
-                        update_values["homeroom_l2_approved"] = counters.get("homeroom_l2_approved", 0)
+                        
+                        # ✅ FIX: Khi skip L2, LUÔN set homeroom_l2_approved = 1
+                        # (vì homeroom_approval_status = "level_2_approved")
+                        homeroom_l2_approved_val = counters.get("homeroom_l2_approved", 0)
+                        if homeroom_l2_approved_val != 1:
+                            # Log warning và force set = 1 vì status đã là level_2_approved
+                            frappe.logger().warning(
+                                f"[APPROVE] homeroom_l2_approved computed as {homeroom_l2_approved_val} "
+                                f"but status is level_2_approved. Forcing to 1 for {report_data.name}"
+                            )
+                            homeroom_l2_approved_val = 1
+                        
+                        update_values["homeroom_l2_approved"] = homeroom_l2_approved_val
                         update_values["homeroom_level_2_approved_at"] = now
                         update_values["homeroom_level_2_approved_by"] = user
-                        if counters.get("all_sections_l2_approved", 0):
+                        
+                        # ✅ Recompute all_sections_l2_approved với homeroom_l2_approved = 1
+                        counters["homeroom_l2_approved"] = homeroom_l2_approved_val
+                        all_l2 = True
+                        homeroom_enabled = getattr(template, 'homeroom_enabled', False) if template else False
+                        scores_enabled = getattr(template, 'scores_enabled', False) if template else False
+                        subject_eval_enabled = getattr(template, 'subject_eval_enabled', False) if template else False
+                        program_type = getattr(template, 'program_type', 'vn') if template else 'vn'
+                        
+                        if homeroom_enabled and counters["homeroom_l2_approved"] != 1:
+                            all_l2 = False
+                        if scores_enabled and program_type != 'intl':
+                            if counters.get("scores_total_count", 0) > 0 and counters.get("scores_l2_approved_count", 0) < counters.get("scores_total_count", 0):
+                                all_l2 = False
+                        if subject_eval_enabled:
+                            if counters.get("subject_eval_total_count", 0) > 0 and counters.get("subject_eval_l2_approved_count", 0) < counters.get("subject_eval_total_count", 0):
+                                all_l2 = False
+                        if program_type == 'intl':
+                            if counters.get("intl_total_count", 0) > 0 and counters.get("intl_l2_approved_count", 0) < counters.get("intl_total_count", 0):
+                                all_l2 = False
+                        
+                        if all_l2:
                             update_values["approval_status"] = "level_2_approved"
                             update_values["all_sections_l2_approved"] = 1
+                        
+                        # ✅ Update tất cả counters để tránh gọi lại update_report_counters
+                        update_values["scores_submitted_count"] = counters.get("scores_submitted_count", 0)
+                        update_values["scores_l2_approved_count"] = counters.get("scores_l2_approved_count", 0)
+                        update_values["scores_total_count"] = counters.get("scores_total_count", 0)
+                        update_values["subject_eval_submitted_count"] = counters.get("subject_eval_submitted_count", 0)
+                        update_values["subject_eval_l2_approved_count"] = counters.get("subject_eval_l2_approved_count", 0)
+                        update_values["subject_eval_total_count"] = counters.get("subject_eval_total_count", 0)
+                        update_values["intl_submitted_count"] = counters.get("intl_submitted_count", 0)
+                        update_values["intl_l2_approved_count"] = counters.get("intl_l2_approved_count", 0)
+                        update_values["intl_total_count"] = counters.get("intl_total_count", 0)
+                        
+                        counters_already_set = True
+                        frappe.logger().info(
+                            f"[APPROVE] Skip L2 for homeroom - set homeroom_l2_approved=1, "
+                            f"all_sections_l2_approved={'1' if all_l2 else '0'} for {report_data.name}"
+                        )
                 
                 if pending_level == "publish":
                     update_values["status"] = "published"
@@ -695,7 +748,8 @@ def approve_class_reports():
                     update_modified=True
                 )
                 
-                if pending_level in ["level_1", "level_2"]:
+                # ✅ FIX: Chỉ gọi update_report_counters nếu chưa set counters ở trên
+                if pending_level in ["level_1", "level_2"] and not counters_already_set:
                     update_report_counters(report_data.name, data_json, template)
                 
                 report.reload()
