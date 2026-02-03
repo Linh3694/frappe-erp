@@ -435,6 +435,9 @@ def get_student_subject_teachers():
 
         logs.append(f"✅ Grouped into {len(subject_groups)} unique subject-class combinations")
 
+        # ID của chương trình Quốc tế
+        INTERNATIONAL_CURRICULUM_ID = "SIS_CURRICULUM-00011"
+        
         # Process each subject-class combination
         for key, group in subject_groups.items():
             try:
@@ -445,6 +448,12 @@ def get_student_subject_teachers():
 
                 # Get actual subject details
                 actual_subject = frappe.get_doc("SIS Actual Subject", group["actual_subject_id"])
+                
+                # Filter: chỉ lấy môn học thuộc chương trình Quốc tế
+                if actual_subject.curriculum_id != INTERNATIONAL_CURRICULUM_ID:
+                    logs.append(f"⏭️ Skipping subject {actual_subject.title_vn or actual_subject.title_en} - not International Curriculum")
+                    continue
+                
                 actual_subject_name = actual_subject.title_vn or actual_subject.title_en
 
                 # Get subject assignment for this actual_subject and class
