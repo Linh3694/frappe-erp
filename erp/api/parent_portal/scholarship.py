@@ -79,7 +79,6 @@ def _get_guardian_students(guardian_id, school_year_id=None):
             s.name as student_id,
             s.student_name,
             s.student_code,
-            s.image as sis_photo,
             c.name as class_id,
             c.title as class_name,
             c.education_grade,
@@ -102,8 +101,17 @@ def _get_guardian_students(guardian_id, school_year_id=None):
         ORDER BY s.student_name
     """, params, as_dict=True)
     
-    # Lấy tên GVCN riêng để tránh lỗi JOIN phức tạp
+    # Lấy năm học hiện tại để lấy ảnh
+    current_school_year = frappe.db.get_value(
+        "SIS School Year",
+        {"is_enable": 1},
+        "name",
+        order_by="start_date desc"
+    )
+    
+    # Lấy tên GVCN và ảnh học sinh riêng
     for student in students:
+        # Lấy tên GVCN
         homeroom_teacher_name = None
         if student.get('homeroom_teacher'):
             try:
@@ -114,6 +122,30 @@ def _get_guardian_students(guardian_id, school_year_id=None):
             except Exception:
                 pass
         student['homeroom_teacher_name'] = homeroom_teacher_name
+        
+        # Lấy ảnh học sinh từ SIS Photo (giống logic trong re_enrollment.py)
+        sis_photo = None
+        try:
+            # Ưu tiên: 1) Năm học hiện tại trước, 2) Upload date mới nhất, 3) Creation mới nhất
+            sis_photos = frappe.db.sql("""
+                SELECT photo, title, upload_date, school_year_id
+                FROM `tabSIS Photo`
+                WHERE student_id = %s
+                    AND type = 'student'
+                    AND status = 'Active'
+                ORDER BY 
+                    CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                    upload_date DESC,
+                    creation DESC
+                LIMIT 1
+            """, (student.student_id, current_school_year), as_dict=True)
+
+            if sis_photos:
+                sis_photo = sis_photos[0]["photo"]
+        except Exception as photo_err:
+            frappe.logger().error(f"Error getting sis_photo for {student.student_id}: {str(photo_err)}")
+        
+        student['sis_photo'] = sis_photo
     
     return students
 
