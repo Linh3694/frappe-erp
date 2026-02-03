@@ -350,21 +350,27 @@ def get_teachers_for_class(class_id=None):
         
         homeroom_teacher_id = class_info.homeroom_teacher if class_info else None
         
-        # Lấy danh sách GV dạy lớp này từ timetable
+        # ID của chương trình Quốc tế
+        INTERNATIONAL_CURRICULUM_ID = "SIS_CURRICULUM-00011"
+        
+        # Lấy danh sách GV dạy lớp này từ SIS Subject Assignment
+        # Filter theo curriculum để chỉ lấy GV dạy chương trình Quốc tế
         teachers = frappe.db.sql("""
             SELECT DISTINCT 
                 t.name as teacher_id,
                 u.full_name as teacher_name
             FROM `tabSIS Teacher` t
             INNER JOIN `tabUser` u ON t.user_id = u.name
-            INNER JOIN `tabSIS Timetable Instance Row` tir ON t.name = tir.teacher_id
-            INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
-            WHERE ti.class_id = %(class_id)s
+            INNER JOIN `tabSIS Subject Assignment` sa ON t.name = sa.teacher_id
+            INNER JOIN `tabSIS Actual Subject` subj ON sa.actual_subject_id = subj.name
+            WHERE sa.class_id = %(class_id)s
               AND t.name != %(homeroom_id)s
+              AND subj.curriculum_id = %(curriculum_id)s
             ORDER BY u.full_name
         """, {
             "class_id": class_id,
-            "homeroom_id": homeroom_teacher_id or ""
+            "homeroom_id": homeroom_teacher_id or "",
+            "curriculum_id": INTERNATIONAL_CURRICULUM_ID
         }, as_dict=True)
         
         # Lấy thông tin GVCN từ User
@@ -775,26 +781,40 @@ def submit_application_with_files():
             
             return file_doc.file_url
         
-        # Upload báo cáo học tập
-        semester1_report_url = upload_file('semester1_report', 'Scholarship/Reports')
-        semester2_report_url = upload_file('semester2_report', 'Scholarship/Reports')
+        # Upload báo cáo học tập - hỗ trợ nhiều files
+        semester1_urls = []
+        semester1_count = int(get_form_value('semester1_report_count') or 0)
+        for i in range(semester1_count):
+            file_url = upload_file(f'semester1_report_{i}', 'Scholarship/Reports')
+            if file_url:
+                semester1_urls.append(file_url)
         
-        # Gộp link báo cáo học tập
+        semester2_urls = []
+        semester2_count = int(get_form_value('semester2_report_count') or 0)
+        for i in range(semester2_count):
+            file_url = upload_file(f'semester2_report_{i}', 'Scholarship/Reports')
+            if file_url:
+                semester2_urls.append(file_url)
+        
+        # Gộp link báo cáo học tập (backward compatible với code cũ)
         report_links = []
-        if semester1_report_url:
-            report_links.append(f"Kì 1: {semester1_report_url}")
-        if semester2_report_url:
-            report_links.append(f"Kì 2: {semester2_report_url}")
+        if semester1_urls:
+            report_links.append(f"Kì 1: {', '.join(semester1_urls)}")
+        if semester2_urls:
+            report_links.append(f"Kì 2: {', '.join(semester2_urls)}")
         
         # Upload video giới thiệu
         video_url = upload_file('video_file', 'Scholarship/Videos')
         
         # Tạo đơn đăng ký
-        # Lưu báo cáo học tập với format: semester1_url||semester2_url
-        # Dùng || để phân biệt với | trong URL
+        # Lưu báo cáo học tập với format: semester1_urls||semester2_urls
+        # Mỗi semester có nhiều URLs phân cách bằng |
+        # Dùng || để phân biệt giữa 2 kỳ
         academic_report_str = None
-        if semester1_report_url or semester2_report_url:
-            academic_report_str = f"{semester1_report_url or ''}||{semester2_report_url or ''}"
+        if semester1_urls or semester2_urls:
+            semester1_str = '|'.join(semester1_urls) if semester1_urls else ''
+            semester2_str = '|'.join(semester2_urls) if semester2_urls else ''
+            academic_report_str = f"{semester1_str}||{semester2_str}"
         
         app = frappe.get_doc({
             "doctype": "SIS Scholarship Application",
@@ -811,7 +831,7 @@ def submit_application_with_files():
             "status": "Submitted"
         })
         
-        # Parse và thêm thành tích - Cấu trúc mới với dynamic categories
+        # Parse và thêm thành tích - Cấu trúc mới: chỉ files, không có entries
         achievements_json = get_form_value('achievements')
         if achievements_json:
             try:
@@ -822,11 +842,12 @@ def submit_application_with_files():
                     category_index = cat_data.get('category_index', 0)
                     category_title_vn = cat_data.get('category_title_vn', '')
                     category_title_en = cat_data.get('category_title_en', '')
-                    entries = cat_data.get('entries', [])
-                    file_counts = cat_data.get('file_counts', [])
+                    file_count = cat_data.get('file_count', 0)
+                    
+                    if file_count == 0:
+                        continue
                     
                     # Map category title to achievement_type dựa vào tên
-                    # Có thể mở rộng logic này nếu cần
                     achievement_type = 'other'
                     title_lower = category_title_vn.lower() if category_title_vn else ''
                     if 'bài thi' in title_lower or 'chuẩn hóa' in title_lower or 'standardized' in title_lower.lower():
@@ -836,30 +857,27 @@ def submit_application_with_files():
                     elif 'ngoại khóa' in title_lower or 'hoạt động' in title_lower or 'extracurricular' in title_lower.lower():
                         achievement_type = 'extracurricular'
                     
-                    logs.append(f"Category {category_index}: {category_title_vn} -> {achievement_type}, {len(entries)} entries")
+                    logs.append(f"Category {category_index}: {category_title_vn} -> {achievement_type}, {file_count} files")
                     
-                    # Thêm từng entry vào achievements
-                    for entry_idx, entry_content in enumerate(entries):
-                        # Thu thập tất cả files cho entry này
-                        file_count = file_counts[entry_idx] if entry_idx < len(file_counts) else 0
-                        attachment_urls = []
-                        
-                        for file_idx in range(file_count):
-                            file_key = f'achievement_file_{category_index}_{entry_idx}_{file_idx}'
-                            file_url = upload_file(file_key, 'Scholarship/Certificates')
-                            if file_url:
-                                attachment_urls.append(file_url)
-                        
-                        # Gộp nhiều file URLs thành 1 string, phân cách bằng |
-                        attachment_str = ' | '.join(attachment_urls) if attachment_urls else None
-                        
-                        app.append("achievements", {
-                            "achievement_type": achievement_type,
-                            "title": entry_content,
-                            "description": f"{category_title_vn} ({category_title_en})" if category_title_en else category_title_vn,
-                            "attachment": attachment_str
-                        })
-                        logs.append(f"  Entry {entry_idx}: {entry_content[:50]}... ({file_count} files)")
+                    # Upload tất cả files cho category này
+                    attachment_urls = []
+                    for file_idx in range(file_count):
+                        file_key = f'achievement_file_{category_index}_{file_idx}'
+                        file_url = upload_file(file_key, 'Scholarship/Certificates')
+                        if file_url:
+                            attachment_urls.append(file_url)
+                    
+                    # Gộp nhiều file URLs thành 1 string, phân cách bằng |
+                    attachment_str = ' | '.join(attachment_urls) if attachment_urls else None
+                    
+                    # Tạo 1 achievement record cho category với tất cả files
+                    app.append("achievements", {
+                        "achievement_type": achievement_type,
+                        "title": category_title_vn,
+                        "description": f"{category_title_vn} ({category_title_en})" if category_title_en else category_title_vn,
+                        "attachment": attachment_str
+                    })
+                    logs.append(f"  Added {len(attachment_urls)} files for category {category_title_vn}")
                         
             except json.JSONDecodeError as e:
                 logs.append(f"Error parsing achievements JSON: {str(e)}")
