@@ -884,8 +884,8 @@ def submit_application_with_files():
         if semester2_urls:
             report_links.append(f"Kì 2: {', '.join(semester2_urls)}")
         
-        # Upload video giới thiệu
-        video_url = upload_file('video_file', 'Scholarship/Videos')
+        # Lấy video URL từ form (không upload file nữa)
+        video_url = get_form_value('video_url')
         
         # Tạo đơn đăng ký
         # Lưu báo cáo học tập với format: semester1_urls||semester2_urls
@@ -908,7 +908,7 @@ def submit_application_with_files():
             "second_teacher_id": get_form_value('second_teacher_id'),
             "academic_report_type": 'upload' if academic_report_str else 'existing',
             "academic_report_upload": academic_report_str,  # Format: semester1_url||semester2_url
-            "video_url": video_url,
+            "video_url": video_url if video_url else None,
             "status": "Submitted"
         })
         

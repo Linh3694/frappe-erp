@@ -226,23 +226,26 @@ def create_template():
                     except (json.JSONDecodeError, TypeError):
                         continue
         else:
-            # Template cho toàn khối - check duplicate theo title
-            existing = frappe.db.exists(
-                "SIS Report Card Template",
-                {
-                    "title": (data.get("title") or "").strip(),
-                    "campus_id": campus_id,
-                    "school_year": data.get("school_year"),
-                    "semester_part": data.get("semester_part"),
-                    "program_type": (data.get("program_type") or "vn"),
-                },
-            )
-            if existing:
-                program_type_label = "Chương trình Việt Nam" if (data.get("program_type") or "vn") == "vn" else "Chương trình Quốc tế"
-                return validation_error_response(
-                    message=_("Template already exists for this school year, semester and program type"),
-                    errors={"template": [f"Đã tồn tại template cho {program_type_label} - {data.get('semester_part')} - {data.get('school_year')}"]}
+            # Template cho toàn khối - check duplicate theo education_grade (KHÔNG phải title)
+            # Một khối chỉ có thể có một template cho mỗi năm học + kỳ học + program_type
+            education_grade = data.get("education_grade")
+            if education_grade:
+                existing = frappe.db.exists(
+                    "SIS Report Card Template",
+                    {
+                        "education_grade": education_grade,
+                        "campus_id": campus_id,
+                        "school_year": data.get("school_year"),
+                        "semester_part": data.get("semester_part"),
+                        "program_type": (data.get("program_type") or "vn"),
+                    },
                 )
+                if existing:
+                    program_type_label = "Chương trình Việt Nam" if (data.get("program_type") or "vn") == "vn" else "Chương trình Quốc tế"
+                    return validation_error_response(
+                        message=_("Template already exists for this grade, school year and semester"),
+                        errors={"template": [f"Khối này đã có template cho {program_type_label} - {data.get('semester_part')} - {data.get('school_year')}"]}
+                    )
 
         # Create doc
         doc_data = {
