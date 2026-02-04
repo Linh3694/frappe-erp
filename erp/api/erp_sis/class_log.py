@@ -531,7 +531,7 @@ def batch_get_class_logs():
                 "log_date": date,
                 "period": ["in", periods]
             },
-            fields=["name", "period", "class_id", "general_comment"]
+            fields=["name", "period", "class_id", "general_comment", "lesson_name", "lesson_score", "homework_assignment"]
         )
         
         # Build map: period -> subject
@@ -592,7 +592,10 @@ def batch_get_class_logs():
                         "name": subject_id,
                         "timetable_instance_id": timetable_instance,
                         "class_id": subject['class_id'],
-                        "general_comment": subject.get('general_comment')
+                        "general_comment": subject.get('general_comment'),
+                        "lesson_name": subject.get('lesson_name'),
+                        "lesson_score": subject.get('lesson_score'),
+                        "homework_assignment": subject.get('homework_assignment')
                     },
                     "students": students
                 }
@@ -920,7 +923,7 @@ def batch_get_homeroom_class_logs():
         
         if instance_ids:
             all_subject_logs = frappe.db.sql("""
-                SELECT name, period, class_id, general_comment, timetable_instance_id
+                SELECT name, period, class_id, general_comment, lesson_name, lesson_score, homework_assignment, timetable_instance_id
                 FROM `tabSIS Class Log Subject`
                 WHERE timetable_instance_id IN %(instance_ids)s
                     AND log_date = %(date)s
@@ -1181,7 +1184,10 @@ def batch_get_homeroom_class_logs():
                     "name": primary_subject['name'] if primary_subject else None,
                     "timetable_instance_id": primary_subject['timetable_instance_id'] if primary_subject else class_instances.get(homeroom_class_id),
                     "class_id": primary_subject['class_id'] if primary_subject else homeroom_class_id,
-                    "general_comment": primary_subject.get('general_comment') if primary_subject else None
+                    "general_comment": primary_subject.get('general_comment') if primary_subject else None,
+                    "lesson_name": primary_subject.get('lesson_name') if primary_subject else None,
+                    "lesson_score": primary_subject.get('lesson_score') if primary_subject else None,
+                    "homework_assignment": primary_subject.get('homework_assignment') if primary_subject else None
                 } if primary_subject else None,
                 "students": period_student_logs,
                 "source_class_id": primary_subject['class_id'] if primary_subject else homeroom_class_id,
