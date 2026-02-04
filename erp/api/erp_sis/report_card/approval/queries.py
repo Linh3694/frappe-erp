@@ -62,9 +62,9 @@ def _get_pending_subjects_detail(report_name: str, section_type: str = "subject_
             status = approval.get("status", "draft")
             is_approved = status in l2_passed
             
-            # Lấy tên môn từ SIS Actual Subject
+            # ✅ FIX: Lấy tên môn từ SIS Actual Subject - dùng title_vn
             subject_name = frappe.db.get_value(
-                "SIS Actual Subject", subject_id, "subject_title"
+                "SIS Actual Subject", subject_id, "title_vn"
             ) or subject_id
             
             result.append({
