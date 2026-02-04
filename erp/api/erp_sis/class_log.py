@@ -1246,6 +1246,7 @@ def batch_get_homeroom_class_logs():
         
         meta = {
             "homeroom_class_id": homeroom_class_id,
+            "homeroom_class_title": class_titles.get(homeroom_class_id, homeroom_class_id),  # ⭐ Tên lớp chủ nhiệm
             "student_count": len(student_ids),
             "classes_queried": list(all_classes_to_query),
             "performance_ms": int(total_time),
