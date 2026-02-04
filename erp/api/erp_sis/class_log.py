@@ -894,6 +894,18 @@ def batch_get_homeroom_class_logs():
         
         frappe.logger().info(f"🏫 [Backend] Will query {len(all_classes_to_query)} classes: {list(all_classes_to_query)}")
         
+        # ⚡ Step 3b: Query tên lớp (class_title) cho tất cả các class
+        class_titles = {}
+        if all_classes_to_query:
+            class_title_rows = frappe.db.sql("""
+                SELECT name, title
+                FROM `tabSIS Class`
+                WHERE name IN %(class_ids)s
+            """, {"class_ids": list(all_classes_to_query)}, as_dict=True)
+            
+            for row in class_title_rows:
+                class_titles[row['name']] = row['title']
+        
         # ⚡ Step 4: BATCH query timetable instances (single query instead of N queries)
         step_start = time.time()
         class_instances = {}
@@ -1187,6 +1199,7 @@ def batch_get_homeroom_class_logs():
                 all_subjects.append({
                     "name": homeroom_subject_log['name'],
                     "class_id": homeroom_subject_log['class_id'],
+                    "class_title": class_titles.get(homeroom_subject_log['class_id'], homeroom_subject_log['class_id']),
                     "general_comment": homeroom_subject_log.get('general_comment'),
                     "lesson_name": homeroom_subject_log.get('lesson_name'),
                     "lesson_score": homeroom_subject_log.get('lesson_score'),
@@ -1199,6 +1212,7 @@ def batch_get_homeroom_class_logs():
                 all_subjects.append({
                     "name": mixed_log['name'],
                     "class_id": mixed_log['class_id'],
+                    "class_title": class_titles.get(mixed_log['class_id'], mixed_log['class_id']),
                     "general_comment": mixed_log.get('general_comment'),
                     "lesson_name": mixed_log.get('lesson_name'),
                     "lesson_score": mixed_log.get('lesson_score'),
