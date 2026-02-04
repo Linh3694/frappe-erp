@@ -1179,6 +1179,33 @@ def batch_get_homeroom_class_logs():
                 # Nếu có subject_log từ mixed class, dùng mixed class đầu tiên
                 primary_class = list(mixed_subject_logs.keys())[0]
             
+            # ⭐ Build all_subjects - thông tin chi tiết của tất cả các lớp (homeroom + mixed)
+            all_subjects = []
+            
+            # Thêm homeroom class subject nếu có
+            if homeroom_subject_log:
+                all_subjects.append({
+                    "name": homeroom_subject_log['name'],
+                    "class_id": homeroom_subject_log['class_id'],
+                    "general_comment": homeroom_subject_log.get('general_comment'),
+                    "lesson_name": homeroom_subject_log.get('lesson_name'),
+                    "lesson_score": homeroom_subject_log.get('lesson_score'),
+                    "homework_assignment": homeroom_subject_log.get('homework_assignment'),
+                    "is_homeroom": True
+                })
+            
+            # Thêm mixed class subjects
+            for mixed_class_id, mixed_log in mixed_subject_logs.items():
+                all_subjects.append({
+                    "name": mixed_log['name'],
+                    "class_id": mixed_log['class_id'],
+                    "general_comment": mixed_log.get('general_comment'),
+                    "lesson_name": mixed_log.get('lesson_name'),
+                    "lesson_score": mixed_log.get('lesson_score'),
+                    "homework_assignment": mixed_log.get('homework_assignment'),
+                    "is_homeroom": False
+                })
+            
             result[period] = {
                 "subject": {
                     "name": primary_subject['name'] if primary_subject else None,
@@ -1189,6 +1216,7 @@ def batch_get_homeroom_class_logs():
                     "lesson_score": primary_subject.get('lesson_score') if primary_subject else None,
                     "homework_assignment": primary_subject.get('homework_assignment') if primary_subject else None
                 } if primary_subject else None,
+                "all_subjects": all_subjects,  # ⭐ Thông tin chi tiết của tất cả các lớp
                 "students": period_student_logs,
                 "source_class_id": primary_subject['class_id'] if primary_subject else homeroom_class_id,
                 "source_classes": list(source_classes),
