@@ -29,6 +29,60 @@ from ..approval_helpers.helpers import (
 )
 
 
+def _get_pending_subjects_detail(report_name: str, section_type: str = "subject_eval") -> list:
+    """
+    Lấy danh sách các môn chưa L2 approved từ data_json của report.
+    
+    Args:
+        report_name: ID của report
+        section_type: Loại section ("scores", "subject_eval", "intl_scores")
+    
+    Returns:
+        List[dict]: Danh sách môn với thông tin {subject_id, subject_name, status, is_approved}
+    """
+    try:
+        data_json_str = frappe.db.get_value("SIS Student Report Card", report_name, "data_json")
+        if not data_json_str:
+            return []
+        
+        data_json = json.loads(data_json_str)
+        section_data = data_json.get(section_type, {})
+        
+        if not isinstance(section_data, dict):
+            return []
+        
+        l2_passed = ["level_2_approved", "reviewed", "published"]
+        result = []
+        
+        for subject_id, subject_data in section_data.items():
+            if not isinstance(subject_data, dict):
+                continue
+            
+            approval = subject_data.get("approval", {})
+            status = approval.get("status", "draft")
+            is_approved = status in l2_passed
+            
+            # Lấy tên môn từ SIS Actual Subject
+            subject_name = frappe.db.get_value(
+                "SIS Actual Subject", subject_id, "subject_title"
+            ) or subject_id
+            
+            result.append({
+                "subject_id": subject_id,
+                "subject_name": subject_name,
+                "status": status,
+                "is_approved": is_approved
+            })
+        
+        # Sắp xếp: môn chưa approved lên trước
+        result.sort(key=lambda x: (x["is_approved"], x["subject_name"]))
+        
+        return result
+    except Exception as e:
+        frappe.logger().error(f"Error getting pending subjects detail: {str(e)}")
+        return []
+
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -449,11 +503,26 @@ def get_pending_approvals(level: Optional[str] = None):
                                         progress_obj["homeroom_l2_approved"] = r.get("homeroom_l2_approved")
                                     if scores_enabled:
                                         progress_obj["scores"] = f"{r.get('scores_l2_approved_count', 0)}/{r.get('scores_total_count', 0)}"
+                                        # ✅ Thêm chi tiết các môn scores nếu chưa complete
+                                        if not r["is_complete"]:
+                                            scores_detail = _get_pending_subjects_detail(r["name"], "scores")
+                                            if scores_detail:
+                                                progress_obj["scores_detail"] = scores_detail
                                     if subject_eval_enabled:
                                         progress_obj["subject_eval"] = f"{r.get('subject_eval_l2_approved_count', 0)}/{r.get('subject_eval_total_count', 0)}"
+                                        # ✅ Thêm chi tiết các môn subject_eval nếu chưa complete
+                                        if not r["is_complete"]:
+                                            eval_detail = _get_pending_subjects_detail(r["name"], "subject_eval")
+                                            if eval_detail:
+                                                progress_obj["subject_eval_detail"] = eval_detail
                                 else:
                                     # INTL: chỉ có intl progress
                                     progress_obj["intl"] = f"{r.get('intl_l2_approved_count', 0)}/{r.get('intl_total_count', 0)}"
+                                    # ✅ Thêm chi tiết các môn INTL nếu chưa complete
+                                    if not r["is_complete"]:
+                                        intl_detail = _get_pending_subjects_detail(r["name"], "intl_scores")
+                                        if intl_detail:
+                                            progress_obj["intl_detail"] = intl_detail
                                 r["progress"] = progress_obj
                                 # Mark as viewer only if manager không phải là actual L3 reviewer
                                 if is_manager and not is_l3:
