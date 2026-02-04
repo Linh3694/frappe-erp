@@ -614,6 +614,10 @@ def approve_class_reports():
                 except json.JSONDecodeError:
                     data_json = {}
                 
+                # ✅ FIX: Khởi tạo counters_already_set ở đầu mỗi iteration
+                # để đảm bảo update_report_counters() được gọi khi approve subject
+                counters_already_set = False
+                
                 # Update approval trong data_json cho Level 1, 2
                 if pending_level in ["level_1", "level_2"] and subject_id:
                     board_type = data.get("board_type")
@@ -672,9 +676,6 @@ def approve_class_reports():
                         by_field: user,
                         "data_json": json.dumps(data_json, ensure_ascii=False)
                     }
-                    
-                    # ✅ Flag để biết đã set counters hay chưa (tránh double compute)
-                    counters_already_set = False
                     
                     if next_status == "level_2_approved" and section == "homeroom":
                         # ✅ FIX: Sync data_json trước khi compute counters
