@@ -497,9 +497,8 @@ def get_active_period():
                         r.teacher_id,
                         r.recommendation_type,
                         r.denied_reason,
-                        t.teacher_name
+                        r.teacher_name
                     FROM `tabSIS Scholarship Recommendation` r
-                    LEFT JOIN `tabSIS Teacher` t ON r.teacher_id = t.name
                     WHERE r.application_id = %(app_id)s
                       AND r.status = 'Denied'
                     ORDER BY r.modified DESC
