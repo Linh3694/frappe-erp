@@ -826,7 +826,10 @@ def get_applications():
                 app.status, app.submitted_at,
                 app.main_teacher_name, app.second_teacher_name,
                 app.main_recommendation_status, app.second_recommendation_status,
-                app.total_score, app.total_percentage
+                app.total_score, app.total_percentage,
+                app.ctvn_score, app.ctqt_score, app.standardized_test_score,
+                app.quality_score, app.extracurricular_score, app.competition_score,
+                app.recommendation_score, app.video_score, app.scoring_note
             FROM `tabSIS Scholarship Application` app
             WHERE {where_clause}
             ORDER BY app.submitted_at DESC
@@ -835,7 +838,7 @@ def get_applications():
         
         applications = frappe.db.sql(query, values, as_dict=True)
         
-        # Thêm display values
+        # Thêm display values và scoring object
         status_display_map = {
             "Submitted": "Đã nộp",
             "WaitingRecommendation": "Chờ thư giới thiệu",
@@ -848,6 +851,18 @@ def get_applications():
         
         for app in applications:
             app["status_display"] = status_display_map.get(app.status, app.status)
+            # Gom các điểm chi tiết vào scoring object
+            app["scoring"] = {
+                "ctvn_score": app.pop("ctvn_score", None),
+                "ctqt_score": app.pop("ctqt_score", None),
+                "standardized_test_score": app.pop("standardized_test_score", None),
+                "quality_score": app.pop("quality_score", None),
+                "extracurricular_score": app.pop("extracurricular_score", None),
+                "competition_score": app.pop("competition_score", None),
+                "recommendation_score": app.pop("recommendation_score", None),
+                "video_score": app.pop("video_score", None),
+                "note": app.pop("scoring_note", None),
+            }
         
         logs.append(f"Tìm thấy {len(applications)} / {total} đơn")
         
