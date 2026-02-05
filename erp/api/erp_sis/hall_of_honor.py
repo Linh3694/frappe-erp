@@ -435,6 +435,7 @@ def get_award_records(
                     'note_vn': entry.get('note_vn'),
                     'note_en': entry.get('note_en'),
                     'classInfo': {
+                        '_id': entry['class_id'],  # Thêm _id để FE có thể dùng khi click
                         'name': entry['class_name'],
                         'title': entry['class_title']
                     }
@@ -590,6 +591,7 @@ def get_award_record_detail(name: str):
             populated_entry = {
                 'class_id': entry.class_id,
                 'classInfo': {
+                    '_id': entry.class_id,  # Thêm _id để FE có thể dùng khi click
                     'name': class_doc.name,
                     'title': class_doc.short_title  # Sử dụng short_title thay vì title
                 },
