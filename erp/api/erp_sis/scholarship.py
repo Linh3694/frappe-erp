@@ -1545,6 +1545,7 @@ def submit_recommendation():
 def deny_recommendation():
     """
     Giáo viên từ chối viết thư giới thiệu.
+    Gửi push notification đến phụ huynh.
     """
     logs = []
     
@@ -1582,10 +1583,49 @@ def deny_recommendation():
         if teacher_user != user and "System Manager" not in user_roles and "SIS Manager" not in user_roles:
             return error_response("Bạn không có quyền từ chối thư giới thiệu này", logs=logs)
         
+        # Lấy thông tin đơn học bổng trước khi deny
+        app = frappe.get_doc("SIS Scholarship Application", rec.application_id)
+        
+        # Lấy tên giáo viên từ chối
+        teacher_name = frappe.db.get_value("SIS Teacher", rec.teacher_id, "teacher_name") or "Giáo viên"
+        
+        # Lấy tên học sinh
+        student_name = frappe.db.get_value("SIS Student", app.student_id, "student_name") or app.student_id
+        
         # Deny thư
         rec.deny_recommendation(reason)
         
         logs.append(f"Đã từ chối viết thư: {recommendation_id}")
+        
+        # Gửi push notification đến phụ huynh
+        try:
+            guardian_id = app.guardian_id
+            if guardian_id:
+                # Email format: guardian_id@parent.wellspring.edu.vn
+                parent_email = f"{guardian_id}@parent.wellspring.edu.vn"
+                
+                from erp.api.parent_portal.push_notification import send_push_notification
+                
+                push_result = send_push_notification(
+                    user_email=parent_email,
+                    title="Học bổng: Giáo viên từ chối viết thư giới thiệu",
+                    body=f"{teacher_name} đã từ chối viết thư giới thiệu cho {student_name}. Vui lòng chọn giáo viên khác.",
+                    icon="/icon.png",
+                    data={
+                        "type": "scholarship_teacher_denied",
+                        "url": "/scholarship",
+                        "application_id": app.name,
+                        "student_id": app.student_id,
+                        "student_name": student_name,
+                        "teacher_name": teacher_name,
+                        "deny_reason": reason
+                    },
+                    tag=f"scholarship-deny-{app.name}"
+                )
+                
+                logs.append(f"Push notification result: {push_result.get('success')}")
+        except Exception as push_error:
+            logs.append(f"Cảnh báo: Không thể gửi push notification - {str(push_error)}")
         
         return success_response(
             data={"name": rec.name, "status": "Denied"},
