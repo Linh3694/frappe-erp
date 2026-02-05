@@ -496,7 +496,7 @@ def get_active_period():
                         r.name,
                         r.teacher_id,
                         r.recommendation_type,
-                        r.deny_reason,
+                        r.denied_reason,
                         t.teacher_name
                     FROM `tabSIS Scholarship Recommendation` r
                     LEFT JOIN `tabSIS Teacher` t ON r.teacher_id = t.name
@@ -511,7 +511,7 @@ def get_active_period():
                         "teacher_id": denied_recommendation[0].teacher_id,
                         "teacher_name": denied_recommendation[0].teacher_name,
                         "recommendation_type": denied_recommendation[0].recommendation_type,
-                        "deny_reason": denied_recommendation[0].deny_reason
+                        "deny_reason": denied_recommendation[0].denied_reason
                     }
                 
                 student_info["submission"] = {
