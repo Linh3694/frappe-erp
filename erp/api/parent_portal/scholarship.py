@@ -1109,6 +1109,42 @@ def submit_application_with_files():
                 {"period_id": ["Period ID là bắt buộc"]}
             )
         
+        # Kiểm tra kỳ học bổng có đang mở và còn trong thời hạn không
+        period_info = frappe.db.get_value(
+            "SIS Scholarship Period",
+            period_id,
+            ["name", "status", "from_date", "to_date", "title"],
+            as_dict=True
+        )
+        
+        if not period_info:
+            return error_response("Kỳ học bổng không tồn tại", logs=logs)
+        
+        # Kiểm tra trạng thái kỳ
+        if period_info.status != 'Open':
+            status_msg = {
+                'Draft': 'Kỳ học bổng chưa mở đăng ký',
+                'Closed': 'Kỳ học bổng đã đóng'
+            }
+            return error_response(
+                status_msg.get(period_info.status, 'Kỳ học bổng không ở trạng thái cho phép đăng ký'),
+                logs=logs
+            )
+        
+        # Kiểm tra thời gian đăng ký
+        today = getdate(nowdate())
+        if period_info.from_date and today < getdate(period_info.from_date):
+            return error_response(
+                f"Chưa đến thời gian đăng ký. Thời gian mở: {period_info.from_date}",
+                logs=logs
+            )
+        
+        if period_info.to_date and today > getdate(period_info.to_date):
+            return error_response(
+                f"Đã hết hạn đăng ký. Hạn cuối: {period_info.to_date}",
+                logs=logs
+            )
+        
         logs.append(f"PHHS {guardian_id} đăng ký học bổng cho {student_id}")
         
         # Kiểm tra học sinh thuộc về phụ huynh này
