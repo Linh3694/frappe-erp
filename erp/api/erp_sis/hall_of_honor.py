@@ -373,6 +373,18 @@ def get_award_records(
                 student_entries_by_record[parent] = []
             student_entries_by_record[parent].append(entry)
         
+        # DEBUG: In ra activities từ DB
+        print("\n" + "="*80)
+        print(f"🔍 [DEBUG] Total student entries: {len(all_student_entries)}")
+        print("🔍 [DEBUG] Sample activities data:")
+        for i, entry in enumerate(all_student_entries[:5]):  # In 5 entries
+            act_vn = entry.get('activities_vn')
+            act_en = entry.get('activities_en')
+            print(f"  [{i}] Student {entry.get('student_id')}: ")
+            print(f"      activities_vn={repr(act_vn)}")
+            print(f"      activities_en={repr(act_en)}")
+        print("="*80 + "\n")
+        
         # Group class entries by parent
         class_entries_by_record = {}
         for entry in all_class_entries:
