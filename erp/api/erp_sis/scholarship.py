@@ -572,6 +572,62 @@ def toggle_period_status():
 
 
 @frappe.whitelist()
+def toggle_parent_portal_visibility():
+    """
+    Bật/tắt hiển thị kỳ học bổng trên Parent Portal.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        
+        # Lấy data
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        period_id = data.get('period_id')
+        show = data.get('show')  # True/False hoặc 1/0
+        
+        if not period_id:
+            return validation_error_response(
+                "Thiếu period_id",
+                {"period_id": ["Period ID là bắt buộc"]}
+            )
+        
+        # Chuyển đổi show sang boolean/int
+        if isinstance(show, str):
+            show = show.lower() in ('true', '1', 'yes')
+        show = 1 if show else 0
+        
+        logs.append(f"Toggle parent portal visibility {period_id} -> {show}")
+        
+        period_doc = frappe.get_doc("SIS Scholarship Period", period_id)
+        period_doc.show_on_parent_portal = show
+        period_doc.save()
+        
+        frappe.db.commit()
+        
+        status_text = "Đã hiển thị trên Parent Portal" if show else "Đã ẩn khỏi Parent Portal"
+        
+        return success_response(
+            data={"name": period_id, "show_on_parent_portal": show},
+            message=status_text,
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Admin Toggle Parent Portal Visibility Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
 def delete_scholarship_period():
     """
     Xóa kỳ học bổng.

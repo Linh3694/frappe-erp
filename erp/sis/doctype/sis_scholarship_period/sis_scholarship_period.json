@@ -22,6 +22,7 @@
   "campus_id",
   "column_break_basic",
   "status",
+  "show_on_parent_portal",
   "from_date",
   "to_date",
   "education_stages_section",
@@ -81,6 +82,13 @@
    "reqd": 1,
    "in_list_view": 1,
    "description": "Draft: Nháp, Open: Đang mở đăng ký, Closed: Đã đóng"
+  },
+  {
+   "fieldname": "show_on_parent_portal",
+   "fieldtype": "Check",
+   "label": "Hiển thị trên Parent Portal",
+   "default": 0,
+   "description": "Bật để hiển thị nút đăng ký học bổng trên Parent Portal"
   },
   {
    "fieldname": "from_date",

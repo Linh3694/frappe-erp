@@ -165,12 +165,13 @@ def get_active_period():
         if not guardian_id:
             return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
         
-        # Tìm kỳ học bổng đang Open
+        # Tìm kỳ học bổng đang Open và được hiển thị trên Parent Portal
         today = nowdate()
         period = frappe.db.sql("""
             SELECT name, title, academic_year_id, campus_id, status, from_date, to_date
             FROM `tabSIS Scholarship Period`
             WHERE status = 'Open'
+              AND show_on_parent_portal = 1
               AND from_date <= %(today)s
               AND to_date >= %(today)s
             ORDER BY from_date DESC
@@ -178,11 +179,12 @@ def get_active_period():
         """, {"today": today}, as_dict=True)
         
         if not period:
-            # Kiểm tra có kỳ sắp mở không
+            # Kiểm tra có kỳ sắp mở không (và được hiển thị trên Parent Portal)
             upcoming = frappe.db.sql("""
                 SELECT name, title, from_date, to_date, status
                 FROM `tabSIS Scholarship Period`
                 WHERE status = 'Open'
+                  AND show_on_parent_portal = 1
                   AND from_date > %(today)s
                 ORDER BY from_date ASC
                 LIMIT 1
@@ -197,11 +199,12 @@ def get_active_period():
                     }
                 )
             
-            # Kiểm tra có kỳ đã đóng không
+            # Kiểm tra có kỳ đã đóng không (và được hiển thị trên Parent Portal)
             closed = frappe.db.sql("""
                 SELECT name, title, to_date
                 FROM `tabSIS Scholarship Period`
                 WHERE status = 'Open'
+                  AND show_on_parent_portal = 1
                   AND to_date < %(today)s
                 ORDER BY to_date DESC
                 LIMIT 1
