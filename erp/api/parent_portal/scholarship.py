@@ -398,6 +398,31 @@ def get_application_detail(application_id=None):
         
         logs.append(f"Lấy chi tiết đơn: {application_id}")
         
+        # Parse báo cáo học tập - format: semester1_urls||semester2_urls
+        semester1_files = []
+        semester2_files = []
+        if app.academic_report_upload:
+            parts = app.academic_report_upload.split('||')
+            if len(parts) >= 1 and parts[0]:
+                semester1_files = [url.strip() for url in parts[0].split('|') if url.strip()]
+            if len(parts) >= 2 and parts[1]:
+                semester2_files = [url.strip() for url in parts[1].split('|') if url.strip()]
+        
+        # Lấy thành tích với files
+        achievements = []
+        for ach in app.achievements:
+            # Parse nhiều file URLs nếu có (phân cách bằng |)
+            files = []
+            if ach.attachment:
+                files = [url.strip() for url in ach.attachment.split(' | ') if url.strip()]
+            
+            achievements.append({
+                "achievement_type": ach.achievement_type,
+                "title": ach.title,
+                "description": ach.description,
+                "files": files
+            })
+        
         return success_response(
             data={
                 "student_notification_email": app.student_notification_email,
@@ -406,7 +431,10 @@ def get_application_detail(application_id=None):
                 "guardian_phone": app.guardian_contact_phone,
                 "guardian_email": app.guardian_contact_email,
                 "second_teacher_id": app.second_teacher_id,
-                "video_url": app.video_url
+                "video_url": app.video_url,
+                "semester1_files": semester1_files,
+                "semester2_files": semester2_files,
+                "achievements": achievements
             }
         )
         
