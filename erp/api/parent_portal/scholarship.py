@@ -365,6 +365,63 @@ def get_student_subject_teachers_international(student_id=None):
 
 
 @frappe.whitelist()
+def get_application_detail(application_id=None):
+    """
+    Lấy chi tiết đơn đăng ký học bổng để phụ huynh có thể chỉnh sửa.
+    """
+    logs = []
+    
+    try:
+        if not application_id:
+            application_id = frappe.request.args.get('application_id')
+        
+        if not application_id:
+            return validation_error_response(
+                "Thiếu application_id",
+                {"application_id": ["Application ID là bắt buộc"]}
+            )
+        
+        # Kiểm tra guardian
+        guardian_id = _get_current_guardian()
+        if not guardian_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        # Lấy thông tin đơn
+        app = frappe.get_doc("SIS Scholarship Application", application_id)
+        
+        # Kiểm tra đơn thuộc về học sinh của guardian này
+        guardian_students = _get_guardian_students(guardian_id)
+        student_ids = [s.student_id for s in guardian_students]
+        
+        if app.student_id not in student_ids:
+            return error_response("Bạn không có quyền xem đơn này", logs=logs)
+        
+        logs.append(f"Lấy chi tiết đơn: {application_id}")
+        
+        return success_response(
+            data={
+                "student_notification_email": app.student_notification_email,
+                "student_contact_phone": app.student_contact_phone,
+                "guardian_name": app.guardian_contact_name,
+                "guardian_phone": app.guardian_contact_phone,
+                "guardian_email": app.guardian_contact_email,
+                "second_teacher_id": app.second_teacher_id,
+                "video_url": app.video_url
+            }
+        )
+        
+    except frappe.DoesNotExistError:
+        return error_response("Không tìm thấy đơn đăng ký", logs=logs)
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Get Application Detail Error")
+        return error_response(
+            message=f"Lỗi khi lấy chi tiết đơn: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
 def get_teachers_for_class(class_id=None):
     """
     Lấy danh sách giáo viên dạy một lớp để PHHS chọn làm người giới thiệu thứ 2.
@@ -755,19 +812,40 @@ def submit_application_with_files():
         # Lấy thông tin học sinh
         student_info = next((s for s in students if s['student_id'] == student_id), None)
         
-        # Kiểm tra đã đăng ký chưa
+        # Kiểm tra xem đây là edit hay tạo mới
+        application_id = get_form_value('application_id')
+        is_edit = bool(application_id)
+        
+        # Kiểm tra đã đăng ký chưa (nếu không phải edit mode)
         existing = frappe.db.exists("SIS Scholarship Application", {
             "scholarship_period_id": period_id,
             "student_id": student_id
         })
         
-        if existing:
+        if existing and not is_edit:
             return error_response("Học sinh này đã đăng ký học bổng rồi", logs=logs)
         
-        # Kiểm tra kỳ học bổng
+        # Nếu edit mode, kiểm tra application_id hợp lệ
+        if is_edit:
+            if not frappe.db.exists("SIS Scholarship Application", application_id):
+                return error_response("Không tìm thấy đơn đăng ký cần chỉnh sửa", logs=logs)
+            
+            # Kiểm tra đơn thuộc về học sinh đúng
+            app_student = frappe.db.get_value("SIS Scholarship Application", application_id, "student_id")
+            if app_student != student_id:
+                return error_response("Đơn đăng ký không thuộc về học sinh này", logs=logs)
+            
+            # Kiểm tra đơn chưa có kết quả cuối (không cho sửa khi đã Approved/Rejected)
+            app_status = frappe.db.get_value("SIS Scholarship Application", application_id, "status")
+            if app_status in ['Approved', 'Rejected']:
+                return error_response("Không thể chỉnh sửa đơn đã có kết quả", logs=logs)
+        
+        # Kiểm tra kỳ học bổng - chỉ cần còn trong hạn khi tạo mới
         period = frappe.get_doc("SIS Scholarship Period", period_id)
-        if period.status != "Open":
-            return error_response("Kỳ học bổng này chưa mở hoặc đã đóng", logs=logs)
+        
+        if not is_edit:
+            if period.status != "Open":
+                return error_response("Kỳ học bổng này chưa mở hoặc đã đóng", logs=logs)
         
         if not period.is_within_period():
             return error_response("Không trong thời gian đăng ký", logs=logs)
@@ -854,7 +932,7 @@ def submit_application_with_files():
         guardian_contact_phone = get_form_value('guardian_contact_phone')
         guardian_contact_email = get_form_value('guardian_contact_email')
         
-        # Tạo đơn đăng ký
+        # Tạo hoặc cập nhật đơn đăng ký
         # Lưu báo cáo học tập với format: semester1_urls||semester2_urls
         # Mỗi semester có nhiều URLs phân cách bằng |
         # Dùng || để phân biệt giữa 2 kỳ
@@ -864,26 +942,51 @@ def submit_application_with_files():
             semester2_str = '|'.join(semester2_urls) if semester2_urls else ''
             academic_report_str = f"{semester1_str}||{semester2_str}"
         
-        app = frappe.get_doc({
-            "doctype": "SIS Scholarship Application",
-            "scholarship_period_id": period_id,
-            "student_id": student_id,
-            "class_id": student_info.get('class_id'),
-            "education_stage_id": student_info.get('education_stage_id'),
-            "guardian_id": guardian_id,
-            "main_teacher_id": get_form_value('main_teacher_id') or student_info.get('homeroom_teacher'),
-            "second_teacher_id": get_form_value('second_teacher_id'),
-            "academic_report_type": 'upload' if academic_report_str else 'existing',
-            "academic_report_upload": academic_report_str,  # Format: semester1_url||semester2_url
-            "video_url": video_url if video_url else None,
-            "status": "Submitted",
-            # Thông tin liên hệ
-            "student_notification_email": student_notification_email,
-            "student_contact_phone": student_contact_phone,
-            "guardian_contact_name": guardian_contact_name,
-            "guardian_contact_phone": guardian_contact_phone,
-            "guardian_contact_email": guardian_contact_email
-        })
+        if is_edit:
+            # Cập nhật đơn hiện có
+            app = frappe.get_doc("SIS Scholarship Application", application_id)
+            
+            # Cập nhật các trường
+            app.main_teacher_id = get_form_value('main_teacher_id') or student_info.get('homeroom_teacher')
+            app.second_teacher_id = get_form_value('second_teacher_id')
+            if academic_report_str:
+                app.academic_report_type = 'upload'
+                app.academic_report_upload = academic_report_str
+            app.video_url = video_url if video_url else None
+            app.student_notification_email = student_notification_email
+            app.student_contact_phone = student_contact_phone
+            app.guardian_contact_name = guardian_contact_name
+            app.guardian_contact_phone = guardian_contact_phone
+            app.guardian_contact_email = guardian_contact_email
+            
+            # Xóa thành tích cũ nếu có thành tích mới
+            achievements_json = get_form_value('achievements')
+            if achievements_json:
+                app.achievements = []
+            
+            logs.append(f"Cập nhật đơn: {application_id}")
+        else:
+            # Tạo đơn mới
+            app = frappe.get_doc({
+                "doctype": "SIS Scholarship Application",
+                "scholarship_period_id": period_id,
+                "student_id": student_id,
+                "class_id": student_info.get('class_id'),
+                "education_stage_id": student_info.get('education_stage_id'),
+                "guardian_id": guardian_id,
+                "main_teacher_id": get_form_value('main_teacher_id') or student_info.get('homeroom_teacher'),
+                "second_teacher_id": get_form_value('second_teacher_id'),
+                "academic_report_type": 'upload' if academic_report_str else 'existing',
+                "academic_report_upload": academic_report_str,  # Format: semester1_url||semester2_url
+                "video_url": video_url if video_url else None,
+                "status": "Submitted",
+                # Thông tin liên hệ
+                "student_notification_email": student_notification_email,
+                "student_contact_phone": student_contact_phone,
+                "guardian_contact_name": guardian_contact_name,
+                "guardian_contact_phone": guardian_contact_phone,
+                "guardian_contact_email": guardian_contact_email
+            })
         
         # Parse và thêm thành tích - Cấu trúc mới: chỉ files, không có entries
         achievements_json = get_form_value('achievements')
@@ -982,17 +1085,23 @@ def submit_application_with_files():
             except json.JSONDecodeError:
                 pass
         
-        app.insert()
-        frappe.db.commit()
+        if is_edit:
+            app.save()
+            logs.append(f"Đã cập nhật đơn đăng ký: {app.name}")
+            message = "Cập nhật hồ sơ thành công"
+        else:
+            app.insert()
+            logs.append(f"Đã tạo đơn đăng ký: {app.name}")
+            message = "Đăng ký học bổng thành công"
         
-        logs.append(f"Đã tạo đơn đăng ký: {app.name}")
+        frappe.db.commit()
         
         return success_response(
             data={
                 "name": app.name,
                 "status": app.status
             },
-            message="Đăng ký học bổng thành công",
+            message=message,
             logs=logs
         )
         
