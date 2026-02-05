@@ -416,12 +416,17 @@ def get_award_records(
                     try:
                         student_data['activities_vn'] = json.loads(entry['activities_vn'])
                     except:
-                        pass
+                        student_data['activities_vn'] = []
+                else:
+                    student_data['activities_vn'] = []
+                    
                 if entry.get('activities_en'):
                     try:
                         student_data['activities_en'] = json.loads(entry['activities_en'])
                     except:
-                        pass
+                        student_data['activities_en'] = []
+                else:
+                    student_data['activities_en'] = []
                 
                 students.append(student_data)
             
@@ -573,12 +578,16 @@ def get_award_record_detail(name: str):
                     populated_entry['activities_vn'] = json.loads(entry.activities_vn)
                 except:
                     populated_entry['activities_vn'] = []
+            else:
+                populated_entry['activities_vn'] = []
             
             if entry.activities_en:
                 try:
                     populated_entry['activities_en'] = json.loads(entry.activities_en)
                 except:
                     populated_entry['activities_en'] = []
+            else:
+                populated_entry['activities_en'] = []
             
             student_entries.append(populated_entry)
         
