@@ -827,10 +827,11 @@ def get_applications():
                 app.main_teacher_name, app.second_teacher_name,
                 app.main_recommendation_status, app.second_recommendation_status,
                 app.total_score, app.total_percentage,
-                app.ctvn_score, app.ctqt_score, app.standardized_test_score,
-                app.quality_score, app.extracurricular_score, app.competition_score,
-                app.recommendation_score, app.video_score, app.scoring_note
+                sc.ctvn_score, sc.ctqt_score, sc.standardized_test_score,
+                sc.quality_score, sc.extracurricular_score, sc.competition_score,
+                sc.recommendation_score, sc.video_score, sc.note as scoring_note
             FROM `tabSIS Scholarship Application` app
+            LEFT JOIN `tabSIS Scholarship Scoring` sc ON sc.application_id = app.name
             WHERE {where_clause}
             ORDER BY app.submitted_at DESC
             LIMIT {page_size} OFFSET {offset}
