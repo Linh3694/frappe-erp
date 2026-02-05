@@ -165,59 +165,16 @@ def get_active_period():
         if not guardian_id:
             return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
         
-        # Tìm kỳ học bổng đang Open và được hiển thị trên Parent Portal
-        today = nowdate()
+        # Tìm kỳ học bổng được hiển thị trên Parent Portal (độc lập với status và thời gian)
         period = frappe.db.sql("""
             SELECT name, title, academic_year_id, campus_id, status, from_date, to_date
             FROM `tabSIS Scholarship Period`
-            WHERE status = 'Open'
-              AND show_on_parent_portal = 1
-              AND from_date <= %(today)s
-              AND to_date >= %(today)s
-            ORDER BY from_date DESC
+            WHERE show_on_parent_portal = 1
+            ORDER BY modified DESC
             LIMIT 1
-        """, {"today": today}, as_dict=True)
+        """, as_dict=True)
         
         if not period:
-            # Kiểm tra có kỳ sắp mở không (và được hiển thị trên Parent Portal)
-            upcoming = frappe.db.sql("""
-                SELECT name, title, from_date, to_date, status
-                FROM `tabSIS Scholarship Period`
-                WHERE status = 'Open'
-                  AND show_on_parent_portal = 1
-                  AND from_date > %(today)s
-                ORDER BY from_date ASC
-                LIMIT 1
-            """, {"today": today}, as_dict=True)
-            
-            if upcoming:
-                return success_response(
-                    data={
-                        "status": "not_started",
-                        "message": "Chưa đến thời gian đăng ký học bổng",
-                        "start_date": str(upcoming[0].from_date) if upcoming[0].from_date else None
-                    }
-                )
-            
-            # Kiểm tra có kỳ đã đóng không (và được hiển thị trên Parent Portal)
-            closed = frappe.db.sql("""
-                SELECT name, title, to_date
-                FROM `tabSIS Scholarship Period`
-                WHERE status = 'Open'
-                  AND show_on_parent_portal = 1
-                  AND to_date < %(today)s
-                ORDER BY to_date DESC
-                LIMIT 1
-            """, {"today": today}, as_dict=True)
-            
-            if closed:
-                return success_response(
-                    data={
-                        "status": "ended",
-                        "message": "Đã hết thời gian đăng ký học bổng"
-                    }
-                )
-            
             return success_response(
                 data={
                     "status": "no_period",
