@@ -943,6 +943,23 @@ def submit_application_with_files():
             if file_url:
                 semester2_urls.append(file_url)
         
+        # Gộp với existing files (khi edit mode)
+        existing_semester1_json = get_form_value('existing_semester1_files')
+        if existing_semester1_json:
+            try:
+                existing_semester1 = json.loads(existing_semester1_json)
+                semester1_urls = existing_semester1 + semester1_urls
+            except json.JSONDecodeError:
+                pass
+        
+        existing_semester2_json = get_form_value('existing_semester2_files')
+        if existing_semester2_json:
+            try:
+                existing_semester2 = json.loads(existing_semester2_json)
+                semester2_urls = existing_semester2 + semester2_urls
+            except json.JSONDecodeError:
+                pass
+        
         # Gộp link báo cáo học tập (backward compatible với code cũ)
         report_links = []
         if semester1_urls:
@@ -1028,8 +1045,10 @@ def submit_application_with_files():
                     category_title_vn = cat_data.get('category_title_vn', '')
                     category_title_en = cat_data.get('category_title_en', '')
                     file_count = cat_data.get('file_count', 0)
+                    existing_files = cat_data.get('existing_files', [])
                     
-                    if file_count == 0:
+                    # Bỏ qua nếu không có file nào (cả mới và cũ)
+                    if file_count == 0 and len(existing_files) == 0:
                         continue
                     
                     # Map category title to achievement_type dựa vào tên
@@ -1042,10 +1061,12 @@ def submit_application_with_files():
                     elif 'ngoại khóa' in title_lower or 'hoạt động' in title_lower or 'extracurricular' in title_lower.lower():
                         achievement_type = 'extracurricular'
                     
-                    logs.append(f"Category {category_index}: {category_title_vn} -> {achievement_type}, {file_count} files")
+                    logs.append(f"Category {category_index}: {category_title_vn} -> {achievement_type}, {file_count} new files, {len(existing_files)} existing files")
                     
-                    # Upload tất cả files cho category này
-                    attachment_urls = []
+                    # Bắt đầu với existing files
+                    attachment_urls = list(existing_files) if existing_files else []
+                    
+                    # Upload files mới cho category này
                     for file_idx in range(file_count):
                         file_key = f'achievement_file_{category_index}_{file_idx}'
                         file_url = upload_file(file_key, 'Scholarship/Certificates')
@@ -1062,7 +1083,7 @@ def submit_application_with_files():
                         "description": f"{category_title_vn} ({category_title_en})" if category_title_en else category_title_vn,
                         "attachment": attachment_str
                     })
-                    logs.append(f"  Added {len(attachment_urls)} files for category {category_title_vn}")
+                    logs.append(f"  Added {len(attachment_urls)} total files for category {category_title_vn}")
                         
             except json.JSONDecodeError as e:
                 logs.append(f"Error parsing achievements JSON: {str(e)}")
