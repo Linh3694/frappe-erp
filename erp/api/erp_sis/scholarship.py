@@ -895,6 +895,7 @@ def get_application_detail(application_id=None):
                 "status": main_rec.status,
                 "denied_reason": main_rec.denied_reason,
                 "submitted_at": str(main_rec.submitted_at) if main_rec.submitted_at else None,
+                "average_rating_score": getattr(main_rec, 'average_rating_score', None),
                 "answers": [{"section_title": a.section_title, "question_text_vn": a.question_text_vn, "answer_text": a.answer_text, "answer_rating": a.answer_rating} for a in main_rec.answers]
             })
         
@@ -906,6 +907,7 @@ def get_application_detail(application_id=None):
                 "status": second_rec.status,
                 "denied_reason": second_rec.denied_reason,
                 "submitted_at": str(second_rec.submitted_at) if second_rec.submitted_at else None,
+                "average_rating_score": getattr(second_rec, 'average_rating_score', None),
                 "answers": [{"section_title": a.section_title, "question_text_vn": a.question_text_vn, "answer_text": a.answer_text, "answer_rating": a.answer_rating} for a in second_rec.answers]
             })
         
@@ -962,6 +964,13 @@ def get_application_detail(application_id=None):
                 "status": app.status,
                 "submitted_at": str(app.submitted_at) if app.submitted_at else None,
                 "guardian_name": app.guardian_name,
+                # Thông tin liên hệ
+                "student_notification_email": getattr(app, 'student_notification_email', None),
+                "student_contact_phone": getattr(app, 'student_contact_phone', None),
+                "guardian_contact_name": getattr(app, 'guardian_contact_name', None),
+                "guardian_contact_phone": getattr(app, 'guardian_contact_phone', None),
+                "guardian_contact_email": getattr(app, 'guardian_contact_email', None),
+                # Báo cáo học tập
                 "academic_report_type": app.academic_report_type,
                 "academic_report_link": app.academic_report_link,
                 "academic_report_upload": app.academic_report_upload,
@@ -1427,6 +1436,7 @@ def submit_recommendation():
         
         recommendation_id = data.get('recommendation_id')
         answers = data.get('answers', [])
+        average_rating_score = data.get('average_rating_score')
         
         if not recommendation_id:
             return validation_error_response(
@@ -1455,8 +1465,8 @@ def submit_recommendation():
         if teacher_user != user and "System Manager" not in user_roles and "SIS Manager" not in user_roles:
             return error_response("Bạn không có quyền viết thư giới thiệu này", logs=logs)
         
-        # Submit thư
-        rec.submit_recommendation(answers)
+        # Submit thư với điểm trung bình
+        rec.submit_recommendation(answers, average_rating_score)
         
         logs.append(f"Đã submit thư giới thiệu: {recommendation_id}")
         

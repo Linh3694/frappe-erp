@@ -58,16 +58,21 @@ class SISScholarshipRecommendation(Document):
 		application = frappe.get_doc("SIS Scholarship Application", self.application_id)
 		application.update_recommendation_status()
 	
-	def submit_recommendation(self, answers):
+	def submit_recommendation(self, answers, average_rating_score=None):
 		"""
 		Submit thư giới thiệu với các câu trả lời.
 		Args:
 			answers: List các dict chứa câu trả lời
+			average_rating_score: Điểm trung bình của các câu hỏi rating (optional)
 		"""
 		# Clear và thêm answers mới
 		self.answers = []
 		for answer in answers:
 			self.append("answers", answer)
+		
+		# Lưu điểm trung bình nếu có
+		if average_rating_score is not None:
+			self.average_rating_score = average_rating_score
 		
 		self.status = "Submitted"
 		self.submitted_at = now()

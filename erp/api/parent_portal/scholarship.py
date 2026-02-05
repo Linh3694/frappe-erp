@@ -887,6 +887,13 @@ def submit_application_with_files():
         # Lấy video URL từ form (không upload file nữa)
         video_url = get_form_value('video_url')
         
+        # Lấy thông tin liên hệ từ form
+        student_notification_email = get_form_value('student_notification_email')
+        student_contact_phone = get_form_value('student_contact_phone')
+        guardian_contact_name = get_form_value('guardian_contact_name')
+        guardian_contact_phone = get_form_value('guardian_contact_phone')
+        guardian_contact_email = get_form_value('guardian_contact_email')
+        
         # Tạo đơn đăng ký
         # Lưu báo cáo học tập với format: semester1_urls||semester2_urls
         # Mỗi semester có nhiều URLs phân cách bằng |
@@ -909,7 +916,13 @@ def submit_application_with_files():
             "academic_report_type": 'upload' if academic_report_str else 'existing',
             "academic_report_upload": academic_report_str,  # Format: semester1_url||semester2_url
             "video_url": video_url if video_url else None,
-            "status": "Submitted"
+            "status": "Submitted",
+            # Thông tin liên hệ
+            "student_notification_email": student_notification_email,
+            "student_contact_phone": student_contact_phone,
+            "guardian_contact_name": guardian_contact_name,
+            "guardian_contact_phone": guardian_contact_phone,
+            "guardian_contact_email": guardian_contact_email
         })
         
         # Parse và thêm thành tích - Cấu trúc mới: chỉ files, không có entries

@@ -26,6 +26,13 @@
   "class_name",
   "education_stage_id",
   "education_stage_name",
+  "contact_info_section",
+  "student_notification_email",
+  "student_contact_phone",
+  "column_break_contact",
+  "guardian_contact_name",
+  "guardian_contact_phone",
+  "guardian_contact_email",
   "status_section",
   "status",
   "column_break_status",
@@ -129,6 +136,49 @@
    "label": "Tên cấp học",
    "read_only": 1,
    "fetch_from": "education_stage_id.title_vn"
+  },
+  {
+   "fieldname": "contact_info_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin liên hệ"
+  },
+  {
+   "fieldname": "student_notification_email",
+   "fieldtype": "Data",
+   "label": "Email nhận thông báo (HS)",
+   "options": "Email",
+   "description": "Email để nhận thông báo kết quả"
+  },
+  {
+   "fieldname": "student_contact_phone",
+   "fieldtype": "Data",
+   "label": "SĐT liên hệ (HS)",
+   "options": "Phone",
+   "description": "Số điện thoại liên hệ của học sinh"
+  },
+  {
+   "fieldname": "column_break_contact",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "guardian_contact_name",
+   "fieldtype": "Data",
+   "label": "Họ tên giám hộ",
+   "description": "Họ và tên người giám hộ liên hệ"
+  },
+  {
+   "fieldname": "guardian_contact_phone",
+   "fieldtype": "Data",
+   "label": "SĐT giám hộ",
+   "options": "Phone",
+   "description": "Số điện thoại người giám hộ"
+  },
+  {
+   "fieldname": "guardian_contact_email",
+   "fieldtype": "Data",
+   "label": "Email giám hộ",
+   "options": "Email",
+   "description": "Email người giám hộ"
   },
   {
    "fieldname": "status_section",

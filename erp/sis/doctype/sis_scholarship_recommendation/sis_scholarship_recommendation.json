@@ -24,6 +24,7 @@
   "recommendation_type",
   "status",
   "denied_reason",
+  "average_rating_score",
   "answers_section",
   "answers",
   "system_section",
@@ -88,6 +89,14 @@
    "label": "Lý do từ chối",
    "depends_on": "eval:doc.status=='Denied'",
    "mandatory_depends_on": "eval:doc.status=='Denied'"
+  },
+  {
+   "fieldname": "average_rating_score",
+   "fieldtype": "Float",
+   "label": "Điểm đánh giá TB",
+   "precision": 2,
+   "read_only": 1,
+   "description": "Điểm trung bình của các câu hỏi rating"
   },
   {
    "fieldname": "answers_section",
