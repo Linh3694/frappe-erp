@@ -387,7 +387,7 @@ def get_application_detail(application_id=None):
             return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
         
         # Lấy thông tin đơn
-        app = frappe.get_doc("SIS Scholarship Application", application_id)
+        app = frappe.get_doc("SIS Scholarship Application", application_id, ignore_permissions=True)
         
         # Kiểm tra đơn thuộc về học sinh của guardian này
         guardian_students = _get_guardian_students(guardian_id)
@@ -944,7 +944,7 @@ def submit_application_with_files():
         
         if is_edit:
             # Cập nhật đơn hiện có
-            app = frappe.get_doc("SIS Scholarship Application", application_id)
+            app = frappe.get_doc("SIS Scholarship Application", application_id, ignore_permissions=True)
             
             # Cập nhật các trường
             app.main_teacher_id = get_form_value('main_teacher_id') or student_info.get('homeroom_teacher')
@@ -1086,11 +1086,11 @@ def submit_application_with_files():
                 pass
         
         if is_edit:
-            app.save()
+            app.save(ignore_permissions=True)
             logs.append(f"Đã cập nhật đơn đăng ký: {app.name}")
             message = "Cập nhật hồ sơ thành công"
         else:
-            app.insert()
+            app.insert(ignore_permissions=True)
             logs.append(f"Đã tạo đơn đăng ký: {app.name}")
             message = "Đăng ký học bổng thành công"
         
