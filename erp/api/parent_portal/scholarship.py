@@ -547,6 +547,7 @@ def get_active_period():
                     "academic_year_id": period_data.academic_year_id,
                     "school_year_name_vn": school_year.title_vn if school_year else None,
                     "school_year_name_en": school_year.title_en if school_year else None,
+                    "status": period_data.status,  # Trạng thái kỳ: Draft/Open/Closed
                     "from_date": str(period_data.from_date) if period_data.from_date else None,
                     "to_date": str(period_data.to_date) if period_data.to_date else None,
                     "achievement_categories": achievement_categories
