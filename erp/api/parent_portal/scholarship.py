@@ -1330,34 +1330,51 @@ def submit_application_with_files():
                 changed_teachers.append(('second', new_second_teacher_id))
                 logs.append(f"GV bộ môn thay đổi: {old_second_teacher_id} -> {new_second_teacher_id}")
             
-            # Nếu có thay đổi giáo viên, xóa các recommendation cũ bị từ chối
+            # Nếu có thay đổi giáo viên, xóa recommendation cũ và tạo mới cho GV mới
             if changed_teachers:
-                # Xóa recommendations đã từ chối của giáo viên cũ
-                denied_recs = frappe.get_all(
-                    "SIS Scholarship Recommendation",
-                    filters={
-                        "application_id": application_id,
-                        "status": "Denied"
-                    },
-                    fields=["name", "teacher_id", "recommendation_type"]
-                )
-                
-                for rec in denied_recs:
-                    # Xóa recommendation đã từ chối nếu giáo viên tương ứng đã được thay đổi
-                    should_delete = False
-                    if rec.recommendation_type == 'main' and new_main_teacher_id != old_main_teacher_id:
-                        should_delete = True
-                    elif rec.recommendation_type == 'second' and new_second_teacher_id != old_second_teacher_id:
-                        should_delete = True
+                for rec_type, new_teacher_id in changed_teachers:
+                    # Xóa TẤT CẢ recommendation cũ của loại này (Denied, Pending, v.v.)
+                    old_recs = frappe.get_all(
+                        "SIS Scholarship Recommendation",
+                        filters={
+                            "application_id": application_id,
+                            "recommendation_type": rec_type
+                        },
+                        fields=["name", "teacher_id", "status"]
+                    )
                     
-                    if should_delete:
+                    for rec in old_recs:
                         frappe.delete_doc("SIS Scholarship Recommendation", rec.name, ignore_permissions=True)
-                        logs.append(f"Đã xóa recommendation bị từ chối: {rec.name}")
+                        logs.append(f"Đã xóa recommendation cũ ({rec.status}): {rec.name} của GV {rec.teacher_id}")
+                    
+                    # Tạo recommendation MỚI cho giáo viên mới
+                    try:
+                        new_rec = frappe.get_doc({
+                            "doctype": "SIS Scholarship Recommendation",
+                            "application_id": application_id,
+                            "teacher_id": new_teacher_id,
+                            "recommendation_type": rec_type,
+                            "status": "Pending"
+                        })
+                        new_rec.insert(ignore_permissions=True)
+                        
+                        # Cập nhật reference trên application
+                        if rec_type == 'main':
+                            app.main_recommendation_id = new_rec.name
+                            app.main_recommendation_status = "Pending"
+                        else:
+                            app.second_recommendation_id = new_rec.name
+                            app.second_recommendation_status = "Pending"
+                        
+                        logs.append(f"Đã tạo recommendation mới: {new_rec.name} cho GV {new_teacher_id} ({rec_type})")
+                    except Exception as rec_err:
+                        logs.append(f"Lỗi tạo recommendation mới cho GV {new_teacher_id}: {str(rec_err)}")
+                        frappe.log_error(frappe.get_traceback(), "Scholarship Create New Recommendation Error")
                 
-                # Reset status về Submitted nếu đang ở trạng thái DeniedByTeacher
+                # Reset status về WaitingRecommendation nếu đang ở trạng thái DeniedByTeacher
                 if app.status == 'DeniedByTeacher':
-                    app.status = 'Submitted'
-                    logs.append("Reset trạng thái về Submitted")
+                    app.status = 'WaitingRecommendation'
+                    logs.append("Reset trạng thái về WaitingRecommendation")
             
             # Cập nhật các trường
             app.main_teacher_id = new_main_teacher_id
