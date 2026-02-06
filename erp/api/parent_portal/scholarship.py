@@ -95,7 +95,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
         student_name: tên học sinh
         student_code: mã học sinh
         class_name: tên lớp
-        portal_link: link portal giáo viên (đến tab scholarship)
+        portal_link: link portal giáo viên (base URL)
         deadline_str: hạn chót gửi thư (format dd/mm/yyyy cho VN, Month dd, yyyy cho EN)
     
     Returns:
@@ -194,10 +194,10 @@ def _get_teacher_email_info(teacher_id, logs=None):
             _log(f"⚠️ GV {teacher_id} không tồn tại hoặc chưa có user_id")
             return None, None
         
-        # Lấy email và full_name từ User - query trực tiếp DB
+        # Lấy email, first_name, last_name từ User - query trực tiếp DB
         user_data = frappe.db.get_value(
             "User", user_id,
-            ["email", "full_name"],
+            ["email", "first_name", "last_name"],
             as_dict=True
         )
         
@@ -210,7 +210,15 @@ def _get_teacher_email_info(teacher_id, logs=None):
             _log(f"⚠️ GV {teacher_id} user_id={user_id} email={email} - không hợp lệ")
             return None, None
         
-        teacher_name = user_data.get("full_name") or teacher_id
+        # Ghép tên theo thứ tự Việt Nam: last_name + first_name
+        # VD: first_name="Linh", last_name="Nguyễn Hải" -> "Nguyễn Hải Linh"
+        first_name = (user_data.get("first_name") or "").strip()
+        last_name = (user_data.get("last_name") or "").strip()
+        if last_name and first_name:
+            teacher_name = f"{last_name} {first_name}"
+        else:
+            teacher_name = first_name or last_name or teacher_id
+        
         return email, teacher_name
     except Exception as e:
         if logs is not None:
@@ -262,9 +270,8 @@ def _send_scholarship_notification_to_teachers(app, student_info, is_new=True):
         class_name = student_info.get('class_name') or ''
         class_id = student_info.get('class_id') or app.class_id
         
-        # URL portal giáo viên - tab scholarship trong trang ClassInfo
-        portal_url = frappe.conf.get('teacher_portal_url') or 'https://wis.wellspring.edu.vn'
-        portal_link = f"{portal_url}/teaching/classes/{class_id}?tab=scholarship"
+        # URL portal giáo viên - chỉ dùng base URL
+        portal_link = frappe.conf.get('teacher_portal_url') or 'https://wis.wellspring.edu.vn'
         
         # Lấy deadline từ kỳ học bổng
         deadline_str = _get_period_deadline_str(app.scholarship_period_id)
@@ -318,9 +325,8 @@ def _send_email_to_changed_teachers(app, student_info, changed_teachers, logs):
         class_name = student_info.get('class_name') or ''
         class_id = student_info.get('class_id') or app.class_id
         
-        # URL portal giáo viên
-        portal_url = frappe.conf.get('teacher_portal_url') or 'https://wis.wellspring.edu.vn'
-        portal_link = f"{portal_url}/teaching/classes/{class_id}?tab=scholarship"
+        # URL portal giáo viên - chỉ dùng base URL
+        portal_link = frappe.conf.get('teacher_portal_url') or 'https://wis.wellspring.edu.vn'
         
         # Lấy deadline từ kỳ học bổng
         deadline_str = _get_period_deadline_str(app.scholarship_period_id)
