@@ -344,8 +344,11 @@ def save_contact_log():
 def send_contact_log():
     """
     Gửi contact log cho phụ huynh qua push notification.
-    ⚡ Tối ưu: Batch update status + enqueue background job gửi notification
-    → API trả về ngay (~200ms), notification gửi async ở background.
+    ⚡ Tối ưu:
+    - Batch update status bằng 1 SQL query
+    - Batch lấy student names (1 query)
+    - Batch lấy guardians (1 query)
+    - Gửi notification synchronous để đảm bảo phụ huynh nhận được ngay
     """
     try:
         body = _get_body() or {}
@@ -358,11 +361,10 @@ def send_contact_log():
         # Validate quyền giáo viên chủ nhiệm
         _validate_homeroom_teacher_access(class_id)
         
-        # ⚡ Batch update status bằng SQL thay vì loop từng record
         now = frappe.utils.now_datetime()
         user = frappe.session.user
         
-        # Lấy student_ids trước khi update (cần cho notification)
+        # ⚡ Batch lấy student_ids (1 query)
         log_data = frappe.db.sql("""
             SELECT name, student_id 
             FROM `tabSIS Class Log Student`
@@ -375,7 +377,7 @@ def send_contact_log():
         student_ids = [d['student_id'] for d in log_data]
         valid_log_ids = [d['name'] for d in log_data]
         
-        # ⚡ Batch update tất cả status cùng lúc (1 query thay vì N queries)
+        # ⚡ Batch update tất cả status cùng lúc (1 query thay vì N get_doc+save)
         frappe.db.sql("""
             UPDATE `tabSIS Class Log Student`
             SET contact_log_status = 'Sent',
@@ -390,26 +392,14 @@ def send_contact_log():
         
         sent_count = len(valid_log_ids)
         
-        # ⚡ Enqueue background job để gửi notification (không block response)
-        try:
-            frappe.enqueue(
-                _send_contact_log_notifications_background,
-                queue='short',
-                timeout=300,
-                class_id=class_id,
-                student_ids=student_ids,
-                sent_by=user
-            )
-            frappe.logger().info(f"📨 [CONTACT_LOG] Enqueued notification job for {len(student_ids)} students")
-        except Exception as e:
-            # Nếu enqueue fail, log lỗi nhưng vẫn trả về success (status đã update)
-            frappe.logger().error(f"❌ [CONTACT_LOG] Failed to enqueue notifications: {str(e)}")
+        # ⚡ Gửi notification synchronous (đảm bảo phụ huynh nhận được)
+        notification_result = _send_contact_log_notifications(class_id, student_ids)
         
         return success_response(
             message="Contact logs sent successfully",
             data={
                 "total_logs_updated": sent_count,
-                "notification_status": "queued"
+                "notification_summary": notification_result
             }
         )
         
@@ -424,38 +414,43 @@ def send_contact_log():
         )
 
 
-def _send_contact_log_notifications_background(class_id, student_ids, sent_by):
+def _send_contact_log_notifications(class_id, student_ids):
     """
-    Background job: Gửi notification cho phụ huynh.
-    ⚡ Tối ưu: Batch lấy guardian → gửi notification per-parent (cần student_name riêng biệt)
+    Gửi notification cho phụ huynh (synchronous).
+    ⚡ Tối ưu so với code cũ:
+    - Code cũ: N lần gọi send_bulk_parent_notifications (N = số học sinh)
+      → mỗi lần query guardians, tạo notification, gửi push riêng biệt
+    - Code mới: 1 batch query guardians + 1 batch query student names
+      → chỉ loop 1 lần qua parents để tạo notification + push
     """
     from erp.utils.notification_handler import (
         get_guardians_for_students,
         get_parent_emails
     )
     
+    result = {"success_count": 0, "failed_count": 0, "total_parents": 0}
+    
     try:
-        frappe.logger().info(f"📨 [BG_CONTACT_LOG] Start sending notifications for {len(student_ids)} students in class {class_id}")
+        if not student_ids:
+            return result
         
-        # ⚡ Batch lấy tên tất cả học sinh cùng lúc (1 query)
-        student_names = {}
-        if student_ids:
-            name_rows = frappe.db.sql("""
-                SELECT name, student_name FROM `tabCRM Student`
-                WHERE name IN %(ids)s
-            """, {"ids": student_ids}, as_dict=True)
-            student_names = {r['name']: r['student_name'] for r in name_rows}
+        # ⚡ Batch lấy tên tất cả học sinh cùng lúc (1 query thay vì N queries)
+        name_rows = frappe.db.sql("""
+            SELECT name, student_name FROM `tabCRM Student`
+            WHERE name IN %(ids)s
+        """, {"ids": student_ids}, as_dict=True)
+        student_names = {r['name']: r['student_name'] for r in name_rows}
         
-        # ⚡ Batch lấy tất cả guardians (1 batch query thay vì N queries)
+        # ⚡ Batch lấy tất cả guardians cho TẤT CẢ students (1 batch thay vì N lần)
         guardians = get_guardians_for_students(student_ids)
         
         if not guardians:
-            frappe.logger().info(f"📨 [BG_CONTACT_LOG] No guardians found, done.")
-            return
+            return result
         
         parent_emails = get_parent_emails(guardians)
+        result["total_parents"] = len(parent_emails)
         
-        # Tạo mapping: email → student_id
+        # Tạo mapping: email → student_id (ưu tiên student trong danh sách gửi)
         email_to_student_map = {}
         for guardian in guardians:
             email = guardian.get("email")
@@ -464,23 +459,12 @@ def _send_contact_log_notifications_background(class_id, student_ids, sent_by):
                 matched = next((s for s in guardian_student_ids if s in student_ids), guardian_student_ids[0])
                 email_to_student_map[email] = matched
         
-        # ⚡ Debounce check (tránh gửi trùng)
-        redis = frappe.cache()
-        timestamp_key = frappe.utils.now()[:16]  # YYYY-MM-DDTHH:MM
-        debounce_key = f"contact_log_bg:{class_id}:{timestamp_key}"
-        if redis.get_value(debounce_key):
-            frappe.logger().info(f"⏭️ [BG_CONTACT_LOG] Debounce skip for {debounce_key}")
-            return
-        redis.set_value(debounce_key, "1", expires_in_sec=60)
-        
-        # Import các helper để tạo notification + push
-        from erp.common.doctype.erp_notification.erp_notification import create_notification, get_unread_count
+        # Import helpers
+        from erp.common.doctype.erp_notification.erp_notification import get_unread_count
         from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update, get_notification_text
         from erp.api.parent_portal.push_notification import send_push_notification
         
-        success_count = 0
-        failed_count = 0
-        
+        # Gửi notification cho từng phụ huynh
         for parent_email in parent_emails:
             try:
                 student_id = email_to_student_map.get(parent_email)
@@ -500,18 +484,16 @@ def _send_contact_log_notifications_background(class_id, student_ids, sent_by):
                     "timestamp": frappe.utils.now()
                 }
                 
-                # Tạo notification record
-                import json as json_lib
-                from frappe import get_doc
-                notification_doc = get_doc({
+                # Tạo notification record trong DB
+                notification_doc = frappe.get_doc({
                     "doctype": "ERP Notification",
-                    "title": json_lib.dumps(notification_title),
-                    "message": json_lib.dumps(notification_body),
+                    "title": json.dumps(notification_title),
+                    "message": json.dumps(notification_body),
                     "recipient_user": parent_email,
-                    "recipients": json_lib.dumps([parent_email]),
+                    "recipients": json.dumps([parent_email]),
                     "notification_type": "contact_log",
                     "priority": "medium",
-                    "data": json_lib.dumps(merged_data),
+                    "data": json.dumps(merged_data),
                     "channel": "push",
                     "status": "sent",
                     "delivery_status": "pending",
@@ -521,7 +503,7 @@ def _send_contact_log_notifications_background(class_id, student_ids, sent_by):
                 })
                 notification_doc.insert(ignore_permissions=True)
                 
-                # Emit realtime (SocketIO)
+                # Emit realtime notification (SocketIO) → hiển thị popup trên parent portal
                 emit_notification_to_user(parent_email, {
                     "id": notification_doc.name,
                     "type": "contact_log",
@@ -534,10 +516,11 @@ def _send_contact_log_notifications_background(class_id, student_ids, sent_by):
                     "student_id": student_id
                 })
                 
+                # Cập nhật unread count cho parent portal
                 unread_count = get_unread_count(parent_email)
                 emit_unread_count_update(parent_email, unread_count)
                 
-                # Gửi push notification
+                # Gửi push notification → hiện notification trên điện thoại/browser
                 try:
                     final_title = get_notification_text(notification_title)
                     final_body = get_notification_text(notification_body)
@@ -550,22 +533,28 @@ def _send_contact_log_notifications_background(class_id, student_ids, sent_by):
                         tag="contact_log"
                     )
                 except Exception as push_err:
-                    frappe.logger().warning(f"❌ [BG_CONTACT_LOG] Push failed for {parent_email}: {str(push_err)}")
+                    frappe.logger().warning(f"❌ [CONTACT_LOG] Push failed for {parent_email}: {str(push_err)}")
                 
-                success_count += 1
+                result["success_count"] += 1
                 
             except Exception as parent_err:
-                failed_count += 1
-                frappe.logger().error(f"❌ [BG_CONTACT_LOG] Failed for {parent_email}: {str(parent_err)}")
+                result["failed_count"] += 1
+                frappe.logger().error(f"❌ [CONTACT_LOG] Notification failed for {parent_email}: {str(parent_err)}")
         
-        # Commit 1 lần duy nhất cuối cùng
+        # Commit tất cả notification records 1 lần duy nhất
         frappe.db.commit()
-        frappe.logger().info(f"✅ [BG_CONTACT_LOG] Done: {success_count} success, {failed_count} failed out of {len(parent_emails)} parents")
+        
+        frappe.logger().info(
+            f"✅ [CONTACT_LOG] Notifications: {result['success_count']} success, "
+            f"{result['failed_count']} failed out of {len(parent_emails)} parents"
+        )
         
     except Exception as e:
-        frappe.logger().error(f"❌ [BG_CONTACT_LOG] Background job error: {str(e)}")
+        frappe.logger().error(f"❌ [CONTACT_LOG] Notification error: {str(e)}")
         import traceback
         frappe.logger().error(traceback.format_exc())
+    
+    return result
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
