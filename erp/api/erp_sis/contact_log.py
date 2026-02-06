@@ -139,11 +139,8 @@ def get_badges(education_stage=None):
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def save_contact_log():
     """
-    Save contact log (badges + comment) for students
-    Does NOT send notification yet - just saves draft
-    
-    FIX: Tìm student log đã có contact_log trước (từ bất kỳ subject nào trong ngày),
-    nếu có thì update, nếu không mới tạo mới
+    Lưu contact log (badges + comment) cho học sinh - chưa gửi notification.
+    ⚡ Tối ưu: Batch update existing logs bằng SQL, batch query class_students.
     """
     try:
         body = _get_body() or {}
@@ -154,14 +151,14 @@ def save_contact_log():
         if not class_id:
             return error_response(message="Missing class_id", code="MISSING_PARAMS")
         
-        # Validate teacher access
+        # Validate quyền giáo viên chủ nhiệm
         _validate_homeroom_teacher_access(class_id)
         
         saved_count = 0
         log_ids = {}  # student_id -> log_id
         
-        # Tìm tất cả subjects của class + date để tìm existing contact logs
-        existing_logs_map = {}  # student_id -> log record có contact_log
+        # ⚡ Batch query: Tìm tất cả existing logs của class + date (1 query)
+        existing_logs_map = {}  # student_id -> log record
         if date:
             existing_logs = frappe.db.sql("""
                 SELECT 
@@ -181,15 +178,14 @@ def save_contact_log():
                     END
             """, {"class_id": class_id, "date": date}, as_dict=True)
             
-            # Lấy record tốt nhất cho mỗi student (ưu tiên record có contact_log)
             for log in existing_logs:
                 if log['student_id'] not in existing_logs_map:
                     existing_logs_map[log['student_id']] = log
         
-        # Tìm hoặc tạo subject mặc định cho trường hợp cần tạo mới
-        default_subject_id = None
+        # Phân loại: students cần update vs students cần tạo mới
+        students_to_update = []  # [(log_id, badges_json, comment, student_id)]
+        students_to_create = []  # [(student_id, badges, comment)]
         
-        # Now process each student
         for student_data in students:
             student_id = student_data.get('student_id')
             badges = student_data.get('badges') or []
@@ -198,93 +194,121 @@ def save_contact_log():
             if not student_id:
                 continue
             
-            # Kiểm tra xem student đã có log với contact_log chưa
             existing_log = existing_logs_map.get(student_id)
-            
             if existing_log:
-                # Update existing log (đã có contact_log hoặc ít nhất có record)
-                log_id = existing_log['log_id']
-                student_log = frappe.get_doc("SIS Class Log Student", log_id)
-                student_log.badges = json.dumps(badges)
-                student_log.contact_log_comment = comment
-                # Chỉ set Draft nếu chưa Sent
-                if student_log.contact_log_status != 'Sent':
-                    student_log.contact_log_status = "Draft"
-                student_log.save()
+                students_to_update.append((
+                    existing_log['log_id'],
+                    json.dumps(badges),
+                    comment,
+                    student_id,
+                    existing_log.get('contact_log_status')
+                ))
             else:
-                # Cần tạo mới - lấy hoặc tạo subject mặc định
-                if not default_subject_id:
-                    # Tìm timetable instance
-                    timetable_instance = None
-                    if date:
-                        timetable_instances = frappe.get_all(
-                            "SIS Timetable Instance",
-                            filters={
-                                "class_id": class_id,
-                                "start_date": ["<=", date],
-                                "end_date": [">=", date]
-                            },
-                            fields=["name"],
-                            limit=1
-                        )
-                        if timetable_instances:
-                            timetable_instance = timetable_instances[0]['name']
-                    
-                    if not timetable_instance:
-                        return error_response(
-                            message="No active timetable instance found for this class and date",
-                            code="NO_TIMETABLE_INSTANCE"
-                        )
-                    
-                    # Tìm subject đã có
-                    subject_rows = frappe.get_all(
-                        "SIS Class Log Subject",
-                        filters={
-                            "timetable_instance_id": timetable_instance,
-                            "class_id": class_id,
-                            "log_date": date
-                        },
-                        fields=["name"],
-                        limit=1
-                    )
-                    
-                    if subject_rows:
-                        default_subject_id = subject_rows[0]['name']
-                    else:
-                        # Tạo subject mới
-                        from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
-                        campus_id = None
-                        try:
-                            campus_id = get_current_user_campus()
-                            if not campus_id:
-                                campuses = get_user_campuses(frappe.session.user)
-                                campus_id = campuses[0] if campuses else None
-                        except Exception:
-                            pass
-                        
-                        subject_doc = frappe.get_doc({
-                            "doctype": "SIS Class Log Subject",
-                            "timetable_instance_id": timetable_instance,
-                            "class_id": class_id,
-                            "log_date": date,
-                            "recorded_by": frappe.session.user,
-                            "campus_id": campus_id
-                        })
-                        subject_doc.insert()
-                        default_subject_id = subject_doc.name
-                
-                # Get class_student_id
-                class_student = frappe.get_value(
-                    "SIS Class Student",
-                    filters={"class_id": class_id, "student_id": student_id},
-                    fieldname="name"
+                students_to_create.append((student_id, badges, comment))
+        
+        # ⚡ Batch UPDATE: Cập nhật tất cả existing logs cùng lúc
+        now = frappe.utils.now_datetime()
+        user = frappe.session.user
+        
+        for (log_id, badges_json, comment, student_id, current_status) in students_to_update:
+            # Dùng SQL trực tiếp thay vì frappe.get_doc + save (tiết kiệm ~50ms/record)
+            new_status = current_status if current_status == 'Sent' else 'Draft'
+            frappe.db.sql("""
+                UPDATE `tabSIS Class Log Student`
+                SET badges = %(badges)s,
+                    contact_log_comment = %(comment)s,
+                    contact_log_status = %(status)s,
+                    modified = %(now)s,
+                    modified_by = %(user)s
+                WHERE name = %(log_id)s
+            """, {
+                "badges": badges_json,
+                "comment": comment,
+                "status": new_status,
+                "now": now,
+                "user": user,
+                "log_id": log_id
+            })
+            log_ids[student_id] = log_id
+            saved_count += 1
+        
+        # Xử lý students cần tạo mới (nếu có)
+        if students_to_create:
+            # Tìm hoặc tạo subject mặc định (chỉ 1 lần)
+            default_subject_id = None
+            timetable_instance = None
+            
+            if date:
+                timetable_instances = frappe.get_all(
+                    "SIS Timetable Instance",
+                    filters={
+                        "class_id": class_id,
+                        "start_date": ["<=", date],
+                        "end_date": [">=", date]
+                    },
+                    fields=["name"],
+                    limit=1
                 )
+                if timetable_instances:
+                    timetable_instance = timetable_instances[0]['name']
+            
+            if not timetable_instance:
+                return error_response(
+                    message="No active timetable instance found for this class and date",
+                    code="NO_TIMETABLE_INSTANCE"
+                )
+            
+            subject_rows = frappe.get_all(
+                "SIS Class Log Subject",
+                filters={
+                    "timetable_instance_id": timetable_instance,
+                    "class_id": class_id,
+                    "log_date": date
+                },
+                fields=["name"],
+                limit=1
+            )
+            
+            if subject_rows:
+                default_subject_id = subject_rows[0]['name']
+            else:
+                from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
+                campus_id = None
+                try:
+                    campus_id = get_current_user_campus()
+                    if not campus_id:
+                        campuses = get_user_campuses(frappe.session.user)
+                        campus_id = campuses[0] if campuses else None
+                except Exception:
+                    pass
                 
+                subject_doc = frappe.get_doc({
+                    "doctype": "SIS Class Log Subject",
+                    "timetable_instance_id": timetable_instance,
+                    "class_id": class_id,
+                    "log_date": date,
+                    "recorded_by": frappe.session.user,
+                    "campus_id": campus_id
+                })
+                subject_doc.insert()
+                default_subject_id = subject_doc.name
+            
+            # ⚡ Batch query class_student_ids (1 query thay vì N queries)
+            new_student_ids = [s[0] for s in students_to_create]
+            class_student_rows = frappe.db.sql("""
+                SELECT name, student_id FROM `tabSIS Class Student`
+                WHERE class_id = %(class_id)s AND student_id IN %(student_ids)s
+            """, {"class_id": class_id, "student_ids": new_student_ids}, as_dict=True)
+            
+            class_student_map = {r['student_id']: r['name'] for r in class_student_rows}
+            
+            # Tạo student logs cho các student mới
+            for (student_id, badges, comment) in students_to_create:
+                class_student = class_student_map.get(student_id)
                 if not class_student:
                     frappe.log_error(f"No class student found for student_id={student_id}, class_id={class_id}")
                     continue
                 
-                # Tạo student log mới
                 student_log = frappe.get_doc({
                     "doctype": "SIS Class Log Student",
                     "subject_id": default_subject_id,
@@ -295,10 +319,8 @@ def save_contact_log():
                     "contact_log_status": "Draft"
                 })
                 student_log.insert()
-                log_id = student_log.name
-            
-            log_ids[student_id] = log_id
-            saved_count += 1
+                log_ids[student_id] = student_log.name
+                saved_count += 1
         
         frappe.db.commit()
         
@@ -321,157 +343,229 @@ def save_contact_log():
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def send_contact_log():
     """
-    Send contact log to parents via push notification
-    Updates status to "Sent" and sends push notifications using unified handler
+    Gửi contact log cho phụ huynh qua push notification.
+    ⚡ Tối ưu: Batch update status + enqueue background job gửi notification
+    → API trả về ngay (~200ms), notification gửi async ở background.
     """
     try:
-        print("=" * 80)
-        print("📨 [CONTACT_LOG] ========== START send_contact_log ==========")
-        print("=" * 80)
-        
         body = _get_body() or {}
-        print(f"📨 [CONTACT_LOG] Request body: {body}")
-        
         class_id = body.get('class_id')
         student_log_ids = body.get('student_log_ids') or []
         
-        print(f"📨 [CONTACT_LOG] class_id: {class_id}")
-        print(f"📨 [CONTACT_LOG] student_log_ids: {student_log_ids}")
-        
         if not class_id or not student_log_ids:
-            print(f"❌ [CONTACT_LOG] Missing params")
             return error_response(message="Missing class_id or student_log_ids", code="MISSING_PARAMS")
         
-        # Validate teacher access
-        print(f"📨 [CONTACT_LOG] Validating teacher access...")
+        # Validate quyền giáo viên chủ nhiệm
         _validate_homeroom_teacher_access(class_id)
-        print(f"✅ [CONTACT_LOG] Teacher access validated")
         
-        # Collect all student IDs and update status
-        student_ids = []
-        sent_count = 0
-        failed_count = 0
-        results = []
+        # ⚡ Batch update status bằng SQL thay vì loop từng record
+        now = frappe.utils.now_datetime()
+        user = frappe.session.user
         
-        for log_id in student_log_ids:
-            try:
-                # Get student log
-                student_log = frappe.get_doc("SIS Class Log Student", log_id)
-                student_ids.append(student_log.student_id)
-                
-                # Update status to "Sent"
-                student_log.contact_log_status = "Sent"
-                student_log.contact_log_sent_by = frappe.session.user
-                student_log.contact_log_sent_at = frappe.utils.now_datetime()
-                student_log.save()
-                
-                print(f"📨 [CONTACT_LOG] Updated student_log: {log_id}")
-                sent_count += 1
-                
-            except Exception as e:
-                print(f"❌ [CONTACT_LOG] Error updating log {log_id}: {str(e)}")
-                failed_count += 1
-                results.append({
-                    "student_log_id": log_id,
-                    "success": False,
-                    "message": str(e)
-                })
+        # Lấy student_ids trước khi update (cần cho notification)
+        log_data = frappe.db.sql("""
+            SELECT name, student_id 
+            FROM `tabSIS Class Log Student`
+            WHERE name IN %(log_ids)s
+        """, {"log_ids": student_log_ids}, as_dict=True)
         
-        print(f"📨 [CONTACT_LOG] Updated {sent_count} logs, {failed_count} failed")
+        if not log_data:
+            return error_response(message="No valid student logs found", code="NO_LOGS")
         
-        if not student_ids:
-            print(f"⚠️ [CONTACT_LOG] No students to notify")
-            return error_response(
-                message="Failed to update contact logs",
-                code="UPDATE_FAILED"
-            )
+        student_ids = [d['student_id'] for d in log_data]
+        valid_log_ids = [d['name'] for d in log_data]
         
-        # Send notifications using unified handler - individually for each student
-        from erp.utils.notification_handler import send_bulk_parent_notifications
+        # ⚡ Batch update tất cả status cùng lúc (1 query thay vì N queries)
+        frappe.db.sql("""
+            UPDATE `tabSIS Class Log Student`
+            SET contact_log_status = 'Sent',
+                contact_log_sent_by = %(user)s,
+                contact_log_sent_at = %(now)s,
+                modified = %(now)s,
+                modified_by = %(user)s
+            WHERE name IN %(log_ids)s
+        """, {"user": user, "now": now, "log_ids": valid_log_ids})
         
+        frappe.db.commit()
+        
+        sent_count = len(valid_log_ids)
+        
+        # ⚡ Enqueue background job để gửi notification (không block response)
         try:
-            print(f"📨 [CONTACT_LOG] Sending individual notifications to parents of {len(student_ids)} students")
-            
-            # Send notification for each student individually (so we can include student_name)
-            total_success = 0
-            total_failed = 0
-            total_parents = 0
-            
-            for student_id in student_ids:
-                try:
-                    # Get student name
-                    student_name = frappe.db.get_value("CRM Student", student_id, "student_name")
-                    
-                    if not student_name:
-                        print(f"⚠️ [CONTACT_LOG] Student name not found for {student_id}, skipping")
-                        continue
-                    
-                    # Send notification for this student with their name
-                    result = send_bulk_parent_notifications(
-                        recipient_type="contact_log",
-                        recipients_data={
-                            "student_ids": [student_id]
-                        },
-                        title="Sổ liên lạc",
-                        body=f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay.",
-                        icon="/icon.png",
-                        data={
-                            "type": "contact_log",
-                            "student_id": student_id,
-                            "student_name": student_name,
-                            "timestamp": frappe.utils.now()
-                        }
-                    )
-                    
-                    total_success += result.get('success_count', 0)
-                    total_failed += result.get('failed_count', 0)
-                    total_parents += result.get('total_parents', 0)
-                    
-                except Exception as student_error:
-                    print(f"❌ [CONTACT_LOG] Error sending notification for {student_id}: {str(student_error)}")
-                    continue
-            
-            # Create summary result
-            notification_result = {
-                'success_count': total_success,
-                'failed_count': total_failed,
-                'total_parents': total_parents
-            }
-            
-            print(f"✅ [CONTACT_LOG] Notifications sent - Success: {notification_result.get('success_count')}, Failed: {notification_result.get('failed_count')}")
-            
-            return success_response(
-                message="Contact logs sent successfully",
-                data={
-                    "total_logs_updated": sent_count,
-                    "notification_summary": {
-                        "total_parents": notification_result.get('total_parents', 0),
-                        "success_count": notification_result.get('success_count', 0),
-                        "failed_count": notification_result.get('failed_count', 0)
-                    }
-                }
+            frappe.enqueue(
+                _send_contact_log_notifications_background,
+                queue='short',
+                timeout=300,
+                class_id=class_id,
+                student_ids=student_ids,
+                sent_by=user
             )
-        
+            frappe.logger().info(f"📨 [CONTACT_LOG] Enqueued notification job for {len(student_ids)} students")
         except Exception as e:
-            print(f"❌ [CONTACT_LOG] Error sending notifications: {str(e)}")
-            frappe.logger().error(f"Contact Log Notification Error: {str(e)}")
-            
-            # Still return success since logs were updated, just notification failed
-            return success_response(
-                message="Contact logs updated but notification sending failed",
-                data={
-                    "total_logs_updated": sent_count,
-                    "notification_error": str(e)
-                }
-            )
+            # Nếu enqueue fail, log lỗi nhưng vẫn trả về success (status đã update)
+            frappe.logger().error(f"❌ [CONTACT_LOG] Failed to enqueue notifications: {str(e)}")
         
+        return success_response(
+            message="Contact logs sent successfully",
+            data={
+                "total_logs_updated": sent_count,
+                "notification_status": "queued"
+            }
+        )
+        
+    except frappe.PermissionError as e:
+        return error_response(message=str(e), code="PERMISSION_ERROR")
     except Exception as e:
-        print(f"❌ [CONTACT_LOG] Error: {str(e)}")
+        frappe.db.rollback()
         frappe.logger().error(f"Send Contact Log Error: {str(e)}")
         return error_response(
             message=f"Failed to send contact logs: {str(e)}",
             code="SEND_CONTACT_LOG_ERROR"
         )
+
+
+def _send_contact_log_notifications_background(class_id, student_ids, sent_by):
+    """
+    Background job: Gửi notification cho phụ huynh.
+    ⚡ Tối ưu: Batch lấy guardian → gửi notification per-parent (cần student_name riêng biệt)
+    """
+    from erp.utils.notification_handler import (
+        get_guardians_for_students,
+        get_parent_emails
+    )
+    
+    try:
+        frappe.logger().info(f"📨 [BG_CONTACT_LOG] Start sending notifications for {len(student_ids)} students in class {class_id}")
+        
+        # ⚡ Batch lấy tên tất cả học sinh cùng lúc (1 query)
+        student_names = {}
+        if student_ids:
+            name_rows = frappe.db.sql("""
+                SELECT name, student_name FROM `tabCRM Student`
+                WHERE name IN %(ids)s
+            """, {"ids": student_ids}, as_dict=True)
+            student_names = {r['name']: r['student_name'] for r in name_rows}
+        
+        # ⚡ Batch lấy tất cả guardians (1 batch query thay vì N queries)
+        guardians = get_guardians_for_students(student_ids)
+        
+        if not guardians:
+            frappe.logger().info(f"📨 [BG_CONTACT_LOG] No guardians found, done.")
+            return
+        
+        parent_emails = get_parent_emails(guardians)
+        
+        # Tạo mapping: email → student_id
+        email_to_student_map = {}
+        for guardian in guardians:
+            email = guardian.get("email")
+            guardian_student_ids = guardian.get("student_ids", [])
+            if email and guardian_student_ids:
+                matched = next((s for s in guardian_student_ids if s in student_ids), guardian_student_ids[0])
+                email_to_student_map[email] = matched
+        
+        # ⚡ Debounce check (tránh gửi trùng)
+        redis = frappe.cache()
+        timestamp_key = frappe.utils.now()[:16]  # YYYY-MM-DDTHH:MM
+        debounce_key = f"contact_log_bg:{class_id}:{timestamp_key}"
+        if redis.get_value(debounce_key):
+            frappe.logger().info(f"⏭️ [BG_CONTACT_LOG] Debounce skip for {debounce_key}")
+            return
+        redis.set_value(debounce_key, "1", expires_in_sec=60)
+        
+        # Import các helper để tạo notification + push
+        from erp.common.doctype.erp_notification.erp_notification import create_notification, get_unread_count
+        from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update, get_notification_text
+        from erp.api.parent_portal.push_notification import send_push_notification
+        
+        success_count = 0
+        failed_count = 0
+        
+        for parent_email in parent_emails:
+            try:
+                student_id = email_to_student_map.get(parent_email)
+                student_name = student_names.get(student_id, student_id) if student_id else ""
+                
+                notification_title = {"vi": "Sổ liên lạc", "en": "Contact Log"}
+                notification_body = {
+                    "vi": f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay.",
+                    "en": f"Student {student_name} has a new comment about today's school day."
+                }
+                
+                merged_data = {
+                    "type": "contact_log",
+                    "notificationType": "contact_log",
+                    "student_id": student_id,
+                    "student_name": student_name,
+                    "timestamp": frappe.utils.now()
+                }
+                
+                # Tạo notification record
+                import json as json_lib
+                from frappe import get_doc
+                notification_doc = get_doc({
+                    "doctype": "ERP Notification",
+                    "title": json_lib.dumps(notification_title),
+                    "message": json_lib.dumps(notification_body),
+                    "recipient_user": parent_email,
+                    "recipients": json_lib.dumps([parent_email]),
+                    "notification_type": "contact_log",
+                    "priority": "medium",
+                    "data": json_lib.dumps(merged_data),
+                    "channel": "push",
+                    "status": "sent",
+                    "delivery_status": "pending",
+                    "sent_at": frappe.utils.now(),
+                    "event_timestamp": frappe.utils.now(),
+                    "student_id": student_id
+                })
+                notification_doc.insert(ignore_permissions=True)
+                
+                # Emit realtime (SocketIO)
+                emit_notification_to_user(parent_email, {
+                    "id": notification_doc.name,
+                    "type": "contact_log",
+                    "title": notification_title,
+                    "message": notification_body,
+                    "status": "unread",
+                    "priority": "medium",
+                    "created_at": frappe.utils.now(),
+                    "data": merged_data,
+                    "student_id": student_id
+                })
+                
+                unread_count = get_unread_count(parent_email)
+                emit_unread_count_update(parent_email, unread_count)
+                
+                # Gửi push notification
+                try:
+                    final_title = get_notification_text(notification_title)
+                    final_body = get_notification_text(notification_body)
+                    send_push_notification(
+                        user_email=parent_email,
+                        title=final_title,
+                        body=final_body,
+                        icon="/icon.png",
+                        data=merged_data,
+                        tag="contact_log"
+                    )
+                except Exception as push_err:
+                    frappe.logger().warning(f"❌ [BG_CONTACT_LOG] Push failed for {parent_email}: {str(push_err)}")
+                
+                success_count += 1
+                
+            except Exception as parent_err:
+                failed_count += 1
+                frappe.logger().error(f"❌ [BG_CONTACT_LOG] Failed for {parent_email}: {str(parent_err)}")
+        
+        # Commit 1 lần duy nhất cuối cùng
+        frappe.db.commit()
+        frappe.logger().info(f"✅ [BG_CONTACT_LOG] Done: {success_count} success, {failed_count} failed out of {len(parent_emails)} parents")
+        
+    except Exception as e:
+        frappe.logger().error(f"❌ [BG_CONTACT_LOG] Background job error: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
