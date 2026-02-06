@@ -187,25 +187,17 @@ def _get_teacher_email_info(teacher_id, logs=None):
     
     try:
         # Query trực tiếp DB để tránh cache issue
-        teacher_data = frappe.db.get_value(
-            "SIS Teacher", teacher_id, 
-            ["user_id", "teacher_name"], 
-            as_dict=True
-        )
+        # SIS Teacher chỉ có field user_id, không có teacher_name
+        user_id = frappe.db.get_value("SIS Teacher", teacher_id, "user_id")
         
-        if not teacher_data:
-            _log(f"⚠️ Không tìm thấy GV {teacher_id} trong DB")
-            return None, None
-        
-        user_id = teacher_data.get("user_id")
         if not user_id:
-            _log(f"⚠️ GV {teacher_id} ({teacher_data.get('teacher_name') or '?'}) chưa có tài khoản User (user_id trống)")
+            _log(f"⚠️ GV {teacher_id} không tồn tại hoặc chưa có user_id")
             return None, None
         
         # Lấy email và full_name từ User - query trực tiếp DB
         user_data = frappe.db.get_value(
             "User", user_id,
-            ["email", "full_name", "enabled"],
+            ["email", "full_name"],
             as_dict=True
         )
         
@@ -218,7 +210,7 @@ def _get_teacher_email_info(teacher_id, logs=None):
             _log(f"⚠️ GV {teacher_id} user_id={user_id} email={email} - không hợp lệ")
             return None, None
         
-        teacher_name = teacher_data.get("teacher_name") or user_data.get("full_name") or teacher_id
+        teacher_name = user_data.get("full_name") or teacher_id
         return email, teacher_name
     except Exception as e:
         if logs is not None:
