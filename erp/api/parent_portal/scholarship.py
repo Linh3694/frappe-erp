@@ -86,13 +86,132 @@ def _send_email_via_service(to_list, subject, body):
         return {"success": False, "message": str(e)}
 
 
+def _build_scholarship_email(teacher_name, student_name, student_code, class_name, portal_link, deadline_str):
+    """
+    Tạo subject và body email yêu cầu viết thư giới thiệu học bổng (song ngữ Việt-Anh).
+    
+    Args:
+        teacher_name: tên giáo viên
+        student_name: tên học sinh
+        student_code: mã học sinh
+        class_name: tên lớp
+        portal_link: link portal giáo viên (đến tab scholarship)
+        deadline_str: hạn chót gửi thư (format dd/mm/yyyy cho VN, Month dd, yyyy cho EN)
+    
+    Returns:
+        tuple (subject, body_html)
+    """
+    subject = (
+        f"Yêu cầu viết thư giới thiệu – Học bổng Tài năng Wellspring 2026-2027 | "
+        f"Request for Letter of Recommendation – 2026-2027 Wellspring Talent Scholarship"
+    )
+    
+    body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; color: #333; line-height: 1.7;">
+        <!-- Phần tiếng Việt -->
+        <p style="color: #888; font-style: italic; margin-bottom: 20px;">[English version below]</p>
+
+        <p>Kính gửi Thầy/Cô <strong>{teacher_name}</strong>,</p>
+
+        <p>Hội đồng Thi đua Khen thưởng Wellspring Hanoi trân trọng thông báo:</p>
+
+        <p>Học sinh <strong>{student_name}</strong> (Mã học sinh: <strong>{student_code}</strong>, lớp <strong>{class_name}</strong>) đã nộp hồ sơ đăng ký Học bổng Tài năng Wellspring Năm học 2026-2027 và lựa chọn Thầy/Cô là giáo viên viết thư giới thiệu cho học sinh.</p>
+
+        <p>Thầy/Cô vui lòng đăng nhập hệ thống Portal để viết và gửi thư giới thiệu trước <strong>17h00 ngày {deadline_str}</strong>.</p>
+
+        <div style="background: #f5f7fa; border-left: 4px solid #1976d2; padding: 16px 20px; margin: 24px 0; border-radius: 4px;">
+            <p style="margin: 0 0 12px 0; font-weight: bold;">📝 HƯỚNG DẪN GỬI THƯ GIỚI THIỆU:</p>
+            <p style="margin: 4px 0;">1️⃣ Truy cập Portal theo đường link:<br>&nbsp;&nbsp;&nbsp;&nbsp;👉 <a href="{portal_link}" style="color: #1976d2;">{portal_link}</a></p>
+            <p style="margin: 4px 0;">2️⃣ Đăng nhập bằng tài khoản giáo viên của Thầy/Cô</p>
+            <p style="margin: 4px 0;">3️⃣ Tại menu mục "Giảng dạy", nhấn "Lớp học" → Chọn lớp của học sinh → "Học bổng"</p>
+            <p style="margin: 4px 0;">4️⃣ Chọn "Viết thư" cho học sinh tương ứng</p>
+            <p style="margin: 4px 0;">5️⃣ Nhập điểm đánh giá và nhận xét → Nhấn "Gửi thư giới thiệu"</p>
+            <p style="margin: 4px 0;">6️⃣ Sau khi Thầy/Cô gửi thư giới thiệu thành công, hệ thống Portal sẽ tự động cập nhật trạng thái thư từ "Viết thư" sang "Đã hoàn thành"</p>
+        </div>
+
+        <p>Nếu Thầy/Cô có bất kỳ thắc mắc nào hoặc cần hỗ trợ, vui lòng liên hệ qua email: <a href="mailto:hocbong@wellspring.edu.vn" style="color: #1976d2;">hocbong@wellspring.edu.vn</a>.</p>
+
+        <p>Xin chân thành cảm ơn sự hỗ trợ và hợp tác của Thầy/Cô!</p>
+
+        <p>Trân trọng,<br><strong>Hội đồng Thi đua Khen thưởng Wellspring Hanoi</strong></p>
+
+        <hr style="border: none; border-top: 2px solid #ddd; margin: 36px 0;">
+
+        <!-- Phần tiếng Anh -->
+        <p>Dear <strong>{teacher_name}</strong>,</p>
+
+        <p>The Wellspring Hanoi Emulation and Reward Committee would like to inform you that:</p>
+
+        <p>Student <strong>{student_name}</strong> (Student ID: <strong>{student_code}</strong>, Class: <strong>{class_name}</strong>) has submitted their application for the 2026-2027 Wellspring Talent Scholarship and has selected you as their recommender.</p>
+
+        <p>We kindly ask that you log in to the Portal system to complete and submit the letter of recommendation by <strong>5:00 PM on {deadline_str}</strong>.</p>
+
+        <div style="background: #f5f7fa; border-left: 4px solid #1976d2; padding: 16px 20px; margin: 24px 0; border-radius: 4px;">
+            <p style="margin: 0 0 12px 0; font-weight: bold;">📝 INSTRUCTIONS FOR SUBMITTING THE LETTER OF RECOMMENDATION:</p>
+            <p style="margin: 4px 0;">1️⃣ Access the Portal via the following link:<br>&nbsp;&nbsp;&nbsp;&nbsp;👉 <a href="{portal_link}" style="color: #1976d2;">{portal_link}</a></p>
+            <p style="margin: 4px 0;">2️⃣ Log in using your teacher account</p>
+            <p style="margin: 4px 0;">3️⃣ From the menu, under "Teaching" → click "Classes" → Choose the student's class → click "Scholarship"</p>
+            <p style="margin: 4px 0;">4️⃣ Select "Write Letter" for the corresponding student</p>
+            <p style="margin: 4px 0;">5️⃣ Enter your evaluation scores and comments → Click "Submit"</p>
+            <p style="margin: 4px 0;">6️⃣ Once the letter has been successfully submitted, the Portal system will automatically update the status from "Write Letter" to "Completed."</p>
+        </div>
+
+        <p>Should you have any questions or require further assistance, please contact us at <a href="mailto:hocbong@wellspring.edu.vn" style="color: #1976d2;">hocbong@wellspring.edu.vn</a>.</p>
+
+        <p>Thank you very much for your support and cooperation.</p>
+
+        <p>Sincerely,<br><strong>The Wellspring Hanoi Emulation and Reward Committee</strong></p>
+    </div>
+    """
+    
+    return subject, body
+
+
+def _get_teacher_email_info(teacher_id):
+    """
+    Lấy email và tên giáo viên từ teacher_id.
+    
+    Returns:
+        tuple (email, teacher_name) hoặc (None, None) nếu không tìm thấy
+    """
+    try:
+        teacher = frappe.get_doc("SIS Teacher", teacher_id, ignore_permissions=True)
+        if not teacher.user_id:
+            return None, None
+        
+        user = frappe.get_doc("User", teacher.user_id)
+        if not user.email or user.email == 'Administrator':
+            return None, None
+        
+        teacher_name = teacher.teacher_name or user.full_name or teacher_id
+        return user.email, teacher_name
+    except Exception:
+        return None, None
+
+
+def _get_period_deadline_str(period_id):
+    """
+    Lấy deadline (to_date) từ kỳ học bổng, trả về chuỗi format dd/mm/yyyy.
+    Fallback nếu không có to_date.
+    """
+    try:
+        to_date = frappe.db.get_value("SIS Scholarship Period", period_id, "to_date")
+        if to_date:
+            d = getdate(to_date)
+            return d.strftime("%d/%m/%Y")
+    except Exception:
+        pass
+    return "theo thông báo"
+
+
 def _send_scholarship_notification_to_teachers(app, student_info, is_new=True):
     """
-    Gửi email thông báo đến giáo viên về đơn học bổng mới
+    Gửi email thông báo đến giáo viên về đơn học bổng mới.
+    Dùng template song ngữ Việt-Anh.
     
     Args:
         app: SIS Scholarship Application document
-        student_info: thông tin học sinh
+        student_info: thông tin học sinh (từ _get_guardian_students)
         is_new: True nếu đơn mới, False nếu cập nhật
     """
     try:
@@ -107,78 +226,40 @@ def _send_scholarship_notification_to_teachers(app, student_info, is_new=True):
             frappe.logger().info("No teachers to notify for scholarship application")
             return
         
-        # Lấy email của các giáo viên
-        teacher_emails = []
-        teacher_names = {}
-        
-        for teacher_id in teacher_ids:
-            try:
-                teacher = frappe.get_doc("SIS Teacher", teacher_id, ignore_permissions=True)
-                if teacher.user_id:
-                    user = frappe.get_doc("User", teacher.user_id)
-                    if user.email and user.email != 'Administrator':
-                        teacher_emails.append(user.email)
-                        teacher_names[user.email] = teacher.teacher_name or user.full_name or teacher_id
-            except Exception as e:
-                frappe.logger().warning(f"Could not get email for teacher {teacher_id}: {str(e)}")
-                continue
-        
-        if not teacher_emails:
-            frappe.logger().info("No valid teacher emails found for scholarship notification")
-            return
-        
         # Lấy thông tin học sinh
-        student_name = student_info.get('full_name') or student_info.get('student_id')
+        student_name = student_info.get('student_name') or student_info.get('student_id') or ''
+        student_code = student_info.get('student_code') or ''
         class_name = student_info.get('class_name') or ''
         class_id = student_info.get('class_id') or app.class_id
         
         # URL portal giáo viên - tab scholarship trong trang ClassInfo
         portal_url = frappe.conf.get('teacher_portal_url') or 'https://wis.wellspring.edu.vn'
-        scholarship_url = f"{portal_url}/teaching/classes/{class_id}?tab=scholarship"
+        portal_link = f"{portal_url}/teaching/classes/{class_id}?tab=scholarship"
         
-        # Tạo nội dung email
-        subject = f"[Học bổng] Cần viết thư giới thiệu cho học sinh {student_name}"
-        
-        body = f"""
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #1976d2;">Thông báo: Yêu cầu viết thư giới thiệu học bổng</h2>
-            
-            <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <p><strong>Học sinh:</strong> {student_name}</p>
-                <p><strong>Lớp:</strong> {class_name}</p>
-                <p><strong>Thời gian đăng ký:</strong> {now()}</p>
-            </div>
-            
-            <p>Kính gửi Thầy/Cô,</p>
-            
-            <p>Phụ huynh của học sinh <strong>{student_name}</strong> vừa nộp đơn đăng ký xét học bổng và đã chọn Thầy/Cô làm người viết thư giới thiệu.</p>
-            
-            <p>Thầy/Cô vui lòng truy cập Portal để xem chi tiết và hoàn thành thư giới thiệu:</p>
-            
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="{scholarship_url}" style="background: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
-                    📝 Viết thư giới thiệu
-                </a>
-            </div>
-            
-            <p>Xin cảm ơn Thầy/Cô đã hỗ trợ học sinh trong quá trình xét học bổng.</p>
-            
-            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
-            
-            <p style="color: #666; font-size: 14px;">
-                <strong>Trường PTLC Song Ngữ Quốc tế Wellspring</strong><br>
-                Đây là email tự động, vui lòng không phản hồi trực tiếp.
-            </p>
-        </div>
-        """
+        # Lấy deadline từ kỳ học bổng
+        deadline_str = _get_period_deadline_str(app.scholarship_period_id)
         
         # Gửi email cho từng giáo viên
-        for email in teacher_emails:
-            result = _send_email_via_service([email], subject, body)
+        for teacher_id in teacher_ids:
+            teacher_email, teacher_name = _get_teacher_email_info(teacher_id)
+            if not teacher_email:
+                frappe.logger().warning(f"Could not get email for teacher {teacher_id}")
+                continue
+            
+            subject, body = _build_scholarship_email(
+                teacher_name=teacher_name,
+                student_name=student_name,
+                student_code=student_code,
+                class_name=class_name,
+                portal_link=portal_link,
+                deadline_str=deadline_str
+            )
+            
+            result = _send_email_via_service([teacher_email], subject, body)
             if result.get('success'):
-                frappe.logger().info(f"Scholarship notification sent to {email}")
+                frappe.logger().info(f"Scholarship notification sent to {teacher_email}")
             else:
-                frappe.logger().warning(f"Failed to send scholarship notification to {email}: {result.get('message')}")
+                frappe.logger().warning(f"Failed to send scholarship notification to {teacher_email}: {result.get('message')}")
         
     except Exception as e:
         frappe.logger().error(f"Error sending scholarship notification: {str(e)}")
@@ -189,10 +270,11 @@ def _send_email_to_changed_teachers(app, student_info, changed_teachers, logs):
     """
     Gửi email thông báo đến giáo viên MỚI khi phụ huynh thay đổi giáo viên viết thư giới thiệu.
     Chỉ gửi cho giáo viên mới được thay đổi, không gửi lại cho giáo viên không thay đổi.
+    Dùng template song ngữ Việt-Anh.
     
     Args:
         app: SIS Scholarship Application document
-        student_info: thông tin học sinh
+        student_info: thông tin học sinh (từ _get_guardian_students)
         changed_teachers: list of tuples (recommendation_type, teacher_id) cho giáo viên thay đổi
         logs: list để ghi log
     """
@@ -201,69 +283,37 @@ def _send_email_to_changed_teachers(app, student_info, changed_teachers, logs):
             return
         
         # Lấy thông tin học sinh
-        student_name = student_info.get('full_name') or student_info.get('student_id')
+        student_name = student_info.get('student_name') or student_info.get('student_id') or ''
+        student_code = student_info.get('student_code') or ''
         class_name = student_info.get('class_name') or ''
         class_id = student_info.get('class_id') or app.class_id
         
         # URL portal giáo viên
         portal_url = frappe.conf.get('teacher_portal_url') or 'https://wis.wellspring.edu.vn'
-        scholarship_url = f"{portal_url}/teaching/classes/{class_id}?tab=scholarship"
+        portal_link = f"{portal_url}/teaching/classes/{class_id}?tab=scholarship"
+        
+        # Lấy deadline từ kỳ học bổng
+        deadline_str = _get_period_deadline_str(app.scholarship_period_id)
         
         for rec_type, teacher_id in changed_teachers:
             try:
-                teacher = frappe.get_doc("SIS Teacher", teacher_id, ignore_permissions=True)
-                if not teacher.user_id:
-                    logs.append(f"Giáo viên {teacher_id} không có user_id")
+                teacher_email, teacher_name = _get_teacher_email_info(teacher_id)
+                if not teacher_email:
+                    logs.append(f"Giáo viên {teacher_id} không có email hợp lệ hoặc user_id")
                     continue
                 
-                user = frappe.get_doc("User", teacher.user_id)
-                if not user.email or user.email == 'Administrator':
-                    logs.append(f"Giáo viên {teacher_id} không có email hợp lệ")
-                    continue
-                
-                teacher_name = teacher.teacher_name or user.full_name or teacher_id
-                teacher_email = user.email
-                
-                # Tạo nội dung email
-                subject = f"[Học bổng] Cần viết thư giới thiệu cho học sinh {student_name}"
-                
-                body = f"""
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <h2 style="color: #1976d2;">Thông báo: Yêu cầu viết thư giới thiệu học bổng</h2>
-                    
-                    <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                        <p><strong>Học sinh:</strong> {student_name}</p>
-                        <p><strong>Lớp:</strong> {class_name}</p>
-                        <p><strong>Vai trò:</strong> {'Giáo viên chủ nhiệm' if rec_type == 'main' else 'Giáo viên bộ môn'}</p>
-                        <p><strong>Thời gian:</strong> {now()}</p>
-                    </div>
-                    
-                    <p>Kính gửi {teacher_name},</p>
-                    
-                    <p>Phụ huynh của học sinh <strong>{student_name}</strong> đã chọn Thầy/Cô làm người viết thư giới thiệu cho đơn xét học bổng.</p>
-                    
-                    <p>Thầy/Cô vui lòng truy cập Portal để xem chi tiết và hoàn thành thư giới thiệu:</p>
-                    
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="{scholarship_url}" style="background: #1976d2; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">
-                            📝 Viết thư giới thiệu
-                        </a>
-                    </div>
-                    
-                    <p>Xin cảm ơn Thầy/Cô đã hỗ trợ học sinh trong quá trình xét học bổng.</p>
-                    
-                    <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
-                    
-                    <p style="color: #666; font-size: 14px;">
-                        <strong>Trường PTLC Song Ngữ Quốc tế Wellspring</strong><br>
-                        Đây là email tự động, vui lòng không phản hồi trực tiếp.
-                    </p>
-                </div>
-                """
+                subject, body = _build_scholarship_email(
+                    teacher_name=teacher_name,
+                    student_name=student_name,
+                    student_code=student_code,
+                    class_name=class_name,
+                    portal_link=portal_link,
+                    deadline_str=deadline_str
+                )
                 
                 result = _send_email_via_service([teacher_email], subject, body)
                 if result.get('success'):
-                    logs.append(f"Đã gửi email thông báo đến GV mới: {teacher_email}")
+                    logs.append(f"Đã gửi email thông báo đến GV mới: {teacher_email} ({teacher_name})")
                 else:
                     logs.append(f"Không thể gửi email đến {teacher_email}: {result.get('message')}")
                     
@@ -1343,11 +1393,20 @@ def submit_application_with_files():
                         fields=["name", "teacher_id", "status"]
                     )
                     
+                    # Bước 1: Xóa link reference trên application TRƯỚC (để Frappe cho phép xóa)
+                    if rec_type == 'main':
+                        app.db_set("main_recommendation_id", None, update_modified=False)
+                        app.db_set("main_recommendation_status", None, update_modified=False)
+                    else:
+                        app.db_set("second_recommendation_id", None, update_modified=False)
+                        app.db_set("second_recommendation_status", None, update_modified=False)
+                    
+                    # Bước 2: Xóa recommendation cũ (không bị block vì đã gỡ link)
                     for rec in old_recs:
-                        frappe.delete_doc("SIS Scholarship Recommendation", rec.name, ignore_permissions=True)
+                        frappe.delete_doc("SIS Scholarship Recommendation", rec.name, ignore_permissions=True, force=True)
                         logs.append(f"Đã xóa recommendation cũ ({rec.status}): {rec.name} của GV {rec.teacher_id}")
                     
-                    # Tạo recommendation MỚI cho giáo viên mới
+                    # Bước 3: Tạo recommendation MỚI cho giáo viên mới
                     try:
                         new_rec = frappe.get_doc({
                             "doctype": "SIS Scholarship Recommendation",
@@ -1358,11 +1417,15 @@ def submit_application_with_files():
                         })
                         new_rec.insert(ignore_permissions=True)
                         
-                        # Cập nhật reference trên application
+                        # Cập nhật reference trên application bằng db_set (ghi thẳng DB)
                         if rec_type == 'main':
+                            app.db_set("main_recommendation_id", new_rec.name, update_modified=False)
+                            app.db_set("main_recommendation_status", "Pending", update_modified=False)
                             app.main_recommendation_id = new_rec.name
                             app.main_recommendation_status = "Pending"
                         else:
+                            app.db_set("second_recommendation_id", new_rec.name, update_modified=False)
+                            app.db_set("second_recommendation_status", "Pending", update_modified=False)
                             app.second_recommendation_id = new_rec.name
                             app.second_recommendation_status = "Pending"
                         
