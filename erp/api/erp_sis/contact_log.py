@@ -450,96 +450,111 @@ def _send_contact_log_notifications(class_id, student_ids):
         parent_emails = get_parent_emails(guardians)
         result["total_parents"] = len(parent_emails)
         
-        # Tạo mapping: email → student_id (ưu tiên student trong danh sách gửi)
-        email_to_student_map = {}
+        # Tạo mapping: email → [student_ids] (1 phụ huynh có thể có nhiều con trong danh sách gửi)
+        # VD: PH có 2 con A, B đều trong lớp → email_to_students_map["ph@..."] = ["A", "B"]
+        student_ids_set = set(student_ids)
+        email_to_students_map = {}
         for guardian in guardians:
             email = guardian.get("email")
             guardian_student_ids = guardian.get("student_ids", [])
             if email and guardian_student_ids:
-                matched = next((s for s in guardian_student_ids if s in student_ids), guardian_student_ids[0])
-                email_to_student_map[email] = matched
+                # Chỉ lấy những student nằm trong danh sách gửi lần này
+                matched_students = [s for s in guardian_student_ids if s in student_ids_set]
+                if matched_students:
+                    email_to_students_map[email] = matched_students
         
         # Import helpers
         from erp.common.doctype.erp_notification.erp_notification import get_unread_count
         from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update, get_notification_text
         from erp.api.parent_portal.push_notification import send_push_notification
         
-        # Gửi notification cho từng phụ huynh
+        # Gửi notification cho từng phụ huynh × từng học sinh
+        # VD: PH có 2 con A, B → gửi 2 notification riêng biệt:
+        #   "Học sinh A có nhận xét mới..."
+        #   "Học sinh B có nhận xét mới..."
         for parent_email in parent_emails:
+            matched_students = email_to_students_map.get(parent_email, [])
+            if not matched_students:
+                continue
+            
+            for student_id in matched_students:
+                try:
+                    student_name = student_names.get(student_id, student_id)
+                    
+                    notification_title = {"vi": "Sổ liên lạc", "en": "Contact Log"}
+                    notification_body = {
+                        "vi": f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay.",
+                        "en": f"Student {student_name} has a new comment about today's school day."
+                    }
+                    
+                    merged_data = {
+                        "type": "contact_log",
+                        "notificationType": "contact_log",
+                        "student_id": student_id,
+                        "student_name": student_name,
+                        "timestamp": frappe.utils.now()
+                    }
+                    
+                    # Tạo notification record trong DB
+                    notification_doc = frappe.get_doc({
+                        "doctype": "ERP Notification",
+                        "title": json.dumps(notification_title),
+                        "message": json.dumps(notification_body),
+                        "recipient_user": parent_email,
+                        "recipients": json.dumps([parent_email]),
+                        "notification_type": "contact_log",
+                        "priority": "medium",
+                        "data": json.dumps(merged_data),
+                        "channel": "push",
+                        "status": "sent",
+                        "delivery_status": "pending",
+                        "sent_at": frappe.utils.now(),
+                        "event_timestamp": frappe.utils.now(),
+                        "student_id": student_id
+                    })
+                    notification_doc.insert(ignore_permissions=True)
+                    
+                    # Emit realtime notification (SocketIO) → hiển thị popup trên parent portal
+                    emit_notification_to_user(parent_email, {
+                        "id": notification_doc.name,
+                        "type": "contact_log",
+                        "title": notification_title,
+                        "message": notification_body,
+                        "status": "unread",
+                        "priority": "medium",
+                        "created_at": frappe.utils.now(),
+                        "data": merged_data,
+                        "student_id": student_id
+                    })
+                    
+                    # Gửi push notification → hiện notification trên điện thoại/browser
+                    # Dùng tag riêng cho mỗi student để KHÔNG bị ghi đè nhau
+                    try:
+                        final_title = get_notification_text(notification_title)
+                        final_body = get_notification_text(notification_body)
+                        send_push_notification(
+                            user_email=parent_email,
+                            title=final_title,
+                            body=final_body,
+                            icon="/icon.png",
+                            data=merged_data,
+                            tag=f"contact_log_{student_id}"
+                        )
+                    except Exception as push_err:
+                        frappe.logger().warning(f"❌ [CONTACT_LOG] Push failed for {parent_email}/{student_id}: {str(push_err)}")
+                    
+                    result["success_count"] += 1
+                    
+                except Exception as parent_err:
+                    result["failed_count"] += 1
+                    frappe.logger().error(f"❌ [CONTACT_LOG] Notification failed for {parent_email}/{student_id}: {str(parent_err)}")
+            
+            # Cập nhật unread count 1 lần cho mỗi phụ huynh (sau khi gửi hết notifications của PH đó)
             try:
-                student_id = email_to_student_map.get(parent_email)
-                student_name = student_names.get(student_id, student_id) if student_id else ""
-                
-                notification_title = {"vi": "Sổ liên lạc", "en": "Contact Log"}
-                notification_body = {
-                    "vi": f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay.",
-                    "en": f"Student {student_name} has a new comment about today's school day."
-                }
-                
-                merged_data = {
-                    "type": "contact_log",
-                    "notificationType": "contact_log",
-                    "student_id": student_id,
-                    "student_name": student_name,
-                    "timestamp": frappe.utils.now()
-                }
-                
-                # Tạo notification record trong DB
-                notification_doc = frappe.get_doc({
-                    "doctype": "ERP Notification",
-                    "title": json.dumps(notification_title),
-                    "message": json.dumps(notification_body),
-                    "recipient_user": parent_email,
-                    "recipients": json.dumps([parent_email]),
-                    "notification_type": "contact_log",
-                    "priority": "medium",
-                    "data": json.dumps(merged_data),
-                    "channel": "push",
-                    "status": "sent",
-                    "delivery_status": "pending",
-                    "sent_at": frappe.utils.now(),
-                    "event_timestamp": frappe.utils.now(),
-                    "student_id": student_id
-                })
-                notification_doc.insert(ignore_permissions=True)
-                
-                # Emit realtime notification (SocketIO) → hiển thị popup trên parent portal
-                emit_notification_to_user(parent_email, {
-                    "id": notification_doc.name,
-                    "type": "contact_log",
-                    "title": notification_title,
-                    "message": notification_body,
-                    "status": "unread",
-                    "priority": "medium",
-                    "created_at": frappe.utils.now(),
-                    "data": merged_data,
-                    "student_id": student_id
-                })
-                
-                # Cập nhật unread count cho parent portal
                 unread_count = get_unread_count(parent_email)
                 emit_unread_count_update(parent_email, unread_count)
-                
-                # Gửi push notification → hiện notification trên điện thoại/browser
-                try:
-                    final_title = get_notification_text(notification_title)
-                    final_body = get_notification_text(notification_body)
-                    send_push_notification(
-                        user_email=parent_email,
-                        title=final_title,
-                        body=final_body,
-                        icon="/icon.png",
-                        data=merged_data,
-                        tag="contact_log"
-                    )
-                except Exception as push_err:
-                    frappe.logger().warning(f"❌ [CONTACT_LOG] Push failed for {parent_email}: {str(push_err)}")
-                
-                result["success_count"] += 1
-                
-            except Exception as parent_err:
-                result["failed_count"] += 1
-                frappe.logger().error(f"❌ [CONTACT_LOG] Notification failed for {parent_email}: {str(parent_err)}")
+            except Exception:
+                pass
         
         # Commit tất cả notification records 1 lần duy nhất
         frappe.db.commit()
