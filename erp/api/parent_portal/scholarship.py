@@ -1418,16 +1418,13 @@ def submit_application_with_files():
                         new_rec.insert(ignore_permissions=True)
                         
                         # Cập nhật reference trên application bằng db_set (ghi thẳng DB)
+                        # Không cần set attribute trên app vì sẽ reload() sau
                         if rec_type == 'main':
                             app.db_set("main_recommendation_id", new_rec.name, update_modified=False)
                             app.db_set("main_recommendation_status", "Pending", update_modified=False)
-                            app.main_recommendation_id = new_rec.name
-                            app.main_recommendation_status = "Pending"
                         else:
                             app.db_set("second_recommendation_id", new_rec.name, update_modified=False)
                             app.db_set("second_recommendation_status", "Pending", update_modified=False)
-                            app.second_recommendation_id = new_rec.name
-                            app.second_recommendation_status = "Pending"
                         
                         logs.append(f"Đã tạo recommendation mới: {new_rec.name} cho GV {new_teacher_id} ({rec_type})")
                     except Exception as rec_err:
@@ -1436,8 +1433,12 @@ def submit_application_with_files():
                 
                 # Reset status về WaitingRecommendation nếu đang ở trạng thái DeniedByTeacher
                 if app.status == 'DeniedByTeacher':
-                    app.status = 'WaitingRecommendation'
+                    app.db_set("status", "WaitingRecommendation", update_modified=False)
                     logs.append("Reset trạng thái về WaitingRecommendation")
+                
+                # Reload app để đồng bộ modified timestamp
+                # (vì new_rec.insert() trigger on_update → update_application_status → app.save() → thay đổi modified)
+                app.reload()
             
             # Cập nhật các trường
             app.main_teacher_id = new_main_teacher_id
