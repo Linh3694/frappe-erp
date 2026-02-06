@@ -1603,7 +1603,26 @@ def deny_recommendation():
         app = frappe.get_doc("SIS Scholarship Application", rec.application_id)
         
         # Lấy tên giáo viên từ chối
-        teacher_name = frappe.db.get_value("SIS Teacher", rec.teacher_id, "teacher_name") or "Giáo viên"
+        # SIS Teacher chỉ có field user_id, không có teacher_name
+        teacher_user_id = frappe.db.get_value("SIS Teacher", rec.teacher_id, "user_id")
+        if teacher_user_id:
+            user_data = frappe.db.get_value(
+                "User", teacher_user_id,
+                ["first_name", "last_name"],
+                as_dict=True
+            )
+            if user_data:
+                # Ghép tên theo thứ tự Việt Nam: last_name + first_name
+                first_name = (user_data.get("first_name") or "").strip()
+                last_name = (user_data.get("last_name") or "").strip()
+                if last_name and first_name:
+                    teacher_name = f"{last_name} {first_name}"
+                else:
+                    teacher_name = first_name or last_name or "Giáo viên"
+            else:
+                teacher_name = "Giáo viên"
+        else:
+            teacher_name = "Giáo viên"
         
         # Lấy tên học sinh
         student_name = frappe.db.get_value("SIS Student", app.student_id, "student_name") or app.student_id
