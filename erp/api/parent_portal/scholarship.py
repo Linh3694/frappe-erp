@@ -167,29 +167,62 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
     return subject, body
 
 
-def _get_teacher_email_info(teacher_id):
+def _get_teacher_email_info(teacher_id, logs=None):
     """
     Lấy email và tên giáo viên từ teacher_id.
+    Dùng frappe.db.get_value (query trực tiếp DB) thay vì frappe.get_doc 
+    để tránh vấn đề ORM cache sau chuỗi thao tác delete/insert/save.
+    
+    Args:
+        teacher_id: ID giáo viên
+        logs: list để ghi log chi tiết (optional)
     
     Returns:
         tuple (email, teacher_name) hoặc (None, None) nếu không tìm thấy
     """
+    def _log(msg):
+        if logs is not None:
+            logs.append(msg)
+        frappe.logger().warning(msg)
+    
     try:
-        teacher = frappe.get_doc("SIS Teacher", teacher_id, ignore_permissions=True)
-        if not teacher.user_id:
-            frappe.logger().warning(f"[Scholarship Email] Teacher {teacher_id} không có user_id")
+        # Query trực tiếp DB để tránh cache issue
+        teacher_data = frappe.db.get_value(
+            "SIS Teacher", teacher_id, 
+            ["user_id", "teacher_name"], 
+            as_dict=True
+        )
+        
+        if not teacher_data:
+            _log(f"⚠️ Không tìm thấy GV {teacher_id} trong DB")
             return None, None
         
-        # Dùng ignore_permissions vì API được gọi bởi parent user, 
-        # parent có thể không có quyền đọc User doctype
-        user = frappe.get_doc("User", teacher.user_id, ignore_permissions=True)
-        if not user.email or user.email == 'Administrator':
-            frappe.logger().warning(f"[Scholarship Email] Teacher {teacher_id} user {teacher.user_id} không có email hợp lệ")
+        user_id = teacher_data.get("user_id")
+        if not user_id:
+            _log(f"⚠️ GV {teacher_id} ({teacher_data.get('teacher_name') or '?'}) chưa có tài khoản User (user_id trống)")
             return None, None
         
-        teacher_name = teacher.teacher_name or user.full_name or teacher_id
-        return user.email, teacher_name
+        # Lấy email và full_name từ User - query trực tiếp DB
+        user_data = frappe.db.get_value(
+            "User", user_id,
+            ["email", "full_name", "enabled"],
+            as_dict=True
+        )
+        
+        if not user_data:
+            _log(f"⚠️ GV {teacher_id} có user_id={user_id} nhưng User không tồn tại trong DB")
+            return None, None
+        
+        email = user_data.get("email")
+        if not email or email == 'Administrator':
+            _log(f"⚠️ GV {teacher_id} user_id={user_id} email={email} - không hợp lệ")
+            return None, None
+        
+        teacher_name = teacher_data.get("teacher_name") or user_data.get("full_name") or teacher_id
+        return email, teacher_name
     except Exception as e:
+        if logs is not None:
+            logs.append(f"❌ Lỗi lấy thông tin GV {teacher_id}: {str(e)}")
         frappe.logger().error(f"[Scholarship Email] Lỗi lấy thông tin GV {teacher_id}: {str(e)}")
         return None, None
 
@@ -305,9 +338,8 @@ def _send_email_to_changed_teachers(app, student_info, changed_teachers, logs):
         for rec_type, teacher_id in changed_teachers:
             try:
                 logs.append(f"[DEBUG Email] Xử lý GV: {teacher_id} ({rec_type})")
-                teacher_email, teacher_name = _get_teacher_email_info(teacher_id)
+                teacher_email, teacher_name = _get_teacher_email_info(teacher_id, logs=logs)
                 if not teacher_email:
-                    logs.append(f"[DEBUG Email] GV {teacher_id} không có email hợp lệ hoặc user_id")
                     continue
                 
                 logs.append(f"[DEBUG Email] Gửi email đến: {teacher_email} ({teacher_name})")
