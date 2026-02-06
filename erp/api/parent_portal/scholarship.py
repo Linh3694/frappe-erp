@@ -177,15 +177,20 @@ def _get_teacher_email_info(teacher_id):
     try:
         teacher = frappe.get_doc("SIS Teacher", teacher_id, ignore_permissions=True)
         if not teacher.user_id:
+            frappe.logger().warning(f"[Scholarship Email] Teacher {teacher_id} không có user_id")
             return None, None
         
-        user = frappe.get_doc("User", teacher.user_id)
+        # Dùng ignore_permissions vì API được gọi bởi parent user, 
+        # parent có thể không có quyền đọc User doctype
+        user = frappe.get_doc("User", teacher.user_id, ignore_permissions=True)
         if not user.email or user.email == 'Administrator':
+            frappe.logger().warning(f"[Scholarship Email] Teacher {teacher_id} user {teacher.user_id} không có email hợp lệ")
             return None, None
         
         teacher_name = teacher.teacher_name or user.full_name or teacher_id
         return user.email, teacher_name
-    except Exception:
+    except Exception as e:
+        frappe.logger().error(f"[Scholarship Email] Lỗi lấy thông tin GV {teacher_id}: {str(e)}")
         return None, None
 
 
@@ -295,12 +300,17 @@ def _send_email_to_changed_teachers(app, student_info, changed_teachers, logs):
         # Lấy deadline từ kỳ học bổng
         deadline_str = _get_period_deadline_str(app.scholarship_period_id)
         
+        logs.append(f"[DEBUG Email] student={student_name}, class={class_name}, deadline={deadline_str}, portal={portal_link}")
+        
         for rec_type, teacher_id in changed_teachers:
             try:
+                logs.append(f"[DEBUG Email] Xử lý GV: {teacher_id} ({rec_type})")
                 teacher_email, teacher_name = _get_teacher_email_info(teacher_id)
                 if not teacher_email:
-                    logs.append(f"Giáo viên {teacher_id} không có email hợp lệ hoặc user_id")
+                    logs.append(f"[DEBUG Email] GV {teacher_id} không có email hợp lệ hoặc user_id")
                     continue
+                
+                logs.append(f"[DEBUG Email] Gửi email đến: {teacher_email} ({teacher_name})")
                 
                 subject, body = _build_scholarship_email(
                     teacher_name=teacher_name,
@@ -313,16 +323,19 @@ def _send_email_to_changed_teachers(app, student_info, changed_teachers, logs):
                 
                 result = _send_email_via_service([teacher_email], subject, body)
                 if result.get('success'):
-                    logs.append(f"Đã gửi email thông báo đến GV mới: {teacher_email} ({teacher_name})")
+                    logs.append(f"✅ Đã gửi email thông báo đến GV mới: {teacher_email} ({teacher_name})")
                 else:
-                    logs.append(f"Không thể gửi email đến {teacher_email}: {result.get('message')}")
+                    logs.append(f"❌ Không thể gửi email đến {teacher_email}: {result.get('message')}")
                     
             except Exception as e:
-                logs.append(f"Lỗi khi gửi email cho GV {teacher_id}: {str(e)}")
+                logs.append(f"❌ Lỗi khi gửi email cho GV {teacher_id}: {str(e)}")
                 continue
         
     except Exception as e:
         frappe.logger().error(f"Error sending email to changed teachers: {str(e)}")
+        # Ghi log vào logs nếu có
+        if logs is not None:
+            logs.append(f"❌ [DEBUG Email] Exception ngoài cùng: {str(e)}")
 
 
 def _get_current_guardian():
@@ -1588,12 +1601,19 @@ def submit_application_with_files():
             logs.append(f"Đã cập nhật đơn đăng ký: {app.name}")
             message = "Cập nhật hồ sơ thành công"
             
+            # Debug log: kiểm tra changed_teachers có được populate không
+            logs.append(f"[DEBUG] changed_teachers = {changed_teachers}")
+            logs.append(f"[DEBUG] old_second={old_second_teacher_id}, new_second={new_second_teacher_id}")
+            
             # Gửi email thông báo đến giáo viên MỚI được thay đổi (không gửi lại cho GV cũ)
             if changed_teachers:
+                logs.append(f"[DEBUG] Bắt đầu gửi email cho {len(changed_teachers)} GV thay đổi")
                 try:
                     _send_email_to_changed_teachers(app, student_info, changed_teachers, logs)
                 except Exception as email_error:
                     logs.append(f"Cảnh báo: Không thể gửi email thông báo - {str(email_error)}")
+            else:
+                logs.append("[DEBUG] changed_teachers rỗng - không gửi email")
         else:
             app.insert(ignore_permissions=True)
             logs.append(f"Đã tạo đơn đăng ký: {app.name}")
