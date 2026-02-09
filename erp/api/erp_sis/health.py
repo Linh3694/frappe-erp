@@ -384,14 +384,14 @@ def delete_health_report():
 @frappe.whitelist(allow_guest=False)
 def get_daily_health_summary():
     """
-    Lấy tổng hợp báo cáo y tế toàn trường (cho Operation)
+    Lấy danh sách đăng ký cháo theo ngày ăn cháo thực tế (cho trang Đăng ký cháo)
+    Filter theo ngày ăn cháo trong child table SIS Health Report Porridge (hrp.date)
     Params:
-        - date: Ngày báo cáo (required)
-        - campus: Campus filter (optional) - filter qua class
-        - search: Tìm kiếm theo tên/mã học sinh (optional)
+        - date: Ngày ăn cháo (required)
+        - campus: Campus filter (optional) - filter qua SIS Class.campus_id
+        - search: Tìm kiếm theo tên/mã học sinh/lớp (optional)
         - page: Trang (default: 1)
         - page_length: Số lượng mỗi trang (default: 50)
-        - porridge_only: Nếu = 1, chỉ lấy báo cáo có đăng ký cháo, filter theo ngày ăn cháo thực tế (optional)
     """
     try:
         _check_teacher_permission()
@@ -399,94 +399,72 @@ def get_daily_health_summary():
         data = frappe.local.form_dict
         request_args = frappe.request.args
         
-        report_date = data.get("date") or request_args.get("date") or today()
+        target_date = data.get("date") or request_args.get("date") or today()
         campus = data.get("campus") or request_args.get("campus")
         search = data.get("search") or request_args.get("search")
         page = int(data.get("page") or request_args.get("page") or 1)
         page_length = int(data.get("page_length") or request_args.get("page_length") or 50)
-        porridge_only = data.get("porridge_only") or request_args.get("porridge_only")
         
         offset = (page - 1) * page_length
         
-        # --- Mode ăn cháo: filter theo ngày ăn cháo thực tế từ child table ---
-        if porridge_only:
-            return _get_porridge_only_summary(report_date, campus, search, page, page_length, offset)
-        
-        # --- Mode mặc định: filter theo ngày tạo báo cáo ---
-        # Build filters
-        filters = {"report_date": report_date}
-        
-        # Search filters
-        or_filters = None
-        if search:
-            or_filters = [
-                ["student_name", "like", f"%{search}%"],
-                ["student_code", "like", f"%{search}%"],
-                ["class_name", "like", f"%{search}%"]
-            ]
-        
         # Nếu có filter campus, lấy danh sách class_id thuộc campus đó
+        campus_class_ids = None
         if campus:
-            class_ids = frappe.get_all(
+            campus_class_ids = frappe.get_all(
                 "SIS Class",
                 filters={"campus_id": campus},
                 pluck="name"
             )
-            if class_ids:
-                filters["class_id"] = ["in", class_ids]
-            else:
-                # Không có class nào thuộc campus này
+            if not campus_class_ids:
                 return success_response(
                     data={"data": [], "total": 0, "page": page, "page_length": page_length},
-                    message="Lấy tổng hợp báo cáo y tế thành công"
+                    message="Lấy danh sách đăng ký cháo thành công"
                 )
         
-        # Lấy danh sách báo cáo (không query trực tiếp field campus)
-        reports = frappe.get_all(
-            "SIS Health Report",
-            filters=filters,
-            or_filters=or_filters,
-            fields=[
-                "name", "student_id", "student_name", "student_code",
-                "class_id", "class_name", "description",
-                "porridge_registration", "porridge_note", "report_date",
-                "created_by_user", "created_by_name", "creation"
-            ],
-            order_by="creation desc",
-            limit=page_length,
-            limit_start=offset
-        )
+        # Query lấy báo cáo có đăng ký cháo cho ngày được chọn (theo ngày ăn cháo thực tế)
+        query = """
+            SELECT DISTINCT
+                hr.name, hr.student_id, hr.student_name, hr.student_code,
+                hr.class_id, hr.class_name, hr.description,
+                hr.porridge_registration, hr.porridge_note,
+                hr.created_by_user, hr.created_by_name, hr.creation,
+                hrp.breakfast, hrp.lunch, hrp.afternoon
+            FROM `tabSIS Health Report` hr
+            INNER JOIN `tabSIS Health Report Porridge` hrp ON hrp.parent = hr.name
+            WHERE hr.porridge_registration = 1
+                AND hrp.date = %s
+                AND (hrp.breakfast = 1 OR hrp.lunch = 1 OR hrp.afternoon = 1)
+        """
+        params = [target_date]
         
-        # Lấy porridge_dates và campus cho mỗi report
+        # Filter campus qua class_id
+        if campus_class_ids:
+            placeholders = ", ".join(["%s"] * len(campus_class_ids))
+            query += f" AND hr.class_id IN ({placeholders})"
+            params.extend(campus_class_ids)
+        
+        # Filter tìm kiếm
+        if search:
+            query += " AND (hr.student_name LIKE %s OR hr.student_code LIKE %s OR hr.class_name LIKE %s)"
+            search_pattern = f"%{search}%"
+            params.extend([search_pattern, search_pattern, search_pattern])
+        
+        query += " ORDER BY hr.creation DESC"
+        
+        # Đếm tổng trước khi phân trang
+        count_query = f"SELECT COUNT(*) as cnt FROM ({query}) as sub"
+        total = frappe.db.sql(count_query, params, as_dict=True)[0].cnt
+        
+        # Phân trang
+        query += " LIMIT %s OFFSET %s"
+        params.extend([page_length, offset])
+        
+        reports = frappe.db.sql(query, params, as_dict=True)
+        
+        # Bổ sung created_at cho mỗi report
         for report in reports:
-            porridge_dates = frappe.get_all(
-                "SIS Health Report Porridge",
-                filters={"parent": report["name"]},
-                fields=["date", "breakfast", "lunch", "afternoon"],
-                order_by="date asc"
-            )
-            report["porridge_dates"] = porridge_dates
             report["created_at"] = str(report.get("creation", ""))
-            
-            # Lấy education_stage từ class -> education_grade -> education_stage
-            if report.get("class_id"):
-                try:
-                    education_grade = frappe.db.get_value("SIS Class", report["class_id"], "education_grade")
-                    if education_grade:
-                        education_stage_id = frappe.db.get_value("SIS Education Grade", education_grade, "education_stage_id")
-                        if education_stage_id:
-                            report["education_stage"] = frappe.db.get_value("SIS Education Stage", education_stage_id, "title_vn")
-                        else:
-                            report["education_stage"] = None
-                    else:
-                        report["education_stage"] = None
-                except:
-                    report["education_stage"] = None
-            else:
-                report["education_stage"] = None
-        
-        # Lấy tổng số
-        total = frappe.db.count("SIS Health Report", filters=filters)
+            report["porridge_dates"] = []
         
         return success_response(
             data={
@@ -495,107 +473,15 @@ def get_daily_health_summary():
                 "page": page,
                 "page_length": page_length
             },
-            message="Lấy tổng hợp báo cáo y tế thành công"
+            message="Lấy danh sách đăng ký cháo thành công"
         )
     
     except Exception as e:
         frappe.logger().error(f"Error getting daily health summary: {str(e)}")
         return error_response(
-            message=f"Lỗi khi lấy tổng hợp báo cáo: {str(e)}",
+            message=f"Lỗi khi lấy danh sách đăng ký cháo: {str(e)}",
             code="SUMMARY_ERROR"
         )
-
-
-def _get_porridge_only_summary(target_date, campus, search, page, page_length, offset):
-    """
-    Lấy danh sách báo cáo có đăng ký cháo, filter theo ngày ăn cháo thực tế (hrp.date).
-    Trả về thêm breakfast, lunch, afternoon cho ngày được chọn.
-    """
-    # Lấy danh sách class_id thuộc campus (nếu có filter)
-    campus_class_ids = None
-    if campus:
-        campus_class_ids = frappe.get_all(
-            "SIS Class",
-            filters={"campus_id": campus},
-            pluck="name"
-        )
-        if not campus_class_ids:
-            return success_response(
-                data={"data": [], "total": 0, "page": page, "page_length": page_length},
-                message="Lấy danh sách đăng ký cháo thành công"
-            )
-
-    # Query lấy báo cáo có đăng ký cháo cho ngày được chọn
-    query = """
-        SELECT DISTINCT
-            hr.name, hr.student_id, hr.student_name, hr.student_code,
-            hr.class_id, hr.class_name, hr.description,
-            hr.porridge_registration, hr.porridge_note,
-            hr.created_by_user, hr.created_by_name, hr.creation,
-            hrp.breakfast, hrp.lunch, hrp.afternoon
-        FROM `tabSIS Health Report` hr
-        INNER JOIN `tabSIS Health Report Porridge` hrp ON hrp.parent = hr.name
-        WHERE hr.porridge_registration = 1
-            AND hrp.date = %s
-            AND (hrp.breakfast = 1 OR hrp.lunch = 1 OR hrp.afternoon = 1)
-    """
-    params = [target_date]
-
-    # Filter campus qua class_id (giống logic mode mặc định)
-    if campus_class_ids:
-        placeholders = ", ".join(["%s"] * len(campus_class_ids))
-        query += f" AND hr.class_id IN ({placeholders})"
-        params.extend(campus_class_ids)
-
-    # Filter tìm kiếm
-    if search:
-        query += " AND (hr.student_name LIKE %s OR hr.student_code LIKE %s OR hr.class_name LIKE %s)"
-        search_pattern = f"%{search}%"
-        params.extend([search_pattern, search_pattern, search_pattern])
-
-    query += " ORDER BY hr.creation DESC"
-
-    # Đếm tổng trước khi phân trang
-    count_query = f"SELECT COUNT(*) as cnt FROM ({query}) as sub"
-    total = frappe.db.sql(count_query, params, as_dict=True)[0].cnt
-
-    # Phân trang
-    query += " LIMIT %s OFFSET %s"
-    params.extend([page_length, offset])
-
-    reports = frappe.db.sql(query, params, as_dict=True)
-
-    # Bổ sung created_at và education_stage cho mỗi report
-    for report in reports:
-        report["created_at"] = str(report.get("creation", ""))
-        report["porridge_dates"] = []
-
-        # Lấy education_stage từ class -> education_grade -> education_stage
-        if report.get("class_id"):
-            try:
-                education_grade = frappe.db.get_value("SIS Class", report["class_id"], "education_grade")
-                if education_grade:
-                    education_stage_id = frappe.db.get_value("SIS Education Grade", education_grade, "education_stage_id")
-                    if education_stage_id:
-                        report["education_stage"] = frappe.db.get_value("SIS Education Stage", education_stage_id, "title_vn")
-                    else:
-                        report["education_stage"] = None
-                else:
-                    report["education_stage"] = None
-            except:
-                report["education_stage"] = None
-        else:
-            report["education_stage"] = None
-
-    return success_response(
-        data={
-            "data": reports,
-            "total": total,
-            "page": page,
-            "page_length": page_length
-        },
-        message="Lấy danh sách đăng ký cháo thành công"
-    )
 
 
 @frappe.whitelist(allow_guest=False)
