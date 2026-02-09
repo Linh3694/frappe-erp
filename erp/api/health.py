@@ -12,7 +12,7 @@ from erp.api.erp_sis.health import (
     create_health_report,
     update_health_report,
     delete_health_report,
-    get_daily_health_summary,
+    get_porridge_registration_list,
     get_porridge_list
 )
 
@@ -21,6 +21,6 @@ __all__ = [
     'create_health_report',
     'update_health_report',
     'delete_health_report',
-    'get_daily_health_summary',
+    'get_porridge_registration_list',
     'get_porridge_list'
 ]

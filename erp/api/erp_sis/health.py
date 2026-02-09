@@ -382,7 +382,7 @@ def delete_health_report():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_daily_health_summary():
+def get_porridge_registration_list():
     """
     Lấy danh sách đăng ký cháo theo ngày ăn cháo thực tế (cho trang Đăng ký cháo)
     Filter theo ngày ăn cháo trong child table SIS Health Report Porridge (hrp.date)
@@ -477,21 +477,28 @@ def get_daily_health_summary():
         )
     
     except Exception as e:
-        frappe.logger().error(f"Error getting daily health summary: {str(e)}")
+        frappe.logger().error(f"Error getting porridge registration list: {str(e)}")
         return error_response(
             message=f"Lỗi khi lấy danh sách đăng ký cháo: {str(e)}",
-            code="SUMMARY_ERROR"
+            code="PORRIDGE_REGISTRATION_ERROR"
         )
 
 
 @frappe.whitelist(allow_guest=False)
 def get_porridge_list():
     """
-    Lấy danh sách học sinh ăn cháo (cho TrackingMeal)
+    Lấy danh sách học sinh đăng ký ăn cháo theo ngày (cho trang Đăng ký cháo)
+    Trả về danh sách học sinh có đăng ký cháo cho ngày được chọn, kèm chi tiết các bữa (sáng/trưa/xế)
     Params:
-        - date: Ngày (required)
-        - campus: Campus filter (optional) - filter qua class
-        - search: Tìm kiếm theo tên/mã học sinh (optional)
+        - date: Ngày ăn cháo (required)
+        - campus: Campus filter (optional) - filter qua education_grade.campus_id
+        - search: Tìm kiếm theo tên/mã học sinh/lớp (optional)
+    Returns:
+        - data: Danh sách học sinh với thông tin bữa cháo
+        - total: Tổng số học sinh
+        - total_breakfast: Số học sinh ăn cháo buổi sáng
+        - total_lunch: Số học sinh ăn cháo buổi trưa
+        - total_afternoon: Số học sinh ăn cháo buổi xế
     """
     try:
         _check_teacher_permission()
