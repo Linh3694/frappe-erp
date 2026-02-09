@@ -546,8 +546,8 @@ def get_porridge_list():
         params = [target_date]
         
         if campus:
-            # Filter theo campus qua education_grade
-            query += " AND eg.campus_id = %s"
+            # Filter theo campus qua SIS Class (giống get_daily_health_summary)
+            query += " AND c.campus_id = %s"
             params.append(campus)
         
         if search:
