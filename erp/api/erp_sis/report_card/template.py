@@ -87,7 +87,7 @@ def get_all_templates(
             "SIS Report Card Template",
             fields=[
                 "name", "title", "campus_id", "curriculum", "education_stage",
-                "education_grade", "school_year", "semester_part", "is_published",
+                "education_grade", "class_ids", "school_year", "semester_part", "is_published",
                 "creation", "modified", "owner",
             ],
             filters=filters,
@@ -107,9 +107,21 @@ def get_all_templates(
             )
             owner_map = {u["name"]: u.get("full_name") or u["name"] for u in users}
         
-        # Thêm owner_full_name vào mỗi row
+        # Thêm owner_full_name vào mỗi row và parse class_ids nếu là JSON string
         for row in rows:
             row["owner_full_name"] = owner_map.get(row.get("owner"), row.get("owner"))
+            
+            # ✅ Parse class_ids nếu là JSON string
+            if row.get("class_ids"):
+                if isinstance(row["class_ids"], str):
+                    try:
+                        row["class_ids"] = json.loads(row["class_ids"])
+                    except (json.JSONDecodeError, TypeError):
+                        row["class_ids"] = []
+                elif not isinstance(row["class_ids"], list):
+                    row["class_ids"] = []
+            else:
+                row["class_ids"] = None
 
         total_count = frappe.db.count("SIS Report Card Template", filters=filters)
         return paginated_response(
