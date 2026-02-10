@@ -202,7 +202,7 @@ def get_daily_health_visits():
         # Lấy ảnh học sinh cho mỗi visit
         current_school_year = frappe.db.get_value(
             "SIS School Year",
-            {"status": "Active"},
+            {"is_enable": 1},
             "name"
         )
         
