@@ -1,0 +1,231 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:VISIT-{YYYY}{MM}{DD}-{#####}",
+ "creation": "2025-02-09 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_info_section",
+  "student_id",
+  "student_name",
+  "student_code",
+  "column_break_1",
+  "class_id",
+  "class_name",
+  "visit_info_section",
+  "visit_date",
+  "reason",
+  "column_break_2",
+  "leave_class_time",
+  "arrive_clinic_time",
+  "leave_clinic_time",
+  "status_section",
+  "status",
+  "column_break_3",
+  "reported_by",
+  "reported_by_name",
+  "received_by",
+  "received_by_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_info_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin học sinh"
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "student_id.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên học sinh",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "student_id.student_code",
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã học sinh",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Lớp",
+   "options": "SIS Class",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "class_id.title",
+   "fieldname": "class_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên lớp",
+   "read_only": 1
+  },
+  {
+   "fieldname": "visit_info_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin xuống Y tế"
+  },
+  {
+   "default": "Today",
+   "fieldname": "visit_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Ngày xuống Y tế",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Text",
+   "label": "Lý do xuống Y tế",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "leave_class_time",
+   "fieldtype": "Time",
+   "label": "Thời gian rời lớp",
+   "reqd": 1
+  },
+  {
+   "fieldname": "arrive_clinic_time",
+   "fieldtype": "Time",
+   "label": "Thời gian đến phòng Y tế"
+  },
+  {
+   "fieldname": "leave_clinic_time",
+   "fieldtype": "Time",
+   "label": "Thời gian rời phòng Y tế"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái"
+  },
+  {
+   "default": "left_class",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "left_class\nat_clinic\nreturned\npicked_up\ntransferred",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "reported_by",
+   "fieldtype": "Link",
+   "label": "Giáo viên báo cáo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reported_by_name",
+   "fieldtype": "Data",
+   "label": "Tên giáo viên",
+   "read_only": 1
+  },
+  {
+   "fieldname": "received_by",
+   "fieldtype": "Link",
+   "label": "Nhân viên Y tế tiếp nhận",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "received_by_name",
+   "fieldtype": "Data",
+   "label": "Tên nhân viên Y tế",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-02-09 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Daily Health Visit",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}
