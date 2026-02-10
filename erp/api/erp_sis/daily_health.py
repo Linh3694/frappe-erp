@@ -199,6 +199,47 @@ def get_daily_health_visits():
                      search_lower in (v.get("student_code") or "").lower() or
                      search_lower in (v.get("class_name") or "").lower()]
         
+        # Lấy ảnh học sinh cho mỗi visit
+        current_school_year = frappe.db.get_value(
+            "SIS School Year",
+            {"status": "Active"},
+            "name"
+        )
+        
+        for visit in visits:
+            student_photo = None
+            try:
+                # Ưu tiên lấy ảnh theo năm học hiện tại
+                if current_school_year:
+                    photos = frappe.get_all(
+                        "SIS Photo",
+                        filters={
+                            "student_id": visit.get("student_id"),
+                            "school_year_id": current_school_year
+                        },
+                        fields=["photo"],
+                        order_by="creation desc",
+                        limit=1
+                    )
+                    if photos and photos[0].get("photo"):
+                        student_photo = photos[0]["photo"]
+                
+                # Fallback - lấy ảnh mới nhất nếu không có ảnh năm học
+                if not student_photo:
+                    photos = frappe.get_all(
+                        "SIS Photo",
+                        filters={"student_id": visit.get("student_id")},
+                        fields=["photo"],
+                        order_by="creation desc",
+                        limit=1
+                    )
+                    if photos and photos[0].get("photo"):
+                        student_photo = photos[0]["photo"]
+            except Exception as photo_err:
+                frappe.logger().warning(f"Error fetching photo for student {visit.get('student_id')}: {str(photo_err)}")
+            
+            visit["student_photo"] = student_photo
+        
         return success_response(
             data={"data": visits, "total": len(visits)},
             message="Lấy danh sách học sinh xuống Y tế thành công"
