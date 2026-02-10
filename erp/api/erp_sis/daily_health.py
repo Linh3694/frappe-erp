@@ -326,9 +326,14 @@ def create_health_examination():
     Tạo hồ sơ khám mới
     Params:
         - visit_id: ID của visit (required)
-        - symptoms: Triệu chứng/Thăm khám (required)
-        - diagnosis: Chẩn đoán (optional)
-        - treatment: Xử lý/Dặn dò (optional)
+        - symptoms: Triệu chứng (required)
+        - images: List of image URLs (optional) - should be uploaded via upload_file first
+        - disease_classification: Phân loại bệnh (optional)
+        - examination_notes: Kết quả thăm khám (optional)
+        - treatment_type: Loại điều trị (optional): medication/rest/other
+        - treatment_details: Chi tiết điều trị (optional)
+        - diagnosis: Chẩn đoán (optional) - deprecated
+        - treatment: Xử lý/Dặn dò (optional) - deprecated
         - outcome: Kết quả (optional)
     """
     try:
@@ -338,6 +343,13 @@ def create_health_examination():
         
         visit_id = data.get("visit_id")
         symptoms = data.get("symptoms")
+        images = data.get("images", [])  # List of {image: url, description: text}
+        disease_classification = data.get("disease_classification", "")
+        examination_notes = data.get("examination_notes", "")
+        treatment_type = data.get("treatment_type", "")
+        treatment_details = data.get("treatment_details", "")
+        
+        # Backward compatibility
         diagnosis = data.get("diagnosis", "")
         treatment = data.get("treatment", "")
         outcome = data.get("outcome")
@@ -374,12 +386,26 @@ def create_health_examination():
             "examination_date": today(),
             "visit_id": visit_id,
             "symptoms": symptoms,
-            "diagnosis": diagnosis,
-            "treatment": treatment,
+            "disease_classification": disease_classification,
+            "examination_notes": examination_notes,
+            "treatment_type": treatment_type,
+            "treatment_details": treatment_details,
+            "diagnosis": diagnosis,  # Deprecated
+            "treatment": treatment,  # Deprecated
             "outcome": outcome,
             "examined_by": examined_by_user,
             "examined_by_name": examined_by_name
         })
+        
+        # Add images as child table if provided
+        if images and isinstance(images, list):
+            for img_data in images:
+                if isinstance(img_data, dict) and img_data.get("image"):
+                    exam.append("images", {
+                        "image": img_data.get("image"),
+                        "description": img_data.get("description", "")
+                    })
+        
         exam.insert()
         frappe.db.commit()
         
@@ -410,9 +436,14 @@ def update_health_examination():
     Cập nhật hồ sơ khám
     Params:
         - exam_id: ID của examination (required)
-        - symptoms: Triệu chứng/Thăm khám (optional)
-        - diagnosis: Chẩn đoán (optional)
-        - treatment: Xử lý/Dặn dò (optional)
+        - symptoms: Triệu chứng (optional)
+        - images: List of image URLs (optional) - replaces existing images
+        - disease_classification: Phân loại bệnh (optional)
+        - examination_notes: Kết quả thăm khám (optional)
+        - treatment_type: Loại điều trị (optional)
+        - treatment_details: Chi tiết điều trị (optional)
+        - diagnosis: Chẩn đoán (optional) - deprecated
+        - treatment: Xử lý/Dặn dò (optional) - deprecated
         - outcome: Kết quả (optional)
     """
     try:
@@ -422,6 +453,13 @@ def update_health_examination():
         
         exam_id = data.get("exam_id")
         symptoms = data.get("symptoms")
+        images = data.get("images")  # List of {image: url, description: text} or None
+        disease_classification = data.get("disease_classification")
+        examination_notes = data.get("examination_notes")
+        treatment_type = data.get("treatment_type")
+        treatment_details = data.get("treatment_details")
+        
+        # Backward compatibility
         diagnosis = data.get("diagnosis")
         treatment = data.get("treatment")
         outcome = data.get("outcome")
@@ -435,12 +473,32 @@ def update_health_examination():
         # Cập nhật các trường
         if symptoms is not None:
             exam.symptoms = symptoms
+        if disease_classification is not None:
+            exam.disease_classification = disease_classification
+        if examination_notes is not None:
+            exam.examination_notes = examination_notes
+        if treatment_type is not None:
+            exam.treatment_type = treatment_type
+        if treatment_details is not None:
+            exam.treatment_details = treatment_details
         if diagnosis is not None:
             exam.diagnosis = diagnosis
         if treatment is not None:
             exam.treatment = treatment
         if outcome is not None:
             exam.outcome = outcome
+        
+        # Update images if provided
+        if images is not None and isinstance(images, list):
+            # Clear existing images
+            exam.images = []
+            # Add new images
+            for img_data in images:
+                if isinstance(img_data, dict) and img_data.get("image"):
+                    exam.append("images", {
+                        "image": img_data.get("image"),
+                        "description": img_data.get("description", "")
+                    })
         
         exam.save()
         frappe.db.commit()

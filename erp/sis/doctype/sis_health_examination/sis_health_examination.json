@@ -16,6 +16,11 @@
   "visit_id",
   "examination_section",
   "symptoms",
+  "images",
+  "disease_classification",
+  "examination_notes",
+  "treatment_type",
+  "treatment_details",
   "diagnosis",
   "treatment",
   "outcome_section",
@@ -82,18 +87,45 @@
   {
    "fieldname": "symptoms",
    "fieldtype": "Text",
-   "label": "Triệu chứng / Thăm khám",
+   "label": "Triệu chứng",
    "reqd": 1
+  },
+  {
+   "fieldname": "images",
+   "fieldtype": "Table",
+   "label": "Hình ảnh",
+   "options": "SIS Examination Image"
+  },
+  {
+   "fieldname": "disease_classification",
+   "fieldtype": "Data",
+   "label": "Phân loại bệnh"
+  },
+  {
+   "fieldname": "examination_notes",
+   "fieldtype": "Text",
+   "label": "Kết quả thăm khám"
+  },
+  {
+   "fieldname": "treatment_type",
+   "fieldtype": "Select",
+   "label": "Loại điều trị",
+   "options": "medication\nrest\nother"
+  },
+  {
+   "fieldname": "treatment_details",
+   "fieldtype": "Text",
+   "label": "Chi tiết điều trị"
   },
   {
    "fieldname": "diagnosis",
    "fieldtype": "Text",
-   "label": "Chẩn đoán"
+   "label": "Chẩn đoán (Deprecated)"
   },
   {
    "fieldname": "treatment",
    "fieldtype": "Text",
-   "label": "Xử lý / Dặn dò"
+   "label": "Xử lý / Dặn dò (Deprecated)"
   },
   {
    "fieldname": "outcome_section",
