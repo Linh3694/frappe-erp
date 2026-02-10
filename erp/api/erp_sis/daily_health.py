@@ -270,6 +270,57 @@ def receive_student_at_clinic():
 
 
 @frappe.whitelist(allow_guest=False)
+def start_examination():
+    """
+    Bắt đầu khám - chuyển status sang examining
+    Params:
+        - visit_id: ID của visit (required)
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = _get_request_data()
+        
+        visit_id = data.get("visit_id")
+        
+        if not visit_id:
+            return validation_error_response("visit_id là bắt buộc", {"visit_id": ["visit_id là bắt buộc"]})
+        
+        # Lấy visit
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
+        
+        # Chỉ cho phép start examination khi status là at_clinic
+        if visit.status not in ["at_clinic", "examining"]:
+            return error_response(
+                message="Chỉ có thể bắt đầu khám khi học sinh đã được tiếp nhận",
+                code="INVALID_STATUS"
+            )
+        
+        # Cập nhật visit status sang examining
+        visit.status = "examining"
+        visit.save()
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": visit.name, "status": visit.status},
+            message="Đã bắt đầu khám"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Bản ghi xuống Y tế không tồn tại",
+            code="NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.logger().error(f"Error starting examination: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi bắt đầu khám: {str(e)}",
+            code="START_EXAM_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def create_health_examination():
     """
     Tạo hồ sơ khám mới

@@ -132,7 +132,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Trạng thái",
-   "options": "left_class\nat_clinic\nreturned\npicked_up\ntransferred",
+   "options": "left_class\nat_clinic\nexamining\nreturned\npicked_up\ntransferred",
    "reqd": 1
   },
   {
