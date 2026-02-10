@@ -451,6 +451,8 @@ def update_health_examination():
         
         data = _get_request_data()
         
+        frappe.logger().info(f"[update_health_examination] Received data: {data}")
+        
         exam_id = data.get("exam_id")
         symptoms = data.get("symptoms")
         images = data.get("images")  # List of {image: url, description: text} or None
@@ -470,26 +472,29 @@ def update_health_examination():
         # Lấy examination
         exam = frappe.get_doc("SIS Health Examination", exam_id)
         
-        # Cập nhật các trường
+        frappe.logger().info(f"[update_health_examination] Found exam: {exam.name}")
+        
+        # Cập nhật các trường (cho phép empty string để clear field)
         if symptoms is not None:
             exam.symptoms = symptoms
         if disease_classification is not None:
-            exam.disease_classification = disease_classification
+            exam.disease_classification = disease_classification if disease_classification else None
         if examination_notes is not None:
-            exam.examination_notes = examination_notes
+            exam.examination_notes = examination_notes if examination_notes else None
         if treatment_type is not None:
-            exam.treatment_type = treatment_type
+            exam.treatment_type = treatment_type if treatment_type else None
         if treatment_details is not None:
-            exam.treatment_details = treatment_details
+            exam.treatment_details = treatment_details if treatment_details else None
         if diagnosis is not None:
-            exam.diagnosis = diagnosis
+            exam.diagnosis = diagnosis if diagnosis else None
         if treatment is not None:
-            exam.treatment = treatment
+            exam.treatment = treatment if treatment else None
         if outcome is not None:
             exam.outcome = outcome
         
-        # Update images if provided
+        # Update images if provided (cho phép empty array để clear tất cả)
         if images is not None and isinstance(images, list):
+            frappe.logger().info(f"[update_health_examination] Updating images: {images}")
             # Clear existing images
             exam.images = []
             # Add new images
@@ -502,6 +507,8 @@ def update_health_examination():
         
         exam.save()
         frappe.db.commit()
+        
+        frappe.logger().info(f"[update_health_examination] Successfully updated exam: {exam.name}")
         
         return success_response(
             data={"name": exam.name},
@@ -516,6 +523,8 @@ def update_health_examination():
     except Exception as e:
         frappe.db.rollback()
         frappe.logger().error(f"Error updating health examination: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
         return error_response(
             message=f"Lỗi khi cập nhật hồ sơ khám: {str(e)}",
             code="UPDATE_EXAM_ERROR"
@@ -548,11 +557,23 @@ def get_student_examination_history():
             filters={"student_id": student_id},
             fields=[
                 "name", "examination_date", "symptoms", "diagnosis",
-                "treatment", "outcome", "examined_by_name", "creation"
+                "treatment", "outcome", "examined_by_name", "creation", "modified",
+                "visit_id", "disease_classification", "examination_notes",
+                "treatment_type", "treatment_details"
             ],
             order_by="examination_date desc, creation desc",
             limit=limit
         )
+        
+        # Lấy images cho mỗi examination
+        for exam in exams:
+            exam_images = frappe.get_all(
+                "SIS Examination Image",
+                filters={"parent": exam.get("name")},
+                fields=["image", "description"],
+                order_by="idx"
+            )
+            exam["images"] = exam_images
         
         return success_response(
             data={"data": exams, "total": len(exams)},
