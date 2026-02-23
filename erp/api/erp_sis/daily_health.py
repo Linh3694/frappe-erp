@@ -1692,15 +1692,18 @@ def get_class_health_examinations():
     try:
         _check_teacher_permission()
         
-        # Ưu tiên đọc từ form_dict (GET query params) trước
-        class_id = frappe.form_dict.get("class_id")
-        date = frappe.form_dict.get("date") or today()
+        # Debug logging
+        frappe.logger().info(f"[get_class_health_examinations] frappe.form_dict: {dict(frappe.form_dict)}")
+        frappe.logger().info(f"[get_class_health_examinations] frappe.local.form_dict: {dict(frappe.local.form_dict) if frappe.local.form_dict else 'None'}")
         
-        # Nếu không có trong form_dict, thử đọc từ request body (POST)
-        if not class_id:
-            data = _get_request_data()
-            class_id = data.get("class_id")
-            date = data.get("date") or date
+        # Lấy params từ nhiều nguồn
+        data = _get_request_data()
+        frappe.logger().info(f"[get_class_health_examinations] _get_request_data(): {data}")
+        
+        class_id = data.get("class_id") or frappe.form_dict.get("class_id") or frappe.request.args.get("class_id")
+        date = data.get("date") or frappe.form_dict.get("date") or frappe.request.args.get("date") or today()
+        
+        frappe.logger().info(f"[get_class_health_examinations] class_id={class_id}, date={date}")
         
         if not class_id:
             return validation_error_response("Thiếu class_id", {"class_id": ["class_id là bắt buộc"]})
