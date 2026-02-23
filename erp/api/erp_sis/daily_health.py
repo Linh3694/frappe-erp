@@ -1048,7 +1048,17 @@ def create_disease_classification(code: str = None, title: str = None, campus: s
     Tạo mới phân loại bệnh
     """
     try:
-        # Lấy dữ liệu từ form_dict nếu không có trong tham số
+        # Lấy dữ liệu từ form_dict hoặc request JSON
+        import json
+        if not code and frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+                code = data.get('code')
+                title = data.get('title')
+                campus = data.get('campus')
+            except json.JSONDecodeError:
+                pass
+        
         code = code or frappe.form_dict.get('code')
         title = title or frappe.form_dict.get('title')
         campus = campus or frappe.form_dict.get('campus')
@@ -1100,11 +1110,19 @@ def update_disease_classification(name: str = None, code: str = None, title: str
     Cập nhật phân loại bệnh
     """
     try:
-        # Lấy dữ liệu từ form_dict nếu không có trong tham số
-        name = name or frappe.form_dict.get('name')
-        code = code if code is not None else frappe.form_dict.get('code')
-        title = title if title is not None else frappe.form_dict.get('title')
-        enabled_val = frappe.form_dict.get('enabled')
+        # Lấy dữ liệu từ request JSON
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        name = name or data.get('name') or frappe.form_dict.get('name')
+        code = code if code is not None else data.get('code') or frappe.form_dict.get('code')
+        title = title if title is not None else data.get('title') or frappe.form_dict.get('title')
+        enabled_val = data.get('enabled') or frappe.form_dict.get('enabled')
         if enabled is None and enabled_val is not None:
             enabled = int(enabled_val) if enabled_val not in [None, ''] else None
         
@@ -1163,7 +1181,15 @@ def delete_disease_classification(name: str = None):
     Xóa phân loại bệnh
     """
     try:
-        name = name or frappe.form_dict.get('name')
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        name = name or data.get('name') or frappe.form_dict.get('name')
         
         if not name:
             return error_response(
@@ -1230,11 +1256,19 @@ def create_medicine(title: str = None, campus: str = None, unit: str = None, des
     Tạo mới thuốc
     """
     try:
-        # Lấy dữ liệu từ form_dict nếu không có trong tham số
-        title = title or frappe.form_dict.get('title')
-        campus = campus or frappe.form_dict.get('campus')
-        unit = unit or frappe.form_dict.get('unit')
-        description = description or frappe.form_dict.get('description')
+        # Lấy dữ liệu từ request JSON
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        title = title or data.get('title') or frappe.form_dict.get('title')
+        campus = campus or data.get('campus') or frappe.form_dict.get('campus')
+        unit = unit or data.get('unit') or frappe.form_dict.get('unit')
+        description = description or data.get('description') or frappe.form_dict.get('description')
         
         if not title or not campus:
             return error_response(
@@ -1284,12 +1318,20 @@ def update_medicine(name: str = None, title: str = None, unit: str = None, descr
     Cập nhật thuốc
     """
     try:
-        # Lấy dữ liệu từ form_dict nếu không có trong tham số
-        name = name or frappe.form_dict.get('name')
-        title = title if title is not None else frappe.form_dict.get('title')
-        unit = unit if unit is not None else frappe.form_dict.get('unit')
-        description = description if description is not None else frappe.form_dict.get('description')
-        enabled_val = frappe.form_dict.get('enabled')
+        # Lấy dữ liệu từ request JSON
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        name = name or data.get('name') or frappe.form_dict.get('name')
+        title = title if title is not None else data.get('title') or frappe.form_dict.get('title')
+        unit = unit if unit is not None else data.get('unit') or frappe.form_dict.get('unit')
+        description = description if description is not None else data.get('description') or frappe.form_dict.get('description')
+        enabled_val = data.get('enabled') or frappe.form_dict.get('enabled')
         if enabled is None and enabled_val is not None:
             enabled = int(enabled_val) if enabled_val not in [None, ''] else None
         
@@ -1351,7 +1393,15 @@ def delete_medicine(name: str = None):
     Xóa thuốc
     """
     try:
-        name = name or frappe.form_dict.get('name')
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        name = name or data.get('name') or frappe.form_dict.get('name')
         
         if not name:
             return error_response(
