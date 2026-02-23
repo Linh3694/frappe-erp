@@ -1021,7 +1021,14 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None, mode=None
         
         # Step 1: Lấy tất cả học sinh có mặt trong SIS Class Attendance (present/late)
         # Chỉ lấy lớp regular, không lấy mixed
-        class_attendance_students = frappe.db.sql("""
+        # Ưu tiên tiết Homeroom để check Face ID vào (mode check_in)
+        # Nếu mode check_in: chỉ lấy học sinh có mặt tiết Homeroom
+        # Nếu mode check_out: lấy học sinh có mặt bất kỳ tiết nào
+        period_filter = ""
+        if mode == 'check_in':
+            period_filter = "AND ca.period = 'Homeroom'"
+        
+        class_attendance_students = frappe.db.sql(f"""
             SELECT DISTINCT
                 ca.student_id,
                 ca.student_name,
@@ -1036,6 +1043,7 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None, mode=None
                 AND c.campus_id = %(campus_id)s
                 AND c.school_year_id = %(school_year)s
                 AND c.class_type = 'regular'
+                {period_filter}
             GROUP BY ca.student_id, ca.student_name, ca.student_code, ca.class_id, c.title
         """, {
             "date": date_obj,
