@@ -27,7 +27,10 @@
   "outcome",
   "column_break_2",
   "examined_by",
-  "examined_by_name"
+  "examined_by_name",
+  "parent_notification_section",
+  "sent_to_parent",
+  "sent_to_parent_at"
  ],
  "fields": [
   {
@@ -154,6 +157,23 @@
    "fieldname": "examined_by_name",
    "fieldtype": "Data",
    "label": "Tên người khám",
+   "read_only": 1
+  },
+  {
+   "fieldname": "parent_notification_section",
+   "fieldtype": "Section Break",
+   "label": "Thông báo phụ huynh"
+  },
+  {
+   "default": "0",
+   "fieldname": "sent_to_parent",
+   "fieldtype": "Check",
+   "label": "Đã gửi đến phụ huynh"
+  },
+  {
+   "fieldname": "sent_to_parent_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian gửi đến phụ huynh",
    "read_only": 1
   }
  ],

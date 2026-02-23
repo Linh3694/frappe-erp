@@ -48,7 +48,7 @@
    "fieldname": "notification_type",
    "fieldtype": "Select",
    "label": "Loại thông báo",
-   "options": "system\nattendance\nticket\nchat\npost\nnews\nreport_card\ncontact_log\nannouncement\nleave\nuser\nalert\nreminder\ninfo\ntest",
+   "options": "system\nattendance\nticket\nchat\npost\nnews\nreport_card\ncontact_log\nannouncement\nleave\nhealth_examination\nuser\nalert\nreminder\ninfo\ntest",
    "default": "system",
    "in_list_view": 1
   },

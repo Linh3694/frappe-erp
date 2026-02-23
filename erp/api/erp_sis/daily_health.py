@@ -1666,3 +1666,459 @@ def import_medicines_excel(campus=None):
             message=f"Lỗi khi import thuốc: {str(e)}",
             code="IMPORT_MEDICINE_ERROR"
         )
+
+
+# ========================================================================================
+# TEACHER HEALTH APIs - Cho giáo viên xem hồ sơ thăm khám và gửi đến phụ huynh
+# ========================================================================================
+
+@frappe.whitelist(allow_guest=False)
+def get_class_health_examinations():
+    """
+    Lấy danh sách hồ sơ thăm khám của học sinh trong lớp theo ngày.
+    Dành cho giáo viên chủ nhiệm xem.
+    
+    Params:
+        - class_id: ID lớp (required)
+        - date: Ngày cần lấy dữ liệu (optional, default: today)
+    
+    Returns:
+        - data: Danh sách học sinh có hồ sơ thăm khám, grouped theo student
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = _get_request_data()
+        class_id = data.get("class_id") or frappe.form_dict.get("class_id")
+        date = data.get("date") or frappe.form_dict.get("date") or today()
+        
+        if not class_id:
+            return validation_error_response("Thiếu class_id", {"class_id": ["class_id là bắt buộc"]})
+        
+        # Lấy danh sách student_id trong lớp
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"parent": class_id},
+            fields=["student_id"]
+        )
+        student_ids = [cs.student_id for cs in class_students]
+        
+        if not student_ids:
+            return success_response(data={"data": []}, message="Không có học sinh trong lớp")
+        
+        # Lấy tất cả Daily Health Visits của các học sinh trong ngày
+        visits = frappe.get_all(
+            "SIS Daily Health Visit",
+            filters={
+                "student_id": ["in", student_ids],
+                "visit_date": date
+            },
+            fields=[
+                "name", "student_id", "student_name", "student_code",
+                "visit_date", "reason", "leave_class_time", "arrive_clinic_time",
+                "leave_clinic_time", "status", "reported_by_name", "received_by_name"
+            ],
+            order_by="creation desc"
+        )
+        
+        # Lấy tất cả Health Examinations của các học sinh trong ngày
+        examinations = frappe.get_all(
+            "SIS Health Examination",
+            filters={
+                "student_id": ["in", student_ids],
+                "examination_date": date
+            },
+            fields=[
+                "name", "student_id", "student_name", "student_code",
+                "examination_date", "visit_id", "symptoms", "disease_classification",
+                "examination_notes", "treatment_type", "treatment_details",
+                "outcome", "examined_by_name", "sent_to_parent", "sent_to_parent_at",
+                "creation", "modified"
+            ],
+            order_by="creation desc"
+        )
+        
+        # Lấy thông tin ảnh học sinh
+        student_photos = {}
+        if student_ids:
+            students_info = frappe.get_all(
+                "CRM Student",
+                filters={"name": ["in", student_ids]},
+                fields=["name", "student_photo"]
+            )
+            student_photos = {s.name: s.student_photo for s in students_info}
+        
+        # Group theo student
+        student_data = {}
+        
+        # Thêm visits
+        for visit in visits:
+            sid = visit.student_id
+            if sid not in student_data:
+                student_data[sid] = {
+                    "student_id": sid,
+                    "student_name": visit.student_name,
+                    "student_code": visit.student_code,
+                    "student_photo": student_photos.get(sid, ""),
+                    "visits": [],
+                    "examinations": []
+                }
+            student_data[sid]["visits"].append(visit)
+        
+        # Thêm examinations
+        for exam in examinations:
+            sid = exam.student_id
+            if sid not in student_data:
+                student_data[sid] = {
+                    "student_id": sid,
+                    "student_name": exam.student_name,
+                    "student_code": exam.student_code,
+                    "student_photo": student_photos.get(sid, ""),
+                    "visits": [],
+                    "examinations": []
+                }
+            
+            # Lấy images cho exam
+            images = frappe.get_all(
+                "SIS Examination Image",
+                filters={"parent": exam.name},
+                fields=["image", "description"]
+            )
+            exam["images"] = images
+            
+            student_data[sid]["examinations"].append(exam)
+        
+        # Convert dict to list và sắp xếp theo tên
+        result = sorted(student_data.values(), key=lambda x: x.get("student_name", ""))
+        
+        return success_response(
+            data={"data": result},
+            message=f"Lấy danh sách thăm khám thành công ({len(result)} học sinh)"
+        )
+        
+    except frappe.PermissionError as e:
+        return error_response(message=str(e), code="PERMISSION_DENIED")
+    except Exception as e:
+        frappe.logger().error(f"Error getting class health examinations: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        return error_response(
+            message=f"Lỗi khi lấy danh sách thăm khám: {str(e)}",
+            code="GET_CLASS_HEALTH_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def send_exam_to_parent():
+    """
+    Gửi hồ sơ thăm khám đến phụ huynh qua notification.
+    
+    Params:
+        - exam_ids: Danh sách ID hồ sơ thăm khám cần gửi (required)
+    
+    Returns:
+        - success: True/False
+        - message: Thông báo kết quả
+        - sent_count: Số lượng đã gửi thành công
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = _get_request_data()
+        exam_ids = data.get("exam_ids") or []
+        
+        if not exam_ids:
+            return validation_error_response("Thiếu exam_ids", {"exam_ids": ["exam_ids là bắt buộc"]})
+        
+        if isinstance(exam_ids, str):
+            exam_ids = [exam_ids]
+        
+        # Lấy thông tin các exam
+        exams = frappe.get_all(
+            "SIS Health Examination",
+            filters={"name": ["in", exam_ids]},
+            fields=["name", "student_id", "student_name", "student_code", "disease_classification", "sent_to_parent"]
+        )
+        
+        if not exams:
+            return validation_error_response("Không tìm thấy hồ sơ thăm khám", {"exam_ids": ["Không tìm thấy hồ sơ"]})
+        
+        # Lọc chỉ những exam chưa gửi
+        exams_to_send = [e for e in exams if not e.sent_to_parent]
+        
+        if not exams_to_send:
+            return success_response(
+                data={"sent_count": 0},
+                message="Tất cả hồ sơ đã được gửi trước đó"
+            )
+        
+        # Import notification handler
+        from erp.utils.notification_handler import send_bulk_parent_notifications
+        
+        # Group exams theo student để gửi notification gộp
+        student_exams = {}
+        for exam in exams_to_send:
+            sid = exam.student_id
+            if sid not in student_exams:
+                student_exams[sid] = {
+                    "student_name": exam.student_name,
+                    "student_code": exam.student_code,
+                    "exams": []
+                }
+            student_exams[sid]["exams"].append(exam)
+        
+        sent_count = 0
+        notification_results = []
+        
+        for student_id, info in student_exams.items():
+            student_name = info["student_name"]
+            exam_names = [e.name for e in info["exams"]]
+            
+            # Chuẩn bị notification
+            title = {
+                "vi": f"Học sinh {student_name} có cập nhật mới về sức khỏe",
+                "en": f"Student {student_name} has health update"
+            }
+            
+            body = {
+                "vi": f"Phòng Y tế đã ghi nhận thông tin thăm khám cho {student_name}. Nhấn để xem chi tiết.",
+                "en": f"Health clinic has recorded examination information for {student_name}. Tap to view details."
+            }
+            
+            try:
+                result = send_bulk_parent_notifications(
+                    recipient_type="health_examination",
+                    recipients_data={"student_ids": [student_id]},
+                    title=title,
+                    body=body,
+                    icon="/health-icon.png",
+                    data={
+                        "type": "health_examination",
+                        "student_id": student_id,
+                        "student_name": student_name,
+                        "exam_ids": exam_names
+                    }
+                )
+                
+                notification_results.append({
+                    "student_id": student_id,
+                    "success": result.get("success", False),
+                    "message": result.get("message", "")
+                })
+                
+                if result.get("success"):
+                    # Cập nhật sent_to_parent cho các exams
+                    for exam_name in exam_names:
+                        frappe.db.set_value(
+                            "SIS Health Examination",
+                            exam_name,
+                            {
+                                "sent_to_parent": 1,
+                                "sent_to_parent_at": now()
+                            },
+                            update_modified=False
+                        )
+                        sent_count += 1
+                        
+            except Exception as notif_err:
+                frappe.logger().error(f"Error sending notification for student {student_id}: {str(notif_err)}")
+                notification_results.append({
+                    "student_id": student_id,
+                    "success": False,
+                    "message": str(notif_err)
+                })
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={
+                "sent_count": sent_count,
+                "total_requested": len(exams_to_send),
+                "results": notification_results
+            },
+            message=f"Đã gửi {sent_count}/{len(exams_to_send)} hồ sơ thăm khám đến phụ huynh"
+        )
+        
+    except frappe.PermissionError as e:
+        return error_response(message=str(e), code="PERMISSION_DENIED")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.logger().error(f"Error sending exam to parent: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        return error_response(
+            message=f"Lỗi khi gửi hồ sơ đến phụ huynh: {str(e)}",
+            code="SEND_EXAM_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def recall_exam_from_parent():
+    """
+    Thu hồi hồ sơ thăm khám đã gửi đến phụ huynh.
+    Xóa notifications và cập nhật trạng thái sent_to_parent = 0.
+    
+    Params:
+        - exam_ids: Danh sách ID hồ sơ thăm khám cần thu hồi (required)
+    
+    Returns:
+        - success: True/False
+        - message: Thông báo kết quả
+        - recalled_count: Số lượng đã thu hồi thành công
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = _get_request_data()
+        exam_ids = data.get("exam_ids") or []
+        
+        if not exam_ids:
+            return validation_error_response("Thiếu exam_ids", {"exam_ids": ["exam_ids là bắt buộc"]})
+        
+        if isinstance(exam_ids, str):
+            exam_ids = [exam_ids]
+        
+        # Lấy thông tin các exam đã gửi
+        exams = frappe.get_all(
+            "SIS Health Examination",
+            filters={
+                "name": ["in", exam_ids],
+                "sent_to_parent": 1
+            },
+            fields=["name", "student_id"]
+        )
+        
+        if not exams:
+            return success_response(
+                data={"recalled_count": 0},
+                message="Không có hồ sơ nào cần thu hồi"
+            )
+        
+        recalled_count = 0
+        
+        for exam in exams:
+            exam_id = exam.name
+            
+            # Tìm và xóa notifications liên quan
+            # Pattern: Tìm notifications có type health_examination và chứa exam_id trong data
+            notifications = frappe.db.sql("""
+                SELECT name FROM `tabERP Notification`
+                WHERE notification_type = 'health_examination'
+                AND (
+                    data LIKE %(pattern1)s
+                    OR data LIKE %(pattern2)s
+                )
+            """, {
+                "pattern1": f'%"{exam_id}"%',
+                "pattern2": f'%\'{exam_id}\'%'
+            }, as_dict=True)
+            
+            for notif in notifications:
+                try:
+                    frappe.delete_doc("ERP Notification", notif.name, force=True, ignore_permissions=True)
+                except Exception as del_err:
+                    frappe.logger().warning(f"Could not delete notification {notif.name}: {str(del_err)}")
+            
+            # Cập nhật trạng thái exam
+            frappe.db.set_value(
+                "SIS Health Examination",
+                exam_id,
+                {
+                    "sent_to_parent": 0,
+                    "sent_to_parent_at": None
+                },
+                update_modified=False
+            )
+            recalled_count += 1
+        
+        frappe.db.commit()
+        
+        return success_response(
+            data={"recalled_count": recalled_count},
+            message=f"Đã thu hồi {recalled_count} hồ sơ thăm khám"
+        )
+        
+    except frappe.PermissionError as e:
+        return error_response(message=str(e), code="PERMISSION_DENIED")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.logger().error(f"Error recalling exam from parent: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        return error_response(
+            message=f"Lỗi khi thu hồi hồ sơ: {str(e)}",
+            code="RECALL_EXAM_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_parent_health_records():
+    """
+    API dành cho Parent Portal: Lấy danh sách hồ sơ thăm khám đã được gửi đến phụ huynh.
+    
+    Params:
+        - student_id: ID học sinh (required)
+    
+    Returns:
+        - data: Danh sách hồ sơ thăm khám grouped theo ngày
+    """
+    try:
+        data = _get_request_data()
+        student_id = data.get("student_id") or frappe.form_dict.get("student_id")
+        
+        if not student_id:
+            return validation_error_response("Thiếu student_id", {"student_id": ["student_id là bắt buộc"]})
+        
+        # Lấy tất cả examinations đã gửi đến parent
+        examinations = frappe.get_all(
+            "SIS Health Examination",
+            filters={
+                "student_id": student_id,
+                "sent_to_parent": 1
+            },
+            fields=[
+                "name", "student_id", "student_name", "student_code",
+                "examination_date", "visit_id", "symptoms", "disease_classification",
+                "examination_notes", "treatment_type", "treatment_details",
+                "outcome", "examined_by_name", "sent_to_parent_at",
+                "creation", "modified"
+            ],
+            order_by="examination_date desc, creation desc"
+        )
+        
+        # Lấy images cho từng exam
+        for exam in examinations:
+            images = frappe.get_all(
+                "SIS Examination Image",
+                filters={"parent": exam.name},
+                fields=["image", "description"]
+            )
+            exam["images"] = images
+        
+        # Group theo ngày
+        grouped = {}
+        for exam in examinations:
+            date_key = str(exam.examination_date)
+            if date_key not in grouped:
+                grouped[date_key] = []
+            grouped[date_key].append(exam)
+        
+        # Convert to list sorted by date desc
+        result = [
+            {"date": date, "examinations": exams}
+            for date, exams in sorted(grouped.items(), reverse=True)
+        ]
+        
+        return success_response(
+            data={"data": result, "total": len(examinations)},
+            message=f"Lấy {len(examinations)} hồ sơ thăm khám thành công"
+        )
+        
+    except Exception as e:
+        frappe.logger().error(f"Error getting parent health records: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        return error_response(
+            message=f"Lỗi khi lấy hồ sơ thăm khám: {str(e)}",
+            code="GET_PARENT_HEALTH_ERROR"
+        )
