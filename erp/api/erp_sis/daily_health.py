@@ -1428,3 +1428,189 @@ def delete_medicine(name: str = None):
             message=f"Lỗi khi xóa thuốc: {str(e)}",
             code="DELETE_MEDICINE_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def import_disease_classifications_excel():
+    """
+    Import phân loại bệnh từ file Excel.
+    Cột A: Mã bệnh, Cột B: Tên phân loại
+    """
+    try:
+        import openpyxl
+        import io
+
+        campus = frappe.form_dict.get('campus')
+        if not campus:
+            return error_response(
+                message="Thiếu thông tin trường học",
+                code="MISSING_CAMPUS"
+            )
+
+        # Kiểm tra campus tồn tại
+        if not frappe.db.exists("SIS Campus", campus):
+            return error_response(
+                message=f"Không tìm thấy trường học: {campus}",
+                code="CAMPUS_NOT_FOUND"
+            )
+
+        # Lấy file từ request
+        file_obj = frappe.request.files.get('file')
+        if not file_obj:
+            return error_response(
+                message="Không tìm thấy file",
+                code="MISSING_FILE"
+            )
+
+        file_data = file_obj.read()
+        wb = openpyxl.load_workbook(io.BytesIO(file_data), read_only=True, data_only=True)
+        ws = wb.active
+
+        success_count = 0
+        error_list = []
+        total_count = 0
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            # Bỏ qua dòng rỗng hoàn toàn
+            if not any(row):
+                continue
+
+            code = str(row[0]).strip() if row[0] is not None else ''
+            title = str(row[1]).strip() if row[1] is not None else ''
+            total_count += 1
+
+            # Validate dữ liệu bắt buộc
+            if not code:
+                error_list.append(f"Dòng {row_idx}: Mã bệnh không được để trống")
+                continue
+            if not title:
+                error_list.append(f"Dòng {row_idx}: Tên phân loại không được để trống")
+                continue
+
+            # Kiểm tra trùng mã trong campus
+            if frappe.db.exists("SIS Disease Classification", {"code": code, "campus": campus}):
+                error_list.append(f"Dòng {row_idx}: Mã bệnh '{code}' đã tồn tại")
+                continue
+
+            try:
+                doc = frappe.get_doc({
+                    "doctype": "SIS Disease Classification",
+                    "code": code,
+                    "title": title,
+                    "campus": campus,
+                    "enabled": 1
+                })
+                doc.insert(ignore_permissions=True)
+                success_count += 1
+            except Exception as e:
+                error_list.append(f"Dòng {row_idx}: {str(e)}")
+
+        frappe.db.commit()
+
+        message = f"Import phân loại bệnh hoàn tất"
+        return success_response(
+            data={
+                "success_count": success_count,
+                "total_count": total_count,
+                "errors": error_list,
+                "message": message
+            },
+            message=message
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"Error importing disease classifications: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi import phân loại bệnh: {str(e)}",
+            code="IMPORT_DISEASE_CLASSIFICATION_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def import_medicines_excel():
+    """
+    Import thuốc từ file Excel.
+    Cột A: Tên thuốc, Cột B: Đơn vị (tùy chọn), Cột C: Mô tả (tùy chọn)
+    """
+    try:
+        import openpyxl
+        import io
+
+        campus = frappe.form_dict.get('campus')
+        if not campus:
+            return error_response(
+                message="Thiếu thông tin trường học",
+                code="MISSING_CAMPUS"
+            )
+
+        # Kiểm tra campus tồn tại
+        if not frappe.db.exists("SIS Campus", campus):
+            return error_response(
+                message=f"Không tìm thấy trường học: {campus}",
+                code="CAMPUS_NOT_FOUND"
+            )
+
+        # Lấy file từ request
+        file_obj = frappe.request.files.get('file')
+        if not file_obj:
+            return error_response(
+                message="Không tìm thấy file",
+                code="MISSING_FILE"
+            )
+
+        file_data = file_obj.read()
+        wb = openpyxl.load_workbook(io.BytesIO(file_data), read_only=True, data_only=True)
+        ws = wb.active
+
+        success_count = 0
+        error_list = []
+        total_count = 0
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            # Bỏ qua dòng rỗng hoàn toàn
+            if not any(row):
+                continue
+
+            title = str(row[0]).strip() if row[0] is not None else ''
+            unit = str(row[1]).strip() if len(row) > 1 and row[1] is not None else ''
+            description = str(row[2]).strip() if len(row) > 2 and row[2] is not None else ''
+            total_count += 1
+
+            # Validate dữ liệu bắt buộc
+            if not title:
+                error_list.append(f"Dòng {row_idx}: Tên thuốc không được để trống")
+                continue
+
+            try:
+                doc = frappe.get_doc({
+                    "doctype": "SIS Medicine",
+                    "title": title,
+                    "unit": unit or None,
+                    "description": description or None,
+                    "campus": campus,
+                    "enabled": 1
+                })
+                doc.insert(ignore_permissions=True)
+                success_count += 1
+            except Exception as e:
+                error_list.append(f"Dòng {row_idx}: {str(e)}")
+
+        frappe.db.commit()
+
+        message = f"Import thuốc hoàn tất"
+        return success_response(
+            data={
+                "success_count": success_count,
+                "total_count": total_count,
+                "errors": error_list,
+                "message": message
+            },
+            message=message
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"Error importing medicines: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi import thuốc: {str(e)}",
+            code="IMPORT_MEDICINE_ERROR"
+        )
