@@ -1043,11 +1043,16 @@ def get_disease_classifications(campus: str = None):
 
 
 @frappe.whitelist()
-def create_disease_classification(code: str, title: str, campus: str):
+def create_disease_classification(code: str = None, title: str = None, campus: str = None):
     """
     Tạo mới phân loại bệnh
     """
     try:
+        # Lấy dữ liệu từ form_dict nếu không có trong tham số
+        code = code or frappe.form_dict.get('code')
+        title = title or frappe.form_dict.get('title')
+        campus = campus or frappe.form_dict.get('campus')
+        
         if not code or not title or not campus:
             return error_response(
                 message="Mã bệnh, tên phân loại và trường học là bắt buộc",
@@ -1090,11 +1095,19 @@ def create_disease_classification(code: str, title: str, campus: str):
 
 
 @frappe.whitelist()
-def update_disease_classification(name: str, code: str = None, title: str = None, enabled: int = None):
+def update_disease_classification(name: str = None, code: str = None, title: str = None, enabled: int = None):
     """
     Cập nhật phân loại bệnh
     """
     try:
+        # Lấy dữ liệu từ form_dict nếu không có trong tham số
+        name = name or frappe.form_dict.get('name')
+        code = code if code is not None else frappe.form_dict.get('code')
+        title = title if title is not None else frappe.form_dict.get('title')
+        enabled_val = frappe.form_dict.get('enabled')
+        if enabled is None and enabled_val is not None:
+            enabled = int(enabled_val) if enabled_val not in [None, ''] else None
+        
         if not name:
             return error_response(
                 message="ID phân loại bệnh là bắt buộc",
@@ -1145,11 +1158,13 @@ def update_disease_classification(name: str, code: str = None, title: str = None
 
 
 @frappe.whitelist()
-def delete_disease_classification(name: str):
+def delete_disease_classification(name: str = None):
     """
     Xóa phân loại bệnh
     """
     try:
+        name = name or frappe.form_dict.get('name')
+        
         if not name:
             return error_response(
                 message="ID phân loại bệnh là bắt buộc",
@@ -1210,11 +1225,17 @@ def get_medicines(campus: str = None):
 
 
 @frappe.whitelist()
-def create_medicine(title: str, campus: str, unit: str = None, description: str = None):
+def create_medicine(title: str = None, campus: str = None, unit: str = None, description: str = None):
     """
     Tạo mới thuốc
     """
     try:
+        # Lấy dữ liệu từ form_dict nếu không có trong tham số
+        title = title or frappe.form_dict.get('title')
+        campus = campus or frappe.form_dict.get('campus')
+        unit = unit or frappe.form_dict.get('unit')
+        description = description or frappe.form_dict.get('description')
+        
         if not title or not campus:
             return error_response(
                 message="Tên thuốc và trường học là bắt buộc",
@@ -1258,11 +1279,20 @@ def create_medicine(title: str, campus: str, unit: str = None, description: str 
 
 
 @frappe.whitelist()
-def update_medicine(name: str, title: str = None, unit: str = None, description: str = None, enabled: int = None):
+def update_medicine(name: str = None, title: str = None, unit: str = None, description: str = None, enabled: int = None):
     """
     Cập nhật thuốc
     """
     try:
+        # Lấy dữ liệu từ form_dict nếu không có trong tham số
+        name = name or frappe.form_dict.get('name')
+        title = title if title is not None else frappe.form_dict.get('title')
+        unit = unit if unit is not None else frappe.form_dict.get('unit')
+        description = description if description is not None else frappe.form_dict.get('description')
+        enabled_val = frappe.form_dict.get('enabled')
+        if enabled is None and enabled_val is not None:
+            enabled = int(enabled_val) if enabled_val not in [None, ''] else None
+        
         if not name:
             return error_response(
                 message="ID thuốc là bắt buộc",
@@ -1316,11 +1346,13 @@ def update_medicine(name: str, title: str = None, unit: str = None, description:
 
 
 @frappe.whitelist()
-def delete_medicine(name: str):
+def delete_medicine(name: str = None):
     """
     Xóa thuốc
     """
     try:
+        name = name or frappe.form_dict.get('name')
+        
         if not name:
             return error_response(
                 message="ID thuốc là bắt buộc",
