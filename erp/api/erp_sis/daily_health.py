@@ -1746,15 +1746,43 @@ def get_class_health_examinations():
             order_by="creation desc"
         )
         
-        # Lấy thông tin ảnh học sinh
+        # Lấy năm học hiện tại để query ảnh học sinh
+        current_school_year = frappe.db.get_value(
+            "SIS School Year",
+            {"is_enable": 1},
+            "name"
+        )
+        
+        # Lấy ảnh học sinh từ SIS Photo (batch query)
         student_photos = {}
         if student_ids:
-            students_info = frappe.get_all(
-                "CRM Student",
-                filters={"name": ["in", student_ids]},
-                fields=["name", "student_photo"]
-            )
-            student_photos = {s.name: s.student_photo for s in students_info}
+            # Ưu tiên lấy ảnh theo năm học hiện tại
+            if current_school_year:
+                photos = frappe.get_all(
+                    "SIS Photo",
+                    filters={
+                        "student_id": ["in", student_ids],
+                        "school_year_id": current_school_year
+                    },
+                    fields=["student_id", "photo"],
+                    order_by="creation desc"
+                )
+                for p in photos:
+                    if p.student_id and p.photo and p.student_id not in student_photos:
+                        student_photos[p.student_id] = p.photo
+            
+            # Fallback - lấy ảnh mới nhất cho các student chưa có ảnh
+            missing_ids = [sid for sid in student_ids if sid not in student_photos]
+            if missing_ids:
+                photos = frappe.get_all(
+                    "SIS Photo",
+                    filters={"student_id": ["in", missing_ids]},
+                    fields=["student_id", "photo"],
+                    order_by="creation desc"
+                )
+                for p in photos:
+                    if p.student_id and p.photo and p.student_id not in student_photos:
+                        student_photos[p.student_id] = p.photo
         
         # Group theo student
         student_data = {}
