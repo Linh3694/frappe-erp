@@ -1291,6 +1291,7 @@ def get_class_applications(class_id=None):
     """
     Lấy danh sách đơn học bổng cần viết thư giới thiệu theo lớp.
     Dùng cho giáo viên trong ClassInfo tab.
+    Trả về thêm thông tin period để kiểm tra điều kiện chỉnh sửa.
     """
     logs = []
     
@@ -1317,10 +1318,12 @@ def get_class_applications(class_id=None):
             return error_response("Bạn không phải giáo viên trong hệ thống", logs=logs)
         
         # Lấy các đơn mà GV này được chọn làm người giới thiệu
+        # Thêm thông tin period để kiểm tra điều kiện chỉnh sửa
         query = """
             SELECT 
                 app.name, app.student_id, app.student_name, app.student_code,
                 app.status, app.submitted_at,
+                app.scholarship_period_id,
                 CASE 
                     WHEN app.main_teacher_id = %(teacher_id)s THEN 'main'
                     WHEN app.second_teacher_id = %(teacher_id)s THEN 'second'
@@ -1332,8 +1335,11 @@ def get_class_applications(class_id=None):
                 CASE 
                     WHEN app.main_teacher_id = %(teacher_id)s THEN app.main_recommendation_id
                     WHEN app.second_teacher_id = %(teacher_id)s THEN app.second_recommendation_id
-                END as recommendation_id
+                END as recommendation_id,
+                period.status as period_status,
+                period.to_date as period_end_date
             FROM `tabSIS Scholarship Application` app
+            LEFT JOIN `tabSIS Scholarship Period` period ON period.name = app.scholarship_period_id
             WHERE app.class_id = %(class_id)s
               AND (app.main_teacher_id = %(teacher_id)s OR app.second_teacher_id = %(teacher_id)s)
               AND app.status IN ('Submitted', 'WaitingRecommendation', 'RecommendationSubmitted', 'InReview', 'Approved', 'Rejected', 'DeniedByTeacher')
@@ -1345,13 +1351,28 @@ def get_class_applications(class_id=None):
             "teacher_id": teacher_id
         }, as_dict=True)
         
-        # Thêm display values
+        # Thêm display values và tính can_edit
+        today = getdate(nowdate())
         for app in applications:
             app["recommendation_status_display"] = {
                 "Pending": "Chờ viết thư",
                 "Submitted": "Đã viết thư",
                 "Denied": "Đã từ chối"
             }.get(app.recommendation_status, app.recommendation_status)
+            
+            # Tính toán can_edit: kỳ chưa đóng + còn trong hạn + đã viết thư (status = Submitted)
+            period_end = getdate(app.period_end_date) if app.period_end_date else None
+            can_edit = False
+            
+            if (app.recommendation_status and app.recommendation_status.lower() == 'submitted' 
+                and app.period_status != 'Closed' 
+                and period_end and today <= period_end):
+                can_edit = True
+            
+            app["can_edit"] = can_edit
+            
+            # Format period_end_date cho frontend
+            app["period_end_date"] = str(app.period_end_date) if app.period_end_date else None
         
         logs.append(f"Tìm thấy {len(applications)} đơn cho class {class_id}")
         
@@ -1663,6 +1684,218 @@ def deny_recommendation():
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
         frappe.log_error(frappe.get_traceback(), "Deny Recommendation Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def get_recommendation_detail(recommendation_id=None):
+    """
+    Lấy chi tiết thư giới thiệu đã viết để chỉnh sửa.
+    Chỉ cho phép xem/sửa nếu:
+    - User là giáo viên sở hữu thư này
+    - Hoặc là admin
+    """
+    logs = []
+    
+    try:
+        if not recommendation_id:
+            recommendation_id = frappe.request.args.get('recommendation_id')
+        
+        if not recommendation_id:
+            return validation_error_response(
+                "Thiếu recommendation_id",
+                {"recommendation_id": ["Recommendation ID là bắt buộc"]}
+            )
+        
+        if not frappe.db.exists("SIS Scholarship Recommendation", recommendation_id):
+            return not_found_response("Không tìm thấy thư giới thiệu")
+        
+        rec = frappe.get_doc("SIS Scholarship Recommendation", recommendation_id)
+        
+        # Kiểm tra quyền
+        user = frappe.session.user
+        teacher_user = frappe.db.get_value("SIS Teacher", rec.teacher_id, "user_id")
+        user_roles = frappe.get_roles(user)
+        
+        if teacher_user != user and "System Manager" not in user_roles and "SIS Manager" not in user_roles:
+            return error_response("Bạn không có quyền xem thư giới thiệu này", logs=logs)
+        
+        # Lấy thông tin application để kiểm tra period
+        app = frappe.get_doc("SIS Scholarship Application", rec.application_id)
+        period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+        
+        # Kiểm tra có được phép chỉnh sửa không
+        # Điều kiện: kỳ chưa đóng + còn trong hạn
+        can_edit = False
+        today = getdate(nowdate())
+        period_end = getdate(period.to_date) if period.to_date else None
+        
+        if period.status != 'Closed' and period_end and today <= period_end:
+            can_edit = True
+        
+        logs.append(f"Period status: {period.status}, end: {period_end}, today: {today}, can_edit: {can_edit}")
+        
+        # Lấy các câu trả lời đã lưu
+        answers = []
+        for answer in rec.answers:
+            answers.append({
+                "section_title": answer.section_title,
+                "question_text_vn": answer.question_text_vn,
+                "question_text_en": answer.question_text_en,
+                "question_type": answer.question_type,
+                "answer_text": answer.answer_text,
+                "answer_rating": answer.answer_rating,
+                "sort_order": answer.sort_order
+            })
+        
+        # Lấy form config để mapping câu trả lời về đúng format
+        form_sections = []
+        for section in period.form_sections:
+            questions = []
+            if section.questions_json:
+                try:
+                    questions = json.loads(section.questions_json)
+                except:
+                    questions = []
+            
+            form_sections.append({
+                "section_title_vn": section.section_title_vn,
+                "section_title_en": section.section_title_en,
+                "sort_order": section.sort_order,
+                "questions": questions
+            })
+        
+        return single_item_response(
+            data={
+                "recommendation_id": rec.name,
+                "status": rec.status,
+                "teacher_name": rec.teacher_name,
+                "submitted_at": str(rec.submitted_at) if rec.submitted_at else None,
+                "average_rating_score": getattr(rec, 'average_rating_score', None),
+                "answers": answers,
+                "form_sections": form_sections,
+                "can_edit": can_edit,
+                "period_status": period.status,
+                "period_end_date": str(period.to_date) if period.to_date else None,
+                "student_info": {
+                    "student_name": app.student_name,
+                    "student_code": app.student_code,
+                    "class_name": app.class_name
+                }
+            },
+            message="Lấy chi tiết thư giới thiệu thành công"
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Get Recommendation Detail Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def update_recommendation():
+    """
+    Cập nhật thư giới thiệu đã viết.
+    Chỉ cho phép nếu:
+    - User là giáo viên sở hữu thư này (hoặc admin)
+    - Kỳ học bổng chưa đóng
+    - Còn trong deadline
+    """
+    logs = []
+    
+    try:
+        # Lấy data từ request
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        recommendation_id = data.get('recommendation_id')
+        answers = data.get('answers', [])
+        average_rating_score = data.get('average_rating_score')
+        
+        if not recommendation_id:
+            return validation_error_response(
+                "Thiếu recommendation_id",
+                {"recommendation_id": ["Recommendation ID là bắt buộc"]}
+            )
+        
+        if isinstance(answers, str):
+            answers = json.loads(answers)
+        
+        if not answers:
+            return validation_error_response(
+                "Thiếu nội dung thư giới thiệu",
+                {"answers": ["Vui lòng điền nội dung thư giới thiệu"]}
+            )
+        
+        logs.append(f"Update recommendation: {recommendation_id}")
+        
+        rec = frappe.get_doc("SIS Scholarship Recommendation", recommendation_id)
+        
+        # Kiểm tra quyền
+        user = frappe.session.user
+        teacher_user = frappe.db.get_value("SIS Teacher", rec.teacher_id, "user_id")
+        user_roles = frappe.get_roles(user)
+        
+        if teacher_user != user and "System Manager" not in user_roles and "SIS Manager" not in user_roles:
+            return error_response("Bạn không có quyền chỉnh sửa thư giới thiệu này", logs=logs)
+        
+        # Kiểm tra điều kiện được phép chỉnh sửa
+        app = frappe.get_doc("SIS Scholarship Application", rec.application_id)
+        period = frappe.get_doc("SIS Scholarship Period", app.scholarship_period_id)
+        
+        today = getdate(nowdate())
+        period_end = getdate(period.to_date) if period.to_date else None
+        
+        # Kiểm tra kỳ đã đóng chưa
+        if period.status == 'Closed':
+            return error_response("Không thể chỉnh sửa vì kỳ học bổng đã đóng", logs=logs)
+        
+        # Kiểm tra còn trong deadline không
+        if period_end and today > period_end:
+            return error_response("Không thể chỉnh sửa vì đã hết hạn nộp đơn", logs=logs)
+        
+        # Cập nhật các câu trả lời
+        rec.answers = []
+        for answer in answers:
+            rec.append("answers", {
+                "section_title": answer.get('section_title'),
+                "question_text_vn": answer.get('question_text_vn'),
+                "question_text_en": answer.get('question_text_en'),
+                "question_type": answer.get('question_type'),
+                "answer_text": answer.get('answer_text'),
+                "answer_rating": answer.get('answer_rating'),
+                "sort_order": answer.get('sort_order', 0)
+            })
+        
+        # Cập nhật điểm trung bình
+        if average_rating_score is not None:
+            rec.average_rating_score = average_rating_score
+        
+        # Cập nhật thời gian
+        rec.submitted_at = now()
+        
+        rec.save()
+        frappe.db.commit()
+        
+        logs.append(f"Đã cập nhật thư giới thiệu: {recommendation_id}")
+        
+        return success_response(
+            data={"name": rec.name, "status": rec.status},
+            message="Cập nhật thư giới thiệu thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Update Recommendation Error")
         return error_response(
             message=f"Lỗi: {str(e)}",
             logs=logs
