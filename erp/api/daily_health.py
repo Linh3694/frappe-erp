@@ -17,7 +17,13 @@ from erp.api.erp_sis.daily_health import (
     get_student_examination_history,
     get_students_at_clinic,
     complete_health_visit,
-    get_health_status_for_period
+    get_health_status_for_period,
+    # Teacher Health APIs
+    get_class_health_examinations,
+    send_exam_to_parent,
+    recall_exam_from_parent,
+    # Parent Portal Health APIs
+    get_parent_health_records
 )
 
 __all__ = [
@@ -30,5 +36,11 @@ __all__ = [
     'get_student_examination_history',
     'get_students_at_clinic',
     'complete_health_visit',
-    'get_health_status_for_period'
+    'get_health_status_for_period',
+    # Teacher Health APIs
+    'get_class_health_examinations',
+    'send_exam_to_parent',
+    'recall_exam_from_parent',
+    # Parent Portal Health APIs
+    'get_parent_health_records'
 ]
