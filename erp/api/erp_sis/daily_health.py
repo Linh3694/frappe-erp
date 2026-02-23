@@ -28,10 +28,17 @@ def _check_teacher_permission():
 
 def _get_request_data():
     """Get request data from various sources"""
+    data = {}
+    
+    # Luôn lấy form_dict trước (query params và form data)
+    if frappe.local.form_dict:
+        data = dict(frappe.local.form_dict)
+    
+    # Sau đó merge với JSON body nếu có
     if hasattr(frappe.request, 'is_json') and frappe.request.is_json:
-        data = frappe.request.json or {}
+        json_data = frappe.request.json or {}
+        data.update(json_data)
     else:
-        data = {}
         try:
             if hasattr(frappe.request, 'data') and frappe.request.data:
                 raw = frappe.request.data
@@ -42,9 +49,6 @@ def _get_request_data():
                         data.update(parsed)
         except (json.JSONDecodeError, AttributeError, TypeError):
             pass
-        
-        if not data and frappe.local.form_dict:
-            data = dict(frappe.local.form_dict)
     
     return data
 
@@ -1688,9 +1692,15 @@ def get_class_health_examinations():
     try:
         _check_teacher_permission()
         
-        data = _get_request_data()
-        class_id = data.get("class_id") or frappe.form_dict.get("class_id")
-        date = data.get("date") or frappe.form_dict.get("date") or today()
+        # Ưu tiên đọc từ form_dict (GET query params) trước
+        class_id = frappe.form_dict.get("class_id")
+        date = frappe.form_dict.get("date") or today()
+        
+        # Nếu không có trong form_dict, thử đọc từ request body (POST)
+        if not class_id:
+            data = _get_request_data()
+            class_id = data.get("class_id")
+            date = data.get("date") or date
         
         if not class_id:
             return validation_error_response("Thiếu class_id", {"class_id": ["class_id là bắt buộc"]})
