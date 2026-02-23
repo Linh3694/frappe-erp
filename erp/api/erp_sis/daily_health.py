@@ -1008,3 +1008,337 @@ def get_health_status_for_period():
             message=f"Lỗi khi lấy trạng thái Y tế theo tiết học: {str(e)}",
             code="GET_HEALTH_STATUS_ERROR"
         )
+
+
+# ==================== DISEASE CLASSIFICATION CRUD ====================
+
+@frappe.whitelist()
+def get_disease_classifications(campus: str = None):
+    """
+    Lấy danh sách phân loại bệnh theo campus
+    """
+    try:
+        filters = {"enabled": 1}
+        if campus:
+            filters["campus"] = campus
+        
+        classifications = frappe.get_all(
+            "SIS Disease Classification",
+            filters=filters,
+            fields=["name", "title", "campus", "enabled", "creation", "modified"],
+            order_by="title asc"
+        )
+        
+        return success_response(
+            data={"data": classifications, "total": len(classifications)},
+            message="Lấy danh sách phân loại bệnh thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error getting disease classifications: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách phân loại bệnh: {str(e)}",
+            code="GET_DISEASE_CLASSIFICATIONS_ERROR"
+        )
+
+
+@frappe.whitelist()
+def create_disease_classification(title: str, campus: str):
+    """
+    Tạo mới phân loại bệnh
+    """
+    try:
+        if not title or not campus:
+            return error_response(
+                message="Tên phân loại và trường học là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS"
+            )
+        
+        # Kiểm tra trùng tên trong cùng campus
+        existing = frappe.get_all(
+            "SIS Disease Classification",
+            filters={"title": title, "campus": campus},
+            limit=1
+        )
+        if existing:
+            return error_response(
+                message="Phân loại bệnh này đã tồn tại",
+                code="DUPLICATE_CLASSIFICATION"
+            )
+        
+        doc = frappe.get_doc({
+            "doctype": "SIS Disease Classification",
+            "title": title,
+            "campus": campus,
+            "enabled": 1
+        })
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Tạo phân loại bệnh thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error creating disease classification: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo phân loại bệnh: {str(e)}",
+            code="CREATE_DISEASE_CLASSIFICATION_ERROR"
+        )
+
+
+@frappe.whitelist()
+def update_disease_classification(name: str, title: str = None, enabled: int = None):
+    """
+    Cập nhật phân loại bệnh
+    """
+    try:
+        if not name:
+            return error_response(
+                message="ID phân loại bệnh là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS"
+            )
+        
+        doc = frappe.get_doc("SIS Disease Classification", name)
+        
+        if title is not None:
+            # Kiểm tra trùng tên trong cùng campus (trừ chính nó)
+            existing = frappe.get_all(
+                "SIS Disease Classification",
+                filters={"title": title, "campus": doc.campus, "name": ["!=", name]},
+                limit=1
+            )
+            if existing:
+                return error_response(
+                    message="Phân loại bệnh này đã tồn tại",
+                    code="DUPLICATE_CLASSIFICATION"
+                )
+            doc.title = title
+        
+        if enabled is not None:
+            doc.enabled = enabled
+        
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Cập nhật phân loại bệnh thành công"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy phân loại bệnh",
+            code="CLASSIFICATION_NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error updating disease classification: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật phân loại bệnh: {str(e)}",
+            code="UPDATE_DISEASE_CLASSIFICATION_ERROR"
+        )
+
+
+@frappe.whitelist()
+def delete_disease_classification(name: str):
+    """
+    Xóa phân loại bệnh
+    """
+    try:
+        if not name:
+            return error_response(
+                message="ID phân loại bệnh là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS"
+            )
+        
+        frappe.delete_doc("SIS Disease Classification", name, ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": name},
+            message="Xóa phân loại bệnh thành công"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy phân loại bệnh",
+            code="CLASSIFICATION_NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error deleting disease classification: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa phân loại bệnh: {str(e)}",
+            code="DELETE_DISEASE_CLASSIFICATION_ERROR"
+        )
+
+
+# ==================== MEDICINE CRUD ====================
+
+@frappe.whitelist()
+def get_medicines(campus: str = None):
+    """
+    Lấy danh sách thuốc theo campus
+    """
+    try:
+        filters = {"enabled": 1}
+        if campus:
+            filters["campus"] = campus
+        
+        medicines = frappe.get_all(
+            "SIS Medicine",
+            filters=filters,
+            fields=["name", "title", "unit", "description", "campus", "enabled", "creation", "modified"],
+            order_by="title asc"
+        )
+        
+        return success_response(
+            data={"data": medicines, "total": len(medicines)},
+            message="Lấy danh sách thuốc thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error getting medicines: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách thuốc: {str(e)}",
+            code="GET_MEDICINES_ERROR"
+        )
+
+
+@frappe.whitelist()
+def create_medicine(title: str, campus: str, unit: str = None, description: str = None):
+    """
+    Tạo mới thuốc
+    """
+    try:
+        if not title or not campus:
+            return error_response(
+                message="Tên thuốc và trường học là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS"
+            )
+        
+        # Kiểm tra trùng tên trong cùng campus
+        existing = frappe.get_all(
+            "SIS Medicine",
+            filters={"title": title, "campus": campus},
+            limit=1
+        )
+        if existing:
+            return error_response(
+                message="Thuốc này đã tồn tại",
+                code="DUPLICATE_MEDICINE"
+            )
+        
+        doc = frappe.get_doc({
+            "doctype": "SIS Medicine",
+            "title": title,
+            "unit": unit,
+            "description": description,
+            "campus": campus,
+            "enabled": 1
+        })
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Tạo thuốc thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error creating medicine: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo thuốc: {str(e)}",
+            code="CREATE_MEDICINE_ERROR"
+        )
+
+
+@frappe.whitelist()
+def update_medicine(name: str, title: str = None, unit: str = None, description: str = None, enabled: int = None):
+    """
+    Cập nhật thuốc
+    """
+    try:
+        if not name:
+            return error_response(
+                message="ID thuốc là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS"
+            )
+        
+        doc = frappe.get_doc("SIS Medicine", name)
+        
+        if title is not None:
+            # Kiểm tra trùng tên trong cùng campus (trừ chính nó)
+            existing = frappe.get_all(
+                "SIS Medicine",
+                filters={"title": title, "campus": doc.campus, "name": ["!=", name]},
+                limit=1
+            )
+            if existing:
+                return error_response(
+                    message="Thuốc này đã tồn tại",
+                    code="DUPLICATE_MEDICINE"
+                )
+            doc.title = title
+        
+        if unit is not None:
+            doc.unit = unit
+        
+        if description is not None:
+            doc.description = description
+        
+        if enabled is not None:
+            doc.enabled = enabled
+        
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Cập nhật thuốc thành công"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy thuốc",
+            code="MEDICINE_NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error updating medicine: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật thuốc: {str(e)}",
+            code="UPDATE_MEDICINE_ERROR"
+        )
+
+
+@frappe.whitelist()
+def delete_medicine(name: str):
+    """
+    Xóa thuốc
+    """
+    try:
+        if not name:
+            return error_response(
+                message="ID thuốc là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS"
+            )
+        
+        frappe.delete_doc("SIS Medicine", name, ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": name},
+            message="Xóa thuốc thành công"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy thuốc",
+            code="MEDICINE_NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error deleting medicine: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa thuốc: {str(e)}",
+            code="DELETE_MEDICINE_ERROR"
+        )
