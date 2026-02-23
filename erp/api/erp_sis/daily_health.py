@@ -1025,8 +1025,8 @@ def get_disease_classifications(campus: str = None):
         classifications = frappe.get_all(
             "SIS Disease Classification",
             filters=filters,
-            fields=["name", "title", "campus", "enabled", "creation", "modified"],
-            order_by="title asc"
+            fields=["name", "code", "title", "campus", "enabled", "creation", "modified"],
+            order_by="code asc"
         )
         
         return success_response(
@@ -1043,31 +1043,32 @@ def get_disease_classifications(campus: str = None):
 
 
 @frappe.whitelist()
-def create_disease_classification(title: str, campus: str):
+def create_disease_classification(code: str, title: str, campus: str):
     """
     Tạo mới phân loại bệnh
     """
     try:
-        if not title or not campus:
+        if not code or not title or not campus:
             return error_response(
-                message="Tên phân loại và trường học là bắt buộc",
+                message="Mã bệnh, tên phân loại và trường học là bắt buộc",
                 code="MISSING_REQUIRED_FIELDS"
             )
         
-        # Kiểm tra trùng tên trong cùng campus
+        # Kiểm tra trùng mã trong cùng campus
         existing = frappe.get_all(
             "SIS Disease Classification",
-            filters={"title": title, "campus": campus},
+            filters={"code": code, "campus": campus},
             limit=1
         )
         if existing:
             return error_response(
-                message="Phân loại bệnh này đã tồn tại",
-                code="DUPLICATE_CLASSIFICATION"
+                message="Mã bệnh này đã tồn tại",
+                code="DUPLICATE_CODE"
             )
         
         doc = frappe.get_doc({
             "doctype": "SIS Disease Classification",
+            "code": code,
             "title": title,
             "campus": campus,
             "enabled": 1
@@ -1076,7 +1077,7 @@ def create_disease_classification(title: str, campus: str):
         frappe.db.commit()
         
         return success_response(
-            data={"name": doc.name, "title": doc.title},
+            data={"name": doc.name, "code": doc.code, "title": doc.title},
             message="Tạo phân loại bệnh thành công"
         )
     
@@ -1089,7 +1090,7 @@ def create_disease_classification(title: str, campus: str):
 
 
 @frappe.whitelist()
-def update_disease_classification(name: str, title: str = None, enabled: int = None):
+def update_disease_classification(name: str, code: str = None, title: str = None, enabled: int = None):
     """
     Cập nhật phân loại bệnh
     """
@@ -1102,18 +1103,21 @@ def update_disease_classification(name: str, title: str = None, enabled: int = N
         
         doc = frappe.get_doc("SIS Disease Classification", name)
         
-        if title is not None:
-            # Kiểm tra trùng tên trong cùng campus (trừ chính nó)
+        if code is not None:
+            # Kiểm tra trùng mã trong cùng campus (trừ chính nó)
             existing = frappe.get_all(
                 "SIS Disease Classification",
-                filters={"title": title, "campus": doc.campus, "name": ["!=", name]},
+                filters={"code": code, "campus": doc.campus, "name": ["!=", name]},
                 limit=1
             )
             if existing:
                 return error_response(
-                    message="Phân loại bệnh này đã tồn tại",
-                    code="DUPLICATE_CLASSIFICATION"
+                    message="Mã bệnh này đã tồn tại",
+                    code="DUPLICATE_CODE"
                 )
+            doc.code = code
+        
+        if title is not None:
             doc.title = title
         
         if enabled is not None:
@@ -1123,7 +1127,7 @@ def update_disease_classification(name: str, title: str = None, enabled: int = N
         frappe.db.commit()
         
         return success_response(
-            data={"name": doc.name, "title": doc.title},
+            data={"name": doc.name, "code": doc.code, "title": doc.title},
             message="Cập nhật phân loại bệnh thành công"
         )
     
