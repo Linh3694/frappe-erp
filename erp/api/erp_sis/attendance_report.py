@@ -840,3 +840,172 @@ def get_timetable_columns(education_stage_id=None, campus_id=None, date=None):
             message=f"Lỗi khi lấy danh sách tiết học: {str(e)}",
             code="GET_TIMETABLE_COLUMNS_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_school_attendance_summary(date=None, period=None, campus_id=None):
+    """
+    Lấy thống kê điểm danh toàn trường cho 1 tiết (thường là Homeroom)
+    Bao gồm: tổng học sinh, đã điểm danh, có mặt, vắng, muộn
+    
+    Args:
+        date: Ngày cần xem (YYYY-MM-DD)
+        period: Tên tiết (e.g. "Homeroom")
+        campus_id: Campus ID (optional)
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                date: "2026-02-23",
+                period: "Homeroom",
+                school_year: "2025-2026",
+                summary: {
+                    total_students: 1519,      # Tổng học sinh toàn trường
+                    total_attendance: 1512,    # Tổng đã điểm danh
+                    not_attendance: 7,         # Chưa điểm danh
+                    present: 1285,             # Có mặt
+                    late: 34,                  # Đến muộn
+                    present_total: 1319,       # Tổng có mặt (present + late)
+                    absent: 16,                # Vắng không phép
+                    excused: 177,              # Vắng có phép
+                    left_early: 0,             # Về sớm
+                    total_absent: 193,         # Tổng vắng (absent + excused)
+                    attendance_rate: 87.2      # Tỷ lệ có mặt
+                }
+            }
+        }
+    """
+    try:
+        # Lấy params
+        if not date:
+            date = frappe.request.args.get('date')
+        if not period:
+            period = frappe.request.args.get('period')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        
+        if not date:
+            return error_response(
+                message="Thiếu tham số: date là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        # Default period là Homeroom
+        if not period:
+            period = 'Homeroom'
+        
+        # Parse date
+        date_obj = frappe.utils.getdate(date)
+        
+        # Resolve campus_id từ format frontend sang format database
+        campus_id = _resolve_campus_id(campus_id)
+        
+        # Lấy campus từ context nếu không truyền
+        if not campus_id:
+            try:
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
+            except Exception:
+                pass
+        
+        # Lấy active school year
+        school_year_filters = {"is_enable": 1}
+        if campus_id:
+            school_year_filters["campus_id"] = campus_id
+        
+        school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+        
+        if not school_year:
+            return error_response(
+                message="Không tìm thấy năm học đang active",
+                code="NO_ACTIVE_SCHOOL_YEAR"
+            )
+        
+        # Build class filters
+        class_filters = {
+            "school_year_id": school_year,
+            "class_type": "regular"
+        }
+        if campus_id:
+            class_filters["campus_id"] = campus_id
+        
+        # Lấy tổng số học sinh toàn trường
+        total_students = frappe.db.sql("""
+            SELECT COUNT(DISTINCT cs.student_id) as total
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            WHERE c.school_year_id = %(school_year)s 
+                AND c.class_type = 'regular'
+                AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL)
+        """, {
+            "school_year": school_year,
+            "campus_id": campus_id
+        })[0][0] or 0
+        
+        # Lấy thống kê điểm danh
+        stats = frappe.db.sql("""
+            SELECT 
+                COUNT(*) as total_attendance,
+                SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) as present,
+                SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) as late,
+                SUM(CASE WHEN a.status IN ('present', 'late') THEN 1 ELSE 0 END) as present_total,
+                SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) as absent,
+                SUM(CASE WHEN a.status = 'excused' THEN 1 ELSE 0 END) as excused,
+                SUM(CASE WHEN a.status = 'left_early' THEN 1 ELSE 0 END) as left_early
+            FROM `tabSIS Class Attendance` a
+            INNER JOIN `tabSIS Class` c ON a.class_id = c.name
+            WHERE a.date = %(date)s 
+                AND a.period = %(period)s
+                AND c.school_year_id = %(school_year)s 
+                AND c.class_type = 'regular'
+                AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL)
+        """, {
+            "date": date_obj,
+            "period": period,
+            "school_year": school_year,
+            "campus_id": campus_id
+        }, as_dict=True)[0]
+        
+        # Tính toán các giá trị
+        total_attendance = int(stats['total_attendance'] or 0)
+        present = int(stats['present'] or 0)
+        late = int(stats['late'] or 0)
+        present_total = int(stats['present_total'] or 0)
+        absent = int(stats['absent'] or 0)
+        excused = int(stats['excused'] or 0)
+        left_early = int(stats['left_early'] or 0)
+        total_absent = absent + excused
+        not_attendance = total_students - total_attendance
+        
+        # Tính tỷ lệ có mặt
+        attendance_rate = round(present_total / total_attendance * 100, 1) if total_attendance > 0 else 0
+        
+        return success_response(
+            data={
+                "date": str(date_obj),
+                "period": period,
+                "school_year": school_year,
+                "summary": {
+                    "total_students": total_students,
+                    "total_attendance": total_attendance,
+                    "not_attendance": not_attendance,
+                    "present": present,
+                    "late": late,
+                    "present_total": present_total,
+                    "absent": absent,
+                    "excused": excused,
+                    "left_early": left_early,
+                    "total_absent": total_absent,
+                    "attendance_rate": attendance_rate
+                }
+            },
+            message="Lấy thống kê điểm danh toàn trường thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_school_attendance_summary error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy thống kê điểm danh toàn trường: {str(e)}",
+            code="GET_SCHOOL_ATTENDANCE_SUMMARY_ERROR"
+        )
