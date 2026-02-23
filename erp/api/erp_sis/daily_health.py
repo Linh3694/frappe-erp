@@ -30,11 +30,15 @@ def _get_request_data():
     """Get request data from various sources"""
     data = {}
     
-    # Luôn lấy form_dict trước (query params và form data)
-    if frappe.local.form_dict:
-        data = dict(frappe.local.form_dict)
+    # 1. Lấy từ URL query params (GET request)
+    if hasattr(frappe, 'request') and hasattr(frappe.request, 'args') and frappe.request.args:
+        data.update(dict(frappe.request.args))
     
-    # Sau đó merge với JSON body nếu có
+    # 2. Lấy từ form_dict (query params và form data)
+    if frappe.local.form_dict:
+        data.update(dict(frappe.local.form_dict))
+    
+    # 3. Merge với JSON body nếu có (POST request)
     if hasattr(frappe.request, 'is_json') and frappe.request.is_json:
         json_data = frappe.request.json or {}
         data.update(json_data)
