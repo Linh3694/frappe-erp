@@ -1475,6 +1475,15 @@ def import_disease_classifications_excel(campus=None):
         error_list = []
         total_count = 0
 
+        # Tải trước danh sách mã đã có để kiểm tra trùng nhanh (so sánh uppercase)
+        existing_codes = set(
+            r.code.strip().upper()
+            for r in frappe.get_all("SIS Disease Classification", filters={"campus": campus}, fields=["code"])
+            if r.code
+        )
+        # Theo dõi mã trong file Excel để phát hiện trùng nội bộ
+        seen_in_file = set()
+
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
             # Bỏ qua dòng rỗng hoàn toàn
             if not any(row):
@@ -1492,9 +1501,16 @@ def import_disease_classifications_excel(campus=None):
                 error_list.append(f"Dòng {row_idx}: Tên phân loại không được để trống")
                 continue
 
-            # Kiểm tra trùng mã trong campus
-            if frappe.db.exists("SIS Disease Classification", {"code": code, "campus": campus}):
-                error_list.append(f"Dòng {row_idx}: Mã bệnh '{code}' đã tồn tại")
+            code_upper = code.upper()
+
+            # Kiểm tra trùng trong cùng file Excel
+            if code_upper in seen_in_file:
+                error_list.append(f"Dòng {row_idx}: Mã bệnh '{code}' bị trùng trong file Excel")
+                continue
+
+            # Kiểm tra trùng mã với dữ liệu đã có trong hệ thống
+            if code_upper in existing_codes:
+                error_list.append(f"Dòng {row_idx}: Mã bệnh '{code}' đã tồn tại trong hệ thống")
                 continue
 
             try:
@@ -1507,6 +1523,8 @@ def import_disease_classifications_excel(campus=None):
                 })
                 doc.insert(ignore_permissions=True)
                 success_count += 1
+                seen_in_file.add(code_upper)
+                existing_codes.add(code_upper)
             except Exception as e:
                 error_list.append(f"Dòng {row_idx}: {str(e)}")
 
@@ -1576,6 +1594,15 @@ def import_medicines_excel(campus=None):
         error_list = []
         total_count = 0
 
+        # Tải trước danh sách tên thuốc đã có để kiểm tra trùng nhanh (so sánh lowercase)
+        existing_titles = set(
+            r.title.strip().lower()
+            for r in frappe.get_all("SIS Medicine", filters={"campus": campus}, fields=["title"])
+            if r.title
+        )
+        # Theo dõi tên trong file Excel để phát hiện trùng nội bộ
+        seen_in_file = set()
+
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
             # Bỏ qua dòng rỗng hoàn toàn
             if not any(row):
@@ -1591,6 +1618,18 @@ def import_medicines_excel(campus=None):
                 error_list.append(f"Dòng {row_idx}: Tên thuốc không được để trống")
                 continue
 
+            title_lower = title.lower()
+
+            # Kiểm tra trùng trong cùng file Excel
+            if title_lower in seen_in_file:
+                error_list.append(f"Dòng {row_idx}: Tên thuốc '{title}' bị trùng trong file Excel")
+                continue
+
+            # Kiểm tra trùng với dữ liệu đã có trong hệ thống
+            if title_lower in existing_titles:
+                error_list.append(f"Dòng {row_idx}: Tên thuốc '{title}' đã tồn tại trong hệ thống")
+                continue
+
             try:
                 doc = frappe.get_doc({
                     "doctype": "SIS Medicine",
@@ -1602,6 +1641,9 @@ def import_medicines_excel(campus=None):
                 })
                 doc.insert(ignore_permissions=True)
                 success_count += 1
+                # Thêm vào tập đã xử lý để tránh trùng các dòng sau trong file
+                seen_in_file.add(title_lower)
+                existing_titles.add(title_lower)
             except Exception as e:
                 error_list.append(f"Dòng {row_idx}: {str(e)}")
 
