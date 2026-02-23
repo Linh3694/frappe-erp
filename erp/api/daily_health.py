@@ -16,7 +16,8 @@ from erp.api.erp_sis.daily_health import (
     update_health_examination,
     get_student_examination_history,
     get_students_at_clinic,
-    complete_health_visit
+    complete_health_visit,
+    get_health_status_for_period
 )
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     'update_health_examination',
     'get_student_examination_history',
     'get_students_at_clinic',
-    'complete_health_visit'
+    'complete_health_visit',
+    'get_health_status_for_period'
 ]

@@ -58,6 +58,7 @@ def report_student_to_clinic():
         - class_id: ID lớp (required)
         - reason: Lý do xuống Y tế (required)
         - leave_class_time: Thời gian rời lớp (optional, default: now)
+        - period: Tên tiết học (optional) - nếu có sẽ tự động cập nhật attendance thành excused
     """
     try:
         _check_teacher_permission()
@@ -68,6 +69,7 @@ def report_student_to_clinic():
         class_id = data.get("class_id")
         reason = data.get("reason")
         leave_class_time = data.get("leave_class_time") or nowtime()
+        period = data.get("period")  # Tên tiết học (optional)
         
         # Validation
         errors = {}
@@ -83,7 +85,7 @@ def report_student_to_clinic():
         
         # Lấy thông tin student và class
         student = frappe.db.get_value("CRM Student", student_id, ["student_name", "student_code"], as_dict=True)
-        class_info = frappe.db.get_value("SIS Class", class_id, ["title"], as_dict=True)
+        class_info = frappe.db.get_value("SIS Class", class_id, ["title", "campus_id"], as_dict=True)
         
         if not student:
             return validation_error_response("Học sinh không tồn tại", {"student_id": ["Học sinh không tồn tại"]})
@@ -116,10 +118,61 @@ def report_student_to_clinic():
             "reported_by_name": reported_by_name
         })
         visit.insert()
+        
+        # Nếu có period, tự động cập nhật attendance thành excused
+        attendance_updated = False
+        if period:
+            try:
+                existing_attendance = frappe.db.exists(
+                    "SIS Class Attendance",
+                    {
+                        "student_id": student_id,
+                        "class_id": class_id,
+                        "date": today(),
+                        "period": period
+                    }
+                )
+                
+                if existing_attendance:
+                    # Cập nhật attendance hiện có thành excused
+                    frappe.db.set_value(
+                        "SIS Class Attendance",
+                        existing_attendance,
+                        "status",
+                        "excused"
+                    )
+                    attendance_updated = True
+                else:
+                    # Tạo mới attendance với status excused
+                    attendance = frappe.get_doc({
+                        "doctype": "SIS Class Attendance",
+                        "student_id": student_id,
+                        "student_code": student.get("student_code"),
+                        "student_name": student.get("student_name"),
+                        "class_id": class_id,
+                        "date": today(),
+                        "period": period,
+                        "status": "excused",
+                        "remarks": f"Xuống Y tế: {reason}",
+                        "campus_id": class_info.get("campus_id"),
+                        "recorded_by": reported_by_user
+                    })
+                    attendance.insert()
+                    attendance_updated = True
+                    
+                frappe.logger().info(f"[report_student_to_clinic] Updated attendance to excused for student {student_id}, period {period}")
+            except Exception as att_err:
+                # Không fail toàn bộ request nếu không thể cập nhật attendance
+                frappe.logger().warning(f"[report_student_to_clinic] Could not update attendance: {str(att_err)}")
+        
         frappe.db.commit()
         
         return success_response(
-            data={"name": visit.name, "status": visit.status},
+            data={
+                "name": visit.name,
+                "status": visit.status,
+                "attendance_updated": attendance_updated
+            },
             message="Đã báo cáo học sinh xuống Y tế"
         )
     
@@ -756,4 +809,202 @@ def complete_health_visit():
         return error_response(
             message=f"Lỗi khi hoàn thành lượt xuống Y tế: {str(e)}",
             code="COMPLETE_ERROR"
+        )
+
+
+def _get_period_times(class_id, period_name, visit_date):
+    """
+    Lấy thời gian bắt đầu và kết thúc của tiết học từ Schedule Group.
+    Returns: (start_time, end_time) hoặc (None, None) nếu không tìm thấy
+    """
+    try:
+        # Lấy education_stage_id từ class
+        class_doc = frappe.db.get_value("SIS Class", class_id, ["education_stage_id"], as_dict=True)
+        if not class_doc or not class_doc.get("education_stage_id"):
+            frappe.logger().warning(f"[get_period_times] Cannot find education_stage_id for class {class_id}")
+            return None, None
+        
+        education_stage_id = class_doc.get("education_stage_id")
+        
+        # Tìm Schedule Group đang active cho education_stage và date
+        schedule_group = frappe.db.sql("""
+            SELECT name FROM `tabSIS Schedule Group`
+            WHERE education_stage_id = %s
+              AND is_active = 1
+              AND start_date <= %s
+              AND end_date >= %s
+            ORDER BY start_date DESC
+            LIMIT 1
+        """, (education_stage_id, visit_date, visit_date), as_dict=True)
+        
+        if not schedule_group:
+            frappe.logger().warning(f"[get_period_times] Cannot find active schedule group for education_stage {education_stage_id} on {visit_date}")
+            return None, None
+        
+        schedule_group_id = schedule_group[0].get("name")
+        
+        # Tìm Period với period_name khớp
+        period = frappe.db.get_value(
+            "SIS Timetable Column",
+            {
+                "schedule_id": schedule_group_id,
+                "period_name": period_name
+            },
+            ["start_time", "end_time"],
+            as_dict=True
+        )
+        
+        if not period:
+            frappe.logger().warning(f"[get_period_times] Cannot find period '{period_name}' in schedule group {schedule_group_id}")
+            return None, None
+        
+        return period.get("start_time"), period.get("end_time")
+    
+    except Exception as e:
+        frappe.logger().error(f"[get_period_times] Error: {str(e)}")
+        return None, None
+
+
+def _time_to_seconds(time_val):
+    """
+    Chuyển đổi time value (có thể là timedelta hoặc string) sang seconds
+    """
+    if time_val is None:
+        return None
+    
+    # Nếu là timedelta (từ database)
+    if hasattr(time_val, 'total_seconds'):
+        return time_val.total_seconds()
+    
+    # Nếu là string (HH:MM hoặc HH:MM:SS)
+    if isinstance(time_val, str):
+        parts = time_val.split(':')
+        if len(parts) >= 2:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds = int(parts[2]) if len(parts) > 2 else 0
+            return hours * 3600 + minutes * 60 + seconds
+    
+    return None
+
+
+@frappe.whitelist(allow_guest=False)
+def get_health_status_for_period():
+    """
+    Lấy trạng thái Y tế của học sinh theo tiết học (cho LessonLog).
+    Kiểm tra thời gian rời lớp/rời Y tế với thời gian tiết học để xác định chính xác.
+    
+    Params:
+        - class_id: ID lớp (required)
+        - date: Ngày (required)
+        - period: Tên tiết học, VD: "Tiết 1" (required)
+    
+    Returns:
+        students: Record<student_id, {visit_id, status, leave_class_time, leave_clinic_time}>
+        
+    Logic:
+        - Học sinh được coi là "ở Y tế" trong tiết nếu:
+          1. leave_class_time < period_end_time (rời lớp trước khi tiết kết thúc)
+          2. AND (leave_clinic_time IS NULL OR leave_clinic_time > period_start_time) (chưa về hoặc về sau khi tiết bắt đầu)
+        - Nếu không tìm được thông tin tiết học, fallback về logic cũ (chỉ check status)
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = frappe.local.form_dict
+        request_args = frappe.request.args
+        
+        class_id = data.get("class_id") or request_args.get("class_id")
+        visit_date = data.get("date") or request_args.get("date")
+        period_name = data.get("period") or request_args.get("period")
+        
+        # Validation
+        errors = {}
+        if not class_id:
+            errors["class_id"] = ["class_id là bắt buộc"]
+        if not visit_date:
+            errors["date"] = ["date là bắt buộc"]
+        if not period_name:
+            errors["period"] = ["period là bắt buộc"]
+        
+        if errors:
+            return validation_error_response("Dữ liệu không hợp lệ", errors)
+        
+        # Lấy thời gian tiết học
+        period_start, period_end = _get_period_times(class_id, period_name, visit_date)
+        period_start_sec = _time_to_seconds(period_start)
+        period_end_sec = _time_to_seconds(period_end)
+        
+        has_period_times = period_start_sec is not None and period_end_sec is not None
+        
+        if not has_period_times:
+            frappe.logger().warning(f"[get_health_status_for_period] Cannot get period times for {period_name}, using fallback logic")
+        
+        # Query tất cả visits trong ngày của lớp
+        visits = frappe.get_all(
+            "SIS Daily Health Visit",
+            filters={
+                "class_id": class_id,
+                "visit_date": visit_date
+            },
+            fields=[
+                "name", "student_id", "status",
+                "leave_class_time", "leave_clinic_time"
+            ],
+            order_by="leave_class_time desc"
+        )
+        
+        # Filter học sinh ở Y tế theo logic thời gian
+        students_at_clinic = {}
+        
+        for visit in visits:
+            student_id = visit.student_id
+            
+            # Nếu student đã có trong result (ưu tiên visit mới nhất), skip
+            if student_id in students_at_clinic:
+                continue
+            
+            leave_class_sec = _time_to_seconds(visit.leave_class_time)
+            leave_clinic_sec = _time_to_seconds(visit.leave_clinic_time)
+            
+            is_at_clinic = False
+            
+            if has_period_times and leave_class_sec is not None:
+                # Logic có thời gian tiết học:
+                # 1. Học sinh rời lớp trước khi tiết kết thúc
+                # 2. AND (chưa về OR về sau khi tiết bắt đầu)
+                left_before_period_end = leave_class_sec < period_end_sec
+                not_returned_or_returned_after_period_start = (
+                    leave_clinic_sec is None or 
+                    leave_clinic_sec > period_start_sec
+                )
+                
+                if left_before_period_end and not_returned_or_returned_after_period_start:
+                    is_at_clinic = True
+            else:
+                # Fallback: không có thông tin tiết học, chỉ check status
+                # Status đang ở Y tế: left_class, at_clinic, examining
+                if visit.status in ["left_class", "at_clinic", "examining"]:
+                    is_at_clinic = True
+            
+            if is_at_clinic:
+                students_at_clinic[student_id] = {
+                    "visit_id": visit.name,
+                    "status": visit.status,
+                    "leave_class_time": str(visit.leave_class_time) if visit.leave_class_time else None,
+                    "leave_clinic_time": str(visit.leave_clinic_time) if visit.leave_clinic_time else None
+                }
+        
+        return success_response(
+            data={"students": students_at_clinic},
+            message="Lấy trạng thái Y tế theo tiết học thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error getting health status for period: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        return error_response(
+            message=f"Lỗi khi lấy trạng thái Y tế theo tiết học: {str(e)}",
+            code="GET_HEALTH_STATUS_ERROR"
         )
