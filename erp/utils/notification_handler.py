@@ -461,11 +461,19 @@ def send_bulk_parent_notifications(
             # FIX: Debounce key cho parent notification để tránh duplicate
             # Key: student_id + notification_type + timestamp (rounded to minute)
             student_ids_str = ",".join(sorted(student_ids[:5]))  # Lấy 5 student đầu tiên làm key
-            event_ts = data.get("timestamp", "") if data else ""
-            # Round timestamp to minute để debounce trong cùng 1 phút
-            if event_ts and len(event_ts) > 16:
-                event_ts = event_ts[:16]  # YYYY-MM-DDTHH:MM
-            debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{event_ts}"
+            
+            # Với health_examination: mỗi lô exam riêng biệt phải tạo notification riêng
+            # Dùng exam_ids làm key thay vì timestamp để mỗi lần gửi exam khác nhau đều qua
+            if recipient_type == "health_examination" and data:
+                exam_ids_list = data.get("exam_ids", [])
+                exam_ids_key = ",".join(sorted(exam_ids_list)) if exam_ids_list else ""
+                debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{exam_ids_key}"
+            else:
+                event_ts = data.get("timestamp", "") if data else ""
+                # Round timestamp to minute để debounce trong cùng 1 phút
+                if event_ts and len(event_ts) > 16:
+                    event_ts = event_ts[:16]  # YYYY-MM-DDTHH:MM
+                debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{event_ts}"
             
             # Check debounce
             redis = frappe.cache()
