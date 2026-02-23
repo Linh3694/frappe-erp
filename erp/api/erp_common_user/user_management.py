@@ -61,6 +61,9 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         # Build WHERE clause
         where_conditions = ["u.user_type = 'System User'"]
         
+        # Loại bỏ các user có email đuôi @parent.wellspring.edu.vn (tài khoản phụ huynh)
+        where_conditions.append("u.email NOT LIKE '%@parent.wellspring.edu.vn'")
+        
         if active is not None:
             where_conditions.append(f"u.enabled = {int(active)}")
             
@@ -388,19 +391,40 @@ def send_password_reset(user_email):
 def get_user_stats():
     """Get user management statistics"""
     try:
+        # Loại trừ các user có email đuôi @parent.wellspring.edu.vn (tài khoản phụ huynh)
+        exclude_parent_condition = "email NOT LIKE '%@parent.wellspring.edu.vn'"
+        
         stats = {
-            "total_users": frappe.db.count("User", {"user_type": "System User"}),
-            "enabled_users": frappe.db.count("User", {"user_type": "System User", "enabled": 1}),
-            "disabled_users": frappe.db.count("User", {"user_type": "System User", "enabled": 0}),
+            "total_users": frappe.db.sql(f"""
+                SELECT COUNT(*) FROM `tabUser` 
+                WHERE user_type = 'System User' AND {exclude_parent_condition}
+            """)[0][0],
+            "enabled_users": frappe.db.sql(f"""
+                SELECT COUNT(*) FROM `tabUser` 
+                WHERE user_type = 'System User' AND enabled = 1 AND {exclude_parent_condition}
+            """)[0][0],
+            "disabled_users": frappe.db.sql(f"""
+                SELECT COUNT(*) FROM `tabUser` 
+                WHERE user_type = 'System User' AND enabled = 0 AND {exclude_parent_condition}
+            """)[0][0],
         }
         
         # Add custom field stats if they exist
         try:
             if frappe.db.has_column("User", "provider"):
                 stats.update({
-                    "microsoft_users": frappe.db.count("User", {"user_type": "System User", "provider": "microsoft"}),
-                    "apple_users": frappe.db.count("User", {"user_type": "System User", "provider": "apple"}),
-                    "local_users": frappe.db.count("User", {"user_type": "System User", "provider": ["in", ["local", ""]]}),
+                    "microsoft_users": frappe.db.sql(f"""
+                        SELECT COUNT(*) FROM `tabUser` 
+                        WHERE user_type = 'System User' AND provider = 'microsoft' AND {exclude_parent_condition}
+                    """)[0][0],
+                    "apple_users": frappe.db.sql(f"""
+                        SELECT COUNT(*) FROM `tabUser` 
+                        WHERE user_type = 'System User' AND provider = 'apple' AND {exclude_parent_condition}
+                    """)[0][0],
+                    "local_users": frappe.db.sql(f"""
+                        SELECT COUNT(*) FROM `tabUser` 
+                        WHERE user_type = 'System User' AND (provider = 'local' OR provider = '' OR provider IS NULL) AND {exclude_parent_condition}
+                    """)[0][0],
                 })
         except:
             stats.update({
@@ -409,28 +433,30 @@ def get_user_stats():
                 "local_users": stats["total_users"]
             })
         
-        # Users by role
-        role_stats = frappe.db.sql("""
+        # Users by role (loại trừ tài khoản phụ huynh)
+        role_stats = frappe.db.sql(f"""
             SELECT r.role, COUNT(*) as count
             FROM `tabHas Role` r
             INNER JOIN `tabUser` u ON r.parent = u.name
             WHERE u.user_type = 'System User'
             AND u.enabled = 1
+            AND u.email NOT LIKE '%@parent.wellspring.edu.vn'
             GROUP BY r.role
             ORDER BY count DESC
         """, as_dict=True)
         
         stats["role_distribution"] = role_stats
         
-        # Users by department (if custom field exists)
+        # Users by department (if custom field exists, loại trừ tài khoản phụ huynh)
         dept_stats = []
         try:
             if frappe.db.has_column("User", "department"):
-                dept_stats = frappe.db.sql("""
+                dept_stats = frappe.db.sql(f"""
                     SELECT department, COUNT(*) as count
                     FROM `tabUser`
                     WHERE user_type = 'System User'
                     AND department IS NOT NULL AND department != ''
+                    AND {exclude_parent_condition}
                     GROUP BY department
                     ORDER BY count DESC
                     LIMIT 10
@@ -440,14 +466,16 @@ def get_user_stats():
             
         stats["department_distribution"] = dept_stats
         
-        # Recent activity (users created in last 7 days)
+        # Recent activity (users created in last 7 days, loại trừ tài khoản phụ huynh)
         from datetime import datetime, timedelta
         week_ago = datetime.now() - timedelta(days=7)
         
-        recent_users = frappe.db.count("User", {
-            "user_type": "System User",
-            "creation": [">=", week_ago]
-        })
+        recent_users = frappe.db.sql(f"""
+            SELECT COUNT(*) FROM `tabUser`
+            WHERE user_type = 'System User' 
+            AND creation >= %s
+            AND {exclude_parent_condition}
+        """, (week_ago,))[0][0]
         
         stats["recent_new_users"] = recent_users
         
@@ -631,6 +659,9 @@ def export_users(filters=None):
         
         # Build WHERE clause
         where_conditions = ["user_type = 'System User'"]
+        
+        # Loại bỏ các user có email đuôi @parent.wellspring.edu.vn (tài khoản phụ huynh)
+        where_conditions.append("email NOT LIKE '%@parent.wellspring.edu.vn'")
         
         if filters:
             if filters.get("enabled") is not None:
