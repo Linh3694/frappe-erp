@@ -1696,18 +1696,9 @@ def get_class_health_examinations():
     try:
         _check_teacher_permission()
         
-        # Debug logging
-        frappe.logger().info(f"[get_class_health_examinations] frappe.form_dict: {dict(frappe.form_dict)}")
-        frappe.logger().info(f"[get_class_health_examinations] frappe.local.form_dict: {dict(frappe.local.form_dict) if frappe.local.form_dict else 'None'}")
-        
-        # Lấy params từ nhiều nguồn
         data = _get_request_data()
-        frappe.logger().info(f"[get_class_health_examinations] _get_request_data(): {data}")
-        
-        class_id = data.get("class_id") or frappe.form_dict.get("class_id") or frappe.request.args.get("class_id")
-        date = data.get("date") or frappe.form_dict.get("date") or frappe.request.args.get("date") or today()
-        
-        frappe.logger().info(f"[get_class_health_examinations] class_id={class_id}, date={date}")
+        class_id = data.get("class_id")
+        date = data.get("date") or today()
         
         if not class_id:
             return validation_error_response("Thiếu class_id", {"class_id": ["class_id là bắt buộc"]})
@@ -1715,7 +1706,7 @@ def get_class_health_examinations():
         # Lấy danh sách student_id trong lớp
         class_students = frappe.get_all(
             "SIS Class Student",
-            filters={"parent": class_id},
+            filters={"class_id": class_id},
             fields=["student_id"]
         )
         student_ids = [cs.student_id for cs in class_students]
