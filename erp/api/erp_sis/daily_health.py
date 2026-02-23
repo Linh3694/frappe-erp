@@ -1431,7 +1431,7 @@ def delete_medicine(name: str = None):
 
 
 @frappe.whitelist(allow_guest=False)
-def import_disease_classifications_excel():
+def import_disease_classifications_excel(campus=None):
     """
     Import phân loại bệnh từ file Excel.
     Cột A: Mã bệnh, Cột B: Tên phân loại
@@ -1440,7 +1440,12 @@ def import_disease_classifications_excel():
         import openpyxl
         import io
 
-        campus = frappe.form_dict.get('campus')
+        # Đọc campus từ nhiều nguồn: tham số hàm, form_dict, query string
+        campus = (
+            campus
+            or frappe.form_dict.get('campus')
+            or (frappe.request.args.get('campus') if frappe.request else None)
+        )
         if not campus:
             return error_response(
                 message="Thiếu thông tin trường học",
@@ -1527,7 +1532,7 @@ def import_disease_classifications_excel():
 
 
 @frappe.whitelist(allow_guest=False)
-def import_medicines_excel():
+def import_medicines_excel(campus=None):
     """
     Import thuốc từ file Excel.
     Cột A: Tên thuốc, Cột B: Đơn vị (tùy chọn), Cột C: Mô tả (tùy chọn)
@@ -1536,7 +1541,12 @@ def import_medicines_excel():
         import openpyxl
         import io
 
-        campus = frappe.form_dict.get('campus')
+        # Đọc campus từ nhiều nguồn: tham số hàm, form_dict, query string
+        campus = (
+            campus
+            or frappe.form_dict.get('campus')
+            or (frappe.request.args.get('campus') if frappe.request else None)
+        )
         if not campus:
             return error_response(
                 message="Thiếu thông tin trường học",
