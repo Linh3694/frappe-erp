@@ -424,63 +424,68 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 			attendance_map[key] = row
 		
 		# Step 3: Optionally get check-in/out data (for homeroom only)
+		# Wrap trong try-except vì bảng Attendance Log có thể không tồn tại
 		checkin_map = {}
 		if include_checkin_out:
-			# Get student codes for homeroom classes
-			homeroom_class_ids = [item.get('class_id') for item in items 
-								  if item.get('period') == 'homeroom' and item.get('class_id')]
-			
-			if homeroom_class_ids:
-				# Get student codes for these classes
-				student_codes_data = frappe.db.sql("""
-					SELECT cs.class_id, s.student_code
-					FROM `tabSIS Class Student` cs
-					INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
-					WHERE cs.class_id IN %(class_ids)s
-						AND s.student_code IS NOT NULL
-				""", {"class_ids": homeroom_class_ids}, as_dict=True)
+			try:
+				# Get student codes for homeroom classes
+				homeroom_class_ids = [item.get('class_id') for item in items 
+									  if item.get('period') == 'homeroom' and item.get('class_id')]
 				
-				# Group by class
-				class_student_codes = {}
-				all_codes = []
-				for row in student_codes_data:
-					if row['class_id'] not in class_student_codes:
-						class_student_codes[row['class_id']] = []
-					class_student_codes[row['class_id']].append(row['student_code'])
-					all_codes.append(row['student_code'])
-				
-				# Query attendance log for check-in/out
-				if all_codes and dates:
-					checkin_data = frappe.db.sql("""
-						SELECT 
-							student_code,
-							MIN(check_in_time) as check_in_time,
-							MAX(check_out_time) as check_out_time
-						FROM `tabAttendance Log`
-						WHERE student_code IN %(codes)s
-							AND DATE(check_in_time) IN %(dates)s
-						GROUP BY student_code
-					""", {"codes": all_codes, "dates": dates}, as_dict=True)
+				if homeroom_class_ids:
+					# Get student codes for these classes
+					student_codes_data = frappe.db.sql("""
+						SELECT cs.class_id, s.student_code
+						FROM `tabSIS Class Student` cs
+						INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+						WHERE cs.class_id IN %(class_ids)s
+							AND s.student_code IS NOT NULL
+					""", {"class_ids": homeroom_class_ids}, as_dict=True)
 					
-					# Build code -> checkin data map
-					code_checkin_map = {}
-					for row in checkin_data:
-						code_checkin_map[row['student_code']] = row
+					# Group by class
+					class_student_codes = {}
+					all_codes = []
+					for row in student_codes_data:
+						if row['class_id'] not in class_student_codes:
+							class_student_codes[row['class_id']] = []
+						class_student_codes[row['class_id']].append(row['student_code'])
+						all_codes.append(row['student_code'])
 					
-					# Count per class
-					for class_id, codes in class_student_codes.items():
-						check_in_count = 0
-						check_out_count = 0
-						for code in codes:
-							if code in code_checkin_map:
-								if code_checkin_map[code].get('check_in_time'):
-									check_in_count += 1
-								if code_checkin_map[code].get('check_out_time'):
-									check_out_count += 1
-						checkin_map[class_id] = {
-							'check_in_count': check_in_count,
-							'check_out_count': check_out_count
-						}
+					# Query attendance log for check-in/out (bảng có thể không tồn tại)
+					if all_codes and dates:
+						checkin_data = frappe.db.sql("""
+							SELECT 
+								student_code,
+								MIN(check_in_time) as check_in_time,
+								MAX(check_out_time) as check_out_time
+							FROM `tabAttendance Log`
+							WHERE student_code IN %(codes)s
+								AND DATE(check_in_time) IN %(dates)s
+							GROUP BY student_code
+						""", {"codes": all_codes, "dates": dates}, as_dict=True)
+						
+						# Build code -> checkin data map
+						code_checkin_map = {}
+						for row in checkin_data:
+							code_checkin_map[row['student_code']] = row
+						
+						# Count per class
+						for class_id, codes in class_student_codes.items():
+							check_in_count = 0
+							check_out_count = 0
+							for code in codes:
+								if code in code_checkin_map:
+									if code_checkin_map[code].get('check_in_time'):
+										check_in_count += 1
+									if code_checkin_map[code].get('check_out_time'):
+										check_out_count += 1
+							checkin_map[class_id] = {
+								'check_in_count': check_in_count,
+								'check_out_count': check_out_count
+							}
+			except Exception as checkin_err:
+				# Bảng Attendance Log không tồn tại hoặc lỗi khác - bỏ qua, check-in/out là optional
+				frappe.logger().warning(f"Could not fetch check-in/out data: {str(checkin_err)}")
 		
 		# Step 4: Build result
 		result = {}
