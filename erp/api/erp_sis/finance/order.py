@@ -56,7 +56,8 @@ def get_orders(finance_year_id=None):
                 "total_students", "total_collected", "total_outstanding", "collection_rate",
                 "sort_order"
             ],
-            order_by="sort_order asc, creation asc"
+            order_by="sort_order asc, creation asc",
+            ignore_permissions=True
         )
         
         # Format order_type display
