@@ -961,16 +961,23 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
         }, as_dict=True)
 
         # Lấy thống kê đăng ký suất ăn (Set Á/Âu) cho mỗi lớp thuộc education_stage này
+        # Chỉ tính học sinh có điểm danh homeroom là present hoặc late
+        # Group theo ca.class_id (lớp được điểm danh) để khớp với class_detail_data
         meal_registration_stats = frappe.db.sql("""
             SELECT 
-                r.class_id,
+                ca.class_id,
                 c.title as class_title,
                 u.full_name as homeroom_teacher_name,
                 SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as set_a,
                 SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as set_au
             FROM `tabSIS Menu Registration` r
             INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
-            INNER JOIN `tabSIS Class` c ON r.class_id = c.name
+            INNER JOIN `tabSIS Class Attendance` ca 
+                ON ca.student_id = r.student_id 
+                AND ca.date = ri.date 
+                AND ca.period = 'homeroom'
+                AND LOWER(ca.status) IN ('present', 'late')
+            INNER JOIN `tabSIS Class` c ON ca.class_id = c.name
             LEFT JOIN `tabSIS Teacher` t ON c.homeroom_teacher = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ri.date = %(date)s
@@ -980,7 +987,7 @@ def get_meal_tracking_class_detail(date=None, education_stage=None):
                     SELECT name FROM `tabSIS Education Grade` 
                     WHERE education_stage_id = %(stage_id)s
                 )
-            GROUP BY r.class_id, c.title, u.full_name
+            GROUP BY ca.class_id, c.title, u.full_name
         """, {
             "date": date,
             "campus_id": campus_id or "campus-1",
