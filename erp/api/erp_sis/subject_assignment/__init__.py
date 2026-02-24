@@ -119,6 +119,12 @@ def batch_update_teacher_assignments():
                 "action": "delete"
             })
         
+        # Create set for fast lookup of deleted IDs
+        # Khi frontend muốn "xóa rồi tạo mới" (thay đổi dates/weekdays),
+        # assignment ID sẽ nằm trong cả deleted_assignment_ids và assignments.
+        # Nếu existing trùng với deleted ID -> phải tạo mới, không phải update.
+        deleted_ids_set = set(deleted_assignment_ids)
+        
         # Get teacher campus once
         teacher_campus = frappe.db.get_value("SIS Teacher", teacher_id, "campus_id")
         
@@ -156,7 +162,9 @@ def batch_update_teacher_assignments():
                 if weekdays is not None:
                     assignment_data["weekdays"] = weekdays
                 
-                if existing:
+                # ⚡ FIX: Nếu existing nằm trong deleted_ids_set -> tạo mới, không phải update
+                # Vì phase delete sẽ xóa existing trước, rồi phase này sẽ tạo mới
+                if existing and existing not in deleted_ids_set:
                     assignment_data["assignment_id"] = existing
                     assignment_data["action"] = "update"
                 else:
