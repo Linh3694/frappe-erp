@@ -525,10 +525,17 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 		return success_response(data=result, message=f"Fetched stats for {len(result)} classes")
 		
 	except Exception as e:
-		frappe.log_error(f"batch_get_classes_attendance_summary error: {str(e)}")
 		import traceback
-		frappe.logger().error(f"Traceback: {traceback.format_exc()}")
-		return error_response(message="Failed to batch get attendance summary", code="BATCH_SUMMARY_ERROR")
+		error_detail = str(e)
+		tb = traceback.format_exc()
+		frappe.log_error(f"batch_get_classes_attendance_summary error: {error_detail}")
+		frappe.logger().error(f"Traceback: {tb}")
+		# Trả về chi tiết lỗi trong response để frontend có thể đọc qua network
+		return error_response(
+			message=f"Failed to batch get attendance summary: {error_detail}", 
+			code="BATCH_SUMMARY_ERROR",
+			debug_info={"traceback": tb[:1000]}  # Giới hạn traceback để không quá dài
+		)
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
