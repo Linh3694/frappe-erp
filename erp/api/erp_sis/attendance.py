@@ -451,17 +451,17 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 						class_student_codes[row['class_id']].append(row['student_code'])
 						all_codes.append(row['student_code'])
 					
-					# Query attendance log for check-in/out (bảng có thể không tồn tại)
+					# Query attendance log for check-in/out từ bảng ERP Time Attendance
 					if all_codes and dates:
 						checkin_data = frappe.db.sql("""
 							SELECT 
-								student_code,
+								employee_code as student_code,
 								MIN(check_in_time) as check_in_time,
 								MAX(check_out_time) as check_out_time
-							FROM `tabAttendance Log`
-							WHERE student_code IN %(codes)s
-								AND DATE(check_in_time) IN %(dates)s
-							GROUP BY student_code
+							FROM `tabERP Time Attendance`
+							WHERE employee_code IN %(codes)s
+								AND date IN %(dates)s
+							GROUP BY employee_code
 						""", {"codes": all_codes, "dates": dates}, as_dict=True)
 						
 						# Build code -> checkin data map
