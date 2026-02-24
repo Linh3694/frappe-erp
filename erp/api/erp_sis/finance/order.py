@@ -51,9 +51,9 @@ def get_orders(finance_year_id=None):
             "SIS Finance Order",
             filters={"finance_year_id": finance_year_id},
             fields=[
-                "name", "title", "order_type", "is_active", "is_required",
-                "total_amount", "payment_type", "installment_count", "deadline",
-                "total_students", "total_collected", "total_outstanding", "collection_rate",
+                "name", "title", "order_type", "status", "is_active", "is_required",
+                "debit_note_form_code", "total_students", "data_completed_count",
+                "total_collected", "total_outstanding", "collection_rate",
                 "sort_order"
             ],
             order_by="sort_order asc, creation asc",
@@ -70,7 +70,6 @@ def get_orders(finance_year_id=None):
         
         for order in orders:
             order['order_type_display'] = order_type_display.get(order.order_type, order.order_type)
-            order['payment_type_display'] = 'Chia kỳ' if order.payment_type == 'installment' else 'Một lần'
         
         logs.append(f"Tìm thấy {len(orders)} đơn hàng")
         
