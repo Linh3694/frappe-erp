@@ -19,8 +19,79 @@ from .utils import _check_admin_permission
 
 
 @frappe.whitelist()
+def create_order_simple():
+    """
+    Tạo đơn hàng đơn giản - KHÔNG cần milestones và fee_lines.
+    Version mới cho workflow đơn giản: tạo order -> thêm học sinh -> import số tiền -> upload file.
+    
+    Body:
+        finance_year_id: ID năm tài chính
+        title: Tên đơn hàng
+        order_type: Loại (tuition/service/activity/other)
+        description: Mô tả (optional)
+        is_active: Trạng thái hoạt động (default 0)
+    
+    Returns:
+        Thông tin đơn hàng vừa tạo
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền tạo đơn hàng", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        logs.append(f"Tạo đơn hàng đơn giản: {data.get('title')}")
+        
+        # Validate required fields
+        if not data.get('finance_year_id'):
+            return validation_error_response("Thiếu finance_year_id", {"finance_year_id": ["Bắt buộc"]})
+        if not data.get('title'):
+            return validation_error_response("Thiếu title", {"title": ["Bắt buộc"]})
+        
+        # Tạo đơn hàng - không có milestones và fee_lines
+        order_doc = frappe.get_doc({
+            "doctype": "SIS Finance Order",
+            "finance_year_id": data['finance_year_id'],
+            "title": data['title'],
+            "order_type": data.get('order_type', 'tuition'),
+            "status": "draft",
+            "is_active": data.get('is_active', 0),
+            "is_required": data.get('is_required', 1),
+            "description": data.get('description', '')
+        })
+        
+        order_doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        logs.append(f"Đã tạo đơn hàng: {order_doc.name}")
+        
+        return success_response(
+            data={
+                "name": order_doc.name,
+                "title": order_doc.title,
+                "order_type": order_doc.order_type,
+                "status": order_doc.status,
+                "is_active": order_doc.is_active
+            },
+            message="Tạo đơn hàng thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Create Order Simple Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
 def create_order_with_structure():
     """
+    [DEPRECATED - dùng create_order_simple cho workflow mới]
     Tạo đơn hàng mới với cấu trúc milestones và fee_lines.
     
     Body:
@@ -377,15 +448,16 @@ def add_students_to_order_v2():
                     "payment_status": "unpaid"
                 })
                 
-                # Tạo Student Order Lines từ fee_lines của order
-                for line in order_doc.fee_lines:
-                    order_student.append("fee_lines", {
-                        "order_line_idx": line.idx,
-                        "line_number": line.line_number,
-                        "line_type": line.line_type,
-                        "amounts_json": "{}",
-                        "is_calculated": 1 if line.formula else 0
-                    })
+                # Chỉ tạo Student Order Lines nếu order có fee_lines (legacy mode)
+                if order_doc.fee_lines:
+                    for line in order_doc.fee_lines:
+                        order_student.append("fee_lines", {
+                            "order_line_idx": line.idx,
+                            "line_number": line.line_number,
+                            "line_type": line.line_type,
+                            "amounts_json": "{}",
+                            "is_calculated": 1 if line.formula else 0
+                        })
                 
                 order_student.insert(ignore_permissions=True)
                 created_count += 1

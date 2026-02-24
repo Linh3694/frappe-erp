@@ -1,0 +1,164 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-FIN-DOC-{#####}",
+ "beta": 0,
+ "creation": "2026-02-24 00:00:00.000000",
+ "custom": 0,
+ "description": "Lưu trữ các file tài liệu (Debit Note, Receipt, Invoice) được upload cho từng học sinh trong order",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "order_student_id",
+  "document_type",
+  "column_break_basic",
+  "file_url",
+  "file_name",
+  "details_section",
+  "notes",
+  "column_break_details",
+  "uploaded_by",
+  "uploaded_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "order_student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "SIS Finance Order Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "document_type",
+   "fieldtype": "Select",
+   "label": "Loại tài liệu",
+   "options": "debit_note\nreceipt\ninvoice",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Loại file: Debit Note, Receipt (biên lai), Invoice (hóa đơn)"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "file_url",
+   "fieldtype": "Attach",
+   "label": "File",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "File PDF/ảnh tài liệu"
+  },
+  {
+   "fieldname": "file_name",
+   "fieldtype": "Data",
+   "label": "Tên file gốc",
+   "read_only": 1,
+   "description": "Tên file gốc khi upload"
+  },
+  {
+   "fieldname": "details_section",
+   "fieldtype": "Section Break",
+   "label": "Chi tiết"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "column_break_details",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "uploaded_by",
+   "fieldtype": "Link",
+   "label": "Người upload",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "uploaded_at",
+   "fieldtype": "Datetime",
+   "label": "Thời gian upload",
+   "read_only": 1,
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-02-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Student Document",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "uploaded_at",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -49,6 +49,7 @@ from .statistics import (
 
 # Order Structure APIs (v2 with milestones)
 from .order_structure import (
+    create_order_simple,
     create_order_with_structure,
     get_order_with_structure,
     update_order_structure,
@@ -65,6 +66,8 @@ from .payment import (
 
 # Excel Import/Export APIs
 from .excel import (
+    export_simple_template,
+    import_simple_amounts,
     export_order_excel_template,
     import_student_fee_data,
     recalculate_order_totals
@@ -85,6 +88,13 @@ from .notification import (
     get_fee_notifications,
     delete_fee_notification,
     send_fee_notification
+)
+
+# Student Document APIs (upload debit_note, receipt, invoice)
+from .student_document import (
+    upload_student_document,
+    get_student_documents,
+    delete_student_document
 )
 
 # Export tất cả functions để giữ backward compatibility
@@ -121,6 +131,7 @@ __all__ = [
     'export_finance_data',
     
     # Order Structure (v2)
+    'create_order_simple',
     'create_order_with_structure',
     'get_order_with_structure',
     'update_order_structure',
@@ -133,6 +144,8 @@ __all__ = [
     'record_milestone_payment',
     
     # Excel Import/Export
+    'export_simple_template',
+    'import_simple_amounts',
     'export_order_excel_template',
     'import_student_fee_data',
     'recalculate_order_totals',
@@ -149,4 +162,9 @@ __all__ = [
     'get_fee_notifications',
     'delete_fee_notification',
     'send_fee_notification',
+    
+    # Student Document
+    'upload_student_document',
+    'get_student_documents',
+    'delete_student_document',
 ]

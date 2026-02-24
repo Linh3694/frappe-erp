@@ -192,9 +192,213 @@ def _calculate_totals_v2(order_student_doc, order_doc, debug=False):
 
 
 @frappe.whitelist()
+def export_simple_template(order_id=None):
+    """
+    Export Excel template đơn giản - chỉ có 3 cột số tiền.
+    Dành cho workflow mới không dùng milestones/fee_lines.
+    
+    Template columns:
+    - student_code: Mã học sinh
+    - student_name: Tên học sinh
+    - class_title: Lớp
+    - total_amount: Số tiền phải đóng
+    - paid_amount: Số tiền đã đóng
+    - note: Ghi chú
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền xuất template", logs=logs)
+        
+        if not order_id:
+            order_id = frappe.request.args.get('order_id')
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        
+        # Headers đơn giản
+        headers = ["student_code", "student_name", "class_title", "total_amount", "paid_amount", "note"]
+        header_labels = ["Mã học sinh", "Tên học sinh", "Lớp", "Số tiền phải đóng", "Số tiền đã đóng", "Ghi chú"]
+        
+        # Get students
+        students = frappe.get_all(
+            "SIS Finance Order Student",
+            filters={"order_id": order_id},
+            fields=["name", "student_code", "student_name", "class_title", "total_amount", "paid_amount", "notes"],
+            order_by="student_name ASC"
+        )
+        
+        # Build rows với dữ liệu hiện có
+        rows = []
+        for student in students:
+            row = {
+                "student_code": student.student_code,
+                "student_name": student.student_name,
+                "class_title": student.class_title or "",
+                "total_amount": student.total_amount or "",
+                "paid_amount": student.paid_amount or "",
+                "note": student.notes or ""
+            }
+            rows.append(row)
+        
+        logs.append(f"Exported {len(rows)} students for order {order_id}")
+        
+        return success_response(
+            data={
+                "headers": headers,
+                "header_labels": header_labels,
+                "rows": rows,
+                "order_title": order_doc.title
+            },
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def import_simple_amounts():
+    """
+    Import số tiền đơn giản từ Excel - chỉ có total_amount và paid_amount.
+    Dành cho workflow mới không dùng milestones/fee_lines.
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền import", logs=logs)
+        
+        files = frappe.request.files
+        if 'file' not in files:
+            return validation_error_response("Thiếu file", {"file": ["File Excel là bắt buộc"]})
+        
+        file = files['file']
+        
+        # Lấy order_id từ form data
+        order_id = (
+            frappe.form_dict.get('order_id') or 
+            frappe.request.form.get('order_id') or
+            frappe.request.values.get('order_id')
+        )
+        
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        logs.append(f"Import số tiền đơn giản cho đơn hàng: {order_id}")
+        
+        # Đọc Excel - skip dòng 1 (label tiếng Việt), dùng dòng 2 làm header
+        import pandas as pd
+        df = pd.read_excel(file, header=1)
+        
+        logs.append(f"Columns in Excel: {list(df.columns)}")
+        
+        # Validate cột student_code
+        if 'student_code' not in df.columns:
+            return validation_error_response(
+                "Thiếu cột student_code", 
+                {"file": [f"Cần có cột student_code. Các cột hiện tại: {list(df.columns)[:5]}..."]}
+            )
+        
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            try:
+                student_code = str(row['student_code']).strip()
+                
+                # Tìm Order Student
+                order_student_name = frappe.db.get_value(
+                    "SIS Finance Order Student",
+                    {"order_id": order_id, "student_code": student_code},
+                    "name"
+                )
+                
+                if not order_student_name:
+                    errors.append({"row": idx + 3, "error": f"Không tìm thấy học sinh: {student_code}", "student_code": student_code})
+                    error_count += 1
+                    continue
+                
+                order_student_doc = frappe.get_doc("SIS Finance Order Student", order_student_name)
+                
+                # Cập nhật total_amount nếu có
+                if 'total_amount' in row and pd.notna(row['total_amount']):
+                    try:
+                        order_student_doc.total_amount = float(row['total_amount'])
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Cập nhật paid_amount nếu có
+                if 'paid_amount' in row and pd.notna(row['paid_amount']):
+                    try:
+                        order_student_doc.paid_amount = float(row['paid_amount'])
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Tính outstanding_amount
+                total = order_student_doc.total_amount or 0
+                paid = order_student_doc.paid_amount or 0
+                order_student_doc.outstanding_amount = total - paid
+                
+                # Cập nhật payment_status
+                if paid >= total and total > 0:
+                    order_student_doc.payment_status = 'paid'
+                elif paid > 0:
+                    order_student_doc.payment_status = 'partial'
+                else:
+                    order_student_doc.payment_status = 'unpaid'
+                
+                # Cập nhật data_status nếu có số tiền
+                if total > 0:
+                    order_student_doc.data_status = 'complete'
+                
+                # Cập nhật note
+                if 'note' in row and pd.notna(row['note']):
+                    order_student_doc.notes = str(row['note'])
+                
+                order_student_doc.save(ignore_permissions=True)
+                success_count += 1
+                
+            except Exception as e:
+                errors.append({"row": idx + 3, "error": str(e), "student_code": row.get('student_code', '')})
+                error_count += 1
+        
+        frappe.db.commit()
+        
+        # Cập nhật statistics
+        order_doc.update_statistics()
+        order_doc.update_status_based_on_students()
+        
+        logs.append(f"Import xong: {success_count} thành công, {error_count} lỗi")
+        
+        return success_response(
+            data={
+                "success_count": success_count,
+                "error_count": error_count,
+                "total_count": len(df),
+                "errors": errors[:20]
+            },
+            message=f"Import thành công {success_count}/{len(df)} dòng",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Import Simple Amounts Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
 def export_order_excel_template(order_id=None):
     """
-    Export Excel template để admin điền số tiền.
+    [LEGACY] Export Excel template để admin điền số tiền - dùng milestones.
+    Cho workflow cũ với milestones/fee_lines.
     """
     logs = []
     
