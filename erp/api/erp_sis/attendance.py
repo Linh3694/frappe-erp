@@ -328,6 +328,210 @@ def check_has_attendance(class_id=None, date=None, period=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
+def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
+	"""
+	Batch get attendance summary stats for multiple classes in ONE request.
+	Tối ưu cho mobile app - giảm từ N*4 API calls xuống còn 1 call.
+	
+	Request body:
+	{
+		"items": [
+			{"class_id": "CLASS-001", "date": "2024-01-15", "period": "homeroom"},
+			{"class_id": "CLASS-002", "date": "2024-01-15", "period": "homeroom"},
+			{"class_id": "CLASS-003", "date": "2024-01-15", "period": "T1"}
+		],
+		"include_checkin_out": true  // Optional: include check-in/out counts (slower)
+	}
+	
+	Returns:
+	{
+		"CLASS-001": {
+			"total_students": 35,
+			"has_attendance": true,
+			"present_count": 30,
+			"absent_count": 2,
+			"late_count": 2,
+			"excused_count": 1,
+			"check_in_count": 28,  // only if include_checkin_out=true
+			"check_out_count": 25  // only if include_checkin_out=true
+		},
+		"CLASS-002_T1": { ... }
+	}
+	"""
+	try:
+		import time
+		start_time = time.time()
+		
+		body = _get_json_body() or {}
+		if items is None:
+			items = body.get('items')
+		if include_checkin_out is None:
+			include_checkin_out = body.get('include_checkin_out', False)
+		include_checkin_out = _to_bool(include_checkin_out)
+		
+		if not items or not isinstance(items, list):
+			return error_response(message="items must be a non-empty array", code="INVALID_ITEMS")
+		
+		# Collect unique class_ids and dates
+		class_ids = list(set([item.get('class_id') for item in items if item.get('class_id')]))
+		dates = list(set([item.get('date') for item in items if item.get('date')]))
+		
+		if not class_ids or not dates:
+			return error_response(message="No valid class_id or date provided", code="INVALID_PARAMS")
+		
+		# Step 1: Batch get student counts per class (1 query)
+		student_counts = frappe.db.sql("""
+			SELECT class_id, COUNT(*) as count
+			FROM `tabSIS Class Student`
+			WHERE class_id IN %(class_ids)s
+			GROUP BY class_id
+		""", {"class_ids": class_ids}, as_dict=True)
+		
+		student_count_map = {row['class_id']: row['count'] for row in student_counts}
+		
+		# Step 2: Batch get attendance stats per class/date/period (1 query)
+		# Build conditions for all items
+		conditions = []
+		for item in items:
+			class_id = item.get('class_id')
+			date = item.get('date')
+			period = item.get('period')
+			if class_id and date and period:
+				conditions.append(f"(class_id = '{class_id}' AND date = '{date}' AND period = '{period}')")
+		
+		if not conditions:
+			return error_response(message="No valid items to process", code="NO_VALID_ITEMS")
+		
+		attendance_stats = frappe.db.sql("""
+			SELECT 
+				class_id,
+				date,
+				period,
+				COUNT(*) as total_attendance,
+				SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as present_count,
+				SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) as absent_count,
+				SUM(CASE WHEN status = 'late' THEN 1 ELSE 0 END) as late_count,
+				SUM(CASE WHEN status = 'excused' THEN 1 ELSE 0 END) as excused_count
+			FROM `tabSIS Class Attendance`
+			WHERE ({conditions})
+			GROUP BY class_id, date, period
+		""".format(conditions=" OR ".join(conditions)), as_dict=True)
+		
+		# Build attendance stats map
+		attendance_map = {}
+		for row in attendance_stats:
+			key = f"{row['class_id']}|{row['date']}|{row['period']}"
+			attendance_map[key] = row
+		
+		# Step 3: Optionally get check-in/out data (for homeroom only)
+		checkin_map = {}
+		if include_checkin_out:
+			# Get student codes for homeroom classes
+			homeroom_class_ids = [item.get('class_id') for item in items 
+								  if item.get('period') == 'homeroom' and item.get('class_id')]
+			
+			if homeroom_class_ids:
+				# Get student codes for these classes
+				student_codes_data = frappe.db.sql("""
+					SELECT cs.class_id, s.student_code
+					FROM `tabSIS Class Student` cs
+					INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+					WHERE cs.class_id IN %(class_ids)s
+						AND s.student_code IS NOT NULL
+				""", {"class_ids": homeroom_class_ids}, as_dict=True)
+				
+				# Group by class
+				class_student_codes = {}
+				all_codes = []
+				for row in student_codes_data:
+					if row['class_id'] not in class_student_codes:
+						class_student_codes[row['class_id']] = []
+					class_student_codes[row['class_id']].append(row['student_code'])
+					all_codes.append(row['student_code'])
+				
+				# Query attendance log for check-in/out
+				if all_codes and dates:
+					checkin_data = frappe.db.sql("""
+						SELECT 
+							student_code,
+							MIN(check_in_time) as check_in_time,
+							MAX(check_out_time) as check_out_time
+						FROM `tabAttendance Log`
+						WHERE student_code IN %(codes)s
+							AND DATE(check_in_time) IN %(dates)s
+						GROUP BY student_code
+					""", {"codes": all_codes, "dates": dates}, as_dict=True)
+					
+					# Build code -> checkin data map
+					code_checkin_map = {}
+					for row in checkin_data:
+						code_checkin_map[row['student_code']] = row
+					
+					# Count per class
+					for class_id, codes in class_student_codes.items():
+						check_in_count = 0
+						check_out_count = 0
+						for code in codes:
+							if code in code_checkin_map:
+								if code_checkin_map[code].get('check_in_time'):
+									check_in_count += 1
+								if code_checkin_map[code].get('check_out_time'):
+									check_out_count += 1
+						checkin_map[class_id] = {
+							'check_in_count': check_in_count,
+							'check_out_count': check_out_count
+						}
+		
+		# Step 4: Build result
+		result = {}
+		for item in items:
+			class_id = item.get('class_id')
+			date = item.get('date')
+			period = item.get('period')
+			
+			if not class_id or not date or not period:
+				continue
+			
+			# Result key: class_id for homeroom, class_id_period for timetable
+			result_key = class_id if period == 'homeroom' else f"{class_id}_{period}"
+			
+			# Get stats
+			lookup_key = f"{class_id}|{date}|{period}"
+			stats = attendance_map.get(lookup_key, {})
+			
+			total_students = student_count_map.get(class_id, 0)
+			has_attendance = stats.get('total_attendance', 0) > 0
+			
+			result[result_key] = {
+				'total_students': total_students,
+				'has_attendance': has_attendance,
+				'present_count': stats.get('present_count', 0) or 0,
+				'absent_count': stats.get('absent_count', 0) or 0,
+				'late_count': stats.get('late_count', 0) or 0,
+				'excused_count': stats.get('excused_count', 0) or 0,
+			}
+			
+			# Add check-in/out if available
+			if class_id in checkin_map:
+				result[result_key]['check_in_count'] = checkin_map[class_id]['check_in_count']
+				result[result_key]['check_out_count'] = checkin_map[class_id]['check_out_count']
+			elif include_checkin_out and period == 'homeroom':
+				result[result_key]['check_in_count'] = 0
+				result[result_key]['check_out_count'] = 0
+		
+		elapsed = (time.time() - start_time) * 1000
+		frappe.logger().info(f"✅ batch_get_classes_attendance_summary: {len(items)} items in {elapsed:.0f}ms")
+		
+		return success_response(data=result, message=f"Fetched stats for {len(result)} classes")
+		
+	except Exception as e:
+		frappe.log_error(f"batch_get_classes_attendance_summary error: {str(e)}")
+		import traceback
+		frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+		return error_response(message="Failed to batch get attendance summary", code="BATCH_SUMMARY_ERROR")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def batch_check_has_attendance(items=None):
 	"""Batch check if attendance exists for multiple class/date/period combinations.
 	No cache - returns map of key -> has_attendance.

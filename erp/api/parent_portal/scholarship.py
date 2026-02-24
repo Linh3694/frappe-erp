@@ -583,6 +583,8 @@ def get_active_period():
             
             if existing_app:
                 # Lấy thông tin từ chối nếu có
+                # Chỉ trả về denied_info nếu giáo viên hiện tại vẫn là giáo viên đã từ chối
+                # (sau khi phụ huynh thay đổi giáo viên thì không hiển thị thông báo từ chối nữa)
                 denied_info = None
                 denied_recommendation = frappe.db.sql("""
                     SELECT 
@@ -592,8 +594,13 @@ def get_active_period():
                         r.denied_reason,
                         r.teacher_name
                     FROM `tabSIS Scholarship Recommendation` r
+                    JOIN `tabSIS Scholarship Application` a ON r.application_id = a.name
                     WHERE r.application_id = %(app_id)s
                       AND r.status = 'Denied'
+                      AND (
+                          (r.recommendation_type = 'main' AND r.teacher_id = a.main_teacher_id)
+                          OR (r.recommendation_type = 'second' AND r.teacher_id = a.second_teacher_id)
+                      )
                     ORDER BY r.modified DESC
                     LIMIT 1
                 """, {"app_id": existing_app.name}, as_dict=True)
