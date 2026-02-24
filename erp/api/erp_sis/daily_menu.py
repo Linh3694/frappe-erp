@@ -716,6 +716,7 @@ def get_meal_tracking_by_date(date=None):
         
         if is_registration_date:
             # Lấy thông tin đăng ký suất ăn theo education_stage cho ngày này
+            # Chỉ tính học sinh có điểm danh homeroom là present hoặc late
             menu_registration_data = frappe.db.sql("""
                 SELECT 
                     es.title_vn as education_stage,
@@ -726,6 +727,11 @@ def get_meal_tracking_by_date(date=None):
                 INNER JOIN `tabSIS Class` c ON r.class_id = c.name
                 INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
                 INNER JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
+                INNER JOIN `tabSIS Class Attendance` ca 
+                    ON ca.student_id = r.student_id 
+                    AND ca.date = ri.date 
+                    AND ca.period = 'homeroom'
+                    AND LOWER(ca.status) IN ('present', 'late')
                 WHERE ri.date = %s
                 GROUP BY es.title_vn, ri.choice
             """, (date,), as_dict=True)
