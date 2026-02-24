@@ -296,7 +296,13 @@ def get_debit_note_preview(order_student_id=None, milestone_key=None):
                 "current_milestone_key": milestone_key,
                 "yearly_milestones": yearly_milestones,    # Đóng cả năm
                 "semester_milestones": semester_milestones, # Đóng theo kỳ
-                "lines": lines
+                "lines": lines,
+                # Tổng hợp thanh toán (cho form BALANCE_DUE)
+                "payment_summary": {
+                    "total_amount": order_student.total_amount or 0,
+                    "paid_amount": order_student.paid_amount or 0,
+                    "outstanding_amount": order_student.outstanding_amount or 0,
+                }
             },
             logs=logs
         )

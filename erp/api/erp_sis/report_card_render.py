@@ -466,7 +466,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form, l2_approved_sub
                     subject_info = {
                         "subject_id": subject_id,
                         "title_vn": getattr(score_cfg, 'display_name', None) or _resolve_actual_subject_title(subject_id) or subject_id,
-                        "teacher_name": teacher_names[0] if teacher_names else "",
+                        "teacher_names": teacher_names,  # ✅ Tất cả giáo viên giảng dạy
+                        "teacher_name": teacher_names[0] if teacher_names else "",  # Backward compatibility
                         "source": "scores",  # Mark source
                         "idx": cfg_idx  # Keep idx for ordering
                     }
@@ -488,7 +489,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form, l2_approved_sub
                     subject_info = {
                         "subject_id": subject_id,
                         "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
-                        "teacher_name": teacher_names[0] if teacher_names else "",
+                        "teacher_names": teacher_names,  # ✅ Tất cả giáo viên giảng dạy
+                        "teacher_name": teacher_names[0] if teacher_names else "",  # Backward compatibility
                         "source": "subject_eval",  # Mark source
                         "idx": cfg_idx  # Keep idx for ordering
                     }
@@ -513,7 +515,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form, l2_approved_sub
                     subjects_to_process.append({
                         "subject_id": subject_id,
                         "title_vn": _resolve_actual_subject_title(subject_id) or subject_id,
-                        "teacher_name": teacher_names[0] if teacher_names else "",
+                        "teacher_names": teacher_names,  # ✅ Tất cả giáo viên giảng dạy
+                        "teacher_name": teacher_names[0] if teacher_names else "",  # Backward compatibility
                         "source": "scores"
                     })
         
@@ -529,7 +532,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form, l2_approved_sub
                     subjects_to_process.append({
                         "subject_id": subject_id,
                         "title_vn": subject_title or _resolve_actual_subject_title(subject_id) or subject_id,
-                        "teacher_name": teacher_names[0] if teacher_names else "",
+                        "teacher_names": teacher_names,  # ✅ Tất cả giáo viên giảng dạy
+                        "teacher_name": teacher_names[0] if teacher_names else "",  # Backward compatibility
                         "source": "subject_eval"
                     })
     
@@ -572,7 +576,8 @@ def _standardize_report_data(data: Dict[str, Any], report, form, l2_approved_sub
         standardized_subject = {
             "subject_id": subject_id,
             "title_vn": subject_info.get("title_vn", ""),
-            "teacher_name": subject_info.get("teacher_name", ""),
+            "teacher_names": subject_info.get("teacher_names", []),  # ✅ Tất cả giáo viên giảng dạy
+            "teacher_name": subject_info.get("teacher_name", ""),  # Backward compatibility
         }
         
         # ✨ Lấy subject data từ subjects_raw_map và merge với subject_eval_data
