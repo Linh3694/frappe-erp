@@ -224,8 +224,7 @@ def get_student_orders(finance_student_id=None):
                 "paid_amount": os.paid_amount or 0,
                 "outstanding_amount": outstanding_amount,
                 "payment_status": payment_status,
-                "is_active": order_doc.is_active,
-                "deadline": str(order_doc.deadline) if order_doc.deadline else None
+                "is_active": order_doc.is_active
             })
         
         # Tính tổng
