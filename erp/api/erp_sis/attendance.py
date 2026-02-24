@@ -424,13 +424,17 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 			attendance_map[key] = row
 		
 		# Step 3: Optionally get check-in/out data (for homeroom only)
-		# Wrap trong try-except vì bảng Attendance Log có thể không tồn tại
+		# Wrap trong try-except vì bảng có thể không tồn tại
 		checkin_map = {}
+		debug_checkin = {}  # Debug info để trả về frontend
 		if include_checkin_out:
 			try:
 				# Get student codes for homeroom classes
 				homeroom_class_ids = [item.get('class_id') for item in items 
 									  if item.get('period') == 'homeroom' and item.get('class_id')]
+				
+				debug_checkin['homeroom_class_ids'] = homeroom_class_ids
+				debug_checkin['dates'] = dates
 				
 				if homeroom_class_ids:
 					# Get student codes for these classes
@@ -441,6 +445,9 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 						WHERE cs.class_id IN %(class_ids)s
 							AND s.student_code IS NOT NULL
 					""", {"class_ids": homeroom_class_ids}, as_dict=True)
+					
+					debug_checkin['student_codes_count'] = len(student_codes_data)
+					debug_checkin['sample_student_codes'] = [r['student_code'] for r in student_codes_data[:5]]
 					
 					# Group by class
 					class_student_codes = {}
@@ -464,6 +471,15 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 							GROUP BY employee_code
 						""", {"codes": all_codes, "dates": dates}, as_dict=True)
 						
+						debug_checkin['checkin_data_count'] = len(checkin_data)
+						debug_checkin['checkin_data_sample'] = checkin_data[:3] if checkin_data else []
+						
+						# Kiểm tra xem bảng có dữ liệu nào không (bất kể student code)
+						total_today = frappe.db.sql("""
+							SELECT COUNT(*) as cnt FROM `tabERP Time Attendance` WHERE date IN %(dates)s
+						""", {"dates": dates}, as_dict=True)
+						debug_checkin['total_records_today'] = total_today[0]['cnt'] if total_today else 0
+						
 						# Build code -> checkin data map
 						code_checkin_map = {}
 						for row in checkin_data:
@@ -484,7 +500,8 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 								'check_out_count': check_out_count
 							}
 			except Exception as checkin_err:
-				# Bảng Attendance Log không tồn tại hoặc lỗi khác - bỏ qua, check-in/out là optional
+				# Bảng không tồn tại hoặc lỗi khác - bỏ qua, check-in/out là optional
+				debug_checkin['error'] = str(checkin_err)
 				frappe.logger().warning(f"Could not fetch check-in/out data: {str(checkin_err)}")
 		
 		# Step 4: Build result
@@ -527,7 +544,12 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 		elapsed = (time.time() - start_time) * 1000
 		frappe.logger().info(f"✅ batch_get_classes_attendance_summary: {len(items)} items in {elapsed:.0f}ms")
 		
-		return success_response(data=result, message=f"Fetched stats for {len(result)} classes")
+		# Thêm debug info để frontend có thể xem qua network
+		return success_response(
+			data=result, 
+			message=f"Fetched stats for {len(result)} classes",
+			debug_info=debug_checkin if include_checkin_out else None
+		)
 		
 	except Exception as e:
 		import traceback
