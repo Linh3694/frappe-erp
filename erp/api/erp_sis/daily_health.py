@@ -489,6 +489,7 @@ def create_health_examination():
         - examination_notes: Kết quả thăm khám (optional)
         - treatment_type: Loại điều trị (optional): medication/rest/other
         - treatment_details: Chi tiết điều trị (optional)
+        - notes: Ghi chú (optional)
         - diagnosis: Chẩn đoán (optional) - deprecated
         - treatment: Xử lý/Dặn dò (optional) - deprecated
         - outcome: Kết quả (optional)
@@ -505,6 +506,7 @@ def create_health_examination():
         examination_notes = data.get("examination_notes", "")
         treatment_type = data.get("treatment_type", "")
         treatment_details = data.get("treatment_details", "")
+        notes = data.get("notes", "")
         
         # Backward compatibility
         diagnosis = data.get("diagnosis", "")
@@ -547,6 +549,7 @@ def create_health_examination():
             "examination_notes": examination_notes,
             "treatment_type": treatment_type,
             "treatment_details": treatment_details,
+            "notes": notes,
             "diagnosis": diagnosis,  # Deprecated
             "treatment": treatment,  # Deprecated
             "outcome": outcome,
@@ -599,6 +602,7 @@ def update_health_examination():
         - examination_notes: Kết quả thăm khám (optional)
         - treatment_type: Loại điều trị (optional)
         - treatment_details: Chi tiết điều trị (optional)
+        - notes: Ghi chú (optional)
         - diagnosis: Chẩn đoán (optional) - deprecated
         - treatment: Xử lý/Dặn dò (optional) - deprecated
         - outcome: Kết quả (optional)
@@ -617,6 +621,7 @@ def update_health_examination():
         examination_notes = data.get("examination_notes")
         treatment_type = data.get("treatment_type")
         treatment_details = data.get("treatment_details")
+        notes = data.get("notes")
         
         # Backward compatibility
         diagnosis = data.get("diagnosis")
@@ -642,6 +647,8 @@ def update_health_examination():
             exam.treatment_type = treatment_type if treatment_type else None
         if treatment_details is not None:
             exam.treatment_details = treatment_details if treatment_details else None
+        if notes is not None:
+            exam.notes = notes if notes else None
         if diagnosis is not None:
             exam.diagnosis = diagnosis if diagnosis else None
         if treatment is not None:

@@ -21,6 +21,7 @@
   "examination_notes",
   "treatment_type",
   "treatment_details",
+  "notes",
   "diagnosis",
   "treatment",
   "outcome_section",
@@ -119,6 +120,11 @@
    "fieldname": "treatment_details",
    "fieldtype": "Text",
    "label": "Chi tiết điều trị"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Ghi chú"
   },
   {
    "fieldname": "diagnosis",
