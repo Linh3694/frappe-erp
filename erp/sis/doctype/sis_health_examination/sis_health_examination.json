@@ -113,7 +113,7 @@
    "fieldname": "treatment_type",
    "fieldtype": "Select",
    "label": "Loại điều trị",
-   "options": "medication\nrest\nother"
+   "options": "first_aid\nmedication\nrest\nother"
   },
   {
    "fieldname": "treatment_details",

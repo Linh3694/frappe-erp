@@ -2166,3 +2166,343 @@ def get_parent_health_records():
             message=f"Lỗi khi lấy hồ sơ thăm khám: {str(e)}",
             code="GET_PARENT_HEALTH_ERROR"
         )
+
+
+# ========================================================================================
+# FIRST AID CONFIG APIs
+# ========================================================================================
+
+@frappe.whitelist()
+def get_first_aid_items(campus: str = None):
+    """
+    Lấy danh sách vật tư sơ cứu
+    """
+    try:
+        filters = {"enabled": 1}
+        
+        # Lấy campus từ nhiều nguồn
+        campus = campus or frappe.form_dict.get('campus')
+        if campus:
+            filters["campus"] = campus
+        
+        items = frappe.get_all(
+            "SIS First Aid",
+            filters=filters,
+            fields=["name", "title", "unit", "description", "campus", "enabled", "creation", "modified"],
+            order_by="title asc"
+        )
+        
+        return success_response(
+            data={"data": items, "total": len(items)},
+            message="Lấy danh sách sơ cứu thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error getting first aid items: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách sơ cứu: {str(e)}",
+            code="GET_FIRST_AID_ERROR"
+        )
+
+
+@frappe.whitelist()
+def create_first_aid(title: str = None, campus: str = None, unit: str = None, description: str = None):
+    """
+    Tạo mới vật tư sơ cứu
+    """
+    try:
+        # Lấy dữ liệu từ request JSON
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        title = title or data.get('title') or frappe.form_dict.get('title')
+        campus = campus or data.get('campus') or frappe.form_dict.get('campus')
+        unit = unit or data.get('unit') or frappe.form_dict.get('unit')
+        description = description or data.get('description') or frappe.form_dict.get('description')
+        
+        if not title or not campus:
+            return error_response(
+                message="Tên sơ cứu và trường học là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS"
+            )
+        
+        # Kiểm tra trùng tên trong cùng campus
+        existing = frappe.get_all(
+            "SIS First Aid",
+            filters={"title": title, "campus": campus},
+            limit=1
+        )
+        if existing:
+            return error_response(
+                message="Vật tư sơ cứu này đã tồn tại",
+                code="DUPLICATE_FIRST_AID"
+            )
+        
+        doc = frappe.get_doc({
+            "doctype": "SIS First Aid",
+            "title": title,
+            "unit": unit,
+            "description": description,
+            "campus": campus,
+            "enabled": 1
+        })
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Tạo vật tư sơ cứu thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error creating first aid: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo vật tư sơ cứu: {str(e)}",
+            code="CREATE_FIRST_AID_ERROR"
+        )
+
+
+@frappe.whitelist()
+def update_first_aid(name: str = None, title: str = None, unit: str = None, description: str = None, enabled: int = None):
+    """
+    Cập nhật vật tư sơ cứu
+    """
+    try:
+        # Lấy dữ liệu từ request JSON
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        name = name or data.get('name') or frappe.form_dict.get('name')
+        title = title if title is not None else data.get('title')
+        unit = unit if unit is not None else data.get('unit')
+        description = description if description is not None else data.get('description')
+        enabled = enabled if enabled is not None else data.get('enabled')
+        
+        if not name:
+            return error_response(
+                message="Thiếu ID vật tư sơ cứu",
+                code="MISSING_NAME"
+            )
+        
+        # Lấy document
+        doc = frappe.get_doc("SIS First Aid", name)
+        
+        # Kiểm tra trùng tên nếu đổi title
+        if title and title != doc.title:
+            existing = frappe.get_all(
+                "SIS First Aid",
+                filters={
+                    "title": title,
+                    "campus": doc.campus,
+                    "name": ["!=", name]
+                },
+                limit=1
+            )
+            if existing:
+                return error_response(
+                    message="Tên vật tư sơ cứu này đã tồn tại",
+                    code="DUPLICATE_FIRST_AID"
+                )
+            doc.title = title
+        
+        if unit is not None:
+            doc.unit = unit
+        if description is not None:
+            doc.description = description
+        if enabled is not None:
+            doc.enabled = enabled
+        
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Cập nhật vật tư sơ cứu thành công"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Vật tư sơ cứu không tồn tại",
+            code="NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.logger().error(f"Error updating first aid: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật vật tư sơ cứu: {str(e)}",
+            code="UPDATE_FIRST_AID_ERROR"
+        )
+
+
+@frappe.whitelist()
+def delete_first_aid(name: str = None):
+    """
+    Xóa vật tư sơ cứu
+    """
+    try:
+        # Lấy dữ liệu từ request JSON
+        import json
+        data = {}
+        if frappe.request and frappe.request.data:
+            try:
+                data = json.loads(frappe.request.data)
+            except json.JSONDecodeError:
+                pass
+        
+        name = name or data.get('name') or frappe.form_dict.get('name')
+        
+        if not name:
+            return error_response(
+                message="Thiếu ID vật tư sơ cứu",
+                code="MISSING_NAME"
+            )
+        
+        # Kiểm tra tồn tại
+        if not frappe.db.exists("SIS First Aid", name):
+            return error_response(
+                message="Vật tư sơ cứu không tồn tại",
+                code="NOT_FOUND"
+            )
+        
+        frappe.delete_doc("SIS First Aid", name, ignore_permissions=True)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": name},
+            message="Xóa vật tư sơ cứu thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error deleting first aid: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa vật tư sơ cứu: {str(e)}",
+            code="DELETE_FIRST_AID_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def import_first_aid_excel(campus=None):
+    """
+    Import vật tư sơ cứu từ file Excel.
+    Cột A: Tên sơ cứu, Cột B: Đơn vị (tùy chọn), Cột C: Mô tả (tùy chọn)
+    """
+    try:
+        import openpyxl
+        import io
+
+        # Đọc campus từ nhiều nguồn: tham số hàm, form_dict, query string
+        campus = (
+            campus
+            or frappe.form_dict.get('campus')
+            or (frappe.request.args.get('campus') if frappe.request else None)
+        )
+        if not campus:
+            return error_response(
+                message="Thiếu thông tin trường học",
+                code="MISSING_CAMPUS"
+            )
+
+        # Kiểm tra campus tồn tại
+        if not frappe.db.exists("SIS Campus", campus):
+            return error_response(
+                message=f"Không tìm thấy trường học: {campus}",
+                code="CAMPUS_NOT_FOUND"
+            )
+
+        # Lấy file từ request
+        file_obj = frappe.request.files.get('file')
+        if not file_obj:
+            return error_response(
+                message="Không tìm thấy file",
+                code="MISSING_FILE"
+            )
+
+        file_data = file_obj.read()
+        wb = openpyxl.load_workbook(io.BytesIO(file_data), read_only=True, data_only=True)
+        ws = wb.active
+
+        success_count = 0
+        error_list = []
+        total_count = 0
+
+        # Tải trước danh sách tên sơ cứu đã có để kiểm tra trùng nhanh (so sánh lowercase)
+        existing_titles = set(
+            r.title.strip().lower()
+            for r in frappe.get_all("SIS First Aid", filters={"campus": campus}, fields=["title"])
+            if r.title
+        )
+        # Theo dõi tên trong file Excel để phát hiện trùng nội bộ
+        seen_in_file = set()
+
+        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            # Bỏ qua dòng rỗng hoàn toàn
+            if not any(row):
+                continue
+
+            title = str(row[0]).strip() if row[0] is not None else ''
+            unit = str(row[1]).strip() if len(row) > 1 and row[1] is not None else ''
+            description = str(row[2]).strip() if len(row) > 2 and row[2] is not None else ''
+            total_count += 1
+
+            # Validate dữ liệu bắt buộc
+            if not title:
+                error_list.append(f"Dòng {row_idx}: Tên sơ cứu không được để trống")
+                continue
+
+            title_lower = title.lower()
+
+            # Kiểm tra trùng trong cùng file Excel
+            if title_lower in seen_in_file:
+                error_list.append(f"Dòng {row_idx}: Tên sơ cứu '{title}' bị trùng trong file Excel")
+                continue
+
+            # Kiểm tra trùng với dữ liệu đã có trong hệ thống
+            if title_lower in existing_titles:
+                error_list.append(f"Dòng {row_idx}: Tên sơ cứu '{title}' đã tồn tại trong hệ thống")
+                continue
+
+            try:
+                doc = frappe.get_doc({
+                    "doctype": "SIS First Aid",
+                    "title": title,
+                    "unit": unit or None,
+                    "description": description or None,
+                    "campus": campus,
+                    "enabled": 1
+                })
+                doc.insert(ignore_permissions=True)
+                success_count += 1
+                # Thêm vào tập đã xử lý để tránh trùng các dòng sau trong file
+                seen_in_file.add(title_lower)
+                existing_titles.add(title_lower)
+            except Exception as e:
+                error_list.append(f"Dòng {row_idx}: {str(e)}")
+
+        frappe.db.commit()
+
+        message = f"Import vật tư sơ cứu hoàn tất"
+        return success_response(
+            data={
+                "success_count": success_count,
+                "total_count": total_count,
+                "errors": error_list,
+                "message": message
+            },
+            message=message
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"Error importing first aid items: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi import vật tư sơ cứu: {str(e)}",
+            code="IMPORT_FIRST_AID_ERROR"
+        )
