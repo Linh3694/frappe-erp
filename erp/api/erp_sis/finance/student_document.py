@@ -222,6 +222,131 @@ def delete_student_document():
         return error_response(f"Lỗi: {str(e)}", logs=logs)
 
 
+@frappe.whitelist()
+def bulk_upload_debit_notes():
+    """
+    Upload hàng loạt Debit Note cho học sinh trong order.
+    Tên file (bỏ phần mở rộng) phải trùng với student_code.
+    
+    Args (form data):
+        order_id: ID của SIS Finance Order
+        files: Danh sách file upload (multiple)
+    
+    Returns:
+        Kết quả upload: total, success_count, error_count, errors[]
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền upload tài liệu", logs=logs)
+        
+        order_id = frappe.form_dict.get('order_id')
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        
+        if not frappe.db.exists("SIS Finance Order", order_id):
+            return error_response(f"Không tìm thấy order: {order_id}", logs=logs)
+        
+        # Lấy danh sách files
+        uploaded_files = frappe.request.files.getlist('files')
+        if not uploaded_files:
+            return validation_error_response("Thiếu file", {"files": ["Cần ít nhất 1 file"]})
+        
+        logs.append(f"Nhận {len(uploaded_files)} file cho order {order_id}")
+        
+        # Build map student_code -> order_student record
+        order_students = frappe.db.sql("""
+            SELECT name, student_code, student_name
+            FROM `tabSIS Finance Order Student`
+            WHERE order_id = %s
+        """, (order_id,), as_dict=True)
+        
+        student_map = {}
+        for s in order_students:
+            student_map[s.student_code] = s
+        
+        logs.append(f"Tìm thấy {len(student_map)} học sinh trong order")
+        
+        errors = []
+        success_count = 0
+        
+        for uploaded_file in uploaded_files:
+            file_name = uploaded_file.filename
+            # Trích xuất student_code từ tên file (bỏ phần mở rộng)
+            import os
+            student_code = os.path.splitext(file_name)[0]
+            
+            student = student_map.get(student_code)
+            if not student:
+                errors.append({
+                    "file_name": file_name,
+                    "student_code": student_code,
+                    "error": f"Không tìm thấy học sinh với mã \"{student_code}\" trong đơn hàng"
+                })
+                continue
+            
+            try:
+                order_student_id = student.name
+                
+                # Lưu file vào Frappe File Manager
+                file_doc = frappe.get_doc({
+                    "doctype": "File",
+                    "file_name": file_name,
+                    "attached_to_doctype": "SIS Finance Order Student",
+                    "attached_to_name": order_student_id,
+                    "content": uploaded_file.read(),
+                    "is_private": 1
+                })
+                file_doc.insert(ignore_permissions=True)
+                
+                # Reset file pointer cho lần đọc sau (nếu cần)
+                uploaded_file.seek(0)
+                
+                # Tạo document record
+                doc = frappe.get_doc({
+                    "doctype": "SIS Finance Student Document",
+                    "order_student_id": order_student_id,
+                    "document_type": "debit_note",
+                    "file_url": file_doc.file_url,
+                    "file_name": file_name,
+                    "notes": f"Bulk upload debit note",
+                    "uploaded_by": frappe.session.user,
+                    "uploaded_at": now_datetime()
+                })
+                doc.insert(ignore_permissions=True)
+                
+                success_count += 1
+                logs.append(f"OK: {file_name} -> {student.student_name} ({order_student_id})")
+                
+            except Exception as e:
+                errors.append({
+                    "file_name": file_name,
+                    "student_code": student_code,
+                    "error": str(e)
+                })
+                logs.append(f"Lỗi: {file_name} -> {str(e)}")
+        
+        frappe.db.commit()
+        
+        total = len(uploaded_files)
+        return success_response(
+            data={
+                "total": total,
+                "success_count": success_count,
+                "error_count": len(errors),
+                "errors": errors
+            },
+            message=f"Upload {success_count}/{total} debit note thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Bulk Upload Debit Notes Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
 def _get_document_type_label(document_type):
     """Lấy label tiếng Việt cho document_type"""
     labels = {

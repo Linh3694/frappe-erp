@@ -94,7 +94,8 @@ from .notification import (
 from .student_document import (
     upload_student_document,
     get_student_documents,
-    delete_student_document
+    delete_student_document,
+    bulk_upload_debit_notes
 )
 
 # Export tất cả functions để giữ backward compatibility
@@ -167,4 +168,5 @@ __all__ = [
     'upload_student_document',
     'get_student_documents',
     'delete_student_document',
+    'bulk_upload_debit_notes',
 ]
