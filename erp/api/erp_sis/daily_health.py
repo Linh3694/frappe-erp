@@ -723,7 +723,7 @@ def get_student_examination_history():
                 "name", "examination_date", "symptoms", "diagnosis",
                 "treatment", "outcome", "examined_by_name", "creation", "modified",
                 "visit_id", "disease_classification", "examination_notes",
-                "treatment_type", "treatment_details"
+                "treatment_type", "treatment_details", "notes"
             ],
             order_by="examination_date desc, creation desc",
             limit=limit
@@ -1801,7 +1801,7 @@ def get_class_health_examinations():
             fields=[
                 "name", "student_id", "student_name", "student_code",
                 "examination_date", "visit_id", "symptoms", "disease_classification",
-                "examination_notes", "treatment_type", "treatment_details",
+                "examination_notes", "treatment_type", "treatment_details", "notes",
                 "outcome", "examined_by_name", "sent_to_parent", "sent_to_parent_at",
                 "creation", "modified"
             ],
@@ -2177,7 +2177,7 @@ def get_parent_health_records():
             fields=[
                 "name", "student_id", "student_name", "student_code",
                 "examination_date", "visit_id", "symptoms", "disease_classification",
-                "examination_notes", "treatment_type", "treatment_details",
+                "examination_notes", "treatment_type", "treatment_details", "notes",
                 "outcome", "examined_by_name", "sent_to_parent_at",
                 "creation", "modified"
             ],
