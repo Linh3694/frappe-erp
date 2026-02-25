@@ -380,6 +380,53 @@ def receive_student_at_clinic():
 
 
 @frappe.whitelist(allow_guest=False)
+def update_visit_reason():
+    """
+    Cập nhật lý do báo cáo y tế
+    Params:
+        - visit_id: ID của visit (required)
+        - reason: Lý do mới (required)
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = _get_request_data()
+        
+        visit_id = data.get("visit_id")
+        reason = data.get("reason")
+        
+        if not visit_id:
+            return validation_error_response("visit_id là bắt buộc", {"visit_id": ["visit_id là bắt buộc"]})
+        
+        if not reason or not str(reason).strip():
+            return validation_error_response("reason là bắt buộc", {"reason": ["reason là bắt buộc"]})
+        
+        # Lấy và cập nhật visit
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
+        visit.reason = str(reason).strip()
+        visit.save()
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": visit.name, "reason": visit.reason},
+            message="Đã cập nhật lý do báo cáo y tế"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Bản ghi xuống Y tế không tồn tại",
+            code="NOT_FOUND"
+        )
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.logger().error(f"Error updating visit reason: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật lý do: {str(e)}",
+            code="UPDATE_REASON_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def start_examination():
     """
     Bắt đầu khám - chuyển status sang examining
