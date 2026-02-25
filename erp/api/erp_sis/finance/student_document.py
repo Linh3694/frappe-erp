@@ -89,6 +89,15 @@ def upload_student_document():
             "uploaded_at": now_datetime()
         })
         doc.insert(ignore_permissions=True)
+        
+        # Cập nhật latest_debit_note_url nếu upload debit_note
+        if document_type == 'debit_note':
+            frappe.db.set_value(
+                "SIS Finance Order Student", order_student_id,
+                "latest_debit_note_url", file_doc.file_url,
+                update_modified=False
+            )
+        
         frappe.db.commit()
         
         logs.append(f"Document created: {doc.name}")
