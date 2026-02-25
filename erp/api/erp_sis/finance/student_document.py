@@ -320,6 +320,13 @@ def bulk_upload_debit_notes():
                 })
                 doc.insert(ignore_permissions=True)
                 
+                # Cập nhật latest_debit_note_url trên OrderStudent để FE hiển thị
+                frappe.db.set_value(
+                    "SIS Finance Order Student", order_student_id,
+                    "latest_debit_note_url", file_doc.file_url,
+                    update_modified=False
+                )
+                
                 success_count += 1
                 logs.append(f"OK: {file_name} -> {student.student_name} ({order_student_id})")
                 
