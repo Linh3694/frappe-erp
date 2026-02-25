@@ -78,6 +78,14 @@ def report_student_to_clinic():
         reason = data.get("reason")
         leave_class_time = data.get("leave_class_time") or nowtime()
         period = data.get("period")  # Tên tiết học (optional)
+        report_date = data.get("date")  # Ngày báo cáo (optional, dùng để validate)
+        
+        # Chặn báo Y tế cho ngày quá khứ
+        if report_date and report_date != today():
+            return validation_error_response(
+                "Chỉ được báo Y tế cho ngày hôm nay",
+                {"date": ["Không thể báo Y tế cho ngày đã qua"]}
+            )
         
         # Validation
         errors = {}
