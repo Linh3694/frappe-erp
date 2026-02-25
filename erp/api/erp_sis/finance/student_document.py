@@ -37,10 +37,12 @@ def upload_student_document():
         if not _check_admin_permission():
             return error_response("Bạn không có quyền upload tài liệu", logs=logs)
         
-        # Lấy dữ liệu từ form
-        order_student_id = frappe.form_dict.get('order_student_id')
-        document_type = frappe.form_dict.get('document_type')
-        notes = frappe.form_dict.get('notes', '')
+        # Lấy dữ liệu từ form (fallback qua request.form / request.args cho multipart)
+        _form = frappe.request.form if hasattr(frappe.request, 'form') and frappe.request.form else {}
+        _args = frappe.request.args if hasattr(frappe.request, 'args') and frappe.request.args else {}
+        order_student_id = frappe.form_dict.get('order_student_id') or _form.get('order_student_id') or _args.get('order_student_id')
+        document_type = frappe.form_dict.get('document_type') or _form.get('document_type') or _args.get('document_type')
+        notes = frappe.form_dict.get('notes') or _form.get('notes') or _args.get('notes', '')
         
         # Validate inputs
         if not order_student_id:
