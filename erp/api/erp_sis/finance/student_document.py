@@ -235,13 +235,22 @@ def bulk_upload_debit_notes():
     Returns:
         Kết quả upload: total, success_count, error_count, errors[]
     """
+    import os as _os
     logs = []
     
     try:
         if not _check_admin_permission():
             return error_response("Bạn không có quyền upload tài liệu", logs=logs)
         
-        order_id = frappe.form_dict.get('order_id')
+        # Lấy order_id từ nhiều nguồn (form_dict, request.form, request.args)
+        order_id = (
+            frappe.form_dict.get('order_id')
+            or (frappe.request.form.get('order_id') if hasattr(frappe.request, 'form') and frappe.request.form else None)
+            or (frappe.request.args.get('order_id') if hasattr(frappe.request, 'args') and frappe.request.args else None)
+        )
+        
+        logs.append(f"order_id={order_id}, form_dict_keys={list(frappe.form_dict.keys())}")
+        
         if not order_id:
             return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
         
@@ -273,9 +282,7 @@ def bulk_upload_debit_notes():
         
         for uploaded_file in uploaded_files:
             file_name = uploaded_file.filename
-            # Trích xuất student_code từ tên file (bỏ phần mở rộng)
-            import os
-            student_code = os.path.splitext(file_name)[0]
+            student_code = _os.path.splitext(file_name)[0]
             
             student = student_map.get(student_code)
             if not student:
@@ -289,7 +296,6 @@ def bulk_upload_debit_notes():
             try:
                 order_student_id = student.name
                 
-                # Lưu file vào Frappe File Manager
                 file_doc = frappe.get_doc({
                     "doctype": "File",
                     "file_name": file_name,
@@ -300,17 +306,15 @@ def bulk_upload_debit_notes():
                 })
                 file_doc.insert(ignore_permissions=True)
                 
-                # Reset file pointer cho lần đọc sau (nếu cần)
                 uploaded_file.seek(0)
                 
-                # Tạo document record
                 doc = frappe.get_doc({
                     "doctype": "SIS Finance Student Document",
                     "order_student_id": order_student_id,
                     "document_type": "debit_note",
                     "file_url": file_doc.file_url,
                     "file_name": file_name,
-                    "notes": f"Bulk upload debit note",
+                    "notes": "Bulk upload debit note",
                     "uploaded_by": frappe.session.user,
                     "uploaded_at": now_datetime()
                 })
