@@ -42,14 +42,30 @@ def _get_parent_students(parent_id, education_stage_id=None):
     """
     Lấy danh sách học sinh của phụ huynh.
     Có thể lọc theo cấp học (education_stage_id).
+    
+    QUAN TRỌNG: Chỉ lấy relationships từ child table `student_relationships` của Guardian,
+    KHÔNG lấy từ child table `family_relationships` của Student.
+    
+    Lý do: CRM Family Relationship có thể thuộc nhiều parent types:
+    - CRM Guardian (field: student_relationships) - Guardian khai báo học sinh của mình
+    - CRM Student (field: family_relationships) - Student khai báo guardians của mình
+    - CRM Family
+    
+    Khi query không filter parenttype, sẽ lấy cả relationships mà Student khai báo
+    (ví dụ: học sinh A thêm guardian X là "Thầy", thì X sẽ thấy học sinh A dù không liên quan)
     """
     if not parent_id:
         return []
     
-    # Query CRM Family Relationship để lấy danh sách học sinh
+    # Chỉ lấy relationships từ child table của Guardian (student_relationships)
+    # Điều này đảm bảo chỉ lấy học sinh mà Guardian đã khai báo
     relationships = frappe.get_all(
         "CRM Family Relationship",
-        filters={"guardian": parent_id},
+        filters={
+            "guardian": parent_id,
+            "parenttype": "CRM Guardian",  # Chỉ lấy từ phía Guardian
+            "parent": parent_id  # Parent phải là chính guardian này
+        },
         fields=["student", "relationship_type", "key_person"]
     )
     
@@ -65,7 +81,12 @@ def _get_parent_students(parent_id, education_stage_id=None):
             current_class = _get_student_current_class(student.name, student.campus_id)
             
             # Kiểm tra education_stage nếu có filter
-            if education_stage_id and current_class:
+            if education_stage_id:
+                # Nếu học sinh không có lớp, bỏ qua (không thể xác định cấp học)
+                if not current_class:
+                    frappe.logger().debug(f"Skipping student {student.name} - no current class")
+                    continue
+                
                 class_education_stage = _get_class_education_stage(current_class.get("class_id"))
                 if class_education_stage != education_stage_id:
                     continue
