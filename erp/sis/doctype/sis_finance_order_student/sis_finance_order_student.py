@@ -9,11 +9,12 @@ from frappe.model.document import Document
 class SISFinanceOrderStudent(Document):
     """
     Học sinh trong đơn hàng.
-    Thay thế SIS Finance Order Item cũ với cấu trúc phức tạp hơn:
-    - Hỗ trợ nhiều mốc deadline
-    - Lưu số tiền riêng cho từng học sinh (qua child table)
-    - Tracking Debit Note versioning
-    - Hỗ trợ thanh toán theo mốc (yearly hoặc semester)
+    
+    Hỗ trợ 2 phương thức thanh toán:
+    - yearly: đóng cả năm (dùng total_amount)
+    - semester: đóng theo kỳ (dùng semester_amount × 2)
+    
+    Khi chưa chọn phương thức, total_amount là số tiền mặc định (giá cả năm).
     """
     
     def before_save(self):
@@ -25,33 +26,35 @@ class SISFinanceOrderStudent(Document):
     def calculate_outstanding(self):
         """Tính số tiền còn nợ dựa trên phương thức thanh toán"""
         if self.payment_scheme_choice == 'semester':
-            # Với semester: outstanding = tổng 2 kỳ - đã đóng kỳ 1 - đã đóng kỳ 2
-            milestone_amounts = self.get_milestone_amounts()
-            total_semester = (milestone_amounts.get('semester_1', 0) or 0) + (milestone_amounts.get('semester_2', 0) or 0)
+            sem_amount = self.semester_amount or 0
+            total_semester = sem_amount * 2
             paid = (self.semester_1_paid or 0) + (self.semester_2_paid or 0)
-            self.outstanding_amount = total_semester - paid
-            self.paid_amount = paid
             self.total_amount = total_semester
+            self.paid_amount = paid
+            self.outstanding_amount = total_semester - paid
         else:
-            # Với yearly hoặc chưa chọn: dùng total_amount hiện tại
             self.outstanding_amount = (self.total_amount or 0) - (self.paid_amount or 0)
     
     def update_payment_status(self):
-        """Cập nhật trạng thái thanh toán dựa trên phương thức đã chọn"""
+        """Cập nhật trạng thái thanh toán"""
         if self.payment_scheme_choice == 'semester':
-            # Với semester: kiểm tra từng kỳ
-            milestone_amounts = self.get_milestone_amounts()
-            sem1_amount = milestone_amounts.get('semester_1', 0) or 0
-            sem2_amount = milestone_amounts.get('semester_2', 0) or 0
+            sem_amount = self.semester_amount or 0
             sem1_paid = self.semester_1_paid or 0
             sem2_paid = self.semester_2_paid or 0
             
-            if sem1_paid >= sem1_amount and sem2_paid >= sem2_amount:
+            if sem_amount <= 0:
+                self.payment_status = 'unpaid'
+                return
+            
+            if sem1_paid >= sem_amount and sem2_paid >= sem_amount:
                 self.payment_status = 'paid'
-                self.current_milestone_key = None  # Đã hoàn tất
-            elif sem1_paid >= sem1_amount:
+                self.current_milestone_key = None
+            elif sem1_paid >= sem_amount:
                 self.payment_status = 'partial'
-                self.current_milestone_key = 'semester_2'  # Chờ đóng kỳ 2
+                self.current_milestone_key = 'semester_2'
+            elif sem2_paid >= sem_amount:
+                self.payment_status = 'partial'
+                self.current_milestone_key = 'semester_1'
             elif sem1_paid > 0 or sem2_paid > 0:
                 self.payment_status = 'partial'
                 self.current_milestone_key = 'semester_1'
@@ -59,7 +62,6 @@ class SISFinanceOrderStudent(Document):
                 self.payment_status = 'unpaid'
                 self.current_milestone_key = 'semester_1'
         else:
-            # Với yearly hoặc chưa chọn
             if not self.total_amount or self.total_amount <= 0:
                 self.payment_status = 'unpaid'
             elif self.paid_amount >= self.total_amount:
@@ -71,12 +73,15 @@ class SISFinanceOrderStudent(Document):
     
     def update_data_status(self):
         """Kiểm tra xem học sinh đã có đầy đủ số tiền chưa"""
-        # Kiểm tra có fee_lines không
+        if (self.total_amount or 0) > 0 or (self.semester_amount or 0) > 0:
+            self.data_status = 'complete'
+            return
+        
+        # Fallback: kiểm tra fee_lines (workflow cũ)
         if not self.fee_lines or len(self.fee_lines) == 0:
             self.data_status = 'pending'
             return
         
-        # Kiểm tra tất cả các dòng có amounts_json không
         for line in self.fee_lines:
             if not line.amounts_json:
                 self.data_status = 'pending'
@@ -86,11 +91,16 @@ class SISFinanceOrderStudent(Document):
     
     def get_milestone_amounts(self):
         """
-        Lấy số tiền TOTAL của từng milestone từ milestone_amounts_json.
-        
-        Returns:
-            dict: {yearly_1: xxx, yearly_2: xxx, semester_1: xxx, semester_2: xxx}
+        Lấy số tiền từng milestone.
+        Ưu tiên dùng semester_amount field, fallback về milestone_amounts_json.
         """
+        if self.semester_amount and self.semester_amount > 0:
+            return {
+                'yearly_1': self.total_amount or 0,
+                'semester_1': self.semester_amount,
+                'semester_2': self.semester_amount,
+            }
+        
         if self.milestone_amounts_json:
             try:
                 return json.loads(self.milestone_amounts_json)
@@ -99,30 +109,18 @@ class SISFinanceOrderStudent(Document):
         return {}
     
     def set_milestone_amounts(self, amounts_dict):
-        """
-        Lưu số tiền TOTAL của từng milestone.
-        
-        Args:
-            amounts_dict: {yearly_1: xxx, yearly_2: xxx, semester_1: xxx, semester_2: xxx}
-        """
+        """Lưu số tiền TOTAL của từng milestone (backward compat)."""
         self.milestone_amounts_json = json.dumps(amounts_dict)
     
     def calculate_total_amount(self, milestone_number):
         """
         Tính tổng số tiền theo mốc deadline cụ thể.
-        Chỉ tính các dòng type=total hoặc category (không tính item để tránh trùng).
-        
-        Args:
-            milestone_number: Số mốc (1, 2, 3...)
-        
-        Returns:
-            Tổng số tiền cho mốc đó
+        Chỉ tính các dòng type=total (không tính item để tránh trùng).
         """
         total = 0
         milestone_key = f"m{milestone_number}"
         
         for line in self.fee_lines:
-            # Chỉ tính dòng total (dòng tổng cộng cuối cùng)
             if line.line_type == 'total' and line.amounts_json:
                 try:
                     amounts = json.loads(line.amounts_json)
@@ -133,48 +131,36 @@ class SISFinanceOrderStudent(Document):
         return total
     
     def get_payment_display_info(self):
-        """
-        Lấy thông tin hiển thị cho thanh toán.
-        
-        Returns:
-            dict với các thông tin:
-            - scheme_display: Tên phương thức hiển thị
-            - current_milestone_display: Mốc hiện tại
-            - semester_status: Trạng thái từng kỳ (nếu là semester)
-        """
-        milestone_amounts = self.get_milestone_amounts()
+        """Lấy thông tin hiển thị cho thanh toán."""
+        sem_amount = self.semester_amount or 0
         
         if self.payment_scheme_choice == 'yearly':
-            milestone_key = self.current_milestone_key or 'yearly_1'
             return {
-                'scheme_display': f"Năm - {milestone_key.replace('yearly_', 'Mốc ')}",
-                'current_milestone_display': milestone_key,
-                'amount': milestone_amounts.get(milestone_key, self.total_amount),
+                'scheme_display': 'Cả năm',
+                'current_milestone_display': None,
+                'amount': self.total_amount,
                 'semester_status': None
             }
         elif self.payment_scheme_choice == 'semester':
-            sem1_amount = milestone_amounts.get('semester_1', 0) or 0
-            sem2_amount = milestone_amounts.get('semester_2', 0) or 0
             sem1_paid = self.semester_1_paid or 0
             sem2_paid = self.semester_2_paid or 0
             
-            sem1_status = 'paid' if sem1_paid >= sem1_amount else ('partial' if sem1_paid > 0 else 'unpaid')
-            sem2_status = 'paid' if sem2_paid >= sem2_amount else ('partial' if sem2_paid > 0 else 'unpaid')
+            sem1_status = 'paid' if sem1_paid >= sem_amount else ('partial' if sem1_paid > 0 else 'unpaid')
+            sem2_status = 'paid' if sem2_paid >= sem_amount else ('partial' if sem2_paid > 0 else 'unpaid')
             
             return {
                 'scheme_display': 'Theo kỳ',
                 'current_milestone_display': self.current_milestone_key,
-                'amount': sem1_amount + sem2_amount,
+                'amount': sem_amount * 2,
                 'semester_status': {
-                    'semester_1': {'amount': sem1_amount, 'paid': sem1_paid, 'status': sem1_status},
-                    'semester_2': {'amount': sem2_amount, 'paid': sem2_paid, 'status': sem2_status}
+                    'semester_1': {'amount': sem_amount, 'paid': sem1_paid, 'status': sem1_status},
+                    'semester_2': {'amount': sem_amount, 'paid': sem2_paid, 'status': sem2_status}
                 }
             }
         else:
-            # Chưa chọn - hiển thị mặc định yearly_1
             return {
                 'scheme_display': 'Chưa chọn',
                 'current_milestone_display': None,
-                'amount': milestone_amounts.get('yearly_1', self.total_amount),
+                'amount': self.total_amount,
                 'semester_status': None
             }

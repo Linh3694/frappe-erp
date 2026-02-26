@@ -252,6 +252,140 @@ def update_order_student_payment():
 
 
 @frappe.whitelist()
+def record_payment_choice():
+    """
+    Ghi nhận thanh toán theo lựa chọn phương thức (radio button).
+    Backend tự lấy số tiền từ Order Student, FE không cần truyền amount.
+    
+    Body:
+        order_student_id: ID của Order Student
+        payment_choice: 'yearly' | 'semester_1' | 'semester_2'
+        notes: Ghi chú (optional)
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền cập nhật", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        order_student_id = data.get('order_student_id')
+        payment_choice = data.get('payment_choice')
+        notes = data.get('notes')
+        
+        if not order_student_id:
+            return validation_error_response(
+                "Thiếu order_student_id",
+                {"order_student_id": ["Order Student ID là bắt buộc"]}
+            )
+        
+        valid_choices = ['yearly', 'semester_1', 'semester_2']
+        if payment_choice not in valid_choices:
+            return validation_error_response(
+                f"payment_choice không hợp lệ. Phải là: {valid_choices}",
+                {"payment_choice": [f"Giá trị hợp lệ: {valid_choices}"]}
+            )
+        
+        if not frappe.db.exists("SIS Finance Order Student", order_student_id):
+            return not_found_response(f"Không tìm thấy Order Student: {order_student_id}")
+        
+        order_student = frappe.get_doc("SIS Finance Order Student", order_student_id)
+        finance_student_id = order_student.finance_student_id
+        
+        yearly_amount = order_student.total_amount or 0
+        sem_amount = order_student.semester_amount or 0
+        
+        if payment_choice == 'yearly':
+            if yearly_amount <= 0:
+                return error_response("Chưa có số tiền cả năm (total_amount)", logs=logs)
+            
+            order_student.payment_scheme_choice = 'yearly'
+            order_student.paid_amount = yearly_amount
+            order_student.outstanding_amount = 0
+            order_student.payment_status = 'paid'
+            order_student.semester_1_paid = 0
+            order_student.semester_2_paid = 0
+            order_student.current_milestone_key = None
+            logs.append(f"Ghi nhận đóng cả năm: {yearly_amount:,.0f} đ")
+        
+        elif payment_choice == 'semester_1':
+            if sem_amount <= 0:
+                return error_response("Chưa có số tiền kỳ (semester_amount)", logs=logs)
+            
+            order_student.payment_scheme_choice = 'semester'
+            order_student.semester_1_paid = sem_amount
+            # before_save sẽ tính lại total_amount, paid_amount, outstanding, status
+            logs.append(f"Ghi nhận đóng Kỳ 1: {sem_amount:,.0f} đ")
+        
+        elif payment_choice == 'semester_2':
+            if sem_amount <= 0:
+                return error_response("Chưa có số tiền kỳ (semester_amount)", logs=logs)
+            
+            order_student.payment_scheme_choice = 'semester'
+            order_student.semester_2_paid = sem_amount
+            logs.append(f"Ghi nhận đóng Kỳ 2: {sem_amount:,.0f} đ")
+        
+        if notes:
+            existing_notes = order_student.notes or ''
+            timestamp = frappe.utils.now()
+            new_note = f"[{timestamp}] {payment_choice}: {notes}"
+            order_student.notes = f"{existing_notes}\n{new_note}".strip()
+        
+        order_student.save(ignore_permissions=True)
+        order_student.reload()
+        
+        logs.append(f"Đã cập nhật Order Student: {order_student_id}")
+        
+        order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
+        
+        # Flag các order tuition khác TRƯỚC khi tính summary
+        flagged_count = 0
+        if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
+            flagged_count = _flag_other_tuition_orders(
+                finance_student_id=finance_student_id,
+                paid_order_id=order_student.order_id,
+                finance_year_id=order_doc.finance_year_id,
+                paid_order_title=order_doc.title,
+                logs=logs
+            )
+        
+        _update_finance_student_summary(finance_student_id, logs)
+        order_doc.update_statistics()
+        
+        frappe.db.commit()
+        
+        payment_info = order_student.get_payment_display_info()
+        
+        return success_response(
+            data={
+                "name": order_student.name,
+                "payment_choice": payment_choice,
+                "payment_scheme_choice": order_student.payment_scheme_choice,
+                "total_amount": order_student.total_amount,
+                "semester_amount": order_student.semester_amount,
+                "paid_amount": order_student.paid_amount,
+                "outstanding_amount": order_student.outstanding_amount,
+                "payment_status": order_student.payment_status,
+                "semester_1_paid": order_student.semester_1_paid,
+                "semester_2_paid": order_student.semester_2_paid,
+                "payment_info": payment_info,
+                "flagged_count": flagged_count
+            },
+            message=f"Ghi nhận thanh toán ({payment_choice}) thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Record Payment Choice Error")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
 def record_milestone_payment():
     """
     Ghi nhận thanh toán theo mốc milestone.

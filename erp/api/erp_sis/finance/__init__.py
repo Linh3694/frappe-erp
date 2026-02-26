@@ -62,6 +62,7 @@ from .order_structure import (
 # Payment APIs
 from .payment import (
     update_order_student_payment,
+    record_payment_choice,
     record_milestone_payment
 )
 
@@ -144,6 +145,7 @@ __all__ = [
     
     # Payment
     'update_order_student_payment',
+    'record_payment_choice',
     'record_milestone_payment',
     
     # Excel Import/Export

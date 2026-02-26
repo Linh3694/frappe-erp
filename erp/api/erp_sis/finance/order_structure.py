@@ -552,8 +552,8 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
             SELECT 
                 os.name, os.order_id, os.finance_student_id,
                 os.student_name, os.student_code, os.class_title,
-                os.data_status, os.total_amount, os.paid_amount,
-                os.outstanding_amount, os.payment_status,
+                os.data_status, os.total_amount, os.semester_amount,
+                os.paid_amount, os.outstanding_amount, os.payment_status,
                 os.latest_debit_note_version, os.latest_debit_note_url,
                 os.payment_scheme_choice, os.current_milestone_key,
                 os.semester_1_paid, os.semester_2_paid,

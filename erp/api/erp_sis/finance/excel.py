@@ -219,15 +219,15 @@ def export_simple_template(order_id=None):
         
         order_doc = frappe.get_doc("SIS Finance Order", order_id)
         
-        # Headers đơn giản
-        headers = ["student_code", "student_name", "class_title", "total_amount", "paid_amount", "note"]
-        header_labels = ["Mã học sinh", "Tên học sinh", "Lớp", "Số tiền phải đóng", "Số tiền đã đóng", "Ghi chú"]
+        # Headers đơn giản (thêm semester_amount)
+        headers = ["student_code", "student_name", "class_title", "total_amount", "semester_amount", "paid_amount", "note"]
+        header_labels = ["Mã học sinh", "Tên học sinh", "Lớp", "Tiền cả năm", "Tiền 1 kỳ", "Số tiền đã đóng", "Ghi chú"]
         
         # Get students
         students = frappe.get_all(
             "SIS Finance Order Student",
             filters={"order_id": order_id},
-            fields=["name", "student_code", "student_name", "class_title", "total_amount", "paid_amount", "notes"],
+            fields=["name", "student_code", "student_name", "class_title", "total_amount", "semester_amount", "paid_amount", "notes"],
             order_by="student_name ASC"
         )
         
@@ -239,6 +239,7 @@ def export_simple_template(order_id=None):
                 "student_name": student.student_name,
                 "class_title": student.class_title or "",
                 "total_amount": student.total_amount or "",
+                "semester_amount": student.semester_amount or "",
                 "paid_amount": student.paid_amount or "",
                 "note": student.notes or ""
             }
@@ -334,29 +335,19 @@ def import_simple_amounts():
                     except (ValueError, TypeError):
                         pass
                 
+                # Cập nhật semester_amount nếu có
+                if 'semester_amount' in row and pd.notna(row['semester_amount']):
+                    try:
+                        order_student_doc.semester_amount = float(row['semester_amount'])
+                    except (ValueError, TypeError):
+                        pass
+                
                 # Cập nhật paid_amount nếu có
                 if 'paid_amount' in row and pd.notna(row['paid_amount']):
                     try:
                         order_student_doc.paid_amount = float(row['paid_amount'])
                     except (ValueError, TypeError):
                         pass
-                
-                # Tính outstanding_amount
-                total = order_student_doc.total_amount or 0
-                paid = order_student_doc.paid_amount or 0
-                order_student_doc.outstanding_amount = total - paid
-                
-                # Cập nhật payment_status
-                if paid >= total and total > 0:
-                    order_student_doc.payment_status = 'paid'
-                elif paid > 0:
-                    order_student_doc.payment_status = 'partial'
-                else:
-                    order_student_doc.payment_status = 'unpaid'
-                
-                # Cập nhật data_status nếu có số tiền
-                if total > 0:
-                    order_student_doc.data_status = 'complete'
                 
                 # Cập nhật note
                 if 'note' in row and pd.notna(row['note']):
