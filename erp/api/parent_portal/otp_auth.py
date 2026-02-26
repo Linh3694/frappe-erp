@@ -548,7 +548,7 @@ def get_guardian_info():
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"guardian_id": guardian_id},
-            fields=["name", "guardian_id", "guardian_name", "phone_number", "email"],
+            fields=["name", "guardian_id", "guardian_name", "phone_number", "email", "first_login_at"],
             ignore_permissions=True
         )
 
@@ -559,6 +559,9 @@ def get_guardian_info():
             }
 
         guardian = guardian_list[0]
+        # Convert first_login_at to string for JSON serialization
+        if guardian.get("first_login_at"):
+            guardian["first_login_at"] = str(guardian["first_login_at"])
 
         return {
             "success": True,
