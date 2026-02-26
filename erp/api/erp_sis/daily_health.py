@@ -67,6 +67,9 @@ def report_student_to_clinic():
         - reason: Lý do xuống Y tế (required)
         - leave_class_time: Thời gian rời lớp (optional, default: now)
         - period: Tên tiết học (optional) - nếu có sẽ tự động cập nhật attendance thành excused
+        - initial_status: Trạng thái ban đầu (optional, default: left_class)
+                         - "left_class": Đã rời lớp (giáo viên báo)
+                         - "received": Đã tiếp nhận (Y tế tự tạo khi học sinh trực tiếp xuống)
     """
     try:
         _check_teacher_permission()
@@ -79,6 +82,12 @@ def report_student_to_clinic():
         leave_class_time = data.get("leave_class_time") or nowtime()
         period = data.get("period")  # Tên tiết học (optional)
         report_date = data.get("date")  # Ngày báo cáo (optional, dùng để validate)
+        initial_status = data.get("initial_status", "left_class")  # Trạng thái ban đầu
+        
+        # Validate initial_status
+        valid_statuses = ["left_class", "received"]
+        if initial_status not in valid_statuses:
+            initial_status = "left_class"
         
         # Chặn báo Y tế cho ngày quá khứ
         if report_date and report_date != today():
@@ -119,7 +128,7 @@ def report_student_to_clinic():
             reported_by_name = frappe.session.user
         
         # Tạo bản ghi visit
-        visit = frappe.get_doc({
+        visit_data = {
             "doctype": "SIS Daily Health Visit",
             "student_id": student_id,
             "student_name": student.get("student_name"),
@@ -129,10 +138,18 @@ def report_student_to_clinic():
             "visit_date": today(),
             "reason": reason,
             "leave_class_time": leave_class_time,
-            "status": "left_class",
+            "status": initial_status,
             "reported_by": reported_by_user,
             "reported_by_name": reported_by_name
-        })
+        }
+        
+        # Nếu Y tế tự tạo (received), cập nhật thêm thông tin tiếp nhận
+        if initial_status == "received":
+            visit_data["arrived_at_clinic_time"] = nowtime()
+            visit_data["received_by"] = reported_by_user
+            visit_data["received_by_name"] = reported_by_name
+        
+        visit = frappe.get_doc(visit_data)
         visit.insert()
         
         # Nếu có period, tự động cập nhật attendance thành excused
