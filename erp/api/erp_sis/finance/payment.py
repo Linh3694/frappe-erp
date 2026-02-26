@@ -158,6 +158,10 @@ def update_order_student_payment():
         paid_amount = data.get('paid_amount')
         notes = data.get('notes')
         
+        # Debug: log raw data nhận được
+        logs.append(f"DEBUG RAW: is_json={frappe.request.is_json}, data={data}")
+        logs.append(f"DEBUG RAW: paid_amount={paid_amount}, type={type(paid_amount).__name__}")
+        
         if not order_student_id:
             return validation_error_response(
                 "Thiếu order_student_id",
