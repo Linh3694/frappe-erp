@@ -69,7 +69,7 @@ def get_students_health_checkup(school_year_id=None):
                 WHERE cs.school_year_id = %(school_year_id)s
                     AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.title as class_name ASC, s.student_name ASC
+                ORDER BY c.title ASC, s.student_name ASC
             """
         else:
             # Nếu chưa có table health checkup, chỉ lấy danh sách học sinh
@@ -88,7 +88,7 @@ def get_students_health_checkup(school_year_id=None):
                 WHERE cs.school_year_id = %(school_year_id)s
                     AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.title as class_name ASC, s.student_name ASC
+                ORDER BY c.title ASC, s.student_name ASC
             """
         
         params = {"school_year_id": school_year_id}
@@ -399,7 +399,7 @@ def export_health_checkup(school_year_id=None):
                 WHERE cs.school_year_id = %(school_year_id)s
                     AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.title as class_name ASC, s.student_name ASC
+                ORDER BY c.title ASC, s.student_name ASC
             """
         else:
             # Nếu chưa có table health checkup, chỉ lấy danh sách học sinh với các cột NULL
@@ -453,7 +453,7 @@ def export_health_checkup(school_year_id=None):
                 WHERE cs.school_year_id = %(school_year_id)s
                     AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.title as class_name ASC, s.student_name ASC
+                ORDER BY c.title ASC, s.student_name ASC
             """
         
         params = {"school_year_id": school_year_id}
