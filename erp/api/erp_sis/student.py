@@ -1098,6 +1098,59 @@ def search_students(search_term=None):
         except Exception as e:
             frappe.logger().error(f"Failed to enrich search students with family codes: {str(e)}")
         
+        # Enrich với thông tin lớp hiện tại (năm học đang active)
+        try:
+            student_ids = [s.get("name") for s in students if s.get("name")]
+            if student_ids:
+                # Lấy năm học hiện tại (is_enable = 1)
+                current_school_year = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1, "campus_id": campus_id},
+                    "name",
+                    order_by="start_date desc"
+                )
+                # Fallback nếu không có campus filter
+                if not current_school_year:
+                    current_school_year = frappe.db.get_value(
+                        "SIS School Year",
+                        {"is_enable": 1},
+                        "name",
+                        order_by="start_date desc"
+                    )
+                
+                if current_school_year:
+                    # Lấy thông tin lớp của học sinh trong năm học hiện tại
+                    class_rows = frappe.db.sql(
+                        """
+                        SELECT 
+                            cs.student_id,
+                            c.name as class_id,
+                            c.title as class_title
+                        FROM `tabSIS Class Student` cs
+                        INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                        WHERE cs.student_id IN %(ids)s
+                          AND cs.school_year_id = %(year)s
+                          AND c.school_year_id = %(year)s
+                        """,
+                        {"ids": tuple(student_ids), "year": current_school_year},
+                        as_dict=True,
+                    )
+                    # Tạo mapping: student_id -> class info
+                    class_mapping = {}
+                    for r in class_rows:
+                        class_mapping[r["student_id"]] = {
+                            "class_id": r["class_id"],
+                            "class_title": r["class_title"]
+                        }
+                    # Gán vào students
+                    for s in students:
+                        sid = s.get("name")
+                        if sid in class_mapping:
+                            s["current_class_id"] = class_mapping[sid]["class_id"]
+                            s["current_class_title"] = class_mapping[sid]["class_title"]
+        except Exception as e:
+            frappe.logger().error(f"Failed to enrich search students with class info: {str(e)}")
+        
         # Return all search results without pagination
         return success_response(
             data=students,
