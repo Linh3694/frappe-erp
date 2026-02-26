@@ -992,12 +992,18 @@ def get_students_for_selection():
 def search_students(search_term=None):
     """Search students - returns all matching results without pagination"""
     try:
-        # Normalize parameters: prefer form_dict values if provided
+        # Normalize parameters: ưu tiên lấy từ form_dict vì GET params thường nằm ở đây
         form = frappe.local.form_dict or {}
-        if 'search_term' in form and (search_term is None or str(search_term).strip() == ''):
+        
+        # Debug log để xem tất cả params
+        frappe.logger().info(f"[search_students] form_dict: {form}")
+        frappe.logger().info(f"[search_students] search_term param: '{search_term}'")
+        
+        # Lấy search_term từ form_dict nếu có
+        if form.get('search_term'):
             search_term = form.get('search_term')
-
-        frappe.logger().info(f"search_students called with search_term: '{search_term}'")
+        
+        frappe.logger().info(f"[search_students] FINAL search_term: '{search_term}'")
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -1101,6 +1107,8 @@ def search_students(search_term=None):
         # Enrich với thông tin lớp hiện tại (năm học đang active)
         try:
             student_ids = [s.get("name") for s in students if s.get("name")]
+            frappe.logger().info(f"[search_students] Enriching class info for {len(student_ids)} students, campus_id={campus_id}")
+            
             if student_ids:
                 # Lấy năm học hiện tại (is_enable = 1)
                 current_school_year = frappe.db.get_value(
@@ -1109,6 +1117,8 @@ def search_students(search_term=None):
                     "name",
                     order_by="start_date desc"
                 )
+                frappe.logger().info(f"[search_students] School year with campus filter: {current_school_year}")
+                
                 # Fallback nếu không có campus filter
                 if not current_school_year:
                     current_school_year = frappe.db.get_value(
@@ -1117,6 +1127,7 @@ def search_students(search_term=None):
                         "name",
                         order_by="start_date desc"
                     )
+                    frappe.logger().info(f"[search_students] School year without campus filter (fallback): {current_school_year}")
                 
                 if current_school_year:
                     # Lấy thông tin lớp của học sinh trong năm học hiện tại
@@ -1135,6 +1146,10 @@ def search_students(search_term=None):
                         {"ids": tuple(student_ids), "year": current_school_year},
                         as_dict=True,
                     )
+                    frappe.logger().info(f"[search_students] Found {len(class_rows)} class assignments")
+                    if class_rows:
+                        frappe.logger().info(f"[search_students] First 3 class rows: {class_rows[:3]}")
+                    
                     # Tạo mapping: student_id -> class info
                     class_mapping = {}
                     for r in class_rows:
@@ -1143,11 +1158,16 @@ def search_students(search_term=None):
                             "class_title": r["class_title"]
                         }
                     # Gán vào students
+                    enriched_count = 0
                     for s in students:
                         sid = s.get("name")
                         if sid in class_mapping:
                             s["current_class_id"] = class_mapping[sid]["class_id"]
                             s["current_class_title"] = class_mapping[sid]["class_title"]
+                            enriched_count += 1
+                    frappe.logger().info(f"[search_students] Enriched {enriched_count}/{len(students)} students with class info")
+                else:
+                    frappe.logger().warning("[search_students] No active school year found!")
         except Exception as e:
             frappe.logger().error(f"Failed to enrich search students with class info: {str(e)}")
         
