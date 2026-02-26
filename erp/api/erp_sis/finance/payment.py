@@ -181,10 +181,16 @@ def update_order_student_payment():
         order_student = frappe.get_doc("SIS Finance Order Student", order_student_id)
         finance_student_id = order_student.finance_student_id
         
-        # Debug: log giá trị trước khi cập nhật
-        old_paid = order_student.paid_amount
-        new_paid = float(paid_amount) if paid_amount else 0
-        logs.append(f"DEBUG: old_paid={old_paid}, new_paid={new_paid}")
+        # Chuyển đổi paid_amount sang float
+        new_paid = float(paid_amount) if paid_amount is not None else 0
+        
+        # Nếu đang dùng semester payment scheme, chuyển về yearly/None để cho phép
+        # cập nhật paid_amount trực tiếp (workflow đơn giản)
+        if order_student.payment_scheme_choice == 'semester':
+            logs.append(f"Chuyển từ semester sang yearly để cập nhật paid_amount trực tiếp")
+            order_student.payment_scheme_choice = None
+            order_student.semester_1_paid = 0
+            order_student.semester_2_paid = 0
         
         # Cập nhật paid_amount
         order_student.paid_amount = new_paid
@@ -193,22 +199,13 @@ def update_order_student_payment():
         if notes is not None:
             order_student.notes = notes
         
-        # Debug: log giá trị sau khi set
-        logs.append(f"DEBUG: after set, paid_amount={order_student.paid_amount}")
-        
         # Lưu Order Student (before_save sẽ tự tính outstanding và payment_status)
         order_student.save(ignore_permissions=True)
         
-        # Debug: log giá trị sau khi save
-        logs.append(f"DEBUG: after save, paid_amount={order_student.paid_amount}")
-        
-        # Reload document để lấy giá trị mới nhất từ database
+        # Reload để lấy giá trị sau khi before_save tính toán
         order_student.reload()
         
-        # Debug: log giá trị sau khi reload
-        logs.append(f"DEBUG: after reload, paid_amount={order_student.paid_amount}")
-        
-        logs.append(f"Đã cập nhật Order Student: {order_student_id}")
+        logs.append(f"Đã cập nhật Order Student: {order_student_id}, paid_amount={order_student.paid_amount}")
         
         # Cascade update lên Finance Student
         finance_student_updated = _update_finance_student_summary(finance_student_id, logs)
