@@ -979,7 +979,7 @@ def _time_to_seconds(time_val):
 def get_health_status_for_period():
     """
     Lấy trạng thái Y tế của học sinh theo tiết học (cho LessonLog).
-    Kiểm tra thời gian rời lớp/rời Y tế với thời gian tiết học để xác định chính xác.
+    Trả về tất cả visit liên quan đến tiết học, kể cả đã checkout.
     
     Params:
         - class_id: ID lớp (required)
@@ -990,10 +990,10 @@ def get_health_status_for_period():
         students: Record<student_id, {visit_id, status, leave_class_time, leave_clinic_time}>
         
     Logic:
-        - Học sinh được coi là "ở Y tế" trong tiết nếu:
-          1. leave_class_time < period_end_time (rời lớp trước khi tiết kết thúc)
-          2. AND (leave_clinic_time IS NULL OR leave_clinic_time > period_start_time) (chưa về hoặc về sau khi tiết bắt đầu)
-        - Nếu không tìm được thông tin tiết học, fallback về logic cũ (chỉ check status)
+        - Nếu có thời gian tiết học:
+          1. Học sinh rời lớp TRONG tiết → luôn hiển thị (kể cả đã checkout: returned, picked_up, transferred)
+          2. Học sinh rời lớp TRƯỚC tiết nhưng chưa về hoặc về sau tiết bắt đầu → hiển thị
+        - Nếu không có thời gian tiết: hiển thị tất cả visit trong ngày
     """
     try:
         _check_teacher_permission()
@@ -1041,7 +1041,8 @@ def get_health_status_for_period():
             order_by="leave_class_time desc"
         )
         
-        # Filter học sinh ở Y tế theo logic thời gian
+        # Filter học sinh có visit liên quan đến tiết học
+        # Logic mới: Nếu học sinh rời lớp trong tiết đó, luôn hiển thị trạng thái (kể cả đã checkout)
         students_at_clinic = {}
         
         for visit in visits:
@@ -1054,27 +1055,28 @@ def get_health_status_for_period():
             leave_class_sec = _time_to_seconds(visit.leave_class_time)
             leave_clinic_sec = _time_to_seconds(visit.leave_clinic_time)
             
-            is_at_clinic = False
+            should_include = False
             
             if has_period_times and leave_class_sec is not None:
                 # Logic có thời gian tiết học:
-                # 1. Học sinh rời lớp trước khi tiết kết thúc
-                # 2. AND (chưa về OR về sau khi tiết bắt đầu)
-                left_before_period_end = leave_class_sec < period_end_sec
-                not_returned_or_returned_after_period_start = (
-                    leave_clinic_sec is None or 
-                    leave_clinic_sec > period_start_sec
+                # Học sinh rời lớp trong khoảng thời gian tiết → luôn hiển thị (kể cả đã checkout)
+                # Hoặc: rời lớp trước tiết nhưng vẫn ở Y tế trong tiết
+                left_during_period = period_start_sec <= leave_class_sec < period_end_sec
+                
+                # Rời lớp trước tiết nhưng chưa về hoặc về trong/sau tiết
+                left_before_but_still_at_clinic = (
+                    leave_class_sec < period_start_sec and
+                    (leave_clinic_sec is None or leave_clinic_sec > period_start_sec)
                 )
                 
-                if left_before_period_end and not_returned_or_returned_after_period_start:
-                    is_at_clinic = True
+                if left_during_period or left_before_but_still_at_clinic:
+                    should_include = True
             else:
-                # Fallback: không có thông tin tiết học, chỉ check status
-                # Status đang ở Y tế: left_class, at_clinic, examining
-                if visit.status in ["left_class", "at_clinic", "examining"]:
-                    is_at_clinic = True
+                # Fallback: không có thông tin tiết học, hiển thị tất cả visit trong ngày
+                # Để giáo viên biết học sinh đã/đang ở Y tế
+                should_include = True
             
-            if is_at_clinic:
+            if should_include:
                 students_at_clinic[student_id] = {
                     "visit_id": visit.name,
                     "status": visit.status,
