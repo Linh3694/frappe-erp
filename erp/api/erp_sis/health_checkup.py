@@ -11,7 +11,7 @@ from frappe import _
 from frappe.utils import today
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
-    not_found_response, validation_error_response
+    not_found_response
 )
 import json
 
@@ -35,7 +35,7 @@ def get_students_health_checkup(school_year_id=None):
             school_year_id = frappe.form_dict.get("school_year_id") or frappe.request.args.get("school_year_id")
         
         if not school_year_id:
-            return validation_error_response("school_year_id là bắt buộc")
+            return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
         
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
@@ -132,9 +132,9 @@ def get_student_health_checkup(student_id=None, school_year_id=None):
             school_year_id = frappe.form_dict.get("school_year_id") or frappe.request.args.get("school_year_id")
         
         if not student_id:
-            return validation_error_response("student_id là bắt buộc")
+            return error_response(message="student_id là bắt buộc", code="VALIDATION_ERROR")
         if not school_year_id:
-            return validation_error_response("school_year_id là bắt buộc")
+            return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
         
         # Lấy thông tin học sinh cơ bản
         student = frappe.get_doc("CRM Student", student_id)
@@ -216,9 +216,9 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
             data = frappe.form_dict.get("data")
         
         if not student_id:
-            return validation_error_response("student_id là bắt buộc")
+            return error_response(message="student_id là bắt buộc", code="VALIDATION_ERROR")
         if not school_year_id:
-            return validation_error_response("school_year_id là bắt buộc")
+            return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
         
         # Parse data nếu là string
         if isinstance(data, str):
@@ -331,7 +331,7 @@ def export_health_checkup(school_year_id=None):
             school_year_id = frappe.form_dict.get("school_year_id") or frappe.request.args.get("school_year_id")
         
         if not school_year_id:
-            return validation_error_response("school_year_id là bắt buộc")
+            return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
         
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
@@ -496,16 +496,16 @@ def import_health_checkup(school_year_id=None, data=None):
             data = frappe.form_dict.get("data")
         
         if not school_year_id:
-            return validation_error_response("school_year_id là bắt buộc")
+            return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
         if not data:
-            return validation_error_response("data là bắt buộc")
+            return error_response(message="data là bắt buộc", code="VALIDATION_ERROR")
         
         # Parse data nếu là string
         if isinstance(data, str):
             data = json.loads(data)
         
         if not isinstance(data, list):
-            return validation_error_response("data phải là danh sách")
+            return error_response(message="data phải là danh sách", code="VALIDATION_ERROR")
         
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
