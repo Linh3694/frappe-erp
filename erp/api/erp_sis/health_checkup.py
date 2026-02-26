@@ -309,7 +309,9 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
             # Conclusion
             "bmi", "pbf", "body_score",
             "nutrition_conclusion", "nutrition_classification",
-            "disease_condition", "health_classification"
+            "disease_condition", "health_classification",
+            # Notes
+            "doctor_recommendation", "reference_notes"
         ]
         
         if existing:
@@ -426,7 +428,9 @@ def export_health_checkup(school_year_id=None):
                     shc.nutrition_conclusion,
                     shc.nutrition_classification,
                     shc.disease_condition,
-                    shc.health_classification
+                    shc.health_classification,
+                    shc.doctor_recommendation,
+                    shc.reference_notes
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
@@ -483,7 +487,9 @@ def export_health_checkup(school_year_id=None):
                     NULL as nutrition_conclusion,
                     NULL as nutrition_classification,
                     NULL as disease_condition,
-                    NULL as health_classification
+                    NULL as health_classification,
+                    NULL as doctor_recommendation,
+                    NULL as reference_notes
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
@@ -577,7 +583,8 @@ def import_health_checkup(school_year_id=None, data=None):
             "circulation", "respiratory", "digestive", "renal_urinary", "other_clinical",
             "bmi", "pbf", "body_score",
             "nutrition_conclusion", "nutrition_classification",
-            "disease_condition", "health_classification"
+            "disease_condition", "health_classification",
+            "doctor_recommendation", "reference_notes"
         ]
         
         success_count = 0
