@@ -16,6 +16,37 @@ from erp.utils.api_response import (
 import json
 
 
+def _get_request_data():
+    """Lấy request data từ nhiều nguồn khác nhau (query params, form_dict, JSON body)"""
+    data = {}
+    
+    # 1. Lấy từ URL query params (GET request)
+    if hasattr(frappe, 'request') and hasattr(frappe.request, 'args') and frappe.request.args:
+        data.update(dict(frappe.request.args))
+    
+    # 2. Lấy từ form_dict (query params và form data)
+    if frappe.local.form_dict:
+        data.update(dict(frappe.local.form_dict))
+    
+    # 3. Merge với JSON body nếu có (POST request)
+    if hasattr(frappe.request, 'is_json') and frappe.request.is_json:
+        json_data = frappe.request.json or {}
+        data.update(json_data)
+    else:
+        try:
+            if hasattr(frappe.request, 'data') and frappe.request.data:
+                raw = frappe.request.data
+                body = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw
+                if body and body.strip():
+                    json_data = json.loads(body)
+                    if isinstance(json_data, dict):
+                        data.update(json_data)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    
+    return data
+
+
 @frappe.whitelist(allow_guest=False)
 def get_students_health_checkup(school_year_id=None):
     """
@@ -207,13 +238,19 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
         Dữ liệu khám sức khoẻ đã lưu
     """
     try:
-        # Lấy từ params
+        # Lấy dữ liệu từ request (hỗ trợ cả query params, form_dict và JSON body)
+        request_data = _get_request_data()
+        
+        # Ưu tiên params truyền trực tiếp, sau đó từ request_data
         if not student_id:
-            student_id = frappe.form_dict.get("student_id")
+            student_id = request_data.get("student_id")
         if not school_year_id:
-            school_year_id = frappe.form_dict.get("school_year_id")
+            school_year_id = request_data.get("school_year_id")
         if not data:
-            data = frappe.form_dict.get("data")
+            data = request_data.get("data")
+        
+        # Log để debug
+        frappe.logger().info(f"save_student_health_checkup called with: student_id={student_id}, school_year_id={school_year_id}, data_type={type(data)}, request_data_keys={list(request_data.keys())}")
         
         if not student_id:
             return error_response(message="student_id là bắt buộc", code="VALIDATION_ERROR")
@@ -489,11 +526,14 @@ def import_health_checkup(school_year_id=None, data=None):
         Kết quả import: success_count, error_count, errors
     """
     try:
-        # Lấy từ params
+        # Lấy dữ liệu từ request (hỗ trợ cả query params, form_dict và JSON body)
+        request_data = _get_request_data()
+        
+        # Ưu tiên params truyền trực tiếp, sau đó từ request_data
         if not school_year_id:
-            school_year_id = frappe.form_dict.get("school_year_id")
+            school_year_id = request_data.get("school_year_id")
         if not data:
-            data = frappe.form_dict.get("data")
+            data = request_data.get("data")
         
         if not school_year_id:
             return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
