@@ -277,7 +277,7 @@ def get_order_with_structure(order_id=None):
 def update_order_structure():
     """
     Cập nhật cấu trúc milestones và fee_lines của đơn hàng.
-    Chỉ cho phép khi status = draft hoặc students_added.
+    Cho phép ở mọi status trừ closed.
     """
     logs = []
     
@@ -299,9 +299,9 @@ def update_order_structure():
         
         order_doc = frappe.get_doc("SIS Finance Order", order_id)
         
-        # Chỉ cho phép cập nhật khi status phù hợp
-        if order_doc.status not in ['draft', 'students_added']:
-            return error_response(f"Không thể cập nhật khi status = {order_doc.status}")
+        # Chỉ không cho phép khi đã đóng
+        if order_doc.status == 'closed':
+            return error_response("Không thể cập nhật đơn hàng đã đóng")
         
         # Cập nhật milestones
         if 'milestones' in data:

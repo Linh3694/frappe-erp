@@ -152,8 +152,8 @@ class SISFinanceOrder(Document):
         return None
     
     def can_add_students(self):
-        """Kiểm tra có thể thêm học sinh không"""
-        return self.status in ['draft', 'students_added']
+        """Kiểm tra có thể thêm học sinh không - cho phép ở mọi status trừ closed"""
+        return self.status != 'closed'
     
     def can_import_data(self):
         """Kiểm tra có thể import số tiền không"""
