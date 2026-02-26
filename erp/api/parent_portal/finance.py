@@ -231,7 +231,7 @@ def get_student_finance_detail(finance_student_id=None):
             as_dict=True
         ) if finance_year else None
         
-        # Lấy danh sách các khoản phí (order items) - chỉ lấy order đã published/closed
+        # Lấy danh sách các khoản phí (order items) - chỉ lấy order đang active
         order_items = frappe.db.sql("""
             SELECT 
                 foi.name as item_id,
@@ -252,7 +252,6 @@ def get_student_finance_detail(finance_student_id=None):
             INNER JOIN `tabSIS Finance Order` fo ON foi.order_id = fo.name
             WHERE foi.finance_student_id = %s
               AND fo.is_active = 1
-              AND fo.status IN ('published', 'closed')
             ORDER BY fo.sort_order ASC, fo.creation ASC
         """, (finance_student_id,), as_dict=True)
         
@@ -526,7 +525,7 @@ def get_all_students_finance(finance_year_id=None):
             if active_finance:
                 af = active_finance[0]
                 
-                # Tính totals từ order items có status = published/closed
+                # Tính totals từ order items có is_active = 1
                 order_totals = frappe.db.sql("""
                     SELECT 
                         COALESCE(SUM(foi.final_amount), 0) as total_amount,
@@ -536,7 +535,6 @@ def get_all_students_finance(finance_year_id=None):
                     INNER JOIN `tabSIS Finance Order` fo ON foi.order_id = fo.name
                     WHERE foi.finance_student_id = %s
                       AND fo.is_active = 1
-                      AND fo.status IN ('published', 'closed')
                 """, (af.finance_student_id,), as_dict=True)
                 
                 ot = order_totals[0] if order_totals else {"total_amount": 0, "paid_amount": 0, "outstanding_amount": 0}
