@@ -77,7 +77,7 @@ def create_fee_notification():
         logs.append(f"Order: {order_doc.title}")
         
         # Lấy campus_id từ finance_year
-        finance_year = frappe.get_doc("SIS Finance Year", order_doc.finance_year)
+        finance_year = frappe.get_doc("SIS Finance Year", order_doc.finance_year_id)
         campus_id = finance_year.campus_id or "campus-1"
         
         # Lấy deadline gần nhất từ milestones
@@ -106,7 +106,7 @@ def create_fee_notification():
             # Lấy tất cả học sinh trong order
             order_students = frappe.get_all(
                 "SIS Finance Order Student",
-                filters={"parent": order_id},
+                filters={"order_id": order_id},
                 fields=["name", "finance_student_id", "total_amount"]
             )
         else:
@@ -115,7 +115,7 @@ def create_fee_notification():
                 student_ids = json.loads(student_ids)
             order_students = frappe.get_all(
                 "SIS Finance Order Student",
-                filters={"name": ["in", student_ids]},
+                filters={"name": ["in", student_ids], "order_id": order_id},
                 fields=["name", "finance_student_id", "total_amount"]
             )
         
