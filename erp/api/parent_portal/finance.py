@@ -239,8 +239,6 @@ def get_student_finance_detail(finance_student_id=None):
                 fo.title as order_title,
                 fo.order_type,
                 fo.description as order_description,
-                fo.payment_type,
-                fo.installment_count,
                 foi.amount,
                 foi.discount_amount,
                 foi.final_amount,
