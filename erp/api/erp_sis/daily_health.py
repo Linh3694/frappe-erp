@@ -69,7 +69,7 @@ def report_student_to_clinic():
         - period: Tên tiết học (optional) - nếu có sẽ tự động cập nhật attendance thành excused
         - initial_status: Trạng thái ban đầu (optional, default: left_class)
                          - "left_class": Đã rời lớp (giáo viên báo)
-                         - "received": Đã tiếp nhận (Y tế tự tạo khi học sinh trực tiếp xuống)
+                         - "at_clinic": Đang ở Y tế (Y tế tự tạo khi học sinh trực tiếp xuống)
     """
     try:
         _check_teacher_permission()
@@ -85,7 +85,7 @@ def report_student_to_clinic():
         initial_status = data.get("initial_status", "left_class")  # Trạng thái ban đầu
         
         # Validate initial_status
-        valid_statuses = ["left_class", "received"]
+        valid_statuses = ["left_class", "at_clinic"]
         if initial_status not in valid_statuses:
             initial_status = "left_class"
         
@@ -143,8 +143,8 @@ def report_student_to_clinic():
             "reported_by_name": reported_by_name
         }
         
-        # Nếu Y tế tự tạo (received), cập nhật thêm thông tin tiếp nhận
-        if initial_status == "received":
+        # Nếu Y tế tự tạo (at_clinic), cập nhật thêm thông tin tiếp nhận
+        if initial_status == "at_clinic":
             visit_data["arrived_at_clinic_time"] = nowtime()
             visit_data["received_by"] = reported_by_user
             visit_data["received_by_name"] = reported_by_name
