@@ -139,13 +139,22 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 			frappe.logger().info(f"📚 Processing class: {class_id} ({class_title}) - Full info: {class_info}")
 
 			try:
-				# Check if homeroom attendance exists for this class/date
-				attendance_count = frappe.db.count("SIS Class Attendance", {
+				# FIX BUG: Chỉ đếm records với status KHÁC excused để xác định "đã điểm danh"
+				# Vì excused có thể được tạo tự động từ đơn nghỉ phép (leave request)
+				manual_attendance_count = frappe.db.count("SIS Class Attendance", {
+					"class_id": class_id,
+					"date": date,
+					"period": "homeroom",
+					"status": ["in", ["present", "absent", "late"]]
+				})
+				
+				# Đếm tổng số records (bao gồm cả excused) để tính attended_count
+				total_attendance_count = frappe.db.count("SIS Class Attendance", {
 					"class_id": class_id,
 					"date": date,
 					"period": "homeroom"
 				})
-				frappe.logger().info(f"   📊 Attendance count: {attendance_count}")
+				frappe.logger().info(f"   📊 Manual attendance: {manual_attendance_count}, Total: {total_attendance_count}")
 
 				# Get student count in class
 				student_count = frappe.db.count("SIS Class Student", {
@@ -155,7 +164,7 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 
 				# Get last update time
 				last_updated = None
-				if attendance_count > 0:
+				if total_attendance_count > 0:
 					last_record = frappe.get_all("SIS Class Attendance",
 						filters={
 							"class_id": class_id,
@@ -170,19 +179,21 @@ def check_homeroom_attendance_status(date=None, campus_id=None):
 						last_updated = last_record[0].modified
 						frappe.logger().info(f"   🕐 Last updated: {last_updated}")
 
-				# Calculate status
-				if attendance_count == 0:
+				# FIX BUG: Xác định status dựa trên manual_attendance_count (không tính excused tự động)
+				# Khi giáo viên điểm danh, tất cả học sinh đều được ghi nhận (present/absent/late/excused)
+				# Nên nếu manual_attendance_count = 0 nghĩa là chưa điểm danh thủ công
+				if manual_attendance_count == 0:
 					status = "not_started"
 					attended_count = 0
 					attendance_percentage = 0
-				elif attendance_count < student_count:
+				elif total_attendance_count < student_count:
 					status = "pending"
-					attended_count = attendance_count
-					attendance_percentage = round((attendance_count / student_count) * 100, 1)
+					attended_count = total_attendance_count
+					attendance_percentage = round((total_attendance_count / student_count) * 100, 1)
 				else:
 					status = "completed"
-					attended_count = attendance_count
-					attendance_percentage = round((attendance_count / student_count) * 100, 1)
+					attended_count = total_attendance_count
+					attendance_percentage = round((total_attendance_count / student_count) * 100, 1)
 					total_completed += 1
 
 				frappe.logger().info(f"   📈 Status: {status}, Attended: {attended_count}/{student_count} ({attendance_percentage}%)")
