@@ -477,6 +477,9 @@ def verify_otp_and_login(phone_number, otp):
         # Get comprehensive guardian data
         comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
 
+        # Lấy first_login_at từ guardian document
+        first_login_at = frappe.db.get_value("CRM Guardian", guardian["name"], "first_login_at")
+
         # Return success response
         return {
             "success": True,
@@ -487,7 +490,8 @@ def verify_otp_and_login(phone_number, otp):
                     "guardian_id": guardian["guardian_id"],
                     "guardian_name": guardian["guardian_name"],
                     "phone_number": guardian["phone_number"],
-                    "email": guardian.get("email", "")
+                    "email": guardian.get("email", ""),
+                    "first_login_at": str(first_login_at) if first_login_at else None
                 },
                 "user": {
                     "email": user_email,
