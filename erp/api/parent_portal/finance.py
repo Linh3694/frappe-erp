@@ -586,3 +586,94 @@ def get_all_students_finance(finance_year_id=None):
             logs=logs
         )
 
+
+@frappe.whitelist()
+def get_order_student_documents(order_student_id=None):
+    """
+    Lấy danh sách tài liệu (Debit Note, Invoice, Receipt) của một order student.
+    Dành cho phụ huynh xem tài liệu tài chính.
+    
+    Args:
+        order_student_id: ID của SIS Finance Order Student
+    
+    Returns:
+        Danh sách documents
+    """
+    logs = []
+    
+    try:
+        if not order_student_id:
+            order_student_id = frappe.request.args.get('order_student_id')
+        
+        if not order_student_id:
+            return error_response("Thiếu order_student_id", logs=logs)
+        
+        # Kiểm tra phụ huynh
+        parent_id = _get_current_parent()
+        if not parent_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        # Lấy danh sách học sinh của phụ huynh
+        student_ids = _get_parent_students(parent_id)
+        
+        if not student_ids:
+            return error_response("Không có quyền truy cập", logs=logs)
+        
+        # Kiểm tra order_student có thuộc học sinh của phụ huynh không
+        order_student = frappe.db.sql("""
+            SELECT 
+                fos.name,
+                fos.finance_student_id,
+                fs.student_id
+            FROM `tabSIS Finance Order Student` fos
+            INNER JOIN `tabSIS Finance Student` fs ON fos.finance_student_id = fs.name
+            WHERE fos.name = %s
+        """, (order_student_id,), as_dict=True)
+        
+        if not order_student:
+            return error_response("Không tìm thấy thông tin", logs=logs)
+        
+        if order_student[0].student_id not in student_ids:
+            return error_response("Không có quyền truy cập tài liệu này", logs=logs)
+        
+        # Lấy danh sách tài liệu
+        documents = frappe.get_all(
+            "SIS Finance Student Document",
+            filters={"order_student_id": order_student_id},
+            fields=[
+                "name", "order_student_id", "document_type", 
+                "file_url", "file_name", "notes",
+                "uploaded_at", "creation"
+            ],
+            order_by="creation desc"
+        )
+        
+        # Format document type labels
+        document_type_labels = {
+            'debit_note': 'Giấy báo nợ',
+            'invoice': 'Hóa đơn',
+            'receipt': 'Biên lai'
+        }
+        
+        for doc in documents:
+            if doc.get('uploaded_at'):
+                doc['uploaded_at'] = str(doc['uploaded_at'])
+            if doc.get('creation'):
+                doc['creation'] = str(doc['creation'])
+            doc['document_type_label'] = document_type_labels.get(doc.get('document_type'), doc.get('document_type'))
+        
+        logs.append(f"Tìm thấy {len(documents)} tài liệu")
+        
+        return success_response(
+            data=documents,
+            message="Lấy danh sách tài liệu thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Get Order Student Documents Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
