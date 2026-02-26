@@ -39,6 +39,8 @@
   "column_break_payment",
   "outstanding_amount",
   "payment_status",
+  "tuition_paid_elsewhere",
+  "tuition_paid_elsewhere_order",
   "debit_note_section",
   "latest_debit_note_version",
   "latest_debit_note_url",
@@ -203,6 +205,21 @@
    "default": "unpaid",
    "in_list_view": 1,
    "description": "unpaid: Chưa đóng | partial: Đóng một phần | paid: Đã đóng đủ"
+  },
+  {
+   "fieldname": "tuition_paid_elsewhere",
+   "fieldtype": "Check",
+   "label": "Đã đóng HP ở đơn khác",
+   "default": 0,
+   "read_only": 1,
+   "description": "Đánh dấu nếu học sinh đã đóng học phí ở đơn hàng tuition khác trong cùng năm"
+  },
+  {
+   "fieldname": "tuition_paid_elsewhere_order",
+   "fieldtype": "Data",
+   "label": "Đơn hàng đã đóng HP",
+   "read_only": 1,
+   "description": "Tên đơn hàng tuition mà học sinh đã đóng học phí"
   },
   {
    "fieldname": "debit_note_section",

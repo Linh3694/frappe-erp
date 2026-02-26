@@ -399,7 +399,7 @@ def add_students_to_order_v2():
         logs.append(f"Thêm {len(student_ids)} học sinh vào đơn hàng {order_id}")
         
         # Nếu order_type là tuition và exclude_paid_tuition = True, 
-        # lấy danh sách học sinh đã đóng học phí trong năm
+        # lấy danh sách học sinh đã đóng học phí (paid hoặc partial) trong năm
         paid_tuition_student_ids = set()
         if order_doc.order_type == 'tuition' and exclude_paid_tuition:
             paid_students = frappe.db.sql("""
@@ -409,14 +409,14 @@ def add_students_to_order_v2():
                 WHERE o.finance_year_id = %(finance_year_id)s
                 AND o.order_type = 'tuition'
                 AND o.name != %(current_order)s
-                AND os.payment_status = 'paid'
+                AND os.payment_status IN ('paid', 'partial')
             """, {
                 "finance_year_id": order_doc.finance_year_id,
                 "current_order": order_id
             }, as_list=True)
             paid_tuition_student_ids = {r[0] for r in paid_students}
             if paid_tuition_student_ids:
-                logs.append(f"Tìm thấy {len(paid_tuition_student_ids)} học sinh đã đóng học phí trong năm")
+                logs.append(f"Tìm thấy {len(paid_tuition_student_ids)} học sinh đã có ghi nhận học phí trong năm")
         
         created_count = 0
         skipped_count = 0
@@ -547,7 +547,7 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
         offset = (page - 1) * page_size
         total_pages = (total + page_size - 1) // page_size
         
-        # Get students - thêm các fields mới cho milestone payment
+        # Get students - thêm các fields mới cho milestone payment và tuition_paid_elsewhere
         students = frappe.db.sql(f"""
             SELECT 
                 os.name, os.order_id, os.finance_student_id,
@@ -557,7 +557,8 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
                 os.latest_debit_note_version, os.latest_debit_note_url,
                 os.payment_scheme_choice, os.current_milestone_key,
                 os.semester_1_paid, os.semester_2_paid,
-                os.milestone_amounts_json
+                os.milestone_amounts_json,
+                os.tuition_paid_elsewhere, os.tuition_paid_elsewhere_order
             FROM `tabSIS Finance Order Student` os
             WHERE {where_sql}
             ORDER BY os.student_name ASC
@@ -593,7 +594,7 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
 @frappe.whitelist()
 def get_paid_tuition_students(finance_year_id=None, exclude_order_id=None):
     """
-    Lấy danh sách học sinh đã đóng học phí trong năm tài chính.
+    Lấy danh sách học sinh đã có ghi nhận học phí (paid hoặc partial) trong năm tài chính.
     Dùng để filter trong StudentPoolModal khi thêm học sinh vào order tuition.
     
     Args:
@@ -601,7 +602,7 @@ def get_paid_tuition_students(finance_year_id=None, exclude_order_id=None):
         exclude_order_id: ID order cần loại trừ (order hiện tại)
     
     Returns:
-        Danh sách finance_student_id đã đóng học phí
+        Danh sách finance_student_id đã có ghi nhận học phí
     """
     logs = []
     
@@ -617,11 +618,11 @@ def get_paid_tuition_students(finance_year_id=None, exclude_order_id=None):
         if not finance_year_id:
             return validation_error_response("Thiếu finance_year_id", {"finance_year_id": ["Bắt buộc"]})
         
-        # Query học sinh đã đóng học phí trong các order tuition
+        # Query học sinh đã có ghi nhận học phí (paid hoặc partial) trong các order tuition
         where_clause = """
             o.finance_year_id = %(finance_year_id)s
             AND o.order_type = 'tuition'
-            AND os.payment_status = 'paid'
+            AND os.payment_status IN ('paid', 'partial')
         """
         params = {"finance_year_id": finance_year_id}
         

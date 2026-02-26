@@ -17,6 +17,63 @@ from erp.utils.api_response import (
 from .utils import _check_admin_permission
 
 
+def _flag_other_tuition_orders(finance_student_id, paid_order_id, finance_year_id, paid_order_title, logs=None):
+    """
+    Đánh dấu các bản ghi Order Student khác của học sinh trong các order tuition khác.
+    Khi học sinh đã có ghi nhận thanh toán (paid/partial) ở một order tuition,
+    các bản ghi của học sinh đó ở order tuition khác sẽ được flag.
+    
+    Args:
+        finance_student_id: ID của Finance Student
+        paid_order_id: ID của order vừa được cập nhật thanh toán
+        finance_year_id: ID năm tài chính
+        paid_order_title: Tên của order vừa được thanh toán
+        logs: List để append logs
+    
+    Returns:
+        Số lượng bản ghi đã được flag
+    """
+    if logs is None:
+        logs = []
+    
+    try:
+        # Tìm các Order Student của cùng học sinh trong các order tuition khác
+        # có payment_status là unpaid hoặc partial (chưa hoàn thành thanh toán)
+        other_order_students = frappe.db.sql("""
+            SELECT os.name, os.order_id, o.title as order_title
+            FROM `tabSIS Finance Order Student` os
+            JOIN `tabSIS Finance Order` o ON o.name = os.order_id
+            WHERE os.finance_student_id = %(finance_student_id)s
+            AND o.finance_year_id = %(finance_year_id)s
+            AND o.order_type = 'tuition'
+            AND o.name != %(paid_order_id)s
+            AND os.payment_status IN ('unpaid', 'partial')
+            AND (os.tuition_paid_elsewhere IS NULL OR os.tuition_paid_elsewhere = 0)
+        """, {
+            "finance_student_id": finance_student_id,
+            "finance_year_id": finance_year_id,
+            "paid_order_id": paid_order_id
+        }, as_dict=True)
+        
+        flagged_count = 0
+        for os_record in other_order_students:
+            frappe.db.set_value("SIS Finance Order Student", os_record.name, {
+                "tuition_paid_elsewhere": 1,
+                "tuition_paid_elsewhere_order": paid_order_title
+            }, update_modified=True)
+            flagged_count += 1
+            logs.append(f"Đã đánh dấu Order Student {os_record.name} (order: {os_record.order_title})")
+        
+        if flagged_count > 0:
+            logs.append(f"Đã flag {flagged_count} bản ghi Order Student ở các order tuition khác")
+        
+        return flagged_count
+        
+    except Exception as e:
+        logs.append(f"Lỗi flag other tuition orders: {str(e)}")
+        return 0
+
+
 def _update_finance_student_summary(finance_student_id, logs=None):
     """
     Cập nhật tổng hợp tài chính cho Finance Student từ tất cả Order Student.
@@ -130,6 +187,9 @@ def update_order_student_payment():
         # Lưu Order Student (before_save sẽ tự tính outstanding và payment_status)
         order_student.save(ignore_permissions=True)
         
+        # Reload document để lấy giá trị mới nhất sau khi before_save đã tính toán
+        order_student.reload()
+        
         logs.append(f"Đã cập nhật Order Student: {order_student_id}")
         
         # Cascade update lên Finance Student
@@ -138,6 +198,17 @@ def update_order_student_payment():
         # Cập nhật thống kê Order
         order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
         order_doc.update_statistics()
+        
+        # Nếu order_type là tuition và payment_status là paid/partial, flag các order tuition khác
+        flagged_count = 0
+        if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
+            flagged_count = _flag_other_tuition_orders(
+                finance_student_id=finance_student_id,
+                paid_order_id=order_student.order_id,
+                finance_year_id=order_doc.finance_year_id,
+                paid_order_title=order_doc.title,
+                logs=logs
+            )
         
         frappe.db.commit()
         
@@ -148,7 +219,8 @@ def update_order_student_payment():
                 "outstanding_amount": order_student.outstanding_amount,
                 "payment_status": order_student.payment_status,
                 "finance_student_id": finance_student_id,
-                "finance_student_updated": finance_student_updated
+                "finance_student_updated": finance_student_updated,
+                "flagged_count": flagged_count
             },
             message="Cập nhật thành công",
             logs=logs
@@ -325,6 +397,17 @@ def record_milestone_payment():
         order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
         order_doc.update_statistics()
         
+        # Nếu order_type là tuition và payment_status là paid/partial, flag các order tuition khác
+        flagged_count = 0
+        if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
+            flagged_count = _flag_other_tuition_orders(
+                finance_student_id=finance_student_id,
+                paid_order_id=order_student.order_id,
+                finance_year_id=order_doc.finance_year_id,
+                paid_order_title=order_doc.title,
+                logs=logs
+            )
+        
         frappe.db.commit()
         
         # Lấy payment info để trả về
@@ -344,7 +427,8 @@ def record_milestone_payment():
                 "semester_2_paid": order_student.semester_2_paid,
                 "payment_info": payment_info,
                 "finance_student_id": finance_student_id,
-                "finance_student_updated": finance_student_updated
+                "finance_student_updated": finance_student_updated,
+                "flagged_count": flagged_count
             },
             message=f"Ghi nhận thanh toán {milestone_key} thành công",
             logs=logs
