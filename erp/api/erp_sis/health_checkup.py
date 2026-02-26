@@ -505,8 +505,14 @@ def export_health_checkup(school_year_id=None):
         
         data = frappe.db.sql(sql, params, as_dict=True)
         
+        # Lấy tên năm học để frontend tạo tên file
+        school_year_name = frappe.db.get_value("SIS School Year", school_year_id, "title_vn") or school_year_id
+        
         return success_response(
-            data=data,
+            data={
+                "students": data,
+                "school_year_name": school_year_name
+            },
             message=f"Xuất dữ liệu {len(data)} học sinh thành công"
         )
         
