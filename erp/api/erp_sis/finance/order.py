@@ -497,3 +497,75 @@ def assign_order_to_all_students():
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
         return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def toggle_order_active():
+    """
+    Bật/tắt trạng thái is_active của đơn hàng.
+    
+    Body:
+        order_id: ID đơn hàng
+        is_active: True/False - trạng thái mới
+    
+    Returns:
+        Thông tin đơn hàng đã cập nhật
+    """
+    logs = []
+    
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền thay đổi trạng thái", logs=logs)
+        
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+        
+        order_id = data.get('order_id')
+        is_active = data.get('is_active')
+        
+        if not order_id:
+            return validation_error_response(
+                "Thiếu order_id",
+                {"order_id": ["Order ID là bắt buộc"]}
+            )
+        
+        if is_active is None:
+            return validation_error_response(
+                "Thiếu is_active",
+                {"is_active": ["Trạng thái is_active là bắt buộc"]}
+            )
+        
+        # Chuyển đổi is_active sang số
+        is_active_val = 1 if is_active in [True, 1, "1", "true", "True"] else 0
+        
+        logs.append(f"Toggle order {order_id} is_active = {is_active_val}")
+        
+        # Cập nhật đơn hàng
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        order_doc.is_active = is_active_val
+        order_doc.save(ignore_permissions=True)
+        
+        frappe.db.commit()
+        
+        logs.append(f"Đã cập nhật is_active = {is_active_val}")
+        
+        return success_response(
+            data={
+                "name": order_doc.name,
+                "is_active": order_doc.is_active
+            },
+            message=f"Đã {'bật' if is_active_val else 'tắt'} đơn hàng",
+            logs=logs
+        )
+        
+    except frappe.DoesNotExistError:
+        return not_found_response("Không tìm thấy đơn hàng", logs=logs)
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Toggle Order Active Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
