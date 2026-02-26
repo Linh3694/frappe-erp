@@ -1310,13 +1310,15 @@ def get_class_log_detail(class_id=None, date=None):
         periods_result = []
         
         if timetable_instance:
-            # Query attendance cho tiết Homeroom
+            # FIX BUG: Chỉ đếm records với status KHÁC excused
+            # Vì excused có thể được tạo tự động từ đơn nghỉ phép (leave request)
             homeroom_attendance_count = frappe.db.sql("""
                 SELECT COUNT(DISTINCT student_id) as count
                 FROM `tabSIS Class Attendance`
                 WHERE class_id = %(class_id)s
                     AND date = %(date)s
                     AND period = 'Homeroom'
+                    AND status IN ('present', 'absent', 'late')
             """, {
                 "class_id": class_id,
                 "date": date_obj

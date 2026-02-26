@@ -302,6 +302,9 @@ def get_class_attendance(class_id=None, date=None, period=None, skip_cache=None)
 def check_has_attendance(class_id=None, date=None, period=None):
 	"""Check if attendance exists for a class on a date and period.
 	Simple check without cache - returns boolean.
+	
+	FIX BUG: Chỉ đếm records với status KHÁC excused
+	Vì excused có thể được tạo tự động từ đơn nghỉ phép (leave request)
 	"""
 	try:
 		if not class_id:
@@ -314,11 +317,13 @@ def check_has_attendance(class_id=None, date=None, period=None):
 		if not class_id or not date or not period:
 			return error_response(message="Missing required parameters: class_id, date, period", code="MISSING_PARAMETERS")
 		
-		# Simple count query - no cache
+		# FIX BUG: Chỉ đếm records với status KHÁC excused
+		# Vì excused có thể được tạo tự động từ đơn nghỉ phép (leave request)
 		count = frappe.db.count("SIS Class Attendance", filters={
 			"class_id": class_id,
 			"date": date,
 			"period": period,
+			"status": ["in", ["present", "absent", "late"]]
 		})
 		
 		return success_response(data={"has_attendance": count > 0, "count": count})
@@ -522,15 +527,27 @@ def batch_get_classes_attendance_summary(items=None, include_checkin_out=None):
 			stats = attendance_map.get(lookup_key, {})
 			
 			total_students = student_count_map.get(class_id, 0)
-			has_attendance = stats.get('total_attendance', 0) > 0
+			
+			# FIX BUG: Chỉ coi là "đã điểm danh" khi có ít nhất 1 record với status KHÁC excused
+			# Vì excused có thể được tạo tự động từ đơn nghỉ phép (leave request)
+			# Khi giáo viên điểm danh, tất cả học sinh sẽ có status (present/absent/late/excused)
+			# Nên nếu chỉ có excused thì nghĩa là chưa điểm danh thủ công
+			present_count = stats.get('present_count', 0) or 0
+			absent_count = stats.get('absent_count', 0) or 0
+			late_count = stats.get('late_count', 0) or 0
+			excused_count = stats.get('excused_count', 0) or 0
+			
+			# has_attendance = True khi có ít nhất 1 record present/absent/late
+			manual_attendance_count = present_count + absent_count + late_count
+			has_attendance = manual_attendance_count > 0
 			
 			result[result_key] = {
 				'total_students': total_students,
 				'has_attendance': has_attendance,
-				'present_count': stats.get('present_count', 0) or 0,
-				'absent_count': stats.get('absent_count', 0) or 0,
-				'late_count': stats.get('late_count', 0) or 0,
-				'excused_count': stats.get('excused_count', 0) or 0,
+				'present_count': present_count,
+				'absent_count': absent_count,
+				'late_count': late_count,
+				'excused_count': excused_count,
 			}
 			
 			# Add check-in/out if available
@@ -597,10 +614,13 @@ def batch_check_has_attendance(items=None):
 			
 			key = f"{class_id}_{period}" if period != "homeroom" else class_id
 			
+			# FIX BUG: Chỉ đếm records với status KHÁC excused
+			# Vì excused có thể được tạo tự động từ đơn nghỉ phép (leave request)
 			count = frappe.db.count("SIS Class Attendance", filters={
 				"class_id": class_id,
 				"date": date,
 				"period": period,
+				"status": ["in", ["present", "absent", "late"]]
 			})
 			
 			result[key] = {"has_attendance": count > 0, "count": count}

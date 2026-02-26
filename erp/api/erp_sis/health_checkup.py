@@ -41,30 +41,55 @@ def get_students_health_checkup(school_year_id=None):
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
         
+        # Kiểm tra xem doctype SIS Student Health Checkup đã tồn tại chưa
+        checkup_table_exists = frappe.db.sql(
+            "SHOW TABLES LIKE 'tabSIS Student Health Checkup'"
+        )
+        
         # Build query - lấy tất cả học sinh Regular class theo năm học
-        # LEFT JOIN với SIS Student Health Checkup để biết đã có data chưa
         campus_filter = "AND cs.campus_id = %(campus_id)s" if campus_id else ""
         
-        sql = f"""
-            SELECT 
-                s.name as student_id,
-                s.student_name,
-                s.student_code,
-                s.gender,
-                c.name as class_id,
-                c.class_name,
-                shc.name as checkup_id
-            FROM `tabSIS Class Student` cs
-            INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
-            INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
-            LEFT JOIN `tabSIS Student Health Checkup` shc 
-                ON shc.student_id = cs.student_id 
-                AND shc.school_year_id = cs.school_year_id
-            WHERE cs.school_year_id = %(school_year_id)s
-                AND c.class_type = 'Regular'
-                {campus_filter}
-            ORDER BY c.class_name ASC, s.student_name ASC
-        """
+        if checkup_table_exists:
+            # LEFT JOIN với SIS Student Health Checkup để biết đã có data chưa
+            sql = f"""
+                SELECT 
+                    s.name as student_id,
+                    s.student_name,
+                    s.student_code,
+                    s.gender,
+                    c.name as class_id,
+                    c.class_name,
+                    shc.name as checkup_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                LEFT JOIN `tabSIS Student Health Checkup` shc 
+                    ON shc.student_id = cs.student_id 
+                    AND shc.school_year_id = cs.school_year_id
+                WHERE cs.school_year_id = %(school_year_id)s
+                    AND c.class_type = 'Regular'
+                    {campus_filter}
+                ORDER BY c.class_name ASC, s.student_name ASC
+            """
+        else:
+            # Nếu chưa có table health checkup, chỉ lấy danh sách học sinh
+            sql = f"""
+                SELECT 
+                    s.name as student_id,
+                    s.student_name,
+                    s.student_code,
+                    s.gender,
+                    c.name as class_id,
+                    c.class_name,
+                    NULL as checkup_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                WHERE cs.school_year_id = %(school_year_id)s
+                    AND c.class_type = 'Regular'
+                    {campus_filter}
+                ORDER BY c.class_name ASC, s.student_name ASC
+            """
         
         params = {"school_year_id": school_year_id}
         if campus_id:
@@ -126,13 +151,18 @@ def get_student_health_checkup(student_id=None, school_year_id=None):
         class_name = class_info[0].class_name if class_info else None
         class_id = class_info[0].class_id if class_info else None
         
-        # Lấy dữ liệu khám sức khoẻ nếu có
-        checkup_data = frappe.db.get_value(
-            "SIS Student Health Checkup",
-            {"student_id": student_id, "school_year_id": school_year_id},
-            ["*"],
-            as_dict=True
+        # Lấy dữ liệu khám sức khoẻ nếu có (kiểm tra table tồn tại trước)
+        checkup_data = None
+        checkup_table_exists = frappe.db.sql(
+            "SHOW TABLES LIKE 'tabSIS Student Health Checkup'"
         )
+        if checkup_table_exists:
+            checkup_data = frappe.db.get_value(
+                "SIS Student Health Checkup",
+                {"student_id": student_id, "school_year_id": school_year_id},
+                ["*"],
+                as_dict=True
+            )
         
         # Build response
         response_data = {
@@ -198,6 +228,16 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
+        
+        # Kiểm tra xem doctype đã tồn tại chưa
+        checkup_table_exists = frappe.db.sql(
+            "SHOW TABLES LIKE 'tabSIS Student Health Checkup'"
+        )
+        if not checkup_table_exists:
+            return error_response(
+                message="Vui lòng chạy 'bench migrate' để tạo bảng dữ liệu khám sức khoẻ",
+                code="TABLE_NOT_EXISTS"
+            )
         
         # Kiểm tra xem đã có record chưa
         existing = frappe.db.get_value(
@@ -297,62 +337,122 @@ def export_health_checkup(school_year_id=None):
         
         campus_filter = "AND cs.campus_id = %(campus_id)s" if campus_id else ""
         
+        # Kiểm tra xem doctype đã tồn tại chưa
+        checkup_table_exists = frappe.db.sql(
+            "SHOW TABLES LIKE 'tabSIS Student Health Checkup'"
+        )
+        
         # Query tất cả học sinh kèm data khám (nếu có)
-        sql = f"""
-            SELECT 
-                s.student_code,
-                s.student_name,
-                s.gender,
-                c.class_name,
-                shc.height,
-                shc.weight,
-                shc.water_content,
-                shc.water_range,
-                shc.protein,
-                shc.protein_range,
-                shc.body_fat_mass,
-                shc.body_fat_range,
-                shc.mineral,
-                shc.mineral_range,
-                shc.target_weight,
-                shc.weight_control,
-                shc.muscle_control,
-                shc.fat_control,
-                shc.systolic_pressure,
-                shc.diastolic_pressure,
-                shc.heart_rate,
-                shc.left_eye_no_glasses,
-                shc.right_eye_no_glasses,
-                shc.left_eye_with_glasses,
-                shc.right_eye_with_glasses,
-                shc.other_eye_disease,
-                shc.refractive_error,
-                shc.ent_disease,
-                shc.dental_disease,
-                shc.musculoskeletal_disease,
-                shc.circulation,
-                shc.respiratory,
-                shc.digestive,
-                shc.renal_urinary,
-                shc.other_clinical,
-                shc.bmi,
-                shc.pbf,
-                shc.body_score,
-                shc.nutrition_conclusion,
-                shc.nutrition_classification,
-                shc.disease_condition,
-                shc.health_classification
-            FROM `tabSIS Class Student` cs
-            INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
-            INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
-            LEFT JOIN `tabSIS Student Health Checkup` shc 
-                ON shc.student_id = cs.student_id 
-                AND shc.school_year_id = cs.school_year_id
-            WHERE cs.school_year_id = %(school_year_id)s
-                AND c.class_type = 'Regular'
-                {campus_filter}
-            ORDER BY c.class_name ASC, s.student_name ASC
-        """
+        if checkup_table_exists:
+            sql = f"""
+                SELECT 
+                    s.student_code,
+                    s.student_name,
+                    s.gender,
+                    c.class_name,
+                    shc.height,
+                    shc.weight,
+                    shc.water_content,
+                    shc.water_range,
+                    shc.protein,
+                    shc.protein_range,
+                    shc.body_fat_mass,
+                    shc.body_fat_range,
+                    shc.mineral,
+                    shc.mineral_range,
+                    shc.target_weight,
+                    shc.weight_control,
+                    shc.muscle_control,
+                    shc.fat_control,
+                    shc.systolic_pressure,
+                    shc.diastolic_pressure,
+                    shc.heart_rate,
+                    shc.left_eye_no_glasses,
+                    shc.right_eye_no_glasses,
+                    shc.left_eye_with_glasses,
+                    shc.right_eye_with_glasses,
+                    shc.other_eye_disease,
+                    shc.refractive_error,
+                    shc.ent_disease,
+                    shc.dental_disease,
+                    shc.musculoskeletal_disease,
+                    shc.circulation,
+                    shc.respiratory,
+                    shc.digestive,
+                    shc.renal_urinary,
+                    shc.other_clinical,
+                    shc.bmi,
+                    shc.pbf,
+                    shc.body_score,
+                    shc.nutrition_conclusion,
+                    shc.nutrition_classification,
+                    shc.disease_condition,
+                    shc.health_classification
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                LEFT JOIN `tabSIS Student Health Checkup` shc 
+                    ON shc.student_id = cs.student_id 
+                    AND shc.school_year_id = cs.school_year_id
+                WHERE cs.school_year_id = %(school_year_id)s
+                    AND c.class_type = 'Regular'
+                    {campus_filter}
+                ORDER BY c.class_name ASC, s.student_name ASC
+            """
+        else:
+            # Nếu chưa có table health checkup, chỉ lấy danh sách học sinh với các cột NULL
+            sql = f"""
+                SELECT 
+                    s.student_code,
+                    s.student_name,
+                    s.gender,
+                    c.class_name,
+                    NULL as height,
+                    NULL as weight,
+                    NULL as water_content,
+                    NULL as water_range,
+                    NULL as protein,
+                    NULL as protein_range,
+                    NULL as body_fat_mass,
+                    NULL as body_fat_range,
+                    NULL as mineral,
+                    NULL as mineral_range,
+                    NULL as target_weight,
+                    NULL as weight_control,
+                    NULL as muscle_control,
+                    NULL as fat_control,
+                    NULL as systolic_pressure,
+                    NULL as diastolic_pressure,
+                    NULL as heart_rate,
+                    NULL as left_eye_no_glasses,
+                    NULL as right_eye_no_glasses,
+                    NULL as left_eye_with_glasses,
+                    NULL as right_eye_with_glasses,
+                    NULL as other_eye_disease,
+                    NULL as refractive_error,
+                    NULL as ent_disease,
+                    NULL as dental_disease,
+                    NULL as musculoskeletal_disease,
+                    NULL as circulation,
+                    NULL as respiratory,
+                    NULL as digestive,
+                    NULL as renal_urinary,
+                    NULL as other_clinical,
+                    NULL as bmi,
+                    NULL as pbf,
+                    NULL as body_score,
+                    NULL as nutrition_conclusion,
+                    NULL as nutrition_classification,
+                    NULL as disease_condition,
+                    NULL as health_classification
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                WHERE cs.school_year_id = %(school_year_id)s
+                    AND c.class_type = 'Regular'
+                    {campus_filter}
+                ORDER BY c.class_name ASC, s.student_name ASC
+            """
         
         params = {"school_year_id": school_year_id}
         if campus_id:
@@ -408,6 +508,16 @@ def import_health_checkup(school_year_id=None, data=None):
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
+        
+        # Kiểm tra xem doctype đã tồn tại chưa
+        checkup_table_exists = frappe.db.sql(
+            "SHOW TABLES LIKE 'tabSIS Student Health Checkup'"
+        )
+        if not checkup_table_exists:
+            return error_response(
+                message="Vui lòng chạy 'bench migrate' để tạo bảng dữ liệu khám sức khoẻ",
+                code="TABLE_NOT_EXISTS"
+            )
         
         # Các fields được phép import
         allowed_fields = [

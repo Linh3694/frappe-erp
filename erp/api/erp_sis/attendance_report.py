@@ -332,8 +332,11 @@ def get_period_attendance_overview(date=None, period=None, campus_id=None, educa
             absent_all += absent
             late_all += late
             
-            # Kiểm tra đã điểm danh hay chưa
-            has_attendance = sum([present, absent, late, excused, left_early]) > 0
+            # FIX BUG: Chỉ coi là "đã điểm danh" khi có ít nhất 1 record với status KHÁC excused
+            # Vì excused có thể được tạo tự động từ đơn nghỉ phép (leave request)
+            # Khi giáo viên điểm danh, tất cả học sinh sẽ có status (present/absent/late/excused)
+            # Nên nếu chỉ có excused thì nghĩa là chưa điểm danh thủ công
+            has_attendance = sum([present, absent, late, left_early]) > 0
             if has_attendance:
                 completed_classes += 1
             else:
@@ -594,7 +597,8 @@ def get_class_attendance_summary(class_id=None, date=None):
                 "late": late,
                 "excused": excused,
                 "left_early": left_early,
-                "has_attendance": sum([present, absent, late, excused, left_early]) > 0,
+                # FIX BUG: Không tính excused vì có thể tự động từ đơn nghỉ phép
+                "has_attendance": sum([present, absent, late, left_early]) > 0,
                 "rate": round(present / total_students * 100, 1) if total_students > 0 else 0
             })
         
