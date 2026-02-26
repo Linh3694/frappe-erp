@@ -650,7 +650,7 @@ def get_order_student_documents(order_student_id=None):
         
         # Format document type labels
         document_type_labels = {
-            'debit_note': 'Giấy báo nợ',
+            'debit_note': 'Thông báo học phí',
             'invoice': 'Hóa đơn',
             'receipt': 'Biên lai'
         }
