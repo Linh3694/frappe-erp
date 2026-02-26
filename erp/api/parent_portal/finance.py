@@ -231,31 +231,26 @@ def get_student_finance_detail(finance_student_id=None):
             as_dict=True
         ) if finance_year else None
         
-        # Lấy danh sách các khoản phí (order items) - chỉ lấy order đang active
-        order_items = frappe.db.sql("""
+        # Lấy danh sách các khoản phí từ SIS Finance Order Student - chỉ lấy order đang active
+        order_students = frappe.db.sql("""
             SELECT 
-                foi.name as item_id,
-                foi.order_id,
+                fos.name as item_id,
+                fos.order_id,
                 fo.title as order_title,
                 fo.order_type,
                 fo.description as order_description,
-                foi.amount,
-                foi.discount_amount,
-                foi.final_amount,
-                foi.paid_amount,
-                foi.outstanding_amount,
-                foi.payment_status,
-                foi.deadline,
-                foi.late_fee,
-                foi.last_payment_date
-            FROM `tabSIS Finance Order Item` foi
-            INNER JOIN `tabSIS Finance Order` fo ON foi.order_id = fo.name
-            WHERE foi.finance_student_id = %s
+                fos.total_amount as final_amount,
+                fos.paid_amount,
+                fos.outstanding_amount,
+                fos.payment_status
+            FROM `tabSIS Finance Order Student` fos
+            INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
+            WHERE fos.finance_student_id = %s
               AND fo.is_active = 1
             ORDER BY fo.sort_order ASC, fo.creation ASC
         """, (finance_student_id,), as_dict=True)
         
-        logs.append(f"Tìm thấy {len(order_items)} khoản phí")
+        logs.append(f"Tìm thấy {len(order_students)} khoản phí")
         
         # Format kết quả
         order_type_display = {
@@ -273,7 +268,7 @@ def get_student_finance_detail(finance_student_id=None):
         }
         
         items = []
-        for item in order_items:
+        for item in order_students:
             item_data = {
                 "item_id": item.item_id,
                 "order_id": item.order_id,
@@ -281,31 +276,12 @@ def get_student_finance_detail(finance_student_id=None):
                 "order_type": item.order_type,
                 "order_type_display": order_type_display.get(item.order_type, item.order_type),
                 "order_description": item.order_description,
-                "payment_type": item.payment_type,
-                "payment_type_display": 'Chia kỳ' if item.payment_type == 'installment' else 'Một lần',
-                "installment_count": item.installment_count,
-                "amount": item.amount or 0,
-                "discount_amount": item.discount_amount or 0,
                 "final_amount": item.final_amount or 0,
                 "paid_amount": item.paid_amount or 0,
                 "outstanding_amount": item.outstanding_amount or 0,
                 "payment_status": item.payment_status,
-                "payment_status_display": status_display.get(item.payment_status, item.payment_status),
-                "deadline": str(item.deadline) if item.deadline else None,
-                "late_fee": item.late_fee or 0,
-                "last_payment_date": str(item.last_payment_date) if item.last_payment_date else None,
-                "is_overdue": item.deadline and getdate(item.deadline) < getdate(nowdate()) and item.payment_status != 'paid'
+                "payment_status_display": status_display.get(item.payment_status, item.payment_status)
             }
-            
-            # Lấy chi tiết các kỳ thanh toán nếu là chia kỳ
-            if item.payment_type == 'installment':
-                installments = frappe.get_all(
-                    "SIS Finance Order Installment",
-                    filters={"parent": item.item_id},
-                    fields=["installment_number", "amount", "deadline", "paid_amount", "payment_status", "payment_date"],
-                    order_by="installment_number asc"
-                )
-                item_data["installments"] = installments
             
             items.append(item_data)
         
@@ -525,15 +501,15 @@ def get_all_students_finance(finance_year_id=None):
             if active_finance:
                 af = active_finance[0]
                 
-                # Tính totals từ order items có is_active = 1
+                # Tính totals từ SIS Finance Order Student có is_active = 1
                 order_totals = frappe.db.sql("""
                     SELECT 
-                        COALESCE(SUM(foi.final_amount), 0) as total_amount,
-                        COALESCE(SUM(foi.paid_amount), 0) as paid_amount,
-                        COALESCE(SUM(foi.outstanding_amount), 0) as outstanding_amount
-                    FROM `tabSIS Finance Order Item` foi
-                    INNER JOIN `tabSIS Finance Order` fo ON foi.order_id = fo.name
-                    WHERE foi.finance_student_id = %s
+                        COALESCE(SUM(fos.total_amount), 0) as total_amount,
+                        COALESCE(SUM(fos.paid_amount), 0) as paid_amount,
+                        COALESCE(SUM(fos.outstanding_amount), 0) as outstanding_amount
+                    FROM `tabSIS Finance Order Student` fos
+                    INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
+                    WHERE fos.finance_student_id = %s
                       AND fo.is_active = 1
                 """, (af.finance_student_id,), as_dict=True)
                 
