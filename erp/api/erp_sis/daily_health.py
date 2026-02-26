@@ -770,6 +770,153 @@ def get_student_examination_history():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_daily_health_report_data():
+    """
+    Lấy dữ liệu báo cáo y tế hàng ngày (cho xuất Excel).
+    Trả về danh sách visits kèm examinations chi tiết.
+    
+    Params:
+        - date: Ngày cần lấy dữ liệu (optional, default: today)
+    
+    Returns:
+        - data: Danh sách visits với examinations, mỗi examination là một dòng
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = frappe.local.form_dict
+        request_args = frappe.request.args
+        
+        report_date = data.get("date") or request_args.get("date") or today()
+        
+        # Lấy tất cả visits trong ngày
+        visits = frappe.get_all(
+            "SIS Daily Health Visit",
+            filters={"visit_date": report_date},
+            fields=[
+                "name", "student_id", "student_name", "student_code",
+                "class_id", "class_name", "visit_date", "reason",
+                "leave_class_time", "arrive_clinic_time", "leave_clinic_time",
+                "status", "reported_by_name", "received_by_name", "creation"
+            ],
+            order_by="leave_class_time asc"
+        )
+        
+        if not visits:
+            return success_response(
+                data={"data": [], "total": 0},
+                message="Không có dữ liệu trong ngày"
+            )
+        
+        # Lấy danh sách visit_id
+        visit_ids = [v.name for v in visits]
+        
+        # Lấy tất cả examinations của các visits trong ngày
+        examinations = frappe.get_all(
+            "SIS Health Examination",
+            filters={"visit_id": ["in", visit_ids]},
+            fields=[
+                "name", "visit_id", "student_id", "symptoms", "disease_classification",
+                "examination_notes", "treatment_type", "treatment_details", "notes",
+                "outcome", "examined_by_name", "creation"
+            ],
+            order_by="creation asc"
+        )
+        
+        # Tạo map visit_id -> list examinations
+        exam_map = {}
+        for exam in examinations:
+            vid = exam.get("visit_id")
+            if vid not in exam_map:
+                exam_map[vid] = []
+            exam_map[vid].append(exam)
+        
+        # Map treatment_type -> label
+        treatment_type_labels = {
+            "first_aid": "Sơ cứu",
+            "medication": "Cho thuốc",
+            "rest": "Nghỉ ngơi",
+            "other": "Khác"
+        }
+        
+        # Map outcome -> label
+        outcome_labels = {
+            "return_class": "Về lớp",
+            "picked_up": "Phụ huynh đón",
+            "transferred": "Chuyển viện"
+        }
+        
+        # Map status -> label
+        status_labels = {
+            "left_class": "Rời khỏi lớp, chờ tiếp nhận",
+            "at_clinic": "Đã tiếp nhận",
+            "examining": "Đang khám",
+            "returned": "Đã về lớp",
+            "picked_up": "Phụ huynh đón",
+            "transferred": "Chuyển viện"
+        }
+        
+        # Tạo danh sách kết quả - mỗi examination là một dòng
+        result = []
+        for visit in visits:
+            visit_exams = exam_map.get(visit.name, [])
+            
+            base_data = {
+                "visit_id": visit.name,
+                "student_name": visit.student_name,
+                "student_code": visit.student_code,
+                "class_name": visit.class_name,
+                "reason": visit.reason,
+                "leave_class_time": str(visit.leave_class_time)[:5] if visit.leave_class_time else "",
+                "arrive_clinic_time": str(visit.arrive_clinic_time)[:5] if visit.arrive_clinic_time else "",
+                "leave_clinic_time": str(visit.leave_clinic_time)[:5] if visit.leave_clinic_time else "",
+                "status": status_labels.get(visit.status, visit.status),
+                "reported_by_name": visit.reported_by_name or "",
+                "received_by_name": visit.received_by_name or ""
+            }
+            
+            if visit_exams:
+                # Có examinations - tạo một dòng cho mỗi examination
+                for exam in visit_exams:
+                    row = {**base_data}
+                    row["symptoms"] = exam.get("symptoms") or ""
+                    row["disease_classification"] = exam.get("disease_classification") or ""
+                    row["treatment_type"] = treatment_type_labels.get(exam.get("treatment_type"), exam.get("treatment_type") or "")
+                    row["treatment_details"] = exam.get("treatment_details") or ""
+                    row["examination_notes"] = exam.get("examination_notes") or ""
+                    row["notes"] = exam.get("notes") or ""
+                    row["outcome"] = outcome_labels.get(exam.get("outcome"), exam.get("outcome") or "")
+                    row["examined_by_name"] = exam.get("examined_by_name") or ""
+                    result.append(row)
+            else:
+                # Không có examination - vẫn tạo một dòng với thông tin visit
+                row = {**base_data}
+                row["symptoms"] = ""
+                row["disease_classification"] = ""
+                row["treatment_type"] = ""
+                row["treatment_details"] = ""
+                row["examination_notes"] = ""
+                row["notes"] = ""
+                row["outcome"] = ""
+                row["examined_by_name"] = ""
+                result.append(row)
+        
+        return success_response(
+            data={"data": result, "total": len(result)},
+            message="Lấy dữ liệu báo cáo thành công"
+        )
+    
+    except Exception as e:
+        frappe.logger().error(f"Error getting daily health report data: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        return error_response(
+            message=f"Lỗi khi lấy dữ liệu báo cáo: {str(e)}",
+            code="GET_REPORT_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def get_students_at_clinic():
     """
     Lấy danh sách học sinh đang ở Y tế cho một lớp (cho LessonLog điểm danh)
