@@ -1,0 +1,501 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:CHECKUP-{YYYY}{MM}{DD}-{#####}",
+ "creation": "2025-02-26 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_info_section",
+  "student_id",
+  "student_name",
+  "student_code",
+  "column_break_basic_1",
+  "school_year_id",
+  "campus_id",
+  "checkup_date",
+  "body_metrics_section",
+  "height",
+  "weight",
+  "column_break_body_1",
+  "water_content",
+  "water_range",
+  "column_break_body_2",
+  "protein",
+  "protein_range",
+  "column_break_body_3",
+  "body_fat_mass",
+  "body_fat_range",
+  "column_break_body_4",
+  "mineral",
+  "mineral_range",
+  "body_targets_section",
+  "target_weight",
+  "weight_control",
+  "column_break_targets_1",
+  "muscle_control",
+  "fat_control",
+  "blood_pressure_section",
+  "systolic_pressure",
+  "diastolic_pressure",
+  "column_break_bp_1",
+  "heart_rate",
+  "eye_exam_section",
+  "left_eye_no_glasses",
+  "right_eye_no_glasses",
+  "column_break_eye_1",
+  "left_eye_with_glasses",
+  "right_eye_with_glasses",
+  "column_break_eye_2",
+  "other_eye_disease",
+  "refractive_error",
+  "specialist_exam_section",
+  "ent_disease",
+  "column_break_specialist_1",
+  "dental_disease",
+  "column_break_specialist_2",
+  "musculoskeletal_disease",
+  "internal_medicine_section",
+  "circulation",
+  "respiratory",
+  "column_break_internal_1",
+  "digestive",
+  "renal_urinary",
+  "column_break_internal_2",
+  "other_clinical",
+  "conclusion_section",
+  "bmi",
+  "pbf",
+  "body_score",
+  "column_break_conclusion_1",
+  "nutrition_conclusion",
+  "nutrition_classification",
+  "column_break_conclusion_2",
+  "disease_condition",
+  "health_classification"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_info_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "student_id.student_name",
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên học sinh",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "student_id.student_code",
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã học sinh",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_basic_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Cơ sở",
+   "options": "SIS Campus"
+  },
+  {
+   "default": "Today",
+   "fieldname": "checkup_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày khám"
+  },
+  {
+   "fieldname": "body_metrics_section",
+   "fieldtype": "Section Break",
+   "label": "Kết quả chỉ số cơ thể"
+  },
+  {
+   "description": "cm",
+   "fieldname": "height",
+   "fieldtype": "Float",
+   "label": "Chiều cao",
+   "precision": "1"
+  },
+  {
+   "description": "kg",
+   "fieldname": "weight",
+   "fieldtype": "Float",
+   "label": "Cân nặng",
+   "precision": "1"
+  },
+  {
+   "fieldname": "column_break_body_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Lít",
+   "fieldname": "water_content",
+   "fieldtype": "Float",
+   "label": "Lượng nước",
+   "precision": "1"
+  },
+  {
+   "fieldname": "water_range",
+   "fieldtype": "Data",
+   "label": "Giới hạn nước"
+  },
+  {
+   "fieldname": "column_break_body_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "kg",
+   "fieldname": "protein",
+   "fieldtype": "Float",
+   "label": "Protein",
+   "precision": "1"
+  },
+  {
+   "fieldname": "protein_range",
+   "fieldtype": "Data",
+   "label": "Giới hạn protein"
+  },
+  {
+   "fieldname": "column_break_body_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "kg",
+   "fieldname": "body_fat_mass",
+   "fieldtype": "Float",
+   "label": "Lượng chất béo",
+   "precision": "1"
+  },
+  {
+   "fieldname": "body_fat_range",
+   "fieldtype": "Data",
+   "label": "Giới hạn chất béo"
+  },
+  {
+   "fieldname": "column_break_body_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "kg",
+   "fieldname": "mineral",
+   "fieldtype": "Float",
+   "label": "Lượng khoáng chất",
+   "precision": "2"
+  },
+  {
+   "fieldname": "mineral_range",
+   "fieldtype": "Data",
+   "label": "Giới hạn khoáng chất"
+  },
+  {
+   "fieldname": "body_targets_section",
+   "fieldtype": "Section Break",
+   "label": "Mục tiêu cân nặng"
+  },
+  {
+   "description": "kg",
+   "fieldname": "target_weight",
+   "fieldtype": "Float",
+   "label": "Cân nặng cần hướng tới",
+   "precision": "1"
+  },
+  {
+   "description": "kg - Số cân nặng cần kiểm soát (+ tăng, - giảm)",
+   "fieldname": "weight_control",
+   "fieldtype": "Float",
+   "label": "Kiểm soát cân nặng",
+   "precision": "1"
+  },
+  {
+   "fieldname": "column_break_targets_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "kg",
+   "fieldname": "muscle_control",
+   "fieldtype": "Float",
+   "label": "Kiểm soát cơ",
+   "precision": "1"
+  },
+  {
+   "description": "kg",
+   "fieldname": "fat_control",
+   "fieldtype": "Float",
+   "label": "Kiểm soát chất béo",
+   "precision": "1"
+  },
+  {
+   "fieldname": "blood_pressure_section",
+   "fieldtype": "Section Break",
+   "label": "Kết quả khám huyết áp"
+  },
+  {
+   "description": "mmHg",
+   "fieldname": "systolic_pressure",
+   "fieldtype": "Int",
+   "label": "Tâm thu"
+  },
+  {
+   "description": "mmHg",
+   "fieldname": "diastolic_pressure",
+   "fieldtype": "Int",
+   "label": "Tâm trương"
+  },
+  {
+   "fieldname": "column_break_bp_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "lần/phút",
+   "fieldname": "heart_rate",
+   "fieldtype": "Int",
+   "label": "Nhịp tim"
+  },
+  {
+   "fieldname": "eye_exam_section",
+   "fieldtype": "Section Break",
+   "label": "Kết quả khám mắt"
+  },
+  {
+   "description": "/10",
+   "fieldname": "left_eye_no_glasses",
+   "fieldtype": "Data",
+   "label": "Mắt trái (không kính)"
+  },
+  {
+   "description": "/10",
+   "fieldname": "right_eye_no_glasses",
+   "fieldtype": "Data",
+   "label": "Mắt phải (không kính)"
+  },
+  {
+   "fieldname": "column_break_eye_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "/10",
+   "fieldname": "left_eye_with_glasses",
+   "fieldtype": "Data",
+   "label": "Mắt trái (có kính)"
+  },
+  {
+   "description": "/10",
+   "fieldname": "right_eye_with_glasses",
+   "fieldtype": "Data",
+   "label": "Mắt phải (có kính)"
+  },
+  {
+   "fieldname": "column_break_eye_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "other_eye_disease",
+   "fieldtype": "Data",
+   "label": "Bệnh về mắt khác"
+  },
+  {
+   "fieldname": "refractive_error",
+   "fieldtype": "Data",
+   "label": "Tật khúc xạ"
+  },
+  {
+   "fieldname": "specialist_exam_section",
+   "fieldtype": "Section Break",
+   "label": "Khám chuyên khoa"
+  },
+  {
+   "fieldname": "ent_disease",
+   "fieldtype": "Data",
+   "label": "Bệnh về TMH (Tai Mũi Họng)"
+  },
+  {
+   "fieldname": "column_break_specialist_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "dental_disease",
+   "fieldtype": "Data",
+   "label": "Bệnh về RHM (Răng Hàm Mặt)"
+  },
+  {
+   "fieldname": "column_break_specialist_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "musculoskeletal_disease",
+   "fieldtype": "Data",
+   "label": "Bệnh về CXK (Cơ Xương Khớp)"
+  },
+  {
+   "fieldname": "internal_medicine_section",
+   "fieldtype": "Section Break",
+   "label": "Kết quả khám nội khoa"
+  },
+  {
+   "fieldname": "circulation",
+   "fieldtype": "Data",
+   "label": "Tuần hoàn"
+  },
+  {
+   "fieldname": "respiratory",
+   "fieldtype": "Data",
+   "label": "Hô hấp"
+  },
+  {
+   "fieldname": "column_break_internal_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "digestive",
+   "fieldtype": "Data",
+   "label": "Tiêu hóa"
+  },
+  {
+   "fieldname": "renal_urinary",
+   "fieldtype": "Data",
+   "label": "Thận - tiết niệu"
+  },
+  {
+   "fieldname": "column_break_internal_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "other_clinical",
+   "fieldtype": "Data",
+   "label": "Khám lâm sàng khác"
+  },
+  {
+   "fieldname": "conclusion_section",
+   "fieldtype": "Section Break",
+   "label": "Kết luận"
+  },
+  {
+   "description": "kg/m²",
+   "fieldname": "bmi",
+   "fieldtype": "Float",
+   "label": "BMI (Chỉ số khối cơ thể)",
+   "precision": "2"
+  },
+  {
+   "description": "%",
+   "fieldname": "pbf",
+   "fieldtype": "Float",
+   "label": "PBF (Phần trăm chất béo)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "body_score",
+   "fieldtype": "Int",
+   "label": "Điểm số cơ thể"
+  },
+  {
+   "fieldname": "column_break_conclusion_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "nutrition_conclusion",
+   "fieldtype": "Data",
+   "label": "Kết luận dinh dưỡng"
+  },
+  {
+   "fieldname": "nutrition_classification",
+   "fieldtype": "Data",
+   "label": "Phân loại dinh dưỡng"
+  },
+  {
+   "fieldname": "column_break_conclusion_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "disease_condition",
+   "fieldtype": "Data",
+   "label": "Tình trạng bệnh tật"
+  },
+  {
+   "fieldname": "health_classification",
+   "fieldtype": "Data",
+   "label": "Phân loại sức khỏe"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-02-26 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Student Health Checkup",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1,
+ "unique_together": [["student_id", "school_year_id"]]
+}
