@@ -73,7 +73,10 @@
   "nutrition_classification",
   "column_break_conclusion_2",
   "disease_condition",
-  "health_classification"
+  "health_classification",
+  "notes_section",
+  "doctor_recommendation",
+  "reference_notes"
  ],
  "fields": [
   {
@@ -444,6 +447,21 @@
    "fieldname": "health_classification",
    "fieldtype": "Data",
    "label": "Phân loại sức khỏe"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "doctor_recommendation",
+   "fieldtype": "Text",
+   "label": "Đề nghị của bác sĩ"
+  },
+  {
+   "fieldname": "reference_notes",
+   "fieldtype": "Text",
+   "label": "Tham chiếu"
   }
  ],
  "index_web_pages_for_search": 0,
