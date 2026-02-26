@@ -231,7 +231,7 @@ def get_student_finance_detail(finance_student_id=None):
             as_dict=True
         ) if finance_year else None
         
-        # Lấy danh sách các khoản phí (order items)
+        # Lấy danh sách các khoản phí (order items) - chỉ lấy order đã published/closed
         order_items = frappe.db.sql("""
             SELECT 
                 foi.name as item_id,
@@ -254,6 +254,7 @@ def get_student_finance_detail(finance_student_id=None):
             INNER JOIN `tabSIS Finance Order` fo ON foi.order_id = fo.name
             WHERE foi.finance_student_id = %s
               AND fo.is_active = 1
+              AND fo.status IN ('published', 'closed')
             ORDER BY fo.sort_order ASC, fo.creation ASC
         """, (finance_student_id,), as_dict=True)
         
@@ -311,6 +312,21 @@ def get_student_finance_detail(finance_student_id=None):
             
             items.append(item_data)
         
+        # Tính lại totals từ các order items đã filter (chỉ published/closed)
+        filtered_total = sum(item.get("final_amount", 0) for item in items)
+        filtered_paid = sum(item.get("paid_amount", 0) for item in items)
+        filtered_outstanding = sum(item.get("outstanding_amount", 0) for item in items)
+        
+        # Tính payment_status dựa trên số liệu đã filter
+        if filtered_total == 0:
+            filtered_status = 'unpaid'
+        elif filtered_paid >= filtered_total:
+            filtered_status = 'paid'
+        elif filtered_paid > 0:
+            filtered_status = 'partial'
+        else:
+            filtered_status = 'unpaid'
+        
         result = {
             "finance_student": {
                 "id": finance_student_id,
@@ -318,11 +334,11 @@ def get_student_finance_detail(finance_student_id=None):
                 "student_name": finance_student.student_name,
                 "student_code": finance_student.student_code,
                 "class_title": finance_student.class_title,
-                "total_amount": finance_student.total_amount or 0,
-                "paid_amount": finance_student.paid_amount or 0,
-                "outstanding_amount": finance_student.outstanding_amount or 0,
-                "payment_status": finance_student.payment_status,
-                "payment_status_display": status_display.get(finance_student.payment_status, finance_student.payment_status)
+                "total_amount": filtered_total,
+                "paid_amount": filtered_paid,
+                "outstanding_amount": filtered_outstanding,
+                "payment_status": filtered_status,
+                "payment_status_display": status_display.get(filtered_status, filtered_status)
             },
             "finance_year": {
                 "id": finance_student.finance_year_id,
@@ -395,6 +411,12 @@ def get_all_students_finance():
         total_paid = 0
         total_outstanding = 0
         
+        status_display = {
+            'unpaid': 'Chưa đóng',
+            'partial': 'Đóng một phần',
+            'paid': 'Đã đóng đủ'
+        }
+        
         for student_id in student_ids:
             # Lấy thông tin học sinh
             student = frappe.db.get_value(
@@ -413,23 +435,13 @@ def get_all_students_finance():
                     fs.name as finance_student_id,
                     fs.finance_year_id,
                     fy.title as finance_year_title,
-                    fs.class_title,
-                    fs.total_amount,
-                    fs.paid_amount,
-                    fs.outstanding_amount,
-                    fs.payment_status
+                    fs.class_title
                 FROM `tabSIS Finance Student` fs
                 INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
                 WHERE fs.student_id = %s
                   AND fy.is_active = 1
                 LIMIT 1
             """, (student_id,), as_dict=True)
-            
-            status_display = {
-                'unpaid': 'Chưa đóng',
-                'partial': 'Đóng một phần',
-                'paid': 'Đã đóng đủ'
-            }
             
             student_data = {
                 "student_id": student_id,
@@ -440,21 +452,47 @@ def get_all_students_finance():
             
             if active_finance:
                 af = active_finance[0]
+                
+                # Tính totals từ order items có status = published/closed
+                order_totals = frappe.db.sql("""
+                    SELECT 
+                        COALESCE(SUM(foi.final_amount), 0) as total_amount,
+                        COALESCE(SUM(foi.paid_amount), 0) as paid_amount,
+                        COALESCE(SUM(foi.outstanding_amount), 0) as outstanding_amount
+                    FROM `tabSIS Finance Order Item` foi
+                    INNER JOIN `tabSIS Finance Order` fo ON foi.order_id = fo.name
+                    WHERE foi.finance_student_id = %s
+                      AND fo.is_active = 1
+                      AND fo.status IN ('published', 'closed')
+                """, (af.finance_student_id,), as_dict=True)
+                
+                ot = order_totals[0] if order_totals else {"total_amount": 0, "paid_amount": 0, "outstanding_amount": 0}
+                
+                # Tính payment_status
+                if ot["total_amount"] == 0:
+                    payment_status = 'unpaid'
+                elif ot["paid_amount"] >= ot["total_amount"]:
+                    payment_status = 'paid'
+                elif ot["paid_amount"] > 0:
+                    payment_status = 'partial'
+                else:
+                    payment_status = 'unpaid'
+                
                 student_data.update({
                     "finance_student_id": af.finance_student_id,
                     "finance_year_id": af.finance_year_id,
                     "finance_year_title": af.finance_year_title,
                     "class_title": af.class_title,
-                    "total_amount": af.total_amount or 0,
-                    "paid_amount": af.paid_amount or 0,
-                    "outstanding_amount": af.outstanding_amount or 0,
-                    "payment_status": af.payment_status,
-                    "payment_status_display": status_display.get(af.payment_status, af.payment_status)
+                    "total_amount": ot["total_amount"],
+                    "paid_amount": ot["paid_amount"],
+                    "outstanding_amount": ot["outstanding_amount"],
+                    "payment_status": payment_status,
+                    "payment_status_display": status_display.get(payment_status, payment_status)
                 })
                 
-                total_amount += (af.total_amount or 0)
-                total_paid += (af.paid_amount or 0)
-                total_outstanding += (af.outstanding_amount or 0)
+                total_amount += ot["total_amount"]
+                total_paid += ot["paid_amount"]
+                total_outstanding += ot["outstanding_amount"]
             
             students_finance.append(student_data)
         
