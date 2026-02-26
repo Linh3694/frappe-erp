@@ -31,7 +31,8 @@ from .order import (
     update_order,
     delete_order,
     assign_order_to_students,
-    assign_order_to_all_students
+    assign_order_to_all_students,
+    toggle_order_active
 )
 
 # Order Items APIs
@@ -121,6 +122,7 @@ __all__ = [
     'delete_order',
     'assign_order_to_students',
     'assign_order_to_all_students',
+    'toggle_order_active',
     
     # Order Items
     'get_order_items',
