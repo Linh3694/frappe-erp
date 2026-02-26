@@ -366,10 +366,67 @@ def get_student_finance_detail(finance_student_id=None):
 
 
 @frappe.whitelist()
-def get_all_students_finance():
+def get_finance_years():
+    """
+    Lấy danh sách năm tài chính của các học sinh thuộc phụ huynh.
+    Dùng để hiển thị dropdown chọn năm học.
+    
+    Returns:
+        Danh sách năm tài chính unique
+    """
+    logs = []
+    
+    try:
+        # Kiểm tra phụ huynh
+        parent_id = _get_current_parent()
+        if not parent_id:
+            return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
+        
+        # Lấy danh sách học sinh của phụ huynh
+        student_ids = _get_parent_students(parent_id)
+        
+        if not student_ids:
+            return success_response(data=[], message="Không có học sinh", logs=logs)
+        
+        # Lấy danh sách năm tài chính unique
+        placeholders = ', '.join(['%s'] * len(student_ids))
+        finance_years = frappe.db.sql(f"""
+            SELECT DISTINCT
+                fy.name as finance_year_id,
+                fy.title,
+                fy.is_active,
+                sy.title_vn as school_year_name_vn,
+                sy.title_en as school_year_name_en
+            FROM `tabSIS Finance Student` fs
+            INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
+            LEFT JOIN `tabSIS School Year` sy ON fy.school_year_id = sy.name
+            WHERE fs.student_id IN ({placeholders})
+            ORDER BY fy.start_date DESC
+        """, tuple(student_ids), as_dict=True)
+        
+        return success_response(
+            data=finance_years,
+            message="Lấy danh sách năm tài chính thành công",
+            logs=logs
+        )
+        
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Parent Portal Get Finance Years Error")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            logs=logs
+        )
+
+
+@frappe.whitelist()
+def get_all_students_finance(finance_year_id=None):
     """
     Lấy tổng hợp tài chính của tất cả học sinh của phụ huynh.
     Dùng để hiển thị overview trên dashboard.
+    
+    Args:
+        finance_year_id: ID năm tài chính (optional). Nếu không truyền, lấy năm active.
     
     Returns:
         Tổng hợp tài chính của tất cả học sinh
@@ -377,7 +434,11 @@ def get_all_students_finance():
     logs = []
     
     try:
-        logs.append("Lấy tổng hợp tài chính tất cả học sinh")
+        # Lấy finance_year_id từ query params nếu không truyền vào
+        if not finance_year_id:
+            finance_year_id = frappe.request.args.get('finance_year_id')
+        
+        logs.append(f"Lấy tổng hợp tài chính tất cả học sinh, finance_year_id={finance_year_id}")
         
         # Kiểm tra phụ huynh
         parent_id = _get_current_parent()
@@ -429,19 +490,33 @@ def get_all_students_finance():
             if not student:
                 continue
             
-            # Lấy năm tài chính đang active của học sinh
-            active_finance = frappe.db.sql("""
-                SELECT 
-                    fs.name as finance_student_id,
-                    fs.finance_year_id,
-                    fy.title as finance_year_title,
-                    fs.class_title
-                FROM `tabSIS Finance Student` fs
-                INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
-                WHERE fs.student_id = %s
-                  AND fy.is_active = 1
-                LIMIT 1
-            """, (student_id,), as_dict=True)
+            # Lấy năm tài chính - nếu có filter thì dùng filter, nếu không thì lấy năm active
+            if finance_year_id:
+                active_finance = frappe.db.sql("""
+                    SELECT 
+                        fs.name as finance_student_id,
+                        fs.finance_year_id,
+                        fy.title as finance_year_title,
+                        fs.class_title
+                    FROM `tabSIS Finance Student` fs
+                    INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
+                    WHERE fs.student_id = %s
+                      AND fs.finance_year_id = %s
+                    LIMIT 1
+                """, (student_id, finance_year_id), as_dict=True)
+            else:
+                active_finance = frappe.db.sql("""
+                    SELECT 
+                        fs.name as finance_student_id,
+                        fs.finance_year_id,
+                        fy.title as finance_year_title,
+                        fs.class_title
+                    FROM `tabSIS Finance Student` fs
+                    INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
+                    WHERE fs.student_id = %s
+                      AND fy.is_active = 1
+                    LIMIT 1
+                """, (student_id,), as_dict=True)
             
             student_data = {
                 "student_id": student_id,
@@ -496,6 +571,27 @@ def get_all_students_finance():
             
             students_finance.append(student_data)
         
+        # Lấy thông tin năm tài chính đang chọn
+        selected_year_info = None
+        if finance_year_id:
+            selected_year_info = frappe.db.get_value(
+                "SIS Finance Year",
+                finance_year_id,
+                ["name as finance_year_id", "title", "is_active"],
+                as_dict=True
+            )
+        elif students_finance and students_finance[0].get("finance_year_id"):
+            # Lấy từ student đầu tiên có finance
+            for s in students_finance:
+                if s.get("finance_year_id"):
+                    selected_year_info = frappe.db.get_value(
+                        "SIS Finance Year",
+                        s["finance_year_id"],
+                        ["name as finance_year_id", "title", "is_active"],
+                        as_dict=True
+                    )
+                    break
+        
         return success_response(
             data={
                 "students": students_finance,
@@ -503,7 +599,8 @@ def get_all_students_finance():
                     "total_amount": total_amount,
                     "paid_amount": total_paid,
                     "outstanding_amount": total_outstanding
-                }
+                },
+                "selected_finance_year": selected_year_info
             },
             message="Lấy thông tin thành công",
             logs=logs
