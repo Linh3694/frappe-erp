@@ -58,7 +58,7 @@ def get_students_health_checkup(school_year_id=None):
                     s.student_code,
                     s.gender,
                     c.name as class_id,
-                    c.class_name,
+                    c.title as class_name,
                     shc.name as checkup_id
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
@@ -67,9 +67,9 @@ def get_students_health_checkup(school_year_id=None):
                     ON shc.student_id = cs.student_id 
                     AND shc.school_year_id = cs.school_year_id
                 WHERE cs.school_year_id = %(school_year_id)s
-                    AND c.class_type = 'Regular'
+                    AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.class_name ASC, s.student_name ASC
+                ORDER BY c.title as class_name ASC, s.student_name ASC
             """
         else:
             # Nếu chưa có table health checkup, chỉ lấy danh sách học sinh
@@ -80,15 +80,15 @@ def get_students_health_checkup(school_year_id=None):
                     s.student_code,
                     s.gender,
                     c.name as class_id,
-                    c.class_name,
+                    c.title as class_name,
                     NULL as checkup_id
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
                 WHERE cs.school_year_id = %(school_year_id)s
-                    AND c.class_type = 'Regular'
+                    AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.class_name ASC, s.student_name ASC
+                ORDER BY c.title as class_name ASC, s.student_name ASC
             """
         
         params = {"school_year_id": school_year_id}
@@ -141,12 +141,12 @@ def get_student_health_checkup(student_id=None, school_year_id=None):
         
         # Lấy thông tin lớp của học sinh trong năm học này
         class_info = frappe.db.sql("""
-            SELECT c.name as class_id, c.class_name
+            SELECT c.name as class_id, c.title as class_name
             FROM `tabSIS Class Student` cs
             INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
             WHERE cs.student_id = %(student_id)s
                 AND cs.school_year_id = %(school_year_id)s
-                AND c.class_type = 'Regular'
+                AND c.class_type = 'regular'
             LIMIT 1
         """, {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
         
@@ -351,7 +351,7 @@ def export_health_checkup(school_year_id=None):
                     s.student_code,
                     s.student_name,
                     s.gender,
-                    c.class_name,
+                    c.title as class_name,
                     shc.height,
                     shc.weight,
                     shc.water_content,
@@ -397,9 +397,9 @@ def export_health_checkup(school_year_id=None):
                     ON shc.student_id = cs.student_id 
                     AND shc.school_year_id = cs.school_year_id
                 WHERE cs.school_year_id = %(school_year_id)s
-                    AND c.class_type = 'Regular'
+                    AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.class_name ASC, s.student_name ASC
+                ORDER BY c.title as class_name ASC, s.student_name ASC
             """
         else:
             # Nếu chưa có table health checkup, chỉ lấy danh sách học sinh với các cột NULL
@@ -408,7 +408,7 @@ def export_health_checkup(school_year_id=None):
                     s.student_code,
                     s.student_name,
                     s.gender,
-                    c.class_name,
+                    c.title as class_name,
                     NULL as height,
                     NULL as weight,
                     NULL as water_content,
@@ -451,9 +451,9 @@ def export_health_checkup(school_year_id=None):
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
                 WHERE cs.school_year_id = %(school_year_id)s
-                    AND c.class_type = 'Regular'
+                    AND c.class_type = 'regular'
                     {campus_filter}
-                ORDER BY c.class_name ASC, s.student_name ASC
+                ORDER BY c.title as class_name ASC, s.student_name ASC
             """
         
         params = {"school_year_id": school_year_id}
