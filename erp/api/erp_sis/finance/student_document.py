@@ -66,14 +66,14 @@ def upload_student_document():
         
         logs.append(f"Uploading file: {file_name} for student: {order_student_id}")
         
-        # Lưu file vào Frappe File Manager
+        # Lưu file vào Frappe File Manager (public để có thể xem trực tiếp)
         file_doc = frappe.get_doc({
             "doctype": "File",
             "file_name": file_name,
             "attached_to_doctype": "SIS Finance Order Student",
             "attached_to_name": order_student_id,
             "content": uploaded_file.read(),
-            "is_private": 1
+            "is_private": 0  # Public file để có thể xem trực tiếp qua URL
         })
         file_doc.insert(ignore_permissions=True)
         
@@ -313,7 +313,7 @@ def bulk_upload_debit_notes():
                     "attached_to_doctype": "SIS Finance Order Student",
                     "attached_to_name": order_student_id,
                     "content": uploaded_file.read(),
-                    "is_private": 1
+                    "is_private": 0  # Public file để có thể xem trực tiếp qua URL
                 })
                 file_doc.insert(ignore_permissions=True)
                 
