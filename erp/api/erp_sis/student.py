@@ -992,18 +992,36 @@ def get_students_for_selection():
 def search_students(search_term=None):
     """Search students - returns all matching results without pagination"""
     try:
-        # Normalize parameters: ưu tiên lấy từ form_dict vì GET params thường nằm ở đây
+        # Lấy search_term từ nhiều nguồn khác nhau (Frappe có thể đặt params ở nhiều nơi)
         form = frappe.local.form_dict or {}
         
-        # Debug log để xem tất cả params
-        frappe.logger().info(f"[search_students] form_dict: {form}")
-        frappe.logger().info(f"[search_students] search_term param: '{search_term}'")
+        # Trong Frappe, GET params thường được merge vào form_dict, nhưng cũng check request.args
+        request_args = {}
+        if hasattr(frappe, 'request') and frappe.request:
+            # Werkzeug request.args là ImmutableMultiDict
+            request_args = dict(frappe.request.args) if frappe.request.args else {}
         
-        # Lấy search_term từ form_dict nếu có
-        if form.get('search_term'):
-            search_term = form.get('search_term')
+        # Debug log
+        frappe.logger().info(f"[search_students] form_dict keys: {list(form.keys())}")
+        frappe.logger().info(f"[search_students] form_dict search_term: '{form.get('search_term')}'")
+        frappe.logger().info(f"[search_students] request.args: {request_args}")
+        frappe.logger().info(f"[search_students] function param search_term: '{search_term}'")
         
-        frappe.logger().info(f"[search_students] FINAL search_term: '{search_term}'")
+        # Ưu tiên: function param (Frappe đã parse) > form_dict > request.args
+        final_search_term = search_term
+        if not final_search_term or not str(final_search_term).strip():
+            final_search_term = form.get('search_term')
+        if not final_search_term or not str(final_search_term).strip():
+            final_search_term = request_args.get('search_term')
+        
+        # Clean up - có thể là string hoặc list (MultiDict)
+        if isinstance(final_search_term, list):
+            final_search_term = final_search_term[0] if final_search_term else ''
+        if isinstance(final_search_term, bytes):
+            final_search_term = final_search_term.decode('utf-8')
+        final_search_term = str(final_search_term).strip() if final_search_term else ''
+        
+        frappe.logger().info(f"[search_students] FINAL search_term: '{final_search_term}'")
         
         # Get current user's campus
         campus_id = get_current_campus_from_context()
@@ -1014,16 +1032,15 @@ def search_students(search_term=None):
         # Build search terms and campus filter (use parameterized queries)
         where_clauses = ["campus_id = %s"]
         params = [campus_id]
-        if search_term and str(search_term).strip():
+        if final_search_term:
             # For student_code: prefix match (starts with)
             # For student_name: contains match (can be anywhere)
-            search_clean = str(search_term).strip()
-            like_prefix = f"{search_clean}%"  # Starts with (for student_code)
-            like_contains = f"%{search_clean}%"  # Contains (for student_name)
+            like_prefix = f"{final_search_term}%"  # Starts with (for student_code)
+            like_contains = f"%{final_search_term}%"  # Contains (for student_name)
             where_clauses.append("(LOWER(student_name) LIKE LOWER(%s) OR LOWER(student_code) LIKE LOWER(%s))")
             params.extend([like_contains, like_prefix])
         conditions = " AND ".join(where_clauses)
-        frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
+        frappe.logger().info(f"[search_students] FINAL WHERE: {conditions} | params: {params}")
         
         # Get all matching students without pagination
         sql_query = (
