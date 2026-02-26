@@ -76,7 +76,7 @@ def _flag_other_tuition_orders(finance_student_id, paid_order_id, finance_year_i
 
 def _update_finance_student_summary(finance_student_id, logs=None):
     """
-    Cập nhật tổng hợp tài chính cho Finance Student từ tất cả Order Student.
+    Cập nhật tổng hợp tài chính cho Finance Student từ các Order Student thuộc order active.
     
     Args:
         finance_student_id: ID của Finance Student
@@ -89,13 +89,16 @@ def _update_finance_student_summary(finance_student_id, logs=None):
         logs = []
     
     try:
-        # Tính tổng từ tất cả Order Student của học sinh
+        # Chỉ tính tổng từ Order Student thuộc order active, loại bỏ tuition đã đóng ở nơi khác
         summary = frappe.db.sql("""
             SELECT 
-                COALESCE(SUM(total_amount), 0) as total_amount,
-                COALESCE(SUM(paid_amount), 0) as paid_amount
-            FROM `tabSIS Finance Order Student`
-            WHERE finance_student_id = %s
+                COALESCE(SUM(fos.total_amount), 0) as total_amount,
+                COALESCE(SUM(fos.paid_amount), 0) as paid_amount
+            FROM `tabSIS Finance Order Student` fos
+            INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
+            WHERE fos.finance_student_id = %s
+              AND fo.is_active = 1
+              AND IFNULL(fos.tuition_paid_elsewhere, 0) != 1
         """, (finance_student_id,), as_dict=True)[0]
         
         total_amount = summary.get('total_amount', 0)
@@ -207,14 +210,9 @@ def update_order_student_payment():
         
         logs.append(f"Đã cập nhật Order Student: {order_student_id}, paid_amount={order_student.paid_amount}")
         
-        # Cascade update lên Finance Student
-        finance_student_updated = _update_finance_student_summary(finance_student_id, logs)
-        
-        # Cập nhật thống kê Order
         order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
-        order_doc.update_statistics()
         
-        # Nếu order_type là tuition và payment_status là paid/partial, flag các order tuition khác
+        # Flag các order tuition khác TRƯỚC khi tính summary (để summary loại bỏ đúng)
         flagged_count = 0
         if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
             flagged_count = _flag_other_tuition_orders(
@@ -224,6 +222,12 @@ def update_order_student_payment():
                 paid_order_title=order_doc.title,
                 logs=logs
             )
+        
+        # Cascade update lên Finance Student (giờ đã flag chính xác)
+        finance_student_updated = _update_finance_student_summary(finance_student_id, logs)
+        
+        # Cập nhật thống kê Order
+        order_doc.update_statistics()
         
         frappe.db.commit()
         
@@ -405,14 +409,9 @@ def record_milestone_payment():
         
         logs.append(f"Đã cập nhật Order Student: {order_student_id}")
         
-        # Cascade update lên Finance Student
-        finance_student_updated = _update_finance_student_summary(finance_student_id, logs)
-        
-        # Cập nhật thống kê Order
         order_doc = frappe.get_doc("SIS Finance Order", order_student.order_id)
-        order_doc.update_statistics()
         
-        # Nếu order_type là tuition và payment_status là paid/partial, flag các order tuition khác
+        # Flag các order tuition khác TRƯỚC khi tính summary
         flagged_count = 0
         if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
             flagged_count = _flag_other_tuition_orders(
@@ -422,6 +421,12 @@ def record_milestone_payment():
                 paid_order_title=order_doc.title,
                 logs=logs
             )
+        
+        # Cascade update lên Finance Student (giờ đã flag chính xác)
+        finance_student_updated = _update_finance_student_summary(finance_student_id, logs)
+        
+        # Cập nhật thống kê Order
+        order_doc.update_statistics()
         
         frappe.db.commit()
         

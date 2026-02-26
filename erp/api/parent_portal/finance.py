@@ -53,6 +53,78 @@ def _get_parent_students(parent_id):
     return student_ids
 
 
+def _filter_orders_for_parent_portal(order_items):
+    """
+    Lọc danh sách order items cho hiển thị trên Parent Portal.
+    
+    Tuition orders là các mốc giá thay thế nhau - PHHS chỉ đóng 1 order tuition.
+    - Loại bỏ order tuition có tuition_paid_elsewhere = 1 (đã đóng ở order khác)
+    - Nếu còn nhiều order tuition chưa đóng, chỉ giữ order mới nhất
+    
+    Non-tuition orders (service, activity, other) giữ nguyên - cộng dồn bình thường.
+    """
+    if not order_items:
+        return order_items
+    
+    non_tuition = [i for i in order_items if i.get('order_type') != 'tuition']
+    tuition = [i for i in order_items if i.get('order_type') == 'tuition']
+    
+    if not tuition:
+        return order_items
+    
+    # Loại bỏ tuition đã đóng ở nơi khác
+    tuition_valid = [i for i in tuition if not i.get('tuition_paid_elsewhere')]
+    
+    if len(tuition_valid) <= 1:
+        return non_tuition + tuition_valid
+    
+    # Ưu tiên order đang được đóng (có paid_amount > 0)
+    with_payment = [i for i in tuition_valid if (i.get('paid_amount') or 0) > 0]
+    if with_payment:
+        return non_tuition + [with_payment[0]]
+    
+    # Chưa đóng order nào → giữ order mới nhất (sort_order cao nhất, creation mới nhất)
+    tuition_valid.sort(
+        key=lambda x: (x.get('sort_order', 0) or 0, str(x.get('order_creation', ''))),
+        reverse=True
+    )
+    return non_tuition + [tuition_valid[0]]
+
+
+def _calculate_student_finance_totals(finance_student_id):
+    """
+    Tính tổng tài chính cho 1 học sinh, xử lý dedup tuition orders.
+    Dùng cho bảng tổng quan (get_all_students_finance).
+    """
+    all_items = frappe.db.sql("""
+        SELECT 
+            fos.name,
+            fos.total_amount,
+            fos.paid_amount,
+            fos.outstanding_amount,
+            fo.order_type,
+            IFNULL(fos.tuition_paid_elsewhere, 0) as tuition_paid_elsewhere,
+            fo.sort_order,
+            fo.creation as order_creation
+        FROM `tabSIS Finance Order Student` fos
+        INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
+        WHERE fos.finance_student_id = %s
+          AND fo.is_active = 1
+    """, (finance_student_id,), as_dict=True)
+    
+    relevant = _filter_orders_for_parent_portal(all_items)
+    
+    total = sum(i.get('total_amount') or 0 for i in relevant)
+    paid = sum(i.get('paid_amount') or 0 for i in relevant)
+    outstanding = sum(i.get('outstanding_amount') or 0 for i in relevant)
+    
+    return {
+        "total_amount": total,
+        "paid_amount": paid,
+        "outstanding_amount": outstanding
+    }
+
+
 @frappe.whitelist()
 def get_student_finance(student_id=None):
     """
@@ -231,7 +303,7 @@ def get_student_finance_detail(finance_student_id=None):
             as_dict=True
         ) if finance_year else None
         
-        # Lấy danh sách các khoản phí từ SIS Finance Order Student - chỉ lấy order đang active
+        # Lấy danh sách các khoản phí - bao gồm thông tin tuition dedup
         order_students = frappe.db.sql("""
             SELECT 
                 fos.name as item_id,
@@ -242,7 +314,10 @@ def get_student_finance_detail(finance_student_id=None):
                 fos.total_amount as final_amount,
                 fos.paid_amount,
                 fos.outstanding_amount,
-                fos.payment_status
+                fos.payment_status,
+                IFNULL(fos.tuition_paid_elsewhere, 0) as tuition_paid_elsewhere,
+                fo.sort_order,
+                fo.creation as order_creation
             FROM `tabSIS Finance Order Student` fos
             INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
             WHERE fos.finance_student_id = %s
@@ -250,7 +325,10 @@ def get_student_finance_detail(finance_student_id=None):
             ORDER BY fo.sort_order ASC, fo.creation ASC
         """, (finance_student_id,), as_dict=True)
         
-        logs.append(f"Tìm thấy {len(order_students)} khoản phí")
+        # Lọc tuition orders: chỉ giữ 1 order tuition duy nhất cho PHHS
+        order_students = _filter_orders_for_parent_portal(order_students)
+        
+        logs.append(f"Hiển thị {len(order_students)} khoản phí (sau lọc tuition)")
         
         # Format kết quả
         order_type_display = {
@@ -285,7 +363,7 @@ def get_student_finance_detail(finance_student_id=None):
             
             items.append(item_data)
         
-        # Tính lại totals từ các order items đã filter (chỉ published/closed)
+        # Tính totals từ các items đã lọc
         filtered_total = sum(item.get("final_amount", 0) for item in items)
         filtered_paid = sum(item.get("paid_amount", 0) for item in items)
         filtered_outstanding = sum(item.get("outstanding_amount", 0) for item in items)
@@ -501,19 +579,8 @@ def get_all_students_finance(finance_year_id=None):
             if active_finance:
                 af = active_finance[0]
                 
-                # Tính totals từ SIS Finance Order Student có is_active = 1
-                order_totals = frappe.db.sql("""
-                    SELECT 
-                        COALESCE(SUM(fos.total_amount), 0) as total_amount,
-                        COALESCE(SUM(fos.paid_amount), 0) as paid_amount,
-                        COALESCE(SUM(fos.outstanding_amount), 0) as outstanding_amount
-                    FROM `tabSIS Finance Order Student` fos
-                    INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
-                    WHERE fos.finance_student_id = %s
-                      AND fo.is_active = 1
-                """, (af.finance_student_id,), as_dict=True)
-                
-                ot = order_totals[0] if order_totals else {"total_amount": 0, "paid_amount": 0, "outstanding_amount": 0}
+                # Tính totals - xử lý dedup tuition orders (chỉ tính 1 order tuition duy nhất)
+                ot = _calculate_student_finance_totals(af.finance_student_id)
                 
                 # Tính payment_status
                 if ot["total_amount"] == 0:
