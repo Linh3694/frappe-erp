@@ -103,9 +103,11 @@ def get_students_health_checkup(school_year_id=None):
         )
         
     except Exception as e:
-        frappe.log_error(f"Error getting students health checkup: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        frappe.log_error(f"Error getting students health checkup: {str(e)}\n{error_trace}")
         return error_response(
-            message="Có lỗi xảy ra khi lấy danh sách học sinh",
+            message=f"Có lỗi xảy ra khi lấy danh sách học sinh: {str(e)}",
             code="FETCH_STUDENTS_ERROR"
         )
 
