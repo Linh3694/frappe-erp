@@ -1737,14 +1737,14 @@ def get_my_today_tasks(date=None):
             # Lấy tất cả class_ids để query class log status một lần
             class_ids = list(set([p['class_id'] for p in periods_data]))
             
-            # Query class log status cho tất cả class + period + subject hôm nay
+            # Query class log status cho tất cả class + period hôm nay
+            # SIS Class Log Subject có field `period` (không phải period_name) và không có subject_id
             class_log_map = {}
             if class_ids:
                 logs = frappe.db.sql("""
                     SELECT 
                         cls.class_id,
-                        cls.period_name,
-                        cls.subject_id,
+                        cls.period,
                         CASE 
                             WHEN cls.modified > cls.creation THEN 'updated'
                             WHEN cls.name IS NOT NULL THEN 'entered'
@@ -1759,12 +1759,14 @@ def get_my_today_tasks(date=None):
                 }, as_dict=True)
                 
                 for log in logs:
-                    key = f"{log['class_id']}|{log['period_name']}|{log['subject_id']}"
+                    # Key chỉ cần class_id + period (không có subject_id trong bảng này)
+                    key = f"{log['class_id']}|{log['period']}"
                     class_log_map[key] = log['status']
             
             # Build today_periods result
             for p in periods_data:
-                key = f"{p['class_id']}|{p['period_name']}|{p['subject_id']}"
+                # Match bằng class_id + period_name
+                key = f"{p['class_id']}|{p['period_name']}"
                 status = class_log_map.get(key, 'not_entered')
                 
                 today_periods.append({
