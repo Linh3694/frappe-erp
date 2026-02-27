@@ -1438,6 +1438,7 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
         
         # Lấy tất cả tiết dạy của GV bộ môn trong ngày (chỉ lớp Regular, bỏ tiểu học)
         # Bỏ tiểu học = education_stage_id != 'EDU-STAGE-00001'
+        # Sử dụng GROUP BY để loại bỏ duplicate (do JOIN với nhiều bảng)
         scheduled_periods = frappe.db.sql("""
             SELECT 
                 COALESCE(trt.teacher_id, tr.teacher_1_id) as teacher_id,
@@ -1445,7 +1446,7 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
                 c.title as class_title,
                 eg.education_stage_id,
                 tc.period_name,
-                COALESCE(ts.title_vn, sub.title) as subject_name,
+                MAX(COALESCE(ts.title_vn, sub.title)) as subject_name,
                 tr.subject_id
             FROM `tabSIS Timetable Instance Row` tr
             INNER JOIN `tabSIS Timetable Instance` ti ON tr.parent = ti.name
@@ -1466,6 +1467,7 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
                 AND c.school_year_id = %(school_year)s
                 AND (eg.education_stage_id IS NULL OR eg.education_stage_id != 'EDU-STAGE-00001')
                 {campus_filter}
+            GROUP BY COALESCE(trt.teacher_id, tr.teacher_1_id), ti.class_id, tc.period_name, tr.subject_id, c.title, eg.education_stage_id
         """.format(
             campus_filter="AND c.campus_id = %(campus_id)s" if campus_id else ""
         ), {
