@@ -1198,6 +1198,7 @@ def get_class_log_dashboard(date=None, campus_id=None):
             classes_result.append({
                 "class_id": class_id,
                 "class_title": cls.title,
+                "homeroom_teacher_id": cls.homeroom_teacher,
                 "homeroom_teacher_name": teacher_names.get(cls.homeroom_teacher),
                 "education_stage_id": cls.get('education_stage_id'),
                 "total_study_periods": total_study,
@@ -1375,4 +1376,252 @@ def get_class_log_detail(class_id=None, date=None):
         return error_response(
             message=f"Lỗi khi lấy chi tiết sổ đầu bài: {str(e)}",
             code="GET_CLASS_LOG_DETAIL_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_subject_teachers_dashboard(date=None, campus_id=None):
+    """
+    Lấy dashboard sổ đầu bài theo giáo viên bộ môn
+    Trả về danh sách tất cả GV có tiết dạy trong ngày cùng tiến độ nhập sổ
+    
+    Args:
+        date: Ngày cần xem (YYYY-MM-DD), mặc định là hôm nay
+        campus_id: Campus ID (optional)
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                summary: { total_teachers, completed_teachers, incomplete_teachers },
+                teachers: [
+                    {
+                        teacher_id, teacher_name, total_periods, entered_periods, rate,
+                        education_stage_ids: [str],
+                        classes: [
+                            { class_id, class_title, education_stage_id, period, subject_name, status }
+                        ]
+                    }
+                ]
+            }
+        }
+    """
+    try:
+        if not date:
+            date = frappe.request.args.get('date')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        
+        if not date:
+            date = frappe.utils.today()
+        
+        date_obj = frappe.utils.getdate(date)
+        
+        # Lấy campus từ context nếu không truyền
+        if not campus_id:
+            try:
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
+            except Exception:
+                pass
+        
+        # Lấy active school year
+        school_year_filters = {"is_enable": 1}
+        if campus_id:
+            school_year_filters["campus_id"] = campus_id
+        
+        school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+        
+        # day_of_week format: mon, tue, wed, thu, fri, sat, sun
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
+        
+        # Lấy tất cả tiết dạy của GV bộ môn trong ngày (chỉ lớp Regular, bỏ tiểu học)
+        # Bỏ tiểu học = education_stage_id != 'EDU-STAGE-00001'
+        scheduled_periods = frappe.db.sql("""
+            SELECT 
+                COALESCE(trt.teacher_id, tr.teacher_1_id) as teacher_id,
+                ti.class_id,
+                c.title as class_title,
+                eg.education_stage_id,
+                tc.period_name,
+                COALESCE(ts.title_vn, sub.title) as subject_name,
+                tr.subject_id
+            FROM `tabSIS Timetable Instance Row` tr
+            INNER JOIN `tabSIS Timetable Instance` ti ON tr.parent = ti.name
+            INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+            INNER JOIN `tabSIS Class` c ON ti.class_id = c.name
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+            LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+            LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+            LEFT JOIN `tabSIS Timetable Instance Row Teacher` trt ON trt.parent = tr.name 
+                AND trt.idx = (SELECT MIN(idx) FROM `tabSIS Timetable Instance Row Teacher` WHERE parent = tr.name)
+            WHERE ti.start_date <= %(date)s
+                AND (ti.end_date >= %(date)s OR ti.end_date IS NULL)
+                AND tr.day_of_week = %(day)s
+                AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
+                AND c.class_type = 'Regular'
+                AND c.school_year_id = %(school_year)s
+                AND (eg.education_stage_id IS NULL OR eg.education_stage_id != 'EDU-STAGE-00001')
+                {campus_filter}
+        """.format(
+            campus_filter="AND c.campus_id = %(campus_id)s" if campus_id else ""
+        ), {
+            "date": date_obj,
+            "day": day_of_week_short,
+            "school_year": school_year,
+            "campus_id": campus_id
+        }, as_dict=True)
+        
+        if not scheduled_periods:
+            return success_response(
+                data={
+                    "summary": {
+                        "total_teachers": 0,
+                        "completed_teachers": 0,
+                        "incomplete_teachers": 0
+                    },
+                    "teachers": []
+                },
+                message="Không có tiết dạy nào trong ngày này"
+            )
+        
+        # Lấy tên giáo viên
+        teacher_ids = list(set(p['teacher_id'] for p in scheduled_periods if p.get('teacher_id')))
+        teacher_names = {}
+        if teacher_ids:
+            teacher_data = frappe.db.sql("""
+                SELECT t.name, u.full_name
+                FROM `tabSIS Teacher` t
+                INNER JOIN `tabUser` u ON t.user_id = u.name
+                WHERE t.name IN %(teacher_ids)s
+            """, {"teacher_ids": teacher_ids}, as_dict=True)
+            teacher_names = {t['name']: t['full_name'] for t in teacher_data}
+        
+        # Lấy tất cả class logs trong ngày cho các lớp liên quan
+        class_ids = list(set(p['class_id'] for p in scheduled_periods))
+        
+        entered_logs = {}
+        if class_ids:
+            logs_data = frappe.db.sql("""
+                SELECT 
+                    cls.class_id,
+                    cls.period,
+                    cls.recorded_by,
+                    cls.general_comment,
+                    cls.modified,
+                    cls.creation,
+                    COUNT(clst.name) as student_log_count
+                FROM `tabSIS Class Log Subject` cls
+                LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                WHERE cls.class_id IN %(class_ids)s
+                    AND cls.log_date = %(date)s
+                    AND LOWER(cls.period) LIKE '%%tiết%%'
+                GROUP BY cls.name, cls.class_id, cls.period
+            """, {
+                "class_ids": class_ids,
+                "date": date_obj
+            }, as_dict=True)
+            
+            for log in logs_data:
+                period_num = _extract_period_number(log['period'])
+                key = (log['class_id'], period_num)
+                has_content = log.get('general_comment') or log.get('student_log_count', 0) > 0
+                if has_content:
+                    entered_logs[key] = log
+        
+        # Group theo teacher
+        teacher_data_map = {}
+        for p in scheduled_periods:
+            teacher_id = p.get('teacher_id')
+            if not teacher_id:
+                continue
+            
+            if teacher_id not in teacher_data_map:
+                teacher_data_map[teacher_id] = {
+                    "teacher_id": teacher_id,
+                    "teacher_name": teacher_names.get(teacher_id, "Không xác định"),
+                    "total_periods": 0,
+                    "entered_periods": 0,
+                    "education_stage_ids": set(),
+                    "classes": []
+                }
+            
+            period_num = _extract_period_number(p['period_name'])
+            key = (p['class_id'], period_num)
+            log = entered_logs.get(key)
+            
+            if log:
+                has_content = log.get('general_comment') or log.get('student_log_count', 0) > 0
+                if has_content:
+                    status = "updated" if log.get('modified') != log.get('creation') else "entered"
+                else:
+                    status = "not_entered"
+            else:
+                status = "not_entered"
+            
+            teacher_data_map[teacher_id]["total_periods"] += 1
+            if status in ("entered", "updated"):
+                teacher_data_map[teacher_id]["entered_periods"] += 1
+            
+            if p.get('education_stage_id'):
+                teacher_data_map[teacher_id]["education_stage_ids"].add(p['education_stage_id'])
+            
+            teacher_data_map[teacher_id]["classes"].append({
+                "class_id": p['class_id'],
+                "class_title": p['class_title'],
+                "education_stage_id": p.get('education_stage_id'),
+                "period": p['period_name'],
+                "subject_name": p.get('subject_name') or "Không xác định",
+                "status": status
+            })
+        
+        # Build result
+        teachers_result = []
+        completed_count = 0
+        
+        for teacher_id, data in teacher_data_map.items():
+            total = data["total_periods"]
+            entered = data["entered_periods"]
+            rate = round(entered / total * 100, 1) if total > 0 else 0
+            is_completed = (total > 0 and entered >= total)
+            
+            if is_completed:
+                completed_count += 1
+            
+            teachers_result.append({
+                "teacher_id": teacher_id,
+                "teacher_name": data["teacher_name"],
+                "total_periods": total,
+                "entered_periods": entered,
+                "rate": rate,
+                "is_completed": is_completed,
+                "education_stage_ids": list(data["education_stage_ids"]),
+                "classes": sorted(data["classes"], key=lambda x: _extract_period_number(x['period']))
+            })
+        
+        # Sort: chưa hoàn thành trước, sau đó theo tên
+        teachers_result.sort(key=lambda x: (x['is_completed'], x['teacher_name']))
+        
+        total_teachers = len(teachers_result)
+        
+        return success_response(
+            data={
+                "summary": {
+                    "total_teachers": total_teachers,
+                    "completed_teachers": completed_count,
+                    "incomplete_teachers": total_teachers - completed_count
+                },
+                "teachers": teachers_result
+            },
+            message="Lấy dashboard GV bộ môn thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_subject_teachers_dashboard error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy dashboard GV bộ môn: {str(e)}",
+            code="GET_SUBJECT_TEACHERS_DASHBOARD_ERROR"
         )
