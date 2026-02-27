@@ -1628,3 +1628,362 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
             message=f"Lỗi khi lấy dashboard GV bộ môn: {str(e)}",
             code="GET_SUBJECT_TEACHERS_DASHBOARD_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_my_today_tasks(date=None):
+    """
+    Lấy danh sách công việc hôm nay của giáo viên hiện tại cho trang Home
+    Bao gồm: tiết dạy, điểm danh homeroom, sổ liên lạc, đơn nghỉ phép, check-in/out
+    
+    Args:
+        date: Ngày cần xem (YYYY-MM-DD), mặc định là hôm nay
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                teacher_id: str,
+                teacher_name: str,
+                today_periods: [{period_name, class_id, class_title, subject_name, class_log_status}],
+                homeroom_tasks: [{class_id, class_title, task_type, status, detail, sent_count, total_count}],
+                leave_summary: [{class_id, class_title, leave_count, reasons: [{reason, count}]}],
+                checkin_info: {check_in_time, check_out_time, total_check_ins}
+            }
+        }
+    """
+    try:
+        if not date:
+            date = frappe.request.args.get('date') if hasattr(frappe, 'request') and frappe.request else None
+        if not date:
+            date = frappe.utils.today()
+        
+        date_obj = frappe.utils.getdate(date)
+        
+        # 1. Resolve current user -> SIS Teacher
+        current_user = frappe.session.user
+        teacher = frappe.db.get_value(
+            "SIS Teacher", 
+            {"user_id": current_user}, 
+            ["name", "user_id", "employee_code"],
+            as_dict=True
+        )
+        
+        if not teacher:
+            return success_response(
+                data={
+                    "teacher_id": None,
+                    "teacher_name": None,
+                    "today_periods": [],
+                    "homeroom_tasks": [],
+                    "leave_summary": [],
+                    "checkin_info": None
+                },
+                message="User không phải là giáo viên trong hệ thống"
+            )
+        
+        teacher_id = teacher.name
+        
+        # Lấy tên giáo viên từ User
+        teacher_name = frappe.get_value("User", current_user, "full_name") or current_user
+        
+        # 2. Lấy active school year
+        school_year = frappe.db.get_value("SIS School Year", {"is_enable": 1}, "name")
+        
+        # 3. Lấy các tiết dạy hôm nay của giáo viên từ timetable
+        # day_of_week format: mon, tue, wed, thu, fri, sat, sun
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
+        
+        today_periods = []
+        
+        if school_year:
+            # Query các tiết dạy của giáo viên hôm nay
+            # Dựa vào SIS Timetable Instance Row và kiểm tra teacher_id
+            periods_data = frappe.db.sql("""
+                SELECT DISTINCT
+                    tc.period_name,
+                    ti.class_id,
+                    c.title as class_title,
+                    tr.subject_id,
+                    COALESCE(ts.title_vn, sub.title) as subject_name
+                FROM `tabSIS Timetable Instance Row` tr
+                INNER JOIN `tabSIS Timetable Instance` ti ON tr.parent = ti.name
+                INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+                INNER JOIN `tabSIS Class` c ON ti.class_id = c.name
+                LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+                LEFT JOIN `tabSIS Timetable Instance Row Teacher` trt ON trt.parent = tr.name
+                WHERE c.school_year_id = %(school_year)s
+                    AND c.class_type = 'Regular'
+                    AND tr.day_of_week = %(day)s
+                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                    AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                    AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
+                    AND (ti.end_date IS NULL OR ti.end_date >= %(date)s)
+                    AND ti.start_date <= %(date)s
+                    AND (
+                        trt.teacher_id = %(teacher_id)s
+                        OR (trt.teacher_id IS NULL AND tr.teacher_1_id = %(teacher_id)s)
+                    )
+                ORDER BY tc.period_priority, c.title
+            """, {
+                "school_year": school_year,
+                "day": day_of_week_short,
+                "date": date_obj,
+                "teacher_id": teacher_id
+            }, as_dict=True)
+            
+            # Lấy tất cả class_ids để query class log status một lần
+            class_ids = list(set([p['class_id'] for p in periods_data]))
+            
+            # Query class log status cho tất cả class + period + subject hôm nay
+            class_log_map = {}
+            if class_ids:
+                logs = frappe.db.sql("""
+                    SELECT 
+                        cls.class_id,
+                        cls.period_name,
+                        cls.subject_id,
+                        CASE 
+                            WHEN cls.modified > cls.creation THEN 'updated'
+                            WHEN cls.name IS NOT NULL THEN 'entered'
+                            ELSE 'not_entered'
+                        END as status
+                    FROM `tabSIS Class Log Subject` cls
+                    WHERE cls.class_id IN %(class_ids)s
+                        AND cls.log_date = %(date)s
+                """, {
+                    "class_ids": class_ids,
+                    "date": date_obj
+                }, as_dict=True)
+                
+                for log in logs:
+                    key = f"{log['class_id']}|{log['period_name']}|{log['subject_id']}"
+                    class_log_map[key] = log['status']
+            
+            # Build today_periods result
+            for p in periods_data:
+                key = f"{p['class_id']}|{p['period_name']}|{p['subject_id']}"
+                status = class_log_map.get(key, 'not_entered')
+                
+                today_periods.append({
+                    "period_name": p['period_name'],
+                    "class_id": p['class_id'],
+                    "class_title": p['class_title'],
+                    "subject_name": p['subject_name'] or "Không xác định",
+                    "class_log_status": status
+                })
+        
+        # 4. Lấy các lớp chủ nhiệm của giáo viên
+        homeroom_tasks = []
+        homeroom_class_ids = []
+        
+        if school_year:
+            homeroom_classes = frappe.db.sql("""
+                SELECT name as class_id, title as class_title
+                FROM `tabSIS Class`
+                WHERE school_year_id = %(school_year)s
+                    AND class_type = 'Regular'
+                    AND (homeroom_teacher = %(teacher_id)s OR vice_homeroom_teacher = %(teacher_id)s)
+                ORDER BY title
+            """, {
+                "school_year": school_year,
+                "teacher_id": teacher_id
+            }, as_dict=True)
+            
+            homeroom_class_ids = [c['class_id'] for c in homeroom_classes]
+            
+            for cls in homeroom_classes:
+                class_id = cls['class_id']
+                class_title = cls['class_title']
+                
+                # Task 1: Điểm danh Homeroom
+                # Kiểm tra xem đã có Class Log Subject cho period Homeroom chưa
+                homeroom_log = frappe.db.get_value(
+                    "SIS Class Log Subject",
+                    {
+                        "class_id": class_id,
+                        "log_date": date_obj,
+                        "period_name": "Homeroom"
+                    },
+                    "name"
+                )
+                
+                homeroom_tasks.append({
+                    "class_id": class_id,
+                    "class_title": class_title,
+                    "task_type": "homeroom_attendance",
+                    "status": "completed" if homeroom_log else "pending",
+                    "detail": "Đã điểm danh" if homeroom_log else "Chưa điểm danh",
+                    "sent_count": None,
+                    "total_count": None
+                })
+                
+                # Task 2: Sổ liên lạc
+                contact_stats = _calculate_contact_log_stats(class_id, date_obj, include_students_detail=False)
+                sent_count = contact_stats.get("sent_count", 0)
+                total_count = contact_stats.get("total_students", 0)
+                is_complete = total_count > 0 and sent_count >= total_count
+                
+                homeroom_tasks.append({
+                    "class_id": class_id,
+                    "class_title": class_title,
+                    "task_type": "contact_log",
+                    "status": "completed" if is_complete else "pending",
+                    "detail": f"{sent_count}/{total_count} HS" if total_count > 0 else "Không có HS",
+                    "sent_count": sent_count,
+                    "total_count": total_count
+                })
+        
+        # 5. Lấy đơn nghỉ phép của các lớp chủ nhiệm hôm nay
+        leave_summary = []
+        
+        if homeroom_class_ids:
+            # Lấy các học sinh trong các lớp chủ nhiệm
+            class_students = frappe.db.sql("""
+                SELECT cs.class_id, cs.student_id
+                FROM `tabSIS Class Student` cs
+                WHERE cs.class_id IN %(class_ids)s
+            """, {"class_ids": homeroom_class_ids}, as_dict=True)
+            
+            # Map student -> class
+            student_class_map = {}
+            for row in class_students:
+                student_class_map[row['student_id']] = row['class_id']
+            
+            student_ids = list(student_class_map.keys())
+            
+            if student_ids:
+                # Lấy đơn nghỉ phép active hôm nay
+                leave_requests = frappe.db.sql("""
+                    SELECT student_id, reason, other_reason
+                    FROM `tabSIS Student Leave Request`
+                    WHERE student_id IN %(student_ids)s
+                        AND start_date <= %(date)s
+                        AND end_date >= %(date)s
+                """, {
+                    "student_ids": student_ids,
+                    "date": date_obj
+                }, as_dict=True)
+                
+                # Group theo class
+                class_leave_map = {}  # class_id -> {count, reasons: {reason: count}}
+                for lr in leave_requests:
+                    class_id = student_class_map.get(lr['student_id'])
+                    if not class_id:
+                        continue
+                    
+                    if class_id not in class_leave_map:
+                        class_leave_map[class_id] = {"count": 0, "reasons": {}}
+                    
+                    class_leave_map[class_id]["count"] += 1
+                    
+                    # Lấy reason hiển thị
+                    reason_text = lr['reason'] or lr.get('other_reason') or "Khác"
+                    if reason_text not in class_leave_map[class_id]["reasons"]:
+                        class_leave_map[class_id]["reasons"][reason_text] = 0
+                    class_leave_map[class_id]["reasons"][reason_text] += 1
+                
+                # Build leave_summary
+                # Lấy class_title từ homeroom_classes
+                class_title_map = {c['class_id']: c['class_title'] for c in homeroom_classes}
+                
+                for class_id in homeroom_class_ids:
+                    leave_data = class_leave_map.get(class_id, {"count": 0, "reasons": {}})
+                    reasons_list = [
+                        {"reason": r, "count": c} 
+                        for r, c in leave_data["reasons"].items()
+                    ]
+                    
+                    leave_summary.append({
+                        "class_id": class_id,
+                        "class_title": class_title_map.get(class_id, ""),
+                        "leave_count": leave_data["count"],
+                        "reasons": reasons_list
+                    })
+        
+        # 6. Lấy thông tin check-in/check-out từ ERP Time Attendance
+        checkin_info = None
+        
+        # Thử lấy employee_code từ teacher hoặc user
+        employee_code = teacher.get('employee_code')
+        
+        # Nếu không có employee_code trong teacher, thử lấy từ User.username hoặc email prefix
+        if not employee_code:
+            user_doc = frappe.get_doc("User", current_user)
+            # Ưu tiên username, sau đó email prefix
+            employee_code = user_doc.username or current_user.split('@')[0]
+        
+        if employee_code:
+            # Query ERP Time Attendance
+            attendance = frappe.db.get_value(
+                "ERP Time Attendance",
+                {
+                    "employee_code": employee_code,
+                    "date": date_obj
+                },
+                ["check_in_time", "check_out_time", "total_check_ins", "raw_data"],
+                as_dict=True
+            )
+            
+            if attendance:
+                check_in_time = attendance.get('check_in_time')
+                check_out_time = attendance.get('check_out_time')
+                total_check_ins = attendance.get('total_check_ins') or 0
+                
+                # Recalculate từ raw_data nếu có (giống logic trong query.py)
+                if attendance.get('raw_data'):
+                    try:
+                        import json
+                        raw_data = json.loads(attendance['raw_data']) if isinstance(attendance['raw_data'], str) else attendance['raw_data']
+                        if raw_data and len(raw_data) > 0:
+                            all_times = []
+                            for item in raw_data:
+                                ts_str = item.get('timestamp', '')
+                                if ts_str:
+                                    parsed_ts = frappe.utils.get_datetime(ts_str)
+                                    if parsed_ts.tzinfo is not None:
+                                        parsed_ts = parsed_ts.replace(tzinfo=None)
+                                    all_times.append(parsed_ts)
+                            
+                            if all_times:
+                                all_times.sort()
+                                check_in_time = all_times[0]
+                                check_out_time = all_times[-1] if len(all_times) > 1 else None
+                                total_check_ins = len(all_times)
+                    except Exception as e:
+                        frappe.log_error(f"Error parsing raw_data: {str(e)}")
+                
+                # Format time string
+                def format_time_str(dt):
+                    if not dt:
+                        return None
+                    if hasattr(dt, 'strftime'):
+                        return dt.strftime('%H:%M')
+                    return str(dt)[:5] if dt else None
+                
+                checkin_info = {
+                    "check_in_time": format_time_str(check_in_time),
+                    "check_out_time": format_time_str(check_out_time),
+                    "total_check_ins": total_check_ins
+                }
+        
+        return success_response(
+            data={
+                "teacher_id": teacher_id,
+                "teacher_name": teacher_name,
+                "today_periods": today_periods,
+                "homeroom_tasks": homeroom_tasks,
+                "leave_summary": leave_summary,
+                "checkin_info": checkin_info
+            },
+            message="Lấy công việc hôm nay thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_my_today_tasks error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy công việc hôm nay: {str(e)}",
+            code="GET_MY_TODAY_TASKS_ERROR"
+        )
