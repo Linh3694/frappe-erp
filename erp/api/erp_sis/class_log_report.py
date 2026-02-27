@@ -1437,7 +1437,7 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
         day_of_week_short = day_map.get(date_obj.weekday(), 'mon')
         
         # Lấy tất cả tiết dạy của GV bộ môn trong ngày (chỉ lớp Regular, bỏ tiểu học)
-        # Bỏ tiểu học = education_stage_id != 'EDU-STAGE-00001'
+        # Bỏ tiểu học: education_stage_id != 'EDU-STAGE-00001' VÀ tên lớp không phải lớp 1-5
         # Sử dụng GROUP BY để loại bỏ duplicate (do JOIN với nhiều bảng)
         scheduled_periods = frappe.db.sql("""
             SELECT 
@@ -1466,6 +1466,7 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
                 AND c.class_type = 'Regular'
                 AND c.school_year_id = %(school_year)s
                 AND (eg.education_stage_id IS NULL OR eg.education_stage_id != 'EDU-STAGE-00001')
+                AND NOT (c.title REGEXP '^Lớp [1-5][^0-9]' OR c.title REGEXP '^Lớp [1-5]$')
                 {campus_filter}
             GROUP BY COALESCE(trt.teacher_id, tr.teacher_1_id), ti.class_id, tc.period_name, tr.subject_id, c.title, eg.education_stage_id
         """.format(
