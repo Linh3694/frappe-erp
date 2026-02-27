@@ -1802,12 +1802,13 @@ def get_my_today_tasks(date=None):
                 
                 # Task 1: Điểm danh Homeroom
                 # Kiểm tra xem đã có Class Log Subject cho period Homeroom chưa
+                # Field trong SIS Class Log Subject là `period` (không phải period_name)
                 homeroom_log = frappe.db.get_value(
                     "SIS Class Log Subject",
                     {
                         "class_id": class_id,
                         "log_date": date_obj,
-                        "period_name": "Homeroom"
+                        "period": "Homeroom"
                     },
                     "name"
                 )
