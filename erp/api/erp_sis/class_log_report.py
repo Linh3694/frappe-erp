@@ -1665,7 +1665,7 @@ def get_my_today_tasks(date=None):
         teacher = frappe.db.get_value(
             "SIS Teacher", 
             {"user_id": current_user}, 
-            ["name", "user_id", "employee_code"],
+            ["name", "user_id"],
             as_dict=True
         )
         
@@ -1906,14 +1906,10 @@ def get_my_today_tasks(date=None):
         # 6. Lấy thông tin check-in/check-out từ ERP Time Attendance
         checkin_info = None
         
-        # Thử lấy employee_code từ teacher hoặc user
-        employee_code = teacher.get('employee_code')
-        
-        # Nếu không có employee_code trong teacher, thử lấy từ User.username hoặc email prefix
-        if not employee_code:
-            user_doc = frappe.get_doc("User", current_user)
-            # Ưu tiên username, sau đó email prefix
-            employee_code = user_doc.username or current_user.split('@')[0]
+        # SIS Teacher không có employee_code, lấy từ User.username hoặc email prefix
+        user_doc = frappe.get_doc("User", current_user)
+        # Ưu tiên username, sau đó email prefix
+        employee_code = user_doc.username or current_user.split('@')[0]
         
         if employee_code:
             # Query ERP Time Attendance
