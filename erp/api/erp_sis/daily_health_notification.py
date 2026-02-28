@@ -122,10 +122,21 @@ def notify_health_visit_created(visit_name: str):
     Người nhận: Mobile Medical + Homeroom + Vice-homeroom
     """
     try:
+        frappe.logger().info(f"[health_notification] === BẮT ĐẦU notify_health_visit_created cho visit {visit_name} ===")
+
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
         student_name = visit.student_name or visit.student_id
         class_name = visit.class_name or visit.class_id
         reason = visit.reason or ""
+
+        frappe.logger().info(f"[health_notification] Visit info: student={student_name}, class={visit.class_id}, status={visit.status}")
+
+        # Log chi tiết từng bước resolve recipients
+        medical_users = _get_mobile_medical_users()
+        frappe.logger().info(f"[health_notification] Mobile Medical users: {medical_users}")
+
+        homeroom_teachers = _get_homeroom_teachers(visit.class_id)
+        frappe.logger().info(f"[health_notification] Homeroom teachers: {homeroom_teachers}")
 
         recipients = get_health_notification_recipients(
             class_id=visit.class_id,
@@ -133,7 +144,10 @@ def notify_health_visit_created(visit_name: str):
             include_homeroom=True
         )
 
+        frappe.logger().info(f"[health_notification] Tổng recipients: {recipients}")
+
         if not recipients:
+            frappe.logger().warning(f"[health_notification] KHÔNG TÌM THẤY người nhận nào cho visit {visit_name}")
             return
 
         title = "Báo Y tế"
@@ -156,6 +170,8 @@ def notify_health_visit_created(visit_name: str):
 
     except Exception as e:
         frappe.logger().error(f"[health_notification] Lỗi notify_health_visit_created: {str(e)}")
+        import traceback
+        frappe.logger().error(f"[health_notification] Traceback: {traceback.format_exc()}")
 
 
 def notify_health_visit_received(visit_name: str):

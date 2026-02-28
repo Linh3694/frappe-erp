@@ -200,14 +200,10 @@ def report_student_to_clinic():
         
         frappe.db.commit()
         
-        # Gửi push notification async cho Mobile Medical + Homeroom + Vice-homeroom
+        # Gửi push notification cho Mobile Medical + Homeroom + Vice-homeroom
         try:
-            frappe.enqueue(
-                "erp.api.erp_sis.daily_health_notification.notify_health_visit_created",
-                visit_name=visit.name,
-                queue="short",
-                enqueue_after_commit=True
-            )
+            from erp.api.erp_sis.daily_health_notification import notify_health_visit_created
+            notify_health_visit_created(visit_name=visit.name)
         except Exception as notif_err:
             frappe.logger().warning(f"[report_student_to_clinic] Không gửi được notification: {str(notif_err)}")
         
@@ -388,14 +384,10 @@ def receive_student_at_clinic():
         visit.save()
         frappe.db.commit()
         
-        # Gửi push notification async cho Homeroom + Vice-homeroom + Reporter
+        # Gửi push notification cho Homeroom + Vice-homeroom + Reporter
         try:
-            frappe.enqueue(
-                "erp.api.erp_sis.daily_health_notification.notify_health_visit_received",
-                visit_name=visit.name,
-                queue="short",
-                enqueue_after_commit=True
-            )
+            from erp.api.erp_sis.daily_health_notification import notify_health_visit_received
+            notify_health_visit_received(visit_name=visit.name)
         except Exception as notif_err:
             frappe.logger().warning(f"[receive_student_at_clinic] Không gửi được notification: {str(notif_err)}")
         
@@ -1049,14 +1041,10 @@ def complete_health_visit():
         visit.save()
         frappe.db.commit()
         
-        # Gửi push notification async cho Homeroom + Vice-homeroom + Mobile Medical
+        # Gửi push notification cho Homeroom + Vice-homeroom + Mobile Medical
         try:
-            frappe.enqueue(
-                "erp.api.erp_sis.daily_health_notification.notify_health_visit_completed",
-                visit_name=visit.name,
-                queue="short",
-                enqueue_after_commit=True
-            )
+            from erp.api.erp_sis.daily_health_notification import notify_health_visit_completed
+            notify_health_visit_completed(visit_name=visit.name)
         except Exception as notif_err:
             frappe.logger().warning(f"[complete_health_visit] Không gửi được notification: {str(notif_err)}")
         
