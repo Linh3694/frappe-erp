@@ -316,11 +316,21 @@ def check_stale_health_visits():
             student_name = visit.student_name or visit.student_id
             class_name = visit.class_name or visit.class_id
 
-            recipients = _get_mobile_medical_users()
+            # Gửi cho Mobile Medical + Homeroom + Vice-homeroom + Reporter
+            extra_users = []
+            if visit.reported_by:
+                extra_users.append(visit.reported_by)
+
+            recipients = get_health_notification_recipients(
+                class_id=visit.class_id,
+                include_medical=True,
+                include_homeroom=True,
+                extra_users=extra_users
+            )
             frappe.logger().info(f"[health_notification] Escalation recipients cho visit {visit.name}: {recipients}")
 
             if not recipients:
-                frappe.logger().warning(f"[health_notification] Không tìm thấy Mobile Medical user nào có device token")
+                frappe.logger().warning(f"[health_notification] Không tìm thấy người nhận nào cho escalation visit {visit.name}")
                 continue
 
             title = "Nhắc nhở Y tế"
