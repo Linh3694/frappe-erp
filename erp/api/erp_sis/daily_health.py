@@ -333,6 +333,13 @@ def get_daily_health_visits():
             
             visit["student_photo"] = student_photo
         
+        # Piggyback: kiểm tra visit quá 15 phút chưa chuyển trạng thái (rate limited)
+        try:
+            from erp.api.erp_sis.daily_health_notification import piggyback_check_stale_visits
+            piggyback_check_stale_visits()
+        except Exception:
+            pass
+        
         return success_response(
             data={"data": visits, "total": len(visits)},
             message="Lấy danh sách học sinh xuống Y tế thành công"

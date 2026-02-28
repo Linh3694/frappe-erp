@@ -271,15 +271,22 @@ def notify_health_visit_completed(visit_name: str):
 # Scheduled job: kiểm tra visit quá 15 phút chưa chuyển trạng thái
 # =====================================================================
 
+@frappe.whitelist(allow_guest=False)
 def check_stale_health_visits():
     """
-    Scheduled job (chạy mỗi 5 phút).
-    Tìm các visit có status = 'left_class' và đã tạo hơn 15 phút trước.
+    Kiểm tra visit quá 15 phút chưa chuyển trạng thái.
     Gửi escalation notification cho Mobile Medical.
     Dùng Redis debounce để tránh gửi lặp cho cùng một visit.
+
+    Được gọi bởi:
+    - Scheduled job (hooks.py) mỗi 5 phút (production)
+    - Piggyback khi load trang DailyHealth (development & production)
+    - Có thể gọi thủ công qua API để test
     """
     try:
         from datetime import timedelta
+
+        frappe.logger().info("[health_notification] === BẮT ĐẦU check_stale_health_visits ===")
 
         threshold = now_datetime() - timedelta(minutes=15)
 
@@ -292,21 +299,28 @@ def check_stale_health_visits():
               AND creation <= %(threshold)s
         """, {"today": today(), "threshold": threshold}, as_dict=True)
 
+        frappe.logger().info(f"[health_notification] Tìm thấy {len(stale_visits) if stale_visits else 0} visit quá 15 phút (threshold={threshold})")
+
         if not stale_visits:
             return
 
         redis = frappe.cache()
+        sent_count = 0
 
         for visit in stale_visits:
             debounce_key = f"health_escalation:{visit.name}"
             if redis.get_value(debounce_key):
+                frappe.logger().info(f"[health_notification] Skip visit {visit.name} - đã gửi escalation trước đó")
                 continue
 
             student_name = visit.student_name or visit.student_id
             class_name = visit.class_name or visit.class_id
 
             recipients = _get_mobile_medical_users()
+            frappe.logger().info(f"[health_notification] Escalation recipients cho visit {visit.name}: {recipients}")
+
             if not recipients:
+                frappe.logger().warning(f"[health_notification] Không tìm thấy Mobile Medical user nào có device token")
                 continue
 
             title = "Nhắc nhở Y tế"
@@ -325,11 +339,37 @@ def check_stale_health_visits():
 
             # Đánh dấu đã gửi escalation, TTL 4 giờ (tránh gửi lặp trong ngày)
             redis.set_value(debounce_key, "1", expires_in_sec=14400)
+            sent_count += 1
 
             frappe.logger().info(
                 f"[health_notification] Đã gửi escalation cho visit {visit.name} - "
                 f"{student_name} (left_class > 15 phút)"
             )
 
+        frappe.logger().info(f"[health_notification] === KẾT THÚC check_stale_health_visits - gửi {sent_count} escalation ===")
+
     except Exception as e:
         frappe.logger().error(f"[health_notification] Lỗi check_stale_health_visits: {str(e)}")
+        import traceback
+        frappe.logger().error(f"[health_notification] Traceback: {traceback.format_exc()}")
+
+
+def piggyback_check_stale_visits():
+    """
+    Kiểm tra stale visits khi load trang DailyHealth.
+    Rate limit: chỉ chạy tối đa 1 lần mỗi 3 phút để tránh gọi quá nhiều.
+    """
+    try:
+        redis = frappe.cache()
+        rate_key = "health_stale_check_last_run"
+
+        if redis.get_value(rate_key):
+            return
+
+        # Đánh dấu đã chạy, TTL 3 phút
+        redis.set_value(rate_key, "1", expires_in_sec=180)
+
+        check_stale_health_visits()
+
+    except Exception as e:
+        frappe.logger().warning(f"[health_notification] Lỗi piggyback_check_stale_visits: {str(e)}")
