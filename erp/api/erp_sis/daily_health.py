@@ -200,6 +200,17 @@ def report_student_to_clinic():
         
         frappe.db.commit()
         
+        # Gửi push notification async cho Mobile Medical + Homeroom + Vice-homeroom
+        try:
+            frappe.enqueue(
+                "erp.api.erp_sis.daily_health_notification.notify_health_visit_created",
+                visit_name=visit.name,
+                queue="short",
+                enqueue_after_commit=True
+            )
+        except Exception as notif_err:
+            frappe.logger().warning(f"[report_student_to_clinic] Không gửi được notification: {str(notif_err)}")
+        
         return success_response(
             data={
                 "name": visit.name,
@@ -376,6 +387,17 @@ def receive_student_at_clinic():
         visit.received_by_name = received_by_name
         visit.save()
         frappe.db.commit()
+        
+        # Gửi push notification async cho Homeroom + Vice-homeroom + Reporter
+        try:
+            frappe.enqueue(
+                "erp.api.erp_sis.daily_health_notification.notify_health_visit_received",
+                visit_name=visit.name,
+                queue="short",
+                enqueue_after_commit=True
+            )
+        except Exception as notif_err:
+            frappe.logger().warning(f"[receive_student_at_clinic] Không gửi được notification: {str(notif_err)}")
         
         return success_response(
             data={"name": visit.name, "status": visit.status},
@@ -1026,6 +1048,17 @@ def complete_health_visit():
         visit.leave_clinic_time = leave_clinic_time
         visit.save()
         frappe.db.commit()
+        
+        # Gửi push notification async cho Homeroom + Vice-homeroom + Mobile Medical
+        try:
+            frappe.enqueue(
+                "erp.api.erp_sis.daily_health_notification.notify_health_visit_completed",
+                visit_name=visit.name,
+                queue="short",
+                enqueue_after_commit=True
+            )
+        except Exception as notif_err:
+            frappe.logger().warning(f"[complete_health_visit] Không gửi được notification: {str(notif_err)}")
         
         return success_response(
             data={"name": visit.name, "status": visit.status},

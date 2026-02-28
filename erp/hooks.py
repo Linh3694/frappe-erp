@@ -804,6 +804,10 @@ scheduler_events = {
         # Bus Daily Trips - Archive trips cũ lúc 01:00 AM Chủ nhật
         "0 1 * * 0": [
             "erp.sis.tasks.bus_daily_trips.archive_old_trips_job"
+        ],
+        # Health Visit Escalation - Kiểm tra visit quá 15 phút chưa chuyển trạng thái (mỗi 5 phút, 7h-17h)
+        "*/5 7-17 * * 1-6": [
+            "erp.api.erp_sis.daily_health_notification.check_stale_health_visits"
         ]
     },
     # Project Management - Auto-expire pending invitations

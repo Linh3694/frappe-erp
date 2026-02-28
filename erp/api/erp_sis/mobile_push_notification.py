@@ -610,6 +610,12 @@ def send_mobile_notification(user_email, title, body, data=None):
             elif notification_type == "leave_request" or notification_type == "leave":
                 channel_id = "leave_request"
                 sound_name = "default"
+            elif notification_type in (
+                "daily_health", "health_visit_created", "health_visit_received",
+                "health_visit_completed", "health_visit_escalation"
+            ):
+                channel_id = "daily_health"
+                sound_name = "default"
             else:
                 channel_id = "default"
                 sound_name = "default"
