@@ -2031,7 +2031,8 @@ def get_class_health_examinations():
             fields=[
                 "name", "student_id", "student_name", "student_code",
                 "visit_date", "reason", "leave_class_time", "arrive_clinic_time",
-                "leave_clinic_time", "status", "reported_by_name", "received_by_name"
+                "leave_clinic_time", "status", "reported_by_name", "received_by_name",
+                "checkout_notes", "transfer_hospital", "accompanying_teacher", "accompanying_health_staff"
             ],
             order_by="creation desc"
         )
