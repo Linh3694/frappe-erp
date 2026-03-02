@@ -279,7 +279,9 @@ def get_daily_health_visits():
                 "class_id", "class_name", "visit_date", "reason",
                 "leave_class_time", "arrive_clinic_time", "leave_clinic_time",
                 "status", "reported_by", "reported_by_name",
-                "received_by", "received_by_name", "creation"
+                "received_by", "received_by_name", "creation",
+                "checkout_notes", "transfer_hospital",
+                "accompanying_teacher", "accompanying_health_staff"
             ],
             order_by="leave_class_time desc"
         )
@@ -539,6 +541,7 @@ def create_health_examination():
         
         visit_id = data.get("visit_id")
         symptoms = data.get("symptoms")
+        diet_history = data.get("diet_history", "")
         images = data.get("images", [])  # List of {image: url, description: text}
         disease_classification = data.get("disease_classification", "")
         examination_notes = data.get("examination_notes", "")
@@ -583,6 +586,7 @@ def create_health_examination():
             "examination_date": today(),
             "visit_id": visit_id,
             "symptoms": symptoms,
+            "diet_history": diet_history,
             "disease_classification": disease_classification,
             "examination_notes": examination_notes,
             "treatment_type": treatment_type,
@@ -654,12 +658,15 @@ def update_health_examination():
         
         exam_id = data.get("exam_id")
         symptoms = data.get("symptoms")
+        diet_history = data.get("diet_history")
         images = data.get("images")  # List of {image: url, description: text} or None
         disease_classification = data.get("disease_classification")
         examination_notes = data.get("examination_notes")
         treatment_type = data.get("treatment_type")
         treatment_details = data.get("treatment_details")
         notes = data.get("notes")
+        hospital_diagnosis = data.get("hospital_diagnosis")
+        hospital_treatment = data.get("hospital_treatment")
         
         # Backward compatibility
         diagnosis = data.get("diagnosis")
@@ -677,6 +684,8 @@ def update_health_examination():
         # Cập nhật các trường (cho phép empty string để clear field)
         if symptoms is not None:
             exam.symptoms = symptoms
+        if diet_history is not None:
+            exam.diet_history = diet_history if diet_history else None
         if disease_classification is not None:
             exam.disease_classification = disease_classification if disease_classification else None
         if examination_notes is not None:
@@ -693,6 +702,10 @@ def update_health_examination():
             exam.treatment = treatment if treatment else None
         if outcome is not None:
             exam.outcome = outcome
+        if hospital_diagnosis is not None:
+            exam.hospital_diagnosis = hospital_diagnosis if hospital_diagnosis else None
+        if hospital_treatment is not None:
+            exam.hospital_treatment = hospital_treatment if hospital_treatment else None
         
         # Update images if provided (cho phép empty array để clear tất cả)
         if images is not None and isinstance(images, list):
@@ -758,10 +771,11 @@ def get_student_examination_history():
             "SIS Health Examination",
             filters={"student_id": student_id},
             fields=[
-                "name", "examination_date", "symptoms", "diagnosis",
+                "name", "examination_date", "symptoms", "diet_history", "diagnosis",
                 "treatment", "outcome", "examined_by_name", "creation", "modified",
                 "visit_id", "disease_classification", "examination_notes",
-                "treatment_type", "treatment_details", "notes"
+                "treatment_type", "treatment_details", "notes",
+                "hospital_diagnosis", "hospital_treatment"
             ],
             order_by="examination_date desc, creation desc",
             limit=limit
@@ -1017,6 +1031,10 @@ def complete_health_visit():
         - visit_id: ID của visit (required)
         - outcome: Kết quả (required): returned/picked_up/transferred
         - leave_clinic_time: Thời gian rời Y tế (optional, default: now)
+        - checkout_notes: Ghi chú/Dặn dò khi checkout (optional)
+        - transfer_hospital: Bệnh viện chuyển tới (optional, khi chuyển viện)
+        - accompanying_teacher: GV đi cùng (optional, khi chuyển viện)
+        - accompanying_health_staff: NVYT đi cùng (optional, khi chuyển viện)
     """
     try:
         _check_teacher_permission()
@@ -1026,6 +1044,10 @@ def complete_health_visit():
         visit_id = data.get("visit_id")
         outcome = data.get("outcome")
         leave_clinic_time = data.get("leave_clinic_time") or nowtime()
+        checkout_notes = data.get("checkout_notes", "")
+        transfer_hospital = data.get("transfer_hospital", "")
+        accompanying_teacher = data.get("accompanying_teacher", "")
+        accompanying_health_staff = data.get("accompanying_health_staff", "")
         
         # Validation
         errors = {}
@@ -1045,7 +1067,36 @@ def complete_health_visit():
         # Cập nhật visit
         visit.status = outcome
         visit.leave_clinic_time = leave_clinic_time
+        if checkout_notes:
+            visit.checkout_notes = checkout_notes
+        if outcome == "transferred":
+            visit.transfer_hospital = transfer_hospital
+            visit.accompanying_teacher = accompanying_teacher
+            visit.accompanying_health_staff = accompanying_health_staff
         visit.save()
+        
+        # Cập nhật outcome cho TẤT CẢ examinations liên quan đến visit này
+        exam_outcome_map = {
+            "returned": "return_class",
+            "picked_up": "picked_up",
+            "transferred": "transferred"
+        }
+        exam_outcome = exam_outcome_map.get(outcome)
+        if exam_outcome:
+            related_exams = frappe.get_all(
+                "SIS Health Examination",
+                filters={"visit_id": visit_id},
+                fields=["name"]
+            )
+            for exam in related_exams:
+                frappe.db.set_value(
+                    "SIS Health Examination",
+                    exam.name,
+                    "outcome",
+                    exam_outcome,
+                    update_modified=False
+                )
+        
         frappe.db.commit()
         
         # Gửi push notification cho Homeroom + Vice-homeroom + Mobile Medical
@@ -2370,9 +2421,11 @@ def get_parent_health_records():
             },
             fields=[
                 "name", "student_id", "student_name", "student_code",
-                "examination_date", "visit_id", "symptoms", "disease_classification",
-                "examination_notes", "treatment_type", "treatment_details", "notes",
+                "examination_date", "visit_id", "symptoms", "diet_history",
+                "disease_classification", "examination_notes",
+                "treatment_type", "treatment_details", "notes",
                 "outcome", "examined_by_name", "sent_to_parent_at",
+                "hospital_diagnosis", "hospital_treatment",
                 "creation", "modified"
             ],
             order_by="examination_date desc, creation desc"

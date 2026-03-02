@@ -1,0 +1,498 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:CRM-LEAD-{#####}",
+ "beta": 0,
+ "creation": "2024-08-20 09:00:00.000000",
+ "custom": 0,
+ "description": "CRM Lead Management - Quan ly ho so tuyen sinh",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "general_info_section",
+  "step",
+  "status",
+  "cb_general_1",
+  "data_source",
+  "staff_code",
+  "cb_general_2",
+  "pic",
+  "campus_id",
+  "source_section",
+  "source",
+  "cb_source_1",
+  "referrer",
+  "student_section",
+  "student_name",
+  "student_gender",
+  "student_dob",
+  "cb_student_1",
+  "student_code",
+  "current_grade",
+  "target_grade",
+  "cb_student_2",
+  "current_school",
+  "student_note",
+  "fee_section",
+  "tuition_fee_pct",
+  "service_fee_pct",
+  "cb_fee_1",
+  "dev_fee_pct",
+  "ksdv_pct",
+  "guardian_section",
+  "guardian_name",
+  "relationship",
+  "guardian_email",
+  "cb_guardian_1",
+  "guardian_id_number",
+  "guardian_occupation",
+  "guardian_position",
+  "cb_guardian_2",
+  "guardian_workplace",
+  "guardian_address",
+  "guardian_nationality",
+  "guardian_note",
+  "phone_section",
+  "phone_numbers",
+  "enrollment_info_section",
+  "target_academic_year",
+  "target_semester",
+  "cb_enroll_1",
+  "enrollment_date",
+  "linked_student",
+  "duplicate_section",
+  "duplicate_lead",
+  "duplicate_fields",
+  "reject_section",
+  "reject_reason",
+  "reject_detail",
+  "documents_section",
+  "enrollment_documents",
+  "events_courses_section",
+  "events",
+  "courses"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_info_section",
+   "fieldtype": "Section Break",
+   "label": "General Information"
+  },
+  {
+   "fieldname": "step",
+   "fieldtype": "Select",
+   "label": "Step",
+   "options": "Draft\nVerify\nLead\nQLead\nTest\nDeal\nEnrolled\nRe-Enroll\nWithdraw\nGraduated",
+   "reqd": 1,
+   "default": "Draft",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "New\nKNM\nHGL\nKNM nhieu lan\nKCNC\nSai thong tin\nTrung Lead\nLost\nFollow up\nPre-Event\nEvent\nPre-school tour\nSchool tour\nPre-test\nTest\nOffered\nRetake\nFail\nBooked\nDeposit\nPaid\nUnpaid",
+   "default": "New",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "cb_general_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "data_source",
+   "fieldtype": "Select",
+   "label": "Data Source",
+   "options": "Online\nOffline\nDoi tac"
+  },
+  {
+   "fieldname": "staff_code",
+   "fieldtype": "Data",
+   "label": "Staff Code"
+  },
+  {
+   "fieldname": "cb_general_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "pic",
+   "fieldtype": "Link",
+   "label": "PIC",
+   "options": "User",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Source Information",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Table MultiSelect",
+   "label": "Sources",
+   "options": "CRM Lead Source"
+  },
+  {
+   "fieldname": "cb_source_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "referrer",
+   "fieldtype": "Link",
+   "label": "Referrer",
+   "options": "CRM Referrer"
+  },
+  {
+   "fieldname": "student_section",
+   "fieldtype": "Section Break",
+   "label": "Student Information"
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Student Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_gender",
+   "fieldtype": "Select",
+   "label": "Gender",
+   "options": "Nam\nNu"
+  },
+  {
+   "fieldname": "student_dob",
+   "fieldtype": "Date",
+   "label": "Date of Birth"
+  },
+  {
+   "fieldname": "cb_student_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Student Code",
+   "description": "Auto-generated when moving to Test step"
+  },
+  {
+   "fieldname": "current_grade",
+   "fieldtype": "Select",
+   "label": "Current Grade",
+   "options": "K\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
+  },
+  {
+   "fieldname": "target_grade",
+   "fieldtype": "Select",
+   "label": "Target Grade",
+   "options": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
+  },
+  {
+   "fieldname": "cb_student_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "current_school",
+   "fieldtype": "Link",
+   "label": "Current School",
+   "options": "CRM School"
+  },
+  {
+   "fieldname": "student_note",
+   "fieldtype": "Small Text",
+   "label": "Student Note"
+  },
+  {
+   "fieldname": "fee_section",
+   "fieldtype": "Section Break",
+   "label": "Fee Information",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "tuition_fee_pct",
+   "fieldtype": "Float",
+   "label": "Tuition Fee (%)",
+   "description": "0 to 100"
+  },
+  {
+   "fieldname": "service_fee_pct",
+   "fieldtype": "Float",
+   "label": "Service Fee (%)",
+   "description": "0 to 100"
+  },
+  {
+   "fieldname": "cb_fee_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "dev_fee_pct",
+   "fieldtype": "Float",
+   "label": "Development Fee (%)",
+   "description": "0 to 100"
+  },
+  {
+   "fieldname": "ksdv_pct",
+   "fieldtype": "Float",
+   "label": "KSDV (%)",
+   "description": "0 to 100"
+  },
+  {
+   "fieldname": "guardian_section",
+   "fieldtype": "Section Break",
+   "label": "Guardian Information"
+  },
+  {
+   "fieldname": "guardian_name",
+   "fieldtype": "Data",
+   "label": "Guardian Name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "relationship",
+   "fieldtype": "Select",
+   "label": "Relationship",
+   "options": "Bo\nMe\nNguoi giam ho"
+  },
+  {
+   "fieldname": "guardian_email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "cb_guardian_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "guardian_id_number",
+   "fieldtype": "Data",
+   "label": "ID Number",
+   "description": "CCCD/Passport, max 16 chars"
+  },
+  {
+   "fieldname": "guardian_occupation",
+   "fieldtype": "Data",
+   "label": "Occupation"
+  },
+  {
+   "fieldname": "guardian_position",
+   "fieldtype": "Data",
+   "label": "Position"
+  },
+  {
+   "fieldname": "cb_guardian_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "guardian_workplace",
+   "fieldtype": "Data",
+   "label": "Workplace"
+  },
+  {
+   "fieldname": "guardian_address",
+   "fieldtype": "Data",
+   "label": "Address"
+  },
+  {
+   "fieldname": "guardian_nationality",
+   "fieldtype": "Link",
+   "label": "Nationality",
+   "options": "Country",
+   "default": "Vietnam"
+  },
+  {
+   "fieldname": "guardian_note",
+   "fieldtype": "Small Text",
+   "label": "Guardian Note"
+  },
+  {
+   "fieldname": "phone_section",
+   "fieldtype": "Section Break",
+   "label": "Phone Numbers"
+  },
+  {
+   "fieldname": "phone_numbers",
+   "fieldtype": "Table",
+   "label": "Phone Numbers",
+   "options": "CRM Lead Phone",
+   "reqd": 1
+  },
+  {
+   "fieldname": "enrollment_info_section",
+   "fieldtype": "Section Break",
+   "label": "Enrollment Information",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "target_academic_year",
+   "fieldtype": "Link",
+   "label": "Target Academic Year",
+   "options": "SIS School Year"
+  },
+  {
+   "fieldname": "target_semester",
+   "fieldtype": "Select",
+   "label": "Target Semester",
+   "options": "Hoc ky 1\nHoc ky 2"
+  },
+  {
+   "fieldname": "cb_enroll_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "enrollment_date",
+   "fieldtype": "Date",
+   "label": "Enrollment Date"
+  },
+  {
+   "fieldname": "linked_student",
+   "fieldtype": "Link",
+   "label": "Linked Student",
+   "options": "CRM Student"
+  },
+  {
+   "fieldname": "duplicate_section",
+   "fieldtype": "Section Break",
+   "label": "Duplicate Information",
+   "collapsible": 1,
+   "hidden": 0
+  },
+  {
+   "fieldname": "duplicate_lead",
+   "fieldtype": "Link",
+   "label": "Duplicate Lead",
+   "options": "CRM Lead",
+   "read_only": 1
+  },
+  {
+   "fieldname": "duplicate_fields",
+   "fieldtype": "Data",
+   "label": "Duplicate Fields",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reject_section",
+   "fieldtype": "Section Break",
+   "label": "Rejection",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "reject_reason",
+   "fieldtype": "Small Text",
+   "label": "Reject Reason"
+  },
+  {
+   "fieldname": "reject_detail",
+   "fieldtype": "Small Text",
+   "label": "Reject Detail"
+  },
+  {
+   "fieldname": "documents_section",
+   "fieldtype": "Section Break",
+   "label": "Documents",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "enrollment_documents",
+   "fieldtype": "Table",
+   "label": "Documents",
+   "options": "CRM Lead Document"
+  },
+  {
+   "fieldname": "events_courses_section",
+   "fieldtype": "Section Break",
+   "label": "Events & Courses",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "events",
+   "fieldtype": "Table",
+   "label": "Events",
+   "options": "CRM Lead Event"
+  },
+  {
+   "fieldname": "courses",
+   "fieldtype": "Table",
+   "label": "Courses",
+   "options": "CRM Lead Course"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-08-20 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Lead",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Sales",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}

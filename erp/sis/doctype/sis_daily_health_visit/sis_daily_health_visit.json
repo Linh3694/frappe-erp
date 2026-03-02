@@ -27,7 +27,13 @@
   "reported_by",
   "reported_by_name",
   "received_by",
-  "received_by_name"
+  "received_by_name",
+  "checkout_section",
+  "checkout_notes",
+  "transfer_section",
+  "transfer_hospital",
+  "accompanying_teacher",
+  "accompanying_health_staff"
  ],
  "fields": [
   {
@@ -164,6 +170,37 @@
    "fieldtype": "Data",
    "label": "Tên nhân viên Y tế",
    "read_only": 1
+  },
+  {
+   "fieldname": "checkout_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin checkout"
+  },
+  {
+   "fieldname": "checkout_notes",
+   "fieldtype": "Text",
+   "label": "Ghi chú / Dặn dò khi checkout"
+  },
+  {
+   "fieldname": "transfer_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin chuyển viện",
+   "depends_on": "eval:doc.status=='transferred'"
+  },
+  {
+   "fieldname": "transfer_hospital",
+   "fieldtype": "Data",
+   "label": "Bệnh viện chuyển tới"
+  },
+  {
+   "fieldname": "accompanying_teacher",
+   "fieldtype": "Data",
+   "label": "GV đi cùng"
+  },
+  {
+   "fieldname": "accompanying_health_staff",
+   "fieldtype": "Data",
+   "label": "NVYT đi cùng"
   }
  ],
  "index_web_pages_for_search": 0,

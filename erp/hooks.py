@@ -154,7 +154,11 @@ permission_query_conditions = {
 	"SIS Photo": "erp.sis.utils.permission_query.sis_photo_query",
 	"SIS Class Log Score": "erp.sis.utils.permission_query.sis_class_log_score_query",
 	"SIS Class Log Subject": "erp.sis.utils.permission_query.sis_class_log_subject_query",
-	"SIS Class Log Student": "erp.sis.utils.permission_query.sis_class_log_student_query"
+	"SIS Class Log Student": "erp.sis.utils.permission_query.sis_class_log_student_query",
+	# CRM Doctypes
+	"CRM Lead": "erp.crm.utils.permission_query.crm_lead_query",
+	"CRM Exam": "erp.crm.utils.permission_query.crm_exam_query",
+	"CRM Issue": "erp.crm.utils.permission_query.crm_issue_query",
 }
 
 has_permission = {
@@ -187,7 +191,11 @@ has_permission = {
 	"SIS Photo": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Class Log Score": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Class Log Subject": "erp.sis.utils.campus_permissions.has_campus_permission",
-	"SIS Class Log Student": "erp.sis.utils.campus_permissions.has_campus_permission"
+	"SIS Class Log Student": "erp.sis.utils.campus_permissions.has_campus_permission",
+	# CRM Doctypes
+	"CRM Lead": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Exam": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Issue": "erp.crm.utils.permission_query.has_crm_permission",
 }
 
 # DocType Class
@@ -815,5 +823,7 @@ scheduler_events = {
     "daily": [
         "erp.project_management.cron.expire_pending_invitations",
         "erp.api.parent_portal.push_notification.cleanup_stale_push_subscriptions"
-    ]
+    ],
+    # CRM Weekly - Khong co scheduler tu dong mac dinh, goi thu cong qua API
+    # auto_enroll va end_of_year_transition duoc goi thu cong boi admin
 }

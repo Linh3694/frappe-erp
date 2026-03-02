@@ -1,0 +1,115 @@
+{
+ "actions": [],
+ "autoname": "format:CRM-EXAM-{#####}",
+ "creation": "2024-01-01 00:00:00.000000",
+ "description": "CRM Exam - Ky thi KSDV",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "exam_info",
+  "academic_year",
+  "exam_date",
+  "cb_exam_1",
+  "exam_time",
+  "campus_id",
+  "exam_students_section",
+  "students"
+ ],
+ "fields": [
+  {
+   "fieldname": "exam_info",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "academic_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Academic Year",
+   "options": "SIS School Year",
+   "reqd": 1
+  },
+  {
+   "fieldname": "exam_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Exam Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cb_exam_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "exam_time",
+   "fieldtype": "Data",
+   "label": "Exam Time"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1
+  },
+  {
+   "fieldname": "exam_students_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "students",
+   "fieldtype": "Table",
+   "label": "Students",
+   "options": "CRM Exam Student"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Exam",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "Registrar",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "SIS Sales"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -16,6 +16,7 @@
   "visit_id",
   "examination_section",
   "symptoms",
+  "diet_history",
   "images",
   "disease_classification",
   "examination_notes",
@@ -29,6 +30,9 @@
   "column_break_2",
   "examined_by",
   "examined_by_name",
+  "hospital_section",
+  "hospital_diagnosis",
+  "hospital_treatment",
   "parent_notification_section",
   "sent_to_parent",
   "sent_to_parent_at"
@@ -93,6 +97,11 @@
    "fieldtype": "Text",
    "label": "Triệu chứng",
    "reqd": 1
+  },
+  {
+   "fieldname": "diet_history",
+   "fieldtype": "Text",
+   "label": "Lịch sử ăn uống"
   },
   {
    "fieldname": "images",
@@ -164,6 +173,21 @@
    "fieldtype": "Data",
    "label": "Tên người khám",
    "read_only": 1
+  },
+  {
+   "fieldname": "hospital_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin bệnh viện chuyển tới"
+  },
+  {
+   "fieldname": "hospital_diagnosis",
+   "fieldtype": "Text",
+   "label": "Chẩn đoán tại bệnh viện"
+  },
+  {
+   "fieldname": "hospital_treatment",
+   "fieldtype": "Text",
+   "label": "Điều trị tại bệnh viện"
   },
   {
    "fieldname": "parent_notification_section",

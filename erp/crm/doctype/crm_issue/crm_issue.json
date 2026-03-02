@@ -1,0 +1,192 @@
+{
+ "actions": [],
+ "autoname": "format:CRM-ISSUE-{#####}",
+ "creation": "2024-01-01 00:00:00.000000",
+ "description": "CRM Issue - Van de chung cua hoc sinh",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "issue_info",
+  "issue_code",
+  "title",
+  "issue_type",
+  "cb_issue_1",
+  "lead",
+  "student",
+  "occurred_at",
+  "issue_content",
+  "content",
+  "attachment",
+  "issue_assignment",
+  "pic",
+  "departments",
+  "cb_issue_2",
+  "status",
+  "result",
+  "process_section",
+  "process_logs"
+ ],
+ "fields": [
+  {
+   "fieldname": "issue_info",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "Auto: I-xxx or C-xxx",
+   "fieldname": "issue_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Issue Code",
+   "read_only": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "issue_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Issue Type",
+   "options": "Ho tro, cham soc\nPhan anh, phan nan",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cb_issue_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "lead",
+   "fieldtype": "Link",
+   "label": "Lead",
+   "options": "CRM Lead"
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student"
+  },
+  {
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "label": "Occurred At",
+   "reqd": 1
+  },
+  {
+   "fieldname": "issue_content",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "content",
+   "fieldtype": "Text Editor",
+   "label": "Content",
+   "reqd": 1
+  },
+  {
+   "fieldname": "attachment",
+   "fieldtype": "Attach",
+   "label": "Attachment"
+  },
+  {
+   "fieldname": "issue_assignment",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "pic",
+   "fieldtype": "Link",
+   "label": "PIC",
+   "options": "User"
+  },
+  {
+   "fieldname": "departments",
+   "fieldtype": "Small Text",
+   "label": "Related Departments"
+  },
+  {
+   "fieldname": "cb_issue_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Tiep nhan",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Tiep nhan\nDang xu ly\nHoan thanh",
+   "reqd": 1
+  },
+  {
+   "fieldname": "result",
+   "fieldtype": "Select",
+   "label": "Result",
+   "options": "\nHai long\nChua hai long\nDong y nhung chua hai long\nTiep tuc theo doi"
+  },
+  {
+   "fieldname": "process_section",
+   "fieldtype": "Section Break",
+   "label": "Process Logs"
+  },
+  {
+   "fieldname": "process_logs",
+   "fieldtype": "Table",
+   "label": "Process Logs",
+   "options": "CRM Issue Log"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Issue",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "Registrar",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "SIS Sales",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title"
+}
