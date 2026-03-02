@@ -668,6 +668,14 @@ def update_health_examination():
         hospital_diagnosis = data.get("hospital_diagnosis")
         hospital_treatment = data.get("hospital_treatment")
         
+        # Followup fields
+        followup_checkin_time = data.get("followup_checkin_time")
+        followup_examination = data.get("followup_examination")
+        followup_treatment_details = data.get("followup_treatment_details")
+        followup_checkout_time = data.get("followup_checkout_time")
+        followup_outcome = data.get("followup_outcome")
+        followup_notes = data.get("followup_notes")
+        
         # Backward compatibility
         diagnosis = data.get("diagnosis")
         treatment = data.get("treatment")
@@ -706,6 +714,20 @@ def update_health_examination():
             exam.hospital_diagnosis = hospital_diagnosis if hospital_diagnosis else None
         if hospital_treatment is not None:
             exam.hospital_treatment = hospital_treatment if hospital_treatment else None
+        
+        # Followup fields
+        if followup_checkin_time is not None:
+            exam.followup_checkin_time = followup_checkin_time if followup_checkin_time else None
+        if followup_examination is not None:
+            exam.followup_examination = followup_examination if followup_examination else None
+        if followup_treatment_details is not None:
+            exam.followup_treatment_details = followup_treatment_details if followup_treatment_details else None
+        if followup_checkout_time is not None:
+            exam.followup_checkout_time = followup_checkout_time if followup_checkout_time else None
+        if followup_outcome is not None:
+            exam.followup_outcome = followup_outcome if followup_outcome else None
+        if followup_notes is not None:
+            exam.followup_notes = followup_notes if followup_notes else None
         
         # Update images if provided (cho phép empty array để clear tất cả)
         if images is not None and isinstance(images, list):
@@ -775,7 +797,10 @@ def get_student_examination_history():
                 "treatment", "outcome", "examined_by_name", "creation", "modified",
                 "visit_id", "disease_classification", "examination_notes",
                 "treatment_type", "treatment_details", "notes",
-                "hospital_diagnosis", "hospital_treatment"
+                "hospital_diagnosis", "hospital_treatment",
+                "followup_checkin_time", "followup_examination",
+                "followup_treatment_details", "followup_checkout_time",
+                "followup_outcome", "followup_notes"
             ],
             order_by="examination_date desc, creation desc",
             limit=limit

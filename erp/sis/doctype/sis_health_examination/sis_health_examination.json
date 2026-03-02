@@ -33,6 +33,14 @@
   "hospital_section",
   "hospital_diagnosis",
   "hospital_treatment",
+  "followup_section",
+  "followup_checkin_time",
+  "followup_examination",
+  "followup_treatment_details",
+  "followup_column_break",
+  "followup_checkout_time",
+  "followup_outcome",
+  "followup_notes",
   "parent_notification_section",
   "sent_to_parent",
   "sent_to_parent_at"
@@ -188,6 +196,46 @@
    "fieldname": "hospital_treatment",
    "fieldtype": "Text",
    "label": "Điều trị tại bệnh viện"
+  },
+  {
+   "fieldname": "followup_section",
+   "fieldtype": "Section Break",
+   "label": "Thăm khám bổ sung"
+  },
+  {
+   "fieldname": "followup_checkin_time",
+   "fieldtype": "Time",
+   "label": "Giờ check-in khám bổ sung"
+  },
+  {
+   "fieldname": "followup_examination",
+   "fieldtype": "Text",
+   "label": "Thăm khám bổ sung"
+  },
+  {
+   "fieldname": "followup_treatment_details",
+   "fieldtype": "Text",
+   "label": "Xử trí bổ sung"
+  },
+  {
+   "fieldname": "followup_column_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "followup_checkout_time",
+   "fieldtype": "Time",
+   "label": "Giờ check-out khám bổ sung"
+  },
+  {
+   "fieldname": "followup_outcome",
+   "fieldtype": "Select",
+   "label": "Kết quả khám bổ sung",
+   "options": "\nreturn_class\npicked_up\ntransferred"
+  },
+  {
+   "fieldname": "followup_notes",
+   "fieldtype": "Text",
+   "label": "Ghi chú khám bổ sung"
   },
   {
    "fieldname": "parent_notification_section",
