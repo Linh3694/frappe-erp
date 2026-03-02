@@ -2431,7 +2431,7 @@ def get_parent_health_records():
             order_by="examination_date desc, creation desc"
         )
         
-        # Lấy images cho từng exam
+        # Lấy images + checkout_notes từ visit cho từng exam
         for exam in examinations:
             images = frappe.get_all(
                 "SIS Examination Image",
@@ -2439,6 +2439,15 @@ def get_parent_health_records():
                 fields=["image", "description"]
             )
             exam["images"] = images
+            
+            if exam.get("visit_id"):
+                visit_data = frappe.db.get_value(
+                    "SIS Daily Health Visit",
+                    exam["visit_id"],
+                    ["checkout_notes"],
+                    as_dict=True
+                )
+                exam["checkout_notes"] = visit_data.get("checkout_notes") if visit_data else None
         
         # Group theo ngày
         grouped = {}
