@@ -2074,7 +2074,10 @@ def get_class_health_examinations():
                 "examination_date", "visit_id", "symptoms", "disease_classification",
                 "examination_notes", "treatment_type", "treatment_details", "notes",
                 "outcome", "examined_by_name", "sent_to_parent", "sent_to_parent_at",
-                "creation", "modified"
+                "creation", "modified",
+                "followup_checkin_time", "followup_examination",
+                "followup_treatment_details", "followup_checkout_time",
+                "followup_outcome", "followup_notes"
             ],
             order_by="creation desc"
         )
@@ -2452,6 +2455,9 @@ def get_parent_health_records():
                 "treatment_type", "treatment_details", "notes",
                 "outcome", "examined_by_name", "sent_to_parent_at",
                 "hospital_diagnosis", "hospital_treatment",
+                "followup_checkin_time", "followup_examination",
+                "followup_treatment_details", "followup_checkout_time",
+                "followup_outcome", "followup_notes",
                 "creation", "modified"
             ],
             order_by="examination_date desc, creation desc"
