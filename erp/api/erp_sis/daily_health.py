@@ -738,24 +738,24 @@ def update_health_examination():
         if followup_accompanying_health_staff is not None:
             exam.followup_accompanying_health_staff = followup_accompanying_health_staff if followup_accompanying_health_staff else None
         
-        # Khi followup outcome = transferred, cập nhật visit status
-        if followup_outcome == "transferred" and exam.visit_id:
+        # Khi followup outcome thay đổi, cập nhật visit status tương ứng
+        if followup_outcome in ("transferred", "picked_up") and exam.visit_id:
             try:
                 visit_doc = frappe.get_doc("SIS Daily Health Visit", exam.visit_id)
-                visit_doc.status = "transferred"
-                if followup_transfer_hospital:
-                    visit_doc.transfer_hospital = followup_transfer_hospital
-                if followup_accompanying_teacher:
-                    visit_doc.accompanying_teacher = followup_accompanying_teacher
-                if followup_accompanying_health_staff:
-                    visit_doc.accompanying_health_staff = followup_accompanying_health_staff
+                visit_doc.status = followup_outcome
+                if followup_outcome == "transferred":
+                    if followup_transfer_hospital:
+                        visit_doc.transfer_hospital = followup_transfer_hospital
+                    if followup_accompanying_teacher:
+                        visit_doc.accompanying_teacher = followup_accompanying_teacher
+                    if followup_accompanying_health_staff:
+                        visit_doc.accompanying_health_staff = followup_accompanying_health_staff
                 visit_doc.save()
-                # Cập nhật outcome của tất cả exam liên quan
                 related_exams = frappe.get_all("SIS Health Examination", filters={"visit_id": exam.visit_id}, fields=["name"])
                 for re in related_exams:
-                    frappe.db.set_value("SIS Health Examination", re.name, "outcome", "transferred", update_modified=False)
+                    frappe.db.set_value("SIS Health Examination", re.name, "outcome", followup_outcome, update_modified=False)
             except Exception as e:
-                frappe.logger().error(f"Error updating visit status for followup transfer: {str(e)}")
+                frappe.logger().error(f"Error updating visit status for followup: {str(e)}")
         
         # Update images if provided (cho phép empty array để clear tất cả)
         if images is not None and isinstance(images, list):
