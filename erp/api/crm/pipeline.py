@@ -11,7 +11,7 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data, validate_step_transition,
-    get_valid_statuses_for_step, STEP_STATUSES
+    get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES
 )
 
 
@@ -127,11 +127,21 @@ def advance_step():
     # Cap nhat step va status mac dinh
     doc.step = target_step
     default_statuses = {
-        "Lead": "Moi", "Verify": "New", "QLead": "Follow up",
-        "Test": "Pre-test", "Deal": "Booked", "Enrolled": "Enrolled",
-        "Re-Enroll": "Paid", "Withdraw": "Withdraw", "Graduated": "Graduated"
+        "Verify": "Can kiem tra",
+        "Lead": "Moi",
+        "QLead": "Moi",
+        "Test": "Pre-test",
+        "Deal": "Booked",
+        "Enrolled": "Dang hoc",
+        "Re-Enroll": "Unpaid",
+        "Withdraw": "Chuyen truong",
+        "Graduated": "Tot nghiep"
     }
-    doc.status = default_statuses.get(target_step, "New")
+    doc.status = default_statuses.get(target_step, "")
+    
+    # Sinh crm_code khi chuyen sang Lead
+    if target_step == "Lead" and not doc.crm_code:
+        doc.crm_code = generate_crm_code()
     
     doc.save(ignore_permissions=True)
     frappe.db.commit()
@@ -178,10 +188,21 @@ def bulk_advance_step():
             
             doc.step = target_step
             default_statuses = {
-                "Lead": "Moi", "Verify": "New", "QLead": "Follow up",
-                "Test": "Pre-test", "Deal": "Booked"
+                "Verify": "Can kiem tra",
+                "Lead": "Moi",
+                "QLead": "Moi",
+                "Test": "Pre-test",
+                "Deal": "Booked",
+                "Enrolled": "Dang hoc",
+                "Re-Enroll": "Unpaid",
+                "Withdraw": "Chuyen truong",
+                "Graduated": "Tot nghiep"
             }
-            doc.status = default_statuses.get(target_step, "New")
+            doc.status = default_statuses.get(target_step, "")
+            
+            if target_step == "Lead" and not doc.crm_code:
+                doc.crm_code = generate_crm_code()
+            
             doc.save(ignore_permissions=True)
             
             _log_step_change(lead_name, old_step, target_step, old_status, doc.status)
@@ -218,11 +239,11 @@ def enroll_lead():
     old_step = doc.step
     old_status = doc.status
     doc.step = "Enrolled"
-    doc.status = "Enrolled"
+    doc.status = "Dang hoc"
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     
-    _log_step_change(name, old_step, "Enrolled", old_status, "Enrolled")
+    _log_step_change(name, old_step, "Enrolled", old_status, "Dang hoc")
     
     return single_item_response(doc.as_dict(), "Da nhap hoc thanh cong")
 
@@ -249,13 +270,13 @@ def transfer_to_withdraw():
     old_step = doc.step
     old_status = doc.status
     doc.step = "Withdraw"
-    doc.status = "Withdraw"
+    doc.status = "Chuyen truong"
     if reason:
         doc.reject_reason = reason
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     
-    _log_step_change(name, old_step, "Withdraw", old_status, "Withdraw")
+    _log_step_change(name, old_step, "Withdraw", old_status, "Chuyen truong")
     
     return single_item_response(doc.as_dict(), "Da chuyen sang Withdraw")
 
@@ -353,9 +374,9 @@ def auto_enroll_paid_leads():
             old_step = doc.step
             old_status = doc.status
             doc.step = "Enrolled"
-            doc.status = "Enrolled"
+            doc.status = "Dang hoc"
             doc.save(ignore_permissions=True)
-            _log_step_change(doc.name, old_step, "Enrolled", old_status, "Enrolled")
+            _log_step_change(doc.name, old_step, "Enrolled", old_status, "Dang hoc")
             enrolled_count += 1
         except Exception as e:
             errors.append({"name": lead["name"], "error": str(e)})
@@ -393,7 +414,7 @@ def end_of_year_transition():
             
             if doc.target_grade == "12":
                 doc.step = "Graduated"
-                doc.status = "Graduated"
+                doc.status = "Tot nghiep"
                 results["graduated"] += 1
             else:
                 doc.step = "Re-Enroll"

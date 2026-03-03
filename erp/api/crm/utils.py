@@ -13,16 +13,16 @@ CRM_STEPS = [
 ]
 
 STEP_STATUSES: Dict[str, List[str]] = {
-    "Draft": ["New"],
-    "Verify": ["New"],
-    "Lead": ["Moi", "KNM", "HGL", "KNM nhieu lan", "KCNC", "Sai thong tin", "Trung Lead", "Lost"],
-    "QLead": ["Follow up", "Pre-Event", "Event", "Pre-school tour", "School tour", "Lost"],
-    "Test": ["Pre-test", "Test", "Offered", "Retake", "Fail", "Lost"],
-    "Deal": ["Booked", "Deposit", "Paid", "Lost"],
-    "Enrolled": ["Enrolled"],
-    "Re-Enroll": ["Paid", "Unpaid"],
-    "Withdraw": ["Withdraw"],
-    "Graduated": ["Graduated"],
+    "Draft": [],
+    "Verify": ["Can kiem tra", "Trung"],
+    "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Lost"],
+    "QLead": ["Moi", "Follow Up", "Pre-Event", "Event", "Pre-school Tour/ School Tour", "Lost"],
+    "Test": ["Pre-test", "Test", "Offered", "Failed", "Retake", "Lost"],
+    "Deal": ["Booked", "Deposit", "Lost", "Refund", "Reserved", "Paid"],
+    "Enrolled": ["Dang hoc"],
+    "Re-Enroll": ["Unpaid", "Considering", "Paid"],
+    "Withdraw": ["Chuyen truong", "Bao luu"],
+    "Graduated": ["Tot nghiep"],
 }
 
 VALID_STEP_TRANSITIONS = {
@@ -85,6 +85,20 @@ def validate_step_transition(current_step: str, target_step: str) -> bool:
             frappe.ValidationError
         )
     return True
+
+
+def generate_crm_code() -> str:
+    """Sinh ma CRM tu dong theo format CRM-00001, tang dan"""
+    last = frappe.db.sql(
+        "SELECT crm_code FROM `tabCRM Lead` "
+        "WHERE crm_code IS NOT NULL AND crm_code != '' "
+        "ORDER BY crm_code DESC LIMIT 1"
+    )
+    if last and last[0][0]:
+        num = int(last[0][0].replace("CRM-", "")) + 1
+    else:
+        num = 1
+    return f"CRM-{num:05d}"
 
 
 def get_request_data() -> dict:

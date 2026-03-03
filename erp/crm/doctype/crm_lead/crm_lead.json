@@ -19,6 +19,7 @@
   "general_info_section",
   "step",
   "status",
+  "crm_code",
   "cb_general_1",
   "data_source",
   "staff_code",
@@ -98,9 +99,17 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "New\nKNM\nHGL\nKNM nhieu lan\nKCNC\nSai thong tin\nTrung Lead\nLost\nFollow up\nPre-Event\nEvent\nPre-school tour\nSchool tour\nPre-test\nTest\nOffered\nRetake\nFail\nBooked\nDeposit\nPaid\nUnpaid\nEnrolled\nWithdraw\nGraduated",
-   "default": "New",
+   "options": "\nCan kiem tra\nTrung\nMoi\nKhong nghe may\nHen gap lai\nKhong nghe may nhieu lan\nKhong co nhu cau\nSau thong tin\nTrung Lead\nLost\nFollow Up\nPre-Event\nEvent\nPre-school Tour/ School Tour\nPre-test\nTest\nOffered\nFailed\nRetake\nBooked\nDeposit\nRefund\nReserved\nPaid\nUnpaid\nConsidering\nDang hoc\nChuyen truong\nBao luu\nTot nghiep",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "crm_code",
+   "fieldtype": "Data",
+   "label": "CRM Code",
+   "unique": 1,
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Ma CRM tu dong sinh khi chuyen sang buoc Lead (CRM-00001)"
   },
   {
    "fieldname": "cb_general_1",

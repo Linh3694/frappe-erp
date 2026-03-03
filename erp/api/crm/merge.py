@@ -8,7 +8,7 @@ from erp.utils.api_response import (
     success_response, error_response, single_item_response,
     list_response, validation_error_response, not_found_response
 )
-from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.api.crm.utils import check_crm_permission, get_request_data, generate_crm_code
 
 
 @frappe.whitelist()
@@ -95,6 +95,15 @@ def merge_leads():
             # Xoa ho so phu
             frappe.delete_doc("CRM Lead", sec_name, ignore_permissions=True)
         
+        # Chuyen sang Lead va sinh crm_code sau khi gop
+        if primary_doc.step in ("Draft", "Verify"):
+            primary_doc.step = "Lead"
+            primary_doc.status = "Moi"
+            if not primary_doc.crm_code:
+                primary_doc.crm_code = generate_crm_code()
+            primary_doc.duplicate_lead = ""
+            primary_doc.duplicate_fields = ""
+        
         primary_doc.save(ignore_permissions=True)
         frappe.db.commit()
         
@@ -123,6 +132,8 @@ def skip_merge():
     if doc.step == "Verify":
         doc.step = "Lead"
         doc.status = "Moi"
+        if not doc.crm_code:
+            doc.crm_code = generate_crm_code()
         doc.duplicate_lead = ""
         doc.duplicate_fields = ""
         doc.save(ignore_permissions=True)

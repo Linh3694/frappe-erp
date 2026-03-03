@@ -60,8 +60,8 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
     Ap dung business rules de xac dinh buoc va trang thai cho ho so moi.
     
     Rules:
-    - TH1: Khong trung hoac chi trung 1 truong (ten PH hoac ten HS) -> Lead/Moi
-    - TH2: Trung >= 2 truong -> Verify/New
+    - TH1: Khong trung hoac chi trung 1 truong (ten PH hoac ten HS) -> Verify/Can kiem tra
+    - TH2: Trung >= 2 truong -> Verify/Trung
     - TH3: Chi trung SDT -> kiem tra step va thoi gian
     """
     matched_fields = matched_lead.get("matched_fields", [])
@@ -82,7 +82,7 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                 "is_duplicate": True,
                 "duplicate_type": "multi_field",
                 "recommended_step": "Verify",
-                "recommended_status": "New",
+                "recommended_status": "Trung",
                 "reason": f"Trung {num_matched} truong: {', '.join(matched_fields)}"
             }
     
@@ -97,8 +97,8 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                 return {
                     "is_duplicate": False,
                     "duplicate_type": "phone_only_expired",
-                    "recommended_step": "Lead",
-                    "recommended_status": "Moi",
+                    "recommended_step": "Verify",
+                    "recommended_status": "Can kiem tra",
                     "reason": f"Trung SDT, ho so cu o Lead > 1 nam"
                 }
             else:
@@ -106,7 +106,7 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                     "is_duplicate": True,
                     "duplicate_type": "phone_only_recent",
                     "recommended_step": "Verify",
-                    "recommended_status": "New",
+                    "recommended_status": "Trung",
                     "reason": f"Trung SDT, ho so cu o Lead <= 1 nam"
                 }
         
@@ -116,8 +116,8 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                 return {
                     "is_duplicate": False,
                     "duplicate_type": "phone_only_expired",
-                    "recommended_step": "Lead",
-                    "recommended_status": "Moi",
+                    "recommended_step": "Verify",
+                    "recommended_status": "Can kiem tra",
                     "reason": f"Trung SDT, ho so cu o QLead > 2 nam"
                 }
             else:
@@ -125,7 +125,7 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                     "is_duplicate": True,
                     "duplicate_type": "phone_only_recent",
                     "recommended_step": "Verify",
-                    "recommended_status": "New",
+                    "recommended_status": "Trung",
                     "reason": f"Trung SDT, ho so cu o QLead <= 2 nam"
                 }
         
@@ -135,8 +135,8 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                 return {
                     "is_duplicate": False,
                     "duplicate_type": "phone_only_expired",
-                    "recommended_step": "Lead",
-                    "recommended_status": "Moi",
+                    "recommended_step": "Verify",
+                    "recommended_status": "Can kiem tra",
                     "reason": f"Trung SDT, ho so cu o {old_step} > 1 nam"
                 }
             else:
@@ -144,7 +144,7 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                     "is_duplicate": True,
                     "duplicate_type": "phone_only_recent",
                     "recommended_step": "Verify",
-                    "recommended_status": "New",
+                    "recommended_status": "Trung",
                     "reason": f"Trung SDT, ho so cu o {old_step} <= 1 nam"
                 }
     
@@ -152,8 +152,8 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
     return {
         "is_duplicate": False,
         "duplicate_type": "none",
-        "recommended_step": "Lead",
-        "recommended_status": "Moi",
+        "recommended_step": "Verify",
+        "recommended_status": "Can kiem tra",
         "reason": "Khong trung hoac chi trung 1 truong"
     }
 
@@ -183,8 +183,8 @@ def check_duplicate():
         return success_response({
             "is_duplicate": False,
             "matches": [],
-            "recommended_step": "Lead",
-            "recommended_status": "Moi"
+            "recommended_step": "Verify",
+            "recommended_status": "Can kiem tra"
         })
     
     # Sap xep theo thoi gian cap nhat gan nhat

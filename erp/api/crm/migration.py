@@ -58,7 +58,7 @@ def _build_lead_from_student(student_doc, guardian_doc, relationship_type):
     lead_data = {
         "doctype": "CRM Lead",
         "step": "Enrolled",
-        "status": "Enrolled",
+        "status": "Dang hoc",
         "data_source": "Offline",
         "student_name": student_doc.student_name,
         "student_code": student_doc.student_code,
@@ -265,3 +265,81 @@ def get_migration_stats():
         "total_guardians": total_guardians,
         "total_families": total_families,
     }, "Thong ke migration")
+
+
+@frappe.whitelist(methods=["POST"])
+def fix_migrated_statuses():
+    """
+    Cap nhat status cu khong con hop le sang status moi.
+    Chuyen cac records co status bi loi do thay doi step/status mapping.
+    """
+    check_crm_permission(["System Manager", "SIS Manager"])
+
+    STATUS_FIXES = {
+        "Enrolled": {
+            "old_status": "Enrolled",
+            "new_status": "Dang hoc",
+        },
+        "Withdraw": {
+            "old_status": "Withdraw",
+            "new_status": "Chuyen truong",
+        },
+        "Graduated": {
+            "old_status": "Graduated",
+            "new_status": "Tot nghiep",
+        },
+    }
+
+    OLD_STATUS_MAP = {
+        "New": {"Verify": "Can kiem tra"},
+        "KNM": {"Lead": "Khong nghe may"},
+        "HGL": {"Lead": "Hen gap lai"},
+        "KNM nhieu lan": {"Lead": "Khong nghe may nhieu lan"},
+        "KCNC": {"Lead": "Khong co nhu cau"},
+        "Sai thong tin": {"Lead": "Sau thong tin"},
+        "Follow up": {"QLead": "Follow Up"},
+        "Pre-school tour": {"QLead": "Pre-school Tour/ School Tour"},
+        "School tour": {"QLead": "Pre-school Tour/ School Tour"},
+        "Fail": {"Test": "Failed"},
+    }
+
+    results = {"updated": 0, "details": []}
+
+    # Fix step-specific status renames
+    for step, fix in STATUS_FIXES.items():
+        count = frappe.db.sql(
+            "UPDATE `tabCRM Lead` SET status = %(new)s WHERE step = %(step)s AND status = %(old)s",
+            {"new": fix["new_status"], "step": step, "old": fix["old_status"]}
+        )
+        affected = frappe.db.sql("SELECT ROW_COUNT()")[0][0]
+        if affected:
+            results["updated"] += affected
+            results["details"].append(f"{step}: {fix['old_status']} -> {fix['new_status']} ({affected} records)")
+
+    # Fix old status names
+    for old_status, step_map in OLD_STATUS_MAP.items():
+        for step, new_status in step_map.items():
+            affected_count = frappe.db.sql(
+                "SELECT COUNT(*) FROM `tabCRM Lead` WHERE step = %(step)s AND status = %(old)s",
+                {"step": step, "old": old_status}
+            )[0][0]
+            if affected_count:
+                frappe.db.sql(
+                    "UPDATE `tabCRM Lead` SET status = %(new)s WHERE step = %(step)s AND status = %(old)s",
+                    {"new": new_status, "step": step, "old": old_status}
+                )
+                results["updated"] += affected_count
+                results["details"].append(f"{step}: {old_status} -> {new_status} ({affected_count} records)")
+
+    # Fix Draft records co status 'New' -> status rong
+    draft_count = frappe.db.sql(
+        "SELECT COUNT(*) FROM `tabCRM Lead` WHERE step = 'Draft' AND status != ''",
+    )[0][0]
+    if draft_count:
+        frappe.db.sql("UPDATE `tabCRM Lead` SET status = '' WHERE step = 'Draft' AND status != ''")
+        results["updated"] += draft_count
+        results["details"].append(f"Draft: cleared status ({draft_count} records)")
+
+    frappe.db.commit()
+
+    return success_response(results, f"Da cap nhat {results['updated']} records")

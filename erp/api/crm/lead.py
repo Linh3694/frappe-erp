@@ -46,6 +46,7 @@ def get_leads():
             "guardian_name": ["like", f"%{search}%"],
             "name": ["like", f"%{search}%"],
             "student_code": ["like", f"%{search}%"],
+            "crm_code": ["like", f"%{search}%"],
         }
     
     # Dem tong
@@ -54,7 +55,8 @@ def get_leads():
             SELECT COUNT(*) FROM `tabCRM Lead`
             WHERE ({conditions})
             AND (student_name LIKE %(search)s OR guardian_name LIKE %(search)s 
-                 OR name LIKE %(search)s OR student_code LIKE %(search)s)
+                 OR name LIKE %(search)s OR student_code LIKE %(search)s
+                 OR crm_code LIKE %(search)s)
         """.format(conditions=" AND ".join([f"`{k}` = %({k})s" for k in filters]) if filters else "1=1"),
             {**filters, "search": f"%{search}%"}
         )[0][0]
@@ -69,9 +71,9 @@ def get_leads():
         filters=filters,
         or_filters=or_filters if search else None,
         fields=[
-            "name", "step", "status", "student_name", "guardian_name",
+            "name", "step", "status", "crm_code", "student_name", "guardian_name",
             "student_code", "target_grade", "campus_id", "pic",
-            "data_source", "modified", "creation"
+            "data_source", "modified", "creation", "duplicate_fields", "owner"
         ],
         order_by=f"{sort_by} {sort_order}",
         start=offset,
@@ -152,7 +154,7 @@ def create_lead():
         
         # Set thong tin co ban
         simple_fields = [
-            "step", "status", "data_source", "staff_code", "pic", "campus_id",
+            "data_source", "staff_code", "pic", "campus_id",
             "student_name", "student_gender", "student_dob", "student_code",
             "current_grade", "target_grade", "current_school", "student_note",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
@@ -164,11 +166,9 @@ def create_lead():
             if field in data and data[field]:
                 doc.set(field, data[field])
         
-        # Default step va status
-        if not doc.step:
-            doc.step = data.get("target_step", "Draft")
-        if not doc.status:
-            doc.status = "New" if doc.step == "Verify" else "Moi" if doc.step == "Lead" else "New"
+        # Tao o buoc Draft, khong co status
+        doc.step = "Draft"
+        doc.status = ""
         
         # Set phone numbers
         for phone_item in phone_numbers:
@@ -193,6 +193,37 @@ def create_lead():
             })
         
         doc.insert(ignore_permissions=True)
+        
+        # Tu dong kiem tra trung lap va chuyen sang Verify
+        from erp.api.crm.duplicate import _find_matching_leads, _evaluate_duplicate_rules
+        
+        raw_phones = [p.get("phone_number", "") for p in phone_numbers]
+        matches = _find_matching_leads(
+            raw_phones,
+            doc.student_name,
+            doc.guardian_name,
+            exclude_draft=True
+        )
+        # Loai bo chinh no
+        matches = [m for m in matches if m["name"] != doc.name]
+        
+        doc.step = "Verify"
+        
+        if matches:
+            matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
+            most_recent = matches[0]
+            result = _evaluate_duplicate_rules(most_recent)
+            
+            if result.get("is_duplicate"):
+                doc.status = "Trung"
+                doc.duplicate_lead = most_recent["name"]
+                doc.duplicate_fields = ", ".join(most_recent.get("matched_fields", []))
+            else:
+                doc.status = "Can kiem tra"
+        else:
+            doc.status = "Can kiem tra"
+        
+        doc.save(ignore_permissions=True)
         frappe.db.commit()
         
         return single_item_response(doc.as_dict(), "Tao ho so thanh cong")
