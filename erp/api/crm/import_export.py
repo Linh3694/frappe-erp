@@ -10,7 +10,7 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data,
     validate_phone_number, normalize_phone_number,
-    STEP_STATUSES
+    STEP_STATUSES, CRM_STEPS
 )
 
 
@@ -179,11 +179,13 @@ def export_step_leads_for_update():
         limit_page_length=0,
     )
 
-    valid_statuses = STEP_STATUSES.get(step, [])
+    all_step_statuses = {s: STEP_STATUSES.get(s, []) for s in CRM_STEPS}
 
     return success_response({
         "leads": leads,
-        "valid_statuses": valid_statuses,
+        "valid_statuses": STEP_STATUSES.get(step, []),
+        "all_step_statuses": all_step_statuses,
+        "steps": CRM_STEPS,
         "step": step,
     })
 
@@ -192,10 +194,11 @@ def export_step_leads_for_update():
 def bulk_update_leads():
     """
     Cap nhat hang loat records tu file Excel.
-    Khong tao ban ghi moi, chi update cac truong: pic, status.
+    Khong tao ban ghi moi, chi update cac truong: pic, step, status.
+    Cho phep chuyen buoc (step) — status se duoc validate theo buoc moi.
     Match bang truong 'name' (ID noi bo) hoac 'crm_code'.
 
-    Body JSON: { "rows": [ { "name": "...", "pic": "...", "status": "..." }, ... ] }
+    Body JSON: { "rows": [ { "name": "...", "pic": "...", "step": "...", "status": "..." }, ... ] }
     """
     check_crm_permission()
     data = get_request_data()
@@ -204,18 +207,19 @@ def bulk_update_leads():
     if not rows:
         return validation_error_response("Khong co du lieu", {"rows": ["Bat buoc"]})
 
+    from erp.api.crm.utils import CRM_STEPS, generate_crm_code
+
     results = {"updated": 0, "skipped": 0, "errors": []}
 
     for idx, row in enumerate(rows):
         row_num = idx + 1
-        lead_name = row.get("name", "").strip()
-        crm_code = row.get("crm_code", "").strip()
+        lead_name = str(row.get("name", "")).strip()
+        crm_code = str(row.get("crm_code", "")).strip()
 
         if not lead_name and not crm_code:
             results["errors"].append({"row": row_num, "error": "Thieu name hoac crm_code"})
             continue
 
-        # Tim record
         doc_name = None
         if lead_name and frappe.db.exists("CRM Lead", lead_name):
             doc_name = lead_name
@@ -233,23 +237,52 @@ def bulk_update_leads():
             doc = frappe.get_doc("CRM Lead", doc_name)
             changed = False
 
-            new_pic = row.get("pic", "").strip()
-            if new_pic and new_pic != doc.pic:
+            new_pic = str(row.get("pic", "")).strip()
+            if new_pic and new_pic != (doc.pic or ""):
                 doc.pic = new_pic
                 changed = True
 
-            new_status = row.get("status", "").strip()
-            if new_status and new_status != doc.status:
-                valid = STEP_STATUSES.get(doc.step, [])
+            new_step = str(row.get("step", "")).strip()
+            new_status = str(row.get("status", "")).strip()
+
+            # Xac dinh step se ap dung de validate status
+            target_step = new_step if (new_step and new_step != doc.step) else doc.step
+
+            # Validate step hop le
+            if new_step and new_step != doc.step:
+                if new_step not in CRM_STEPS:
+                    results["errors"].append({
+                        "row": row_num,
+                        "error": f"Buoc '{new_step}' khong hop le. "
+                                 f"Cho phep: {', '.join(CRM_STEPS)}"
+                    })
+                    continue
+                doc.step = new_step
+                changed = True
+
+                # Gan crm_code khi chuyen vao Lead tro di ma chua co
+                if not doc.crm_code and CRM_STEPS.index(new_step) >= CRM_STEPS.index("Lead"):
+                    doc.crm_code = generate_crm_code()
+
+            # Validate status theo step moi (target_step)
+            if new_status and new_status != (doc.status or ""):
+                valid = STEP_STATUSES.get(target_step, [])
                 if valid and new_status not in valid:
                     results["errors"].append({
                         "row": row_num,
-                        "error": f"Status '{new_status}' khong hop le cho buoc {doc.step}. "
+                        "error": f"Status '{new_status}' khong hop le cho buoc {target_step}. "
                                  f"Cho phep: {', '.join(valid)}"
                     })
                     continue
                 doc.status = new_status
                 changed = True
+            elif new_step and new_step != doc.step:
+                # Doi buoc nhung khong set status -> tu dong dat status mac dinh
+                default_statuses = STEP_STATUSES.get(target_step, [])
+                if default_statuses:
+                    doc.status = default_statuses[0]
+                else:
+                    doc.status = ""
 
             if changed:
                 doc.save(ignore_permissions=True)
