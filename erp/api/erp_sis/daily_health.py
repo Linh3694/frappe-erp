@@ -869,6 +869,7 @@ def get_daily_health_report_data():
         - date: Ngày cần lấy dữ liệu (optional, dùng khi không có date_from/date_to)
         - date_from: Từ ngày (optional, dùng với date_to cho khoảng thời gian)
         - date_to: Đến ngày (optional)
+        - only_transferred: Chỉ lấy trường hợp chuyển viện (optional, 1/true/"true")
     
     Returns:
         - data: Danh sách visits với examinations, mỗi examination là một dòng
@@ -881,6 +882,8 @@ def get_daily_health_report_data():
         
         date_from = data.get("date_from") or request_args.get("date_from")
         date_to = data.get("date_to") or request_args.get("date_to")
+        only_transferred = data.get("only_transferred") or request_args.get("only_transferred")
+        only_transferred = only_transferred in (1, True, "1", "true", "True")
         
         # Nếu có date_from và date_to -> filter theo khoảng; ngược lại dùng date (hoặc today)
         if date_from and date_to:
@@ -888,6 +891,9 @@ def get_daily_health_report_data():
         else:
             report_date = data.get("date") or request_args.get("date") or today()
             visit_filters = {"visit_date": report_date}
+        
+        if only_transferred:
+            visit_filters["status"] = "transferred"
         
         # Lấy tất cả visits trong ngày/khoảng ngày
         visits = frappe.get_all(
