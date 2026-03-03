@@ -285,6 +285,8 @@ def bulk_update_leads():
                     doc.status = ""
 
             if changed:
+                doc.flags.ignore_validate = True
+                doc.flags.ignore_mandatory = True
                 doc.save(ignore_permissions=True)
                 results["updated"] += 1
             else:
