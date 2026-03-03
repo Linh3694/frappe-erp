@@ -231,6 +231,19 @@ def get_feedback_ratings(page=1, page_size=20):
 			avg_rating = round(avg_rating_normalized * 5, 1)
 			rating_count = avg_rating_data[0].get('total_count', 0)
 		
+		# Phân phối rating theo từng mức sao (1-5) - dùng cho hiển thị kiểu App Store
+		distribution_rows = frappe.db.sql("""
+			SELECT LEAST(5, GREATEST(1, ROUND(rating * 5))) as star_level, COUNT(*) as cnt
+			FROM `tabFeedback`
+			WHERE feedback_type = 'Đánh giá' AND rating IS NOT NULL
+			GROUP BY LEAST(5, GREATEST(1, ROUND(rating * 5)))
+		""", as_dict=True)
+		rating_distribution = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+		for row in distribution_rows:
+			star_level = int(row.get("star_level", 0))
+			if 1 <= star_level <= 5:
+				rating_distribution[star_level] = row.get("cnt", 0)
+		
 		# Format feedback data
 		formatted_feedbacks = []
 		for fb in feedbacks:
@@ -255,7 +268,8 @@ def get_feedback_ratings(page=1, page_size=20):
 				"page_size": page_size,
 				"total_pages": (total_count + page_size - 1) // page_size,
 				"average_rating": avg_rating,
-				"rating_count": rating_count
+				"rating_count": rating_count,
+				"rating_distribution": rating_distribution
 			}
 		}
 		
