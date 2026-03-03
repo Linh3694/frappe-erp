@@ -263,9 +263,8 @@
   },
   {
    "fieldname": "relationship",
-   "fieldtype": "Select",
-   "label": "Relationship",
-   "options": "Bo\nMe\nNguoi giam ho"
+   "fieldtype": "Data",
+   "label": "Relationship"
   },
   {
    "fieldname": "guardian_email",

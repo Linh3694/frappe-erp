@@ -24,6 +24,8 @@ REVERSE_RELATIONSHIP_MAP = {
     "Father": "Bo",
     "Mother": "Me",
     "Guardian": "Nguoi giam ho",
+    "Grandfather": "Ong",
+    "Grandmother": "Ba",
 }
 
 
