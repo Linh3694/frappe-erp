@@ -866,7 +866,9 @@ def get_daily_health_report_data():
     Trả về danh sách visits kèm examinations chi tiết.
     
     Params:
-        - date: Ngày cần lấy dữ liệu (optional, default: today)
+        - date: Ngày cần lấy dữ liệu (optional, dùng khi không có date_from/date_to)
+        - date_from: Từ ngày (optional, dùng với date_to cho khoảng thời gian)
+        - date_to: Đến ngày (optional)
     
     Returns:
         - data: Danh sách visits với examinations, mỗi examination là một dòng
@@ -877,12 +879,20 @@ def get_daily_health_report_data():
         data = frappe.local.form_dict
         request_args = frappe.request.args
         
-        report_date = data.get("date") or request_args.get("date") or today()
+        date_from = data.get("date_from") or request_args.get("date_from")
+        date_to = data.get("date_to") or request_args.get("date_to")
         
-        # Lấy tất cả visits trong ngày
+        # Nếu có date_from và date_to -> filter theo khoảng; ngược lại dùng date (hoặc today)
+        if date_from and date_to:
+            visit_filters = {"visit_date": ["between", [date_from, date_to]]}
+        else:
+            report_date = data.get("date") or request_args.get("date") or today()
+            visit_filters = {"visit_date": report_date}
+        
+        # Lấy tất cả visits trong ngày/khoảng ngày
         visits = frappe.get_all(
             "SIS Daily Health Visit",
-            filters={"visit_date": report_date},
+            filters=visit_filters,
             fields=[
                 "name", "student_id", "student_name", "student_code",
                 "class_id", "class_name", "visit_date", "reason",
@@ -953,6 +963,7 @@ def get_daily_health_report_data():
             
             base_data = {
                 "visit_id": visit.name,
+                "visit_date": str(visit.visit_date) if visit.visit_date else "",
                 "student_name": visit.student_name,
                 "student_code": visit.student_code,
                 "class_name": visit.class_name,
