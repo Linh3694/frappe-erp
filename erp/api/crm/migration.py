@@ -207,6 +207,9 @@ def sync_existing_students():
 
             lead_data = _build_lead_from_student(student_doc, guardian_doc, rel_type)
             lead_doc = frappe.get_doc(lead_data)
+            # Bypass mandatory validation cho phone_numbers vi du lieu cu co the khong co SDT
+            lead_doc.flags.ignore_validate = True
+            lead_doc.flags.ignore_mandatory = True
             lead_doc.insert(ignore_permissions=True)
 
             results["created"] += 1
