@@ -98,7 +98,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "New\nKNM\nHGL\nKNM nhieu lan\nKCNC\nSai thong tin\nTrung Lead\nLost\nFollow up\nPre-Event\nEvent\nPre-school tour\nSchool tour\nPre-test\nTest\nOffered\nRetake\nFail\nBooked\nDeposit\nPaid\nUnpaid",
+   "options": "New\nKNM\nHGL\nKNM nhieu lan\nKCNC\nSai thong tin\nTrung Lead\nLost\nFollow up\nPre-Event\nEvent\nPre-school tour\nSchool tour\nPre-test\nTest\nOffered\nRetake\nFail\nBooked\nDeposit\nPaid\nUnpaid\nEnrolled\nWithdraw\nGraduated",
    "default": "New",
    "in_list_view": 1
   },
