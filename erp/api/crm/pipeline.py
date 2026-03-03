@@ -138,6 +138,15 @@ def advance_step():
     
     _log_step_change(name, old_step, target_step, old_status, doc.status)
     
+    # Tu dong tao enrollment records khi chuyen Deal -> Enrolled
+    if old_step == "Deal" and target_step == "Enrolled" and not doc.linked_student:
+        try:
+            from erp.api.crm.enrollment import create_enrollment_records
+            frappe.form_dict.update({"lead_name": name})
+            create_enrollment_records()
+        except Exception as e:
+            frappe.log_error(f"Loi tu dong tao enrollment records: {str(e)}")
+    
     return single_item_response(doc.as_dict(), f"Da chuyen ho so sang buoc {target_step}")
 
 
