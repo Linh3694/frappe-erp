@@ -9,7 +9,8 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data,
-    validate_phone_number, normalize_phone_number
+    validate_phone_number, normalize_phone_number,
+    STEP_STATUSES
 )
 
 
@@ -151,3 +152,119 @@ def export_leads():
         lead["primary_phone"] = phone
     
     return list_response(leads)
+
+
+@frappe.whitelist()
+def export_step_leads_for_update():
+    """
+    Xuat danh sach records cua 1 step de user cap nhat bang Excel.
+    Cot: name (ID noi bo), crm_code, student_code, student_name, pic, step, status
+    """
+    check_crm_permission()
+
+    step = frappe.request.args.get("step")
+    if not step:
+        return validation_error_response("Thieu tham so step", {"step": ["Bat buoc"]})
+
+    filters = {"step": step}
+    campus_id = frappe.request.args.get("campus_id")
+    if campus_id:
+        filters["campus_id"] = campus_id
+
+    leads = frappe.get_all(
+        "CRM Lead",
+        filters=filters,
+        fields=["name", "crm_code", "student_code", "student_name", "pic", "step", "status"],
+        order_by="crm_code asc, creation asc",
+        limit_page_length=0,
+    )
+
+    valid_statuses = STEP_STATUSES.get(step, [])
+
+    return success_response({
+        "leads": leads,
+        "valid_statuses": valid_statuses,
+        "step": step,
+    })
+
+
+@frappe.whitelist(methods=["POST"])
+def bulk_update_leads():
+    """
+    Cap nhat hang loat records tu file Excel.
+    Khong tao ban ghi moi, chi update cac truong: pic, status.
+    Match bang truong 'name' (ID noi bo) hoac 'crm_code'.
+
+    Body JSON: { "rows": [ { "name": "...", "pic": "...", "status": "..." }, ... ] }
+    """
+    check_crm_permission()
+    data = get_request_data()
+
+    rows = data.get("rows", [])
+    if not rows:
+        return validation_error_response("Khong co du lieu", {"rows": ["Bat buoc"]})
+
+    results = {"updated": 0, "skipped": 0, "errors": []}
+
+    for idx, row in enumerate(rows):
+        row_num = idx + 1
+        lead_name = row.get("name", "").strip()
+        crm_code = row.get("crm_code", "").strip()
+
+        if not lead_name and not crm_code:
+            results["errors"].append({"row": row_num, "error": "Thieu name hoac crm_code"})
+            continue
+
+        # Tim record
+        doc_name = None
+        if lead_name and frappe.db.exists("CRM Lead", lead_name):
+            doc_name = lead_name
+        elif crm_code:
+            doc_name = frappe.db.get_value("CRM Lead", {"crm_code": crm_code}, "name")
+
+        if not doc_name:
+            results["errors"].append({
+                "row": row_num,
+                "error": f"Khong tim thay ho so: name={lead_name}, crm_code={crm_code}"
+            })
+            continue
+
+        try:
+            doc = frappe.get_doc("CRM Lead", doc_name)
+            changed = False
+
+            new_pic = row.get("pic", "").strip()
+            if new_pic and new_pic != doc.pic:
+                doc.pic = new_pic
+                changed = True
+
+            new_status = row.get("status", "").strip()
+            if new_status and new_status != doc.status:
+                valid = STEP_STATUSES.get(doc.step, [])
+                if valid and new_status not in valid:
+                    results["errors"].append({
+                        "row": row_num,
+                        "error": f"Status '{new_status}' khong hop le cho buoc {doc.step}. "
+                                 f"Cho phep: {', '.join(valid)}"
+                    })
+                    continue
+                doc.status = new_status
+                changed = True
+
+            if changed:
+                doc.save(ignore_permissions=True)
+                results["updated"] += 1
+            else:
+                results["skipped"] += 1
+
+        except Exception as e:
+            results["errors"].append({"row": row_num, "error": str(e)})
+
+    frappe.db.commit()
+
+    return success_response(
+        results,
+        f"Cap nhat: {results['updated']} thanh cong, "
+        f"{results['skipped']} khong thay doi, "
+        f"{len(results['errors'])} loi"
+    )

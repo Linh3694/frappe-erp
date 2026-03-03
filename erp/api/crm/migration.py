@@ -11,7 +11,7 @@ from erp.utils.api_response import (
     success_response, error_response, single_item_response,
     paginated_response, list_response, validation_error_response
 )
-from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.api.crm.utils import check_crm_permission, get_request_data, generate_crm_code
 
 
 REVERSE_GENDER_MAP = {
@@ -208,6 +208,7 @@ def sync_existing_students():
             guardian_doc, rel_type = _find_key_guardian_for_student(s["name"])
 
             lead_data = _build_lead_from_student(student_doc, guardian_doc, rel_type)
+            lead_data["crm_code"] = generate_crm_code()
             lead_doc = frappe.get_doc(lead_data)
             # Bypass mandatory validation cho phone_numbers vi du lieu cu co the khong co SDT
             lead_doc.flags.ignore_validate = True
