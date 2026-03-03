@@ -41,6 +41,9 @@
   "followup_checkout_time",
   "followup_outcome",
   "followup_notes",
+  "followup_transfer_hospital",
+  "followup_accompanying_teacher",
+  "followup_accompanying_health_staff",
   "parent_notification_section",
   "sent_to_parent",
   "sent_to_parent_at"
@@ -236,6 +239,21 @@
    "fieldname": "followup_notes",
    "fieldtype": "Text",
    "label": "Ghi chú khám bổ sung"
+  },
+  {
+   "fieldname": "followup_transfer_hospital",
+   "fieldtype": "Data",
+   "label": "Bệnh viện chuyển tới (khám bổ sung)"
+  },
+  {
+   "fieldname": "followup_accompanying_teacher",
+   "fieldtype": "Data",
+   "label": "GV đi cùng (khám bổ sung)"
+  },
+  {
+   "fieldname": "followup_accompanying_health_staff",
+   "fieldtype": "Data",
+   "label": "NVYT đi cùng (khám bổ sung)"
   },
   {
    "fieldname": "parent_notification_section",

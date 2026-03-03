@@ -675,6 +675,9 @@ def update_health_examination():
         followup_checkout_time = data.get("followup_checkout_time")
         followup_outcome = data.get("followup_outcome")
         followup_notes = data.get("followup_notes")
+        followup_transfer_hospital = data.get("followup_transfer_hospital")
+        followup_accompanying_teacher = data.get("followup_accompanying_teacher")
+        followup_accompanying_health_staff = data.get("followup_accompanying_health_staff")
         
         # Backward compatibility
         diagnosis = data.get("diagnosis")
@@ -728,6 +731,31 @@ def update_health_examination():
             exam.followup_outcome = followup_outcome if followup_outcome else None
         if followup_notes is not None:
             exam.followup_notes = followup_notes if followup_notes else None
+        if followup_transfer_hospital is not None:
+            exam.followup_transfer_hospital = followup_transfer_hospital if followup_transfer_hospital else None
+        if followup_accompanying_teacher is not None:
+            exam.followup_accompanying_teacher = followup_accompanying_teacher if followup_accompanying_teacher else None
+        if followup_accompanying_health_staff is not None:
+            exam.followup_accompanying_health_staff = followup_accompanying_health_staff if followup_accompanying_health_staff else None
+        
+        # Khi followup outcome = transferred, cập nhật visit status
+        if followup_outcome == "transferred" and exam.visit_id:
+            try:
+                visit_doc = frappe.get_doc("SIS Daily Health Visit", exam.visit_id)
+                visit_doc.status = "transferred"
+                if followup_transfer_hospital:
+                    visit_doc.transfer_hospital = followup_transfer_hospital
+                if followup_accompanying_teacher:
+                    visit_doc.accompanying_teacher = followup_accompanying_teacher
+                if followup_accompanying_health_staff:
+                    visit_doc.accompanying_health_staff = followup_accompanying_health_staff
+                visit_doc.save()
+                # Cập nhật outcome của tất cả exam liên quan
+                related_exams = frappe.get_all("SIS Health Examination", filters={"visit_id": exam.visit_id}, fields=["name"])
+                for re in related_exams:
+                    frappe.db.set_value("SIS Health Examination", re.name, "outcome", "transferred", update_modified=False)
+            except Exception as e:
+                frappe.logger().error(f"Error updating visit status for followup transfer: {str(e)}")
         
         # Update images if provided (cho phép empty array để clear tất cả)
         if images is not None and isinstance(images, list):
@@ -800,7 +828,9 @@ def get_student_examination_history():
                 "hospital_diagnosis", "hospital_treatment",
                 "followup_checkin_time", "followup_examination",
                 "followup_treatment_details", "followup_checkout_time",
-                "followup_outcome", "followup_notes"
+                "followup_outcome", "followup_notes",
+                "followup_transfer_hospital", "followup_accompanying_teacher",
+                "followup_accompanying_health_staff"
             ],
             order_by="examination_date desc, creation desc",
             limit=limit
@@ -2077,7 +2107,9 @@ def get_class_health_examinations():
                 "creation", "modified",
                 "followup_checkin_time", "followup_examination",
                 "followup_treatment_details", "followup_checkout_time",
-                "followup_outcome", "followup_notes"
+                "followup_outcome", "followup_notes",
+                "followup_transfer_hospital", "followup_accompanying_teacher",
+                "followup_accompanying_health_staff"
             ],
             order_by="creation desc"
         )
@@ -2458,6 +2490,8 @@ def get_parent_health_records():
                 "followup_checkin_time", "followup_examination",
                 "followup_treatment_details", "followup_checkout_time",
                 "followup_outcome", "followup_notes",
+                "followup_transfer_hospital", "followup_accompanying_teacher",
+                "followup_accompanying_health_staff",
                 "creation", "modified"
             ],
             order_by="examination_date desc, creation desc"
