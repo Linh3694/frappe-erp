@@ -903,7 +903,9 @@ def get_daily_health_report_data():
                 "name", "student_id", "student_name", "student_code",
                 "class_id", "class_name", "visit_date", "reason",
                 "leave_class_time", "arrive_clinic_time", "leave_clinic_time",
-                "status", "reported_by_name", "received_by_name", "creation"
+                "status", "reported_by_name", "received_by_name", "creation",
+                "checkout_notes", "transfer_hospital",
+                "accompanying_teacher", "accompanying_health_staff"
             ],
             order_by="leave_class_time asc"
         )
@@ -922,9 +924,16 @@ def get_daily_health_report_data():
             "SIS Health Examination",
             filters={"visit_id": ["in", visit_ids]},
             fields=[
-                "name", "visit_id", "student_id", "symptoms", "disease_classification",
-                "examination_notes", "treatment_type", "treatment_details", "notes",
-                "outcome", "examined_by_name", "creation"
+                "name", "visit_id", "student_id", "symptoms", "diet_history",
+                "disease_classification", "examination_notes",
+                "treatment_type", "treatment_details", "notes",
+                "outcome", "examined_by_name", "creation",
+                "hospital_diagnosis", "hospital_treatment",
+                "followup_checkin_time", "followup_examination",
+                "followup_treatment_details", "followup_checkout_time",
+                "followup_outcome", "followup_notes",
+                "followup_transfer_hospital", "followup_accompanying_teacher",
+                "followup_accompanying_health_staff"
             ],
             order_by="creation asc"
         )
@@ -979,7 +988,11 @@ def get_daily_health_report_data():
                 "leave_clinic_time": str(visit.leave_clinic_time)[:5] if visit.leave_clinic_time else "",
                 "status": status_labels.get(visit.status, visit.status),
                 "reported_by_name": visit.reported_by_name or "",
-                "received_by_name": visit.received_by_name or ""
+                "received_by_name": visit.received_by_name or "",
+                "checkout_notes": visit.checkout_notes or "",
+                "transfer_hospital": visit.transfer_hospital or "",
+                "accompanying_teacher": visit.accompanying_teacher or "",
+                "accompanying_health_staff": visit.accompanying_health_staff or "",
             }
             
             if visit_exams:
@@ -987,6 +1000,7 @@ def get_daily_health_report_data():
                 for exam in visit_exams:
                     row = {**base_data}
                     row["symptoms"] = exam.get("symptoms") or ""
+                    row["diet_history"] = exam.get("diet_history") or ""
                     row["disease_classification"] = exam.get("disease_classification") or ""
                     row["treatment_type"] = treatment_type_labels.get(exam.get("treatment_type"), exam.get("treatment_type") or "")
                     row["treatment_details"] = exam.get("treatment_details") or ""
@@ -994,11 +1008,23 @@ def get_daily_health_report_data():
                     row["notes"] = exam.get("notes") or ""
                     row["outcome"] = outcome_labels.get(exam.get("outcome"), exam.get("outcome") or "")
                     row["examined_by_name"] = exam.get("examined_by_name") or ""
+                    row["hospital_diagnosis"] = exam.get("hospital_diagnosis") or ""
+                    row["hospital_treatment"] = exam.get("hospital_treatment") or ""
+                    row["followup_checkin_time"] = str(exam.get("followup_checkin_time"))[:5] if exam.get("followup_checkin_time") else ""
+                    row["followup_examination"] = exam.get("followup_examination") or ""
+                    row["followup_treatment_details"] = exam.get("followup_treatment_details") or ""
+                    row["followup_checkout_time"] = str(exam.get("followup_checkout_time"))[:5] if exam.get("followup_checkout_time") else ""
+                    row["followup_outcome"] = outcome_labels.get(exam.get("followup_outcome"), exam.get("followup_outcome") or "")
+                    row["followup_notes"] = exam.get("followup_notes") or ""
+                    row["followup_transfer_hospital"] = exam.get("followup_transfer_hospital") or ""
+                    row["followup_accompanying_teacher"] = exam.get("followup_accompanying_teacher") or ""
+                    row["followup_accompanying_health_staff"] = exam.get("followup_accompanying_health_staff") or ""
                     result.append(row)
             else:
                 # Không có examination - vẫn tạo một dòng với thông tin visit
                 row = {**base_data}
                 row["symptoms"] = ""
+                row["diet_history"] = ""
                 row["disease_classification"] = ""
                 row["treatment_type"] = ""
                 row["treatment_details"] = ""
@@ -1006,6 +1032,17 @@ def get_daily_health_report_data():
                 row["notes"] = ""
                 row["outcome"] = ""
                 row["examined_by_name"] = ""
+                row["hospital_diagnosis"] = ""
+                row["hospital_treatment"] = ""
+                row["followup_checkin_time"] = ""
+                row["followup_examination"] = ""
+                row["followup_treatment_details"] = ""
+                row["followup_checkout_time"] = ""
+                row["followup_outcome"] = ""
+                row["followup_notes"] = ""
+                row["followup_transfer_hospital"] = ""
+                row["followup_accompanying_teacher"] = ""
+                row["followup_accompanying_health_staff"] = ""
                 result.append(row)
         
         return success_response(
