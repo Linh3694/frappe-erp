@@ -666,16 +666,19 @@ def get_active_period():
 
 
 @frappe.whitelist()
-def get_student_subject_teachers_international(student_id=None):
+def get_student_subject_teachers_international(student_id=None, period_id=None):
     """
     Lấy danh sách giáo viên bộ môn của học sinh - CHỈ GIÁO VIÊN DẠY CHƯƠNG TRÌNH QUỐC TẾ.
     Dùng riêng cho trang Scholarship.
+    Filter theo năm học của kỳ học bổng nếu có period_id.
     """
     logs = []
     
     try:
         if not student_id:
             student_id = frappe.request.args.get('student_id')
+        if not period_id:
+            period_id = frappe.request.args.get('period_id')
         
         if not student_id:
             return validation_error_response(
@@ -685,16 +688,32 @@ def get_student_subject_teachers_international(student_id=None):
         
         logs.append(f"🔍 Getting International curriculum teachers for student: {student_id}")
         
+        # Lấy school_year_id từ kỳ học bổng nếu có
+        school_year_id = None
+        if period_id:
+            school_year_id = frappe.db.get_value("SIS Scholarship Period", period_id, "academic_year_id")
+            logs.append(f"📅 Filter theo năm học: {school_year_id}")
+        
         # ID của chương trình Quốc tế
         INTERNATIONAL_CURRICULUM_ID = "SIS_CURRICULUM-00011"
         
-        # Lấy các lớp của học sinh
-        class_students = frappe.get_all(
-            "SIS Class Student",
-            filters={"student_id": student_id},
-            fields=["class_id"],
-            ignore_permissions=True
-        )
+        # Lấy các lớp của học sinh, filter theo năm học nếu có
+        class_filters = {"student_id": student_id}
+        if school_year_id:
+            class_students = frappe.db.sql("""
+                SELECT cs.class_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                WHERE cs.student_id = %(student_id)s
+                  AND c.school_year_id = %(school_year_id)s
+            """, {"student_id": student_id, "school_year_id": school_year_id}, as_dict=True)
+        else:
+            class_students = frappe.get_all(
+                "SIS Class Student",
+                filters=class_filters,
+                fields=["class_id"],
+                ignore_permissions=True
+            )
         
         if not class_students:
             logs.append("⚠️ No classes found for student")
@@ -946,8 +965,16 @@ def submit_application():
         
         logs.append(f"PHHS {guardian_id} đăng ký học bổng cho {student_id}")
         
-        # Kiểm tra học sinh thuộc về phụ huynh này
-        students = _get_guardian_students(guardian_id)
+        # Kiểm tra kỳ học bổng
+        period = frappe.get_doc("SIS Scholarship Period", period_id)
+        if period.status != "Open":
+            return error_response("Kỳ học bổng này chưa mở hoặc đã đóng", logs=logs)
+        
+        if not period.is_within_period():
+            return error_response("Không trong thời gian đăng ký", logs=logs)
+        
+        # Kiểm tra học sinh thuộc về phụ huynh này (filter theo năm học của kỳ học bổng)
+        students = _get_guardian_students(guardian_id, period.academic_year_id)
         student_ids = [s['student_id'] for s in students]
         
         if student_id not in student_ids:
@@ -964,14 +991,6 @@ def submit_application():
         
         if existing:
             return error_response("Học sinh này đã đăng ký học bổng rồi", logs=logs)
-        
-        # Kiểm tra kỳ học bổng
-        period = frappe.get_doc("SIS Scholarship Period", period_id)
-        if period.status != "Open":
-            return error_response("Kỳ học bổng này chưa mở hoặc đã đóng", logs=logs)
-        
-        if not period.is_within_period():
-            return error_response("Không trong thời gian đăng ký", logs=logs)
         
         # Tạo đơn đăng ký
         app = frappe.get_doc({
@@ -1214,7 +1233,7 @@ def submit_application_with_files():
         period_info = frappe.db.get_value(
             "SIS Scholarship Period",
             period_id,
-            ["name", "status", "from_date", "to_date", "title"],
+            ["name", "status", "from_date", "to_date", "title", "academic_year_id"],
             as_dict=True
         )
         
@@ -1248,8 +1267,8 @@ def submit_application_with_files():
         
         logs.append(f"PHHS {guardian_id} đăng ký học bổng cho {student_id}")
         
-        # Kiểm tra học sinh thuộc về phụ huynh này
-        students = _get_guardian_students(guardian_id)
+        # Kiểm tra học sinh thuộc về phụ huynh này (filter theo năm học của kỳ học bổng)
+        students = _get_guardian_students(guardian_id, period_info.academic_year_id)
         student_ids = [s['student_id'] for s in students]
         
         if student_id not in student_ids:
