@@ -563,7 +563,7 @@ def get_active_period():
                     "student_id": student.student_id
                 },
                 ["name", "status", "main_recommendation_status", "second_recommendation_status",
-                 "main_teacher_name", "second_teacher_name"],
+                 "main_teacher_name", "second_teacher_name", "main_teacher_id", "second_teacher_id"],
                 as_dict=True
             )
             
@@ -614,14 +614,26 @@ def get_active_period():
                         "deny_reason": denied_recommendation[0].denied_reason
                     }
                 
+                # Lấy họ tên đầy đủ từ User để đảm bảo hiển thị chính xác (không dùng cache trong application)
+                main_teacher_full_name = existing_app.main_teacher_name
+                second_teacher_full_name = existing_app.second_teacher_name
+                if existing_app.main_teacher_id:
+                    teacher_user = frappe.db.get_value("SIS Teacher", existing_app.main_teacher_id, "user_id")
+                    if teacher_user:
+                        main_teacher_full_name = frappe.db.get_value("User", teacher_user, "full_name") or existing_app.main_teacher_name
+                if existing_app.second_teacher_id:
+                    teacher_user = frappe.db.get_value("SIS Teacher", existing_app.second_teacher_id, "user_id")
+                    if teacher_user:
+                        second_teacher_full_name = frappe.db.get_value("User", teacher_user, "full_name") or existing_app.second_teacher_name
+                
                 student_info["submission"] = {
                     "name": existing_app.name,
                     "status": existing_app.status,
                     "denied_info": denied_info,
                     "main_recommendation_status": existing_app.main_recommendation_status,
                     "second_recommendation_status": existing_app.second_recommendation_status,
-                    "main_teacher_name": existing_app.main_teacher_name,
-                    "second_teacher_name": existing_app.second_teacher_name
+                    "main_teacher_name": main_teacher_full_name,
+                    "second_teacher_name": second_teacher_full_name
                 }
             
             students.append(student_info)
