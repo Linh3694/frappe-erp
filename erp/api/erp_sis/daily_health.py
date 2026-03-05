@@ -596,7 +596,7 @@ def create_health_examination():
                 medical_staff_name = medical_staff
         
         # Tạo examination
-        exam = frappe.get_doc({
+        doc_dict = {
             "doctype": "SIS Health Examination",
             "student_id": visit.student_id,
             "student_name": visit.student_name,
@@ -615,11 +615,15 @@ def create_health_examination():
             "outcome": outcome,
             "examined_by": examined_by_user,
             "examined_by_name": examined_by_name,
-            "medical_staff": medical_staff or None,
-            "medical_staff_name": medical_staff_name or None,
-            "clinic_checkin_time": clinic_checkin_time or None,
-            "clinic_checkout_time": clinic_checkout_time or None,
-        })
+        }
+        if medical_staff:
+            doc_dict["medical_staff"] = medical_staff
+            doc_dict["medical_staff_name"] = medical_staff_name
+        if clinic_checkin_time:
+            doc_dict["clinic_checkin_time"] = clinic_checkin_time
+        if clinic_checkout_time:
+            doc_dict["clinic_checkout_time"] = clinic_checkout_time
+        exam = frappe.get_doc(doc_dict)
         
         # Add images as child table if provided
         if images and isinstance(images, list):
