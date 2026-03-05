@@ -555,14 +555,15 @@ def get_active_period():
             if student.education_stage_id and student.education_stage_id not in allowed_stages:
                 continue
             
-            # Kiểm tra đã đăng ký chưa
+            # Kiểm tra đã đăng ký chưa - lấy thêm thông tin thư giới thiệu
             existing_app = frappe.db.get_value(
                 "SIS Scholarship Application",
                 {
                     "scholarship_period_id": period_data.name,
                     "student_id": student.student_id
                 },
-                ["name", "status"],
+                ["name", "status", "main_recommendation_status", "second_recommendation_status",
+                 "main_teacher_name", "second_teacher_name"],
                 as_dict=True
             )
             
@@ -616,7 +617,11 @@ def get_active_period():
                 student_info["submission"] = {
                     "name": existing_app.name,
                     "status": existing_app.status,
-                    "denied_info": denied_info
+                    "denied_info": denied_info,
+                    "main_recommendation_status": existing_app.main_recommendation_status,
+                    "second_recommendation_status": existing_app.second_recommendation_status,
+                    "main_teacher_name": existing_app.main_teacher_name,
+                    "second_teacher_name": existing_app.second_teacher_name
                 }
             
             students.append(student_info)
