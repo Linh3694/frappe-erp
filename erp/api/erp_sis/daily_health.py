@@ -524,12 +524,15 @@ def create_health_examination():
     Params:
         - visit_id: ID của visit (required)
         - symptoms: Triệu chứng (required)
-        - images: List of image URLs (optional) - should be uploaded via upload_file first
+        - images: List of image URLs (optional)
         - disease_classification: Phân loại bệnh (optional)
-        - examination_notes: Kết quả thăm khám (optional)
-        - treatment_type: Loại điều trị (optional): medication/rest/other
-        - treatment_details: Chi tiết điều trị (optional)
+        - examination_notes: Nhận định ban đầu (optional)
+        - treatment_type: Loại điều trị (optional)
+        - treatment_details: Chi tiết chăm sóc y tế (optional)
         - notes: Ghi chú (optional)
+        - medical_staff: NVYT thăm khám - User ID (optional)
+        - clinic_checkin_time: Thời gian vào y tế (optional)
+        - clinic_checkout_time: Thời gian về (optional)
         - diagnosis: Chẩn đoán (optional) - deprecated
         - treatment: Xử lý/Dặn dò (optional) - deprecated
         - outcome: Kết quả (optional)
@@ -542,12 +545,17 @@ def create_health_examination():
         visit_id = data.get("visit_id")
         symptoms = data.get("symptoms")
         diet_history = data.get("diet_history", "")
-        images = data.get("images", [])  # List of {image: url, description: text}
+        images = data.get("images", [])
         disease_classification = data.get("disease_classification", "")
         examination_notes = data.get("examination_notes", "")
         treatment_type = data.get("treatment_type", "")
         treatment_details = data.get("treatment_details", "")
         notes = data.get("notes", "")
+        
+        # Trường mới: NVYT thăm khám, thời gian vào/về
+        medical_staff = data.get("medical_staff", "")
+        clinic_checkin_time = data.get("clinic_checkin_time", "")
+        clinic_checkout_time = data.get("clinic_checkout_time", "")
         
         # Backward compatibility
         diagnosis = data.get("diagnosis", "")
@@ -567,7 +575,7 @@ def create_health_examination():
         # Lấy visit để lấy thông tin student
         visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
         
-        # Lấy thông tin user
+        # Lấy thông tin user hiện tại (fallback nếu không chọn NVYT)
         examined_by_user = frappe.session.user
         examined_by_name = ""
         try:
@@ -576,6 +584,16 @@ def create_health_examination():
                 examined_by_name = user.get("full_name") or frappe.session.user
         except:
             examined_by_name = frappe.session.user
+        
+        # Resolve tên NVYT thăm khám
+        medical_staff_name = ""
+        if medical_staff:
+            try:
+                ms_user = frappe.db.get_value("User", medical_staff, ["full_name"], as_dict=True)
+                if ms_user:
+                    medical_staff_name = ms_user.get("full_name") or medical_staff
+            except:
+                medical_staff_name = medical_staff
         
         # Tạo examination
         exam = frappe.get_doc({
@@ -596,7 +614,11 @@ def create_health_examination():
             "treatment": treatment,  # Deprecated
             "outcome": outcome,
             "examined_by": examined_by_user,
-            "examined_by_name": examined_by_name
+            "examined_by_name": examined_by_name,
+            "medical_staff": medical_staff or None,
+            "medical_staff_name": medical_staff_name or None,
+            "clinic_checkin_time": clinic_checkin_time or None,
+            "clinic_checkout_time": clinic_checkout_time or None,
         })
         
         # Add images as child table if provided
@@ -636,18 +658,6 @@ def create_health_examination():
 def update_health_examination():
     """
     Cập nhật hồ sơ khám
-    Params:
-        - exam_id: ID của examination (required)
-        - symptoms: Triệu chứng (optional)
-        - images: List of image URLs (optional) - replaces existing images
-        - disease_classification: Phân loại bệnh (optional)
-        - examination_notes: Kết quả thăm khám (optional)
-        - treatment_type: Loại điều trị (optional)
-        - treatment_details: Chi tiết điều trị (optional)
-        - notes: Ghi chú (optional)
-        - diagnosis: Chẩn đoán (optional) - deprecated
-        - treatment: Xử lý/Dặn dò (optional) - deprecated
-        - outcome: Kết quả (optional)
     """
     try:
         _check_teacher_permission()
@@ -659,7 +669,7 @@ def update_health_examination():
         exam_id = data.get("exam_id")
         symptoms = data.get("symptoms")
         diet_history = data.get("diet_history")
-        images = data.get("images")  # List of {image: url, description: text} or None
+        images = data.get("images")
         disease_classification = data.get("disease_classification")
         examination_notes = data.get("examination_notes")
         treatment_type = data.get("treatment_type")
@@ -667,6 +677,25 @@ def update_health_examination():
         notes = data.get("notes")
         hospital_diagnosis = data.get("hospital_diagnosis")
         hospital_treatment = data.get("hospital_treatment")
+        
+        # Trường mới: NVYT thăm khám, thời gian vào/về
+        medical_staff = data.get("medical_staff")
+        clinic_checkin_time = data.get("clinic_checkin_time")
+        clinic_checkout_time = data.get("clinic_checkout_time")
+        
+        # Hospital fields mới
+        hospital_insurance = data.get("hospital_insurance")
+        hospital_school_coordination = data.get("hospital_school_coordination")
+        hospital_medical_staff = data.get("hospital_medical_staff")
+        hospital_name = data.get("hospital_name")
+        hospital_direction = data.get("hospital_direction")
+        hospital_advance_cost = data.get("hospital_advance_cost")
+        hospital_payer = data.get("hospital_payer")
+        hospital_payer_other = data.get("hospital_payer_other")
+        hospital_transport = data.get("hospital_transport")
+        hospital_transport_other = data.get("hospital_transport_other")
+        hospital_health_monitoring = data.get("hospital_health_monitoring")
+        hospital_notes = data.get("hospital_notes")
         
         # Followup fields
         followup_checkin_time = data.get("followup_checkin_time")
@@ -678,6 +707,13 @@ def update_health_examination():
         followup_transfer_hospital = data.get("followup_transfer_hospital")
         followup_accompanying_teacher = data.get("followup_accompanying_teacher")
         followup_accompanying_health_staff = data.get("followup_accompanying_health_staff")
+        
+        # Followup fields mới
+        followup_clinic_checkin_time = data.get("followup_clinic_checkin_time")
+        followup_clinic_checkout_time = data.get("followup_clinic_checkout_time")
+        followup_is_scheduled_recheck = data.get("followup_is_scheduled_recheck")
+        followup_medical_suggestion = data.get("followup_medical_suggestion")
+        followup_medical_staff = data.get("followup_medical_staff")
         
         # Backward compatibility
         diagnosis = data.get("diagnosis")
@@ -692,51 +728,92 @@ def update_health_examination():
         
         frappe.logger().info(f"[update_health_examination] Found exam: {exam.name}")
         
-        # Cập nhật các trường (cho phép empty string để clear field)
+        # --- Helper để set field ---
+        def _set(field, value):
+            if value is not None:
+                setattr(exam, field, value if value else None)
+        
+        # Cập nhật các trường cơ bản
         if symptoms is not None:
             exam.symptoms = symptoms
-        if diet_history is not None:
-            exam.diet_history = diet_history if diet_history else None
-        if disease_classification is not None:
-            exam.disease_classification = disease_classification if disease_classification else None
-        if examination_notes is not None:
-            exam.examination_notes = examination_notes if examination_notes else None
-        if treatment_type is not None:
-            exam.treatment_type = treatment_type if treatment_type else None
-        if treatment_details is not None:
-            exam.treatment_details = treatment_details if treatment_details else None
-        if notes is not None:
-            exam.notes = notes if notes else None
-        if diagnosis is not None:
-            exam.diagnosis = diagnosis if diagnosis else None
-        if treatment is not None:
-            exam.treatment = treatment if treatment else None
+        _set("diet_history", diet_history)
+        _set("disease_classification", disease_classification)
+        _set("examination_notes", examination_notes)
+        _set("treatment_type", treatment_type)
+        _set("treatment_details", treatment_details)
+        _set("notes", notes)
+        _set("diagnosis", diagnosis)
+        _set("treatment", treatment)
         if outcome is not None:
             exam.outcome = outcome
-        if hospital_diagnosis is not None:
-            exam.hospital_diagnosis = hospital_diagnosis if hospital_diagnosis else None
-        if hospital_treatment is not None:
-            exam.hospital_treatment = hospital_treatment if hospital_treatment else None
+        _set("hospital_diagnosis", hospital_diagnosis)
+        _set("hospital_treatment", hospital_treatment)
+        
+        # Trường mới: NVYT thăm khám, thời gian vào/về
+        _set("medical_staff", medical_staff)
+        _set("clinic_checkin_time", clinic_checkin_time)
+        _set("clinic_checkout_time", clinic_checkout_time)
+        if medical_staff is not None and medical_staff:
+            try:
+                ms_user = frappe.db.get_value("User", medical_staff, ["full_name"], as_dict=True)
+                exam.medical_staff_name = ms_user.get("full_name") if ms_user else medical_staff
+            except:
+                exam.medical_staff_name = medical_staff
+        elif medical_staff is not None:
+            exam.medical_staff_name = None
+        
+        # Hospital fields mới
+        _set("hospital_insurance", hospital_insurance)
+        _set("hospital_school_coordination", hospital_school_coordination)
+        _set("hospital_name", hospital_name)
+        _set("hospital_direction", hospital_direction)
+        _set("hospital_payer", hospital_payer)
+        _set("hospital_payer_other", hospital_payer_other)
+        _set("hospital_transport", hospital_transport)
+        _set("hospital_transport_other", hospital_transport_other)
+        _set("hospital_health_monitoring", hospital_health_monitoring)
+        _set("hospital_notes", hospital_notes)
+        if hospital_advance_cost is not None:
+            exam.hospital_advance_cost = hospital_advance_cost if hospital_advance_cost else 0
+        if hospital_medical_staff is not None:
+            exam.hospital_medical_staff = hospital_medical_staff if hospital_medical_staff else None
+            if hospital_medical_staff:
+                try:
+                    hms_user = frappe.db.get_value("User", hospital_medical_staff, ["full_name"], as_dict=True)
+                    exam.hospital_medical_staff_name = hms_user.get("full_name") if hms_user else hospital_medical_staff
+                except:
+                    exam.hospital_medical_staff_name = hospital_medical_staff
+            else:
+                exam.hospital_medical_staff_name = None
         
         # Followup fields
-        if followup_checkin_time is not None:
-            exam.followup_checkin_time = followup_checkin_time if followup_checkin_time else None
-        if followup_examination is not None:
-            exam.followup_examination = followup_examination if followup_examination else None
-        if followup_treatment_details is not None:
-            exam.followup_treatment_details = followup_treatment_details if followup_treatment_details else None
-        if followup_checkout_time is not None:
-            exam.followup_checkout_time = followup_checkout_time if followup_checkout_time else None
+        _set("followup_checkin_time", followup_checkin_time)
+        _set("followup_examination", followup_examination)
+        _set("followup_treatment_details", followup_treatment_details)
+        _set("followup_checkout_time", followup_checkout_time)
         if followup_outcome is not None:
             exam.followup_outcome = followup_outcome if followup_outcome else None
-        if followup_notes is not None:
-            exam.followup_notes = followup_notes if followup_notes else None
-        if followup_transfer_hospital is not None:
-            exam.followup_transfer_hospital = followup_transfer_hospital if followup_transfer_hospital else None
-        if followup_accompanying_teacher is not None:
-            exam.followup_accompanying_teacher = followup_accompanying_teacher if followup_accompanying_teacher else None
-        if followup_accompanying_health_staff is not None:
-            exam.followup_accompanying_health_staff = followup_accompanying_health_staff if followup_accompanying_health_staff else None
+        _set("followup_notes", followup_notes)
+        _set("followup_transfer_hospital", followup_transfer_hospital)
+        _set("followup_accompanying_teacher", followup_accompanying_teacher)
+        _set("followup_accompanying_health_staff", followup_accompanying_health_staff)
+        
+        # Followup fields mới
+        _set("followup_clinic_checkin_time", followup_clinic_checkin_time)
+        _set("followup_clinic_checkout_time", followup_clinic_checkout_time)
+        if followup_is_scheduled_recheck is not None:
+            exam.followup_is_scheduled_recheck = 1 if followup_is_scheduled_recheck else 0
+        _set("followup_medical_suggestion", followup_medical_suggestion)
+        if followup_medical_staff is not None:
+            exam.followup_medical_staff = followup_medical_staff if followup_medical_staff else None
+            if followup_medical_staff:
+                try:
+                    fms_user = frappe.db.get_value("User", followup_medical_staff, ["full_name"], as_dict=True)
+                    exam.followup_medical_staff_name = fms_user.get("full_name") if fms_user else followup_medical_staff
+                except:
+                    exam.followup_medical_staff_name = followup_medical_staff
+            else:
+                exam.followup_medical_staff_name = None
         
         # Khi followup outcome thay đổi, cập nhật visit status tương ứng
         if followup_outcome in ("transferred", "picked_up") and exam.visit_id:
@@ -822,15 +899,27 @@ def get_student_examination_history():
             filters={"student_id": student_id},
             fields=[
                 "name", "examination_date", "symptoms", "diet_history", "diagnosis",
-                "treatment", "outcome", "examined_by_name", "creation", "modified",
+                "treatment", "outcome", "examined_by", "examined_by_name", "creation", "modified",
                 "visit_id", "disease_classification", "examination_notes",
                 "treatment_type", "treatment_details", "notes",
+                "medical_staff", "medical_staff_name",
+                "clinic_checkin_time", "clinic_checkout_time",
                 "hospital_diagnosis", "hospital_treatment",
+                "hospital_insurance", "hospital_school_coordination",
+                "hospital_medical_staff", "hospital_medical_staff_name",
+                "hospital_name", "hospital_direction", "hospital_advance_cost",
+                "hospital_payer", "hospital_payer_other",
+                "hospital_transport", "hospital_transport_other",
+                "hospital_health_monitoring", "hospital_notes",
                 "followup_checkin_time", "followup_examination",
                 "followup_treatment_details", "followup_checkout_time",
                 "followup_outcome", "followup_notes",
                 "followup_transfer_hospital", "followup_accompanying_teacher",
-                "followup_accompanying_health_staff"
+                "followup_accompanying_health_staff",
+                "followup_clinic_checkin_time", "followup_clinic_checkout_time",
+                "followup_is_scheduled_recheck", "followup_medical_suggestion",
+                "followup_medical_staff", "followup_medical_staff_name",
+                "sent_to_parent", "sent_to_parent_at"
             ],
             order_by="examination_date desc, creation desc",
             limit=limit
@@ -1166,6 +1255,8 @@ def complete_health_visit():
             errors["outcome"] = ["outcome là bắt buộc"]
         elif outcome not in ["returned", "picked_up", "transferred"]:
             errors["outcome"] = ["outcome phải là returned, picked_up, hoặc transferred"]
+        if not checkout_notes:
+            errors["checkout_notes"] = ["Đề xuất của nhân viên y tế là bắt buộc"]
         
         if errors:
             return validation_error_response("Dữ liệu không hợp lệ", errors)
@@ -1176,8 +1267,7 @@ def complete_health_visit():
         # Cập nhật visit
         visit.status = outcome
         visit.leave_clinic_time = leave_clinic_time
-        if checkout_notes:
-            visit.checkout_notes = checkout_notes
+        visit.checkout_notes = checkout_notes
         if outcome == "transferred":
             visit.transfer_hospital = transfer_hospital
             visit.accompanying_teacher = accompanying_teacher
@@ -2157,13 +2247,26 @@ def get_class_health_examinations():
                 "name", "student_id", "student_name", "student_code",
                 "examination_date", "visit_id", "symptoms", "disease_classification",
                 "examination_notes", "treatment_type", "treatment_details", "notes",
-                "outcome", "examined_by_name", "sent_to_parent", "sent_to_parent_at",
+                "outcome", "examined_by", "examined_by_name",
+                "medical_staff", "medical_staff_name",
+                "clinic_checkin_time", "clinic_checkout_time",
+                "sent_to_parent", "sent_to_parent_at",
                 "creation", "modified",
+                "hospital_diagnosis", "hospital_treatment",
+                "hospital_insurance", "hospital_school_coordination",
+                "hospital_medical_staff", "hospital_medical_staff_name",
+                "hospital_name", "hospital_direction", "hospital_advance_cost",
+                "hospital_payer", "hospital_payer_other",
+                "hospital_transport", "hospital_transport_other",
+                "hospital_health_monitoring", "hospital_notes",
                 "followup_checkin_time", "followup_examination",
                 "followup_treatment_details", "followup_checkout_time",
                 "followup_outcome", "followup_notes",
                 "followup_transfer_hospital", "followup_accompanying_teacher",
-                "followup_accompanying_health_staff"
+                "followup_accompanying_health_staff",
+                "followup_clinic_checkin_time", "followup_clinic_checkout_time",
+                "followup_is_scheduled_recheck", "followup_medical_suggestion",
+                "followup_medical_staff", "followup_medical_staff_name"
             ],
             order_by="creation desc"
         )
@@ -2539,13 +2642,25 @@ def get_parent_health_records():
                 "examination_date", "visit_id", "symptoms", "diet_history",
                 "disease_classification", "examination_notes",
                 "treatment_type", "treatment_details", "notes",
-                "outcome", "examined_by_name", "sent_to_parent_at",
+                "outcome", "examined_by", "examined_by_name",
+                "medical_staff", "medical_staff_name",
+                "clinic_checkin_time", "clinic_checkout_time",
+                "sent_to_parent_at",
                 "hospital_diagnosis", "hospital_treatment",
+                "hospital_insurance", "hospital_school_coordination",
+                "hospital_medical_staff", "hospital_medical_staff_name",
+                "hospital_name", "hospital_direction", "hospital_advance_cost",
+                "hospital_payer", "hospital_payer_other",
+                "hospital_transport", "hospital_transport_other",
+                "hospital_health_monitoring", "hospital_notes",
                 "followup_checkin_time", "followup_examination",
                 "followup_treatment_details", "followup_checkout_time",
                 "followup_outcome", "followup_notes",
                 "followup_transfer_hospital", "followup_accompanying_teacher",
                 "followup_accompanying_health_staff",
+                "followup_clinic_checkin_time", "followup_clinic_checkout_time",
+                "followup_is_scheduled_recheck", "followup_medical_suggestion",
+                "followup_medical_staff", "followup_medical_staff_name",
                 "creation", "modified"
             ],
             order_by="examination_date desc, creation desc"

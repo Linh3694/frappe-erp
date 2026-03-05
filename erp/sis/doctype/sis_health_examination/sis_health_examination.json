@@ -14,6 +14,11 @@
   "column_break_1",
   "examination_date",
   "visit_id",
+  "medical_staff_section",
+  "medical_staff",
+  "medical_staff_name",
+  "clinic_checkin_time",
+  "clinic_checkout_time",
   "examination_section",
   "symptoms",
   "diet_history",
@@ -31,15 +36,34 @@
   "examined_by",
   "examined_by_name",
   "hospital_section",
+  "hospital_insurance",
+  "hospital_school_coordination",
+  "hospital_medical_staff",
+  "hospital_medical_staff_name",
+  "hospital_name",
   "hospital_diagnosis",
   "hospital_treatment",
+  "hospital_direction",
+  "hospital_advance_cost",
+  "hospital_payer",
+  "hospital_payer_other",
+  "hospital_transport",
+  "hospital_transport_other",
+  "hospital_health_monitoring",
+  "hospital_notes",
   "followup_section",
+  "followup_clinic_checkin_time",
+  "followup_is_scheduled_recheck",
   "followup_checkin_time",
   "followup_examination",
   "followup_treatment_details",
   "followup_column_break",
   "followup_checkout_time",
+  "followup_clinic_checkout_time",
   "followup_outcome",
+  "followup_medical_suggestion",
+  "followup_medical_staff",
+  "followup_medical_staff_name",
   "followup_notes",
   "followup_transfer_hospital",
   "followup_accompanying_teacher",
@@ -99,6 +123,32 @@
    "options": "SIS Daily Health Visit"
   },
   {
+   "fieldname": "medical_staff_section",
+   "fieldtype": "Section Break",
+   "label": "NVYT thăm khám"
+  },
+  {
+   "fieldname": "medical_staff",
+   "fieldtype": "Link",
+   "label": "NVYT thăm khám",
+   "options": "User"
+  },
+  {
+   "fieldname": "medical_staff_name",
+   "fieldtype": "Data",
+   "label": "Tên NVYT thăm khám"
+  },
+  {
+   "fieldname": "clinic_checkin_time",
+   "fieldtype": "Time",
+   "label": "Thời gian vào y tế"
+  },
+  {
+   "fieldname": "clinic_checkout_time",
+   "fieldtype": "Time",
+   "label": "Thời gian về"
+  },
+  {
    "fieldname": "examination_section",
    "fieldtype": "Section Break",
    "label": "Thông tin khám"
@@ -128,7 +178,7 @@
   {
    "fieldname": "examination_notes",
    "fieldtype": "Text",
-   "label": "Kết quả thăm khám"
+   "label": "Nhận định ban đầu"
   },
   {
    "fieldname": "treatment_type",
@@ -139,7 +189,7 @@
   {
    "fieldname": "treatment_details",
    "fieldtype": "Text",
-   "label": "Chi tiết điều trị"
+   "label": "Chi tiết chăm sóc y tế"
   },
   {
    "fieldname": "notes",
@@ -188,7 +238,34 @@
   {
    "fieldname": "hospital_section",
    "fieldtype": "Section Break",
-   "label": "Thông tin bệnh viện chuyển tới"
+   "label": "Chẩn đoán & điều trị tại bệnh viện"
+  },
+  {
+   "fieldname": "hospital_insurance",
+   "fieldtype": "Select",
+   "label": "Bảo hiểm sức khỏe tự nguyện",
+   "options": "\nstudent_insured\nstudent_not_insured"
+  },
+  {
+   "fieldname": "hospital_school_coordination",
+   "fieldtype": "Text",
+   "label": "Phối hợp từ phía nhà trường"
+  },
+  {
+   "fieldname": "hospital_medical_staff",
+   "fieldtype": "Link",
+   "label": "NVYT Phụ trách",
+   "options": "User"
+  },
+  {
+   "fieldname": "hospital_medical_staff_name",
+   "fieldtype": "Data",
+   "label": "Tên NVYT Phụ trách"
+  },
+  {
+   "fieldname": "hospital_name",
+   "fieldtype": "Data",
+   "label": "Bệnh viện chuyển tới"
   },
   {
    "fieldname": "hospital_diagnosis",
@@ -201,9 +278,62 @@
    "label": "Điều trị tại bệnh viện"
   },
   {
+   "fieldname": "hospital_direction",
+   "fieldtype": "Text",
+   "label": "Hướng xử trí"
+  },
+  {
+   "fieldname": "hospital_advance_cost",
+   "fieldtype": "Currency",
+   "label": "Chi phí bộ phận Y tế tạm ứng"
+  },
+  {
+   "fieldname": "hospital_payer",
+   "fieldtype": "Select",
+   "label": "Bên chi trả",
+   "options": "\ncompany\nparent\nother"
+  },
+  {
+   "fieldname": "hospital_payer_other",
+   "fieldtype": "Text",
+   "label": "Bên chi trả (khác)"
+  },
+  {
+   "fieldname": "hospital_transport",
+   "fieldtype": "Select",
+   "label": "Phương tiện di chuyển",
+   "options": "\nschool_car\ntaxi\nparent_car\nother"
+  },
+  {
+   "fieldname": "hospital_transport_other",
+   "fieldtype": "Text",
+   "label": "Phương tiện di chuyển (khác)"
+  },
+  {
+   "fieldname": "hospital_health_monitoring",
+   "fieldtype": "Text",
+   "label": "Theo dõi tình trạng sức khỏe HS"
+  },
+  {
+   "fieldname": "hospital_notes",
+   "fieldtype": "Text",
+   "label": "Ghi chú bệnh viện"
+  },
+  {
    "fieldname": "followup_section",
    "fieldtype": "Section Break",
    "label": "Thăm khám bổ sung"
+  },
+  {
+   "fieldname": "followup_clinic_checkin_time",
+   "fieldtype": "Time",
+   "label": "Thời gian vào (khám bổ sung)"
+  },
+  {
+   "fieldname": "followup_is_scheduled_recheck",
+   "fieldtype": "Check",
+   "default": "0",
+   "label": "Khám lại theo hẹn"
   },
   {
    "fieldname": "followup_checkin_time",
@@ -213,12 +343,12 @@
   {
    "fieldname": "followup_examination",
    "fieldtype": "Text",
-   "label": "Thăm khám bổ sung"
+   "label": "Nhận định ban đầu (bổ sung)"
   },
   {
    "fieldname": "followup_treatment_details",
    "fieldtype": "Text",
-   "label": "Xử trí bổ sung"
+   "label": "Chăm sóc y tế (bổ sung)"
   },
   {
    "fieldname": "followup_column_break",
@@ -230,10 +360,31 @@
    "label": "Giờ check-out khám bổ sung"
   },
   {
+   "fieldname": "followup_clinic_checkout_time",
+   "fieldtype": "Time",
+   "label": "Thời gian về (khám bổ sung)"
+  },
+  {
    "fieldname": "followup_outcome",
    "fieldtype": "Select",
-   "label": "Kết quả khám bổ sung",
+   "label": "Hướng xử lý sau chăm sóc",
    "options": "\nreturn_class\npicked_up\ntransferred"
+  },
+  {
+   "fieldname": "followup_medical_suggestion",
+   "fieldtype": "Text",
+   "label": "Đề xuất của nhân viên y tế (bổ sung)"
+  },
+  {
+   "fieldname": "followup_medical_staff",
+   "fieldtype": "Link",
+   "label": "NVYT Thăm khám (bổ sung)",
+   "options": "User"
+  },
+  {
+   "fieldname": "followup_medical_staff_name",
+   "fieldtype": "Data",
+   "label": "Tên NVYT Thăm khám (bổ sung)"
   },
   {
    "fieldname": "followup_notes",
@@ -315,6 +466,18 @@
    "read": 1,
    "report": 1,
    "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Medical",
    "share": 1,
    "write": 1
   }

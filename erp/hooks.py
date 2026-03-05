@@ -782,7 +782,11 @@ after_request = [
 
 # Fixtures - Explicitly register child tables to prevent orphaning
 fixtures = [
-    {"dt": "DocType", "name": "ERP Administrative Room Class"}
+    {"dt": "DocType", "name": "ERP Administrative Room Class"},
+]
+
+after_migrate = [
+    "erp.setup.after_migrate.execute",
 ]
 
 scheduler_events = {
