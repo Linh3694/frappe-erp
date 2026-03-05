@@ -1321,7 +1321,7 @@ def get_class_applications(class_id=None):
         # Thêm thông tin period để kiểm tra điều kiện chỉnh sửa
         query = """
             SELECT 
-                app.name, app.student_id, app.student_name, app.student_code,
+                app.name, app.student_id, app.student_name, app.student_code, app.class_name,
                 app.status, app.submitted_at,
                 app.scholarship_period_id,
                 CASE 
