@@ -126,7 +126,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
             <p style="margin: 4px 0;">3️⃣ Tại menu mục "Giảng dạy", nhấn "Lớp học" → Chọn lớp của học sinh → "Học bổng"</p>
             <p style="margin: 4px 0;">4️⃣ Chọn "Viết thư" cho học sinh tương ứng</p>
             <p style="margin: 4px 0;">5️⃣ Nhập điểm đánh giá và nhận xét → Nhấn "Gửi thư giới thiệu"</p>
-            <p style="margin: 4px 0;">6️⃣ Sau khi Thầy/Cô gửi thư giới thiệu thành công, hệ thống Portal sẽ tự động cập nhật trạng thái thư từ "Viết thư" sang "Đã hoàn thành"</p>
+            <p style="margin: 4px 0;">6️⃣ Sau khi Thầy/Cô gửi thư giới thiệu thành công, hệ thống Portal sẽ tự động cập nhật trạng thái thư từ "Viết thư" sang "Đã viết thư"</p>
         </div>
 
         <p>Nếu Thầy/Cô có bất kỳ thắc mắc nào hoặc cần hỗ trợ, vui lòng liên hệ qua email: <a href="mailto:hocbong@wellspring.edu.vn" style="color: #1976d2;">hocbong@wellspring.edu.vn</a>.</p>
@@ -153,7 +153,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
             <p style="margin: 4px 0;">3️⃣ From the menu, under "Teaching" → click "Classes" → Choose the student's class → click "Scholarship"</p>
             <p style="margin: 4px 0;">4️⃣ Select "Write Letter" for the corresponding student</p>
             <p style="margin: 4px 0;">5️⃣ Enter your evaluation scores and comments → Click "Submit"</p>
-            <p style="margin: 4px 0;">6️⃣ Once the letter has been successfully submitted, the Portal system will automatically update the status from "Write Letter" to "Completed."</p>
+            <p style="margin: 4px 0;">6️⃣ Once the letter has been successfully submitted, the Portal system will automatically update the status from "Write Letter" to "Letter Submitted."</p>
         </div>
 
         <p>Should you have any questions or require further assistance, please contact us at <a href="mailto:hocbong@wellspring.edu.vn" style="color: #1976d2;">hocbong@wellspring.edu.vn</a>.</p>
@@ -1359,7 +1359,13 @@ def submit_application_with_files():
         
         # Helper function để upload file
         def upload_file(file_key, folder="Scholarship"):
-            """Upload file và trả về file URL"""
+            """Upload file và trả về file URL.
+            Ghi trực tiếp ra disk + set file_url trước insert
+            để tránh Frappe deduplicate file cùng nội dung nhưng khác tên.
+            """
+            import os
+            from frappe.utils import random_string
+            
             if file_key not in frappe.request.files:
                 return None
             
@@ -1367,16 +1373,29 @@ def submit_application_with_files():
             if not file or not file.filename:
                 return None
             
-            # Đảm bảo folder tồn tại
             folder_path = ensure_folder_exists(folder)
+            content = file.read()
             
-            # Lưu file
+            # Tạo tên file unique trên disk để tránh trùng
+            name_part, ext = os.path.splitext(file.filename)
+            unique_name = f"{name_part}_{random_string(6)}{ext}"
+            
+            # Ghi file trực tiếp ra disk
+            public_files_path = frappe.get_site_path('public', 'files')
+            file_path = os.path.join(public_files_path, unique_name)
+            
+            with open(file_path, 'wb') as f:
+                f.write(content)
+            
+            file_url = f"/files/{unique_name}"
+            
+            # Set file_url sẵn → Frappe bỏ qua save_file_on_filesystem → không dedup
             file_doc = frappe.get_doc({
                 "doctype": "File",
-                "file_name": file.filename,
+                "file_name": unique_name,
+                "file_url": file_url,
                 "folder": folder_path,
                 "is_private": 0,
-                "content": file.read()
             })
             file_doc.insert(ignore_permissions=True)
             
