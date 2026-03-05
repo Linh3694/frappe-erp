@@ -1322,7 +1322,10 @@ def get_class_applications(class_id=None):
         query = """
             SELECT 
                 app.name, app.student_id, app.student_name, app.student_code,
-                COALESCE(NULLIF(TRIM(app.class_name), ''), c.short_title, c.title) as class_name,
+                COALESCE(
+                    NULLIF(TRIM(c.short_title), ''),
+                    TRIM(REPLACE(REPLACE(COALESCE(c.title, app.class_name, ''), 'Lớp ', ''), 'Class ', ''))
+                ) as class_name,
                 app.status, app.submitted_at,
                 app.scholarship_period_id,
                 CASE 
