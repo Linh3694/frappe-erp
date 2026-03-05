@@ -1487,9 +1487,37 @@ def submit_application_with_files():
                 changed_teachers.append(('second', new_second_teacher_id))
                 logs.append(f"GV bộ môn thay đổi: {old_second_teacher_id} -> {new_second_teacher_id}")
             
-            # Nếu có thay đổi giáo viên, xóa recommendation cũ và tạo mới cho GV mới
-            if changed_teachers:
-                for rec_type, new_teacher_id in changed_teachers:
+            # Kiểm tra GV giữ nguyên nhưng có recommendation Denied → cần reset
+            # (Trường hợp parent chọn lại cùng GV đã từ chối)
+            denied_same_teachers = []
+            if new_main_teacher_id and new_main_teacher_id == old_main_teacher_id:
+                has_denied = frappe.db.exists("SIS Scholarship Recommendation", {
+                    "application_id": application_id,
+                    "recommendation_type": "main",
+                    "teacher_id": new_main_teacher_id,
+                    "status": "Denied"
+                })
+                if has_denied:
+                    denied_same_teachers.append(('main', new_main_teacher_id))
+                    logs.append(f"GVCN giữ nguyên nhưng có Denied rec → reset: {new_main_teacher_id}")
+            
+            if new_second_teacher_id and new_second_teacher_id == old_second_teacher_id:
+                has_denied = frappe.db.exists("SIS Scholarship Recommendation", {
+                    "application_id": application_id,
+                    "recommendation_type": "second",
+                    "teacher_id": new_second_teacher_id,
+                    "status": "Denied"
+                })
+                if has_denied:
+                    denied_same_teachers.append(('second', new_second_teacher_id))
+                    logs.append(f"GV bộ môn giữ nguyên nhưng có Denied rec → reset: {new_second_teacher_id}")
+            
+            # Gộp danh sách cần xử lý: GV thay đổi + GV giữ nguyên nhưng bị Denied
+            teachers_to_reset = changed_teachers + denied_same_teachers
+            
+            # Nếu có giáo viên cần xử lý, xóa recommendation cũ và tạo mới
+            if teachers_to_reset:
+                for rec_type, new_teacher_id in teachers_to_reset:
                     # Xóa TẤT CẢ recommendation cũ của loại này (Denied, Pending, v.v.)
                     old_recs = frappe.get_all(
                         "SIS Scholarship Recommendation",
@@ -1695,19 +1723,21 @@ def submit_application_with_files():
             logs.append(f"Đã cập nhật đơn đăng ký: {app.name}")
             message = "Cập nhật hồ sơ thành công"
             
-            # Debug log: kiểm tra changed_teachers có được populate không
+            # Debug log
             logs.append(f"[DEBUG] changed_teachers = {changed_teachers}")
+            logs.append(f"[DEBUG] denied_same_teachers = {denied_same_teachers}")
             logs.append(f"[DEBUG] old_second={old_second_teacher_id}, new_second={new_second_teacher_id}")
             
-            # Gửi email thông báo đến giáo viên MỚI được thay đổi (không gửi lại cho GV cũ)
-            if changed_teachers:
-                logs.append(f"[DEBUG] Bắt đầu gửi email cho {len(changed_teachers)} GV thay đổi")
+            # Gửi email thông báo: GV mới thay đổi + GV giữ nguyên nhưng bị Denied (cần thông báo lại)
+            teachers_to_notify = changed_teachers + denied_same_teachers
+            if teachers_to_notify:
+                logs.append(f"[DEBUG] Bắt đầu gửi email cho {len(teachers_to_notify)} GV")
                 try:
-                    _send_email_to_changed_teachers(app, student_info, changed_teachers, logs)
+                    _send_email_to_changed_teachers(app, student_info, teachers_to_notify, logs)
                 except Exception as email_error:
                     logs.append(f"Cảnh báo: Không thể gửi email thông báo - {str(email_error)}")
             else:
-                logs.append("[DEBUG] changed_teachers rỗng - không gửi email")
+                logs.append("[DEBUG] Không có GV cần gửi email")
         else:
             app.insert(ignore_permissions=True)
             logs.append(f"Đã tạo đơn đăng ký: {app.name}")
