@@ -1197,7 +1197,7 @@ def approve_application():
         
         scoring = frappe.get_doc("SIS Scholarship Scoring", app.scoring_id)
         if not scoring.is_complete():
-            return error_response("Vui lòng chấm đủ tất cả tiêu chí trước khi duyệt", logs=logs)
+            return error_response("Vui lòng chấm điểm (tổng > 0) trước khi duyệt", logs=logs)
         
         # Duyệt đơn
         app.status = "Approved"

@@ -6,26 +6,21 @@ from frappe.model.document import Document
 from frappe.utils import now
 
 
-# Định nghĩa điểm tối đa cho từng tiêu chí
-MAX_SCORES = {
-	"ctvn_score": 6,
-	"ctqt_score": 8,
-	"standardized_test_score": 6,
-	"quality_score": 3,
-	"extracurricular_score": 5,
-	"competition_score": 5,
-	"recommendation_score": 5,
-	"video_score": 12
-}
-
+# Điểm tối đa tổng (chỉ giới hạn tổng, không giới hạn từng tiêu chí - đồng bộ với FE)
 TOTAL_MAX_SCORE = 50
+
+# Các trường điểm (để tính tổng)
+SCORE_FIELDS = [
+	"ctvn_score", "ctqt_score", "standardized_test_score", "quality_score",
+	"extracurricular_score", "competition_score", "recommendation_score", "video_score"
+]
 
 
 class SISScholarshipScoring(Document):
 	"""
 	Chấm điểm hồ sơ học bổng.
 	Người phê duyệt bắt buộc chấm điểm trước khi duyệt/từ chối hồ sơ.
-	Tổng điểm tối đa: 50 điểm.
+	Chỉ giới hạn điểm tổng <= 50 (không giới hạn từng tiêu chí riêng lẻ).
 	"""
 	
 	def validate(self):
@@ -35,18 +30,20 @@ class SISScholarshipScoring(Document):
 		self.set_scored_at()
 	
 	def validate_scores(self):
-		"""Kiểm tra điểm không vượt quá điểm tối đa"""
-		for field, max_score in MAX_SCORES.items():
+		"""Chỉ kiểm tra: điểm từng mục >= 0 và tổng <= 50 (đồng bộ với FE)"""
+		total = 0
+		for field in SCORE_FIELDS:
 			score = getattr(self, field, 0) or 0
 			if score < 0:
 				frappe.throw(f"Điểm {field} không được âm")
-			if score > max_score:
-				frappe.throw(f"Điểm {field} không được vượt quá {max_score}")
+			total += score
+		if total > TOTAL_MAX_SCORE:
+			frappe.throw(f"Tổng điểm không được vượt quá {TOTAL_MAX_SCORE}")
 	
 	def calculate_total(self):
 		"""Tính tổng điểm và phần trăm"""
 		total = 0
-		for field in MAX_SCORES.keys():
+		for field in SCORE_FIELDS:
 			score = getattr(self, field, 0) or 0
 			total += score
 		
@@ -80,9 +77,6 @@ class SISScholarshipScoring(Document):
 			)
 	
 	def is_complete(self):
-		"""Kiểm tra đã chấm đủ tất cả tiêu chí chưa"""
-		for field in MAX_SCORES.keys():
-			score = getattr(self, field, None)
-			if score is None:
-				return False
-		return True
+		"""Kiểm tra đã chấm điểm chưa (chỉ cần tổng > 0, đồng bộ với FE)"""
+		total = getattr(self, "total_score", 0) or 0
+		return total > 0
