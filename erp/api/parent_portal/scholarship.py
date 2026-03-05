@@ -115,7 +115,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
 
         <p>Hội đồng Thi đua Khen thưởng Wellspring Hanoi trân trọng thông báo:</p>
 
-        <p>Học sinh <strong>{student_name}</strong> (Mã học sinh: <strong>{student_code}</strong>, lớp <strong>{class_name}</strong>) đã nộp hồ sơ đăng ký Học bổng Tài năng Wellspring Năm học 2026-2027 và lựa chọn Thầy/Cô là giáo viên viết thư giới thiệu cho học sinh.</p>
+        <p>Học sinh <strong>{student_name}</strong> (Mã học sinh: <strong>{student_code}</strong>, <strong>{class_name}</strong>) đã nộp hồ sơ đăng ký Học bổng Tài năng Wellspring Năm học 2026-2027 và lựa chọn Thầy/Cô là giáo viên viết thư giới thiệu cho học sinh.</p>
 
         <p>Thầy/Cô vui lòng đăng nhập hệ thống Portal để viết và gửi thư giới thiệu trước <strong>17h00 ngày {deadline_str}</strong>.</p>
 
@@ -142,7 +142,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
 
         <p>The Wellspring Hanoi Emulation and Reward Committee would like to inform you that:</p>
 
-        <p>Student <strong>{student_name}</strong> (Student ID: <strong>{student_code}</strong>, Class: <strong>{class_name}</strong>) has submitted their application for the 2026-2027 Wellspring Talent Scholarship and has selected you as their recommender.</p>
+        <p>Student <strong>{student_name}</strong> (Student ID: <strong>{student_code}</strong>, <strong>{class_name}</strong>) has submitted their application for the 2026-2027 Wellspring Talent Scholarship and has selected you as their recommender.</p>
 
         <p>We kindly ask that you log in to the Portal system to complete and submit the letter of recommendation by <strong>5:00 PM on {deadline_str}</strong>.</p>
 
