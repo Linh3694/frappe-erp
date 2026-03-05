@@ -1389,7 +1389,8 @@ def submit_application_with_files():
             
             file_url = f"/files/{subfolder}/{file.filename}"
             
-            # Set file_url sẵn → Frappe bỏ qua save_file_on_filesystem → không dedup
+            # Set file_url sẵn + flag ignore_duplicate_entry_error
+            # để tránh validate_duplicate_entry() override file_url về file cũ
             file_doc = frappe.get_doc({
                 "doctype": "File",
                 "file_name": file.filename,
@@ -1397,6 +1398,7 @@ def submit_application_with_files():
                 "folder": folder_path,
                 "is_private": 0,
             })
+            file_doc.flags.ignore_duplicate_entry_error = True
             file_doc.insert(ignore_permissions=True)
             
             return file_doc.file_url
