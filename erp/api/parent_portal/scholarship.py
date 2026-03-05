@@ -1360,11 +1360,11 @@ def submit_application_with_files():
         # Helper function để upload file
         def upload_file(file_key, folder="Scholarship"):
             """Upload file và trả về file URL.
-            Ghi trực tiếp ra disk + set file_url trước insert
+            Ghi trực tiếp ra disk trong subfolder unique + set file_url trước insert
             để tránh Frappe deduplicate file cùng nội dung nhưng khác tên.
             """
             import os
-            from frappe.utils import random_string
+            import time
             
             if file_key not in frappe.request.files:
                 return None
@@ -1376,23 +1376,23 @@ def submit_application_with_files():
             folder_path = ensure_folder_exists(folder)
             content = file.read()
             
-            # Tạo tên file unique trên disk để tránh trùng
-            name_part, ext = os.path.splitext(file.filename)
-            unique_name = f"{name_part}_{random_string(6)}{ext}"
-            
-            # Ghi file trực tiếp ra disk
+            # Tạo subfolder unique (timestamp + hash) để giữ nguyên tên file gốc
+            subfolder = f"{int(time.time())}_{frappe.generate_hash(length=4)}"
             public_files_path = frappe.get_site_path('public', 'files')
-            file_path = os.path.join(public_files_path, unique_name)
+            target_dir = os.path.join(public_files_path, subfolder)
+            os.makedirs(target_dir, exist_ok=True)
             
+            # Ghi file ra disk với tên gốc
+            file_path = os.path.join(target_dir, file.filename)
             with open(file_path, 'wb') as f:
                 f.write(content)
             
-            file_url = f"/files/{unique_name}"
+            file_url = f"/files/{subfolder}/{file.filename}"
             
             # Set file_url sẵn → Frappe bỏ qua save_file_on_filesystem → không dedup
             file_doc = frappe.get_doc({
                 "doctype": "File",
-                "file_name": unique_name,
+                "file_name": file.filename,
                 "file_url": file_url,
                 "folder": folder_path,
                 "is_private": 0,
