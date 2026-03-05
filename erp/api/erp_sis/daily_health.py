@@ -635,6 +635,25 @@ def create_health_examination():
                     })
         
         exam.insert()
+        
+        # Frappe/MariaDB tự điền CURRENT_TIME cho các trường Time không được set.
+        # Cần NULL hóa các trường Time mà user không nhập.
+        time_fields_to_clear = [
+            "followup_checkin_time", "followup_checkout_time",
+            "followup_clinic_checkin_time", "followup_clinic_checkout_time",
+        ]
+        if not clinic_checkin_time:
+            time_fields_to_clear.append("clinic_checkin_time")
+        if not clinic_checkout_time:
+            time_fields_to_clear.append("clinic_checkout_time")
+        
+        if time_fields_to_clear:
+            set_clause = ", ".join([f"`{f}` = NULL" for f in time_fields_to_clear])
+            frappe.db.sql(
+                f"UPDATE `tabSIS Health Examination` SET {set_clause} WHERE name = %s",
+                exam.name
+            )
+        
         frappe.db.commit()
         
         return success_response(
