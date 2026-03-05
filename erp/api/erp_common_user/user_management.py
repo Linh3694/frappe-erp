@@ -82,6 +82,11 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             search_clause += ")"
             where_conditions.append(search_clause)
         
+        if role:
+            where_conditions.append(
+                f"u.name IN (SELECT parent FROM `tabHas Role` WHERE role = {frappe.db.escape(role)} AND parenttype = 'User')"
+            )
+        
         where_clause = " AND ".join(where_conditions)
         
         # Debug logging
