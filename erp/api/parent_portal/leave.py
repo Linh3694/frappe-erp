@@ -200,6 +200,19 @@ def _send_leave_notification_to_teachers(student_id, student_name, parent_name, 
 			start_date_display = str(start_date)
 			end_date_display = str(end_date)
 		
+		# Lấy class_id của học sinh (lớp chủ nhiệm) để mobile app navigate đúng
+		class_id = None
+		if teachers:
+			# Lấy class_id từ SIS Class Student - lớp đầu tiên của học sinh
+			class_students = frappe.get_all(
+				"SIS Class Student",
+				filters={"student_id": student_id},
+				fields=["class_id"],
+				limit=1
+			)
+			if class_students:
+				class_id = class_students[0].class_id
+
 		# Prepare notification content
 		notification_title = "Đơn xin nghỉ phép mới"
 		notification_body = f"Phụ huynh gửi đơn nghỉ cho {student_name}. Lý do: {reason_display}. Ngày: {start_date_display} - {end_date_display}"
@@ -211,6 +224,7 @@ def _send_leave_notification_to_teachers(student_id, student_name, parent_name, 
 			"student_name": student_name,
 			"parent_name": parent_name,
 			"leave_request_id": leave_request_id,
+			"class_id": class_id,
 			"reason": reason,
 			"reason_display": reason_display,
 			"start_date": str(start_date),

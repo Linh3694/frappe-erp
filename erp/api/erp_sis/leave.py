@@ -236,9 +236,22 @@ def get_leave_request_details(leave_request_id=None):
         owner_email = leave_request.owner or ''
         is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
 
+        # Lấy class_id của học sinh (lớp chủ nhiệm) - dùng cho mobile navigate từ notification
+        class_id = None
+        if leave_request.student_id:
+            class_student = frappe.get_all(
+                "SIS Class Student",
+                filters={"student_id": leave_request.student_id},
+                fields=["class_id"],
+                limit=1
+            )
+            if class_student:
+                class_id = class_student[0].class_id
+
         result = {
             "id": leave_request.name,
             "student_id": leave_request.student_id,
+            "class_id": class_id,
             "student_name": leave_request.student_name,
             "parent_id": leave_request.parent_id,
             "parent_name": leave_request.parent_name,
