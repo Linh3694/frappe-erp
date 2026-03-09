@@ -119,7 +119,7 @@
    "fieldname": "data_source",
    "fieldtype": "Select",
    "label": "Data Source",
-   "options": "Online\nOffline\nDoi tac"
+   "options": "Online\nOffline\nDoi tac\nAI Chatbot"
   },
   {
    "fieldname": "staff_code",
