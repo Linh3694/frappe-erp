@@ -27,6 +27,16 @@ def generate_otp(length=6):
     return ''.join([str(secrets.randbelow(10)) for _ in range(length)])
 
 
+def get_staging_default_otp():
+    """
+    Trả về mã OTP mặc định cho môi trường staging/dev.
+    Format: DDMMYY (6 số, thay đổi theo ngày)
+    Ví dụ: ngày 09/03/2026 → "090326"
+    """
+    now = datetime.now()
+    return now.strftime("%d%m%y")
+
+
 def update_guardian_login_stats(guardian_name):
     """
     Cập nhật thống kê login của guardian.
@@ -266,11 +276,13 @@ def request_otp(phone_number):
         logs.append(f"✅ Found guardian: {guardian['guardian_name']} ({guardian['name']})")
         
         # Generate OTP
-        otp_code = generate_otp(6)
-        # Chỉ log OTP trong môi trường dev (không phải production)
-        if not is_production_server():
-            logs.append(f"🔐 [DEV ONLY] Generated OTP: {otp_code}")
+        is_prod = is_production_server()
+        if not is_prod:
+            # Staging/Dev: dùng OTP mặc định theo ngày (DDMMYY) để dễ kiểm thử
+            otp_code = get_staging_default_otp()
+            logs.append(f"🔐 [STAGING] OTP mặc định theo ngày (DDMMYY): {otp_code}")
         else:
+            otp_code = generate_otp(6)
             logs.append("🔐 OTP generated successfully")
         
         # Store OTP in cache (expires in 5 minutes)
@@ -349,8 +361,17 @@ def verify_otp_and_login(phone_number, otp):
         # Get OTP from cache
         cache_key = f"parent_portal_otp:{normalized_phone}"
         cached_data = frappe.cache().get_value(cache_key)
+        is_prod = is_production_server()
         
-        if not cached_data:
+        # Staging/Dev: chấp nhận OTP mặc định theo ngày (DDMMYY) kể cả khi cache hết hạn
+        staging_otp_accepted = False
+        if not is_prod:
+            staging_default = get_staging_default_otp()
+            if otp.strip() == staging_default:
+                staging_otp_accepted = True
+                logs.append(f"✅ [STAGING] OTP mặc định theo ngày được chấp nhận: {staging_default}")
+        
+        if not cached_data and not staging_otp_accepted:
             logs.append(f"❌ No OTP found in cache for: {normalized_phone}")
             return {
                 "success": False,
@@ -358,10 +379,11 @@ def verify_otp_and_login(phone_number, otp):
                 "logs": logs
             }
         
-        logs.append(f"💾 Found cached OTP data")
+        if cached_data:
+            logs.append(f"💾 Found cached OTP data")
         
         # Verify OTP
-        if cached_data["otp"] != otp.strip():
+        if not staging_otp_accepted and cached_data["otp"] != otp.strip():
             logs.append(f"❌ OTP mismatch: expected {cached_data['otp']}, got {otp}")
             return {
                 "success": False,
