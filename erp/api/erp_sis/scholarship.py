@@ -819,14 +819,19 @@ def get_applications():
         
         # Get applications with pagination
         # Bao gồm thông tin PHHS để xuất Excel đầy đủ
+        # - guardian_name: fallback từ CRM Guardian khi app.guardian_name rỗng (fetch_from có thể chưa chạy khi tạo đơn qua API)
+        # - guardian_contact_*: fallback từ CRM Guardian khi application không có (đơn cũ hoặc lỗi lưu)
         offset = (page - 1) * page_size
         query = f"""
             SELECT 
                 app.name, app.scholarship_period_id, app.student_id, app.student_name, 
                 app.student_code, app.class_name, app.education_stage_name,
                 app.status, app.submitted_at,
-                app.guardian_name, app.student_notification_email, app.student_contact_phone,
-                app.guardian_contact_name, app.guardian_contact_phone, app.guardian_contact_email,
+                COALESCE(NULLIF(TRIM(app.guardian_name), ''), g.guardian_name) as guardian_name,
+                app.student_notification_email, app.student_contact_phone,
+                COALESCE(NULLIF(TRIM(app.guardian_contact_name), ''), g.guardian_name) as guardian_contact_name,
+                COALESCE(NULLIF(TRIM(app.guardian_contact_phone), ''), g.phone_number) as guardian_contact_phone,
+                COALESCE(NULLIF(TRIM(app.guardian_contact_email), ''), g.email) as guardian_contact_email,
                 app.video_url,
                 app.main_teacher_name, app.second_teacher_name,
                 app.main_recommendation_status, app.second_recommendation_status,
@@ -835,6 +840,7 @@ def get_applications():
                 sc.quality_score, sc.extracurricular_score, sc.competition_score,
                 sc.recommendation_score, sc.video_score, sc.note as scoring_note
             FROM `tabSIS Scholarship Application` app
+            LEFT JOIN `tabCRM Guardian` g ON app.guardian_id = g.name
             LEFT JOIN `tabSIS Scholarship Scoring` sc ON sc.application_id = app.name
             WHERE {where_clause}
             ORDER BY app.submitted_at DESC
