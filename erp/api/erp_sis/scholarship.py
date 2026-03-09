@@ -818,12 +818,16 @@ def get_applications():
         total = frappe.db.sql(total_query, values, as_dict=True)[0].total
         
         # Get applications with pagination
+        # Bao gồm thông tin PHHS để xuất Excel đầy đủ
         offset = (page - 1) * page_size
         query = f"""
             SELECT 
                 app.name, app.scholarship_period_id, app.student_id, app.student_name, 
                 app.student_code, app.class_name, app.education_stage_name,
                 app.status, app.submitted_at,
+                app.guardian_name, app.student_notification_email, app.student_contact_phone,
+                app.guardian_contact_name, app.guardian_contact_phone, app.guardian_contact_email,
+                app.video_url,
                 app.main_teacher_name, app.second_teacher_name,
                 app.main_recommendation_status, app.second_recommendation_status,
                 app.total_score, app.total_percentage,
