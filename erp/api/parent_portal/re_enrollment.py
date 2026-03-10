@@ -940,26 +940,85 @@ def get_student_re_enrollment(student_id=None):
                 logs=logs
             )
         
-        # Tìm đơn đã nộp
-        submission = frappe.db.get_value(
+        # Tìm đơn đã nộp - lấy full doc để có answers và thông tin chi tiết
+        re_enrollment_name = frappe.db.get_value(
             "SIS Re-enrollment",
             {"student_id": student_id, "config_id": config},
-            ["name", "decision", "payment_type", "not_re_enroll_reason", 
-             "status", "submitted_at", "current_class"],
-            as_dict=True
+            "name"
         )
         
-        if not submission:
+        if not re_enrollment_name:
             return success_response(
                 data=None,
                 message="Học sinh chưa nộp đơn tái ghi danh",
                 logs=logs
             )
         
-        logs.append(f"Tìm thấy đơn: {submission.name}")
+        logs.append(f"Tìm thấy đơn: {re_enrollment_name}")
+        
+        # Lấy full document để có answers và thông tin chi tiết (cho màn hình xem lại)
+        doc = frappe.get_doc("SIS Re-enrollment", re_enrollment_name)
+        
+        # Lấy thông tin config cho fallback khi đợt đã đóng
+        config_doc = frappe.db.get_value(
+            "SIS Re-enrollment Config", doc.config_id,
+            ["title", "school_year_id"],
+            as_dict=True
+        )
+        school_year_names = {}
+        if config_doc and config_doc.get("school_year_id"):
+            school_year_names = frappe.db.get_value(
+                "SIS School Year", config_doc.school_year_id,
+                ["title_vn", "title_en"],
+                as_dict=True
+            ) or {}
+
+        # Build response với đầy đủ thông tin
+        submission_data = {
+            "name": doc.name,
+            "config_id": doc.config_id,
+            "config_title": config_doc.title if config_doc else None,
+            "school_year_name_vn": school_year_names.get("title_vn"),
+            "school_year_name_en": school_year_names.get("title_en"),
+            "student_id": doc.student_id,
+            "student_name": doc.student_name,
+            "student_code": doc.student_code,
+            "current_class": doc.current_class,
+            "decision": doc.decision,
+            "decision_display": DECISION_DISPLAY_MAP_VI.get(doc.decision, doc.decision),
+            "payment_type": doc.payment_type,
+            "payment_display": "Đóng theo năm" if doc.payment_type == "annual" else "Đóng theo kỳ" if doc.payment_type == "semester" else None,
+            "selected_discount_id": doc.selected_discount_id,
+            "selected_discount_name": doc.selected_discount_name,
+            "selected_discount_deadline": str(doc.selected_discount_deadline) if doc.selected_discount_deadline else None,
+            "selected_discount_percent": doc.selected_discount_percent,
+            "not_re_enroll_reason": doc.not_re_enroll_reason,
+            "status": doc.status,
+            "submitted_at": str(doc.submitted_at) if doc.submitted_at else None,
+            "adjustment_status": doc.adjustment_status,
+            "adjustment_requested_at": str(doc.adjustment_requested_at) if doc.adjustment_requested_at else None,
+        }
+        
+        # Thêm answers (câu trả lời khảo sát)
+        answers_list = []
+        for ans in (doc.answers or []):
+            answer_text = ans.selected_options_text_vn or ans.selected_options_text_en or ""
+            selected_opts = ans.selected_options
+            if selected_opts:
+                selected_opts = json.loads(selected_opts) if isinstance(selected_opts, str) else selected_opts
+            else:
+                selected_opts = []
+            answers_list.append({
+                "question_id": ans.question_id,
+                "question_text_vn": ans.question_text_vn,
+                "question_text_en": ans.question_text_en,
+                "answer": answer_text,
+                "selected_options": selected_opts
+            })
+        submission_data["answers"] = answers_list
         
         return single_item_response(
-            data=submission,
+            data=submission_data,
             message="Lấy thông tin đơn tái ghi danh thành công"
         )
         
