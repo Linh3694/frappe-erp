@@ -851,17 +851,26 @@ def get_submissions():
         decision = frappe.request.args.get('decision')
         adjustment_status = frappe.request.args.get('adjustment_status')
         search = frappe.request.args.get('search')
+        # Filter theo lớp, khối, cấp học
+        class_name = frappe.request.args.get('class_name')  # Lớp (current_class)
+        grade_code = frappe.request.args.get('grade_code')  # Khối (từ SIS Education Grade)
+        education_stage_id = frappe.request.args.get('education_stage_id')  # Cấp học (SIS Education Stage)
         page = int(frappe.request.args.get('page', 1))
         page_size = int(frappe.request.args.get('page_size', 50))
         
-        # Kiểm tra config có finance_year_id không
+        # Lấy config info: finance_year_id, source_school_year_id
         finance_year_id = None
+        source_school_year_id = None
         if config_id:
-            finance_year_id = frappe.db.get_value(
+            config_row = frappe.db.get_value(
                 "SIS Re-enrollment Config",
                 config_id,
-                "finance_year_id"
+                ["finance_year_id", "source_school_year_id"],
+                as_dict=True
             )
+            if config_row:
+                finance_year_id = config_row.get("finance_year_id")
+                source_school_year_id = config_row.get("source_school_year_id")
         
         logs.append(f"Config {config_id}, Finance Year: {finance_year_id or 'None'}")
         
@@ -893,6 +902,41 @@ def get_submissions():
         if search:
             conditions.append("(re.student_name LIKE %(search)s OR re.student_code LIKE %(search)s)")
             values["search"] = f"%{search}%"
+        
+        # Filter theo lớp (current_class - tên lớp hiển thị)
+        if class_name:
+            conditions.append("re.current_class = %(class_name)s")
+            values["class_name"] = class_name
+        
+        # Filter theo khối (grade_code từ SIS Education Grade) - cần JOIN qua SIS Class Student
+        if grade_code and source_school_year_id:
+            conditions.append("""
+                EXISTS (
+                    SELECT 1 FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE cs.student_id = re.student_id
+                      AND cs.school_year_id = %(source_school_year_id)s
+                      AND eg.grade_code = %(grade_code)s
+                )
+            """)
+            values["source_school_year_id"] = source_school_year_id
+            values["grade_code"] = grade_code
+        
+        # Filter theo cấp học (education_stage_id - SIS Education Stage, qua Education Grade)
+        if education_stage_id and source_school_year_id:
+            conditions.append("""
+                EXISTS (
+                    SELECT 1 FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE cs.student_id = re.student_id
+                      AND cs.school_year_id = %(source_school_year_id_stage)s
+                      AND eg.education_stage_id = %(education_stage_id)s
+                )
+            """)
+            values["source_school_year_id_stage"] = source_school_year_id
+            values["education_stage_id"] = education_stage_id
         
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
@@ -1019,6 +1063,89 @@ def get_submissions():
             message=f"Lỗi: {str(e)}",
             logs=logs
         )
+
+
+@frappe.whitelist()
+def get_filter_options():
+    """
+    Lấy danh sách options cho bộ lọc: Lớp, Khối, Cấp học.
+    Dùng cho dropdown filter trong ReEnrollmentList.
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+
+        config_id = frappe.request.args.get('config_id')
+        if not config_id:
+            return validation_error_response("Thiếu config_id", {"config_id": ["config_id là bắt buộc"]})
+
+        # Lấy source_school_year_id và campus_id từ config
+        config_row = frappe.db.get_value(
+            "SIS Re-enrollment Config",
+            config_id,
+            ["source_school_year_id", "campus_id"],
+            as_dict=True
+        )
+        if not config_row:
+            return not_found_response("Không tìm thấy config")
+
+        source_school_year_id = config_row.get("source_school_year_id")
+        campus_id = config_row.get("campus_id")
+
+        # Lớp: distinct current_class từ submissions trong config
+        classes_result = frappe.db.sql("""
+            SELECT DISTINCT re.current_class
+            FROM `tabSIS Re-enrollment` re
+            WHERE re.config_id = %(config_id)s
+              AND re.current_class IS NOT NULL
+              AND re.current_class != ''
+            ORDER BY re.current_class
+        """, {"config_id": config_id}, as_dict=True)
+        classes = [r.current_class for r in classes_result if r.current_class]
+
+        # Khối: từ SIS Education Grade (có trong các lớp của năm học nguồn)
+        grades = []
+        if source_school_year_id:
+            grades_result = frappe.db.sql("""
+                SELECT DISTINCT eg.grade_code, eg.title_vn, eg.title_en
+                FROM `tabSIS Class` c
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                WHERE c.school_year_id = %(school_year_id)s
+                  AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL OR %(campus_id)s = '')
+                ORDER BY eg.sort_order, eg.grade_code
+            """, {
+                "school_year_id": source_school_year_id,
+                "campus_id": campus_id or ""
+            }, as_dict=True)
+            grades = [{"value": r.grade_code, "label": r.title_vn or r.grade_code} for r in grades_result]
+
+        # Cấp học: từ SIS Education Stage (qua Education Grade của các lớp năm học nguồn)
+        education_stages = []
+        if source_school_year_id:
+            stages_result = frappe.db.sql("""
+                SELECT DISTINCT es.name, es.title_vn, es.title_en
+                FROM `tabSIS Class` c
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                INNER JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
+                WHERE c.school_year_id = %(school_year_id)s
+                  AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL OR %(campus_id)s = '')
+                ORDER BY es.title_vn
+            """, {
+                "school_year_id": source_school_year_id,
+                "campus_id": campus_id or ""
+            }, as_dict=True)
+            education_stages = [{"value": r.name, "label": r.title_vn or r.title_en or r.name} for r in stages_result]
+
+        return success_response(
+            data={"classes": classes, "grades": grades, "education_stages": education_stages},
+            message="Lấy filter options thành công",
+            logs=logs
+        )
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Re-enrollment Get Filter Options Error")
+        return error_response(message=f"Lỗi: {str(e)}", logs=logs)
 
 
 @frappe.whitelist()

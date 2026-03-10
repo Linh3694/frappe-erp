@@ -1104,15 +1104,23 @@ def submit_re_enrollment():
         
         logs.append(f"Parent: {parent_id}")
         
-        # Kiểm tra học sinh thuộc phụ huynh này
-        relationship = frappe.db.exists(
+        # Kiểm tra học sinh thuộc phụ huynh này và chỉ người liên hệ chính (key_person) mới được nộp đơn
+        rel = frappe.db.get_value(
             "CRM Family Relationship",
-            {"guardian": parent_id, "student": student_id}
+            {"guardian": parent_id, "student": student_id},
+            ["name", "key_person"],
+            as_dict=True
         )
         
-        if not relationship:
+        if not rel:
             return error_response(
                 "Bạn không có quyền nộp đơn cho học sinh này",
+                logs=logs
+            )
+        
+        if not rel.get("key_person"):
+            return error_response(
+                "Chỉ người liên hệ chính của học sinh mới có quyền đăng ký tái ghi danh",
                 logs=logs
             )
         
