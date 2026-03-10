@@ -855,6 +855,8 @@ def get_submissions():
         class_name = frappe.request.args.get('class_name')  # Lớp (current_class)
         grade_code = frappe.request.args.get('grade_code')  # Khối (từ SIS Education Grade)
         education_stage_id = frappe.request.args.get('education_stage_id')  # Cấp học (SIS Education Stage)
+        # Lọc theo creation_time tính đến ngày (as_of_date) - xem dữ liệu tại thời điểm đó
+        as_of_date = frappe.request.args.get('as_of_date')  # YYYY-MM-DD
         page = int(frappe.request.args.get('page', 1))
         page_size = int(frappe.request.args.get('page_size', 50))
         
@@ -937,6 +939,17 @@ def get_submissions():
             """)
             values["source_school_year_id_stage"] = source_school_year_id
             values["education_stage_id"] = education_stage_id
+        
+        # Filter theo creation <= cuối ngày as_of_date (dữ liệu tính đến thời điểm đó)
+        if as_of_date:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(as_of_date, "%Y-%m-%d")
+                as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
+                conditions.append("re.creation <= %(as_of_datetime)s")
+                values["as_of_datetime"] = as_of_datetime
+            except ValueError:
+                pass  # Bỏ qua nếu format không đúng
         
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
@@ -1670,6 +1683,7 @@ def get_statistics():
             return error_response("Bạn không có quyền truy cập", logs=logs)
         
         config_id = frappe.request.args.get('config_id')
+        as_of_date = frappe.request.args.get('as_of_date')  # YYYY-MM-DD - dữ liệu tính đến ngày đó
         
         if not config_id:
             return validation_error_response(
@@ -1677,38 +1691,63 @@ def get_statistics():
                 {"config_id": ["Config ID là bắt buộc"]}
             )
         
+        # Điều kiện creation nếu có as_of_date
+        creation_filter = ""
+        filter_values = [config_id]
+        if as_of_date:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(as_of_date, "%Y-%m-%d")
+                as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
+                creation_filter = " AND creation <= %s"
+                filter_values.append(as_of_datetime)
+            except ValueError:
+                pass
+        
         # Thống kê theo quyết định
-        decision_stats = frappe.db.sql("""
+        decision_stats = frappe.db.sql(f"""
             SELECT 
                 decision,
                 COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s
+            WHERE config_id = %s{creation_filter}
             GROUP BY decision
-        """, config_id, as_dict=True)
+        """, filter_values, as_dict=True)
         
         # Thống kê theo trạng thái
-        status_stats = frappe.db.sql("""
+        status_stats = frappe.db.sql(f"""
             SELECT 
                 status,
                 COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s
+            WHERE config_id = %s{creation_filter}
             GROUP BY status
-        """, config_id, as_dict=True)
+        """, filter_values, as_dict=True)
         
         # Thống kê theo phương thức thanh toán (chỉ cho những người tái ghi danh)
-        payment_stats = frappe.db.sql("""
+        payment_stats = frappe.db.sql(f"""
             SELECT 
                 payment_type,
                 COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND decision = 're_enroll'
+            WHERE config_id = %s AND decision = 're_enroll'{creation_filter}
             GROUP BY payment_type
-        """, config_id, as_dict=True)
+        """, filter_values, as_dict=True)
         
         # Tổng số
-        total = frappe.db.count("SIS Re-enrollment", {"config_id": config_id})
+        if as_of_date:
+            try:
+                from datetime import datetime
+                dt = datetime.strptime(as_of_date, "%Y-%m-%d")
+                as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
+                total = frappe.db.sql("""
+                    SELECT COUNT(*) as count FROM `tabSIS Re-enrollment`
+                    WHERE config_id = %s AND creation <= %s
+                """, [config_id, as_of_datetime], as_dict=True)[0].count
+            except ValueError:
+                total = frappe.db.count("SIS Re-enrollment", {"config_id": config_id})
+        else:
+            total = frappe.db.count("SIS Re-enrollment", {"config_id": config_id})
         
         # Lấy thông tin config
         config = frappe.db.get_value(
@@ -1736,18 +1775,18 @@ def get_statistics():
         payment_dict = {item.payment_type: item.count for item in payment_stats if item.payment_type}
         
         # Đếm số chưa làm đơn (decision = NULL hoặc rỗng)
-        not_submitted_count = frappe.db.sql("""
+        not_submitted_count = frappe.db.sql(f"""
             SELECT COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND (decision IS NULL OR decision = '')
-        """, config_id, as_dict=True)[0].count
+            WHERE config_id = %s AND (decision IS NULL OR decision = ''){creation_filter}
+        """, filter_values, as_dict=True)[0].count
         
         # Đếm số yêu cầu điều chỉnh
-        adjustment_requested_count = frappe.db.sql("""
+        adjustment_requested_count = frappe.db.sql(f"""
             SELECT COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND adjustment_status = 'requested'
-        """, config_id, as_dict=True)[0].count
+            WHERE config_id = %s AND adjustment_status = 'requested'{creation_filter}
+        """, filter_values, as_dict=True)[0].count
         
         logs.append(f"Thống kê cho config {config_id}")
         
