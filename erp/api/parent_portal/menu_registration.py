@@ -909,6 +909,30 @@ def get_period_stats(period_id=None):
         # Tính số chưa đăng ký
         not_registered = total_student_count - registered_students
         
+        # Đếm Á/Âu theo từng ngày (cho header cột trong bảng)
+        count_by_date_sql = """
+            SELECT 
+                ri.date,
+                SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as count_a,
+                SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as count_au
+            FROM `tabSIS Menu Registration` r
+            INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
+            WHERE r.period = %s
+            GROUP BY ri.date
+            ORDER BY ri.date
+        """
+        count_by_date_rows = frappe.db.sql(count_by_date_sql, (period_id,), as_dict=True)
+        count_by_date = {}
+        for d in registration_dates:
+            count_by_date[d] = {"a": 0, "au": 0}
+        for row in count_by_date_rows:
+            date_str = str(row.date) if row.date else None
+            if date_str and date_str in count_by_date:
+                count_by_date[date_str] = {
+                    "a": row.count_a or 0,
+                    "au": row.count_au or 0,
+                }
+        
         return success_response(
             data={
                 "period_id": period_id,
@@ -919,7 +943,8 @@ def get_period_stats(period_id=None):
                 "choice_a": choice_a,
                 "choice_au": choice_au,
                 "registration_dates": registration_dates,
-                "wednesdays": registration_dates  # Backward compatibility
+                "wednesdays": registration_dates,  # Backward compatibility
+                "count_by_date": count_by_date,
             },
             message="Lấy thống kê thành công",
             logs=logs
