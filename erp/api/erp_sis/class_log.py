@@ -708,8 +708,8 @@ def batch_get_homeroom_class_logs():
         # This endpoint aggregates: class logs + class attendance + event attendance
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
-        # v2: subject_title lấy từ SIS Student Timetable thay vì SIS Timetable Instance Row
-        cache_key = f"homeroom_class_logs_v2:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        # v3: subject_title lấy từ SIS Timetable Instance Row (giống parent portal)
+        cache_key = f"homeroom_class_logs_v3:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -1447,8 +1447,8 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         frappe.logger().info(f"🤖 [AI Summary] get_student_classlog_summary: student={student_id}, class={class_id}, date={date}")
 
         # ⚡ CACHE: TTL ngắn (90 giây) vì class log thay đổi thường xuyên
-        # v2: thêm version để invalidate cache khi logic thay đổi
-        cache_key = f"student_classlog_summary_v2:{student_id}:{class_id}:{date}"
+        # v3: fix resolve subject từ Timetable Instance Row + ưu tiên mixed class
+        cache_key = f"student_classlog_summary_v3:{student_id}:{class_id}:{date}"
         try:
             cached = frappe.cache().get_value(cache_key)
             if cached:
@@ -1576,9 +1576,7 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         }, as_dict=True)
 
         # Map: (period, class_id) -> subject_title để match đúng môn theo từng lớp
-        # Fallback: period -> subject_title khi chỉ có 1 class cho period
         period_class_subject_map = {}
-        period_only_subject_map = {}
         for entry in instance_row_subjects:
             period = entry['period_name']
             class_id_val = entry['class_id']
@@ -1587,8 +1585,19 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
             key = (period, class_id_val)
             if key not in period_class_subject_map:
                 period_class_subject_map[key] = entry['subject_title']
-            if period not in period_only_subject_map:
-                period_only_subject_map[period] = entry['subject_title']
+
+        # Xác định lớp thực tế và môn đúng cho từng tiết
+        # Mixed class ưu tiên hơn homeroom (học sinh enrolled mixed sẽ học ở đó)
+        period_correct_subject = {}
+        for (period, cid), subj in period_class_subject_map.items():
+            if cid in mixed_class_ids:
+                period_correct_subject[period] = subj
+            elif period not in period_correct_subject:
+                period_correct_subject[period] = subj
+
+        frappe.logger().info(f"🤖 [AI Summary] period_class_subject_map: {period_class_subject_map}")
+        frappe.logger().info(f"🤖 [AI Summary] period_correct_subject: {period_correct_subject}")
+        frappe.logger().info(f"🤖 [AI Summary] mixed_class_ids: {mixed_class_ids}")
 
         # Lấy tất cả score names cần resolve (homework/behavior/participation + issues)
         score_names = set()
@@ -1626,11 +1635,10 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
             student_log = student_log_by_subject.get(subject_id)
             period_name = subject_log['period']
 
-            # Ưu tiên lấy tên môn từ student timetable theo (period, class_id) - chính xác với mixed class
-            # Fallback: period only, rồi tên lớp mixed/homeroom
-            subject_title = period_class_subject_map.get((period_name, subject_log['class_id']))
+            # Luôn dùng môn từ lớp học sinh thực sự học (mixed ưu tiên hơn homeroom)
+            subject_title = period_correct_subject.get(period_name)
             if not subject_title:
-                subject_title = period_only_subject_map.get(period_name)
+                subject_title = period_class_subject_map.get((period_name, subject_log['class_id']))
             if not subject_title:
                 if subject_log['class_id'] != class_id:
                     subject_title = mixed_class_title_map.get(subject_log['class_id'], subject_log['class_id'])
@@ -1672,6 +1680,20 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
 
             if has_data:
                 comments.append(comment_item)
+
+        # Loại bỏ trùng lặp tiết: giữ entry có nhiều dữ liệu học sinh nhất
+        unique_comments = {}
+        for comment in comments:
+            period = comment['period']
+            student_fields = ['homework', 'behavior', 'participation', 'issues', 'specific_comment']
+            student_data_count = sum(1 for k in student_fields if comment.get(k))
+            if period not in unique_comments:
+                unique_comments[period] = (comment, student_data_count)
+            else:
+                _, existing_count = unique_comments[period]
+                if student_data_count > existing_count:
+                    unique_comments[period] = (comment, student_data_count)
+        comments = [v[0] for v in sorted(unique_comments.values(), key=lambda x: x[0]['period'])]
 
         result = {
             "student_name": student_name,
