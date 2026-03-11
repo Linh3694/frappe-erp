@@ -188,3 +188,229 @@ def delete_discipline_classification(name: str = None):
             message=f"Lỗi khi xóa phân loại kỷ luật: {str(e)}",
             code="DELETE_DISCIPLINE_CLASSIFICATION_ERROR",
         )
+
+
+# ==================== VI PHẠM (VIOLATION) CRUD ====================
+
+@frappe.whitelist(allow_guest=False)
+def get_discipline_violations(campus: str = None):
+    """
+    Lấy danh sách vi phạm kỷ luật theo campus
+    """
+    try:
+        filters = {"enabled": 1}
+        if campus:
+            filters["campus"] = campus
+
+        violations = frappe.get_all(
+            "SIS Discipline Violation",
+            filters=filters,
+            fields=[
+                "name",
+                "title",
+                "classification",
+                "severity_level",
+                "campus",
+                "enabled",
+                "creation",
+                "modified",
+            ],
+            order_by="title asc",
+        )
+
+        # Thêm classification_title cho mỗi violation
+        for v in violations:
+            if v.get("classification"):
+                try:
+                    v["classification_title"] = frappe.db.get_value(
+                        "SIS Discipline Classification",
+                        v["classification"],
+                        "title",
+                    ) or v["classification"]
+                except Exception:
+                    v["classification_title"] = v["classification"]
+            else:
+                v["classification_title"] = ""
+
+        return success_response(
+            data={"data": violations, "total": len(violations)},
+            message="Lấy danh sách vi phạm thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error getting discipline violations: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách vi phạm: {str(e)}",
+            code="GET_DISCIPLINE_VIOLATIONS_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def create_discipline_violation(
+    title: str = None,
+    classification: str = None,
+    severity_level: str = None,
+    campus: str = None,
+):
+    """
+    Tạo mới vi phạm kỷ luật
+    severity_level: "1", "2", "3" (Mức độ 1, 2, 3)
+    """
+    try:
+        data = _get_request_data()
+        title = title or data.get("title")
+        classification = classification or data.get("classification")
+        severity_level = severity_level or data.get("severity_level")
+        campus = campus or data.get("campus")
+
+        if not title or not str(title).strip():
+            return error_response(
+                message="Tiêu đề là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        if not classification:
+            return error_response(
+                message="Phân loại là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        if severity_level not in ("1", "2", "3"):
+            return error_response(
+                message="Mức độ phải là 1, 2 hoặc 3",
+                code="INVALID_SEVERITY_LEVEL",
+            )
+
+        if not campus:
+            return error_response(
+                message="Trường học là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc(
+            {
+                "doctype": "SIS Discipline Violation",
+                "title": str(title).strip(),
+                "classification": classification,
+                "severity_level": severity_level,
+                "campus": campus,
+                "enabled": 1,
+            }
+        )
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Tạo vi phạm thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error creating discipline violation: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo vi phạm: {str(e)}",
+            code="CREATE_DISCIPLINE_VIOLATION_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def update_discipline_violation(
+    name: str = None,
+    title: str = None,
+    classification: str = None,
+    severity_level: str = None,
+    enabled: int = None,
+):
+    """
+    Cập nhật vi phạm kỷ luật
+    """
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        title = title if title is not None else data.get("title")
+        classification = classification if classification is not None else data.get("classification")
+        severity_level = severity_level if severity_level is not None else data.get("severity_level")
+        enabled_val = data.get("enabled")
+        if enabled is None and enabled_val is not None:
+            enabled = int(enabled_val) if enabled_val not in [None, ""] else None
+
+        if not name:
+            return error_response(
+                message="ID vi phạm là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc("SIS Discipline Violation", name)
+
+        if title is not None:
+            doc.title = str(title).strip()
+
+        if classification is not None:
+            doc.classification = classification
+
+        if severity_level is not None:
+            if severity_level not in ("1", "2", "3"):
+                return error_response(
+                    message="Mức độ phải là 1, 2 hoặc 3",
+                    code="INVALID_SEVERITY_LEVEL",
+                )
+            doc.severity_level = severity_level
+
+        if enabled is not None:
+            doc.enabled = enabled
+
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Cập nhật vi phạm thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy vi phạm",
+            code="VIOLATION_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error updating discipline violation: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật vi phạm: {str(e)}",
+            code="UPDATE_DISCIPLINE_VIOLATION_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_discipline_violation(name: str = None):
+    """
+    Xóa vi phạm kỷ luật
+    """
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+
+        if not name:
+            return error_response(
+                message="ID vi phạm là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        frappe.delete_doc("SIS Discipline Violation", name, ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": name},
+            message="Xóa vi phạm thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy vi phạm",
+            code="VIOLATION_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error deleting discipline violation: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa vi phạm: {str(e)}",
+            code="DELETE_DISCIPLINE_VIOLATION_ERROR",
+        )
