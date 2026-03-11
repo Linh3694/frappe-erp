@@ -1275,9 +1275,15 @@ def batch_get_homeroom_class_logs():
             
             # Thêm homeroom class subject nếu có
             if homeroom_subject_log:
+                # Ưu tiên subject_title từ SIS Student Timetable (theo ngày cụ thể),
+                # fallback về subject_title lấy từ timetable instance row (theo tuần/kỳ)
+                homeroom_subject_title = (
+                    timetable_subject_map.get((homeroom_class_id, period))
+                    or homeroom_subject_log.get('subject_title')
+                )
                 all_subjects.append({
                     "name": homeroom_subject_log['name'],
-                    "subject_title": homeroom_subject_log.get('subject_title'),
+                    "subject_title": homeroom_subject_title,
                     "class_id": homeroom_subject_log['class_id'],
                     "class_title": class_titles.get(homeroom_subject_log['class_id'], homeroom_subject_log['class_id']),
                     "general_comment": homeroom_subject_log.get('general_comment'),
@@ -1289,9 +1295,15 @@ def batch_get_homeroom_class_logs():
             
             # Thêm mixed class subjects
             for mixed_class_id, mixed_log in mixed_subject_logs.items():
+                # Ưu tiên subject_title từ SIS Student Timetable (theo ngày cụ thể),
+                # fallback về subject_title lấy từ timetable instance row (theo tuần/kỳ)
+                mixed_subject_title = (
+                    timetable_subject_map.get((mixed_class_id, period))
+                    or mixed_log.get('subject_title')
+                )
                 all_subjects.append({
                     "name": mixed_log['name'],
-                    "subject_title": mixed_log.get('subject_title'),
+                    "subject_title": mixed_subject_title,
                     "class_id": mixed_log['class_id'],
                     "class_title": class_titles.get(mixed_log['class_id'], mixed_log['class_id']),
                     "general_comment": mixed_log.get('general_comment'),
