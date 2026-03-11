@@ -1323,11 +1323,17 @@ def batch_get_homeroom_class_logs():
                         })
                         break
             
+            # subject_title cho subject chính: ưu tiên Step 5b, fallback timetable_subject_map
+            primary_subj_title = None
+            if primary_subject:
+                primary_subj_title = primary_subject.get('subject_title') or timetable_subject_map.get((primary_subject['class_id'], period))
+            
             result[period] = {
                 "subject": {
                     "name": primary_subject['name'] if primary_subject else None,
                     "timetable_instance_id": primary_subject['timetable_instance_id'] if primary_subject else class_instances.get(homeroom_class_id),
                     "class_id": primary_subject['class_id'] if primary_subject else homeroom_class_id,
+                    "subject_title": primary_subj_title,
                     "general_comment": primary_subject.get('general_comment') if primary_subject else None,
                     "lesson_name": primary_subject.get('lesson_name') if primary_subject else None,
                     "lesson_score": primary_subject.get('lesson_score') if primary_subject else None,
