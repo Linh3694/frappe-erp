@@ -22,7 +22,8 @@ from erp.utils.api_response import (
 # Email nhận thông báo yêu cầu điều chỉnh
 ADJUSTMENT_NOTIFICATION_EMAILS = [
     "linh.nguyenhai@wellspring.edu.vn",
-    "hieu.nguyenduy@wellspring.edu.vn"
+    "hieu.nguyenduy@wellspring.edu.vn",
+    "tuyensinh@wellspring.edu.vn"
 ]
 
 # Decision types cho tái ghi danh
