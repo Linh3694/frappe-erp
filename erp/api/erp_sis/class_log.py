@@ -1282,3 +1282,241 @@ def batch_get_homeroom_class_logs():
             code="BATCH_GET_HOMEROOM_CLASS_LOGS_ERROR"
         )
 
+
+@frappe.whitelist(allow_guest=False)
+def get_student_classlog_summary(student_id=None, class_id=None, date=None):
+    """
+    Lấy tổng hợp dữ liệu class log của 1 học sinh trong 1 ngày,
+    dùng để gửi cho AI Agent tạo nhận xét sổ liên lạc.
+    
+    GET params:
+    - student_id: ID học sinh (CRM Student name)
+    - class_id: ID lớp chủ nhiệm (homeroom class)
+    - date: Ngày cần lấy (YYYY-MM-DD)
+    
+    Returns:
+    {
+        "student_name": "Nguyen Van A",
+        "date": "2026-03-10",
+        "comments": [
+            {
+                "period": "Tiết 1",
+                "subject": "Toán",
+                "homework": "Hoàn thành đầy đủ",
+                "behavior": "Tốt",
+                "participation": "Tích cực",
+                "issues": null,
+                "specific_comment": "Hiểu bài nhanh",
+                "general_comment": "Lớp học tập trung",
+                "homework_assignment": "Bài tập trang 45"
+            }
+        ]
+    }
+    """
+    try:
+        # Lấy params từ GET request
+        if not student_id and getattr(frappe, 'request', None):
+            student_id = frappe.request.args.get('student_id')
+        if not class_id and getattr(frappe, 'request', None):
+            class_id = frappe.request.args.get('class_id')
+        if not date and getattr(frappe, 'request', None):
+            date = frappe.request.args.get('date')
+
+        if not student_id or not class_id or not date:
+            return error_response(
+                message="Missing required parameters: student_id, class_id, date",
+                code="MISSING_PARAMS"
+            )
+
+        frappe.logger().info(f"🤖 [AI Summary] get_student_classlog_summary: student={student_id}, class={class_id}, date={date}")
+
+        # ⚡ CACHE: TTL ngắn (90 giây) vì class log thay đổi thường xuyên
+        cache_key = f"student_classlog_summary:{student_id}:{class_id}:{date}"
+        try:
+            cached = frappe.cache().get_value(cache_key)
+            if cached:
+                frappe.logger().info(f"✅ Cache HIT student_classlog_summary {student_id}/{date}")
+                return success_response(data=cached, message="Student classlog summary (cached)")
+        except Exception:
+            pass
+
+        # Lấy tên học sinh
+        student_name = frappe.db.get_value("CRM Student", student_id, "student_name") or student_id
+
+        # Lấy timetable instance của class trong ngày
+        instance_rows = frappe.db.sql("""
+            SELECT name, class_id
+            FROM `tabSIS Timetable Instance`
+            WHERE class_id = %(class_id)s
+                AND start_date <= %(date)s
+                AND end_date >= %(date)s
+            LIMIT 1
+        """, {"class_id": class_id, "date": date}, as_dict=True)
+
+        homeroom_instance_id = instance_rows[0]['name'] if instance_rows else None
+
+        # Tìm mixed class mà học sinh có thể đang học
+        mixed_class_rows = frappe.db.sql("""
+            SELECT cs.class_id, c.title as class_title
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            WHERE cs.student_id = %(student_id)s
+                AND cs.class_id != %(class_id)s
+                AND c.class_type = 'mixed'
+        """, {"student_id": student_id, "class_id": class_id}, as_dict=True)
+
+        mixed_class_ids = [r['class_id'] for r in mixed_class_rows]
+        mixed_class_title_map = {r['class_id']: r['class_title'] for r in mixed_class_rows}
+
+        # Lấy timetable instances của tất cả mixed class
+        all_instance_ids = [homeroom_instance_id] if homeroom_instance_id else []
+        all_class_ids = [class_id] + mixed_class_ids
+
+        if mixed_class_ids:
+            mixed_instances = frappe.db.sql("""
+                SELECT name, class_id
+                FROM `tabSIS Timetable Instance`
+                WHERE class_id IN %(class_ids)s
+                    AND start_date <= %(date)s
+                    AND end_date >= %(date)s
+            """, {"class_ids": mixed_class_ids, "date": date}, as_dict=True)
+            for mi in mixed_instances:
+                if mi['name'] not in all_instance_ids:
+                    all_instance_ids.append(mi['name'])
+
+        if not all_instance_ids:
+            return success_response(
+                data={"student_name": student_name, "date": date, "comments": []},
+                message="No timetable instance found for this class and date"
+            )
+
+        # Lấy tất cả class log subjects của các timetable instance trong ngày (chỉ tiết học)
+        subject_logs = frappe.db.sql("""
+            SELECT 
+                cls.name as subject_id,
+                cls.period,
+                cls.class_id,
+                cls.general_comment,
+                cls.lesson_name,
+                cls.lesson_score,
+                cls.homework_assignment,
+                cls.timetable_instance_id
+            FROM `tabSIS Class Log Subject` cls
+            WHERE cls.timetable_instance_id IN %(instance_ids)s
+                AND cls.log_date = %(date)s
+                AND LOWER(cls.period) LIKE '%%tiết%%'
+            ORDER BY cls.period ASC
+        """, {"instance_ids": all_instance_ids, "date": date}, as_dict=True)
+
+        if not subject_logs:
+            return success_response(
+                data={"student_name": student_name, "date": date, "comments": []},
+                message="No class log found for this date"
+            )
+
+        subject_ids = [sl['subject_id'] for sl in subject_logs]
+
+        # Lấy dữ liệu học sinh cho tất cả tiết (chỉ của student_id này)
+        student_logs = frappe.db.sql("""
+            SELECT 
+                subject_id,
+                homework,
+                behavior,
+                participation,
+                issues,
+                specific_comment
+            FROM `tabSIS Class Log Student`
+            WHERE subject_id IN %(subject_ids)s
+                AND student_id = %(student_id)s
+        """, {"subject_ids": subject_ids, "student_id": student_id}, as_dict=True)
+
+        # Map subject_id -> student_log để lookup O(1)
+        student_log_by_subject = {sl['subject_id']: sl for sl in student_logs}
+
+        # Lấy tất cả score names cần resolve (homework/behavior/participation)
+        score_names = set()
+        for sl in student_logs:
+            if sl.get('homework'):
+                score_names.add(sl['homework'])
+            if sl.get('behavior'):
+                score_names.add(sl['behavior'])
+            if sl.get('participation'):
+                score_names.add(sl['participation'])
+
+        # Resolve score name -> title_vn bằng 1 query
+        score_map = {}
+        if score_names:
+            score_rows = frappe.db.sql("""
+                SELECT name, title_vn
+                FROM `tabSIS Class Log Score`
+                WHERE name IN %(names)s
+            """, {"names": list(score_names)}, as_dict=True)
+            score_map = {r['name']: r['title_vn'] for r in score_rows}
+
+        # Lấy tên lớp homeroom để dùng khi cần
+        homeroom_class_title = frappe.db.get_value("SIS Class", class_id, "title") or class_id
+
+        # Tổng hợp dữ liệu theo từng tiết
+        comments = []
+        for subject_log in subject_logs:
+            subject_id = subject_log['subject_id']
+            student_log = student_log_by_subject.get(subject_id)
+
+            # Xác định tên môn học từ class_id của subject log
+            if subject_log['class_id'] == class_id:
+                subject_title = homeroom_class_title
+            else:
+                subject_title = mixed_class_title_map.get(subject_log['class_id'], subject_log['class_id'])
+
+            comment_item = {
+                "period": subject_log['period'],
+                "subject": subject_title,
+                "general_comment": subject_log.get('general_comment') or None,
+                "homework_assignment": subject_log.get('homework_assignment') or None,
+                "homework": score_map.get(student_log['homework']) if student_log and student_log.get('homework') else None,
+                "behavior": score_map.get(student_log['behavior']) if student_log and student_log.get('behavior') else None,
+                "participation": score_map.get(student_log['participation']) if student_log and student_log.get('participation') else None,
+                "issues": student_log.get('issues') or None if student_log else None,
+                "specific_comment": student_log.get('specific_comment') or None if student_log else None,
+            }
+
+            # Chỉ thêm tiết vào kết quả nếu có ít nhất 1 trường có dữ liệu
+            has_data = any([
+                comment_item['homework'],
+                comment_item['behavior'],
+                comment_item['participation'],
+                comment_item['issues'],
+                comment_item['specific_comment'],
+                comment_item['general_comment'],
+            ])
+
+            if has_data:
+                comments.append(comment_item)
+
+        result = {
+            "student_name": student_name,
+            "date": date,
+            "comments": comments
+        }
+
+        # Cache 90 giây
+        try:
+            frappe.cache().set_value(cache_key, result, expires_in_sec=90)
+        except Exception:
+            pass
+
+        frappe.logger().info(f"✅ [AI Summary] Returning {len(comments)} period comments for student {student_name}")
+        return success_response(
+            data=result,
+            message=f"Fetched classlog summary for {student_name} on {date}",
+            meta={"period_count": len(comments)}
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"❌ [AI Summary] get_student_classlog_summary error: {str(e)}")
+        import traceback
+        frappe.logger().error(f"Traceback: {traceback.format_exc()}")
+        return error_response(
+            message=f"Failed to fetch student classlog summary: {str(e)}",
+            code="GET_STUDENT_CLASSLOG_SUMMARY_ERROR"
+        )
