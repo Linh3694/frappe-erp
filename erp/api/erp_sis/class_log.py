@@ -1272,11 +1272,12 @@ def batch_get_homeroom_class_logs():
             all_subjects = []
             
             # Thêm homeroom class subject nếu có
-            # subject_title đã được gán đúng từ SIS Student Timetable ở Step 5b
+            # subject_title từ Step 5b, fallback sang timetable_subject_map nếu null
             if homeroom_subject_log:
+                homeroom_subj_title = homeroom_subject_log.get('subject_title') or timetable_subject_map.get((homeroom_subject_log['class_id'], period))
                 all_subjects.append({
                     "name": homeroom_subject_log['name'],
-                    "subject_title": homeroom_subject_log.get('subject_title'),
+                    "subject_title": homeroom_subj_title,
                     "class_id": homeroom_subject_log['class_id'],
                     "class_title": class_titles.get(homeroom_subject_log['class_id'], homeroom_subject_log['class_id']),
                     "general_comment": homeroom_subject_log.get('general_comment'),
@@ -1287,11 +1288,12 @@ def batch_get_homeroom_class_logs():
                 })
             
             # Thêm mixed class subjects
-            # subject_title đã được gán đúng từ SIS Student Timetable ở Step 5b
+            # subject_title từ Step 5b, fallback sang timetable_subject_map nếu null
             for mixed_class_id, mixed_log in mixed_subject_logs.items():
+                mixed_subj_title = mixed_log.get('subject_title') or timetable_subject_map.get((mixed_log['class_id'], period))
                 all_subjects.append({
                     "name": mixed_log['name'],
-                    "subject_title": mixed_log.get('subject_title'),
+                    "subject_title": mixed_subj_title,
                     "class_id": mixed_log['class_id'],
                     "class_title": class_titles.get(mixed_log['class_id'], mixed_log['class_id']),
                     "general_comment": mixed_log.get('general_comment'),
