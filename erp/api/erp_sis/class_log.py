@@ -935,7 +935,9 @@ def batch_get_homeroom_class_logs():
         
         if instance_ids:
             # Lấy subject_title từ Timetable Instance Row + SIS Subject để hiển thị cột Môn học
-            # Match period qua tir.period_name HOẶC tc.period_name (Timetable Column) - linh hoạt hơn
+            # QUAN TRỌNG: phải lọc theo day_of_week để lấy đúng môn của ngày được chọn
+            # (mỗi tiết có nhiều row khác nhau theo từng ngày trong tuần)
+            # Cũng lọc theo valid_from/valid_to nếu có (hỗ trợ TKB cập nhật một phần)
             all_subject_logs = frappe.db.sql("""
                 SELECT cls.name, cls.period, cls.class_id, cls.general_comment, cls.lesson_name, cls.lesson_score,
                     cls.homework_assignment, cls.timetable_instance_id,
@@ -943,12 +945,18 @@ def batch_get_homeroom_class_logs():
                      INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
                      LEFT JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
                      WHERE tir.parent = cls.timetable_instance_id
+                       AND tir.day_of_week = LEFT(LOWER(DAYNAME(%(date)s)), 3)
+                       AND (tir.valid_from IS NULL OR tir.valid_from <= %(date)s)
+                       AND (tir.valid_to IS NULL OR tir.valid_to >= %(date)s)
                        AND (
                          tir.period_name = cls.period
                          OR COALESCE(tc.period_name, tir.period_name) = cls.period
                          OR cls.period LIKE CONCAT('%%', COALESCE(tc.period_name, tir.period_name), '%%')
                          OR COALESCE(tc.period_name, tir.period_name) LIKE CONCAT('%%', cls.period, '%%')
                        )
+                     ORDER BY
+                       CASE WHEN tir.valid_from IS NOT NULL THEN 0 ELSE 1 END,
+                       tir.valid_from DESC
                      LIMIT 1) as subject_title
                 FROM `tabSIS Class Log Subject` cls
                 WHERE cls.timetable_instance_id IN %(instance_ids)s
@@ -960,6 +968,7 @@ def batch_get_homeroom_class_logs():
             }, as_dict=True)
         
         # Fallback: Nếu subquery không match (period format khác), tra theo period_priority
+        # Cũng lọc theo day_of_week để lấy đúng môn của ngày được chọn
         logs_missing_subject = [log for log in all_subject_logs if not log.get('subject_title')]
         if logs_missing_subject:
             instance_ids_missing = list({log['timetable_instance_id'] for log in logs_missing_subject})
@@ -973,9 +982,19 @@ def batch_get_homeroom_class_logs():
                     FROM `tabSIS Timetable Instance Row` tir
                     INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
                     WHERE tir.parent IN %(instance_ids)s
-                """, {"instance_ids": instance_ids_missing}, as_dict=True)
-                # Map (instance_id, period_priority) -> subject_title
-                fallback_map = {(r['parent'], r['period_priority']): r['subject_title'] for r in fallback_rows}
+                        AND tir.day_of_week = LEFT(LOWER(DAYNAME(%(date)s)), 3)
+                        AND (tir.valid_from IS NULL OR tir.valid_from <= %(date)s)
+                        AND (tir.valid_to IS NULL OR tir.valid_to >= %(date)s)
+                    ORDER BY
+                        CASE WHEN tir.valid_from IS NOT NULL THEN 0 ELSE 1 END,
+                        tir.valid_from DESC
+                """, {"instance_ids": instance_ids_missing, "date": date}, as_dict=True)
+                # Map (instance_id, period_priority) -> subject_title (ưu tiên row đầu tiên sau ORDER BY)
+                fallback_map = {}
+                for r in fallback_rows:
+                    key = (r['parent'], r['period_priority'])
+                    if key not in fallback_map:
+                        fallback_map[key] = r['subject_title']
                 for log in logs_missing_subject:
                     pnum = period_nums.get(log['name'])
                     if pnum is not None:
