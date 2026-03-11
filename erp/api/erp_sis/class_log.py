@@ -935,13 +935,20 @@ def batch_get_homeroom_class_logs():
         
         if instance_ids:
             # Lấy subject_title từ Timetable Instance Row + SIS Subject để hiển thị cột Môn học
+            # Match period qua tir.period_name HOẶC tc.period_name (Timetable Column) - linh hoạt hơn
             all_subject_logs = frappe.db.sql("""
                 SELECT cls.name, cls.period, cls.class_id, cls.general_comment, cls.lesson_name, cls.lesson_score,
                     cls.homework_assignment, cls.timetable_instance_id,
                     (SELECT sub.title FROM `tabSIS Timetable Instance Row` tir
                      INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                     LEFT JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
                      WHERE tir.parent = cls.timetable_instance_id
-                       AND (tir.period_name = cls.period OR cls.period LIKE CONCAT('%%', tir.period_name, '%%'))
+                       AND (
+                         tir.period_name = cls.period
+                         OR COALESCE(tc.period_name, tir.period_name) = cls.period
+                         OR cls.period LIKE CONCAT('%%', COALESCE(tc.period_name, tir.period_name), '%%')
+                         OR COALESCE(tc.period_name, tir.period_name) LIKE CONCAT('%%', cls.period, '%%')
+                       )
                      LIMIT 1) as subject_title
                 FROM `tabSIS Class Log Subject` cls
                 WHERE cls.timetable_instance_id IN %(instance_ids)s
@@ -951,6 +958,30 @@ def batch_get_homeroom_class_logs():
                 "instance_ids": instance_ids,
                 "date": date
             }, as_dict=True)
+        
+        # Fallback: Nếu subquery không match (period format khác), tra theo period_priority
+        logs_missing_subject = [log for log in all_subject_logs if not log.get('subject_title')]
+        if logs_missing_subject:
+            instance_ids_missing = list({log['timetable_instance_id'] for log in logs_missing_subject})
+            period_nums = {}
+            for log in logs_missing_subject:
+                match = re.search(r'\d+', log.get('period') or '')
+                period_nums[log['name']] = int(match.group()) if match else None
+            if instance_ids_missing:
+                fallback_rows = frappe.db.sql("""
+                    SELECT tir.parent, tir.period_priority, sub.title as subject_title
+                    FROM `tabSIS Timetable Instance Row` tir
+                    INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                    WHERE tir.parent IN %(instance_ids)s
+                """, {"instance_ids": instance_ids_missing}, as_dict=True)
+                # Map (instance_id, period_priority) -> subject_title
+                fallback_map = {(r['parent'], r['period_priority']): r['subject_title'] for r in fallback_rows}
+                for log in logs_missing_subject:
+                    pnum = period_nums.get(log['name'])
+                    if pnum is not None:
+                        key = (log['timetable_instance_id'], pnum)
+                        if key in fallback_map:
+                            log['subject_title'] = fallback_map[key]
         
         # Build map: (class_id, period) -> subject_log
         # Map từ single period (VD: "Tiết 1") về combined period (VD: "Tiết 1 + 2") nếu cần
