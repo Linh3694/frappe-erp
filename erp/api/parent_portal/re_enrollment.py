@@ -831,21 +831,28 @@ def get_active_config():
         # PHHS "đã nộp" khi họ điền form và submit -> có submitted_at
         logs.append(f"Checking submissions for {len(students)} students, config: {config.name}")
         for student in students:
-            # Tìm bản ghi của học sinh
+            # Tìm bản ghi của học sinh (bao gồm thông tin ưu đãi đã chọn)
             existing = frappe.db.get_value(
                 "SIS Re-enrollment",
                 {
                     "student_id": student["name"],
                     "config_id": config.name
                 },
-                ["name", "decision", "payment_type", "status", "submitted_at", "adjustment_status", "adjustment_requested_at"],
+                ["name", "decision", "payment_type", "status", "submitted_at", "adjustment_status", "adjustment_requested_at",
+                 "selected_discount_id", "selected_discount_name", "selected_discount_percent", "selected_discount_deadline"],
                 as_dict=True
             )
             
             if existing:
                 # Đã nộp = có submitted_at (PHHS đã điền form)
                 student["has_submitted"] = bool(existing.submitted_at)
-                student["submission"] = existing if existing.submitted_at else None
+                if existing.submitted_at:
+                    sub_dict = dict(existing)
+                    if sub_dict.get("selected_discount_deadline"):
+                        sub_dict["selected_discount_deadline"] = str(sub_dict["selected_discount_deadline"])
+                    student["submission"] = sub_dict
+                else:
+                    student["submission"] = None
                 student["re_enrollment_id"] = existing.name  # ID để update khi submit
                 logs.append(f"Student {student['name']} - record: {existing.name}, submitted_at: {existing.submitted_at}")
             else:
