@@ -1144,6 +1144,41 @@ def batch_get_homeroom_class_logs():
         
         step_times['7b_event_attendance'] = (time.time() - step_start) * 1000
         
+        # ⚡ Step 7c: Build map (class_id, period) -> subject_title từ thời khóa biểu
+        # Dùng cho các tiết chưa có sổ đầu bài - vẫn hiển thị tên môn
+        step_start = time.time()
+        timetable_subject_map = {}  # (class_id, period) -> subject_title
+        if class_instances and instance_ids:
+            instance_to_class = {v: k for k, v in class_instances.items()}
+            timetable_rows = frappe.db.sql("""
+                SELECT tir.parent, tir.period_name, tir.period_priority, sub.title as subject_title
+                FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                WHERE tir.parent IN %(instance_ids)s
+            """, {"instance_ids": instance_ids}, as_dict=True)
+            for row in timetable_rows:
+                class_id = instance_to_class.get(row['parent'])
+                if not class_id:
+                    continue
+                # Match period: exact hoặc qua period_priority
+                period_name = row.get('period_name') or ''
+                period_priority = row.get('period_priority')
+                subject_title = row.get('subject_title')
+                if not subject_title:
+                    continue
+                # Map vào từng period request mà match
+                if period_name in periods:
+                    key = (class_id, period_name)
+                    if key not in timetable_subject_map:
+                        timetable_subject_map[key] = subject_title
+                if period_priority is not None and period_priority in period_number_to_combined:
+                    combined = period_number_to_combined[period_priority]
+                    key = (class_id, combined)
+                    if key not in timetable_subject_map:
+                        timetable_subject_map[key] = subject_title
+        step_times['7c_timetable_subjects'] = (time.time() - step_start) * 1000
+        frappe.logger().info(f"📚 [Backend] Built timetable_subject_map with {len(timetable_subject_map)} entries ({step_times['7c_timetable_subjects']:.0f}ms)")
+        
         # Step 8: Build result for each period
         step_start = time.time()
         result = {}
@@ -1259,6 +1294,26 @@ def batch_get_homeroom_class_logs():
                     "homework_assignment": mixed_log.get('homework_assignment'),
                     "is_homeroom": False
                 })
+            
+            # ⭐ Khi chưa có sổ đầu bài: thêm placeholder với subject_title từ thời khóa biểu
+            if not all_subjects:
+                subject_from_timetable = None
+                # Ưu tiên homeroom class, sau đó thử class có học sinh trong tiết này
+                for cid in [homeroom_class_id] + list(classes_for_period.keys()):
+                    subject_from_timetable = timetable_subject_map.get((cid, period))
+                    if subject_from_timetable:
+                        all_subjects.append({
+                            "name": None,
+                            "subject_title": subject_from_timetable,
+                            "class_id": cid,
+                            "class_title": class_titles.get(cid, cid),
+                            "general_comment": None,
+                            "lesson_name": None,
+                            "lesson_score": None,
+                            "homework_assignment": None,
+                            "is_homeroom": (cid == homeroom_class_id)
+                        })
+                        break
             
             result[period] = {
                 "subject": {
