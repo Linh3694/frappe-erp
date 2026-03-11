@@ -1544,7 +1544,9 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         student_log_by_subject = {sl['subject_id']: sl for sl in student_logs}
 
         # Lấy tên môn học theo tiết từ SIS Student Timetable của học sinh trong ngày
-        # SIS Student Timetable: student_id + date + timetable_column_id (period) + subject_id -> SIS Subject.title
+        # SIS Student Timetable: student_id + date + timetable_column_id (period) + class_id + subject_id
+        # Quan trọng: map theo (period, class_id) vì học sinh mixed class có thể có môn khác nhau
+        # ở cùng period nhưng khác class (vd: Tiết 1 homeroom=Chào cờ, Tiết 1 mixed=Toán)
         student_timetable_subjects = frappe.db.sql("""
             SELECT 
                 tc.period_name,
@@ -1558,12 +1560,21 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 AND LOWER(tc.period_name) LIKE '%%tiết%%'
         """, {"student_id": student_id, "date": date}, as_dict=True)
 
-        # Map: period_name -> subject_title (ưu tiên match theo class_id)
-        period_subject_map = {}
+        # Map: (period, class_id) -> subject_title để match đúng môn theo từng lớp
+        # Fallback: period -> subject_title khi chỉ có 1 class cho period
+        period_class_subject_map = {}
+        period_only_subject_map = {}
         for entry in student_timetable_subjects:
             period = entry['period_name']
-            if entry.get('subject_title') and period not in period_subject_map:
-                period_subject_map[period] = entry['subject_title']
+            class_id_val = entry.get('timetable_class_id')
+            if not entry.get('subject_title'):
+                continue
+            key = (period, class_id_val)
+            if key not in period_class_subject_map:
+                period_class_subject_map[key] = entry['subject_title']
+            # Fallback: nếu period chưa có trong period_only, lưu (dùng khi không match class)
+            if period not in period_only_subject_map:
+                period_only_subject_map[period] = entry['subject_title']
 
         # Lấy tất cả score names cần resolve (homework/behavior/participation + issues)
         score_names = set()
@@ -1601,9 +1612,11 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
             student_log = student_log_by_subject.get(subject_id)
             period_name = subject_log['period']
 
-            # Ưu tiên lấy tên môn từ student timetable (chính xác nhất)
-            # Fallback: tên lớp mixed, hoặc tên lớp homeroom
-            subject_title = period_subject_map.get(period_name)
+            # Ưu tiên lấy tên môn từ student timetable theo (period, class_id) - chính xác với mixed class
+            # Fallback: period only, rồi tên lớp mixed/homeroom
+            subject_title = period_class_subject_map.get((period_name, subject_log['class_id']))
+            if not subject_title:
+                subject_title = period_only_subject_map.get(period_name)
             if not subject_title:
                 if subject_log['class_id'] != class_id:
                     subject_title = mixed_class_title_map.get(subject_log['class_id'], subject_log['class_id'])
