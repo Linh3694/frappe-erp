@@ -707,7 +707,8 @@ def batch_get_homeroom_class_logs():
         # This endpoint aggregates: class logs + class attendance + event attendance
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
-        cache_key = f"homeroom_class_logs:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        # v2: subject_title lấy từ SIS Student Timetable thay vì SIS Timetable Instance Row
+        cache_key = f"homeroom_class_logs_v2:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -934,30 +935,11 @@ def batch_get_homeroom_class_logs():
         instance_ids = list(class_instances.values())
         
         if instance_ids:
-            # Lấy subject_title từ Timetable Instance Row + SIS Subject để hiển thị cột Môn học
-            # QUAN TRỌNG: phải lọc theo day_of_week để lấy đúng môn của ngày được chọn
-            # (mỗi tiết có nhiều row khác nhau theo từng ngày trong tuần)
-            # Cũng lọc theo valid_from/valid_to nếu có (hỗ trợ TKB cập nhật một phần)
+            # Lấy dữ liệu class log subject - KHÔNG lấy subject_title ở đây
+            # subject_title sẽ được lấy từ SIS Student Timetable ở Step 5b (chính xác theo ngày)
             all_subject_logs = frappe.db.sql("""
                 SELECT cls.name, cls.period, cls.class_id, cls.general_comment, cls.lesson_name, cls.lesson_score,
-                    cls.homework_assignment, cls.timetable_instance_id,
-                    (SELECT sub.title FROM `tabSIS Timetable Instance Row` tir
-                     INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
-                     LEFT JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
-                     WHERE tir.parent = cls.timetable_instance_id
-                       AND tir.day_of_week = LEFT(LOWER(DAYNAME(%(date)s)), 3)
-                       AND (tir.valid_from IS NULL OR tir.valid_from <= %(date)s)
-                       AND (tir.valid_to IS NULL OR tir.valid_to >= %(date)s)
-                       AND (
-                         tir.period_name = cls.period
-                         OR COALESCE(tc.period_name, tir.period_name) = cls.period
-                         OR cls.period LIKE CONCAT('%%', COALESCE(tc.period_name, tir.period_name), '%%')
-                         OR COALESCE(tc.period_name, tir.period_name) LIKE CONCAT('%%', cls.period, '%%')
-                       )
-                     ORDER BY
-                       CASE WHEN tir.valid_from IS NOT NULL THEN 0 ELSE 1 END,
-                       tir.valid_from DESC
-                     LIMIT 1) as subject_title
+                    cls.homework_assignment, cls.timetable_instance_id
                 FROM `tabSIS Class Log Subject` cls
                 WHERE cls.timetable_instance_id IN %(instance_ids)s
                     AND cls.log_date = %(date)s
@@ -966,41 +948,6 @@ def batch_get_homeroom_class_logs():
                 "instance_ids": instance_ids,
                 "date": date
             }, as_dict=True)
-        
-        # Fallback: Nếu subquery không match (period format khác), tra theo period_priority
-        # Cũng lọc theo day_of_week để lấy đúng môn của ngày được chọn
-        logs_missing_subject = [log for log in all_subject_logs if not log.get('subject_title')]
-        if logs_missing_subject:
-            instance_ids_missing = list({log['timetable_instance_id'] for log in logs_missing_subject})
-            period_nums = {}
-            for log in logs_missing_subject:
-                match = re.search(r'\d+', log.get('period') or '')
-                period_nums[log['name']] = int(match.group()) if match else None
-            if instance_ids_missing:
-                fallback_rows = frappe.db.sql("""
-                    SELECT tir.parent, tir.period_priority, sub.title as subject_title
-                    FROM `tabSIS Timetable Instance Row` tir
-                    INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
-                    WHERE tir.parent IN %(instance_ids)s
-                        AND tir.day_of_week = LEFT(LOWER(DAYNAME(%(date)s)), 3)
-                        AND (tir.valid_from IS NULL OR tir.valid_from <= %(date)s)
-                        AND (tir.valid_to IS NULL OR tir.valid_to >= %(date)s)
-                    ORDER BY
-                        CASE WHEN tir.valid_from IS NOT NULL THEN 0 ELSE 1 END,
-                        tir.valid_from DESC
-                """, {"instance_ids": instance_ids_missing, "date": date}, as_dict=True)
-                # Map (instance_id, period_priority) -> subject_title (ưu tiên row đầu tiên sau ORDER BY)
-                fallback_map = {}
-                for r in fallback_rows:
-                    key = (r['parent'], r['period_priority'])
-                    if key not in fallback_map:
-                        fallback_map[key] = r['subject_title']
-                for log in logs_missing_subject:
-                    pnum = period_nums.get(log['name'])
-                    if pnum is not None:
-                        key = (log['timetable_instance_id'], pnum)
-                        if key in fallback_map:
-                            log['subject_title'] = fallback_map[key]
         
         # Build map: (class_id, period) -> subject_log
         # Map từ single period (VD: "Tiết 1") về combined period (VD: "Tiết 1 + 2") nếu cần
@@ -1022,6 +969,38 @@ def batch_get_homeroom_class_logs():
         step_times['5_class_log_subjects'] = (time.time() - step_start) * 1000
         
         frappe.logger().info(f"📝 [Backend] Found {len(all_subject_logs)} class log subjects ({step_times['5_class_log_subjects']:.0f}ms)")
+        
+        # ⭐ Step 5b: Lấy subject_title từ SIS Student Timetable (chính xác theo ngày)
+        # Cách tiếp cận giống get_student_classlog_summary - luôn dùng SIS Student Timetable thay vì
+        # SIS Timetable Instance Row (vì Instance Row không phân biệt ngày, chỉ có day_of_week pattern)
+        step_start = time.time()
+        if all_subject_logs and student_ids:
+            sis_timetable_rows = frappe.db.sql("""
+                SELECT st.class_id, tc.period_name, sub.title as subject_title
+                FROM `tabSIS Student Timetable` st
+                INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+                INNER JOIN `tabSIS Subject` sub ON st.subject_id = sub.name
+                WHERE st.student_id IN %(student_ids)s
+                    AND st.date = %(date)s
+                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
+            """, {"student_ids": student_ids, "date": date}, as_dict=True)
+            
+            # Map (class_id, tc.period_name) -> subject_title
+            # Giống cách get_student_classlog_summary map tc.period_name -> subject_title
+            sis_subject_title_map = {}
+            for row in sis_timetable_rows:
+                key = (row['class_id'], row['period_name'])
+                if key not in sis_subject_title_map and row.get('subject_title'):
+                    sis_subject_title_map[key] = row['subject_title']
+            
+            # Gán subject_title cho mỗi class log subject
+            # cls.period phải khớp tc.period_name - đây là giả định đúng theo dữ liệu thực tế
+            for log in all_subject_logs:
+                key = (log['class_id'], log['period'])
+                if key in sis_subject_title_map:
+                    log['subject_title'] = sis_subject_title_map[key]
+            
+            frappe.logger().info(f"📚 [Backend] Enriched subject_title from SIS Student Timetable: {len(sis_subject_title_map)} entries, {len([l for l in all_subject_logs if l.get('subject_title')])} logs updated ({(time.time() - step_start)*1000:.0f}ms)")
         
         # Step 6: Batch query all student logs
         step_start = time.time()
@@ -1293,16 +1272,11 @@ def batch_get_homeroom_class_logs():
             all_subjects = []
             
             # Thêm homeroom class subject nếu có
+            # subject_title đã được gán đúng từ SIS Student Timetable ở Step 5b
             if homeroom_subject_log:
-                # Ưu tiên subject_title từ SIS Student Timetable (theo ngày cụ thể),
-                # fallback về subject_title lấy từ timetable instance row (theo tuần/kỳ)
-                homeroom_subject_title = (
-                    timetable_subject_map.get((homeroom_class_id, period))
-                    or homeroom_subject_log.get('subject_title')
-                )
                 all_subjects.append({
                     "name": homeroom_subject_log['name'],
-                    "subject_title": homeroom_subject_title,
+                    "subject_title": homeroom_subject_log.get('subject_title'),
                     "class_id": homeroom_subject_log['class_id'],
                     "class_title": class_titles.get(homeroom_subject_log['class_id'], homeroom_subject_log['class_id']),
                     "general_comment": homeroom_subject_log.get('general_comment'),
@@ -1313,16 +1287,11 @@ def batch_get_homeroom_class_logs():
                 })
             
             # Thêm mixed class subjects
+            # subject_title đã được gán đúng từ SIS Student Timetable ở Step 5b
             for mixed_class_id, mixed_log in mixed_subject_logs.items():
-                # Ưu tiên subject_title từ SIS Student Timetable (theo ngày cụ thể),
-                # fallback về subject_title lấy từ timetable instance row (theo tuần/kỳ)
-                mixed_subject_title = (
-                    timetable_subject_map.get((mixed_class_id, period))
-                    or mixed_log.get('subject_title')
-                )
                 all_subjects.append({
                     "name": mixed_log['name'],
-                    "subject_title": mixed_subject_title,
+                    "subject_title": mixed_log.get('subject_title'),
                     "class_id": mixed_log['class_id'],
                     "class_title": class_titles.get(mixed_log['class_id'], mixed_log['class_id']),
                     "general_comment": mixed_log.get('general_comment'),
