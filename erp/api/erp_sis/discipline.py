@@ -190,6 +190,138 @@ def delete_discipline_classification(name: str = None):
         )
 
 
+# ==================== HÌNH THỨC (FORM) CRUD ====================
+# Giống phân loại - chỉ có title
+
+@frappe.whitelist(allow_guest=False)
+def get_discipline_forms(campus: str = None):
+    """Lấy danh sách hình thức kỷ luật theo campus"""
+    try:
+        filters = {"enabled": 1}
+        if campus:
+            filters["campus"] = campus
+
+        forms = frappe.get_all(
+            "SIS Discipline Form",
+            filters=filters,
+            fields=["name", "title", "campus", "enabled", "creation", "modified"],
+            order_by="title asc",
+        )
+
+        return success_response(
+            data={"data": forms, "total": len(forms)},
+            message="Lấy danh sách hình thức thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error getting discipline forms: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách hình thức: {str(e)}",
+            code="GET_DISCIPLINE_FORMS_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def create_discipline_form(title: str = None, campus: str = None):
+    """Tạo mới hình thức kỷ luật"""
+    try:
+        data = _get_request_data()
+        title = title or data.get("title")
+        campus = campus or data.get("campus")
+
+        if not title or not str(title).strip():
+            return error_response(message="Tiêu đề là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+        if not campus:
+            return error_response(message="Trường học là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+
+        doc = frappe.get_doc(
+            {
+                "doctype": "SIS Discipline Form",
+                "title": str(title).strip(),
+                "campus": campus,
+                "enabled": 1,
+            }
+        )
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Tạo hình thức thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error creating discipline form: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo hình thức: {str(e)}",
+            code="CREATE_DISCIPLINE_FORM_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def update_discipline_form(name: str = None, title: str = None, enabled: int = None):
+    """Cập nhật hình thức kỷ luật"""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        title = title if title is not None else data.get("title")
+        enabled_val = data.get("enabled")
+        if enabled is None and enabled_val is not None:
+            enabled = int(enabled_val) if enabled_val not in [None, ""] else None
+
+        if not name:
+            return error_response(message="ID hình thức là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+
+        doc = frappe.get_doc("SIS Discipline Form", name)
+
+        if title is not None:
+            doc.title = str(title).strip()
+        if enabled is not None:
+            doc.enabled = enabled
+
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Cập nhật hình thức thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(message="Không tìm thấy hình thức", code="FORM_NOT_FOUND")
+    except Exception as e:
+        frappe.log_error(f"Error updating discipline form: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật hình thức: {str(e)}",
+            code="UPDATE_DISCIPLINE_FORM_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_discipline_form(name: str = None):
+    """Xóa hình thức kỷ luật"""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+
+        if not name:
+            return error_response(message="ID hình thức là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+
+        frappe.delete_doc("SIS Discipline Form", name, ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(data={"name": name}, message="Xóa hình thức thành công")
+
+    except frappe.DoesNotExistError:
+        return error_response(message="Không tìm thấy hình thức", code="FORM_NOT_FOUND")
+    except Exception as e:
+        frappe.log_error(f"Error deleting discipline form: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa hình thức: {str(e)}",
+            code="DELETE_DISCIPLINE_FORM_ERROR",
+        )
+
+
 # ==================== VI PHẠM (VIOLATION) CRUD ====================
 
 @frappe.whitelist(allow_guest=False)
