@@ -934,12 +934,19 @@ def batch_get_homeroom_class_logs():
         instance_ids = list(class_instances.values())
         
         if instance_ids:
+            # Lấy subject_title từ Timetable Instance Row + SIS Subject để hiển thị cột Môn học
             all_subject_logs = frappe.db.sql("""
-                SELECT name, period, class_id, general_comment, lesson_name, lesson_score, homework_assignment, timetable_instance_id
-                FROM `tabSIS Class Log Subject`
-                WHERE timetable_instance_id IN %(instance_ids)s
-                    AND log_date = %(date)s
-                    AND LOWER(period) LIKE '%%tiết%%'
+                SELECT cls.name, cls.period, cls.class_id, cls.general_comment, cls.lesson_name, cls.lesson_score,
+                    cls.homework_assignment, cls.timetable_instance_id,
+                    (SELECT sub.title FROM `tabSIS Timetable Instance Row` tir
+                     INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                     WHERE tir.parent = cls.timetable_instance_id
+                       AND (tir.period_name = cls.period OR cls.period LIKE CONCAT('%%', tir.period_name, '%%'))
+                     LIMIT 1) as subject_title
+                FROM `tabSIS Class Log Subject` cls
+                WHERE cls.timetable_instance_id IN %(instance_ids)s
+                    AND cls.log_date = %(date)s
+                    AND LOWER(cls.period) LIKE '%%tiết%%'
             """, {
                 "instance_ids": instance_ids,
                 "date": date
@@ -1198,6 +1205,7 @@ def batch_get_homeroom_class_logs():
             if homeroom_subject_log:
                 all_subjects.append({
                     "name": homeroom_subject_log['name'],
+                    "subject_title": homeroom_subject_log.get('subject_title'),
                     "class_id": homeroom_subject_log['class_id'],
                     "class_title": class_titles.get(homeroom_subject_log['class_id'], homeroom_subject_log['class_id']),
                     "general_comment": homeroom_subject_log.get('general_comment'),
@@ -1211,6 +1219,7 @@ def batch_get_homeroom_class_logs():
             for mixed_class_id, mixed_log in mixed_subject_logs.items():
                 all_subjects.append({
                     "name": mixed_log['name'],
+                    "subject_title": mixed_log.get('subject_title'),
                     "class_id": mixed_log['class_id'],
                     "class_title": class_titles.get(mixed_log['class_id'], mixed_log['class_id']),
                     "general_comment": mixed_log.get('general_comment'),
