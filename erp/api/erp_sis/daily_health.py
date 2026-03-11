@@ -710,7 +710,6 @@ def update_health_examination():
         hospital_insurance = data.get("hospital_insurance")
         hospital_school_coordination = data.get("hospital_school_coordination")
         hospital_medical_staff = data.get("hospital_medical_staff")
-        hospital_name = data.get("hospital_name")
         hospital_direction = data.get("hospital_direction")
         hospital_advance_cost = data.get("hospital_advance_cost")
         hospital_payer = data.get("hospital_payer")
@@ -788,7 +787,6 @@ def update_health_examination():
         # Hospital fields mới
         _set("hospital_insurance", hospital_insurance)
         _set("hospital_school_coordination", hospital_school_coordination)
-        _set("hospital_name", hospital_name)
         _set("hospital_direction", hospital_direction)
         _set("hospital_payer", hospital_payer)
         _set("hospital_payer_other", hospital_payer_other)
@@ -930,7 +928,7 @@ def get_student_examination_history():
                 "hospital_diagnosis", "hospital_treatment",
                 "hospital_insurance", "hospital_school_coordination",
                 "hospital_medical_staff", "hospital_medical_staff_name",
-                "hospital_name", "hospital_direction", "hospital_advance_cost",
+                "hospital_direction", "hospital_advance_cost",
                 "hospital_payer", "hospital_payer_other",
                 "hospital_transport", "hospital_transport_other",
                 "hospital_health_monitoring", "hospital_notes",
@@ -2278,7 +2276,7 @@ def get_class_health_examinations():
                 "hospital_diagnosis", "hospital_treatment",
                 "hospital_insurance", "hospital_school_coordination",
                 "hospital_medical_staff", "hospital_medical_staff_name",
-                "hospital_name", "hospital_direction", "hospital_advance_cost",
+                "hospital_direction", "hospital_advance_cost",
                 "hospital_payer", "hospital_payer_other",
                 "hospital_transport", "hospital_transport_other",
                 "hospital_health_monitoring", "hospital_notes",
@@ -2672,7 +2670,7 @@ def get_parent_health_records():
                 "hospital_diagnosis", "hospital_treatment",
                 "hospital_insurance", "hospital_school_coordination",
                 "hospital_medical_staff", "hospital_medical_staff_name",
-                "hospital_name", "hospital_direction", "hospital_advance_cost",
+                "hospital_direction", "hospital_advance_cost",
                 "hospital_payer", "hospital_payer_other",
                 "hospital_transport", "hospital_transport_other",
                 "hospital_health_monitoring", "hospital_notes",
@@ -2702,10 +2700,12 @@ def get_parent_health_records():
                 visit_data = frappe.db.get_value(
                     "SIS Daily Health Visit",
                     exam["visit_id"],
-                    ["checkout_notes"],
+                    ["checkout_notes", "reason"],
                     as_dict=True
                 )
-                exam["checkout_notes"] = visit_data.get("checkout_notes") if visit_data else None
+                if visit_data:
+                    exam["checkout_notes"] = visit_data.get("checkout_notes")
+                    exam["visit_reason"] = visit_data.get("reason")
         
         # Group theo ngày
         grouped = {}
