@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime as dt
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
@@ -970,23 +971,27 @@ def batch_get_homeroom_class_logs():
         
         frappe.logger().info(f"📝 [Backend] Found {len(all_subject_logs)} class log subjects ({step_times['5_class_log_subjects']:.0f}ms)")
         
-        # ⭐ Step 5b: Lấy subject_title từ SIS Student Timetable (chính xác theo ngày)
-        # Cách tiếp cận giống get_student_classlog_summary - luôn dùng SIS Student Timetable thay vì
-        # SIS Timetable Instance Row (vì Instance Row không phân biệt ngày, chỉ có day_of_week pattern)
+        # ⭐ Step 5b: Lấy subject_title từ SIS Timetable Instance Row (weekly pattern)
+        # Giống cách parent portal lấy thời khoá biểu, đã kiểm chứng hoạt động chính xác
+        # (SIS Student Timetable có thể bị lệch dữ liệu so với thời khoá biểu thực tế)
         step_start = time.time()
-        if all_subject_logs and student_ids:
+        if all_subject_logs and instance_ids:
+            date_obj_5b = dt.strptime(date, "%Y-%m-%d")
+            day_of_week_5b = date_obj_5b.strftime("%A").lower()[:3]
+
             sis_timetable_rows = frappe.db.sql("""
-                SELECT st.class_id, tc.period_name, sub.title as subject_title
-                FROM `tabSIS Student Timetable` st
-                INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
-                INNER JOIN `tabSIS Subject` sub ON st.subject_id = sub.name
-                WHERE st.student_id IN %(student_ids)s
-                    AND st.date = %(date)s
+                SELECT ti.class_id, tc.period_name, sub.title as subject_title
+                FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
+                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
+                INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                WHERE ti.name IN %(instance_ids)s
+                    AND tir.day_of_week = %(day_of_week)s
+                    AND tir.subject_id IS NOT NULL
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
-            """, {"student_ids": student_ids, "date": date}, as_dict=True)
+            """, {"instance_ids": instance_ids, "day_of_week": day_of_week_5b}, as_dict=True)
             
-            # Map (class_id, tc.period_name) -> subject_title
-            # Giống cách get_student_classlog_summary map tc.period_name -> subject_title
+            # Map (class_id, period_name) -> subject_title
             sis_subject_title_map = {}
             for row in sis_timetable_rows:
                 key = (row['class_id'], row['period_name'])
@@ -994,13 +999,12 @@ def batch_get_homeroom_class_logs():
                     sis_subject_title_map[key] = row['subject_title']
             
             # Gán subject_title cho mỗi class log subject
-            # cls.period phải khớp tc.period_name - đây là giả định đúng theo dữ liệu thực tế
             for log in all_subject_logs:
                 key = (log['class_id'], log['period'])
                 if key in sis_subject_title_map:
                     log['subject_title'] = sis_subject_title_map[key]
             
-            frappe.logger().info(f"📚 [Backend] Enriched subject_title from SIS Student Timetable: {len(sis_subject_title_map)} entries, {len([l for l in all_subject_logs if l.get('subject_title')])} logs updated ({(time.time() - step_start)*1000:.0f}ms)")
+            frappe.logger().info(f"📚 [Backend] Enriched subject_title from Timetable Instance Row: {len(sis_subject_title_map)} entries, {len([l for l in all_subject_logs if l.get('subject_title')])} logs updated ({(time.time() - step_start)*1000:.0f}ms)")
         
         # Step 6: Batch query all student logs
         step_start = time.time()
@@ -1143,25 +1147,29 @@ def batch_get_homeroom_class_logs():
         step_times['7b_event_attendance'] = (time.time() - step_start) * 1000
         
         # ⚡ Step 7c: Build map (class_id, period) -> subject_title từ thời khóa biểu
-        # Dùng SIS Student Timetable (có date) - chính xác theo ngày, không dùng Timetable Instance Row (theo ngày trong tuần)
+        # Dùng SIS Timetable Instance Row (weekly pattern theo day_of_week)
+        # Giống cách parent portal lấy thời khoá biểu, đã kiểm chứng chính xác
         step_start = time.time()
         timetable_subject_map = {}  # (class_id, period) -> subject_title
-        if student_ids and all_classes_to_query:
-            student_timetable_subjects = frappe.db.sql("""
-                SELECT st.class_id, tc.period_name, tc.period_priority, sub.title as subject_title
-                FROM `tabSIS Student Timetable` st
-                INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
-                INNER JOIN `tabSIS Subject` sub ON st.subject_id = sub.name
-                WHERE st.student_id IN %(student_ids)s
-                    AND st.date = %(date)s
-                    AND st.class_id IN %(class_ids)s
+        if instance_ids:
+            date_obj_7c = dt.strptime(date, "%Y-%m-%d")
+            day_of_week_7c = date_obj_7c.strftime("%A").lower()[:3]
+
+            timetable_instance_subjects = frappe.db.sql("""
+                SELECT ti.class_id, tc.period_name, tc.period_priority, sub.title as subject_title
+                FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
+                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
+                INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                WHERE ti.name IN %(instance_ids)s
+                    AND tir.day_of_week = %(day_of_week)s
+                    AND tir.subject_id IS NOT NULL
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
             """, {
-                "student_ids": student_ids,
-                "date": date,
-                "class_ids": list(all_classes_to_query)
+                "instance_ids": instance_ids,
+                "day_of_week": day_of_week_7c
             }, as_dict=True)
-            for row in student_timetable_subjects:
+            for row in timetable_instance_subjects:
                 class_id = row.get('class_id')
                 if not class_id:
                     continue
@@ -1170,7 +1178,6 @@ def batch_get_homeroom_class_logs():
                 subject_title = row.get('subject_title')
                 if not subject_title:
                     continue
-                # Map vào từng period request mà match
                 if period_name in periods:
                     key = (class_id, period_name)
                     if key not in timetable_subject_map:
@@ -1181,7 +1188,7 @@ def batch_get_homeroom_class_logs():
                     if key not in timetable_subject_map:
                         timetable_subject_map[key] = subject_title
         step_times['7c_timetable_subjects'] = (time.time() - step_start) * 1000
-        frappe.logger().info(f"📚 [Backend] Built timetable_subject_map with {len(timetable_subject_map)} entries from SIS Student Timetable ({step_times['7c_timetable_subjects']:.0f}ms)")
+        frappe.logger().info(f"📚 [Backend] Built timetable_subject_map with {len(timetable_subject_map)} entries from Timetable Instance Row ({step_times['7c_timetable_subjects']:.0f}ms)")
         
         # Step 8: Build result for each period
         step_start = time.time()
@@ -1543,36 +1550,43 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         # Map subject_id -> student_log để lookup O(1)
         student_log_by_subject = {sl['subject_id']: sl for sl in student_logs}
 
-        # Lấy tên môn học theo tiết từ SIS Student Timetable của học sinh trong ngày
-        # SIS Student Timetable: student_id + date + timetable_column_id (period) + class_id + subject_id
-        # Quan trọng: map theo (period, class_id) vì học sinh mixed class có thể có môn khác nhau
-        # ở cùng period nhưng khác class (vd: Tiết 1 homeroom=Chào cờ, Tiết 1 mixed=Toán)
-        student_timetable_subjects = frappe.db.sql("""
+        # Lấy tên môn học từ SIS Timetable Instance Row (weekly pattern theo day_of_week)
+        # Giống cách parent portal (_get_class_timetable_for_date) lấy thời khoá biểu,
+        # đã kiểm chứng hoạt động chính xác (SIS Student Timetable có thể bị lệch dữ liệu)
+        date_obj = dt.strptime(date, "%Y-%m-%d")
+        day_of_week = date_obj.strftime("%A").lower()[:3]  # "mon", "tue", "wed", etc.
+
+        instance_row_subjects = frappe.db.sql("""
             SELECT 
+                ti.class_id,
                 tc.period_name,
-                st.class_id as timetable_class_id,
+                tc.period_priority,
                 sub.title as subject_title
-            FROM `tabSIS Student Timetable` st
-            INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
-            LEFT JOIN `tabSIS Subject` sub ON st.subject_id = sub.name
-            WHERE st.student_id = %(student_id)s
-                AND st.date = %(date)s
+            FROM `tabSIS Timetable Instance Row` tir
+            INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
+            INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
+            INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+            WHERE ti.name IN %(instance_ids)s
+                AND tir.day_of_week = %(day_of_week)s
+                AND tir.subject_id IS NOT NULL
                 AND LOWER(tc.period_name) LIKE '%%tiết%%'
-        """, {"student_id": student_id, "date": date}, as_dict=True)
+        """, {
+            "instance_ids": all_instance_ids,
+            "day_of_week": day_of_week
+        }, as_dict=True)
 
         # Map: (period, class_id) -> subject_title để match đúng môn theo từng lớp
         # Fallback: period -> subject_title khi chỉ có 1 class cho period
         period_class_subject_map = {}
         period_only_subject_map = {}
-        for entry in student_timetable_subjects:
+        for entry in instance_row_subjects:
             period = entry['period_name']
-            class_id_val = entry.get('timetable_class_id')
+            class_id_val = entry['class_id']
             if not entry.get('subject_title'):
                 continue
             key = (period, class_id_val)
             if key not in period_class_subject_map:
                 period_class_subject_map[key] = entry['subject_title']
-            # Fallback: nếu period chưa có trong period_only, lưu (dùng khi không match class)
             if period not in period_only_subject_map:
                 period_only_subject_map[period] = entry['subject_title']
 
