@@ -940,13 +940,14 @@ def get_submissions():
             values["source_school_year_id_stage"] = source_school_year_id
             values["education_stage_id"] = education_stage_id
         
-        # Filter theo creation <= cuối ngày as_of_date (dữ liệu tính đến thời điểm đó)
+        # Filter theo ngày cập nhật (submitted_at) <= cuối ngày as_of_date
+        # Với record chưa nộp (submitted_at NULL) dùng creation
         if as_of_date:
             try:
                 from datetime import datetime
                 dt = datetime.strptime(as_of_date, "%Y-%m-%d")
                 as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
-                conditions.append("re.creation <= %(as_of_datetime)s")
+                conditions.append("(COALESCE(re.submitted_at, re.creation) <= %(as_of_datetime)s)")
                 values["as_of_datetime"] = as_of_datetime
             except ValueError:
                 pass  # Bỏ qua nếu format không đúng
@@ -1691,15 +1692,15 @@ def get_statistics():
                 {"config_id": ["Config ID là bắt buộc"]}
             )
         
-        # Điều kiện creation nếu có as_of_date
-        creation_filter = ""
+        # Điều kiện ngày cập nhật (submitted_at, fallback creation) nếu có as_of_date
+        date_filter = ""
         filter_values = [config_id]
         if as_of_date:
             try:
                 from datetime import datetime
                 dt = datetime.strptime(as_of_date, "%Y-%m-%d")
                 as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
-                creation_filter = " AND creation <= %s"
+                date_filter = " AND (COALESCE(submitted_at, creation) <= %s)"
                 filter_values.append(as_of_datetime)
             except ValueError:
                 pass
@@ -1710,7 +1711,7 @@ def get_statistics():
                 decision,
                 COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s{creation_filter}
+            WHERE config_id = %s{date_filter}
             GROUP BY decision
         """, filter_values, as_dict=True)
         
@@ -1720,7 +1721,7 @@ def get_statistics():
                 status,
                 COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s{creation_filter}
+            WHERE config_id = %s{date_filter}
             GROUP BY status
         """, filter_values, as_dict=True)
         
@@ -1730,7 +1731,7 @@ def get_statistics():
                 payment_type,
                 COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND decision = 're_enroll'{creation_filter}
+            WHERE config_id = %s AND decision = 're_enroll'{date_filter}
             GROUP BY payment_type
         """, filter_values, as_dict=True)
         
@@ -1742,7 +1743,7 @@ def get_statistics():
                 as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
                 total = frappe.db.sql("""
                     SELECT COUNT(*) as count FROM `tabSIS Re-enrollment`
-                    WHERE config_id = %s AND creation <= %s
+                    WHERE config_id = %s AND (COALESCE(submitted_at, creation) <= %s)
                 """, [config_id, as_of_datetime], as_dict=True)[0].count
             except ValueError:
                 total = frappe.db.count("SIS Re-enrollment", {"config_id": config_id})
@@ -1778,14 +1779,14 @@ def get_statistics():
         not_submitted_count = frappe.db.sql(f"""
             SELECT COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND (decision IS NULL OR decision = ''){creation_filter}
+            WHERE config_id = %s AND (decision IS NULL OR decision = ''){date_filter}
         """, filter_values, as_dict=True)[0].count
         
         # Đếm số yêu cầu điều chỉnh
         adjustment_requested_count = frappe.db.sql(f"""
             SELECT COUNT(*) as count
             FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND adjustment_status = 'requested'{creation_filter}
+            WHERE config_id = %s AND adjustment_status = 'requested'{date_filter}
         """, filter_values, as_dict=True)[0].count
         
         logs.append(f"Thống kê cho config {config_id}")
