@@ -1331,7 +1331,8 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         frappe.logger().info(f"🤖 [AI Summary] get_student_classlog_summary: student={student_id}, class={class_id}, date={date}")
 
         # ⚡ CACHE: TTL ngắn (90 giây) vì class log thay đổi thường xuyên
-        cache_key = f"student_classlog_summary:{student_id}:{class_id}:{date}"
+        # v2: thêm version để invalidate cache khi logic thay đổi
+        cache_key = f"student_classlog_summary_v2:{student_id}:{class_id}:{date}"
         try:
             cached = frappe.cache().get_value(cache_key)
             if cached:
@@ -1433,7 +1434,29 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         # Map subject_id -> student_log để lookup O(1)
         student_log_by_subject = {sl['subject_id']: sl for sl in student_logs}
 
-        # Lấy tất cả score names cần resolve (homework/behavior/participation)
+        # Lấy tên môn học theo tiết từ SIS Student Timetable của học sinh trong ngày
+        # SIS Student Timetable: student_id + date + timetable_column_id (period) + subject_id -> SIS Subject.title
+        student_timetable_subjects = frappe.db.sql("""
+            SELECT 
+                tc.period_name,
+                st.class_id as timetable_class_id,
+                sub.title as subject_title
+            FROM `tabSIS Student Timetable` st
+            INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+            LEFT JOIN `tabSIS Subject` sub ON st.subject_id = sub.name
+            WHERE st.student_id = %(student_id)s
+                AND st.date = %(date)s
+                AND LOWER(tc.period_name) LIKE '%%tiết%%'
+        """, {"student_id": student_id, "date": date}, as_dict=True)
+
+        # Map: period_name -> subject_title (ưu tiên match theo class_id)
+        period_subject_map = {}
+        for entry in student_timetable_subjects:
+            period = entry['period_name']
+            if entry.get('subject_title') and period not in period_subject_map:
+                period_subject_map[period] = entry['subject_title']
+
+        # Lấy tất cả score names cần resolve (homework/behavior/participation + issues)
         score_names = set()
         for sl in student_logs:
             if sl.get('homework'):
@@ -1442,6 +1465,12 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 score_names.add(sl['behavior'])
             if sl.get('participation'):
                 score_names.add(sl['participation'])
+            # issues là comma-separated score names
+            if sl.get('issues'):
+                for issue_name in sl['issues'].split(','):
+                    issue_name = issue_name.strip()
+                    if issue_name:
+                        score_names.add(issue_name)
 
         # Resolve score name -> title_vn bằng 1 query
         score_map = {}
@@ -1453,7 +1482,7 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
             """, {"names": list(score_names)}, as_dict=True)
             score_map = {r['name']: r['title_vn'] for r in score_rows}
 
-        # Lấy tên lớp homeroom để dùng khi cần
+        # Lấy tên lớp homeroom để dùng làm fallback
         homeroom_class_title = frappe.db.get_value("SIS Class", class_id, "title") or class_id
 
         # Tổng hợp dữ liệu theo từng tiết
@@ -1461,22 +1490,37 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         for subject_log in subject_logs:
             subject_id = subject_log['subject_id']
             student_log = student_log_by_subject.get(subject_id)
+            period_name = subject_log['period']
 
-            # Xác định tên môn học từ class_id của subject log
-            if subject_log['class_id'] == class_id:
-                subject_title = homeroom_class_title
-            else:
-                subject_title = mixed_class_title_map.get(subject_log['class_id'], subject_log['class_id'])
+            # Ưu tiên lấy tên môn từ student timetable (chính xác nhất)
+            # Fallback: tên lớp mixed, hoặc tên lớp homeroom
+            subject_title = period_subject_map.get(period_name)
+            if not subject_title:
+                if subject_log['class_id'] != class_id:
+                    subject_title = mixed_class_title_map.get(subject_log['class_id'], subject_log['class_id'])
+                else:
+                    subject_title = homeroom_class_title
+
+            # Resolve issues: comma-separated score names -> joined title_vn
+            issues_resolved = None
+            if student_log and student_log.get('issues'):
+                issue_titles = []
+                for issue_name in student_log['issues'].split(','):
+                    issue_name = issue_name.strip()
+                    if issue_name:
+                        title = score_map.get(issue_name, issue_name)
+                        issue_titles.append(title)
+                issues_resolved = ', '.join(issue_titles) if issue_titles else None
 
             comment_item = {
-                "period": subject_log['period'],
+                "period": period_name,
                 "subject": subject_title,
                 "general_comment": subject_log.get('general_comment') or None,
                 "homework_assignment": subject_log.get('homework_assignment') or None,
                 "homework": score_map.get(student_log['homework']) if student_log and student_log.get('homework') else None,
                 "behavior": score_map.get(student_log['behavior']) if student_log and student_log.get('behavior') else None,
                 "participation": score_map.get(student_log['participation']) if student_log and student_log.get('participation') else None,
-                "issues": student_log.get('issues') or None if student_log else None,
+                "issues": issues_resolved,
                 "specific_comment": student_log.get('specific_comment') or None if student_log else None,
             }
 
