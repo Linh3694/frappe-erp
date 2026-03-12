@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime as dt
+from datetime import datetime as dt, timedelta
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
@@ -201,7 +201,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
         subject_rows = frappe.get_all(
             "SIS Class Log Subject",
             filters=filters,
-            fields=["name", "class_id", "general_comment", "lesson_name", "lesson_score", "homework_assignment"],
+            fields=["name", "class_id", "general_comment", "lesson_name", "lesson_score", "is_practise_test", "homework_assignment"],
             limit=1
         )
         if subject_rows:
@@ -210,6 +210,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             general_comment = subject_rows[0].get('general_comment')
             lesson_name = subject_rows[0].get('lesson_name')
             lesson_score = subject_rows[0].get('lesson_score')
+            is_practise_test = subject_rows[0].get('is_practise_test')
             homework_assignment = subject_rows[0].get('homework_assignment')
         else:
             # Resolve class from instance
@@ -238,6 +239,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             general_comment = None
             lesson_name = None
             lesson_score = None
+            is_practise_test = 0
             homework_assignment = None
 
         # Load student logs
@@ -277,6 +279,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
                 "general_comment": general_comment,
                 "lesson_name": lesson_name,
                 "lesson_score": lesson_score,
+                "is_practise_test": is_practise_test,
                 "homework_assignment": homework_assignment,
             },
             "students": student_logs
@@ -307,6 +310,7 @@ def save_class_log():
         general_comment = body.get('general_comment')
         lesson_name = body.get('lesson_name')
         lesson_score = body.get('lesson_score')
+        is_practise_test = body.get('is_practise_test')
         homework_assignment = body.get('homework_assignment')
         items = body.get('students') or []
         if not timetable_instance:
@@ -371,6 +375,8 @@ def save_class_log():
             update_fields["lesson_name"] = lesson_name
         if lesson_score is not None:
             update_fields["lesson_score"] = lesson_score
+        if is_practise_test is not None:
+            update_fields["is_practise_test"] = 1 if is_practise_test else 0
         if homework_assignment is not None:
             update_fields["homework_assignment"] = homework_assignment
         
@@ -533,7 +539,7 @@ def batch_get_class_logs():
                 "log_date": date,
                 "period": ["in", periods]
             },
-            fields=["name", "period", "class_id", "general_comment", "lesson_name", "lesson_score", "homework_assignment"]
+            fields=["name", "period", "class_id", "general_comment", "lesson_name", "lesson_score", "is_practise_test", "homework_assignment"]
         )
         
         # Build map: period -> subject
@@ -597,6 +603,7 @@ def batch_get_class_logs():
                         "general_comment": subject.get('general_comment'),
                         "lesson_name": subject.get('lesson_name'),
                         "lesson_score": subject.get('lesson_score'),
+                        "is_practise_test": subject.get('is_practise_test'),
                         "homework_assignment": subject.get('homework_assignment')
                     },
                     "students": students
@@ -941,7 +948,7 @@ def batch_get_homeroom_class_logs():
             # subject_title sẽ được lấy từ SIS Student Timetable ở Step 5b (chính xác theo ngày)
             all_subject_logs = frappe.db.sql("""
                 SELECT cls.name, cls.period, cls.class_id, cls.general_comment, cls.lesson_name, cls.lesson_score,
-                    cls.homework_assignment, cls.timetable_instance_id
+                    cls.is_practise_test, cls.homework_assignment, cls.timetable_instance_id
                 FROM `tabSIS Class Log Subject` cls
                 WHERE cls.timetable_instance_id IN %(instance_ids)s
                     AND cls.log_date = %(date)s
@@ -1291,6 +1298,7 @@ def batch_get_homeroom_class_logs():
                     "general_comment": homeroom_subject_log.get('general_comment'),
                     "lesson_name": homeroom_subject_log.get('lesson_name'),
                     "lesson_score": homeroom_subject_log.get('lesson_score'),
+                    "is_practise_test": homeroom_subject_log.get('is_practise_test'),
                     "homework_assignment": homeroom_subject_log.get('homework_assignment'),
                     "is_homeroom": True
                 })
@@ -1307,6 +1315,7 @@ def batch_get_homeroom_class_logs():
                     "general_comment": mixed_log.get('general_comment'),
                     "lesson_name": mixed_log.get('lesson_name'),
                     "lesson_score": mixed_log.get('lesson_score'),
+                    "is_practise_test": mixed_log.get('is_practise_test'),
                     "homework_assignment": mixed_log.get('homework_assignment'),
                     "is_homeroom": False
                 })
@@ -1326,6 +1335,7 @@ def batch_get_homeroom_class_logs():
                             "general_comment": None,
                             "lesson_name": None,
                             "lesson_score": None,
+                            "is_practise_test": 0,
                             "homework_assignment": None,
                             "is_homeroom": (cid == homeroom_class_id)
                         })
@@ -1345,6 +1355,7 @@ def batch_get_homeroom_class_logs():
                     "general_comment": primary_subject.get('general_comment') if primary_subject else None,
                     "lesson_name": primary_subject.get('lesson_name') if primary_subject else None,
                     "lesson_score": primary_subject.get('lesson_score') if primary_subject else None,
+                    "is_practise_test": primary_subject.get('is_practise_test') if primary_subject else 0,
                     "homework_assignment": primary_subject.get('homework_assignment') if primary_subject else None
                 } if primary_subject else None,
                 "all_subjects": all_subjects,  # ⭐ Thông tin chi tiết của tất cả các lớp
@@ -1517,6 +1528,7 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 cls.general_comment,
                 cls.lesson_name,
                 cls.lesson_score,
+                cls.is_practise_test,
                 cls.homework_assignment,
                 cls.timetable_instance_id
             FROM `tabSIS Class Log Subject` cls
@@ -1661,6 +1673,7 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 "period": period_name,
                 "subject": subject_title,
                 "general_comment": subject_log.get('general_comment') or None,
+                "is_practise_test": subject_log.get('is_practise_test'),
                 "homework_assignment": subject_log.get('homework_assignment') or None,
                 "homework": score_map.get(student_log['homework']) if student_log and student_log.get('homework') else None,
                 "behavior": score_map.get(student_log['behavior']) if student_log and student_log.get('behavior') else None,
@@ -1722,4 +1735,345 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         return error_response(
             message=f"Failed to fetch student classlog summary: {str(e)}",
             code="GET_STUDENT_CLASSLOG_SUMMARY_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
+    """
+    Tính WIS Study Point (điểm học tập) cho tất cả học sinh trong lớp theo khoảng ngày.
+
+    Công thức: Score = (h / b × 100) × (c / p)^n
+    - h = tổng lesson_score (homework + behavior + participation + top_performance + attendance_penalty)
+    - b = max_lesson_score × p
+    - p = số tiết kế hoạch (loại bỏ is_practise_test=1)
+    - c = số tiết tham gia (present + late + excused)
+    - n = 0.7
+
+    GET params: class_id, date_from, date_to (YYYY-MM-DD)
+    """
+    try:
+        if getattr(frappe, 'request', None):
+            class_id = class_id or frappe.request.args.get('class_id')
+            date_from = date_from or frappe.request.args.get('date_from')
+            date_to = date_to or frappe.request.args.get('date_to')
+
+        if not class_id or not date_from or not date_to:
+            return error_response(
+                message="Missing required parameters: class_id, date_from, date_to",
+                code="MISSING_PARAMS"
+            )
+
+        # Kiểm tra cache (TTL 5 phút)
+        cache_key = f"wis_academic_scores:{class_id}:{date_from}:{date_to}"
+        try:
+            cached = frappe.cache().get_value(cache_key)
+            if cached:
+                return success_response(data=cached, message="WIS academic scores (cached)")
+        except Exception:
+            pass
+
+        # Lấy education_stage của lớp để filter score options
+        class_doc = frappe.db.get_value(
+            "SIS Class", class_id,
+            ["education_grade", "name"],
+            as_dict=True
+        )
+        if not class_doc:
+            return error_response(message="Class not found", code="CLASS_NOT_FOUND")
+
+        education_stage = None
+        if class_doc.get("education_grade"):
+            education_stage = frappe.db.get_value("SIS Education Grade", class_doc["education_grade"], "education_stage_id")
+
+        # Bước 1: Lấy score options và xây dựng map
+        score_filters = {"is_active": 1}
+        if education_stage:
+            score_filters["education_stage"] = education_stage
+
+        score_rows = frappe.get_all(
+            "SIS Class Log Score",
+            filters=score_filters,
+            fields=["name", "type", "value", "is_default"]
+        )
+
+        score_value_map = {}
+        default_values = {"homework": 0, "behavior": 0, "participation": 0, "top_performance": 0}
+        max_by_type = {"homework": 0, "behavior": 0, "participation": 0}
+
+        for r in score_rows:
+            name = r.get("name")
+            t = (r.get("type") or "").lower()
+            val = float(r.get("value") or 0)
+            score_value_map[name] = val
+
+            if t in default_values and r.get("is_default"):
+                default_values[t] = val
+            if t in max_by_type and val > max_by_type[t]:
+                max_by_type[t] = val
+
+        max_lesson_score = max_by_type["homework"] + max_by_type["behavior"] + max_by_type["participation"]
+        if max_lesson_score <= 0:
+            max_lesson_score = 15
+
+        # Attendance penalty mapping (wis-point.md Section 2.3)
+        ATTENDANCE_PENALTY = {"present": 0, "late": -1, "excused": 0, "absent": -3}
+        N = 0.7
+
+        # Lấy danh sách học sinh homeroom
+        homeroom_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"class_id": class_id},
+            fields=["student_id"]
+        )
+        student_ids = [s["student_id"] for s in homeroom_students if s.get("student_id")]
+
+        if not student_ids:
+            result = {"scores": {}, "config": {"n": N, "max_lesson_score": max_lesson_score}}
+            try:
+                frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+            except Exception:
+                pass
+            return success_response(data=result, message="No students in class")
+
+        # Lấy mixed classes
+        mixed_rows = frappe.db.sql("""
+            SELECT cs.student_id, cs.class_id
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            WHERE cs.student_id IN %(student_ids)s
+                AND cs.class_id != %(class_id)s
+                AND c.class_type = 'mixed'
+        """, {"student_ids": student_ids, "class_id": class_id}, as_dict=True)
+
+        student_mixed_classes = {}
+        all_class_ids = {class_id}
+        for row in mixed_rows:
+            if row["student_id"] not in student_mixed_classes:
+                student_mixed_classes[row["student_id"]] = []
+            student_mixed_classes[row["student_id"]].append(row["class_id"])
+            all_class_ids.add(row["class_id"])
+
+        # education_stage_id cho event attendance
+        edu_stage_id = None
+        if education_stage:
+            edu_stage_id = education_stage
+        else:
+            eg_row = frappe.db.sql("""
+                SELECT eg.education_stage_id FROM `tabSIS Class` c
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                WHERE c.name = %(class_id)s
+            """, {"class_id": class_id}, as_dict=True)
+            if eg_row:
+                edu_stage_id = eg_row[0]["education_stage_id"]
+
+        def _extract_period_num(period_name):
+            match = re.search(r"\d+", period_name or "")
+            return int(match.group()) if match else None
+
+        # Tích lũy điểm theo student: { student_id: [daily_scores] }
+        student_daily_scores = {sid: [] for sid in student_ids}
+
+        # Lặp từng ngày trong khoảng
+        current = dt.strptime(date_from, "%Y-%m-%d").date()
+        end = dt.strptime(date_to, "%Y-%m-%d").date()
+
+        while current <= end:
+            date_str = current.strftime("%Y-%m-%d")
+            day_of_week = current.strftime("%A").lower()[:3]
+
+            # Lấy timetable instances cho tất cả class
+            instance_rows = frappe.db.sql("""
+                SELECT class_id, name
+                FROM `tabSIS Timetable Instance`
+                WHERE class_id IN %(class_ids)s
+                    AND start_date <= %(date)s
+                    AND end_date >= %(date)s
+            """, {"class_ids": list(all_class_ids), "date": date_str}, as_dict=True)
+
+            class_instances = {r["class_id"]: r["name"] for r in instance_rows}
+            instance_ids = list(class_instances.values())
+
+            if not instance_ids:
+                current += timedelta(days=1)
+                continue
+
+            # Lấy class log subjects (chỉ tiết học, loại bỏ practise)
+            subject_logs = frappe.db.sql("""
+                SELECT cls.name, cls.period, cls.class_id
+                FROM `tabSIS Class Log Subject` cls
+                WHERE cls.timetable_instance_id IN %(instance_ids)s
+                    AND cls.log_date = %(date)s
+                    AND LOWER(cls.period) LIKE '%%tiết%%'
+                    AND (cls.is_practise_test = 0 OR cls.is_practise_test IS NULL)
+            """, {"instance_ids": instance_ids, "date": date_str}, as_dict=True)
+
+            if not subject_logs:
+                current += timedelta(days=1)
+                continue
+
+            # Build (class_id, period) -> subject
+            subject_by_class_period = {}
+            period_set = set()
+            for sl in subject_logs:
+                key = (sl["class_id"], sl["period"])
+                if key not in subject_by_class_period:
+                    subject_by_class_period[key] = sl
+                period_set.add(sl["period"])
+
+            p = len(period_set)
+            if p <= 0:
+                current += timedelta(days=1)
+                continue
+
+            subject_ids = [log["name"] for log in subject_logs]
+            student_logs = frappe.db.sql("""
+                SELECT subject_id, student_id, homework, behavior, participation, is_top_performance
+                FROM `tabSIS Class Log Student`
+                WHERE subject_id IN %(subject_ids)s
+            """, {"subject_ids": subject_ids}, as_dict=True)
+
+            students_by_subject = {}
+            for sl in student_logs:
+                sid = sl["subject_id"]
+                if sid not in students_by_subject:
+                    students_by_subject[sid] = {}
+                students_by_subject[sid][sl["student_id"]] = sl
+
+            # Lấy attendance
+            class_att = frappe.db.sql("""
+                SELECT student_id, period, status, class_id
+                FROM `tabSIS Class Attendance`
+                WHERE date = %(date)s
+                    AND student_id IN %(student_ids)s
+                    AND LOWER(period) LIKE '%%tiết%%'
+                    AND class_id IN %(class_ids)s
+            """, {"date": date_str, "student_ids": student_ids, "class_ids": list(all_class_ids)}, as_dict=True)
+
+            # Map (student_id, period) -> class_id từ SIS Student Timetable
+            stt_rows = frappe.db.sql("""
+                SELECT st.student_id, st.class_id, tc.period_name
+                FROM `tabSIS Student Timetable` st
+                INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+                WHERE st.student_id IN %(student_ids)s
+                    AND st.date = %(date)s
+                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
+            """, {"student_ids": student_ids, "date": date_str}, as_dict=True)
+
+            student_period_class = {}
+            period_num_to_name = {_extract_period_num(pn): pn for pn in period_set}
+            for row in stt_rows:
+                num = _extract_period_num(row["period_name"])
+                if num and num in period_num_to_name:
+                    pname = period_num_to_name[num]
+                    key = (row["student_id"], pname)
+                    if key not in student_period_class:
+                        student_period_class[key] = row["class_id"]
+
+            for row in class_att:
+                num = _extract_period_num(row["period"])
+                pname = row["period"] if row["period"] in period_set else (period_num_to_name.get(num) if num in period_num_to_name else None)
+                if pname:
+                    key = (row["student_id"], pname)
+                    if key not in student_period_class or student_period_class[key] == class_id:
+                        student_period_class[key] = row["class_id"]
+
+            # Build attendance map (student_id, period) -> status
+            attendance_map = {}
+            for row in class_att:
+                num = _extract_period_num(row["period"])
+                pname = row["period"] if row["period"] in period_set else (period_num_to_name.get(num) if num in period_num_to_name else None)
+                if pname:
+                    key = (row["student_id"], pname)
+                    if key not in attendance_map:
+                        attendance_map[key] = (row["status"] or "present").lower()
+
+            if edu_stage_id:
+                event_att = frappe.db.sql("""
+                    SELECT student_id, period, status
+                    FROM `tabSIS Event Attendance`
+                    WHERE date = %(date)s
+                        AND student_id IN %(student_ids)s
+                        AND LOWER(period) LIKE '%%tiết%%'
+                        AND education_stage_id = %(edu_stage_id)s
+                """, {"date": date_str, "student_ids": student_ids, "edu_stage_id": edu_stage_id}, as_dict=True)
+                for row in event_att:
+                    num = _extract_period_num(row["period"])
+                    pname = row["period"] if row["period"] in period_set else (period_num_to_name.get(num) if num in period_num_to_name else None)
+                    if pname:
+                        key = (row["student_id"], pname)
+                        if key not in attendance_map:
+                            attendance_map[key] = (row["status"] or "present").lower()
+
+            # Tính điểm cho từng học sinh
+            for student_id in student_ids:
+                h = 0.0
+                c = 0
+
+                for period in period_set:
+                    actual_class = student_period_class.get((student_id, period), class_id)
+                    subject_key = (actual_class, period)
+                    subject_log = subject_by_class_period.get(subject_key)
+
+                    if not subject_log:
+                        continue
+
+                    subject_id = subject_log["name"]
+                    student_log = students_by_subject.get(subject_id, {}).get(student_id)
+
+                    att_status = attendance_map.get((student_id, period), "present")
+                    if att_status not in ("present", "late", "excused", "absent"):
+                        att_status = "present"
+                    if att_status in ("present", "late", "excused"):
+                        c += 1
+
+                    penalty = ATTENDANCE_PENALTY.get(att_status, 0)
+
+                    hw_val = score_value_map.get(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
+                    beh_val = score_value_map.get(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
+                    part_val = score_value_map.get(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
+                    praise_val = default_values["top_performance"] if student_log and student_log.get("is_top_performance") else 0
+
+                    lesson_score = (hw_val or 0) + (beh_val or 0) + (part_val or 0) + (praise_val or 0) + penalty
+                    h += lesson_score
+
+                if p > 0:
+                    b = max_lesson_score * p
+                    base_score = (h / b) * 100 if b > 0 else 0
+                    attendance_factor = (c / p) ** N if c > 0 else 0
+                    daily_score = base_score * attendance_factor
+                    student_daily_scores[student_id].append(daily_score)
+
+            current += timedelta(days=1)
+
+        # Tổng hợp: trung bình các daily_score
+        scores = {}
+        for sid in student_ids:
+            daily_list = student_daily_scores[sid]
+            if daily_list:
+                avg = sum(daily_list) / len(daily_list)
+                scores[sid] = {"academic_score": round(avg, 2), "days_with_data": len(daily_list)}
+            else:
+                scores[sid] = {"academic_score": 0, "days_with_data": 0}
+
+        result = {
+            "scores": scores,
+            "config": {"n": N, "max_lesson_score": max_lesson_score}
+        }
+
+        try:
+            frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+        except Exception:
+            pass
+
+        return success_response(data=result, message="WIS academic scores calculated")
+
+    except Exception as e:
+        frappe.logger().error(f"get_wis_academic_scores error: {str(e)}")
+        import traceback
+        frappe.logger().error(traceback.format_exc())
+        frappe.log_error(f"get_wis_academic_scores error: {str(e)}", "WIS Academic Scores Error")
+        return error_response(
+            message=f"Failed to calculate WIS academic scores: {str(e)}",
+            code="GET_WIS_ACADEMIC_SCORES_ERROR"
         )
