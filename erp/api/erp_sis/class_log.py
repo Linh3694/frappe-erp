@@ -1829,6 +1829,15 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
         if max_lesson_score <= 0:
             max_lesson_score = 15
 
+        def _get_score_value(score_name):
+            """Lấy value từ score_name, fallback DB nếu không có trong map (do filter education_stage)."""
+            if not score_name:
+                return None
+            if score_name in score_value_map:
+                return score_value_map[score_name]
+            val = frappe.db.get_value("SIS Class Log Score", score_name, "value")
+            return float(val) if val is not None else None
+
         # Attendance penalty mapping (wis-point.md Section 2.3)
         ATTENDANCE_PENALTY = {"present": 0, "late": -1, "excused": 0, "absent": -3}
         N = 0.7
@@ -2176,9 +2185,9 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                                 if _extract_period_num(pn) == pnum_per and student_id in students_by_subject.get(sl["name"], {}):
                                     student_log = students_by_subject[sl["name"]][student_id]
                                     break
-                        hw_val = score_value_map.get(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
-                        beh_val = score_value_map.get(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
-                        part_val = score_value_map.get(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
+                        hw_val = _get_score_value(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
+                        beh_val = _get_score_value(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
+                        part_val = _get_score_value(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
                         praise_val = default_values["top_performance"] if student_log and student_log.get("is_top_performance") else 0
                     else:
                         # Không có class log -> mặc định 0 cho tất cả thông số
