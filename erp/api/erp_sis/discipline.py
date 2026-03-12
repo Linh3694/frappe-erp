@@ -556,6 +556,7 @@ def get_enabled_school_year(campus: str = None):
     """
     Lấy năm học đang enable (is_enable=1).
     Dùng để filter lớp và học sinh theo năm học hiện tại.
+    Nếu có campus: ưu tiên năm học của campus đó.
     """
     try:
         filters = {"is_enable": 1}
@@ -568,6 +569,15 @@ def get_enabled_school_year(campus: str = None):
             order_by="start_date desc",
             limit=1,
         )
+        # Fallback: nếu filter campus không có kết quả, thử không filter campus
+        if (not sy or not sy[0].get("name")) and campus:
+            sy = frappe.get_all(
+                "SIS School Year",
+                filters={"is_enable": 1},
+                fields=["name"],
+                order_by="start_date desc",
+                limit=1,
+            )
         if sy and sy[0].get("name"):
             return success_response(
                 data={"name": sy[0]["name"]},
@@ -713,26 +723,38 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                     r["student_name"] = ""
                     r["student_code"] = ""
 
-                # Năm học hiện tại (dùng cho photo và class)
+                # Năm học hiện tại (dùng cho photo từ SIS Photo và class từ SIS Class Student)
                 current_sy = frappe.db.get_value(
                     "SIS School Year",
                     {"is_enable": 1},
                     "name",
                     order_by="start_date desc",
                 )
-                # Ảnh học sinh từ SIS Photo
+                # Ảnh học sinh từ SIS Photo (ưu tiên ảnh năm học hiện tại)
                 try:
-                    photo_row = frappe.db.sql(
-                        """
-                        SELECT photo FROM `tabSIS Photo`
-                        WHERE student_id = %s AND type = 'student' AND status = 'Active'
-                        ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
-                                 upload_date DESC, creation DESC
-                        LIMIT 1
-                        """,
-                        (r["target_student"], current_sy),
-                        as_dict=True,
-                    )
+                    if current_sy:
+                        photo_row = frappe.db.sql(
+                            """
+                            SELECT photo FROM `tabSIS Photo`
+                            WHERE student_id = %s AND type = 'student' AND status = 'Active'
+                            ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                                     upload_date DESC, creation DESC
+                            LIMIT 1
+                            """,
+                            (r["target_student"], current_sy),
+                            as_dict=True,
+                        )
+                    else:
+                        photo_row = frappe.db.sql(
+                            """
+                            SELECT photo FROM `tabSIS Photo`
+                            WHERE student_id = %s AND type = 'student' AND status = 'Active'
+                            ORDER BY upload_date DESC, creation DESC
+                            LIMIT 1
+                            """,
+                            (r["target_student"],),
+                            as_dict=True,
+                        )
                     if photo_row and photo_row[0].get("photo"):
                         purl = photo_row[0]["photo"]
                         if purl.startswith("/files/"):
@@ -741,11 +763,30 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                             purl = frappe.utils.get_url("/files/" + purl)
                         r["student_photo_url"] = purl
                     else:
-                        r["student_photo_url"] = None
+                        # Fallback: thử lấy ảnh không filter status (phòng trường hợp status khác)
+                        photo_fb = frappe.db.sql(
+                            """
+                            SELECT photo FROM `tabSIS Photo`
+                            WHERE student_id = %s AND type = 'student' AND photo IS NOT NULL
+                            ORDER BY upload_date DESC LIMIT 1
+                            """,
+                            (r["target_student"],),
+                            as_dict=True,
+                        )
+                        if photo_fb and photo_fb[0].get("photo"):
+                            purl = photo_fb[0]["photo"]
+                            if purl.startswith("/files/"):
+                                purl = frappe.utils.get_url(purl)
+                            elif not purl.startswith("http"):
+                                purl = frappe.utils.get_url("/files/" + purl)
+                            r["student_photo_url"] = purl
+                        else:
+                            r["student_photo_url"] = None
                 except Exception:
                     r["student_photo_url"] = None
 
-                # Lớp Regular của học sinh (năm học hiện tại)
+                # Lớp Regular của học sinh (năm học hiện tại, fallback: năm học gần nhất)
+                cs = None
                 if current_sy:
                     cs = frappe.db.get_value(
                         "SIS Class Student",
@@ -756,12 +797,22 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                         },
                         "class_id",
                     )
-                    if cs:
-                        r["student_class_title"] = frappe.db.get_value(
-                            "SIS Class", cs, "title"
-                        ) or cs
-                    else:
-                        r["student_class_title"] = ""
+                if not cs:
+                    # Fallback: lấy lớp từ bất kỳ năm học nào (mới nhất)
+                    cs_row = frappe.db.sql(
+                        """
+                        SELECT cs.class_id FROM `tabSIS Class Student` cs
+                        WHERE cs.student_id = %s AND cs.class_type = 'regular'
+                        ORDER BY cs.creation DESC LIMIT 1
+                        """,
+                        (r["target_student"],),
+                        as_dict=True,
+                    )
+                    cs = cs_row[0]["class_id"] if cs_row else None
+                if cs:
+                    r["student_class_title"] = frappe.db.get_value(
+                        "SIS Class", cs, "title"
+                    ) or cs
                 else:
                     r["student_class_title"] = ""
             else:
