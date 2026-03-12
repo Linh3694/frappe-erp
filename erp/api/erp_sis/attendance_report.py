@@ -1203,6 +1203,23 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
             if class_assignment:
                 class_title = class_assignment[0][0]
         
+        # Lấy ảnh học sinh từ SIS Photo (ưu tiên ảnh năm học hiện tại)
+        student_photo = None
+        photo_rows = frappe.db.sql("""
+            SELECT photo FROM `tabSIS Photo`
+            WHERE student_id = %(student_id)s AND type = 'student' AND status = 'Active'
+            ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                     upload_date DESC, creation DESC
+            LIMIT 1
+        """, {"student_id": student_id, "sy": school_year or ""}, as_dict=True)
+        if photo_rows and photo_rows[0].get("photo"):
+            purl = photo_rows[0]["photo"]
+            if purl.startswith("/files/"):
+                purl = frappe.utils.get_url(purl)
+            elif not purl.startswith("http"):
+                purl = frappe.utils.get_url("/files/" + purl)
+            student_photo = purl
+        
         # Tính khoảng ngày trong tháng
         from calendar import monthrange
         _, last_day = monthrange(year, month)
@@ -1305,7 +1322,8 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
                     "student_id": student_id,
                     "student_code": student_code,
                     "student_name": student.get("student_name"),
-                    "class_title": class_title
+                    "class_title": class_title,
+                    "photo": student_photo
                 },
                 "year": year,
                 "month": month,
