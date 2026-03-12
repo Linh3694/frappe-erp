@@ -3,6 +3,19 @@ from frappe.model.document import Document
 from frappe import _
 
 
+def _clear_class_log_options_cache(doc):
+    """Xóa cache get_class_log_options khi SIS Class Log Score thay đổi"""
+    try:
+        cache_key_all = "class_log_options:v2:all"
+        frappe.cache().delete_key(cache_key_all)
+        if doc.education_stage:
+            cache_key_stage = f"class_log_options:v2:{doc.education_stage}"
+            frappe.cache().delete_key(cache_key_stage)
+        frappe.logger().info(f"✅ Cleared class_log_options cache after SIS Class Log Score change: {doc.name}")
+    except Exception as e:
+        frappe.logger().warning(f"Cache clear failed: {e}")
+
+
 class SISClassLogScore(Document):
     def validate(self):
         """Đảm bảo title_vn và title_en là duy nhất trong cùng type + education_stage"""
@@ -39,5 +52,14 @@ class SISClassLogScore(Document):
                 frappe.throw(
                     _("Tên (EN) \"{0}\" đã tồn tại trong cùng loại và cấp học").format(title_en)
                 )
+
+    def after_insert(self):
+        _clear_class_log_options_cache(self)
+
+    def on_update(self):
+        _clear_class_log_options_cache(self)
+
+    def on_trash(self):
+        _clear_class_log_options_cache(self)
 
 
