@@ -716,8 +716,8 @@ def batch_get_homeroom_class_logs():
         # This endpoint aggregates: class logs + class attendance + event attendance
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
-        # v3: subject_title lấy từ SIS Timetable Instance Row (giống parent portal)
-        cache_key = f"homeroom_class_logs_v3:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        # v4: subject_title dùng COALESCE(SIS Timetable Subject.title_vn, .title_en, SIS Subject.title) - khớp với teacher dashboard
+        cache_key = f"homeroom_class_logs_v4:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -988,11 +988,13 @@ def batch_get_homeroom_class_logs():
             day_of_week_5b = date_obj_5b.strftime("%A").lower()[:3]
 
             sis_timetable_rows = frappe.db.sql("""
-                SELECT ti.class_id, tc.period_name, sub.title as subject_title
+                SELECT ti.class_id, tc.period_name,
+                    COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
                 FROM `tabSIS Timetable Instance Row` tir
                 INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
                 INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
                 INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
                 WHERE ti.name IN %(instance_ids)s
                     AND tir.day_of_week = %(day_of_week)s
                     AND tir.subject_id IS NOT NULL
@@ -1164,11 +1166,13 @@ def batch_get_homeroom_class_logs():
             day_of_week_7c = date_obj_7c.strftime("%A").lower()[:3]
 
             timetable_instance_subjects = frappe.db.sql("""
-                SELECT ti.class_id, tc.period_name, tc.period_priority, sub.title as subject_title
+                SELECT ti.class_id, tc.period_name, tc.period_priority,
+                    COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
                 FROM `tabSIS Timetable Instance Row` tir
                 INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
                 INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
                 INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
                 WHERE ti.name IN %(instance_ids)s
                     AND tir.day_of_week = %(day_of_week)s
                     AND tir.subject_id IS NOT NULL
