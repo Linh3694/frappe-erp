@@ -2167,10 +2167,10 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         part_val = score_value_map.get(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
                         praise_val = default_values["top_performance"] if student_log and student_log.get("is_top_performance") else 0
                     else:
-                        # Không có class log -> dùng default values
-                        hw_val = default_values["homework"]
-                        beh_val = default_values["behavior"]
-                        part_val = default_values["participation"]
+                        # Không có class log -> mặc định 0 cho tất cả thông số
+                        hw_val = 0
+                        beh_val = 0
+                        part_val = 0
                         praise_val = 0
 
                     lesson_score = (hw_val or 0) + (beh_val or 0) + (part_val or 0) + (praise_val or 0) + penalty
