@@ -2154,10 +2154,12 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     subject_key = (actual_class, period)
                     subject_log = subject_by_class_period.get(subject_key)
 
-                    att_status = attendance_map.get((student_id, period), "present")
+                    # Không có dữ liệu điểm danh -> không tính vào c (coi như vắng)
+                    att_status = attendance_map.get((student_id, period), "absent")
                     if att_status not in ("present", "late", "excused", "absent"):
-                        att_status = "present"
-                    if att_status in ("present", "late", "excused"):
+                        att_status = "absent"
+                    # Có mặt + muộn + vắng không phép tính vào c; vắng có phép không tính
+                    if att_status in ("present", "late", "absent"):
                         c += 1
 
                     penalty = ATTENDANCE_PENALTY.get(att_status, 0)
