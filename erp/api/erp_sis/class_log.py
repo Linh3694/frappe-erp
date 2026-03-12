@@ -1990,22 +1990,26 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     if key not in attendance_map:
                         attendance_map[key] = (row["status"] or "present").lower()
 
-            if edu_stage_id:
-                event_att = frappe.db.sql("""
-                    SELECT student_id, period, status
-                    FROM `tabSIS Event Attendance`
-                    WHERE date = %(date)s
-                        AND student_id IN %(student_ids)s
-                        AND LOWER(period) LIKE '%%tiết%%'
-                        AND education_stage_id = %(edu_stage_id)s
-                """, {"date": date_str, "student_ids": student_ids, "edu_stage_id": edu_stage_id}, as_dict=True)
-                for row in event_att:
-                    num = _extract_period_num(row["period"])
-                    pname = row["period"] if row["period"] in period_set else (period_num_to_name.get(num) if num in period_num_to_name else None)
-                    if pname:
-                        key = (row["student_id"], pname)
-                        if key not in attendance_map:
-                            attendance_map[key] = (row["status"] or "present").lower()
+            # Event Attendance: chỉ query nếu bảng có cột period (schema có thể khác giữa các môi trường)
+            if edu_stage_id and frappe.db.has_column("SIS Event Attendance", "period"):
+                try:
+                    event_att = frappe.db.sql("""
+                        SELECT student_id, period, status
+                        FROM `tabSIS Event Attendance`
+                        WHERE date = %(date)s
+                            AND student_id IN %(student_ids)s
+                            AND LOWER(period) LIKE '%%tiết%%'
+                            AND education_stage_id = %(edu_stage_id)s
+                    """, {"date": date_str, "student_ids": student_ids, "edu_stage_id": edu_stage_id}, as_dict=True)
+                    for row in event_att:
+                        num = _extract_period_num(row.get("period"))
+                        pname = row.get("period") if row.get("period") in period_set else (period_num_to_name.get(num) if num in period_num_to_name else None)
+                        if pname:
+                            key = (row["student_id"], pname)
+                            if key not in attendance_map:
+                                attendance_map[key] = (row.get("status") or "present").lower()
+                except Exception:
+                    pass
 
             # Tính Điểm lớp cho ngày: trung bình có trọng số theo số HS mỗi lớp (chính quy/lớp chạy)
             daily_lesson_scores = []
