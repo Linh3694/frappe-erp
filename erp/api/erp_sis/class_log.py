@@ -2032,6 +2032,14 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     students_by_subject[sid] = {}
                 students_by_subject[sid][sl["student_id"]] = sl
 
+            # student_id + period_num -> student_log (fallback khi tra cứu theo subject_key không khớp)
+            student_period_data = {}
+            for sl in subject_logs:
+                pnum = _extract_period_num(sl.get("period"))
+                if pnum is not None:
+                    for sid, stu_log in students_by_subject.get(sl["name"], {}).items():
+                        student_period_data[(sid, pnum)] = stu_log
+
             # Lấy attendance
             class_att = frappe.db.sql("""
                 SELECT student_id, period, status, class_id
@@ -2162,6 +2170,9 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     actual_class = student_period_class.get((student_id, period), class_id)
                     subject_key = (actual_class, period)
                     subject_log = subject_by_class_period.get(subject_key)
+                    # Fallback: sổ đầu bài thường tạo cho lớp chủ nhiệm, thử class_id khi học sinh ở lớp chạy
+                    if subject_log is None and actual_class != class_id:
+                        subject_log = subject_by_class_period.get((class_id, period))
 
                     # Chỉ tính c và penalty khi có dữ liệu điểm danh cho tiết đó
                     att_status = attendance_map.get((student_id, period))
@@ -2178,13 +2189,10 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     if subject_log:
                         subject_id = subject_log["name"]
                         student_log = students_by_subject.get(subject_id, {}).get(student_id)
-                        # Fallback: tìm trong các subject cùng tiết (lớp chạy có thể dùng subject khác)
+                        # Fallback: tra theo (student_id, số_tiết) - tránh lỗi khớp tên period
                         if student_log is None:
                             pnum_per = _extract_period_num(period)
-                            for (cid, pn), sl in subject_by_class_period.items():
-                                if _extract_period_num(pn) == pnum_per and student_id in students_by_subject.get(sl["name"], {}):
-                                    student_log = students_by_subject[sl["name"]][student_id]
-                                    break
+                            student_log = student_period_data.get((student_id, pnum_per)) if pnum_per else None
                         hw_val = _get_score_value(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
                         beh_val = _get_score_value(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
                         part_val = _get_score_value(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
