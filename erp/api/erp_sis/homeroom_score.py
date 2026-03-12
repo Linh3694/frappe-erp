@@ -140,6 +140,7 @@ def get_homeroom_score_records(class_id=None, date_from=None, date_to=None, sear
                 "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
             )
             if student_ids:
+                # Dùng tuple cho IN clause (list gây lỗi với PostgreSQL/MySQL)
                 photo_rows = frappe.db.sql(
                     """
                     SELECT student_id, photo FROM `tabSIS Photo`
@@ -147,7 +148,7 @@ def get_homeroom_score_records(class_id=None, date_from=None, date_to=None, sear
                     ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
                              upload_date DESC, creation DESC
                     """,
-                    {"student_ids": student_ids, "sy": current_sy or ""},
+                    {"student_ids": tuple(student_ids), "sy": current_sy or ""},
                     as_dict=True,
                 )
                 seen = set()
@@ -363,14 +364,20 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
             year = year or data.get("year")
             month = month or data.get("month")
 
-        if not class_id or not year or not month:
+        if not class_id or year is None or year == "" or month is None or month == "":
             return error_response(
                 message="class_id, year, month là bắt buộc",
                 code="MISSING_PARAMS",
             )
 
-        year = int(year)
-        month = int(month)
+        try:
+            year = int(year)
+            month = int(month)
+        except (ValueError, TypeError):
+            return error_response(
+                message="year và month phải là số hợp lệ",
+                code="INVALID_PARAMS",
+            )
         if month < 1 or month > 12:
             return error_response(
                 message="month phải từ 1 đến 12",
@@ -442,6 +449,7 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
             current_sy = frappe.db.get_value(
                 "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
             )
+            # Dùng tuple cho IN clause (list gây lỗi với PostgreSQL/MySQL)
             photo_rows = frappe.db.sql(
                 """
                 SELECT student_id, photo FROM `tabSIS Photo`
@@ -449,7 +457,7 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
                 ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
                          upload_date DESC, creation DESC
                 """,
-                {"student_ids": student_ids, "sy": current_sy or ""},
+                {"student_ids": tuple(student_ids), "sy": current_sy or ""},
                 as_dict=True,
             )
             seen = set()
