@@ -2154,7 +2154,7 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     subject_key = (actual_class, period)
                     subject_log = subject_by_class_period.get(subject_key)
 
-                    # Có dữ liệu điểm danh: dùng status thực; không có -> coi có mặt (c+=1), penalty=0
+                    # Chỉ tính c và penalty khi có dữ liệu điểm danh cho tiết đó
                     att_status = attendance_map.get((student_id, period))
                     if att_status is not None:
                         if att_status not in ("present", "late", "excused", "absent"):
@@ -2164,7 +2164,6 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                             c += 1
                         penalty = ATTENDANCE_PENALTY.get(att_status, 0)
                     else:
-                        c += 1
                         penalty = 0
 
                     if subject_log:
@@ -2187,7 +2186,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                 if p > 0:
                     b = max_lesson_score * p
                     base_score = (h / b) * 100 if b > 0 else 0
-                    attendance_factor = (c / p) ** N if c > 0 else 0
+                    # Không có dữ liệu điểm danh (c=0) -> att=1, không phạt
+                    attendance_factor = (c / p) ** N if c > 0 else 1
                     daily_score = max(0, base_score * attendance_factor)
                     student_daily_scores[student_id].append(daily_score)
                     if include_detail:
