@@ -410,15 +410,17 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
         )
 
         # Tính tổng điểm theo (student_id, date)
+        # Dùng str(d) để tránh lỗi JSON serialization (date object không serialize được)
         from collections import defaultdict
 
         student_daily = defaultdict(lambda: defaultdict(float))
         for r in records:
             sid = r.get("student_id")
             d = r.get("date")
+            d_str = str(d) if d else None
             v = float(r.get("value") or 0)
-            if sid and d:
-                student_daily[sid][d] += v
+            if sid and d_str:
+                student_daily[sid][d_str] += v
 
         # Lấy danh sách học sinh trong lớp
         class_students = frappe.get_all(
@@ -449,17 +451,32 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
             current_sy = frappe.db.get_value(
                 "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
             )
-            # Dùng tuple cho IN clause (list gây lỗi với PostgreSQL/MySQL)
-            photo_rows = frappe.db.sql(
-                """
-                SELECT student_id, photo FROM `tabSIS Photo`
-                WHERE student_id IN %(student_ids)s AND type = 'student' AND status = 'Active'
-                ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
-                         upload_date DESC, creation DESC
-                """,
-                {"student_ids": tuple(student_ids), "sy": current_sy or ""},
-                as_dict=True,
-            )
+            photo_rows = []
+            try:
+                # Dùng tuple cho IN clause (list gây lỗi với PostgreSQL/MySQL)
+                if current_sy:
+                    photo_rows = frappe.db.sql(
+                        """
+                        SELECT student_id, photo FROM `tabSIS Photo`
+                        WHERE student_id IN %(student_ids)s AND type = 'student' AND status = 'Active'
+                        ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                                 upload_date DESC, creation DESC
+                        """,
+                        {"student_ids": tuple(student_ids), "sy": current_sy},
+                        as_dict=True,
+                    )
+                else:
+                    photo_rows = frappe.db.sql(
+                        """
+                        SELECT student_id, photo FROM `tabSIS Photo`
+                        WHERE student_id IN %(student_ids)s AND type = 'student' AND status = 'Active'
+                        ORDER BY upload_date DESC, creation DESC
+                        """,
+                        {"student_ids": tuple(student_ids)},
+                        as_dict=True,
+                    )
+            except Exception as photo_err:
+                frappe.log_error(f"get_homeroom_score_stats photo query: {str(photo_err)}")
             seen = set()
             for row in photo_rows:
                 if row["student_id"] not in seen and row.get("photo"):
@@ -471,10 +488,10 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
                     student_info[row["student_id"]]["avatar"] = purl
                     seen.add(row["student_id"])
 
-        # Tập hợp tất cả các ngày có dữ liệu
+        # Tập hợp tất cả các ngày có dữ liệu (đảm bảo string cho JSON)
         all_dates = set()
         for sid, daily in student_daily.items():
-            all_dates.update(daily.keys())
+            all_dates.update(str(k) for k in daily.keys())
         dates_sorted = sorted(all_dates)
 
         # Build response
