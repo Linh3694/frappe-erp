@@ -30,7 +30,8 @@ def get_class_log_options(education_stage=None):
             filters["education_stage"] = education_stage
         
         # ⚡ CACHE: Check Redis cache first (30 min TTL - shared cache for master data)
-        cache_key = f"class_log_options:{education_stage or 'all'}"
+        # v2: thêm homeroom type - đổi key để invalidate cache cũ
+        cache_key = f"class_log_options:v2:{education_stage or 'all'}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -122,11 +123,11 @@ def set_class_log_score_default():
         # Clear cache để frontend nhận được data mới
         try:
             # Clear cache cho education_stage cụ thể
-            cache_key_stage = f"class_log_options:{education_stage}"
+            cache_key_stage = f"class_log_options:v2:{education_stage}"
             frappe.cache().delete_key(cache_key_stage)
             
             # Clear cache "all" (khi không có filter education_stage)
-            cache_key_all = "class_log_options:all"
+            cache_key_all = "class_log_options:v2:all"
             frappe.cache().delete_key(cache_key_all)
             
             frappe.logger().info(f"✅ Cleared class_log_options cache after setting default: {name}")
