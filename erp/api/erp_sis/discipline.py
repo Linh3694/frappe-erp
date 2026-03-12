@@ -550,6 +550,41 @@ def delete_discipline_violation(name: str = None):
 
 # ==================== GHI NHẬN LỖI (RECORD) CRUD ====================
 
+
+@frappe.whitelist(allow_guest=False)
+def get_enabled_school_year(campus: str = None):
+    """
+    Lấy năm học đang enable (is_enable=1).
+    Dùng để filter lớp và học sinh theo năm học hiện tại.
+    """
+    try:
+        filters = {"is_enable": 1}
+        if campus:
+            filters["campus_id"] = campus
+        sy = frappe.get_all(
+            "SIS School Year",
+            filters=filters,
+            fields=["name"],
+            order_by="start_date desc",
+            limit=1,
+        )
+        if sy and sy[0].get("name"):
+            return success_response(
+                data={"name": sy[0]["name"]},
+                message="Lấy năm học thành công",
+            )
+        return success_response(
+            data={"name": None},
+            message="Chưa có năm học nào được kích hoạt",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error getting enabled school year: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy năm học: {str(e)}",
+            code="GET_ENABLED_SCHOOL_YEAR_ERROR",
+        )
+
+
 @frappe.whitelist(allow_guest=False)
 def get_discipline_records(owner_only: str = "0", campus: str = None):
     """
