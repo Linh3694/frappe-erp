@@ -6,7 +6,7 @@ Cung cấp các endpoint báo cáo điểm danh theo tiết cho tất cả lớp
 import frappe
 from frappe import _
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from erp.utils.api_response import success_response, error_response
 
 
@@ -1118,4 +1118,205 @@ def get_school_absent_students(date=None, period=None, campus_id=None):
         return error_response(
             message=f"Lỗi khi lấy danh sách học sinh vắng không phép: {str(e)}",
             code="GET_SCHOOL_ABSENT_STUDENTS_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_student_attendance_by_month(student_id=None, year=None, month=None, campus_id=None):
+    """
+    Lấy chi tiết điểm danh cá nhân của học sinh theo tháng.
+    Bao gồm: FaceID (check-in/out qua cổng) và điểm danh chủ nhiệm (SIS Class Attendance).
+    
+    Args:
+        student_id: ID học sinh (CRM Student)
+        year: Năm (YYYY)
+        month: Tháng (1-12)
+        campus_id: Campus ID (optional, để filter)
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                student_info: { student_id, student_code, student_name, class_title },
+                year, month,
+                days: [
+                    {
+                        date: "YYYY-MM-DD",
+                        day_of_week: 1-7,
+                        faceid: { check_in, check_out, status_morning, status_afternoon } | null,
+                        homeroom: [ { period, status } ] | []
+                    }
+                ]
+            }
+        }
+    """
+    try:
+        if not student_id:
+            student_id = frappe.request.args.get('student_id')
+        if not year:
+            year = frappe.request.args.get('year')
+        if not month:
+            month = frappe.request.args.get('month')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        
+        if not student_id or not year or not month:
+            return error_response(
+                message="Thiếu tham số: student_id, year, month là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        year = int(year)
+        month = int(month)
+        if month < 1 or month > 12:
+            return error_response(message="Tháng không hợp lệ (1-12)", code="INVALID_MONTH")
+        
+        # Lấy thông tin học sinh
+        student = frappe.db.get_value(
+            "CRM Student",
+            student_id,
+            ["name", "student_code", "student_name"],
+            as_dict=True
+        )
+        if not student:
+            return error_response(message="Không tìm thấy học sinh", code="STUDENT_NOT_FOUND")
+        
+        student_code = (student.get("student_code") or "").strip()
+        
+        # Lấy lớp hiện tại của học sinh (năm học đang active)
+        campus_id = _resolve_campus_id(campus_id)
+        school_year_filters = {"is_enable": 1}
+        if campus_id:
+            school_year_filters["campus_id"] = campus_id
+        school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+        
+        class_title = None
+        if school_year:
+            class_assignment = frappe.db.sql("""
+                SELECT c.title
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                WHERE cs.student_id = %(student_id)s
+                    AND c.school_year_id = %(school_year)s
+                LIMIT 1
+            """, {"student_id": student_id, "school_year": school_year})
+            if class_assignment:
+                class_title = class_assignment[0][0]
+        
+        # Tính khoảng ngày trong tháng
+        from calendar import monthrange
+        _, last_day = monthrange(year, month)
+        start_date = frappe.utils.getdate(f"{year}-{month:02d}-01")
+        end_date = frappe.utils.getdate(f"{year}-{month:02d}-{last_day:02d}")
+        
+        # 1. Lấy FaceID (ERP Time Attendance) theo student_code
+        faceid_map = {}
+        if student_code:
+            faceid_records = frappe.db.sql("""
+                SELECT date, check_in_time, check_out_time, raw_data
+                FROM `tabERP Time Attendance`
+                WHERE employee_code = %(code)s
+                    AND date >= %(start)s AND date <= %(end)s
+            """, {
+                "code": student_code.upper(),
+                "start": start_date,
+                "end": end_date
+            }, as_dict=True)
+            
+            for rec in faceid_records:
+                date_str = str(rec.date)
+                check_in = rec.check_in_time
+                check_out = rec.check_out_time
+                status_morning = "absent_morning"
+                status_afternoon = "no_checkout"
+                
+                if rec.raw_data:
+                    try:
+                        raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
+                        if raw_data:
+                            morning = [x for x in raw_data if x.get('timestamp') and frappe.utils.get_datetime(x['timestamp']).hour < 12]
+                            afternoon = [x for x in raw_data if x.get('timestamp') and frappe.utils.get_datetime(x['timestamp']).hour >= 12]
+                            if morning:
+                                first_morning = min(morning, key=lambda x: frappe.utils.get_datetime(x['timestamp']))
+                                check_in = frappe.utils.get_datetime(first_morning['timestamp'])
+                                status_morning = "late" if check_in.hour >= 8 else "on_time"
+                            if afternoon:
+                                last_afternoon = max(afternoon, key=lambda x: frappe.utils.get_datetime(x['timestamp']))
+                                check_out = frappe.utils.get_datetime(last_afternoon['timestamp'])
+                                status_afternoon = "early_leave" if check_out.hour < 16 else "on_time"
+                    except Exception:
+                        pass
+                elif check_in:
+                    status_morning = "late" if check_in.hour >= 8 else "on_time"
+                if check_out and not status_afternoon:
+                    status_afternoon = "early_leave" if check_out.hour < 16 else "on_time"
+                
+                faceid_map[date_str] = {
+                    "check_in": check_in.strftime("%H:%M") if check_in else None,
+                    "check_out": check_out.strftime("%H:%M") if check_out else None,
+                    "status_morning": status_morning,
+                    "status_afternoon": status_afternoon
+                }
+        
+        # 2. Lấy điểm danh chủ nhiệm (SIS Class Attendance)
+        homeroom_records = []
+        if school_year:
+            homeroom_records = frappe.db.sql("""
+                SELECT a.date, a.period, a.status
+                FROM `tabSIS Class Attendance` a
+                INNER JOIN `tabSIS Class` c ON a.class_id = c.name
+                WHERE a.student_id = %(student_id)s
+                    AND a.date >= %(start)s AND a.date <= %(end)s
+                    AND c.school_year_id = %(school_year)s
+                    AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL)
+            """, {
+                "student_id": student_id,
+                "start": start_date,
+                "end": end_date,
+                "school_year": school_year,
+                "campus_id": campus_id
+            }, as_dict=True)
+        
+        homeroom_map = {}
+        for rec in homeroom_records:
+            date_str = str(rec.date)
+            if date_str not in homeroom_map:
+                homeroom_map[date_str] = []
+            homeroom_map[date_str].append({"period": rec.period, "status": rec.status})
+        
+        # 3. Build danh sách ngày trong tháng
+        days_result = []
+        current = start_date
+        while current <= end_date:
+            date_str = str(current)
+            faceid = faceid_map.get(date_str)
+            homeroom = homeroom_map.get(date_str, [])
+            days_result.append({
+                "date": date_str,
+                "day_of_week": current.isoweekday(),
+                "faceid": faceid,
+                "homeroom": homeroom
+            })
+            current += timedelta(days=1)
+        
+        return success_response(
+            data={
+                "student_info": {
+                    "student_id": student_id,
+                    "student_code": student_code,
+                    "student_name": student.get("student_name"),
+                    "class_title": class_title
+                },
+                "year": year,
+                "month": month,
+                "days": days_result
+            },
+            message="Lấy điểm danh cá nhân thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_student_attendance_by_month error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy điểm danh cá nhân: {str(e)}",
+            code="GET_STUDENT_ATTENDANCE_BY_MONTH_ERROR"
         )
