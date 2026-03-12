@@ -2169,6 +2169,13 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     if subject_log:
                         subject_id = subject_log["name"]
                         student_log = students_by_subject.get(subject_id, {}).get(student_id)
+                        # Fallback: tìm trong các subject cùng tiết (lớp chạy có thể dùng subject khác)
+                        if student_log is None:
+                            pnum_per = _extract_period_num(period)
+                            for (cid, pn), sl in subject_by_class_period.items():
+                                if _extract_period_num(pn) == pnum_per and student_id in students_by_subject.get(sl["name"], {}):
+                                    student_log = students_by_subject[sl["name"]][student_id]
+                                    break
                         hw_val = score_value_map.get(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
                         beh_val = score_value_map.get(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
                         part_val = score_value_map.get(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
