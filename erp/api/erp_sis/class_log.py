@@ -992,7 +992,7 @@ def batch_get_homeroom_class_logs():
                     SELECT t.user_id as user_id, tt.class_id, tc.period_name, tc.period_priority,
                         COALESCE(ts.title_vn, ts.title_en, s.title) as subject_title
                     FROM `tabSIS Teacher Timetable` tt
-                    INNER JOIN `tabSIS Teacher` t ON tt.teacher = t.name
+                    INNER JOIN `tabSIS Teacher` t ON tt.teacher_id = t.name
                     INNER JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
                     LEFT JOIN `tabSIS Subject` s ON tt.subject_id = s.name
                     LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
