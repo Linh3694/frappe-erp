@@ -2007,13 +2007,16 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                             break
 
             subject_ids = [log["name"] for log in subject_logs]
-            student_logs = frappe.db.sql("""
-                SELECT subject_id, student_id, homework, behavior, participation, is_top_performance
-                FROM `tabSIS Class Log Student`
-                WHERE subject_id IN %(subject_ids)s
-            """, {"subject_ids": subject_ids}, as_dict=True)
-
             students_by_subject = {}
+            if subject_ids:
+                student_logs = frappe.db.sql("""
+                    SELECT subject_id, student_id, homework, behavior, participation, is_top_performance
+                    FROM `tabSIS Class Log Student`
+                    WHERE subject_id IN %(subject_ids)s
+                """, {"subject_ids": subject_ids}, as_dict=True)
+            else:
+                student_logs = []
+
             for sl in student_logs:
                 sid = sl["subject_id"]
                 if sid not in students_by_subject:
