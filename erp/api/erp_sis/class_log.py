@@ -1829,7 +1829,7 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
         student_ids = [s["student_id"] for s in homeroom_students if s.get("student_id")]
 
         if not student_ids:
-            result = {"scores": {}, "config": {"n": N, "max_lesson_score": max_lesson_score}}
+            result = {"scores": {}, "class_score": None, "config": {"n": N, "max_lesson_score": max_lesson_score}}
             try:
                 frappe.cache().set_value(cache_key, result, expires_in_sec=300)
             except Exception:
@@ -1873,6 +1873,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
 
         # Tích lũy điểm theo student: { student_id: [daily_scores] }
         student_daily_scores = {sid: [] for sid in student_ids}
+        # Tích lũy Điểm lớp: [lesson_scores] theo từng tiết trong khoảng
+        class_daily_scores = []
 
         # Lặp từng ngày trong khoảng
         current = dt.strptime(date_from, "%Y-%m-%d").date()
@@ -1898,9 +1900,9 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                 current += timedelta(days=1)
                 continue
 
-            # Lấy class log subjects (chỉ tiết học, loại bỏ practise)
+            # Lấy class log subjects (chỉ tiết học, loại bỏ practise), kèm lesson_score cho Điểm lớp
             subject_logs = frappe.db.sql("""
-                SELECT cls.name, cls.period, cls.class_id
+                SELECT cls.name, cls.period, cls.class_id, cls.lesson_score
                 FROM `tabSIS Class Log Subject` cls
                 WHERE cls.timetable_instance_id IN %(instance_ids)s
                     AND cls.log_date = %(date)s
@@ -2005,6 +2007,33 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         if key not in attendance_map:
                             attendance_map[key] = (row["status"] or "present").lower()
 
+            # Tính Điểm lớp cho ngày: trung bình có trọng số theo số HS mỗi lớp (chính quy/lớp chạy)
+            daily_lesson_scores = []
+            for period in period_set:
+                # Đếm số HS homeroom tham gia mỗi class (homeroom hoặc mixed)
+                class_counts = {}  # class_id -> số HS
+                for sid in student_ids:
+                    actual_class = student_period_class.get((sid, period), class_id)
+                    class_counts[actual_class] = class_counts.get(actual_class, 0) + 1
+
+                weighted_sum = 0
+                total_count = 0
+                for cid, count in class_counts.items():
+                    subj = subject_by_class_period.get((cid, period))
+                    ls = subj.get("lesson_score") if subj else None
+                    if ls:
+                        try:
+                            weighted_sum += int(ls) * count
+                            total_count += count
+                        except (ValueError, TypeError):
+                            pass
+
+                if total_count > 0:
+                    daily_lesson_scores.append(weighted_sum / total_count)
+
+            if daily_lesson_scores:
+                class_daily_scores.extend(daily_lesson_scores)
+
             # Tính điểm cho từng học sinh
             for student_id in student_ids:
                 h = 0.0
@@ -2056,8 +2085,12 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
             else:
                 scores[sid] = {"academic_score": 0, "days_with_data": 0}
 
+        # Điểm lớp = trung bình tất cả Điểm tiết học trong khoảng
+        avg_class_score = sum(class_daily_scores) / len(class_daily_scores) if class_daily_scores else None
+
         result = {
             "scores": scores,
+            "class_score": round(avg_class_score, 2) if avg_class_score is not None else None,
             "config": {"n": N, "max_lesson_score": max_lesson_score}
         }
 
