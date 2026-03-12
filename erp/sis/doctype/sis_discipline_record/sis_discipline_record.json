@@ -1,0 +1,208 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:DISC-REC-{#####}",
+ "creation": "2025-03-11 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_section",
+  "date",
+  "classification",
+  "violation_count",
+  "column_break_1",
+  "target_type",
+  "target_student",
+  "target_classes",
+  "violation_section",
+  "violation",
+  "severity_level",
+  "form",
+  "penalty_points",
+  "time_slot",
+  "column_break_2",
+  "proof_images",
+  "campus"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày",
+   "reqd": 1
+  },
+  {
+   "fieldname": "classification",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Phân loại",
+   "options": "SIS Discipline Classification",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "violation_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Số lần vi phạm",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "target_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Đối tượng",
+   "options": "class\nstudent",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.target_type==\"student\"",
+   "fieldname": "target_student",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "CRM Student"
+  },
+  {
+   "depends_on": "eval:doc.target_type==\"class\"",
+   "fieldname": "target_classes",
+   "fieldtype": "Table",
+   "label": "Lớp",
+   "options": "SIS Discipline Record Class Entry"
+  },
+  {
+   "fieldname": "violation_section",
+   "fieldtype": "Section Break",
+   "label": "Vi phạm"
+  },
+  {
+   "fieldname": "violation",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Vi phạm",
+   "options": "SIS Discipline Violation",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "violation.severity_level",
+   "fieldname": "severity_level",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mức độ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "form",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Hình thức",
+   "options": "SIS Discipline Form",
+   "reqd": 1
+  },
+  {
+   "fieldname": "penalty_points",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Điểm trừ thi đua",
+   "options": "1\n5\n10\n15",
+   "reqd": 1
+  },
+  {
+   "fieldname": "time_slot",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Thời gian"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "proof_images",
+   "fieldtype": "Table",
+   "label": "Ảnh minh chứng",
+   "options": "SIS Discipline Record Image"
+  },
+  {
+   "fieldname": "campus",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Trường học",
+   "options": "SIS Campus",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-03-11 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Discipline Record",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

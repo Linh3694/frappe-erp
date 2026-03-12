@@ -546,3 +546,517 @@ def delete_discipline_violation(name: str = None):
             message=f"Lỗi khi xóa vi phạm: {str(e)}",
             code="DELETE_DISCIPLINE_VIOLATION_ERROR",
         )
+
+
+# ==================== GHI NHẬN LỖI (RECORD) CRUD ====================
+
+@frappe.whitelist(allow_guest=False)
+def get_discipline_records(owner_only: str = "0", campus: str = None):
+    """
+    Lấy danh sách ghi nhận lỗi.
+    owner_only: "1" = Lỗi của tôi (owner = current user), "0" = Toàn bộ lỗi
+    """
+    try:
+        from erp.utils.campus_utils import get_current_campus_from_context
+
+        filters = {}
+        if campus:
+            filters["campus"] = campus
+        else:
+            campus_id = get_current_campus_from_context()
+            if campus_id:
+                filters["campus"] = campus_id
+
+        if owner_only == "1":
+            filters["owner"] = frappe.session.user
+
+        records = frappe.get_all(
+            "SIS Discipline Record",
+            filters=filters,
+            fields=[
+                "name",
+                "date",
+                "classification",
+                "violation_count",
+                "target_type",
+                "target_student",
+                "violation",
+                "severity_level",
+                "form",
+                "penalty_points",
+                "time_slot",
+                "owner",
+                "modified",
+                "campus",
+            ],
+            order_by="modified desc",
+        )
+
+        # Lấy target_classes cho mỗi record (khi target_type = class)
+        record_ids = [r["name"] for r in records]
+        if record_ids:
+            class_entries = frappe.get_all(
+                "SIS Discipline Record Class Entry",
+                filters={"parent": ["in", record_ids]},
+                fields=["parent", "class_id"],
+            )
+            class_map = {}
+            for ce in class_entries:
+                class_map.setdefault(ce["parent"], []).append(ce["class_id"])
+
+            # Lấy class titles
+            class_ids = list(set(c for ids in class_map.values() for c in ids))
+            class_titles = {}
+            if class_ids:
+                for c in frappe.get_all(
+                    "SIS Class",
+                    filters={"name": ["in", class_ids]},
+                    fields=["name", "title"],
+                ):
+                    class_titles[c["name"]] = c.get("title") or c["name"]
+
+            for r in records:
+                r["target_class_ids"] = class_map.get(r["name"], [])
+                r["target_class_titles"] = [
+                    class_titles.get(cid, cid) for cid in r["target_class_ids"]
+                ]
+        else:
+            for r in records:
+                r["target_class_ids"] = []
+                r["target_class_titles"] = []
+
+        # Enrich: classification_title, violation_title, form_title
+        for r in records:
+            if r.get("classification"):
+                r["classification_title"] = frappe.db.get_value(
+                    "SIS Discipline Classification",
+                    r["classification"],
+                    "title",
+                ) or r["classification"]
+            else:
+                r["classification_title"] = ""
+
+            if r.get("violation"):
+                r["violation_title"] = frappe.db.get_value(
+                    "SIS Discipline Violation",
+                    r["violation"],
+                    "title",
+                ) or r["violation"]
+            else:
+                r["violation_title"] = ""
+
+            if r.get("form"):
+                r["form_title"] = frappe.db.get_value(
+                    "SIS Discipline Form",
+                    r["form"],
+                    "title",
+                ) or r["form"]
+            else:
+                r["form_title"] = ""
+
+            # Người cập nhật = owner (người tạo)
+            owner_user = r.get("owner")
+            if owner_user:
+                r["owner_name"] = frappe.db.get_value(
+                    "User", owner_user, "full_name"
+                ) or owner_user
+            else:
+                r["owner_name"] = ""
+
+            # Nếu target_student: lấy student_name, student_code, class (Regular), photo
+            if r.get("target_type") == "student" and r.get("target_student"):
+                student = frappe.db.get_value(
+                    "CRM Student",
+                    r["target_student"],
+                    ["student_name", "student_code"],
+                    as_dict=True,
+                )
+                if student:
+                    r["student_name"] = student.get("student_name") or ""
+                    r["student_code"] = student.get("student_code") or ""
+                else:
+                    r["student_name"] = ""
+                    r["student_code"] = ""
+
+                # Năm học hiện tại (dùng cho photo và class)
+                current_sy = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "name",
+                    order_by="start_date desc",
+                )
+                # Ảnh học sinh từ SIS Photo
+                try:
+                    photo_row = frappe.db.sql(
+                        """
+                        SELECT photo FROM `tabSIS Photo`
+                        WHERE student_id = %s AND type = 'student' AND status = 'Active'
+                        ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                                 upload_date DESC, creation DESC
+                        LIMIT 1
+                        """,
+                        (r["target_student"], current_sy),
+                        as_dict=True,
+                    )
+                    if photo_row and photo_row[0].get("photo"):
+                        purl = photo_row[0]["photo"]
+                        if purl.startswith("/files/"):
+                            purl = frappe.utils.get_url(purl)
+                        elif not purl.startswith("http"):
+                            purl = frappe.utils.get_url("/files/" + purl)
+                        r["student_photo_url"] = purl
+                    else:
+                        r["student_photo_url"] = None
+                except Exception:
+                    r["student_photo_url"] = None
+
+                # Lớp Regular của học sinh (năm học hiện tại)
+                if current_sy:
+                    cs = frappe.db.get_value(
+                        "SIS Class Student",
+                        {
+                            "student_id": r["target_student"],
+                            "school_year_id": current_sy,
+                            "class_type": "regular",
+                        },
+                        "class_id",
+                    )
+                    if cs:
+                        r["student_class_title"] = frappe.db.get_value(
+                            "SIS Class", cs, "title"
+                        ) or cs
+                    else:
+                        r["student_class_title"] = ""
+                else:
+                    r["student_class_title"] = ""
+            else:
+                r["student_name"] = ""
+                r["student_code"] = ""
+                r["student_class_title"] = ""
+                r["student_photo_url"] = None
+
+        return success_response(
+            data={"data": records, "total": len(records)},
+            message="Lấy danh sách ghi nhận lỗi thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error getting discipline records: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách ghi nhận lỗi: {str(e)}",
+            code="GET_DISCIPLINE_RECORDS_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_discipline_record(name: str = None):
+    """Lấy chi tiết 1 bản ghi ghi nhận lỗi"""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="ID bản ghi là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc("SIS Discipline Record", name)
+        d = doc.as_dict()
+
+        # Enrich
+        if d.get("classification"):
+            d["classification_title"] = frappe.db.get_value(
+                "SIS Discipline Classification",
+                d["classification"],
+                "title",
+            ) or d["classification"]
+        if d.get("violation"):
+            d["violation_title"] = frappe.db.get_value(
+                "SIS Discipline Violation",
+                d["violation"],
+                "title",
+            ) or d["violation"]
+        if d.get("form"):
+            d["form_title"] = frappe.db.get_value(
+                "SIS Discipline Form",
+                d["form"],
+                "title",
+            ) or d["form"]
+        if d.get("owner"):
+            d["owner_name"] = frappe.db.get_value(
+                "User", d["owner"], "full_name"
+            ) or d["owner"]
+
+        return success_response(
+            data=d,
+            message="Lấy danh sách ghi nhận lỗi thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy bản ghi",
+            code="RECORD_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error getting discipline record: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy bản ghi: {str(e)}",
+            code="GET_DISCIPLINE_RECORD_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def create_discipline_record(
+    date=None,
+    classification=None,
+    violation_count=None,
+    target_type=None,
+    target_student=None,
+    target_class_ids=None,
+    violation=None,
+    form=None,
+    penalty_points=None,
+    time_slot=None,
+    proof_images=None,
+    campus=None,
+):
+    """
+    Tạo mới ghi nhận lỗi.
+    target_class_ids: list string khi target_type=class (ví dụ: ["SIS-CLASS-00001", "SIS-CLASS-00002"])
+    proof_images: list dict [{"image": "file_url"}, ...]
+    """
+    try:
+        from erp.utils.campus_utils import get_current_campus_from_context
+
+        data = _get_request_data()
+        date = date or data.get("date")
+        classification = classification or data.get("classification")
+        violation_count = violation_count or data.get("violation_count")
+
+        target_type = target_type or data.get("target_type")
+        target_student = target_student or data.get("target_student")
+        target_class_ids = target_class_ids or data.get("target_class_ids") or []
+
+        violation = violation or data.get("violation")
+        form = form or data.get("form")
+        penalty_points = penalty_points or data.get("penalty_points")
+        time_slot = time_slot or data.get("time_slot")
+        proof_images = proof_images or data.get("proof_images") or []
+        campus = campus or data.get("campus") or get_current_campus_from_context()
+
+        if not date:
+            return error_response(
+                message="Ngày là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not classification:
+            return error_response(
+                message="Phân loại là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if violation_count is None:
+            violation_count = 1
+        if not target_type:
+            return error_response(
+                message="Đối tượng là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if target_type == "student" and not target_student:
+            return error_response(
+                message="Học sinh là bắt buộc khi đối tượng là Học sinh",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if target_type == "class" and not target_class_ids:
+            return error_response(
+                message="Lớp là bắt buộc khi đối tượng là Lớp",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not violation:
+            return error_response(
+                message="Vi phạm là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not form:
+            return error_response(
+                message="Hình thức là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not penalty_points:
+            return error_response(
+                message="Điểm trừ thi đua là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if penalty_points not in ("1", "5", "10", "15"):
+            return error_response(
+                message="Điểm trừ phải là 1, 5, 10 hoặc 15",
+                code="INVALID_PENALTY_POINTS",
+            )
+        if not campus:
+            return error_response(
+                message="Trường học là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc(
+            {
+                "doctype": "SIS Discipline Record",
+                "date": date,
+                "classification": classification,
+                "violation_count": int(violation_count),
+                "target_type": target_type,
+                "target_student": target_student if target_type == "student" else None,
+                "violation": violation,
+                "form": form,
+                "penalty_points": str(penalty_points),
+                "time_slot": time_slot or "",
+                "campus": campus,
+            }
+        )
+
+        if target_type == "class":
+            for cid in target_class_ids:
+                if isinstance(cid, dict):
+                    cid = cid.get("class_id") or cid.get("name")
+                if cid:
+                    doc.append("target_classes", {"class_id": cid})
+
+        for img in proof_images:
+            url = img.get("image") if isinstance(img, dict) else img
+            if url:
+                doc.append("proof_images", {"image": url})
+
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name},
+            message="Tạo ghi nhận lỗi thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error creating discipline record: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo ghi nhận lỗi: {str(e)}",
+            code="CREATE_DISCIPLINE_RECORD_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def update_discipline_record(
+    name=None,
+    date=None,
+    classification=None,
+    violation_count=None,
+    target_type=None,
+    target_student=None,
+    target_class_ids=None,
+    violation=None,
+    form=None,
+    penalty_points=None,
+    time_slot=None,
+    proof_images=None,
+):
+    """Cập nhật ghi nhận lỗi"""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="ID bản ghi là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc("SIS Discipline Record", name)
+
+        if date is not None:
+            doc.date = date
+        if classification is not None:
+            doc.classification = classification
+        if violation_count is not None:
+            doc.violation_count = int(violation_count)
+        if target_type is not None:
+            doc.target_type = target_type
+        if target_type == "student":
+            doc.target_student = target_student or data.get("target_student")
+            doc.target_classes = []
+        elif target_type == "class":
+            doc.target_student = None
+            target_class_ids = target_class_ids or data.get("target_class_ids") or []
+            doc.target_classes = []
+            for cid in target_class_ids:
+                if isinstance(cid, dict):
+                    cid = cid.get("class_id") or cid.get("name")
+                if cid:
+                    doc.append("target_classes", {"class_id": cid})
+        if violation is not None:
+            doc.violation = violation
+        if form is not None:
+            doc.form = form
+        if penalty_points is not None:
+            if penalty_points not in ("1", "5", "10", "15"):
+                return error_response(
+                    message="Điểm trừ phải là 1, 5, 10 hoặc 15",
+                    code="INVALID_PENALTY_POINTS",
+                )
+            doc.penalty_points = str(penalty_points)
+        if time_slot is not None:
+            doc.time_slot = time_slot
+        if proof_images is not None:
+            doc.proof_images = []
+            for img in proof_images:
+                url = img.get("image") if isinstance(img, dict) else img
+                if url:
+                    doc.append("proof_images", {"image": url})
+
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name},
+            message="Cập nhật ghi nhận lỗi thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy bản ghi",
+            code="RECORD_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error updating discipline record: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật ghi nhận lỗi: {str(e)}",
+            code="UPDATE_DISCIPLINE_RECORD_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_discipline_record(name: str = None):
+    """Xóa ghi nhận lỗi"""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="ID bản ghi là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        frappe.delete_doc("SIS Discipline Record", name, ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": name},
+            message="Xóa ghi nhận lỗi thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy bản ghi",
+            code="RECORD_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error deleting discipline record: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa ghi nhận lỗi: {str(e)}",
+            code="DELETE_DISCIPLINE_RECORD_ERROR",
+        )
