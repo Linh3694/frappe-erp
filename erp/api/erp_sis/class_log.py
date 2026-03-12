@@ -716,8 +716,8 @@ def batch_get_homeroom_class_logs():
         # This endpoint aggregates: class logs + class attendance + event attendance
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
-        # v4: subject_title dùng COALESCE(SIS Timetable Subject.title_vn, .title_en, SIS Subject.title) - khớp với teacher dashboard
-        cache_key = f"homeroom_class_logs_v4:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        # v5: subject_title tra theo recorded_by từ SIS Teacher Timetable (chính xác theo GV ghi log)
+        cache_key = f"homeroom_class_logs_v5:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -944,11 +944,10 @@ def batch_get_homeroom_class_logs():
         instance_ids = list(class_instances.values())
         
         if instance_ids:
-            # Lấy dữ liệu class log subject - KHÔNG lấy subject_title ở đây
-            # subject_title sẽ được lấy từ SIS Student Timetable ở Step 5b (chính xác theo ngày)
+            # Lấy dữ liệu class log subject (thêm recorded_by để tra môn học theo giáo viên)
             all_subject_logs = frappe.db.sql("""
                 SELECT cls.name, cls.period, cls.class_id, cls.general_comment, cls.lesson_name, cls.lesson_score,
-                    cls.is_practise_test, cls.homework_assignment, cls.timetable_instance_id
+                    cls.is_practise_test, cls.homework_assignment, cls.timetable_instance_id, cls.recorded_by
                 FROM `tabSIS Class Log Subject` cls
                 WHERE cls.timetable_instance_id IN %(instance_ids)s
                     AND cls.log_date = %(date)s
@@ -979,42 +978,115 @@ def batch_get_homeroom_class_logs():
         
         frappe.logger().info(f"📝 [Backend] Found {len(all_subject_logs)} class log subjects ({step_times['5_class_log_subjects']:.0f}ms)")
         
-        # ⭐ Step 5b: Lấy subject_title từ SIS Timetable Instance Row (weekly pattern)
-        # Giống cách parent portal lấy thời khoá biểu, đã kiểm chứng hoạt động chính xác
-        # (SIS Student Timetable có thể bị lệch dữ liệu so với thời khoá biểu thực tế)
+        # ⭐ Step 5b: Lấy subject_title từ SIS Teacher Timetable theo người ghi (recorded_by)
+        # Ưu tiên tra môn học theo đúng giáo viên đã ghi log (chính xác hơn tra theo lớp)
+        # Vì nhiều GV khác nhau có thể ghi log cùng 1 tiết dưới cùng 1 lớp chủ nhiệm
         step_start = time.time()
-        if all_subject_logs and instance_ids:
-            date_obj_5b = dt.strptime(date, "%Y-%m-%d")
-            day_of_week_5b = date_obj_5b.strftime("%A").lower()[:3]
+        if all_subject_logs:
+            recorded_bys = list({log.get('recorded_by') for log in all_subject_logs if log.get('recorded_by')})
+            class_ids_for_teacher = list({log['class_id'] for log in all_subject_logs})
 
-            sis_timetable_rows = frappe.db.sql("""
-                SELECT ti.class_id, tc.period_name,
-                    COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
-                FROM `tabSIS Timetable Instance Row` tir
-                INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
-                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
-                INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
-                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
-                WHERE ti.name IN %(instance_ids)s
-                    AND tir.day_of_week = %(day_of_week)s
-                    AND tir.subject_id IS NOT NULL
-                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
-            """, {"instance_ids": instance_ids, "day_of_week": day_of_week_5b}, as_dict=True)
-            
-            # Map (class_id, period_name) -> subject_title
-            sis_subject_title_map = {}
-            for row in sis_timetable_rows:
-                key = (row['class_id'], row['period_name'])
-                if key not in sis_subject_title_map and row.get('subject_title'):
-                    sis_subject_title_map[key] = row['subject_title']
-            
-            # Gán subject_title cho mỗi class log subject
+            teacher_timetable_rows = []
+            if recorded_bys and class_ids_for_teacher:
+                teacher_timetable_rows = frappe.db.sql("""
+                    SELECT t.user_id as user_id, tt.class_id, tc.period_name, tc.period_priority,
+                        COALESCE(ts.title_vn, ts.title_en, s.title) as subject_title
+                    FROM `tabSIS Teacher Timetable` tt
+                    INNER JOIN `tabSIS Teacher` t ON tt.teacher = t.name
+                    INNER JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
+                    LEFT JOIN `tabSIS Subject` s ON tt.subject_id = s.name
+                    LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name
+                    WHERE t.user_id IN %(user_ids)s
+                        AND tt.class_id IN %(class_ids)s
+                        AND tt.date = %(date)s
+                        AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                """, {
+                    "user_ids": recorded_bys,
+                    "class_ids": class_ids_for_teacher,
+                    "date": date
+                }, as_dict=True)
+
+            # Map (user_id, class_id, period_name/combined) -> subject_title
+            teacher_subject_map = {}
+            for row in teacher_timetable_rows:
+                if not row.get('subject_title'):
+                    continue
+                key_exact = (row['user_id'], row['class_id'], row['period_name'])
+                if key_exact not in teacher_subject_map:
+                    teacher_subject_map[key_exact] = row['subject_title']
+                # Cũng map theo period_priority -> combined period name
+                p_priority = row.get('period_priority')
+                if p_priority and p_priority in period_number_to_combined:
+                    combined = period_number_to_combined[p_priority]
+                    key_combined = (row['user_id'], row['class_id'], combined)
+                    if key_combined not in teacher_subject_map:
+                        teacher_subject_map[key_combined] = row['subject_title']
+
+            # Gán subject_title từ teacher timetable (ưu tiên 1)
             for log in all_subject_logs:
-                key = (log['class_id'], log['period'])
-                if key in sis_subject_title_map:
-                    log['subject_title'] = sis_subject_title_map[key]
-            
-            frappe.logger().info(f"📚 [Backend] Enriched subject_title from Timetable Instance Row: {len(sis_subject_title_map)} entries, {len([l for l in all_subject_logs if l.get('subject_title')])} logs updated ({(time.time() - step_start)*1000:.0f}ms)")
+                user_id = log.get('recorded_by')
+                if not user_id:
+                    continue
+                key = (user_id, log['class_id'], log['period'])
+                if key in teacher_subject_map:
+                    log['subject_title'] = teacher_subject_map[key]
+                    continue
+                # Fallback: map period_number -> combined
+                log_period_num = extract_period_number(log['period'])
+                if log_period_num and log_period_num in period_number_to_combined:
+                    combined_period = period_number_to_combined[log_period_num]
+                    key2 = (user_id, log['class_id'], combined_period)
+                    if key2 in teacher_subject_map:
+                        log['subject_title'] = teacher_subject_map[key2]
+
+            # Fallback (ưu tiên 2): SIS Timetable Instance Row cho các log chưa có subject_title
+            # (khi recorded_by không phải là GV có trong SIS Teacher Timetable)
+            logs_without_subject = [log for log in all_subject_logs if not log.get('subject_title')]
+            if logs_without_subject and instance_ids:
+                date_obj_5b = dt.strptime(date, "%Y-%m-%d")
+                day_of_week_5b = date_obj_5b.strftime("%A").lower()[:3]
+
+                sis_timetable_rows = frappe.db.sql("""
+                    SELECT ti.class_id, tc.period_name, tc.period_priority,
+                        COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
+                    FROM `tabSIS Timetable Instance Row` tir
+                    INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
+                    INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
+                    INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                    LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+                    WHERE ti.name IN %(instance_ids)s
+                        AND tir.day_of_week = %(day_of_week)s
+                        AND tir.subject_id IS NOT NULL
+                        AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                """, {"instance_ids": instance_ids, "day_of_week": day_of_week_5b}, as_dict=True)
+
+                sis_subject_title_map = {}
+                for row in sis_timetable_rows:
+                    if not row.get('subject_title'):
+                        continue
+                    key_exact = (row['class_id'], row['period_name'])
+                    if key_exact not in sis_subject_title_map:
+                        sis_subject_title_map[key_exact] = row['subject_title']
+                    p_priority = row.get('period_priority')
+                    if p_priority and p_priority in period_number_to_combined:
+                        combined = period_number_to_combined[p_priority]
+                        key_combined = (row['class_id'], combined)
+                        if key_combined not in sis_subject_title_map:
+                            sis_subject_title_map[key_combined] = row['subject_title']
+
+                for log in logs_without_subject:
+                    key = (log['class_id'], log['period'])
+                    if key in sis_subject_title_map:
+                        log['subject_title'] = sis_subject_title_map[key]
+                        continue
+                    log_period_num = extract_period_number(log['period'])
+                    if log_period_num and log_period_num in period_number_to_combined:
+                        combined = period_number_to_combined[log_period_num]
+                        key2 = (log['class_id'], combined)
+                        if key2 in sis_subject_title_map:
+                            log['subject_title'] = sis_subject_title_map[key2]
+
+            frappe.logger().info(f"📚 [Backend] Enriched subject_title: teacher_map={len(teacher_timetable_rows)} entries, {len([l for l in all_subject_logs if l.get('subject_title')])} logs updated ({(time.time() - step_start)*1000:.0f}ms)")
         
         # Step 6: Batch query all student logs
         step_start = time.time()
@@ -1713,10 +1785,25 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                     unique_comments[period] = (comment, student_data_count)
         comments = [v[0] for v in sorted(unique_comments.values(), key=lambda x: x[0]['period'])]
 
+        # Lấy danh sách tên đầy đủ tất cả học sinh trong lớp để AI phân biệt tên viết tắt
+        all_student_names = []
+        try:
+            class_students = frappe.db.sql("""
+                SELECT s.student_name
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+                WHERE cs.class_id = %(class_id)s
+                ORDER BY s.student_name
+            """, {"class_id": class_id}, as_dict=True)
+            all_student_names = [r['student_name'] for r in class_students if r.get('student_name')]
+        except Exception:
+            pass
+
         result = {
             "student_name": student_name,
             "date": date,
-            "comments": comments
+            "comments": comments,
+            "all_student_names": all_student_names
         }
 
         # Cache 90 giây
