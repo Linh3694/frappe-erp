@@ -1746,9 +1746,16 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
     Công thức: Score = (h / b × 100) × (c / p)^n
     - h = tổng lesson_score (homework + behavior + participation + top_performance + attendance_penalty)
     - b = max_lesson_score × p
-    - p = số tiết kế hoạch (loại bỏ is_practise_test=1)
+    - p = số tiết kế hoạch từ thời khóa biểu, trừ tiết đánh dấu is_practise_test=1
     - c = số tiết tham gia (present + late + excused)
     - n = 0.7
+
+    Quy tắc:
+    - p lấy từ SIS Timetable Instance Row, không phụ thuộc giáo viên có nhập sổ đầu bài hay không
+    - p chỉ giảm khi giáo viên vào class log và đánh dấu tiết đó là kiểm tra/nghỉ (is_practise_test=1)
+    - Ngày nghỉ lễ (SIS Calendar type=holiday) bị bỏ qua
+    - Nếu tất cả tiết trong ngày đều is_practise_test=1 thì p=0, ngày đó không tính vào days_with_data
+    - Tiết không có class log: dùng default values cho h, lesson_score=0 cho Điểm lớp
 
     GET params: class_id, date_from, date_to (YYYY-MM-DD)
     Thêm include_detail=1 để xem các điểm thành phần (h, b, p, c, base_score, attendance_factor) đối chiếu công thức.
@@ -1779,10 +1786,10 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
             except Exception:
                 pass
 
-        # Lấy education_stage của lớp để filter score options
+        # Lấy education_stage, campus của lớp để filter score options và ngày nghỉ
         class_doc = frappe.db.get_value(
             "SIS Class", class_id,
-            ["education_grade", "name"],
+            ["education_grade", "name", "campus_id"],
             as_dict=True
         )
         if not class_doc:
@@ -1885,12 +1892,38 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
         student_daily_details = {sid: [] for sid in student_ids}
         class_daily_details = []
 
+        # Bước 1: Lấy danh sách ngày nghỉ lễ (SIS Calendar type=holiday)
+        date_from_obj = dt.strptime(date_from, "%Y-%m-%d").date()
+        date_to_obj = dt.strptime(date_to, "%Y-%m-%d").date()
+        holiday_dates = set()
+        cal_filters = {
+            "type": "holiday",
+            "start_date": ["<=", date_to],
+            "end_date": [">=", date_from],
+        }
+        if class_doc.get("campus_id"):
+            cal_filters["campus_id"] = class_doc["campus_id"]
+        holidays = frappe.get_all(
+            "SIS Calendar", filters=cal_filters, fields=["start_date", "end_date"]
+        )
+        for h in holidays:
+            d = h["start_date"]
+            while d <= h["end_date"]:
+                if date_from_obj <= d <= date_to_obj:
+                    holiday_dates.add(d.strftime("%Y-%m-%d"))
+                d += timedelta(days=1)
+
         # Lặp từng ngày trong khoảng
-        current = dt.strptime(date_from, "%Y-%m-%d").date()
-        end = dt.strptime(date_to, "%Y-%m-%d").date()
+        current = date_from_obj
+        end = date_to_obj
 
         while current <= end:
             date_str = current.strftime("%Y-%m-%d")
+            # Bỏ qua ngày nghỉ lễ
+            if date_str in holiday_dates:
+                current += timedelta(days=1)
+                continue
+
             day_of_week = current.strftime("%A").lower()[:3]
 
             # Lấy timetable instances cho tất cả class
@@ -1909,33 +1942,69 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                 current += timedelta(days=1)
                 continue
 
-            # Lấy class log subjects (chỉ tiết học, loại bỏ practise), kèm lesson_score cho Điểm lớp
+            # Bước 2: Lấy p từ thời khóa biểu (SIS Timetable Instance Row), không phụ thuộc class log
+            timetable_periods = frappe.db.sql("""
+                SELECT tir.period_name
+                FROM `tabSIS Timetable Instance Row` tir
+                WHERE tir.parent IN %(instance_ids)s
+                    AND tir.day_of_week = %(dow)s
+                    AND LOWER(COALESCE(tir.period_name, '')) LIKE '%%tiết%%'
+                    AND (tir.valid_from IS NULL OR tir.valid_from <= %(date)s)
+                    AND (tir.valid_to IS NULL OR tir.valid_to >= %(date)s)
+            """, {"instance_ids": instance_ids, "dow": day_of_week, "date": date_str}, as_dict=True)
+
+            timetable_period_set = {r["period_name"] for r in timetable_periods if r.get("period_name")}
+            if not timetable_period_set:
+                current += timedelta(days=1)
+                continue
+
+            # Lấy class log subjects (tất cả, kể cả is_practise_test) để biết tiết nào đánh dấu kiểm tra/nghỉ
             subject_logs = frappe.db.sql("""
-                SELECT cls.name, cls.period, cls.class_id, cls.lesson_score
+                SELECT cls.name, cls.period, cls.class_id, cls.lesson_score, cls.is_practise_test
                 FROM `tabSIS Class Log Subject` cls
                 WHERE cls.timetable_instance_id IN %(instance_ids)s
                     AND cls.log_date = %(date)s
                     AND LOWER(cls.period) LIKE '%%tiết%%'
-                    AND (cls.is_practise_test = 0 OR cls.is_practise_test IS NULL)
             """, {"instance_ids": instance_ids, "date": date_str}, as_dict=True)
 
-            if not subject_logs:
+            # Trừ tiết bị đánh dấu is_practise_test = 1
+            excluded_periods = set()
+            for sl in subject_logs:
+                if sl.get("is_practise_test"):
+                    period_val = sl.get("period") or ""
+                    if period_val in timetable_period_set:
+                        excluded_periods.add(period_val)
+                    else:
+                        pnum = _extract_period_num(period_val)
+                        if pnum is not None:
+                            for pn in timetable_period_set:
+                                if _extract_period_num(pn) == pnum:
+                                    excluded_periods.add(pn)
+                                    break
+
+            period_set = timetable_period_set - excluded_periods
+            p = len(period_set)
+
+            # Bước 2b: Nếu tất cả tiết đều kiểm tra/nghỉ -> không tính ngày này
+            if p <= 0:
                 current += timedelta(days=1)
                 continue
 
-            # Build (class_id, period) -> subject
+            # Build (class_id, period) -> subject (tất cả subject logs để tra cứu)
             subject_by_class_period = {}
-            period_set = set()
             for sl in subject_logs:
                 key = (sl["class_id"], sl["period"])
                 if key not in subject_by_class_period:
                     subject_by_class_period[key] = sl
-                period_set.add(sl["period"])
-
-            p = len(period_set)
-            if p <= 0:
-                current += timedelta(days=1)
-                continue
+                # Thêm mapping theo period_name từ TKB nếu khác (chuẩn hóa tên)
+                pnum = _extract_period_num(sl.get("period"))
+                if pnum is not None:
+                    for pn in timetable_period_set:
+                        if _extract_period_num(pn) == pnum:
+                            alt_key = (sl["class_id"], pn)
+                            if alt_key not in subject_by_class_period:
+                                subject_by_class_period[alt_key] = sl
+                            break
 
             subject_ids = [log["name"] for log in subject_logs]
             student_logs = frappe.db.sql("""
@@ -2021,6 +2090,7 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     pass
 
             # Tính Điểm lớp cho ngày: trung bình có trọng số theo số HS mỗi lớp (chính quy/lớp chạy)
+            # Tiết không có lesson_score (GV chưa nhập) dùng 0
             daily_lesson_scores = []
             for period in period_set:
                 # Đếm số HS homeroom tham gia mỗi class (homeroom hoặc mixed)
@@ -2034,12 +2104,11 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                 for cid, count in class_counts.items():
                     subj = subject_by_class_period.get((cid, period))
                     ls = subj.get("lesson_score") if subj else None
-                    if ls:
-                        try:
-                            weighted_sum += int(ls) * count
-                            total_count += count
-                        except (ValueError, TypeError):
-                            pass
+                    try:
+                        weighted_sum += int(ls or 0) * count
+                    except (ValueError, TypeError):
+                        weighted_sum += 0
+                    total_count += count
 
                 if total_count > 0:
                     daily_lesson_scores.append(weighted_sum / total_count)
@@ -2056,15 +2125,15 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         ws, tc = 0, 0
                         for cid, cnt in class_counts_pr.items():
                             subj = subject_by_class_period.get((cid, pr))
-                            if subj and subj.get("lesson_score"):
-                                try:
-                                    ws += int(subj["lesson_score"]) * cnt
-                                    tc += cnt
-                                except (ValueError, TypeError):
-                                    pass
+                            ls = subj.get("lesson_score") if subj else None
+                            try:
+                                ws += int(ls or 0) * cnt
+                            except (ValueError, TypeError):
+                                pass
+                            tc += cnt
                         period_breakdown.append({
                             "period": pr,
-                            "lesson_score": round(ws / tc, 2) if tc > 0 else None,
+                            "lesson_score": round(ws / tc, 2) if tc > 0 else 0,
                         })
                     class_daily_details.append({
                         "date": date_str,
@@ -2082,12 +2151,6 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     subject_key = (actual_class, period)
                     subject_log = subject_by_class_period.get(subject_key)
 
-                    if not subject_log:
-                        continue
-
-                    subject_id = subject_log["name"]
-                    student_log = students_by_subject.get(subject_id, {}).get(student_id)
-
                     att_status = attendance_map.get((student_id, period), "present")
                     if att_status not in ("present", "late", "excused", "absent"):
                         att_status = "present"
@@ -2096,10 +2159,19 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
 
                     penalty = ATTENDANCE_PENALTY.get(att_status, 0)
 
-                    hw_val = score_value_map.get(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
-                    beh_val = score_value_map.get(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
-                    part_val = score_value_map.get(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
-                    praise_val = default_values["top_performance"] if student_log and student_log.get("is_top_performance") else 0
+                    if subject_log:
+                        subject_id = subject_log["name"]
+                        student_log = students_by_subject.get(subject_id, {}).get(student_id)
+                        hw_val = score_value_map.get(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
+                        beh_val = score_value_map.get(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
+                        part_val = score_value_map.get(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
+                        praise_val = default_values["top_performance"] if student_log and student_log.get("is_top_performance") else 0
+                    else:
+                        # Không có class log -> dùng default values
+                        hw_val = default_values["homework"]
+                        beh_val = default_values["behavior"]
+                        part_val = default_values["participation"]
+                        praise_val = 0
 
                     lesson_score = (hw_val or 0) + (beh_val or 0) + (part_val or 0) + (praise_val or 0) + penalty
                     h += lesson_score
