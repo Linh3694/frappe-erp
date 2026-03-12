@@ -217,3 +217,8 @@ def sis_class_log_subject_query(user):
 def sis_class_log_student_query(user):
     """Permission query for SIS Class Log Student"""
     return get_campus_permission_query("SIS Class Log Student", user)
+
+
+def sis_homeroom_score_record_query(user):
+    """Permission query for SIS Homeroom Score Record"""
+    return get_campus_permission_query("SIS Homeroom Score Record", user)

@@ -1,0 +1,132 @@
+{
+ "actions": [],
+ "autoname": "format:SIS-HSR-{#####}",
+ "creation": "2025-03-12 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "class_id",
+  "campus_id",
+  "student_id",
+  "class_log_score_id",
+  "value",
+  "note",
+  "date"
+ ],
+ "fields": [
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Lớp",
+   "options": "SIS Class",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "fetch_from": "class_id.campus_id",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "read_only": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1
+  },
+  {
+   "fieldname": "class_log_score_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Lý do (SIS Class Log Score)",
+   "options": "SIS Class Log Score",
+   "reqd": 1
+  },
+  {
+   "fieldname": "value",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Điểm",
+   "default": 0
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày ghi nhận",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-03-12 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Homeroom Score Record",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

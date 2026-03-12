@@ -155,6 +155,7 @@ permission_query_conditions = {
 	"SIS Class Log Score": "erp.sis.utils.permission_query.sis_class_log_score_query",
 	"SIS Class Log Subject": "erp.sis.utils.permission_query.sis_class_log_subject_query",
 	"SIS Class Log Student": "erp.sis.utils.permission_query.sis_class_log_student_query",
+	"SIS Homeroom Score Record": "erp.sis.utils.permission_query.sis_homeroom_score_record_query",
 	# CRM Doctypes
 	"CRM Lead": "erp.crm.utils.permission_query.crm_lead_query",
 	"CRM Exam": "erp.crm.utils.permission_query.crm_exam_query",
@@ -192,6 +193,7 @@ has_permission = {
 	"SIS Class Log Score": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Class Log Subject": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Class Log Student": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Homeroom Score Record": "erp.sis.utils.campus_permissions.has_campus_permission",
 	# CRM Doctypes
 	"CRM Lead": "erp.crm.utils.permission_query.has_crm_permission",
 	"CRM Exam": "erp.crm.utils.permission_query.has_crm_permission",
