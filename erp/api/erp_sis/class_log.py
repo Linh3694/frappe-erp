@@ -1751,6 +1751,7 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
     - n = 0.7
 
     GET params: class_id, date_from, date_to (YYYY-MM-DD)
+    Thêm include_detail=1 để xem các điểm thành phần (h, b, p, c, base_score, attendance_factor) đối chiếu công thức.
     """
     try:
         if getattr(frappe, 'request', None):
@@ -1758,20 +1759,25 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
             date_from = date_from or frappe.request.args.get('date_from')
             date_to = date_to or frappe.request.args.get('date_to')
 
+        include_detail = False
+        if getattr(frappe, 'request', None):
+            include_detail = frappe.request.args.get('include_detail') in ("1", "true", "yes")
+
         if not class_id or not date_from or not date_to:
             return error_response(
                 message="Missing required parameters: class_id, date_from, date_to",
                 code="MISSING_PARAMS"
             )
 
-        # Kiểm tra cache (TTL 5 phút)
+        # Kiểm tra cache (TTL 5 phút) - bỏ qua khi include_detail để không cache dữ liệu debug
         cache_key = f"wis_academic_scores:{class_id}:{date_from}:{date_to}"
-        try:
-            cached = frappe.cache().get_value(cache_key)
-            if cached:
-                return success_response(data=cached, message="WIS academic scores (cached)")
-        except Exception:
-            pass
+        if not include_detail:
+            try:
+                cached = frappe.cache().get_value(cache_key)
+                if cached:
+                    return success_response(data=cached, message="WIS academic scores (cached)")
+            except Exception:
+                pass
 
         # Lấy education_stage của lớp để filter score options
         class_doc = frappe.db.get_value(
@@ -1875,6 +1881,9 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
         student_daily_scores = {sid: [] for sid in student_ids}
         # Tích lũy Điểm lớp: [lesson_scores] theo từng tiết trong khoảng
         class_daily_scores = []
+        # Chi tiết để đối chiếu công thức (khi include_detail=true)
+        student_daily_details = {sid: [] for sid in student_ids}
+        class_daily_details = []
 
         # Lặp từng ngày trong khoảng
         current = dt.strptime(date_from, "%Y-%m-%d").date()
@@ -2037,6 +2046,31 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
 
             if daily_lesson_scores:
                 class_daily_scores.extend(daily_lesson_scores)
+                if include_detail:
+                    period_breakdown = []
+                    for pr in sorted(period_set):
+                        class_counts_pr = {}
+                        for sid in student_ids:
+                            ac = student_period_class.get((sid, pr), class_id)
+                            class_counts_pr[ac] = class_counts_pr.get(ac, 0) + 1
+                        ws, tc = 0, 0
+                        for cid, cnt in class_counts_pr.items():
+                            subj = subject_by_class_period.get((cid, pr))
+                            if subj and subj.get("lesson_score"):
+                                try:
+                                    ws += int(subj["lesson_score"]) * cnt
+                                    tc += cnt
+                                except (ValueError, TypeError):
+                                    pass
+                        period_breakdown.append({
+                            "period": pr,
+                            "lesson_score": round(ws / tc, 2) if tc > 0 else None,
+                        })
+                    class_daily_details.append({
+                        "date": date_str,
+                        "lesson_scores_per_period": period_breakdown,
+                        "daily_avg": round(sum(daily_lesson_scores) / len(daily_lesson_scores), 2),
+                    })
 
             # Tính điểm cho từng học sinh
             for student_id in student_ids:
@@ -2076,6 +2110,18 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     attendance_factor = (c / p) ** N if c > 0 else 0
                     daily_score = base_score * attendance_factor
                     student_daily_scores[student_id].append(daily_score)
+                    if include_detail:
+                        student_daily_details[student_id].append({
+                            "date": date_str,
+                            "h": round(h, 2),
+                            "b": round(b, 2),
+                            "p": p,
+                            "c": c,
+                            "base_score": round(base_score, 2),
+                            "attendance_factor": round(attendance_factor, 4),
+                            "daily_score": round(daily_score, 2),
+                            "formula": f"base_score * attendance_factor = ({h}/{b})*100 * ({c}/{p})^{N}",
+                        })
 
             current += timedelta(days=1)
 
@@ -2088,6 +2134,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                 scores[sid] = {"academic_score": round(avg, 2), "days_with_data": len(daily_list)}
             else:
                 scores[sid] = {"academic_score": 0, "days_with_data": 0}
+            if include_detail:
+                scores[sid]["detail"] = student_daily_details[sid]
 
         # Điểm lớp = trung bình tất cả Điểm tiết học trong khoảng
         avg_class_score = sum(class_daily_scores) / len(class_daily_scores) if class_daily_scores else None
@@ -2097,11 +2145,15 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
             "class_score": round(avg_class_score, 2) if avg_class_score is not None else None,
             "config": {"n": N, "max_lesson_score": max_lesson_score}
         }
+        if include_detail:
+            result["class_score_detail"] = class_daily_details
+            result["formula"] = "Score = (h/b × 100) × (c/p)^n  với h=tổng lesson_score, b=max×p, c=tiết tham gia, n=0.7"
 
-        try:
-            frappe.cache().set_value(cache_key, result, expires_in_sec=300)
-        except Exception:
-            pass
+        if not include_detail:
+            try:
+                frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+            except Exception:
+                pass
 
         return success_response(data=result, message="WIS academic scores calculated")
 
