@@ -53,7 +53,7 @@ def get_class_log_options(education_stage=None):
             order_by="type asc, value desc, title_vn asc"
         )
 
-        grouped = {"homework": [], "behavior": [], "participation": [], "issue": [], "top_performance": []}
+        grouped = {"homeroom": [], "homework": [], "behavior": [], "participation": [], "issue": [], "top_performance": []}
         for r in rows:
             t = (r.get('type') or '').lower()
             if t in grouped:

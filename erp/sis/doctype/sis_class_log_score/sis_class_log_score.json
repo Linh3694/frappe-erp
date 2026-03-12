@@ -19,7 +19,7 @@
   "campus_id"
  ],
  "fields": [
-  {"fieldname": "type", "label": "Type", "fieldtype": "Select", "options": "homework\nbehavior\nparticipation\nissue\ntop_performance", "reqd": 1},
+  {"fieldname": "type", "label": "Type", "fieldtype": "Select", "options": "homeroom\nhomework\nbehavior\nparticipation\nissue\ntop_performance", "reqd": 1},
   {"fieldname": "title_vn", "label": "Title (VI)", "fieldtype": "Data", "reqd": 1},
   {"fieldname": "title_en", "label": "Title (EN)", "fieldtype": "Data"},
   {"fieldname": "value", "label": "Value", "fieldtype": "Float", "default": 0},
