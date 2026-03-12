@@ -1013,3 +1013,109 @@ def get_school_attendance_summary(date=None, period=None, campus_id=None):
             message=f"Lỗi khi lấy thống kê điểm danh toàn trường: {str(e)}",
             code="GET_SCHOOL_ATTENDANCE_SUMMARY_ERROR"
         )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_school_absent_students(date=None, period=None, campus_id=None):
+    """
+    Lấy danh sách học sinh vắng không phép (status='absent') toàn trường cho 1 tiết.
+    
+    Args:
+        date: Ngày cần xem (YYYY-MM-DD)
+        period: Tên tiết (e.g. "Homeroom"), mặc định Homeroom
+        campus_id: Campus ID (optional)
+    
+    Returns:
+        {
+            success: true,
+            data: {
+                summary: { total: 16 },
+                students: [
+                    { student_id, student_code, student_name, class_id, class_title }
+                ]
+            }
+        }
+    """
+    try:
+        if not date:
+            date = frappe.request.args.get('date')
+        if not period:
+            period = frappe.request.args.get('period')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+        
+        if not date:
+            return error_response(
+                message="Thiếu tham số: date là bắt buộc",
+                code="MISSING_PARAMS"
+            )
+        
+        if not period:
+            period = 'Homeroom'
+        
+        # Resolve period_name nếu period là ID của timetable column
+        period_filter = period
+        if period.startswith("SIS-TIMETABLE-COLUMN"):
+            tc = frappe.db.get_value("SIS Timetable Column", period, "period_name")
+            if tc:
+                period_filter = tc
+        
+        date_obj = frappe.utils.getdate(date)
+        campus_id = _resolve_campus_id(campus_id)
+        
+        if not campus_id:
+            try:
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
+            except Exception:
+                pass
+        
+        school_year_filters = {"is_enable": 1}
+        if campus_id:
+            school_year_filters["campus_id"] = campus_id
+        
+        school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+        if not school_year:
+            return error_response(
+                message="Không tìm thấy năm học đang active",
+                code="NO_ACTIVE_SCHOOL_YEAR"
+            )
+        
+        # Lấy danh sách học sinh vắng không phép
+        students = frappe.db.sql("""
+            SELECT 
+                a.student_id,
+                a.student_code,
+                a.student_name,
+                a.class_id,
+                c.title as class_title
+            FROM `tabSIS Class Attendance` a
+            INNER JOIN `tabSIS Class` c ON a.class_id = c.name
+            WHERE a.date = %(date)s 
+                AND a.period = %(period_filter)s
+                AND a.status = 'absent'
+                AND c.school_year_id = %(school_year)s 
+                AND c.class_type = 'regular'
+                AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL)
+            ORDER BY c.title, a.student_name
+        """, {
+            "date": date_obj,
+            "period_filter": period_filter,
+            "school_year": school_year,
+            "campus_id": campus_id
+        }, as_dict=True)
+        
+        return success_response(
+            data={
+                "summary": {"total": len(students)},
+                "students": students
+            },
+            message="Lấy danh sách học sinh vắng không phép thành công"
+        )
+        
+    except Exception as e:
+        frappe.log_error(f"get_school_absent_students error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách học sinh vắng không phép: {str(e)}",
+            code="GET_SCHOOL_ABSENT_STUDENTS_ERROR"
+        )

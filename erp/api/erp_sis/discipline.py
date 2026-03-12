@@ -12,7 +12,7 @@ from erp.utils.api_response import success_response, error_response
 
 
 def _get_request_data():
-    """Lấy dữ liệu từ request"""
+    """Lấy dữ liệu từ request (body JSON + form_dict/query params)"""
     data = {}
     if hasattr(frappe, "request") and frappe.request and getattr(frappe.request, "data", None):
         try:
@@ -24,8 +24,9 @@ def _get_request_data():
                     data.update(parsed)
         except (json.JSONDecodeError, AttributeError, TypeError):
             pass
-    if frappe.local.form_dict:
-        data.update(dict(frappe.local.form_dict))
+    form_dict = getattr(frappe.local, "form_dict", None) or getattr(frappe, "form_dict", None)
+    if form_dict:
+        data.update(dict(form_dict))
     return data
 
 
