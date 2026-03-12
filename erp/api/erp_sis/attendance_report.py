@@ -1227,6 +1227,14 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
         end_date = frappe.utils.getdate(f"{year}-{month:02d}-{last_day:02d}")
         
         # 1. Lấy FaceID (ERP Time Attendance) theo student_code
+        # Khung giờ: 8h vào lớp (trước 8h = đúng giờ, từ 8h = muộn), 16h tan (trước 16h = về sớm, từ 16h = đúng giờ)
+        from datetime import time
+        MORNING_DEADLINE = time(8, 0)   # 8:00 vào lớp
+        AFTERNOON_DEADLINE = time(16, 0)  # 16:00 tan học
+
+        def _get_time(dt):
+            return dt.time() if hasattr(dt, 'time') and dt else None
+
         faceid_map = {}
         if student_code:
             faceid_records = frappe.db.sql("""
@@ -1256,17 +1264,21 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
                             if morning:
                                 first_morning = min(morning, key=lambda x: frappe.utils.get_datetime(x['timestamp']))
                                 check_in = frappe.utils.get_datetime(first_morning['timestamp'])
-                                status_morning = "late" if check_in.hour >= 8 else "on_time"
+                                t = _get_time(check_in)
+                                status_morning = "late" if (t and t >= MORNING_DEADLINE) else "on_time"
                             if afternoon:
                                 last_afternoon = max(afternoon, key=lambda x: frappe.utils.get_datetime(x['timestamp']))
                                 check_out = frappe.utils.get_datetime(last_afternoon['timestamp'])
-                                status_afternoon = "early_leave" if check_out.hour < 16 else "on_time"
+                                t = _get_time(check_out)
+                                status_afternoon = "early_leave" if (t and t < AFTERNOON_DEADLINE) else "on_time"
                     except Exception:
                         pass
                 elif check_in:
-                    status_morning = "late" if check_in.hour >= 8 else "on_time"
-                if check_out and not status_afternoon:
-                    status_afternoon = "early_leave" if check_out.hour < 16 else "on_time"
+                    t = _get_time(check_in)
+                    status_morning = "late" if (t and t >= MORNING_DEADLINE) else "on_time"
+                if check_out and status_afternoon == "no_checkout":
+                    t = _get_time(check_out)
+                    status_afternoon = "early_leave" if (t and t < AFTERNOON_DEADLINE) else "on_time"
                 
                 faceid_map[date_str] = {
                     "check_in": check_in.strftime("%H:%M") if check_in else None,
@@ -1275,7 +1287,7 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
                     "status_afternoon": status_afternoon
                 }
         
-        # 2. Lấy điểm danh chủ nhiệm (SIS Class Attendance)
+        # 2. Lấy điểm danh chủ nhiệm (SIS Class Attendance) - chỉ tiết Homeroom
         homeroom_records = []
         if school_year:
             homeroom_records = frappe.db.sql("""
@@ -1284,6 +1296,7 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
                 INNER JOIN `tabSIS Class` c ON a.class_id = c.name
                 WHERE a.student_id = %(student_id)s
                     AND a.date >= %(start)s AND a.date <= %(end)s
+                    AND (a.period = 'Homeroom' OR a.period = 'HOMEROOM' OR LOWER(TRIM(a.period)) = 'homeroom')
                     AND c.school_year_id = %(school_year)s
                     AND (c.campus_id = %(campus_id)s OR %(campus_id)s IS NULL)
             """, {
