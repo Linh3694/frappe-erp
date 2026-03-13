@@ -6,7 +6,8 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "source_name"
+  "source_name",
+  "notes"
  ],
  "fields": [
   {
@@ -16,6 +17,12 @@
    "label": "Source Name",
    "reqd": 1,
    "unique": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Text",
+   "label": "Ghi chú",
+   "in_list_view": 0
   }
  ],
  "index_web_pages_for_search": 1,
