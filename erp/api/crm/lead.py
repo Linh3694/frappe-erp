@@ -283,8 +283,9 @@ def update_lead():
         
         updatable_fields = [
             "data_source", "staff_code", "pic", "campus_id",
-            "student_name", "student_gender", "student_dob",
+            "student_name", "student_gender", "student_dob", "student_code",
             "current_grade", "target_grade", "current_school", "student_note",
+            "tuition_fee_pct", "service_fee_pct", "dev_fee_pct", "ksdv_pct",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note",
