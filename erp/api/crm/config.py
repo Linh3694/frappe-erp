@@ -95,6 +95,28 @@ def delete_source():
     return _crud_delete("CRM Source", get_request_data().get("name"))
 
 
+# --- CRM Promotion ---
+@frappe.whitelist()
+def get_promotions():
+    return _crud_list("CRM Promotion")
+
+
+@frappe.whitelist(methods=["POST"])
+def create_promotion():
+    return _crud_create("CRM Promotion", get_request_data(), "promotion_name")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_promotion():
+    data = get_request_data()
+    return _crud_update("CRM Promotion", data.get("name"), data)
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_promotion():
+    return _crud_delete("CRM Promotion", get_request_data().get("name"))
+
+
 # --- CRM Referrer ---
 @frappe.whitelist()
 def get_referrers():
