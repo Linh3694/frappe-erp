@@ -1,0 +1,103 @@
+{
+ "actions": [],
+ "autoname": "format:CRM-ADM-CRS-{#####}",
+ "creation": "2024-01-01 00:00:00.000000",
+ "description": "Khoá học tuyển sinh - Hoạt động hồ sơ",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "course_name",
+  "event_date",
+  "student_count",
+  "is_active",
+  "school_year_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "course_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên khoá học",
+   "reqd": 1
+  },
+  {
+   "fieldname": "event_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày diễn ra"
+  },
+  {
+   "default": "0",
+   "fieldname": "student_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Số học sinh",
+   "read_only": 1,
+   "description": "Tính tự động khi thêm học sinh vào khoá học"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Trạng thái"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Năm học",
+   "options": "SIS School Year"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Admission Course",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "Registrar",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "SIS Sales"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "course_name"
+}
