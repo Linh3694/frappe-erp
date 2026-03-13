@@ -1188,6 +1188,44 @@ def search_students(search_term=None):
         except Exception as e:
             frappe.logger().error(f"Failed to enrich search students with class info: {str(e)}")
         
+        # Enrich với ảnh học sinh từ SIS Photo (ưu tiên ảnh năm học hiện tại)
+        try:
+            student_ids = [s.get("name") for s in students if s.get("name")]
+            if student_ids:
+                current_sy = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1, "campus_id": campus_id},
+                    "name",
+                    order_by="start_date desc"
+                ) or frappe.db.get_value(
+                    "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+                )
+                photo_rows = frappe.db.sql(
+                    """
+                    SELECT student_id, photo FROM `tabSIS Photo`
+                    WHERE student_id IN %(ids)s AND type = 'student' AND status = 'Active'
+                    ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                             upload_date DESC, creation DESC
+                    """,
+                    {"ids": tuple(student_ids), "sy": current_sy or ""},
+                    as_dict=True,
+                )
+                seen = set()
+                for row in photo_rows:
+                    if row["student_id"] not in seen and row.get("photo"):
+                        purl = row["photo"]
+                        if purl.startswith("/files/"):
+                            purl = frappe.utils.get_url(purl)
+                        elif not purl.startswith("http"):
+                            purl = frappe.utils.get_url("/files/" + purl)
+                        for s in students:
+                            if s.get("name") == row["student_id"]:
+                                s["user_image"] = purl
+                                break
+                        seen.add(row["student_id"])
+        except Exception as e:
+            frappe.logger().error(f"Failed to enrich search students with SIS Photo: {str(e)}")
+        
         # Return all search results without pagination
         return success_response(
             data=students,
