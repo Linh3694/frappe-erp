@@ -240,6 +240,14 @@ def get_guardian_data():
                 "guardian_name": guardian.guardian_name,
                 "phone_number": guardian.phone_number,
                 "email": guardian.email,
+                "id_number": getattr(guardian, "id_number", None),
+                "occupation": getattr(guardian, "occupation", None),
+                "position": getattr(guardian, "position", None),
+                "workplace": getattr(guardian, "workplace", None),
+                "address": getattr(guardian, "address", None),
+                "nationality": getattr(guardian, "nationality", None),
+                "note": getattr(guardian, "note", None),
+                "dob": str(guardian.dob) if getattr(guardian, "dob", None) else None,
                 "creation": guardian.creation.isoformat() if guardian.creation else None,
                 "modified": guardian.modified.isoformat() if guardian.modified else None
             },
@@ -292,6 +300,14 @@ def create_guardian():
         guardian_id = data.get("guardian_id") or data.get("guardianId") or ""
         phone_number = data.get("phone_number") or data.get("phoneNumber") or ""
         email = data.get("email") or ""
+        id_number = data.get("id_number") or ""
+        occupation = data.get("occupation") or ""
+        position = data.get("position") or ""
+        workplace = data.get("workplace") or ""
+        address = data.get("address") or ""
+        nationality = data.get("nationality") or ""
+        note = data.get("note") or ""
+        dob = data.get("dob") or None
         
         # Generate guardian_id if not provided
         # Sử dụng timestamp milliseconds để đảm bảo unique khi nhiều guardian có cùng tên
@@ -361,7 +377,15 @@ def create_guardian():
             "guardian_id": guardian_id,
             "guardian_name": guardian_name,
             "phone_number": formatted_phone or "",
-            "email": email or ""
+            "email": email or "",
+            "id_number": id_number,
+            "occupation": occupation,
+            "position": position,
+            "workplace": workplace,
+            "address": address,
+            "nationality": nationality,
+            "note": note,
+            "dob": dob
         })
         
         frappe.logger().info(f"Creating guardian with ID: {guardian_id}, Name: {guardian_name}")
@@ -392,7 +416,15 @@ def create_guardian():
                 "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
-                "email": guardian_doc.email if guardian_doc.email is not None else (email or "")
+                "email": guardian_doc.email if guardian_doc.email is not None else (email or ""),
+                "id_number": getattr(guardian_doc, "id_number", None),
+                "occupation": getattr(guardian_doc, "occupation", None),
+                "position": getattr(guardian_doc, "position", None),
+                "workplace": getattr(guardian_doc, "workplace", None),
+                "address": getattr(guardian_doc, "address", None),
+                "nationality": getattr(guardian_doc, "nationality", None),
+                "note": getattr(guardian_doc, "note", None),
+                "dob": str(guardian_doc.dob) if getattr(guardian_doc, "dob", None) else None
             },
             message="Guardian created successfully"
         )
@@ -407,7 +439,11 @@ def create_guardian():
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
-def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, email=None):
+def update_guardian(
+    guardian_id=None, guardian_name=None, phone_number=None, email=None,
+    id_number=None, occupation=None, position=None, workplace=None,
+    address=None, nationality=None, note=None, dob=None
+):
     """Update an existing guardian"""
     try:
         # Collect parameters from multiple sources and MERGE (do not depend on presence of guardian_id)
@@ -429,6 +465,22 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
                     phone_number = json_data.get("phone_number")
                 if json_data.get("email") is not None:
                     email = json_data.get("email")
+                if "id_number" in json_data:
+                    id_number = json_data.get("id_number")
+                if "occupation" in json_data:
+                    occupation = json_data.get("occupation")
+                if "position" in json_data:
+                    position = json_data.get("position")
+                if "workplace" in json_data:
+                    workplace = json_data.get("workplace")
+                if "address" in json_data:
+                    address = json_data.get("address")
+                if "nationality" in json_data:
+                    nationality = json_data.get("nationality")
+                if "note" in json_data:
+                    note = json_data.get("note")
+                if "dob" in json_data:
+                    dob = json_data.get("dob")
             except Exception:
                 pass
         
@@ -475,17 +527,48 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
         if email is not None:
             guardian_doc.email = email or ""
             changes_made = True
+
+        if id_number is not None:
+            guardian_doc.id_number = id_number or ""
+            changes_made = True
+        if occupation is not None:
+            guardian_doc.occupation = occupation or ""
+            changes_made = True
+        if position is not None:
+            guardian_doc.position = position or ""
+            changes_made = True
+        if workplace is not None:
+            guardian_doc.workplace = workplace or ""
+            changes_made = True
+        if address is not None:
+            guardian_doc.address = address or ""
+            changes_made = True
+        if nationality is not None:
+            guardian_doc.nationality = nationality or ""
+            changes_made = True
+        if note is not None:
+            guardian_doc.note = note or ""
+            changes_made = True
+        if dob is not None:
+            guardian_doc.dob = dob if dob else None
+            changes_made = True
         
         # Save the document with validation disabled
         try:
             guardian_doc.flags.ignore_validate = True
             guardian_doc.save(ignore_permissions=True)
             # Force-set using db API to avoid any override by hooks/server scripts
-            frappe.db.set_value("CRM Guardian", guardian_doc.name, {
+            set_values = {
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
                 "email": guardian_doc.email or "",
-            })
+            }
+            for attr in ("id_number", "occupation", "position", "workplace", "address", "nationality", "note"):
+                if hasattr(guardian_doc, attr):
+                    set_values[attr] = getattr(guardian_doc, attr) or ""
+            if hasattr(guardian_doc, "dob"):
+                set_values["dob"] = getattr(guardian_doc, "dob", None)
+            frappe.db.set_value("CRM Guardian", guardian_doc.name, set_values)
             frappe.db.commit()
         except Exception as save_error:
             return error_response(
@@ -502,7 +585,15 @@ def update_guardian(guardian_id=None, guardian_name=None, phone_number=None, ema
                 "guardian_id": guardian_doc.guardian_id,
                 "guardian_name": guardian_doc.guardian_name,
                 "phone_number": guardian_doc.phone_number,
-                "email": guardian_doc.email if guardian_doc.email is not None else (email or "")
+                "email": guardian_doc.email if guardian_doc.email is not None else (email or ""),
+                "id_number": getattr(guardian_doc, "id_number", None),
+                "occupation": getattr(guardian_doc, "occupation", None),
+                "position": getattr(guardian_doc, "position", None),
+                "workplace": getattr(guardian_doc, "workplace", None),
+                "address": getattr(guardian_doc, "address", None),
+                "nationality": getattr(guardian_doc, "nationality", None),
+                "note": getattr(guardian_doc, "note", None),
+                "dob": str(guardian_doc.dob) if getattr(guardian_doc, "dob", None) else None
             },
             message="Guardian updated successfully"
         )

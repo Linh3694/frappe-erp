@@ -60,6 +60,9 @@
   "guardian_address",
   "guardian_nationality",
   "guardian_note",
+  "guardian_dob",
+  "linked_family",
+  "lead_guardians",
   "phone_section",
   "phone_numbers",
   "enrollment_info_section",
@@ -326,6 +329,26 @@
    "fieldname": "guardian_note",
    "fieldtype": "Small Text",
    "label": "Guardian Note"
+  },
+  {
+   "fieldname": "guardian_dob",
+   "fieldtype": "Date",
+   "label": "Guardian DOB",
+   "description": "Ngày sinh phụ huynh (flat field, backward compat)"
+  },
+  {
+   "fieldname": "linked_family",
+   "fieldtype": "Link",
+   "label": "Linked Family",
+   "options": "CRM Family",
+   "description": "Gia đình liên kết khi lead đã Enrolled"
+  },
+  {
+   "fieldname": "lead_guardians",
+   "fieldtype": "Table",
+   "label": "Lead Guardians",
+   "options": "CRM Lead Guardian",
+   "description": "Danh sách phụ huynh liên kết với lead"
   },
   {
    "fieldname": "phone_section",

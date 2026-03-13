@@ -15,6 +15,47 @@ from erp.api.crm.utils import (
 )
 
 
+def _sync_lead_guardians_to_family_if_needed(doc):
+    """Tao CRM Family tu lead_guardians khi lead co linked_student nhung chua co linked_family."""
+    if not getattr(doc, "linked_student", None):
+        return
+    if getattr(doc, "linked_family", None):
+        return
+    lead_guardians = getattr(doc, "lead_guardians", None) or []
+    if not lead_guardians:
+        return
+    try:
+        from erp.api.erp_sis.family import create_family
+        guardians = [lg.guardian for lg in lead_guardians if lg.get("guardian")]
+        if not guardians:
+            return
+        relationships = []
+        for i, lg in enumerate(lead_guardians):
+            if not lg.get("guardian"):
+                continue
+            relationships.append({
+                "student": doc.linked_student,
+                "guardian": lg.guardian,
+                "relationship_type": lg.get("relationship_type") or "other",
+                "key_person": 1 if lg.get("is_primary_contact") else 0,
+                "access": 1,
+            })
+        frappe.local.form_dict = {
+            "students": [doc.linked_student],
+            "guardians": guardians,
+            "relationships": relationships,
+        }
+        res = create_family()
+        if res.get("success") and res.get("data", {}).get("family_code"):
+            family_code = res["data"]["family_code"]
+            if frappe.db.exists("CRM Family", family_code):
+                doc.linked_family = family_code
+                doc.flags.ignore_validate = True
+                doc.save(ignore_permissions=True)
+    except Exception as e:
+        frappe.log_error(f"Loi sync lead_guardians sang CRM Family: {str(e)}")
+
+
 def _log_step_change(lead_name, old_step, new_step, old_status, new_status):
     """Ghi nhan lich su chuyen buoc"""
     try:
@@ -148,6 +189,10 @@ def advance_step():
     
     _log_step_change(name, old_step, target_step, old_status, doc.status)
     
+    # Tao CRM Family tu lead_guardians khi chuyen Deal -> Enrolled (co linked_student)
+    if old_step == "Deal" and target_step == "Enrolled":
+        _sync_lead_guardians_to_family_if_needed(doc)
+    
     # Tu dong tao enrollment records khi chuyen Deal -> Enrolled
     if old_step == "Deal" and target_step == "Enrolled" and not doc.linked_student:
         try:
@@ -244,6 +289,8 @@ def enroll_lead():
     frappe.db.commit()
     
     _log_step_change(name, old_step, "Enrolled", old_status, "Dang hoc")
+    
+    _sync_lead_guardians_to_family_if_needed(doc)
     
     return single_item_response(doc.as_dict(), "Da nhap hoc thanh cong")
 
@@ -377,6 +424,7 @@ def auto_enroll_paid_leads():
             doc.status = "Dang hoc"
             doc.save(ignore_permissions=True)
             _log_step_change(doc.name, old_step, "Enrolled", old_status, "Dang hoc")
+            _sync_lead_guardians_to_family_if_needed(doc)
             enrolled_count += 1
         except Exception as e:
             errors.append({"name": lead["name"], "error": str(e)})

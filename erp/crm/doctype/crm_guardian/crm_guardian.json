@@ -21,6 +21,15 @@
   "guardian_name",
   "phone_number",
   "email",
+  "cb_guardian_1",
+  "id_number",
+  "occupation",
+  "position",
+  "workplace",
+  "address",
+  "nationality",
+  "note",
+  "dob",
   "family_information",
   "family_code",
   "student_relationships",
@@ -67,6 +76,61 @@
    "label": "Email",
    "reqd": 0,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "cb_guardian_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "id_number",
+   "fieldtype": "Data",
+   "label": "ID Number",
+   "reqd": 0,
+   "description": "CCCD/Passport, max 16 chars"
+  },
+  {
+   "fieldname": "occupation",
+   "fieldtype": "Data",
+   "label": "Occupation",
+   "reqd": 0
+  },
+  {
+   "fieldname": "position",
+   "fieldtype": "Data",
+   "label": "Position",
+   "reqd": 0
+  },
+  {
+   "fieldname": "workplace",
+   "fieldtype": "Data",
+   "label": "Workplace",
+   "reqd": 0
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Data",
+   "label": "Address",
+   "reqd": 0
+  },
+  {
+   "fieldname": "nationality",
+   "fieldtype": "Link",
+   "label": "Nationality",
+   "options": "Country",
+   "reqd": 0,
+   "default": "Vietnam"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Note",
+   "reqd": 0
+  },
+  {
+   "fieldname": "dob",
+   "fieldtype": "Date",
+   "label": "Date of Birth",
+   "reqd": 0
   },
   {
    "fieldname": "family_information",
