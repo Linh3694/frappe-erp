@@ -17,6 +17,18 @@ from erp.api.crm.utils import check_crm_permission, get_request_data
 # ========== SỰ KIỆN (CRM Admission Event) ==========
 
 
+def _enrich_modified_by_name(items, modified_by_field="modified_by"):
+    """Bổ sung modified_by_name (full_name từ User) cho mỗi item"""
+    for item in items:
+        user_id = item.get(modified_by_field)
+        if user_id:
+            full_name = frappe.db.get_value("User", user_id, "full_name")
+            item["modified_by_name"] = full_name or user_id
+        else:
+            item["modified_by_name"] = None
+    return items
+
+
 @frappe.whitelist()
 def get_events():
     """Lấy danh sách sự kiện, filter theo school_year_id nếu có"""
@@ -31,6 +43,7 @@ def get_events():
         fields=["name", "event_name", "event_date", "student_count", "is_active", "school_year_id", "modified", "modified_by"],
         order_by="modified desc",
     )
+    _enrich_modified_by_name(items)
     return list_response(items)
 
 
@@ -156,6 +169,7 @@ def get_courses():
         fields=["name", "course_name", "event_date", "student_count", "is_active", "school_year_id", "modified", "modified_by"],
         order_by="modified desc",
     )
+    _enrich_modified_by_name(items)
     return list_response(items)
 
 
