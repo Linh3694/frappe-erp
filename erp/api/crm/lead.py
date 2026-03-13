@@ -36,6 +36,9 @@ def get_leads():
     pic = frappe.request.args.get("pic")
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 20))
+    # per_page=0: lấy tất cả (unlimited) - dùng cho dialog thêm học sinh event/course
+    if per_page <= 0:
+        per_page = 0
     sort_by = frappe.request.args.get("sort_by", "modified")
     sort_order = frappe.request.args.get("sort_order", "desc")
     
@@ -73,8 +76,9 @@ def get_leads():
     else:
         total = frappe.db.count("CRM Lead", filters=filters)
     
-    offset = (page - 1) * per_page
-    
+    offset = 0 if per_page == 0 else (page - 1) * per_page
+    page_length = 0 if per_page == 0 else per_page  # 0 = unlimited trong Frappe get_all
+
     # Lay danh sach
     leads = frappe.get_all(
         "CRM Lead",
@@ -87,7 +91,7 @@ def get_leads():
         ],
         order_by=f"{sort_by} {sort_order}",
         start=offset,
-        page_length=per_page
+        page_length=page_length
     )
     
     # Lay phone number chinh cho moi lead
@@ -116,7 +120,9 @@ def get_leads():
             )
         lead["primary_phone"] = phone or ""
     
-    return paginated_response(leads, page, total, per_page)
+    # per_page=0: tra ve all, truyen total de paginated_response tinh total_pages=1
+    resp_per_page = total if per_page == 0 else per_page
+    return paginated_response(leads, 1 if per_page == 0 else page, total, resp_per_page)
 
 
 @frappe.whitelist()
