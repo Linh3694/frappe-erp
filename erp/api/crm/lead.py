@@ -14,6 +14,16 @@ from erp.api.crm.utils import (
 )
 
 
+def _get_full_image_url(user_image):
+    """Chuyen user_image (path) thanh full URL de frontend hien thi avatar."""
+    if not user_image:
+        return None
+    if user_image.startswith("http://") or user_image.startswith("https://"):
+        return user_image
+    path = user_image if user_image.startswith("/") else "/files/" + user_image
+    return frappe.utils.get_url(path)
+
+
 @frappe.whitelist()
 def get_leads():
     """Lay danh sach leads voi filter + pagination"""
@@ -82,6 +92,16 @@ def get_leads():
     
     # Lay phone number chinh cho moi lead
     for lead in leads:
+        # Bo sung pic_info (full_name, user_image) de hien thi ten + avatar
+        if lead.get("pic"):
+            pic_user = frappe.db.get_value(
+                "User", lead["pic"], ["full_name", "user_image"], as_dict=True
+            )
+            if pic_user:
+                lead["pic_info"] = {
+                    "full_name": pic_user.get("full_name") or lead["pic"],
+                    "user_image": _get_full_image_url(pic_user.get("user_image")),
+                }
         phone = frappe.db.get_value(
             "CRM Lead Phone",
             {"parent": lead["name"], "is_primary": 1},
@@ -113,6 +133,17 @@ def get_lead():
     
     doc = frappe.get_doc("CRM Lead", name)
     lead_data = doc.as_dict()
+    
+    # Bo sung pic_info (full_name, user_image) de hien thi ten + avatar
+    if doc.pic:
+        pic_user = frappe.db.get_value(
+            "User", doc.pic, ["full_name", "user_image"], as_dict=True
+        )
+        if pic_user:
+            lead_data["pic_info"] = {
+                "full_name": pic_user.get("full_name") or doc.pic,
+                "user_image": _get_full_image_url(pic_user.get("user_image")),
+            }
     
     # Lay ghi chu
     notes = frappe.get_all(
