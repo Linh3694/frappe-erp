@@ -434,8 +434,9 @@ def _guardian_to_member_dict(guardian_doc, relationship_type=None, is_primary_co
 def get_lead_family():
     """Lay thong tin gia dinh cua lead: members (guardian + relationship + phones), family_code."""
     check_crm_permission()
+    # GET: params trong query string (request.args). POST: trong body (get_request_data).
     data = get_request_data() or {}
-    if not data and hasattr(frappe.request, "args"):
+    if hasattr(frappe.request, "args") and frappe.request.args:
         data = dict(frappe.request.args)
     name = data.get("name") or data.get("lead_name")
     if not name:
