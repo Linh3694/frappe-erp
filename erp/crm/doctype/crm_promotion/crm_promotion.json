@@ -21,9 +21,10 @@
   },
   {
    "fieldname": "category",
-   "fieldtype": "Data",
+   "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Phân loại"
+   "label": "Phân loại",
+   "options": "Học phí\nPhí dịch vụ\nPhí phát triển trường\nKhảo sát đầu vào"
   },
   {
    "fieldname": "value",
