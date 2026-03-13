@@ -63,6 +63,7 @@
   "guardian_dob",
   "linked_family",
   "lead_guardians",
+  "lead_siblings",
   "phone_section",
   "phone_numbers",
   "enrollment_info_section",
@@ -349,6 +350,13 @@
    "label": "Lead Guardians",
    "options": "CRM Lead Guardian",
    "description": "Danh sách phụ huynh liên kết với lead"
+  },
+  {
+   "fieldname": "lead_siblings",
+   "fieldtype": "Table",
+   "label": "Lead Siblings",
+   "options": "CRM Lead Sibling",
+   "description": "Anh/Chị/Em của học sinh trong hồ sơ"
   },
   {
    "fieldname": "phone_section",

@@ -921,6 +921,130 @@ def remove_lead_guardian():
     return success_response(message="Da xoa phu huynh khoi ho so")
 
 
+# === Lead Siblings (Anh/Chị/Em) APIs ===
+
+@frappe.whitelist(methods=["POST"])
+def add_lead_sibling():
+    """Them anh/chi/em vao lead. mode='new' nhap thong tin moi, mode='existing' chon CRM Student co san."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    mode = data.get("mode", "new")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    lead_siblings = getattr(doc, "lead_siblings", None) or []
+
+    if mode == "existing":
+        # Lay tu CRM Student - school mac dinh Wellspring Ha Noi
+        student_id = data.get("student_id") or data.get("existing_student")
+        if not student_id:
+            return validation_error_response("student_id bat buoc khi mode=existing", {"student_id": ["Required"]})
+        if not frappe.db.exists("CRM Student", student_id):
+            return not_found_response(f"Khong tim thay CRM Student {student_id}")
+        student = frappe.get_doc("CRM Student", student_id)
+        # Tim CRM School "Wellspring Ha Noi" hoac tuong tu
+        wellspring_school = frappe.db.get_value(
+            "CRM School",
+            {"school_name": ["like", "%Wellspring%Hà Nội%"]},
+            "name",
+            order_by="creation desc"
+        )
+        if not wellspring_school:
+            wellspring_school = frappe.db.get_value(
+                "CRM School",
+                {"school_name": ["like", "%Wellspring%"]},
+                "name",
+                order_by="creation desc"
+            )
+        doc.append("lead_siblings", {
+            "sibling_name": student.student_name,
+            "student_code": student.student_code or "",
+            "relationship_type": data.get("relationship_type", ""),
+            "dob": str(student.dob) if student.dob else None,
+            "school": wellspring_school or "",
+        })
+    else:
+        # Thêm mới - 5 field, sibling_name required
+        sibling_data = data.get("sibling_data") or data
+        s_name = sibling_data.get("sibling_name") or sibling_data.get("student_name")
+        if not s_name:
+            return validation_error_response("sibling_name (Họ tên) bat buoc", {"sibling_name": ["Required"]})
+        doc.append("lead_siblings", {
+            "sibling_name": s_name,
+            "student_code": sibling_data.get("student_code", ""),
+            "relationship_type": sibling_data.get("relationship_type", ""),
+            "dob": sibling_data.get("dob"),
+            "school": sibling_data.get("school", ""),
+        })
+
+    doc.flags.ignore_validate = True
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return single_item_response({"siblings": [r.as_dict() for r in doc.lead_siblings]}, "Da them anh/chi/em")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_lead_sibling():
+    """Cap nhat thong tin anh/chi/em."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    row_name = data.get("row_name") or data.get("sibling_row_name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not row_name:
+        return validation_error_response("Thieu row_name", {"row_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    for row in (getattr(doc, "lead_siblings", None) or []):
+        if row.get("name") == row_name:
+            updates = data.get("updates") or data
+            if "sibling_name" in updates:
+                row.sibling_name = updates["sibling_name"]
+            if "student_code" in updates:
+                row.student_code = updates.get("student_code", "")
+            if "relationship_type" in updates:
+                row.relationship_type = updates.get("relationship_type", "")
+            if "dob" in updates:
+                row.dob = updates.get("dob")
+            if "school" in updates:
+                row.school = updates.get("school", "")
+            doc.flags.ignore_validate = True
+            doc.save(ignore_permissions=True)
+            frappe.db.commit()
+            return single_item_response(row.as_dict(), "Da cap nhat")
+    return not_found_response(f"Khong tim thay dong anh/chi/em {row_name}")
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_lead_sibling():
+    """Xoa anh/chi/em khoi lead."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    row_name = data.get("row_name") or data.get("sibling_row_name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not row_name:
+        return validation_error_response("Thieu row_name", {"row_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    new_siblings = [r for r in (getattr(doc, "lead_siblings", None) or []) if r.get("name") != row_name]
+    doc.set("lead_siblings", new_siblings)
+    doc.flags.ignore_validate = True
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return success_response(message="Da xoa anh/chi/em khoi ho so")
+
+
 @frappe.whitelist(methods=["POST"])
 def set_primary_contact():
     """Dat guardian lam nguoi lien lac chinh."""
@@ -1035,12 +1159,18 @@ def add_guardian_phone():
         g_doc.save(ignore_permissions=True)
         g_doc.reload()
         existing = getattr(g_doc, "phone_numbers", None) or []
-    # Kiem tra trung trong phone_numbers
+    # Kiem tra trung trong phone_numbers cua guardian nay
     for row in existing:
         if (row.get("phone_number") or "").replace(" ", "") == (formatted or "").replace(" ", ""):
             return validation_error_response(f"So '{formatted}' da ton tai", {"phone_number": ["Trung"]})
-    # Kiem tra trung voi guardian khac (chi so chinh?)
+    # Kiem tra trung voi guardian khac (phone_number cu hoac phone_numbers)
     if frappe.db.exists("CRM Guardian", {"phone_number": formatted, "name": ["!=", guardian_name]}):
+        return validation_error_response(f"So '{formatted}' da duoc su dung boi phu huynh khac", {"phone_number": ["Trung"]})
+    dup = frappe.db.sql(
+        "SELECT 1 FROM `tabCRM Guardian Phone` WHERE phone_number=%s AND parent!=%s LIMIT 1",
+        (formatted, guardian_name),
+    )
+    if dup:
         return validation_error_response(f"So '{formatted}' da duoc su dung boi phu huynh khac", {"phone_number": ["Trung"]})
 
     is_first = len(existing) == 0
