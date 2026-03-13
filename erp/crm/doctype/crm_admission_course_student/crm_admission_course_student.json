@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "autoname": "format:CRM-ADM-CRS-STU-{#####}",
+ "creation": "2024-01-01 00:00:00.000000",
+ "description": "Học sinh đăng ký khoá học tuyển sinh - CRM Lead -> Course",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "course_id",
+  "crm_lead_id",
+  "status"
+ ],
+ "fields": [
+  {
+   "fieldname": "course_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Khoá học",
+   "options": "CRM Admission Course",
+   "reqd": 1
+  },
+  {
+   "fieldname": "crm_lead_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "CRM Lead",
+   "options": "CRM Lead",
+   "reqd": 1
+  },
+  {
+   "default": "registered",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trạng thái",
+   "options": "registered\nattended\nnot_attended"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Admission Course Student",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "SIS Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "Registrar",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "SIS Sales"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
