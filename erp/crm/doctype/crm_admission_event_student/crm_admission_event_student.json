@@ -1,22 +1,22 @@
 {
  "actions": [],
- "autoname": "format:CRM-ADM-CRS-STU-{#####}",
+ "autoname": "format:CRM-ADM-EVT-STU-{#####}",
  "creation": "2024-01-01 00:00:00.000000",
- "description": "Học sinh đăng ký khoá học tuyển sinh - CRM Lead -> Course",
+ "description": "Học sinh đăng ký sự kiện tuyển sinh - CRM Lead -> Event",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "course_id",
+  "event_id",
   "crm_lead_id",
   "status"
  ],
  "fields": [
   {
-   "fieldname": "course_id",
+   "fieldname": "event_id",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Khoá học",
-   "options": "CRM Admission Course",
+   "label": "Sự kiện",
+   "options": "CRM Admission Event",
    "reqd": 1
   },
   {
@@ -33,7 +33,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Trạng thái",
-   "options": "registered\nattended\nnot_attended\npaid"
+   "options": "registered\nattended\nnot_attended"
   }
  ],
  "index_web_pages_for_search": 0,
@@ -42,7 +42,7 @@
  "modified": "2024-01-01 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Crm",
- "name": "CRM Admission Course Student",
+ "name": "CRM Admission Event Student",
  "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
