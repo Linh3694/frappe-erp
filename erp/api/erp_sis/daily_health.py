@@ -236,6 +236,7 @@ def get_daily_health_visits():
     Params:
         - date: Ngày (optional, default: today)
         - campus: Campus filter (optional)
+        - education_stage: Filter theo cấp học (optional)
         - status: Filter theo status (optional)
         - search: Tìm kiếm theo tên/mã học sinh/lớp (optional)
     """
@@ -247,6 +248,7 @@ def get_daily_health_visits():
         
         visit_date = data.get("date") or request_args.get("date") or today()
         campus = data.get("campus") or request_args.get("campus")
+        education_stage = data.get("education_stage") or request_args.get("education_stage")
         status_filter = data.get("status") or request_args.get("status")
         search = data.get("search") or request_args.get("search")
         
@@ -255,8 +257,34 @@ def get_daily_health_visits():
         if status_filter:
             filters["status"] = status_filter
         
-        # Nếu có campus filter, lấy danh sách class_id
-        if campus:
+        # Nếu có education_stage filter (ưu tiên như Sổ đầu bài), lấy class_id theo cấp học
+        if education_stage:
+            # Lấy education grades thuộc stage này
+            grade_ids = frappe.get_all(
+                "SIS Education Grade",
+                filters={"education_stage_id": education_stage},
+                pluck="name"
+            )
+            if grade_ids:
+                stage_class_ids = frappe.get_all(
+                    "SIS Class",
+                    filters={"education_grade": ["in", grade_ids]},
+                    pluck="name"
+                )
+                if stage_class_ids:
+                    filters["class_id"] = ["in", stage_class_ids]
+                else:
+                    return success_response(
+                        data={"data": [], "total": 0},
+                        message="Lấy danh sách học sinh xuống Y tế thành công"
+                    )
+            else:
+                return success_response(
+                    data={"data": [], "total": 0},
+                    message="Lấy danh sách học sinh xuống Y tế thành công"
+                )
+        # Nếu có campus filter (fallback), lấy danh sách class_id
+        elif campus:
             campus_class_ids = frappe.get_all(
                 "SIS Class",
                 filters={"campus_id": campus},
