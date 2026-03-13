@@ -51,11 +51,10 @@
   },
   {
    "fieldname": "school",
-   "fieldtype": "Link",
+   "fieldtype": "Data",
    "label": "Trường",
-   "options": "CRM School",
    "in_list_view": 1,
-   "description": "Trường đang học (mặc định Wellspring Hà Nội khi lấy từ hệ thống)"
+   "description": "Tên trường (mặc định Wellspring Hà Nội khi lấy từ hệ thống, nhập tự do khi thêm mới)"
   }
  ],
  "index_web_pages_for_search": 0,

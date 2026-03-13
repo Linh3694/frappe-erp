@@ -946,21 +946,13 @@ def add_lead_sibling():
         if not frappe.db.exists("CRM Student", student_id):
             return not_found_response(f"Khong tim thay CRM Student {student_id}")
         student = frappe.get_doc("CRM Student", student_id)
-        # Tim CRM School "Wellspring Ha Noi" hoac tuong tu
-        wellspring_schools = frappe.get_all(
-            "CRM School",
-            filters={"school_name": ["like", "%Wellspring%"]},
-            fields=["name"],
-            order_by="creation desc",
-            limit=1
-        )
-        wellspring_school = wellspring_schools[0]["name"] if wellspring_schools else None
+        # Lấy từ hệ thống: trường mặc định Wellspring Hà Nội (text)
         doc.append("lead_siblings", {
             "sibling_name": student.student_name,
             "student_code": student.student_code or "",
             "relationship_type": data.get("relationship_type", ""),
             "dob": str(student.dob) if student.dob else None,
-            "school": wellspring_school or "",
+            "school": "Wellspring Hà Nội",
         })
     else:
         # Thêm mới - 5 field, sibling_name required
