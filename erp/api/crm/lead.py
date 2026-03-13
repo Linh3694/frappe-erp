@@ -734,8 +734,33 @@ def update_lead_guardian():
     g_doc.flags.ignore_validate = True
     g_doc.save(ignore_permissions=True)
 
-    # Sync flat fields neu guardian nay la primary contact
+    # Cap nhat relationship_type trong lead_guardians neu co
     doc = frappe.get_doc("CRM Lead", name)
+    relationship_type = updates.get("relationship_type")
+    if relationship_type is not None:
+        lead_guardians = getattr(doc, "lead_guardians", None) or []
+        for lg in lead_guardians:
+            if lg.get("guardian") == guardian_name:
+                lg.relationship_type = relationship_type
+                break
+        doc.flags.ignore_validate = True
+        doc.save(ignore_permissions=True)
+        doc = frappe.get_doc("CRM Lead", name)
+
+    # Cap nhat relationship_type trong CRM Family Relationship neu co linked_family
+    if relationship_type is not None and getattr(doc, "linked_family", None):
+        rels = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"parent": doc.linked_family, "guardian": guardian_name},
+            fields=["name"],
+        )
+        for r in rels:
+            rel_doc = frappe.get_doc("CRM Family Relationship", r["name"])
+            rel_doc.relationship_type = relationship_type
+            rel_doc.flags.ignore_validate = True
+            rel_doc.save(ignore_permissions=True)
+
+    # Sync flat fields neu guardian nay la primary contact
     is_primary = False
     lead_guardians = getattr(doc, "lead_guardians", None) or []
     for lg in lead_guardians:
