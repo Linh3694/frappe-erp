@@ -1307,20 +1307,24 @@ def submit_re_enrollment():
                     discount_percent = discount.annual_discount if data.get('payment_type') == 'annual' else discount.semester_discount
                     break
         
-        # Lấy năm học
+        # Lấy năm học từ config (SIS School Year dùng title_vn, title_en - không phải name_vn, name_en)
         school_year = ""
         try:
-            config_doc = frappe.get_doc("SIS Re-enrollment Config", config.name) if not 'config_doc' in dir() else config_doc
-            school_year_info = frappe.db.get_value(
-                "SIS School Year", 
-                config_doc.school_year_id, 
-                ["name_vn", "name_en"],
-                as_dict=True
-            )
-            if school_year_info:
-                school_year = school_year_info.name_vn or school_year_info.name_en or ""
-        except:
-            pass
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", config.name)
+            if config_doc.school_year_id:
+                school_year_info = frappe.db.get_value(
+                    "SIS School Year",
+                    config_doc.school_year_id,
+                    ["title_vn", "title_en"],
+                    as_dict=True
+                )
+                if school_year_info:
+                    school_year = school_year_info.title_vn or school_year_info.title_en or ""
+            # Fallback: dùng title của config nếu không lấy được từ School Year
+            if not school_year and config_doc.title:
+                school_year = config_doc.title
+        except Exception as e:
+            frappe.logger().error(f"Lỗi lấy school_year cho announcement: {str(e)}")
         
         # Tạo announcement và gửi push notification
         try:

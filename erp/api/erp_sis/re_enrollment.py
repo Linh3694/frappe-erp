@@ -1533,22 +1533,25 @@ def update_submission():
             try:
                 from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
                 
-                # Lấy thông tin config và năm học
+                # Lấy thông tin config và năm học (SIS School Year dùng title_vn, title_en)
                 school_year = ""
                 config_is_active = False
                 try:
                     config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
                     config_is_active = config_doc.is_active
-                    school_year_info = frappe.db.get_value(
-                        "SIS School Year",
-                        config_doc.school_year_id,
-                        ["name_vn", "name_en"],
-                        as_dict=True
-                    )
-                    if school_year_info:
-                        school_year = school_year_info.name_vn or school_year_info.name_en or ""
-                except:
-                    pass
+                    if config_doc.school_year_id:
+                        school_year_info = frappe.db.get_value(
+                            "SIS School Year",
+                            config_doc.school_year_id,
+                            ["title_vn", "title_en"],
+                            as_dict=True
+                        )
+                        if school_year_info:
+                            school_year = school_year_info.title_vn or school_year_info.title_en or ""
+                    if not school_year and config_doc.title:
+                        school_year = config_doc.title
+                except Exception as e:
+                    frappe.logger().error(f"Lỗi lấy school_year cho announcement: {str(e)}")
                 
                 # Chỉ gửi notification nếu config còn active
                 if not config_is_active:
@@ -2299,22 +2302,25 @@ def update_submission_decision():
         try:
             from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
             
-            # Lấy thông tin config và năm học
+            # Lấy thông tin config và năm học (SIS School Year dùng title_vn, title_en)
             school_year = ""
             config_is_active = False
             try:
                 config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
                 config_is_active = config_doc.is_active
-                school_year_info = frappe.db.get_value(
-                    "SIS School Year",
-                    config_doc.school_year_id,
-                    ["name_vn", "name_en"],
-                    as_dict=True
-                )
-                if school_year_info:
-                    school_year = school_year_info.name_vn or school_year_info.name_en or ""
-            except:
-                pass
+                if config_doc.school_year_id:
+                    school_year_info = frappe.db.get_value(
+                        "SIS School Year",
+                        config_doc.school_year_id,
+                        ["title_vn", "title_en"],
+                        as_dict=True
+                    )
+                    if school_year_info:
+                        school_year = school_year_info.title_vn or school_year_info.title_en or ""
+                if not school_year and config_doc.title:
+                    school_year = config_doc.title
+            except Exception as e:
+                frappe.logger().error(f"Lỗi lấy school_year cho announcement: {str(e)}")
             
             # Chỉ gửi notification nếu config còn active
             if not config_is_active:
