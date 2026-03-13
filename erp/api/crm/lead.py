@@ -402,12 +402,31 @@ def get_lead_summary():
 
 # === Lead Family / Guardian APIs ===
 
+def _get_guardian_phones(guardian_doc):
+    """Lay danh sach so dien thoai tu CRM Guardian. Ưu tiên phone_numbers, fallback phone_number."""
+    g = guardian_doc
+    phones = []
+    # Ưu tiên child table phone_numbers
+    phone_rows = getattr(g, "phone_numbers", None) or []
+    if phone_rows:
+        for row in phone_rows:
+            pn = row.get("phone_number") or ""
+            if pn:
+                phones.append({
+                    "phone_number": pn,
+                    "is_primary": 1 if row.get("is_primary") else 0,
+                    "name": row.get("name"),
+                })
+    # Fallback: phone_number cu (1 so, mac dinh la chinh)
+    if not phones and getattr(g, "phone_number", None):
+        phones.append({"phone_number": g.phone_number, "is_primary": 1})
+    return phones
+
+
 def _guardian_to_member_dict(guardian_doc, relationship_type=None, is_primary_contact=False):
     """Chuyen CRM Guardian doc thanh dict cho LeadFamilyMember."""
     g = guardian_doc
-    phones = []
-    if getattr(g, "phone_number", None):
-        phones.append({"phone_number": g.phone_number, "is_primary": 1})
+    phones = _get_guardian_phones(g)
     return {
         "guardian": {
             "name": g.name,
@@ -468,9 +487,7 @@ def get_lead_family():
                 continue
             g_doc = guardians_by_id.get(r["guardian"])
             if g_doc:
-                phones = []
-                if getattr(g_doc, "phone_number", None):
-                    phones.append({"phone_number": g_doc.phone_number, "is_primary": 1})
+                phones = _get_guardian_phones(g_doc)
                 members.append({
                     "guardian": {
                         "name": g_doc.name,
@@ -732,6 +749,32 @@ def update_lead_guardian():
     for k in guardian_fields:
         if k in updates:
             g_doc.set(k, updates[k])
+    # Cap nhat phone_numbers neu co (danh sach {phone_number, is_primary})
+    if "phone_numbers" in updates:
+        phone_list = updates.get("phone_numbers") or []
+        if isinstance(phone_list, list):
+            from erp.api.erp_sis.guardian import validate_vietnamese_phone_number
+            g_doc.set("phone_numbers", [])
+            has_primary = False
+            for p in phone_list:
+                pn = (p.get("phone_number") or p.get("phone") or "").strip()
+                if not pn:
+                    continue
+                try:
+                    pn = validate_vietnamese_phone_number(pn)
+                except ValueError:
+                    continue
+                is_prim = 1 if p.get("is_primary") else 0
+                if is_prim:
+                    has_primary = True
+                g_doc.append("phone_numbers", {"phone_number": pn, "is_primary": is_prim})
+            # Dam bao co dung 1 so chinh
+            if g_doc.phone_numbers:
+                if not has_primary:
+                    g_doc.phone_numbers[0].is_primary = 1
+                elif sum(1 for r in g_doc.phone_numbers if r.get("is_primary")) > 1:
+                    for i, r in enumerate(g_doc.phone_numbers):
+                        r.is_primary = 1 if i == 0 else 0
     g_doc.flags.ignore_validate = True
     g_doc.save(ignore_permissions=True)
 
@@ -959,3 +1002,112 @@ def set_primary_contact():
 
     frappe.db.commit()
     return single_item_response({"guardian": guardian_name}, "Da dat nguoi lien lac chinh")
+
+
+# === Guardian Phone APIs (nhiều số/guardian, 1 số chính) ===
+
+@frappe.whitelist(methods=["POST"])
+def add_guardian_phone():
+    """Them so dien thoai cho Guardian. Neu la so dau tien thi tu dong la so chinh."""
+    check_crm_permission()
+    data = get_request_data()
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    phone_number = data.get("phone_number") or data.get("phone") or ""
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Guardian", guardian_name):
+        return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}")
+    if not phone_number or not str(phone_number).strip():
+        return validation_error_response("Thieu so dien thoai", {"phone_number": ["Bat buoc"]})
+
+    from erp.api.erp_sis.guardian import validate_vietnamese_phone_number
+    try:
+        formatted = validate_vietnamese_phone_number(phone_number)
+    except ValueError as ve:
+        return validation_error_response(str(ve), {"phone_number": [str(ve)]})
+
+    g_doc = frappe.get_doc("CRM Guardian", guardian_name)
+    existing = getattr(g_doc, "phone_numbers", None) or []
+    # Migration: neu co phone_number cu nhung chua co phone_numbers -> them vao truoc
+    if not existing and getattr(g_doc, "phone_number", None):
+        g_doc.append("phone_numbers", {"phone_number": g_doc.phone_number, "is_primary": 1})
+        g_doc.flags.ignore_validate = True
+        g_doc.save(ignore_permissions=True)
+        g_doc.reload()
+        existing = getattr(g_doc, "phone_numbers", None) or []
+    # Kiem tra trung trong phone_numbers
+    for row in existing:
+        if (row.get("phone_number") or "").replace(" ", "") == (formatted or "").replace(" ", ""):
+            return validation_error_response(f"So '{formatted}' da ton tai", {"phone_number": ["Trung"]})
+    # Kiem tra trung voi guardian khac (chi so chinh?)
+    if frappe.db.exists("CRM Guardian", {"phone_number": formatted, "name": ["!=", guardian_name]}):
+        return validation_error_response(f"So '{formatted}' da duoc su dung boi phu huynh khac", {"phone_number": ["Trung"]})
+
+    is_first = len(existing) == 0
+    g_doc.append("phone_numbers", {"phone_number": formatted, "is_primary": 1 if is_first else 0})
+    g_doc.flags.ignore_validate = True
+    g_doc.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    # Tra ve row moi (co name)
+    new_rows = getattr(g_doc, "phone_numbers", None) or []
+    added = next((r for r in new_rows if r.get("phone_number") == formatted), None)
+    return single_item_response({
+        "guardian": guardian_name,
+        "phone": {"phone_number": formatted, "is_primary": 1 if is_first else 0, "name": added.get("name") if added else None},
+    }, "Da them so dien thoai")
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_guardian_phone():
+    """Xoa so dien thoai khoi Guardian. Neu xoa so chinh va con so khac -> dat so dau tien lam chinh."""
+    check_crm_permission()
+    data = get_request_data()
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    phone_row_name = data.get("phone_row_name") or data.get("phone_name") or data.get("name")
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Guardian", guardian_name):
+        return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}")
+    if not phone_row_name:
+        return validation_error_response("Thieu phone_row_name (name cua dong so)", {"phone_row_name": ["Bat buoc"]})
+
+    g_doc = frappe.get_doc("CRM Guardian", guardian_name)
+    rows = list(getattr(g_doc, "phone_numbers", None) or [])
+    to_remove_idx = next((i for i, r in enumerate(rows) if r.get("name") == phone_row_name), None)
+    if to_remove_idx is None:
+        return not_found_response(f"Khong tim thay so dien thoai {phone_row_name}")
+
+    was_primary = rows[to_remove_idx].get("is_primary")
+    g_doc.remove(rows[to_remove_idx])
+    # Neu xoa so chinh va con so khac -> dat so dau tien lam chinh
+    if was_primary and g_doc.phone_numbers:
+        g_doc.phone_numbers[0].is_primary = 1
+    g_doc.flags.ignore_validate = True
+    g_doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return success_response(message="Da xoa so dien thoai")
+
+
+@frappe.whitelist(methods=["POST"])
+def set_guardian_primary_phone():
+    """Dat so dien thoai lam so chinh. Moi Guardian chi co 1 so chinh."""
+    check_crm_permission()
+    data = get_request_data()
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    phone_row_name = data.get("phone_row_name") or data.get("phone_name") or data.get("name")
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Guardian", guardian_name):
+        return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}")
+    if not phone_row_name:
+        return validation_error_response("Thieu phone_row_name", {"phone_row_name": ["Bat buoc"]})
+
+    g_doc = frappe.get_doc("CRM Guardian", guardian_name)
+    rows = getattr(g_doc, "phone_numbers", None) or []
+    for r in rows:
+        r.is_primary = 1 if r.get("name") == phone_row_name else 0
+    g_doc.flags.ignore_validate = True
+    g_doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return single_item_response({"guardian": guardian_name}, "Da dat so lien lac chinh")
