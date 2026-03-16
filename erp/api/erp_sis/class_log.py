@@ -1710,15 +1710,17 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                     if issue_name:
                         score_names.add(issue_name)
 
-        # Resolve score name -> title_vn bằng 1 query
+        # Resolve score name -> title_vn, color bằng 1 query (để FE hiển thị badge màu)
         score_map = {}
+        score_color_map = {}
         if score_names:
             score_rows = frappe.db.sql("""
-                SELECT name, title_vn
+                SELECT name, title_vn, color
                 FROM `tabSIS Class Log Score`
                 WHERE name IN %(names)s
             """, {"names": list(score_names)}, as_dict=True)
             score_map = {r['name']: r['title_vn'] for r in score_rows}
+            score_color_map = {r['name']: (r.get('color') or '#F6F6F6') for r in score_rows}
 
         # Lấy tên lớp homeroom để dùng làm fallback
         homeroom_class_title = frappe.db.get_value("SIS Class", class_id, "title") or class_id
@@ -1740,16 +1742,20 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 else:
                     subject_title = homeroom_class_title
 
-            # Resolve issues: comma-separated score names -> joined title_vn
-            issues_resolved = None
+            # Resolve issues: comma-separated score names -> list {title, color} cho badge
+            issues_list = []
             if student_log and student_log.get('issues'):
-                issue_titles = []
                 for issue_name in student_log['issues'].split(','):
                     issue_name = issue_name.strip()
                     if issue_name:
-                        title = score_map.get(issue_name, issue_name)
-                        issue_titles.append(title)
-                issues_resolved = ', '.join(issue_titles) if issue_titles else None
+                        issues_list.append({
+                            "title": score_map.get(issue_name, issue_name),
+                            "color": score_color_map.get(issue_name, '#F6F6F6')
+                        })
+
+            homework_val = score_map.get(student_log['homework']) if student_log and student_log.get('homework') else None
+            behavior_val = score_map.get(student_log['behavior']) if student_log and student_log.get('behavior') else None
+            participation_val = score_map.get(student_log['participation']) if student_log and student_log.get('participation') else None
 
             comment_item = {
                 "period": period_name,
@@ -1757,10 +1763,14 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 "general_comment": subject_log.get('general_comment') or None,
                 "is_practise_test": subject_log.get('is_practise_test'),
                 "homework_assignment": subject_log.get('homework_assignment') or None,
-                "homework": score_map.get(student_log['homework']) if student_log and student_log.get('homework') else None,
-                "behavior": score_map.get(student_log['behavior']) if student_log and student_log.get('behavior') else None,
-                "participation": score_map.get(student_log['participation']) if student_log and student_log.get('participation') else None,
-                "issues": issues_resolved,
+                "homework": homework_val,
+                "homework_color": score_color_map.get(student_log['homework']) if student_log and student_log.get('homework') else None,
+                "behavior": behavior_val,
+                "behavior_color": score_color_map.get(student_log['behavior']) if student_log and student_log.get('behavior') else None,
+                "participation": participation_val,
+                "participation_color": score_color_map.get(student_log['participation']) if student_log and student_log.get('participation') else None,
+                "issues": ', '.join([i['title'] for i in issues_list]) if issues_list else None,
+                "issues_list": issues_list,
                 "specific_comment": student_log.get('specific_comment') or None if student_log else None,
                 "is_top_performance": 1 if (student_log and student_log.get('is_top_performance')) else 0,
             }
