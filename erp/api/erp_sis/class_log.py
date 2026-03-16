@@ -2287,8 +2287,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     if att_status is not None:
                         if att_status not in ("present", "late", "excused", "absent"):
                             att_status = "absent"
-                        # Có mặt + muộn + vắng không phép tính vào c; vắng có phép không tính
-                        if att_status in ("present", "late", "absent"):
+                        # wis-point.md 2.2: Có mặt + muộn + vắng có phép tính vào c; vắng không phép không tính
+                        if att_status in ("present", "late", "excused"):
                             c += 1
                         penalty = ATTENDANCE_PENALTY.get(att_status, 0)
                     else:
@@ -2313,7 +2313,11 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         praise_val = 0
 
                     lesson_score = (hw_val or 0) + (beh_val or 0) + (part_val or 0) + (praise_val or 0) + penalty
-                    h += lesson_score
+                    # wis-point.md: Tiết nghỉ không phép → h=0 cho tiết đó (không cộng lesson_score vào h)
+                    if att_status is not None and att_status == "absent":
+                        h += 0
+                    else:
+                        h += lesson_score
 
                 if p > 0:
                     b = max_lesson_score * p
