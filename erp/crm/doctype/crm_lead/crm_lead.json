@@ -79,6 +79,8 @@
   "reject_reason",
   "reject_detail",
   "documents_section",
+  "admission_profile_deadline",
+  "admission_profile_completion_date",
   "enrollment_documents",
   "events_courses_section",
   "events",
@@ -444,6 +446,18 @@
    "fieldtype": "Section Break",
    "label": "Documents",
    "collapsible": 1
+  },
+  {
+   "fieldname": "admission_profile_deadline",
+   "fieldtype": "Date",
+   "label": "Ngày cần hoàn thiện hồ sơ"
+  },
+  {
+   "fieldname": "admission_profile_completion_date",
+   "fieldtype": "Date",
+   "label": "Ngày hoàn thiện hồ sơ nhập học",
+   "read_only": 1,
+   "description": "Tự động tính khi tất cả tài liệu đã nộp"
   },
   {
    "fieldname": "enrollment_documents",

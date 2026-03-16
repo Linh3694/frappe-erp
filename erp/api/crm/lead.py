@@ -296,7 +296,8 @@ def update_lead():
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note", "guardian_dob",
             "target_academic_year", "target_semester", "referrer",
-            "reject_reason", "reject_detail", "enrollment_date"
+            "reject_reason", "reject_detail", "enrollment_date",
+            "admission_profile_deadline", "admission_profile_completion_date"
         ]
         for field in updatable_fields:
             if field in data:
