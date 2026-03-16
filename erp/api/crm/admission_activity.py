@@ -164,6 +164,92 @@ EVENT_STATUS_MAP = {
 }
 
 
+@frappe.whitelist()
+def get_lead_events():
+    """Lấy danh sách sự kiện mà lead đã tham gia (status = attended) - dùng cho DealSection"""
+    check_crm_permission()
+    crm_lead_id = frappe.request.args.get("crm_lead_id")
+    if not crm_lead_id:
+        return validation_error_response("Thiếu crm_lead_id", {"crm_lead_id": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Lead", crm_lead_id):
+        return not_found_response("Không tìm thấy CRM Lead")
+
+    # Lấy các Event Student records với status attended
+    event_students = frappe.get_all(
+        "CRM Admission Event Student",
+        filters={"crm_lead_id": crm_lead_id, "status": "attended"},
+        fields=["name", "event_id", "status", "modified"],
+        order_by="modified desc",
+    )
+    if not event_students:
+        return list_response([], "Thành công")
+
+    event_ids = list({r["event_id"] for r in event_students})
+    events = frappe.get_all(
+        "CRM Admission Event",
+        filters={"name": ["in", event_ids]},
+        fields=["name", "event_name", "event_date", "modified"],
+    )
+    event_map = {e["name"]: e for e in events}
+    result = []
+    for es in event_students:
+        ev = event_map.get(es["event_id"])
+        if ev:
+            result.append({
+                "name": es["name"],
+                "event_id": es["event_id"],
+                "event_name": ev.get("event_name") or "-",
+                "event_date": ev.get("event_date"),
+                "status": es["status"],
+                "status_label": EVENT_STATUS_MAP.get(es["status"], es["status"]),
+                "modified": es["modified"],
+            })
+    return list_response(result, "Thành công")
+
+
+@frappe.whitelist()
+def get_lead_courses():
+    """Lấy danh sách khoá học/CLB mà lead đã đóng tiền (status = paid) - dùng cho DealSection"""
+    check_crm_permission()
+    crm_lead_id = frappe.request.args.get("crm_lead_id")
+    if not crm_lead_id:
+        return validation_error_response("Thiếu crm_lead_id", {"crm_lead_id": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Lead", crm_lead_id):
+        return not_found_response("Không tìm thấy CRM Lead")
+
+    # Lấy các Course Student records với status paid (Đã đóng tiền trở đi)
+    course_students = frappe.get_all(
+        "CRM Admission Course Student",
+        filters={"crm_lead_id": crm_lead_id, "status": "paid"},
+        fields=["name", "course_id", "status", "modified"],
+        order_by="modified desc",
+    )
+    if not course_students:
+        return list_response([], "Thành công")
+
+    course_ids = list({r["course_id"] for r in course_students})
+    courses = frappe.get_all(
+        "CRM Admission Course",
+        filters={"name": ["in", course_ids]},
+        fields=["name", "course_name", "event_date", "modified"],
+    )
+    course_map = {c["name"]: c for c in courses}
+    result = []
+    for cs in course_students:
+        co = course_map.get(cs["course_id"])
+        if co:
+            result.append({
+                "name": cs["name"],
+                "course_id": cs["course_id"],
+                "course_name": co.get("course_name") or "-",
+                "event_date": co.get("event_date"),
+                "status": cs["status"],
+                "status_label": "Đã đóng tiền",
+                "modified": cs["modified"],
+            })
+    return list_response(result, "Thành công")
+
+
 def _get_event_student_summary(event_id):
     """Tính tổng, đã đăng ký, đã tham gia, không tham gia"""
     filters = {"event_id": event_id}
