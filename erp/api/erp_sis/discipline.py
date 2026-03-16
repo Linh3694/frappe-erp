@@ -890,12 +890,38 @@ def get_discipline_record(name: str = None):
         doc = frappe.get_doc("SIS Discipline Record", name)
         d = doc.as_dict()
 
-        # Thêm target_class_ids, target_student_ids từ child tables
-        d["target_class_ids"] = [c.get("class_id") for c in (d.get("target_classes") or []) if c.get("class_id")]
+        # Thêm target_class_ids, target_student_ids, target_class_titles từ child tables
+        class_ids = [c.get("class_id") for c in (d.get("target_classes") or []) if c.get("class_id")]
+        d["target_class_ids"] = class_ids
+        if class_ids:
+            d["target_class_titles"] = [
+                frappe.db.get_value("SIS Class", cid, "title") or cid for cid in class_ids
+            ]
+        else:
+            d["target_class_titles"] = []
         stu_entries = d.get("target_students") or []
         d["target_student_ids"] = [s.get("student_id") for s in stu_entries if s.get("student_id")]
         if not d["target_student_ids"] and d.get("target_student"):
             d["target_student_ids"] = [d["target_student"]]
+        # student_name cho mixed/nhiều học sinh: "A (code1), B (code2)"
+        if len(d["target_student_ids"]) > 1:
+            names = []
+            for sid in d["target_student_ids"]:
+                s = frappe.db.get_value(
+                    "CRM Student", sid, ["student_name", "student_code"], as_dict=True
+                )
+                if s:
+                    names.append((s.get("student_name") or "") + " (" + (s.get("student_code") or "") + ")")
+                else:
+                    names.append(sid)
+            d["student_name"] = ", ".join(names)
+        elif len(d["target_student_ids"]) == 1 and not d.get("student_name"):
+            s = frappe.db.get_value(
+                "CRM Student", d["target_student_ids"][0], ["student_name", "student_code"], as_dict=True
+            )
+            if s:
+                d["student_name"] = s.get("student_name") or ""
+                d["student_code"] = s.get("student_code") or ""
 
         # Enrich
         if d.get("classification"):
