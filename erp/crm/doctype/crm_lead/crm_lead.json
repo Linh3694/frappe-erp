@@ -41,6 +41,23 @@
   "cb_student_2",
   "current_school",
   "student_note",
+  "cb_student_3",
+  "student_place_of_birth",
+  "student_nationality",
+  "student_ethnicity",
+  "student_religion",
+  "cb_student_4",
+  "student_health_insurance_card",
+  "student_initial_medical_registration",
+  "registered_address_section",
+  "registered_address_province",
+  "registered_address_ward",
+  "registered_address_street",
+  "cb_address_1",
+  "current_address_section",
+  "current_address_province",
+  "current_address_ward",
+  "current_address_street",
   "fee_section",
   "tuition_fee_pct",
   "service_fee_pct",
@@ -230,6 +247,90 @@
    "fieldname": "student_note",
    "fieldtype": "Small Text",
    "label": "Student Note"
+  },
+  {
+   "fieldname": "cb_student_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "student_place_of_birth",
+   "fieldtype": "Data",
+   "label": "Noi sinh"
+  },
+  {
+   "fieldname": "student_nationality",
+   "fieldtype": "Data",
+   "label": "Quoc tich"
+  },
+  {
+   "fieldname": "student_ethnicity",
+   "fieldtype": "Data",
+   "label": "Dan toc"
+  },
+  {
+   "fieldname": "student_religion",
+   "fieldtype": "Data",
+   "label": "Ton giao"
+  },
+  {
+   "fieldname": "cb_student_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "student_health_insurance_card",
+   "fieldtype": "Data",
+   "label": "So the BHYT"
+  },
+  {
+   "fieldname": "student_initial_medical_registration",
+   "fieldtype": "Data",
+   "label": "Noi dang ky kham chua benh ban dau"
+  },
+  {
+   "fieldname": "registered_address_section",
+   "fieldtype": "Section Break",
+   "label": "Dia chi theo ho khau",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "registered_address_province",
+   "fieldtype": "Data",
+   "label": "Tinh/Thanh pho"
+  },
+  {
+   "fieldname": "registered_address_ward",
+   "fieldtype": "Data",
+   "label": "Xa/Phuong/Thi Tran"
+  },
+  {
+   "fieldname": "registered_address_street",
+   "fieldtype": "Data",
+   "label": "Xom/Khu pho"
+  },
+  {
+   "fieldname": "cb_address_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "current_address_section",
+   "fieldtype": "Section Break",
+   "label": "Noi o hien nay",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "current_address_province",
+   "fieldtype": "Data",
+   "label": "Tinh/Thanh pho"
+  },
+  {
+   "fieldname": "current_address_ward",
+   "fieldtype": "Data",
+   "label": "Xa/Phuong/Thi Tran"
+  },
+  {
+   "fieldname": "current_address_street",
+   "fieldtype": "Data",
+   "label": "Xom/Khu pho"
   },
   {
    "fieldname": "fee_section",
