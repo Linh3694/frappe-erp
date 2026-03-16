@@ -1526,6 +1526,11 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
         if not date and getattr(frappe, 'request', None):
             date = frappe.request.args.get('date')
 
+        include_empty_periods = (
+            frappe.request.args.get('include_empty_periods') == '1'
+            if getattr(frappe, 'request', None) else False
+        )
+
         if not student_id or not class_id or not date:
             return error_response(
                 message="Missing required parameters: student_id, class_id, date",
@@ -1630,7 +1635,8 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 behavior,
                 participation,
                 issues,
-                specific_comment
+                specific_comment,
+                is_top_performance
             FROM `tabSIS Class Log Student`
             WHERE subject_id IN %(subject_ids)s
                 AND student_id = %(student_id)s
@@ -1756,9 +1762,9 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 "participation": score_map.get(student_log['participation']) if student_log and student_log.get('participation') else None,
                 "issues": issues_resolved,
                 "specific_comment": student_log.get('specific_comment') or None if student_log else None,
+                "is_top_performance": 1 if (student_log and student_log.get('is_top_performance')) else 0,
             }
 
-            # Chỉ thêm tiết vào kết quả nếu có ít nhất 1 trường có dữ liệu
             has_data = any([
                 comment_item['homework'],
                 comment_item['behavior'],
@@ -1766,9 +1772,10 @@ def get_student_classlog_summary(student_id=None, class_id=None, date=None):
                 comment_item['issues'],
                 comment_item['specific_comment'],
                 comment_item['general_comment'],
+                comment_item['is_top_performance'],
             ])
 
-            if has_data:
+            if has_data or include_empty_periods:
                 comments.append(comment_item)
 
         # Loại bỏ trùng lặp tiết: giữ entry có nhiều dữ liệu học sinh nhất
