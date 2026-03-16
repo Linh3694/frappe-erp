@@ -13,8 +13,11 @@ from erp.api.crm.utils import (
 )
 
 
-def _find_matching_leads(phone_numbers, student_name=None, guardian_name=None, exclude_draft=False):
-    """Tim ho so trung dua tren SDT, ten HS, ten PH"""
+def _find_matching_leads(phone_numbers, student_name=None, guardian_name=None, exclude_draft=False, exclude_verify=False):
+    """
+    Tim ho so trung dua tren SDT, ten HS, ten PH.
+    exclude_verify=True: chi check voi ho so trong he thong (Lead, QLead, Test...), khong check voi ban ghi Verify.
+    """
     matches = []
     
     normalized_phones = [normalize_phone_number(p) for p in phone_numbers if p]
@@ -34,6 +37,8 @@ def _find_matching_leads(phone_numbers, student_name=None, guardian_name=None, e
     
     if exclude_draft:
         base_query += " AND cl.step != 'Draft'"
+    if exclude_verify:
+        base_query += " AND cl.step != 'Verify'"
     
     phone_matches = frappe.db.sql(base_query, normalized_phones, as_dict=True)
     
@@ -172,8 +177,11 @@ def check_duplicate():
     if not phone_numbers:
         return validation_error_response("Thieu SDT", {"phone_numbers": ["Bat buoc"]})
     
-    # Tim ho so trung (tru Draft)
-    matches = _find_matching_leads(phone_numbers, student_name, guardian_name, exclude_draft=True)
+    # Tim ho so trung: chi check voi ho so trong he thong (tru Draft, tru Verify)
+    matches = _find_matching_leads(
+        phone_numbers, student_name, guardian_name,
+        exclude_draft=True, exclude_verify=True
+    )
     
     # Loai bo ho so dang kiem tra
     if exclude_lead:

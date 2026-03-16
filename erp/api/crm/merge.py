@@ -31,11 +31,14 @@ def get_merge_candidates():
         dup_doc = frappe.get_doc("CRM Lead", doc.duplicate_lead)
         candidates.append(dup_doc.as_dict())
     
-    # Tim them theo SDT
+    # Tim them theo SDT (chi check voi ho so trong he thong, tru Verify)
     phones = [p.phone_number for p in doc.phone_numbers]
     if phones:
         from erp.api.crm.duplicate import _find_matching_leads
-        matches = _find_matching_leads(phones, doc.student_name, doc.guardian_name, exclude_draft=True)
+        matches = _find_matching_leads(
+            phones, doc.student_name, doc.guardian_name,
+            exclude_draft=True, exclude_verify=True
+        )
         for match in matches:
             if match["name"] != lead_name and match["name"] not in [c.get("name") for c in candidates]:
                 full_doc = frappe.get_doc("CRM Lead", match["name"])

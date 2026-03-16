@@ -12,7 +12,7 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import (
     validate_phone_number, normalize_phone_number, generate_crm_code
 )
-from erp.api.crm.duplicate import _find_matching_leads, _evaluate_duplicate_rules
+from erp.api.crm.duplicate import _find_matching_leads
 
 
 def _verify_chatbot_api_key() -> bool:
@@ -89,31 +89,19 @@ def create_lead_from_chatbot():
 
         doc.insert(ignore_permissions=True)
 
-        # 2. Kiem tra trung lap va chuyen sang Verify
+        # 2. Kiem tra trung lap SĐT voi ho so trong he thong (khong check voi Verify)
         raw_phones = [phone_number]
         matches = _find_matching_leads(
             raw_phones,
             doc.student_name,
             doc.guardian_name,
-            exclude_draft=True
+            exclude_draft=True,
+            exclude_verify=True
         )
         matches = [m for m in matches if m["name"] != doc.name]
 
         doc.step = "Verify"
-
-        if matches:
-            matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
-            most_recent = matches[0]
-            result = _evaluate_duplicate_rules(most_recent)
-
-            if result.get("is_duplicate"):
-                doc.status = "Trung"
-                doc.duplicate_lead = most_recent["name"]
-                doc.duplicate_fields = ", ".join(most_recent.get("matched_fields", []))
-            else:
-                doc.status = "Can kiem tra"
-        else:
-            doc.status = "Can kiem tra"
+        doc.status = "Can kiem tra"
 
         doc.save(ignore_permissions=True)
 
@@ -127,7 +115,7 @@ def create_lead_from_chatbot():
 
         # Ghi log lich su chuyen buoc
         try:
-            old_status = "Trung" if doc.duplicate_lead else "Can kiem tra"
+            old_status = "Can kiem tra"
             frappe.get_doc({
                 "doctype": "CRM Lead Step History",
                 "lead": doc.name,
@@ -146,10 +134,10 @@ def create_lead_from_chatbot():
         lead_data = doc.as_dict()
         response = single_item_response(lead_data, "Tao ho so va dat lich thanh cong")
 
-        # Them duplicate warning neu co
-        if matches and doc.duplicate_lead:
+        # Them duplicate warning neu SDT trung voi ho so trong he thong
+        if matches:
             response["data"]["duplicate_warning"] = True
-            response["data"]["duplicate_lead"] = doc.duplicate_lead
+            response["data"]["duplicate_lead"] = matches[0]["name"]
             response["message"] = "Tao ho so thanh cong. Luu y: SDT co the trung voi ho so da ton tai."
 
         return response

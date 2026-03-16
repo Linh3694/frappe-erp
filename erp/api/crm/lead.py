@@ -275,15 +275,16 @@ def create_lead():
         
         doc.insert(ignore_permissions=True)
         
-        # Tu dong kiem tra trung lap va chuyen sang Verify
-        from erp.api.crm.duplicate import _find_matching_leads, _evaluate_duplicate_rules
+        # Tu dong kiem tra trung lap SĐT voi ho so trong he thong (khong check voi ban ghi Verify)
+        from erp.api.crm.duplicate import _find_matching_leads
         
         raw_phones = [p.get("phone_number", "") for p in phone_numbers]
         matches = _find_matching_leads(
             raw_phones,
             doc.student_name,
             doc.guardian_name,
-            exclude_draft=True
+            exclude_draft=True,
+            exclude_verify=True
         )
         # Loai bo chinh no
         matches = [m for m in matches if m["name"] != doc.name]
@@ -293,19 +294,8 @@ def create_lead():
         if not doc.crm_code:
             doc.crm_code = generate_crm_code()
         
-        if matches:
-            matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
-            most_recent = matches[0]
-            result = _evaluate_duplicate_rules(most_recent)
-            
-            if result.get("is_duplicate"):
-                doc.status = "Trung"
-                doc.duplicate_lead = most_recent["name"]
-                doc.duplicate_fields = ", ".join(most_recent.get("matched_fields", []))
-            else:
-                doc.status = "Can kiem tra"
-        else:
-            doc.status = "Can kiem tra"
+        # Mac dinh trang thai Can kiem tra - user se xac nhan hanh dong tiep theo trong VerifyTab
+        doc.status = "Can kiem tra"
         
         doc.save(ignore_permissions=True)
         frappe.db.commit()
