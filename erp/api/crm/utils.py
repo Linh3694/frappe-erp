@@ -14,7 +14,7 @@ CRM_STEPS = [
 
 STEP_STATUSES: Dict[str, List[str]] = {
     "Draft": [],
-    "Verify": ["Can kiem tra", "Da kiem tra - Gop ho so", "Da kiem tra - Bao trung"],
+    "Verify": ["Can kiem tra", "Trung"],
     "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Lost"],
     "QLead": ["Moi", "Follow Up", "Pre-Event", "Event", "Pre-school Tour/ School Tour", "Lost"],
     "Test": ["Pre-test", "Test", "Offered", "Failed", "Retake", "Lost"],
