@@ -58,6 +58,12 @@
   "current_address_province",
   "current_address_ward",
   "current_address_street",
+  "additional_info_section",
+  "student_study_interruption",
+  "student_study_interruption_reason",
+  "cb_add_1",
+  "student_special_characteristics",
+  "student_discipline_issues",
   "fee_section",
   "tuition_fee_pct",
   "service_fee_pct",
@@ -332,6 +338,39 @@
    "fieldname": "current_address_street",
    "fieldtype": "Data",
    "label": "Xom/Khu pho"
+  },
+  {
+   "fieldname": "additional_info_section",
+   "fieldtype": "Section Break",
+   "label": "Thong tin bo sung"
+  },
+  {
+   "fieldname": "student_study_interruption",
+   "fieldtype": "Data",
+   "label": "Hoc sinh da tung co gian doan viec hoc tap trong thoi gian tu 01 (mot) thang tro len khong?",
+   "description": "Luu dang string"
+  },
+  {
+   "fieldname": "student_study_interruption_reason",
+   "fieldtype": "Data",
+   "label": "Ly do",
+   "description": "Luu dang string"
+  },
+  {
+   "fieldname": "cb_add_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "student_special_characteristics",
+   "fieldtype": "Data",
+   "label": "Cac dac diem dac biet phu huynh muon nha truong luu y",
+   "description": "Luu dang string"
+  },
+  {
+   "fieldname": "student_discipline_issues",
+   "fieldtype": "Data",
+   "label": "Van de ve ky luat",
+   "description": "Luu dang string"
   },
   {
    "fieldname": "fee_section",

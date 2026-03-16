@@ -339,6 +339,8 @@ def update_lead():
             "student_health_insurance_card", "student_initial_medical_registration",
             "registered_address_province", "registered_address_ward", "registered_address_street",
             "current_address_province", "current_address_ward", "current_address_street",
+            "student_study_interruption", "student_study_interruption_reason",
+            "student_special_characteristics", "student_discipline_issues",
             "tuition_fee_pct", "service_fee_pct", "dev_fee_pct", "ksdv_pct",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
