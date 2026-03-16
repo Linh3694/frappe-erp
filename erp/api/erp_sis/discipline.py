@@ -157,7 +157,7 @@ def create_discipline_classification(title: str = None, campus: str = None):
                 "enabled": 1,
             }
         )
-        doc.insert(ignore_permissions=True)
+        doc.insert()
         frappe.db.commit()
 
         return success_response(
@@ -200,7 +200,7 @@ def update_discipline_classification(name: str = None, title: str = None, enable
         if enabled is not None:
             doc.enabled = enabled
 
-        doc.save(ignore_permissions=True)
+        doc.save()
         frappe.db.commit()
 
         return success_response(
@@ -236,7 +236,7 @@ def delete_discipline_classification(name: str = None):
                 code="MISSING_REQUIRED_FIELDS",
             )
 
-        frappe.delete_doc("SIS Discipline Classification", name, ignore_permissions=True)
+        frappe.delete_doc("SIS Discipline Classification", name)
         frappe.db.commit()
 
         return success_response(
@@ -309,7 +309,7 @@ def create_discipline_form(title: str = None, campus: str = None):
                 "enabled": 1,
             }
         )
-        doc.insert(ignore_permissions=True)
+        doc.insert()
         frappe.db.commit()
 
         return success_response(
@@ -346,7 +346,7 @@ def update_discipline_form(name: str = None, title: str = None, enabled: int = N
         if enabled is not None:
             doc.enabled = enabled
 
-        doc.save(ignore_permissions=True)
+        doc.save()
         frappe.db.commit()
 
         return success_response(
@@ -374,7 +374,7 @@ def delete_discipline_form(name: str = None):
         if not name:
             return error_response(message="ID hình thức là bắt buộc", code="MISSING_REQUIRED_FIELDS")
 
-        frappe.delete_doc("SIS Discipline Form", name, ignore_permissions=True)
+        frappe.delete_doc("SIS Discipline Form", name)
         frappe.db.commit()
 
         return success_response(data={"name": name}, message="Xóa hình thức thành công")
@@ -496,7 +496,7 @@ def create_discipline_violation(
                 "enabled": 1,
             }
         )
-        doc.insert(ignore_permissions=True)
+        doc.insert()
         frappe.db.commit()
 
         return success_response(
@@ -558,7 +558,7 @@ def update_discipline_violation(
         if enabled is not None:
             doc.enabled = enabled
 
-        doc.save(ignore_permissions=True)
+        doc.save()
         frappe.db.commit()
 
         return success_response(
@@ -594,7 +594,7 @@ def delete_discipline_violation(name: str = None):
                 code="MISSING_REQUIRED_FIELDS",
             )
 
-        frappe.delete_doc("SIS Discipline Violation", name, ignore_permissions=True)
+        frappe.delete_doc("SIS Discipline Violation", name)
         frappe.db.commit()
 
         return success_response(
@@ -1078,7 +1078,7 @@ def create_discipline_record(
             if url:
                 doc.append("proof_images", {"image": url})
 
-        doc.insert(ignore_permissions=True)
+        doc.insert()
         frappe.db.commit()
 
         return success_response(
@@ -1190,7 +1190,7 @@ def update_discipline_record(
                 if url:
                     doc.append("proof_images", {"image": url})
 
-        doc.save(ignore_permissions=True)
+        doc.save()
         frappe.db.commit()
 
         return success_response(
@@ -1223,7 +1223,7 @@ def delete_discipline_record(name: str = None):
                 code="MISSING_REQUIRED_FIELDS",
             )
 
-        frappe.delete_doc("SIS Discipline Record", name, ignore_permissions=True)
+        frappe.delete_doc("SIS Discipline Record", name)
         frappe.db.commit()
 
         return success_response(
