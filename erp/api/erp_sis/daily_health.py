@@ -974,7 +974,7 @@ def get_student_examination_history():
             limit=limit
         )
         
-        # Lấy images cho mỗi examination và chuyển sang URL đầy đủ
+        # Lấy images + visit_reason cho mỗi examination
         for exam in exams:
             exam_images = frappe.get_all(
                 "SIS Examination Image",
@@ -991,6 +991,14 @@ def get_student_examination_history():
                     else:
                         img["image"] = frappe.utils.get_url("/files/" + img["image"])
             exam["images"] = exam_images
+
+            # Lấy reason từ visit tương ứng (mỗi lượt xuống Y tế có lý do riêng từ GV)
+            visit_id = exam.get("visit_id")
+            if visit_id:
+                visit_reason = frappe.db.get_value("SIS Daily Health Visit", visit_id, "reason")
+                exam["visit_reason"] = visit_reason or ""
+            else:
+                exam["visit_reason"] = ""
         
         return success_response(
             data={"data": exams, "total": len(exams)},
@@ -2411,6 +2419,14 @@ def get_class_health_examinations():
                     else:
                         img["image"] = frappe.utils.get_url("/files/" + img["image"])
             exam["images"] = images
+
+            # Lấy reason từ visit tương ứng (mỗi lượt xuống Y tế có lý do riêng từ GV)
+            visit_id = exam.get("visit_id")
+            if visit_id:
+                visit_reason = frappe.db.get_value("SIS Daily Health Visit", visit_id, "reason")
+                exam["visit_reason"] = visit_reason or ""
+            else:
+                exam["visit_reason"] = ""
             
             student_data[sid]["examinations"].append(exam)
         
@@ -2757,7 +2773,9 @@ def get_parent_health_records():
                 )
                 if visit_data:
                     exam["checkout_notes"] = visit_data.get("checkout_notes")
-                    exam["visit_reason"] = visit_data.get("reason")
+                    exam["visit_reason"] = visit_data.get("reason") or ""
+                else:
+                    exam["visit_reason"] = ""
         
         # Group theo ngày
         grouped = {}
