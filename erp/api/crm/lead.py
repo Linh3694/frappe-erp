@@ -14,6 +14,50 @@ from erp.api.crm.utils import (
 )
 
 
+def _recalculate_admission_profile_completion(doc):
+    """
+    Tu dong tinh ngay hoan thien ho so nhap hoc khi tat ca ProfileTypes
+    (theo target_grade) da co it nhat 1 tai lieu co attachment.
+    """
+    target_grade = doc.get("target_grade")
+    if not target_grade or not str(target_grade).replace(" ", "").isdigit():
+        return
+    try:
+        import json
+        n = int(str(target_grade).strip())
+        if n < 1 or n > 12:
+            return
+        khoi = f"Khối {n}"
+        profile_types = frappe.get_all(
+            "CRM Admission Profile Type",
+            fields=["name", "profile_type", "applicable_grades"],
+        )
+        required = []
+        for pt in profile_types:
+            grades = []
+            if pt.get("applicable_grades"):
+                try:
+                    grades = json.loads(pt["applicable_grades"])
+                except Exception:
+                    pass
+            if isinstance(grades, list) and khoi in grades:
+                required.append(pt.get("profile_type") or pt.get("name"))
+        if not required:
+            return
+        # Chi tinh hoan thien khi user da check (is_submitted=1) cho tat ca profile types
+        docs_checked = set()
+        for d in doc.get("enrollment_documents") or []:
+            name = (d.get("document_name") or "").strip()
+            if name and (d.get("attachment") or "").strip() and d.get("is_submitted") == 1:
+                docs_checked.add(name)
+        all_done = all(n in docs_checked for n in required)
+        if all_done:
+            from datetime import date
+            doc.admission_profile_completion_date = date.today().isoformat()
+    except Exception:
+        pass
+
+
 def _get_full_image_url(user_image):
     """Chuyen user_image (path) thanh full URL de frontend hien thi avatar."""
     if not user_image:
@@ -333,6 +377,9 @@ def update_lead():
                     "is_submitted": d_item.get("is_submitted", 0),
                     "attachment": d_item.get("attachment", "")
                 })
+        
+        # Tu dong tinh ngay hoan thien ho so khi tat ca tai lieu da co file
+        _recalculate_admission_profile_completion(doc)
         
         doc.save(ignore_permissions=True)
         frappe.db.commit()

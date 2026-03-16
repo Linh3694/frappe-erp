@@ -26,14 +26,22 @@ def get_notes():
     filters = {"lead": lead_name}
     if category:
         filters["category"] = category
-    
+
     notes = frappe.get_all(
         "CRM Lead Note",
         filters=filters,
         fields=["*"],
         order_by="creation desc"
     )
-    
+
+    # Bổ sung assignee_name (full_name từ User) cho mỗi note
+    for note in notes:
+        if note.get("assignee"):
+            full_name = frappe.db.get_value("User", note["assignee"], "full_name")
+            note["assignee_name"] = full_name or note["assignee"]
+        else:
+            note["assignee_name"] = ""
+
     return list_response(notes)
 
 
@@ -99,7 +107,7 @@ def update_note():
     try:
         doc = frappe.get_doc("CRM Lead Note", name)
         
-        updatable = ["title", "content", "communication_method", "assignee", "deadline", "category"]
+        updatable = ["title", "content", "communication_method", "assignee", "deadline", "category", "is_completed"]
         for field in updatable:
             if field in data:
                 doc.set(field, data[field])
