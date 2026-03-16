@@ -532,7 +532,7 @@ def list_reports():
         "SIS Student Report Card",
         fields=[
             "name", "title", "template_id", "form_id", "class_id", "student_id",
-            "school_year", "semester_part", "status", "creation", "modified"
+            "school_year", "semester_part", "status", "approval_status", "creation", "modified"
         ],
         filters=filters,
         order_by="modified desc"
