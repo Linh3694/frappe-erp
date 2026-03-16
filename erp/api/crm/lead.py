@@ -10,7 +10,7 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data, validate_phone_number,
-    normalize_phone_number, get_valid_statuses_for_step
+    normalize_phone_number, get_valid_statuses_for_step, generate_crm_code
 )
 
 
@@ -289,6 +289,9 @@ def create_lead():
         matches = [m for m in matches if m["name"] != doc.name]
         
         doc.step = "Verify"
+        # Mac dinh gan ma CRM cho ho so tao tu Lead, bat ke trung hay khong
+        if not doc.crm_code:
+            doc.crm_code = generate_crm_code()
         
         if matches:
             matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
