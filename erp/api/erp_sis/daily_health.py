@@ -974,7 +974,7 @@ def get_student_examination_history():
             limit=limit
         )
         
-        # Lấy images cho mỗi examination
+        # Lấy images cho mỗi examination và chuyển sang URL đầy đủ
         for exam in exams:
             exam_images = frappe.get_all(
                 "SIS Examination Image",
@@ -982,6 +982,14 @@ def get_student_examination_history():
                 fields=["image", "description"],
                 order_by="idx"
             )
+            for img in exam_images:
+                if img.get("image"):
+                    if img["image"].startswith("http://") or img["image"].startswith("https://"):
+                        pass  # Đã là URL đầy đủ
+                    elif img["image"].startswith("/"):
+                        img["image"] = frappe.utils.get_url(img["image"])
+                    else:
+                        img["image"] = frappe.utils.get_url("/files/" + img["image"])
             exam["images"] = exam_images
         
         return success_response(
@@ -2388,12 +2396,20 @@ def get_class_health_examinations():
                     "examinations": []
                 }
             
-            # Lấy images cho exam
+            # Lấy images cho exam và chuyển sang URL đầy đủ
             images = frappe.get_all(
                 "SIS Examination Image",
                 filters={"parent": exam.name},
                 fields=["image", "description"]
             )
+            for img in images:
+                if img.get("image"):
+                    if img["image"].startswith("http://") or img["image"].startswith("https://"):
+                        pass  # Đã là URL đầy đủ
+                    elif img["image"].startswith("/"):
+                        img["image"] = frappe.utils.get_url(img["image"])
+                    else:
+                        img["image"] = frappe.utils.get_url("/files/" + img["image"])
             exam["images"] = images
             
             student_data[sid]["examinations"].append(exam)
@@ -2715,13 +2731,21 @@ def get_parent_health_records():
             order_by="examination_date desc, creation desc"
         )
         
-        # Lấy images + checkout_notes từ visit cho từng exam
+        # Lấy images + checkout_notes từ visit cho từng exam, chuyển image sang URL đầy đủ
         for exam in examinations:
             images = frappe.get_all(
                 "SIS Examination Image",
                 filters={"parent": exam.name},
                 fields=["image", "description"]
             )
+            for img in images:
+                if img.get("image"):
+                    if img["image"].startswith("http://") or img["image"].startswith("https://"):
+                        pass
+                    elif img["image"].startswith("/"):
+                        img["image"] = frappe.utils.get_url(img["image"])
+                    else:
+                        img["image"] = frappe.utils.get_url("/files/" + img["image"])
             exam["images"] = images
             
             if exam.get("visit_id"):
