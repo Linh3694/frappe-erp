@@ -553,6 +553,19 @@ def list_reports():
     end = start + page_size
     paginated = reports[start:end]
 
+    # Bổ sung tên năm học (title_vn) thay vì chỉ trả về ID
+    school_year_ids = list(set(r.get("school_year") for r in paginated if r.get("school_year")))
+    sy_map = {}
+    if school_year_ids:
+        sy_rows = frappe.db.sql(
+            "SELECT name, title_vn FROM `tabSIS School Year` WHERE name IN %s",
+            [school_year_ids],
+            as_dict=True,
+        )
+        sy_map = {r["name"]: r["title_vn"] for r in sy_rows}
+    for r in paginated:
+        r["school_year_title"] = sy_map.get(r.get("school_year")) or r.get("school_year", "")
+
     return paginated_response(paginated, total, page, page_size)
 
 
