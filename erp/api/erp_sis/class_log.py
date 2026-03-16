@@ -2127,7 +2127,7 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
             students_by_subject = {}
             if subject_ids:
                 student_logs = frappe.db.sql("""
-                    SELECT subject_id, student_id, homework, behavior, participation, is_top_performance
+                    SELECT subject_id, student_id, homework, behavior, participation, is_top_performance, top_performance
                     FROM `tabSIS Class Log Student`
                     WHERE subject_id IN %(subject_ids)s
                 """, {"subject_ids": subject_ids}, as_dict=True)
@@ -2217,11 +2217,15 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                 except Exception:
                     pass
 
-            # Tính Điểm lớp cho ngày: trung bình có trọng số theo số HS mỗi lớp (chính quy/lớp chạy)
+            # Tính Điểm lớp cho ngày (wis-point):
+            # - Tiết học lớp chính quy: Điểm tiết học = lesson_score trong sổ đầu bài
+            # - Tiết học lớp chạy: Điểm tiết học = lesson_score của lớp chạy đó trong sổ đầu bài
+            # - Điểm tiết học = trung bình có trọng số theo số HS mỗi lớp
+            # VD: 13 HS lớp chạy A (điểm 8), 7 HS lớp chạy B (điểm 9) -> (13*8 + 7*9)/20 = 8.35
             # Tiết không có lesson_score (GV chưa nhập) dùng 0
             daily_lesson_scores = []
             for period in period_set:
-                # Đếm số HS homeroom tham gia mỗi class (homeroom hoặc mixed)
+                # Đếm số HS homeroom tham gia mỗi class (chính quy hoặc lớp chạy)
                 class_counts = {}  # class_id -> số HS
                 for sid in student_ids:
                     actual_class = student_period_class.get((sid, period), class_id)
@@ -2304,7 +2308,13 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         hw_val = _get_score_value(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
                         beh_val = _get_score_value(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
                         part_val = _get_score_value(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
-                        praise_val = default_values["top_performance"] if student_log and student_log.get("is_top_performance") else 0
+                        # wis-point.md: praise_score = value từ SIS Class Log Score (top_performance). Ưu tiên link, else default, fallback +1 khi được khen
+                        if student_log and student_log.get("is_top_performance"):
+                            praise_val = _get_score_value(student_log.get("top_performance")) if student_log.get("top_performance") else default_values["top_performance"]
+                            if (praise_val or 0) == 0:
+                                praise_val = 1  # Được khen nhưng chưa cấu hình → +1 điểm
+                        else:
+                            praise_val = 0
                     else:
                         # Không có class log -> mặc định 0 cho tất cả thông số
                         hw_val = 0
