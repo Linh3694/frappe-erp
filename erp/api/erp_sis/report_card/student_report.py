@@ -516,15 +516,23 @@ def get_reports_by_class():
     return paginated_response(paginated, total, page, page_size)
 
 
+def _get_param(key, default=None):
+    """Lấy param từ form_dict hoặc request.args (GET query string)."""
+    value = frappe.form_dict.get(key)
+    if not value and hasattr(frappe, "request") and hasattr(frappe.request, "args"):
+        value = frappe.request.args.get(key)
+    return value or default
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET"])
 def list_reports():
     """List student report cards với filters."""
     campus_id = get_current_campus_id()
     filters = {"campus_id": campus_id}
 
-    # Optional filters
+    # Optional filters - dùng _get_param để nhận được params từ GET query string
     for field in ["class_id", "template_id", "student_id", "status", "school_year", "semester_part"]:
-        value = frappe.form_dict.get(field)
+        value = _get_param(field)
         if value:
             filters[field] = value
 
@@ -538,8 +546,8 @@ def list_reports():
         order_by="modified desc"
     )
 
-    page = int(frappe.form_dict.get("page", 1))
-    page_size = int(frappe.form_dict.get("page_size", 20))
+    page = int(_get_param("page") or 1)
+    page_size = int(_get_param("page_size") or _get_param("limit") or 20)
     total = len(reports)
     start = (page - 1) * page_size
     end = start + page_size
