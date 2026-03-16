@@ -638,7 +638,7 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             order_by="modified desc",
         )
 
-        # Lấy target_classes cho mỗi record (khi target_type = class)
+        # Lấy target_classes và target_students cho mỗi record
         record_ids = [r["name"] for r in records]
         if record_ids:
             class_entries = frappe.get_all(
@@ -649,6 +649,16 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             class_map = {}
             for ce in class_entries:
                 class_map.setdefault(ce["parent"], []).append(ce["class_id"])
+
+            # Lấy target_students (bảng mới cho nhiều học sinh / mixed)
+            student_entries = frappe.get_all(
+                "SIS Discipline Record Student Entry",
+                filters={"parent": ["in", record_ids]},
+                fields=["parent", "student_id"],
+            )
+            student_map = {}
+            for se in student_entries:
+                student_map.setdefault(se["parent"], []).append(se["student_id"])
 
             # Lấy class titles
             class_ids = list(set(c for ids in class_map.values() for c in ids))
@@ -666,10 +676,16 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                 r["target_class_titles"] = [
                     class_titles.get(cid, cid) for cid in r["target_class_ids"]
                 ]
+                # target_student_ids: từ target_students table hoặc target_student (1 người)
+                stu_ids = student_map.get(r["name"], [])
+                if not stu_ids and r.get("target_student"):
+                    stu_ids = [r["target_student"]]
+                r["target_student_ids"] = stu_ids
         else:
             for r in records:
                 r["target_class_ids"] = []
                 r["target_class_titles"] = []
+                r["target_student_ids"] = [r["target_student"]] if r.get("target_student") else []
 
         # Enrich: classification_title, violation_title, form_title
         for r in records:
@@ -709,8 +725,15 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             else:
                 r["owner_name"] = ""
 
-            # Nếu target_student: lấy student_name, student_code, class (Regular), photo
-            if r.get("target_type") == "student" and r.get("target_student"):
+            # Lấy thông tin học sinh: target_student (1 người) hoặc target_student_ids (nhiều người / mixed)
+            student_ids_to_fetch = r.get("target_student_ids") or []
+            if not student_ids_to_fetch and r.get("target_student"):
+                student_ids_to_fetch = [r["target_student"]]
+            has_students = (r.get("target_type") in ("student", "mixed")) and student_ids_to_fetch
+
+            if has_students and len(student_ids_to_fetch) == 1:
+                # 1 học sinh: giữ format cũ (student_name, student_code, avatar, class)
+                r["target_student"] = student_ids_to_fetch[0]
                 student = frappe.db.get_value(
                     "CRM Student",
                     r["target_student"],
@@ -816,6 +839,23 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                     ) or cs
                 else:
                     r["student_class_title"] = ""
+            elif has_students and len(student_ids_to_fetch) > 1:
+                # Nhiều học sinh (mixed hoặc student): lấy tên để hiển thị "A, B, C"
+                names = []
+                for sid in student_ids_to_fetch:
+                    s = frappe.db.get_value(
+                        "CRM Student", sid, ["student_name", "student_code"], as_dict=True
+                    )
+                    if s:
+                        names.append((s.get("student_name") or "") + " (" + (s.get("student_code") or "") + ")")
+                    else:
+                        names.append(sid)
+                r["student_name"] = ", ".join(names)
+                r["student_code"] = ""
+                # Lớp: từ target_class_titles nếu mixed, else "-"
+                r["student_class_title"] = ", ".join(r.get("target_class_titles") or []) or "-"
+                r["student_photo_url"] = None
+                r["target_student"] = student_ids_to_fetch[0]  # Để Xem chi tiết dùng học sinh đầu
             else:
                 r["student_name"] = ""
                 r["student_code"] = ""
@@ -849,6 +889,13 @@ def get_discipline_record(name: str = None):
 
         doc = frappe.get_doc("SIS Discipline Record", name)
         d = doc.as_dict()
+
+        # Thêm target_class_ids, target_student_ids từ child tables
+        d["target_class_ids"] = [c.get("class_id") for c in (d.get("target_classes") or []) if c.get("class_id")]
+        stu_entries = d.get("target_students") or []
+        d["target_student_ids"] = [s.get("student_id") for s in stu_entries if s.get("student_id")]
+        if not d["target_student_ids"] and d.get("target_student"):
+            d["target_student_ids"] = [d["target_student"]]
 
         # Enrich
         if d.get("classification"):
@@ -899,6 +946,7 @@ def create_discipline_record(
     violation_count=None,
     target_type=None,
     target_student=None,
+    target_student_ids=None,
     target_class_ids=None,
     violation=None,
     form=None,
@@ -908,8 +956,10 @@ def create_discipline_record(
     campus=None,
 ):
     """
-    Tạo mới ghi nhận lỗi.
-    target_class_ids: list string khi target_type=class (ví dụ: ["SIS-CLASS-00001", "SIS-CLASS-00002"])
+    Tạo mới ghi nhận lỗi - gộp nhiều lớp và nhiều học sinh thành 1 bản ghi.
+    target_class_ids: list string (ví dụ: ["SIS-CLASS-00001", "SIS-CLASS-00002"])
+    target_student_ids: list string (ví dụ: ["STU-001", "STU-002"])
+    Khi có cả lớp và học sinh -> target_type="mixed", 1 bản ghi duy nhất.
     proof_images: list dict [{"image": "file_url"}, ...]
     """
     try:
@@ -922,6 +972,7 @@ def create_discipline_record(
 
         target_type = target_type or data.get("target_type")
         target_student = target_student or data.get("target_student")
+        target_student_ids = target_student_ids or data.get("target_student_ids") or []
         target_class_ids = target_class_ids or data.get("target_class_ids") or []
 
         violation = violation or data.get("violation")
@@ -943,12 +994,22 @@ def create_discipline_record(
             )
         if violation_count is None:
             violation_count = 1
+        # Xác định target_type từ dữ liệu: mixed (cả lớp + học sinh), class, student
+        has_classes = bool(target_class_ids)
+        has_students = bool(target_student_ids) or bool(target_student)
         if not target_type:
-            return error_response(
-                message="Đối tượng là bắt buộc",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if target_type == "student" and not target_student:
+            if has_classes and has_students:
+                target_type = "mixed"
+            elif has_classes:
+                target_type = "class"
+            elif has_students:
+                target_type = "student"
+            else:
+                return error_response(
+                    message="Chọn ít nhất một lớp hoặc một học sinh",
+                    code="MISSING_REQUIRED_FIELDS",
+                )
+        if target_type == "student" and not target_student_ids and not target_student:
             return error_response(
                 message="Học sinh là bắt buộc khi đối tượng là Học sinh",
                 code="MISSING_REQUIRED_FIELDS",
@@ -956,6 +1017,11 @@ def create_discipline_record(
         if target_type == "class" and not target_class_ids:
             return error_response(
                 message="Lớp là bắt buộc khi đối tượng là Lớp",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if target_type == "mixed" and (not target_class_ids and not target_student_ids and not target_student):
+            return error_response(
+                message="Chọn ít nhất một lớp hoặc một học sinh",
                 code="MISSING_REQUIRED_FIELDS",
             )
         if not violation:
@@ -984,6 +1050,11 @@ def create_discipline_record(
                 code="MISSING_REQUIRED_FIELDS",
             )
 
+        # Thu thập danh sách học sinh (target_student cũ hoặc target_student_ids mới)
+        student_ids = list(target_student_ids) if target_student_ids else []
+        if target_student and target_student not in student_ids:
+            student_ids.insert(0, target_student)
+
         doc = frappe.get_doc(
             {
                 "doctype": "SIS Discipline Record",
@@ -991,7 +1062,8 @@ def create_discipline_record(
                 "classification": classification,
                 "violation_count": int(violation_count),
                 "target_type": target_type,
-                "target_student": target_student if target_type == "student" else None,
+                # target_student: chỉ dùng khi student đơn và dùng param cũ (tương thích ngược)
+                "target_student": target_student if target_type == "student" and len(student_ids) == 1 and target_student and not target_student_ids else None,
                 "violation": violation,
                 "form": form,
                 "penalty_points": str(penalty_points),
@@ -1000,12 +1072,24 @@ def create_discipline_record(
             }
         )
 
-        if target_type == "class":
+        # Lớp: target_classes (class hoặc mixed)
+        if target_type in ("class", "mixed") and target_class_ids:
             for cid in target_class_ids:
                 if isinstance(cid, dict):
                     cid = cid.get("class_id") or cid.get("name")
                 if cid:
                     doc.append("target_classes", {"class_id": cid})
+
+        # Học sinh: target_students (nhiều học sinh) hoặc target_student (1 học sinh - tương thích cũ)
+        if student_ids:
+            if len(student_ids) == 1 and target_student and not target_student_ids:
+                doc.target_student = student_ids[0]
+            else:
+                for sid in student_ids:
+                    if isinstance(sid, dict):
+                        sid = sid.get("student_id") or sid.get("name")
+                    if sid:
+                        doc.append("target_students", {"student_id": sid})
 
         for img in proof_images:
             url = img.get("image") if isinstance(img, dict) else img
@@ -1036,6 +1120,7 @@ def update_discipline_record(
     violation_count=None,
     target_type=None,
     target_student=None,
+    target_student_ids=None,
     target_class_ids=None,
     violation=None,
     form=None,
@@ -1043,7 +1128,7 @@ def update_discipline_record(
     time_slot=None,
     proof_images=None,
 ):
-    """Cập nhật ghi nhận lỗi"""
+    """Cập nhật ghi nhận lỗi - hỗ trợ mixed (nhiều lớp + nhiều học sinh)"""
     try:
         data = _get_request_data()
         name = name or data.get("name")
@@ -1055,6 +1140,11 @@ def update_discipline_record(
 
         doc = frappe.get_doc("SIS Discipline Record", name)
 
+        target_type = target_type or data.get("target_type")
+        target_student = target_student or data.get("target_student")
+        target_student_ids = target_student_ids or data.get("target_student_ids") or []
+        target_class_ids = target_class_ids or data.get("target_class_ids") or []
+
         if date is not None:
             doc.date = date
         if classification is not None:
@@ -1063,18 +1153,41 @@ def update_discipline_record(
             doc.violation_count = int(violation_count)
         if target_type is not None:
             doc.target_type = target_type
-        if target_type == "student":
-            doc.target_student = target_student or data.get("target_student")
-            doc.target_classes = []
-        elif target_type == "class":
-            doc.target_student = None
-            target_class_ids = target_class_ids or data.get("target_class_ids") or []
-            doc.target_classes = []
+
+        # Xác định target_type từ dữ liệu nếu có cả lớp và học sinh
+        has_classes = bool(target_class_ids)
+        has_students = bool(target_student_ids) or bool(target_student)
+        if has_classes and has_students:
+            doc.target_type = "mixed"
+        elif has_classes:
+            doc.target_type = "class"
+        elif has_students:
+            doc.target_type = "student"
+
+        student_ids = list(target_student_ids) if target_student_ids else []
+        if target_student and target_student not in student_ids:
+            student_ids.insert(0, target_student)
+
+        doc.target_student = None
+        doc.target_classes = []
+        doc.target_students = []
+
+        if doc.target_type in ("class", "mixed") and target_class_ids:
             for cid in target_class_ids:
                 if isinstance(cid, dict):
                     cid = cid.get("class_id") or cid.get("name")
                 if cid:
                     doc.append("target_classes", {"class_id": cid})
+
+        if student_ids:
+            if len(student_ids) == 1 and target_student and not target_student_ids:
+                doc.target_student = student_ids[0]
+            else:
+                for sid in student_ids:
+                    if isinstance(sid, dict):
+                        sid = sid.get("student_id") or sid.get("name")
+                    if sid:
+                        doc.append("target_students", {"student_id": sid})
         if violation is not None:
             doc.violation = violation
         if form is not None:

@@ -15,6 +15,7 @@
   "target_type",
   "target_student",
   "target_classes",
+  "target_students",
   "violation_section",
   "violation",
   "severity_level",
@@ -64,7 +65,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Đối tượng",
-   "options": "class\nstudent",
+   "options": "class\nstudent\nmixed",
    "reqd": 1
   },
   {
@@ -75,11 +76,18 @@
    "options": "CRM Student"
   },
   {
-   "depends_on": "eval:doc.target_type==\"class\"",
+   "depends_on": "eval:doc.target_type==\"class\" || doc.target_type==\"mixed\"",
    "fieldname": "target_classes",
    "fieldtype": "Table",
    "label": "Lớp",
    "options": "SIS Discipline Record Class Entry"
+  },
+  {
+   "depends_on": "eval:doc.target_type==\"student\" || doc.target_type==\"mixed\"",
+   "fieldname": "target_students",
+   "fieldtype": "Table",
+   "label": "Học sinh",
+   "options": "SIS Discipline Record Student Entry"
   },
   {
    "fieldname": "violation_section",
