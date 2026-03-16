@@ -11,6 +11,72 @@ import frappe
 from erp.utils.api_response import success_response, error_response
 
 
+def _get_student_display_info(sid):
+    """Lấy thông tin hiển thị cho 1 học sinh: name, code, class, photo"""
+    s = frappe.db.get_value(
+        "CRM Student", sid, ["student_name", "student_code"], as_dict=True
+    )
+    if not s:
+        return {"student_id": sid, "student_name": "", "student_code": "", "student_class_title": "", "student_photo_url": None}
+    current_sy = frappe.db.get_value(
+        "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+    )
+    # Lớp Regular
+    cs = None
+    if current_sy:
+        cs = frappe.db.get_value(
+            "SIS Class Student",
+            {"student_id": sid, "school_year_id": current_sy, "class_type": "regular"},
+            "class_id",
+        )
+    if not cs:
+        cs_row = frappe.db.sql(
+            """SELECT cs.class_id FROM `tabSIS Class Student` cs
+            WHERE cs.student_id = %s AND cs.class_type = 'regular'
+            ORDER BY cs.creation DESC LIMIT 1""",
+            (sid,),
+            as_dict=True,
+        )
+        cs = cs_row[0]["class_id"] if cs_row else None
+    class_title = frappe.db.get_value("SIS Class", cs, "title") or "" if cs else ""
+    # Ảnh
+    photo_url = None
+    try:
+        if current_sy:
+            photo_row = frappe.db.sql(
+                """SELECT photo FROM `tabSIS Photo`
+                WHERE student_id = %s AND type = 'student' AND status = 'Active'
+                ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                         upload_date DESC, creation DESC LIMIT 1""",
+                (sid, current_sy),
+                as_dict=True,
+            )
+        else:
+            photo_row = frappe.db.sql(
+                """SELECT photo FROM `tabSIS Photo`
+                WHERE student_id = %s AND type = 'student' AND status = 'Active'
+                ORDER BY upload_date DESC, creation DESC LIMIT 1""",
+                (sid,),
+                as_dict=True,
+            )
+        if photo_row and photo_row[0].get("photo"):
+            purl = photo_row[0]["photo"]
+            if purl.startswith("/files/"):
+                purl = frappe.utils.get_url(purl)
+            elif not purl.startswith("http"):
+                purl = frappe.utils.get_url("/files/" + purl)
+            photo_url = purl
+    except Exception:
+        pass
+    return {
+        "student_id": sid,
+        "student_name": s.get("student_name") or "",
+        "student_code": s.get("student_code") or "",
+        "student_class_title": class_title,
+        "student_photo_url": photo_url,
+    }
+
+
 def _get_request_data():
     """Lấy dữ liệu từ request (body JSON + form_dict/query params)"""
     data = {}
@@ -732,130 +798,26 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             has_students = (r.get("target_type") in ("student", "mixed")) and student_ids_to_fetch
 
             if has_students and len(student_ids_to_fetch) == 1:
-                # 1 học sinh: giữ format cũ (student_name, student_code, avatar, class)
+                # 1 học sinh: target_students + các field cũ
                 r["target_student"] = student_ids_to_fetch[0]
-                student = frappe.db.get_value(
-                    "CRM Student",
-                    r["target_student"],
-                    ["student_name", "student_code"],
-                    as_dict=True,
-                )
-                if student:
-                    r["student_name"] = student.get("student_name") or ""
-                    r["student_code"] = student.get("student_code") or ""
-                else:
-                    r["student_name"] = ""
-                    r["student_code"] = ""
-
-                # Năm học hiện tại (dùng cho photo từ SIS Photo và class từ SIS Class Student)
-                current_sy = frappe.db.get_value(
-                    "SIS School Year",
-                    {"is_enable": 1},
-                    "name",
-                    order_by="start_date desc",
-                )
-                # Ảnh học sinh từ SIS Photo (ưu tiên ảnh năm học hiện tại)
-                try:
-                    if current_sy:
-                        photo_row = frappe.db.sql(
-                            """
-                            SELECT photo FROM `tabSIS Photo`
-                            WHERE student_id = %s AND type = 'student' AND status = 'Active'
-                            ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
-                                     upload_date DESC, creation DESC
-                            LIMIT 1
-                            """,
-                            (r["target_student"], current_sy),
-                            as_dict=True,
-                        )
-                    else:
-                        photo_row = frappe.db.sql(
-                            """
-                            SELECT photo FROM `tabSIS Photo`
-                            WHERE student_id = %s AND type = 'student' AND status = 'Active'
-                            ORDER BY upload_date DESC, creation DESC
-                            LIMIT 1
-                            """,
-                            (r["target_student"],),
-                            as_dict=True,
-                        )
-                    if photo_row and photo_row[0].get("photo"):
-                        purl = photo_row[0]["photo"]
-                        if purl.startswith("/files/"):
-                            purl = frappe.utils.get_url(purl)
-                        elif not purl.startswith("http"):
-                            purl = frappe.utils.get_url("/files/" + purl)
-                        r["student_photo_url"] = purl
-                    else:
-                        # Fallback: thử lấy ảnh không filter status (phòng trường hợp status khác)
-                        photo_fb = frappe.db.sql(
-                            """
-                            SELECT photo FROM `tabSIS Photo`
-                            WHERE student_id = %s AND type = 'student' AND photo IS NOT NULL
-                            ORDER BY upload_date DESC LIMIT 1
-                            """,
-                            (r["target_student"],),
-                            as_dict=True,
-                        )
-                        if photo_fb and photo_fb[0].get("photo"):
-                            purl = photo_fb[0]["photo"]
-                            if purl.startswith("/files/"):
-                                purl = frappe.utils.get_url(purl)
-                            elif not purl.startswith("http"):
-                                purl = frappe.utils.get_url("/files/" + purl)
-                            r["student_photo_url"] = purl
-                        else:
-                            r["student_photo_url"] = None
-                except Exception:
-                    r["student_photo_url"] = None
-
-                # Lớp Regular của học sinh (năm học hiện tại, fallback: năm học gần nhất)
-                cs = None
-                if current_sy:
-                    cs = frappe.db.get_value(
-                        "SIS Class Student",
-                        {
-                            "student_id": r["target_student"],
-                            "school_year_id": current_sy,
-                            "class_type": "regular",
-                        },
-                        "class_id",
-                    )
-                if not cs:
-                    # Fallback: lấy lớp từ bất kỳ năm học nào (mới nhất)
-                    cs_row = frappe.db.sql(
-                        """
-                        SELECT cs.class_id FROM `tabSIS Class Student` cs
-                        WHERE cs.student_id = %s AND cs.class_type = 'regular'
-                        ORDER BY cs.creation DESC LIMIT 1
-                        """,
-                        (r["target_student"],),
-                        as_dict=True,
-                    )
-                    cs = cs_row[0]["class_id"] if cs_row else None
-                if cs:
-                    r["student_class_title"] = frappe.db.get_value(
-                        "SIS Class", cs, "title"
-                    ) or cs
-                else:
-                    r["student_class_title"] = ""
+                st_info = _get_student_display_info(r["target_student"])
+                r["target_students"] = [st_info]
+                r["student_name"] = st_info.get("student_name") or ""
+                r["student_code"] = st_info.get("student_code") or ""
+                r["student_photo_url"] = st_info.get("student_photo_url")
+                r["student_class_title"] = st_info.get("student_class_title") or ""
             elif has_students and len(student_ids_to_fetch) > 1:
-                # Nhiều học sinh (mixed hoặc student): lấy tên để hiển thị "A, B, C"
-                names = []
-                for sid in student_ids_to_fetch:
-                    s = frappe.db.get_value(
-                        "CRM Student", sid, ["student_name", "student_code"], as_dict=True
-                    )
-                    if s:
-                        names.append((s.get("student_name") or "") + " (" + (s.get("student_code") or "") + ")")
-                    else:
-                        names.append(sid)
+                # Nhiều học sinh: target_students với avatar, tên, lớp từng người
+                r["target_students"] = [_get_student_display_info(sid) for sid in student_ids_to_fetch]
+                names = [
+                    (st["student_name"] or "") + " (" + (st["student_code"] or "") + ")"
+                    for st in r["target_students"]
+                ]
                 r["student_name"] = ", ".join(names)
                 r["student_code"] = ""
-                # Lớp: từ target_class_titles nếu mixed, else "-"
                 r["student_class_title"] = ", ".join(r.get("target_class_titles") or []) or "-"
                 r["student_photo_url"] = None
-                r["target_student"] = student_ids_to_fetch[0]  # Để Xem chi tiết dùng học sinh đầu
+                r["target_student"] = student_ids_to_fetch[0]
             else:
                 r["student_name"] = ""
                 r["student_code"] = ""
@@ -903,25 +865,19 @@ def get_discipline_record(name: str = None):
         d["target_student_ids"] = [s.get("student_id") for s in stu_entries if s.get("student_id")]
         if not d["target_student_ids"] and d.get("target_student"):
             d["target_student_ids"] = [d["target_student"]]
-        # student_name cho mixed/nhiều học sinh: "A (code1), B (code2)"
+        # target_students với avatar, tên, lớp cho từng học sinh
         if len(d["target_student_ids"]) > 1:
-            names = []
-            for sid in d["target_student_ids"]:
-                s = frappe.db.get_value(
-                    "CRM Student", sid, ["student_name", "student_code"], as_dict=True
-                )
-                if s:
-                    names.append((s.get("student_name") or "") + " (" + (s.get("student_code") or "") + ")")
-                else:
-                    names.append(sid)
-            d["student_name"] = ", ".join(names)
-        elif len(d["target_student_ids"]) == 1 and not d.get("student_name"):
-            s = frappe.db.get_value(
-                "CRM Student", d["target_student_ids"][0], ["student_name", "student_code"], as_dict=True
+            d["target_students"] = [_get_student_display_info(sid) for sid in d["target_student_ids"]]
+            d["student_name"] = ", ".join(
+                (st["student_name"] or "") + " (" + (st["student_code"] or "") + ")"
+                for st in d["target_students"]
             )
-            if s:
-                d["student_name"] = s.get("student_name") or ""
-                d["student_code"] = s.get("student_code") or ""
+        elif len(d["target_student_ids"]) == 1:
+            st_info = _get_student_display_info(d["target_student_ids"][0])
+            d["target_students"] = [st_info]
+            if not d.get("student_name"):
+                d["student_name"] = st_info.get("student_name") or ""
+                d["student_code"] = st_info.get("student_code") or ""
 
         # Enrich
         if d.get("classification"):
