@@ -2178,13 +2178,13 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     if key not in student_period_class:
                         student_period_class[key] = row["class_id"]
 
+            # Class Attendance = nơi GV điểm danh → ưu tiên hơn SIS Student Timetable khi có
             for row in class_att:
                 num = _extract_period_num(row["period"])
                 pname = row["period"] if row["period"] in period_set else (period_num_to_name.get(num) if num in period_num_to_name else None)
                 if pname:
                     key = (row["student_id"], pname)
-                    if key not in student_period_class or student_period_class[key] == class_id:
-                        student_period_class[key] = row["class_id"]
+                    student_period_class[key] = row["class_id"]
 
             # Build attendance map (student_id, period) -> status
             attendance_map = {}
