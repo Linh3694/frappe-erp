@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "autoname": "field:profile_type",
+ "creation": "2024-01-01 00:00:00.000000",
+ "description": "CRM Admission Profile Type - Loai ho so nhap hoc",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "profile_type",
+  "applicable_grades"
+ ],
+ "fields": [
+  {
+   "fieldname": "profile_type",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Loại hồ sơ",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "applicable_grades",
+   "fieldtype": "Small Text",
+   "label": "Khối áp dụng",
+   "description": "JSON array: [\"Khối 1\", \"Khối 2\", ...]",
+   "in_list_view": 0
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Admission Profile Type",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Registrar",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "SIS Sales"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "profile_type"
+}

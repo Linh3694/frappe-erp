@@ -117,6 +117,28 @@ def delete_promotion():
     return _crud_delete("CRM Promotion", get_request_data().get("name"))
 
 
+# --- CRM Admission Profile Type (Hồ sơ nhập học) ---
+@frappe.whitelist()
+def get_admission_profile_types():
+    return _crud_list("CRM Admission Profile Type")
+
+
+@frappe.whitelist(methods=["POST"])
+def create_admission_profile_type():
+    return _crud_create("CRM Admission Profile Type", get_request_data(), "profile_type")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_admission_profile_type():
+    data = get_request_data()
+    return _crud_update("CRM Admission Profile Type", data.get("name"), data)
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_admission_profile_type():
+    return _crud_delete("CRM Admission Profile Type", get_request_data().get("name"))
+
+
 # --- CRM Referrer ---
 @frappe.whitelist()
 def get_referrers():
