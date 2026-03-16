@@ -25,10 +25,20 @@ def get_step_history():
     history = frappe.get_all(
         "CRM Lead Step History",
         filters={"lead": lead_name},
-        fields=["old_step", "new_step", "old_status", "new_status", "changed_by", "changed_at"],
+        fields=["old_step", "new_step", "old_status", "new_status", "changed_by", "changed_at",
+                "reject_reason", "reject_detail"],
         order_by="changed_at asc"
     )
-    
+
+    # Bo sung full_name tu User cho changed_by de FE chuẩn hoa bang userUtils
+    for h in history:
+        user_id = h.get("changed_by")
+        if user_id:
+            full_name = frappe.db.get_value("User", user_id, "full_name")
+            h["changed_by_full_name"] = full_name or user_id
+        else:
+            h["changed_by_full_name"] = None
+
     return list_response(history)
 
 

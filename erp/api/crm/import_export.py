@@ -12,6 +12,7 @@ from erp.api.crm.utils import (
     validate_phone_number, normalize_phone_number,
     STEP_STATUSES, CRM_STEPS
 )
+from erp.api.crm.pipeline import _log_step_change
 
 
 @frappe.whitelist()
@@ -174,7 +175,8 @@ def export_step_leads_for_update():
     leads = frappe.get_all(
         "CRM Lead",
         filters=filters,
-        fields=["name", "crm_code", "student_code", "student_name", "pic", "step", "status"],
+        fields=["name", "crm_code", "student_code", "student_name", "pic", "step", "status",
+                "reject_reason", "reject_detail"],
         order_by="crm_code asc, creation asc",
         limit_page_length=0,
     )
@@ -244,9 +246,13 @@ def bulk_update_leads():
 
             new_step = str(row.get("step", "")).strip()
             new_status = str(row.get("status", "")).strip()
+            reject_reason = str(row.get("reject_reason", "")).strip()
+            reject_detail = str(row.get("reject_detail", "")).strip()
 
             # Xac dinh step se ap dung de validate status
             target_step = new_step if (new_step and new_step != doc.step) else doc.step
+            old_step = doc.step
+            old_status = doc.status
 
             # Validate step hop le
             if new_step and new_step != doc.step:
@@ -275,6 +281,9 @@ def bulk_update_leads():
                     })
                     continue
                 doc.status = new_status
+                if new_status == "Lost":
+                    doc.reject_reason = reject_reason
+                    doc.reject_detail = reject_detail
                 changed = True
             elif new_step and new_step != doc.step:
                 # Doi buoc nhung khong set status -> tu dong dat status mac dinh
@@ -288,6 +297,12 @@ def bulk_update_leads():
                 doc.flags.ignore_validate = True
                 doc.flags.ignore_mandatory = True
                 doc.save(ignore_permissions=True)
+                # Ghi log step change (status hoac step thay doi)
+                _log_step_change(
+                    doc_name, old_step, doc.step, old_status, doc.status,
+                    reject_reason=reject_reason if doc.status == "Lost" else None,
+                    reject_detail=reject_detail if doc.status == "Lost" else None
+                )
                 results["updated"] += 1
             else:
                 results["skipped"] += 1

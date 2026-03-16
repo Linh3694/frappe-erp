@@ -21,6 +21,8 @@
   "new_step",
   "old_status",
   "new_status",
+  "reject_reason",
+  "reject_detail",
   "changed_by",
   "changed_at"
  ],
@@ -54,6 +56,18 @@
    "fieldname": "new_status",
    "fieldtype": "Data",
    "label": "New Status"
+  },
+  {
+   "fieldname": "reject_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do từ chối",
+   "description": "Lưu khi new_status = Lost"
+  },
+  {
+   "fieldname": "reject_detail",
+   "fieldtype": "Small Text",
+   "label": "Mô tả chi tiết",
+   "description": "Lưu khi new_status = Lost"
   },
   {
    "fieldname": "changed_by",

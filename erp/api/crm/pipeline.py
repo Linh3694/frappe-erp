@@ -56,10 +56,11 @@ def _sync_lead_guardians_to_family_if_needed(doc):
         frappe.log_error(f"Loi sync lead_guardians sang CRM Family: {str(e)}")
 
 
-def _log_step_change(lead_name, old_step, new_step, old_status, new_status):
-    """Ghi nhan lich su chuyen buoc"""
+def _log_step_change(lead_name, old_step, new_step, old_status, new_status,
+                     reject_reason=None, reject_detail=None):
+    """Ghi nhan lich su chuyen buoc. Khi new_status=Lost thi luu reject_reason, reject_detail."""
     try:
-        frappe.get_doc({
+        doc_data = {
             "doctype": "CRM Lead Step History",
             "lead": lead_name,
             "old_step": old_step,
@@ -68,19 +69,27 @@ def _log_step_change(lead_name, old_step, new_step, old_status, new_status):
             "new_status": new_status,
             "changed_by": frappe.session.user,
             "changed_at": now()
-        }).insert(ignore_permissions=True)
+        }
+        if new_status == "Lost":
+            if reject_reason is not None:
+                doc_data["reject_reason"] = reject_reason
+            if reject_detail is not None:
+                doc_data["reject_detail"] = reject_detail
+        frappe.get_doc(doc_data).insert(ignore_permissions=True)
     except Exception as e:
         frappe.log_error(f"Loi ghi log chuyen buoc: {str(e)}")
 
 
 @frappe.whitelist(methods=["POST"])
 def change_status():
-    """Chuyen trang thai trong cung 1 step"""
+    """Chuyen trang thai trong cung 1 step. Khi chuyen sang Lost co the truyen reject_reason, reject_detail."""
     check_crm_permission()
     data = get_request_data()
     
     name = data.get("name")
     new_status = data.get("new_status")
+    reject_reason = data.get("reject_reason", "")
+    reject_detail = data.get("reject_detail", "")
     
     if not name or not new_status:
         return validation_error_response(
@@ -102,10 +111,15 @@ def change_status():
     
     old_status = doc.status
     doc.status = new_status
+    if new_status == "Lost":
+        doc.reject_reason = reject_reason
+        doc.reject_detail = reject_detail
     doc.save(ignore_permissions=True)
     frappe.db.commit()
     
-    _log_step_change(name, doc.step, doc.step, old_status, new_status)
+    _log_step_change(name, doc.step, doc.step, old_status, new_status,
+                     reject_reason=reject_reason if new_status == "Lost" else None,
+                     reject_detail=reject_detail if new_status == "Lost" else None)
     
     return single_item_response(doc.as_dict(), f"Da chuyen trang thai sang {new_status}")
 
