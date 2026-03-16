@@ -28,6 +28,7 @@
   "reported_by_name",
   "received_by",
   "received_by_name",
+  "attendance_record_id",
   "checkout_section",
   "checkout_notes",
   "transfer_section",
@@ -138,7 +139,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Trạng thái",
-   "options": "left_class\nat_clinic\nexamining\nreturned\npicked_up\ntransferred",
+   "options": "left_class\nat_clinic\nexamining\nreturned\npicked_up\ntransferred\ncancelled\nrejected",
    "reqd": 1
   },
   {
@@ -170,6 +171,14 @@
    "fieldtype": "Data",
    "label": "Tên nhân viên Y tế",
    "read_only": 1
+  },
+  {
+   "fieldname": "attendance_record_id",
+   "fieldtype": "Link",
+   "label": "Bản ghi điểm danh",
+   "options": "SIS Class Attendance",
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "fieldname": "checkout_section",

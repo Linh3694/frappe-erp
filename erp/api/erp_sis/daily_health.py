@@ -26,6 +26,15 @@ def _check_teacher_permission():
         frappe.throw(_("Bạn không có quyền truy cập API này"), frappe.PermissionError)
 
 
+def _check_medical_permission():
+    """Check if user has medical staff permission (Y tế từ chối)"""
+    user_roles = frappe.get_roles()
+    allowed_roles = ["System Manager", "SIS Manager", "SIS Medical"]
+
+    if not any(role in allowed_roles for role in user_roles):
+        frappe.throw(_("Bạn không có quyền truy cập API này"), frappe.PermissionError)
+
+
 def _get_request_data():
     """Get request data from various sources"""
     data = {}
@@ -152,8 +161,9 @@ def report_student_to_clinic():
         visit = frappe.get_doc(visit_data)
         visit.insert()
         
-        # Nếu có period, tự động cập nhật attendance thành excused
+        # Nếu có period, tự động cập nhật attendance thành excused và lưu attendance_record_id để revert khi hủy/từ chối
         attendance_updated = False
+        attendance_record_id = None
         if period:
             try:
                 existing_attendance = frappe.db.exists(
@@ -175,6 +185,7 @@ def report_student_to_clinic():
                         "excused"
                     )
                     attendance_updated = True
+                    attendance_record_id = existing_attendance
                 else:
                     # Tạo mới attendance với status excused
                     attendance = frappe.get_doc({
@@ -192,6 +203,11 @@ def report_student_to_clinic():
                     })
                     attendance.insert()
                     attendance_updated = True
+                    attendance_record_id = attendance.name
+                
+                # Lưu attendance_record_id vào visit để revert khi cancel/reject
+                if attendance_record_id:
+                    visit.db_set("attendance_record_id", attendance_record_id)
                     
                 frappe.logger().info(f"[report_student_to_clinic] Updated attendance to excused for student {student_id}, period {period}")
             except Exception as att_err:
@@ -444,6 +460,132 @@ def receive_student_at_clinic():
         return error_response(
             message=f"Lỗi khi tiếp nhận học sinh: {str(e)}",
             code="RECEIVE_ERROR"
+        )
+
+
+def _revert_attendance_for_visit(visit):
+    """
+    Revert attendance về present khi cancel/reject visit.
+    Chỉ revert nếu visit.attendance_record_id tồn tại.
+    """
+    if not visit.get("attendance_record_id"):
+        frappe.logger().warning(
+            f"[_revert_attendance_for_visit] Visit {visit.name} không có attendance_record_id, bỏ qua revert"
+        )
+        return False
+    try:
+        frappe.db.set_value(
+            "SIS Class Attendance",
+            visit.attendance_record_id,
+            "status",
+            "present"
+        )
+        frappe.logger().info(f"[_revert_attendance_for_visit] Đã revert attendance {visit.attendance_record_id} về present")
+        return True
+    except Exception as e:
+        frappe.logger().warning(f"[_revert_attendance_for_visit] Không thể revert: {str(e)}")
+        return False
+
+
+@frappe.whitelist(allow_guest=False)
+def cancel_health_visit():
+    """
+    GV hủy đơn báo Y tế (học sinh quay lại lớp / trốn đi chơi / không xuống Y tế)
+    Chỉ cho phép khi status = left_class (chưa Y tế tiếp nhận)
+    Params:
+        - visit_id: ID của visit (required)
+        - reason: Lý do hủy (optional)
+    """
+    try:
+        _check_teacher_permission()
+        
+        data = _get_request_data()
+        visit_id = data.get("visit_id")
+        reason = data.get("reason", "")
+        
+        if not visit_id:
+            return validation_error_response("visit_id là bắt buộc", {"visit_id": ["visit_id là bắt buộc"]})
+        
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
+        
+        if visit.status != "left_class":
+            return error_response(
+                message="Chỉ có thể hủy đơn khi chưa được Y tế tiếp nhận",
+                code="INVALID_STATUS"
+            )
+        
+        visit.status = "cancelled"
+        if reason:
+            visit.checkout_notes = f"[GV hủy] {reason}"
+        visit.save()
+        
+        _revert_attendance_for_visit(visit)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": visit.name, "status": visit.status},
+            message="Đã hủy đơn báo Y tế"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(message="Bản ghi xuống Y tế không tồn tại", code="NOT_FOUND")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.logger().error(f"Error cancelling health visit: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi hủy đơn: {str(e)}",
+            code="CANCEL_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def reject_health_visit():
+    """
+    Y tế từ chối tiếp nhận học sinh
+    Chỉ cho phép khi status = left_class
+    Params:
+        - visit_id: ID của visit (required)
+        - reject_reason: Lý do từ chối (optional)
+    """
+    try:
+        _check_medical_permission()
+        
+        data = _get_request_data()
+        visit_id = data.get("visit_id")
+        reject_reason = data.get("reject_reason", "")
+        
+        if not visit_id:
+            return validation_error_response("visit_id là bắt buộc", {"visit_id": ["visit_id là bắt buộc"]})
+        
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
+        
+        if visit.status != "left_class":
+            return error_response(
+                message="Chỉ có thể từ chối khi đơn chưa được tiếp nhận",
+                code="INVALID_STATUS"
+            )
+        
+        visit.status = "rejected"
+        if reject_reason:
+            visit.checkout_notes = f"[Y tế từ chối] {reject_reason}"
+        visit.save()
+        
+        _revert_attendance_for_visit(visit)
+        frappe.db.commit()
+        
+        return success_response(
+            data={"name": visit.name, "status": visit.status},
+            message="Đã từ chối tiếp nhận"
+        )
+    
+    except frappe.DoesNotExistError:
+        return error_response(message="Bản ghi xuống Y tế không tồn tại", code="NOT_FOUND")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.logger().error(f"Error rejecting health visit: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi từ chối: {str(e)}",
+            code="REJECT_ERROR"
         )
 
 
@@ -1536,6 +1678,10 @@ def get_health_status_for_period():
         students_at_clinic = {}
         
         for visit in visits:
+            # Bỏ qua visit đã hủy hoặc từ chối - không hiển thị trong LessonLog
+            if visit.status in ("cancelled", "rejected"):
+                continue
+            
             student_id = visit.student_id
             
             # Nếu student đã có trong result (ưu tiên visit mới nhất), skip
