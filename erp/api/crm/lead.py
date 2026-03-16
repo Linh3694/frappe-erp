@@ -1090,6 +1090,92 @@ def remove_lead_sibling():
     return success_response(message="Da xoa anh/chi/em khoi ho so")
 
 
+# === Lead Learning History (Tom tat qua trinh hoc tap) APIs ===
+
+@frappe.whitelist(methods=["POST"])
+def add_lead_learning_history():
+    """Them dong tom tat qua trinh hoc tap: Ten truong, Dia chi, Thang nam bat dau, Thang nam rut ho so."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    history_data = data.get("learning_data") or data
+    doc.append("lead_learning_history", {
+        "school_name": history_data.get("school_name", ""),
+        "address": history_data.get("address", ""),
+        "start_month_year": history_data.get("start_month_year", ""),
+        "withdraw_month_year": history_data.get("withdraw_month_year", ""),
+    })
+    doc.flags.ignore_validate = True
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return single_item_response(
+        {"items": [r.as_dict() for r in doc.lead_learning_history]},
+        "Da them qua trinh hoc tap"
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def update_lead_learning_history():
+    """Cap nhat dong tom tat qua trinh hoc tap."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    row_name = data.get("row_name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not row_name:
+        return validation_error_response("Thieu row_name", {"row_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    for row in (getattr(doc, "lead_learning_history", None) or []):
+        if row.get("name") == row_name:
+            updates = data.get("updates") or data
+            if "school_name" in updates:
+                row.school_name = updates.get("school_name", "")
+            if "address" in updates:
+                row.address = updates.get("address", "")
+            if "start_month_year" in updates:
+                row.start_month_year = updates.get("start_month_year", "")
+            if "withdraw_month_year" in updates:
+                row.withdraw_month_year = updates.get("withdraw_month_year", "")
+            doc.flags.ignore_validate = True
+            doc.save(ignore_permissions=True)
+            frappe.db.commit()
+            return single_item_response(row.as_dict(), "Da cap nhat")
+    return not_found_response(f"Khong tim thay dong qua trinh hoc tap {row_name}")
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_lead_learning_history():
+    """Xoa dong tom tat qua trinh hoc tap khoi lead."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    row_name = data.get("row_name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not row_name:
+        return validation_error_response("Thieu row_name", {"row_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    new_items = [r for r in (getattr(doc, "lead_learning_history", None) or []) if r.get("name") != row_name]
+    doc.set("lead_learning_history", new_items)
+    doc.flags.ignore_validate = True
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return success_response(message="Da xoa qua trinh hoc tap khoi ho so")
+
+
 @frappe.whitelist(methods=["POST"])
 def set_primary_contact():
     """Dat guardian lam nguoi lien lac chinh."""

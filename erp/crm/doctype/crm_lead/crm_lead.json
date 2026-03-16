@@ -81,6 +81,7 @@
   "linked_family",
   "lead_guardians",
   "lead_siblings",
+  "lead_learning_history",
   "phone_section",
   "phone_numbers",
   "enrollment_info_section",
@@ -460,6 +461,13 @@
    "label": "Lead Siblings",
    "options": "CRM Lead Sibling",
    "description": "Anh/Chị/Em của học sinh trong hồ sơ"
+  },
+  {
+   "fieldname": "lead_learning_history",
+   "fieldtype": "Table",
+   "label": "Tom tat qua trinh hoc tap",
+   "options": "CRM Lead Learning History",
+   "description": "Ten truong, Dia chi, Thang nam bat dau hoc, Thang nam rut ho so"
   },
   {
    "fieldname": "phone_section",
