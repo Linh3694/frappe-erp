@@ -2335,7 +2335,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         h += lesson_score
 
                 if p > 0:
-                    b = max_lesson_score * p
+                    # b = max_lesson_score × c (số tiết HS có điểm danh: có mặt/muộn/vắng không phép)
+                    b = max_lesson_score * c if c > 0 else max_lesson_score * p
                     base_score = (h / b) * 100 if b > 0 else 0
                     # Không có dữ liệu điểm danh (c=0) -> att=1, không phạt
                     attendance_factor = (c / p) ** N if c > 0 else 1
@@ -2351,7 +2352,7 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                             "base_score": round(base_score, 2),
                             "attendance_factor": round(attendance_factor, 4),
                             "daily_score": round(daily_score, 2),
-                            "formula": f"base_score * attendance_factor = ({h}/{b})*100 * ({c}/{p})^{N}",
+                            "formula": f"base_score * attendance_factor = ({h}/{b})*100 * ({c}/{p})^{N}  [b=max_lesson_score×c]",
                         })
 
             current += timedelta(days=1)
