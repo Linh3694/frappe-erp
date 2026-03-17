@@ -156,8 +156,11 @@ def _send_adjustment_notification_email(student_name, student_code, requested_at
                 break
         adjustment_link = f"{base_url}/admission/re-enrollment/submissions?config={config_id}"
         
-        # Tiêu đề email
-        subject = "YÊU CẦU ĐIỀU CHỈNH TÁI GHI DANH"
+        # Lấy tên kỳ tái ghi danh từ config
+        config_title = frappe.db.get_value("SIS Re-enrollment Config", config_id, "title") or "Tái Ghi Danh"
+        
+        # Tiêu đề email: YÊU CẦU ĐIỀU CHỈNH [Tên giai đoạn Tái Ghi Danh]
+        subject = f"YÊU CẦU ĐIỀU CHỈNH [{config_title}]"
         
         # Nội dung email HTML
         body = f"""
@@ -165,7 +168,7 @@ def _send_adjustment_notification_email(student_name, student_code, requested_at
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
                 <h2 style="color: #002855; border-bottom: 2px solid #F05023; padding-bottom: 10px;">
-                    YÊU CẦU ĐIỀU CHỈNH TÁI GHI DANH
+                    YÊU CẦU ĐIỀU CHỈNH [{config_title}]
                 </h2>
                 
                 <p>Hệ thống nhận được yêu cầu điều chỉnh Tái ghi danh của Học sinh:</p>
