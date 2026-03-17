@@ -1706,7 +1706,30 @@ def get_statistics():
                 "SIS Re-enrollment Config", config_id, "source_school_year_id"
             )
         
-        # Build điều kiện filter (giống get_submissions)
+        # Tối ưu: Dùng IN (subquery) thay vì EXISTS - subquery không tương quan nên MySQL
+        # chỉ chạy 1 lần thay vì mỗi row (EXISTS chạy ~1400 lần x 7 query = rất chậm)
+        grade_subquery = None
+        if (grade_code or education_stage_id) and source_school_year_id:
+            grade_conditions = ["cs.school_year_id = %(source_school_year_id)s"]
+            values["source_school_year_id"] = source_school_year_id
+            if grade_code:
+                grade_conditions.append("eg.grade_code = %(grade_code)s")
+                values["grade_code"] = grade_code
+            if education_stage_id:
+                grade_conditions.append("eg.education_stage_id = %(education_stage_id)s")
+                values["education_stage_id"] = education_stage_id
+            grade_where = " AND ".join(grade_conditions)
+            grade_subquery = f"""
+                re.student_id IN (
+                    SELECT cs.student_id
+                    FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE {grade_where}
+                )
+            """
+        
+        # Build điều kiện filter
         conditions = ["re.config_id = %(config_id)s"]
         values = {"config_id": config_id}
         
@@ -1726,67 +1749,46 @@ def get_statistics():
             conditions.append("re.current_class = %(class_name)s")
             values["class_name"] = class_name
         
-        # Filter theo khối
-        if grade_code and source_school_year_id:
-            conditions.append("""
-                EXISTS (
-                    SELECT 1 FROM `tabSIS Class Student` cs
-                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
-                    LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
-                    WHERE cs.student_id = re.student_id
-                      AND cs.school_year_id = %(source_school_year_id)s
-                      AND eg.grade_code = %(grade_code)s
-                )
-            """)
-            values["source_school_year_id"] = source_school_year_id
-            values["grade_code"] = grade_code
+        # Filter theo khối/cấp học: IN (subquery) - non-correlated, chạy 1 lần
+        if grade_subquery:
+            conditions.append(grade_subquery)
         
-        # Filter theo cấp học
-        if education_stage_id and source_school_year_id:
-            conditions.append("""
-                EXISTS (
-                    SELECT 1 FROM `tabSIS Class Student` cs
-                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
-                    LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
-                    WHERE cs.student_id = re.student_id
-                      AND cs.school_year_id = %(source_school_year_id_stage)s
-                      AND eg.education_stage_id = %(education_stage_id)s
-                )
-            """)
-            values["source_school_year_id_stage"] = source_school_year_id
-            values["education_stage_id"] = education_stage_id
-        
-        where_clause = " AND ".join(conditions)
-        
-        # Thống kê theo quyết định
-        decision_stats = frappe.db.sql(f"""
-            SELECT decision, COUNT(*) as count
+        # Tối ưu: 1 query thay vì 7 - dùng conditional aggregation
+        stats_row = frappe.db.sql(f"""
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN re.decision IS NULL OR re.decision = '' THEN 1 ELSE 0 END) as not_submitted,
+                SUM(CASE WHEN re.decision = 're_enroll' THEN 1 ELSE 0 END) as re_enroll,
+                SUM(CASE WHEN re.decision = 'considering' THEN 1 ELSE 0 END) as considering,
+                SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) as not_re_enroll,
+                SUM(CASE WHEN re.adjustment_status = 'requested' THEN 1 ELSE 0 END) as adjustment_requested,
+                SUM(CASE WHEN re.status = 'pending' THEN 1 ELSE 0 END) as status_pending,
+                SUM(CASE WHEN re.status = 'approved' THEN 1 ELSE 0 END) as status_approved,
+                SUM(CASE WHEN re.status = 'rejected' THEN 1 ELSE 0 END) as status_rejected,
+                SUM(CASE WHEN re.decision = 're_enroll' AND re.payment_type = 'annual' THEN 1 ELSE 0 END) as payment_annual,
+                SUM(CASE WHEN re.decision = 're_enroll' AND re.payment_type = 'semester' THEN 1 ELSE 0 END) as payment_semester
             FROM `tabSIS Re-enrollment` re
             WHERE {where_clause}
-            GROUP BY decision
         """, values, as_dict=True)
         
-        # Thống kê theo trạng thái
-        status_stats = frappe.db.sql(f"""
-            SELECT status, COUNT(*) as count
-            FROM `tabSIS Re-enrollment` re
-            WHERE {where_clause}
-            GROUP BY status
-        """, values, as_dict=True)
-        
-        # Thống kê theo phương thức thanh toán
-        payment_stats = frappe.db.sql(f"""
-            SELECT payment_type, COUNT(*) as count
-            FROM `tabSIS Re-enrollment` re
-            WHERE {where_clause} AND re.decision = 're_enroll'
-            GROUP BY payment_type
-        """, values, as_dict=True)
-        
-        # Tổng số
-        total = frappe.db.sql(f"""
-            SELECT COUNT(*) as count FROM `tabSIS Re-enrollment` re
-            WHERE {where_clause}
-        """, values, as_dict=True)[0].count
+        row = stats_row[0] if stats_row else {}
+        total = row.get("total") or 0
+        not_submitted_count = row.get("not_submitted") or 0
+        adjustment_requested_count = row.get("adjustment_requested") or 0
+        decision_dict = {
+            "re_enroll": row.get("re_enroll") or 0,
+            "considering": row.get("considering") or 0,
+            "not_re_enroll": row.get("not_re_enroll") or 0
+        }
+        status_dict = {
+            "pending": row.get("status_pending") or 0,
+            "approved": row.get("status_approved") or 0,
+            "rejected": row.get("status_rejected") or 0
+        }
+        payment_dict = {
+            "annual": row.get("payment_annual") or 0,
+            "semester": row.get("payment_semester") or 0
+        }
         
         # Lấy thông tin config
         config = frappe.db.get_value(
@@ -1806,23 +1808,6 @@ def get_statistics():
             """, config.campus_id, as_dict=True)[0].count
         else:
             total_students = 0
-        
-        # Chuyển đổi thành dict dễ sử dụng
-        decision_dict = {item.decision: item.count for item in decision_stats if item.decision}
-        status_dict = {item.status: item.count for item in status_stats}
-        payment_dict = {item.payment_type: item.count for item in payment_stats if item.payment_type}
-        
-        # Đếm số chưa làm đơn
-        not_submitted_count = frappe.db.sql(f"""
-            SELECT COUNT(*) as count FROM `tabSIS Re-enrollment` re
-            WHERE {where_clause} AND (re.decision IS NULL OR re.decision = '')
-        """, values, as_dict=True)[0].count
-        
-        # Đếm số yêu cầu điều chỉnh
-        adjustment_requested_count = frappe.db.sql(f"""
-            SELECT COUNT(*) as count FROM `tabSIS Re-enrollment` re
-            WHERE {where_clause} AND re.adjustment_status = 'requested'
-        """, values, as_dict=True)[0].count
         
         logs.append(f"Thống kê cho config {config_id}")
         
