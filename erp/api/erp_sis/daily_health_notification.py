@@ -218,6 +218,93 @@ def notify_health_visit_received(visit_name: str):
         frappe.logger().error(f"[health_notification] Lỗi notify_health_visit_received: {str(e)}")
 
 
+def notify_health_visit_cancelled(visit_name: str):
+    """
+    Gửi notification khi GV hủy đơn báo Y tế (học sinh quay lại lớp / trốn đi chơi).
+    Người nhận: Mobile Medical (để biết không cần tiếp nhận nữa, cập nhật danh sách)
+    """
+    try:
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
+        student_name = visit.student_name or visit.student_id
+        class_name = visit.class_name or visit.class_id
+
+        recipients = get_health_notification_recipients(
+            class_id=visit.class_id,
+            include_medical=True,
+            include_homeroom=False
+        )
+
+        if not recipients:
+            return
+
+        title = "Đã hủy báo Y tế"
+        body = f"{student_name} ({class_name}) - GV đã hủy đơn báo xuống Y tế"
+
+        data = {
+            "type": "health_visit_cancelled",
+            "visit_id": visit.name,
+            "student_id": visit.student_id,
+            "student_name": student_name,
+            "class_id": visit.class_id,
+            "class_name": class_name,
+            "status": "cancelled",
+        }
+
+        _send_to_recipients(recipients, title, body, data)
+        frappe.logger().info(
+            f"[health_notification] Đã gửi health_visit_cancelled cho {len(recipients)} người - visit {visit.name}"
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"[health_notification] Lỗi notify_health_visit_cancelled: {str(e)}")
+
+
+def notify_health_visit_rejected(visit_name: str):
+    """
+    Gửi notification khi Y tế từ chối tiếp nhận học sinh.
+    Người nhận: Homeroom + Vice-homeroom + Reporter (để biết HS đang về lớp)
+    """
+    try:
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
+        student_name = visit.student_name or visit.student_id
+        class_name = visit.class_name or visit.class_id
+
+        extra_users = []
+        if visit.reported_by:
+            extra_users.append(visit.reported_by)
+
+        recipients = get_health_notification_recipients(
+            class_id=visit.class_id,
+            include_medical=False,
+            include_homeroom=True,
+            extra_users=extra_users
+        )
+
+        if not recipients:
+            return
+
+        title = "Y tế từ chối tiếp nhận"
+        body = f"{student_name} ({class_name}) - Y tế đã từ chối, học sinh đang về lớp"
+
+        data = {
+            "type": "health_visit_rejected",
+            "visit_id": visit.name,
+            "student_id": visit.student_id,
+            "student_name": student_name,
+            "class_id": visit.class_id,
+            "class_name": class_name,
+            "status": "rejected",
+        }
+
+        _send_to_recipients(recipients, title, body, data)
+        frappe.logger().info(
+            f"[health_notification] Đã gửi health_visit_rejected cho {len(recipients)} người - visit {visit.name}"
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"[health_notification] Lỗi notify_health_visit_rejected: {str(e)}")
+
+
 def notify_health_visit_completed(visit_name: str):
     """
     Gửi notification khi Y tế checkout học sinh.

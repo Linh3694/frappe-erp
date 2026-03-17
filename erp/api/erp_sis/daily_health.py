@@ -541,6 +541,13 @@ def cancel_health_visit():
         _revert_attendance_for_visit(visit)
         frappe.db.commit()
         
+        # Gửi push notification cho Mobile Medical (Hủy y tế)
+        try:
+            from erp.api.erp_sis.daily_health_notification import notify_health_visit_cancelled
+            notify_health_visit_cancelled(visit_name=visit.name)
+        except Exception as notif_err:
+            frappe.logger().warning(f"[cancel_health_visit] Không gửi được notification: {str(notif_err)}")
+        
         return success_response(
             data={"name": visit.name, "status": visit.status},
             message="Đã hủy đơn báo Y tế"
@@ -561,8 +568,8 @@ def cancel_health_visit():
 def reject_health_visit():
     """
     Y tế từ chối tiếp nhận học sinh.
-    Khác với GV hủy: chuyển status = returned (đã về lớp), KHÔNG revert attendance.
-    Lý do: học sinh cần thời gian di chuyển về lớp → GV thấy học sinh → điểm danh lại thủ công.
+    Chuyển status = rejected (Từ chối) để phân biệt với returned (Đã về lớp sau khi khám).
+    Không revert attendance - học sinh cần thời gian di chuyển về lớp → GV điểm danh lại khi thấy.
     Params:
         - visit_id: ID của visit (required)
         - reject_reason: Lý do từ chối (optional)
@@ -585,15 +592,22 @@ def reject_health_visit():
                 code="INVALID_STATUS"
             )
         
-        # Chuyển sang returned (đã về lớp) - KHÔNG revert attendance
+        # Chuyển sang rejected (Từ chối) - phân biệt với returned (Đã về lớp sau khi khám)
         # Học sinh đang trên đường về lớp, GV sẽ điểm danh lại khi thấy học sinh
-        visit.status = "returned"
+        visit.status = "rejected"
         visit.leave_clinic_time = nowtime()
         if reject_reason:
             visit.checkout_notes = f"[Y tế từ chối] {reject_reason}"
         visit.save()
         
         frappe.db.commit()
+        
+        # Gửi push notification cho Homeroom + Reporter (Y tế từ chối - Hủy y tế)
+        try:
+            from erp.api.erp_sis.daily_health_notification import notify_health_visit_rejected
+            notify_health_visit_rejected(visit_name=visit.name)
+        except Exception as notif_err:
+            frappe.logger().warning(f"[reject_health_visit] Không gửi được notification: {str(notif_err)}")
         
         return success_response(
             data={"name": visit.name, "status": visit.status},

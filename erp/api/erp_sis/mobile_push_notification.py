@@ -612,7 +612,8 @@ def send_mobile_notification(user_email, title, body, data=None):
                 sound_name = "default"
             elif notification_type in (
                 "daily_health", "health_visit_created", "health_visit_received",
-                "health_visit_completed", "health_visit_escalation"
+                "health_visit_completed", "health_visit_escalation",
+                "health_visit_cancelled", "health_visit_rejected"
             ):
                 channel_id = "daily_health"
                 sound_name = "default"
