@@ -441,9 +441,9 @@ Best regards,
                 except:
                     discount_deadline_display = str(discount_deadline)
             
-            # Build thông tin đơn theo format mới
+            # Build Section 1: Thông tin đăng ký Tái ghi danh
             info_lines_vn = [
-                f"- Năm học đăng ký tái ghi danh: **{school_year}**",
+                f"- Năm học đăng ký Tái ghi danh: **{school_year}**",
                 f"- Quyết định: **{decision_vi}**"
             ]
             
@@ -454,10 +454,21 @@ Best regards,
                 if discount_deadline_display:
                     info_lines_vn.append(f"- Mốc thanh toán lựa chọn: **{discount_deadline_display}**")
                 
-                if discount_name and discount_percent:
-                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **Giảm {discount_percent}%** (theo hạn ưu đãi: trước {discount_deadline_display})")
+                if discount_percent is not None:
+                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **Giảm {discount_percent}%** (theo hạn ưu đãi: trước {discount_deadline_display or '...'})")
+                elif discount_name:
+                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **{discount_name}**")
             
-            info_details_vn = "\n".join(info_lines_vn)
+            info_section1_vn = "\n".join(info_lines_vn)
+            
+            # Build Section 2: Thông tin đăng ký Dịch vụ (câu hỏi khảo sát)
+            service_lines_vn = []
+            for ans in answers:
+                q_vn = ans.get('question_text_vn') or ans.get('question_text_en') or ''
+                a_vn = ans.get('selected_options_text_vn') or ans.get('selected_options_text_en') or '-'
+                if q_vn:
+                    service_lines_vn.append(f"- {q_vn}: **{a_vn}**")
+            service_section_vn = "\n".join(service_lines_vn) if service_lines_vn else "- (Không có)"
             
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
@@ -465,7 +476,11 @@ Nhà trường trân trọng cảm ơn Quý Phụ huynh đã xác nhận thông 
 
 Đơn Tái ghi danh của Học sinh **{student_name}** – **{student_code}** đã được gửi thành công vào **{time_display_vi}** với các thông tin đăng ký như sau:
 
-{info_details_vn}
+1. Thông tin đăng ký Tái ghi danh
+{info_section1_vn}
+
+2. Thông tin đăng ký Dịch vụ
+{service_section_vn}
 
 Trong trường hợp Quý Phụ huynh cần hỗ trợ thêm thông tin, điều chỉnh hoặc hỗ trợ liên quan đến hồ sơ tái ghi danh, xin vui lòng liên hệ Bộ phận hỗ trợ qua các kênh sau:
 
@@ -478,7 +493,7 @@ Nhà trường rất mong tiếp tục được đồng hành cùng Gia đình v
 Trân trọng,
 **Hệ thống Trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
 
-            # Build thông tin đơn tiếng Anh cho parent submission
+            # Build Section 1 (English) cho parent submission
             info_lines_en = [
                 f"- School Year for Re-enrollment: **{school_year}**",
                 f"- Decision: **{decision_en}**"
@@ -491,10 +506,21 @@ Trân trọng,
                 if discount_deadline_display:
                     info_lines_en.append(f"- Selected Payment Milestone: **{discount_deadline_display}**")
                 
-                if discount_name and discount_percent:
-                    info_lines_en.append(f"- Financial Discount Applied: **{discount_percent}% off** (discount deadline: before {discount_deadline_display})")
+                if discount_percent is not None:
+                    info_lines_en.append(f"- Financial Discount Applied: **{discount_percent}% off** (discount deadline: before {discount_deadline_display or '...'})")
+                elif discount_name:
+                    info_lines_en.append(f"- Financial Discount Applied: **{discount_name}**")
             
-            info_details_en = "\n".join(info_lines_en)
+            info_section1_en = "\n".join(info_lines_en)
+            
+            # Build Section 2: Service registration (survey Q&A) - English
+            service_lines_en = []
+            for ans in answers:
+                q_en = ans.get('question_text_en') or ans.get('question_text_vn') or ''
+                a_en = ans.get('selected_options_text_en') or ans.get('selected_options_text_vn') or '-'
+                if q_en:
+                    service_lines_en.append(f"- {q_en}: **{a_en}**")
+            service_section_en = "\n".join(service_lines_en) if service_lines_en else "- (None)"
             
             content_en = f"""Dear Parents,
 
@@ -502,7 +528,11 @@ The School sincerely thanks you for confirming the Re-enrollment information for
 
 The Re-enrollment application for student **{student_name}** – **{student_code}** has been successfully submitted on **{time_display_en}** with the following details:
 
-{info_details_en}
+1. Re-enrollment Registration Information
+{info_section1_en}
+
+2. Service Registration Information
+{service_section_en}
 
 If you need additional support, information adjustments, or assistance regarding the re-enrollment application, please contact the support departments through the following channels:
 
