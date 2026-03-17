@@ -307,6 +307,40 @@ def apply_homeroom_titles(parent_doc, titles_payload: List[Dict[str, Any]]):
         )
 
 
+def _save_options_snapshot(row, field_name: str, payload_opts, master_id: str, master_doctype: str):
+    """
+    Lưu options snapshot vào row. Nếu payload rỗng nhưng master_id có giá trị,
+    tự động load từ master để đảm bảo snapshot luôn đồng bộ.
+    """
+    if payload_opts and isinstance(payload_opts, list) and len(payload_opts) > 0:
+        row.set(field_name, json.dumps(payload_opts))
+        return
+
+    if not master_id:
+        return
+
+    # Payload rỗng/null nhưng có master_id → load fallback từ master
+    try:
+        master_doc = frappe.get_doc(master_doctype, master_id)
+        if hasattr(master_doc, "options") and master_doc.options:
+            master_opts = [
+                {"name": opt.name, "title": getattr(opt, "title", "")}
+                for opt in master_doc.options
+            ]
+            row.set(field_name, json.dumps(master_opts))
+            frappe.logger().info(
+                f"[report_card] Fallback {field_name} từ master {master_id}: "
+                f"{len(master_opts)} options"
+            )
+    except frappe.DoesNotExistError:
+        frappe.logger().warning(
+            f"[report_card] Master {master_doctype} '{master_id}' không tồn tại, "
+            f"bỏ qua fallback {field_name}"
+        )
+    except Exception as e:
+        frappe.logger().error(f"[report_card] Lỗi fallback {field_name}: {str(e)}")
+
+
 def apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
     """
     Apply subjects configuration vào template document.
@@ -394,14 +428,26 @@ def apply_subjects(parent_doc, subjects_payload: List[Dict[str, Any]]):
         except Exception as e:
             frappe.logger().error(f"Error saving intl_ielts_config: {str(e)}")
 
-        # Save options snapshots
+        # Save options snapshots (fallback: load từ master nếu frontend gửi rỗng)
         try:
-            if "criteria_options" in sub and sub.get("criteria_options") is not None:
-                row.set("criteria_options", json.dumps(sub.get("criteria_options")))
-            if "scale_options" in sub and sub.get("scale_options") is not None:
-                row.set("scale_options", json.dumps(sub.get("scale_options")))
-            if "comment_title_options" in sub and sub.get("comment_title_options") is not None:
-                row.set("comment_title_options", json.dumps(sub.get("comment_title_options")))
+            _save_options_snapshot(
+                row, "criteria_options",
+                sub.get("criteria_options"),
+                sub.get("criteria_id"),
+                "SIS Report Card Evaluation Criteria",
+            )
+            _save_options_snapshot(
+                row, "scale_options",
+                sub.get("scale_options"),
+                sub.get("scale_id"),
+                "SIS Report Card Evaluation Scale",
+            )
+            _save_options_snapshot(
+                row, "comment_title_options",
+                sub.get("comment_title_options"),
+                sub.get("comment_title_id"),
+                "SIS Report Card Comment Title",
+            )
         except Exception as e:
             frappe.logger().error(f"Error saving options snapshot: {str(e)}")
 
