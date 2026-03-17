@@ -1679,6 +1679,7 @@ def bulk_update_status():
 def get_statistics():
     """
     Lấy thống kê tái ghi danh.
+    Hỗ trợ filter theo class_name, grade_code, education_stage_id (giống get_submissions).
     """
     logs = []
     
@@ -1688,6 +1689,9 @@ def get_statistics():
         
         config_id = frappe.request.args.get('config_id')
         as_of_date = frappe.request.args.get('as_of_date')  # YYYY-MM-DD - dữ liệu tính đến ngày đó
+        class_name = frappe.request.args.get('class_name')
+        grade_code = frappe.request.args.get('grade_code')
+        education_stage_id = frappe.request.args.get('education_stage_id')
         
         if not config_id:
             return validation_error_response(
@@ -1695,63 +1699,94 @@ def get_statistics():
                 {"config_id": ["Config ID là bắt buộc"]}
             )
         
-        # Điều kiện ngày cập nhật (submitted_at, fallback creation) nếu có as_of_date
-        date_filter = ""
-        filter_values = [config_id]
+        # Lấy source_school_year_id để filter theo khối/cấp học
+        source_school_year_id = None
+        if config_id and (grade_code or education_stage_id):
+            source_school_year_id = frappe.db.get_value(
+                "SIS Re-enrollment Config", config_id, "source_school_year_id"
+            )
+        
+        # Build điều kiện filter (giống get_submissions)
+        conditions = ["re.config_id = %(config_id)s"]
+        values = {"config_id": config_id}
+        
+        # Điều kiện ngày cập nhật
         if as_of_date:
             try:
                 from datetime import datetime
                 dt = datetime.strptime(as_of_date, "%Y-%m-%d")
                 as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
-                date_filter = " AND (COALESCE(submitted_at, creation) <= %s)"
-                filter_values.append(as_of_datetime)
+                conditions.append("(COALESCE(re.submitted_at, re.creation) <= %(as_of_datetime)s)")
+                values["as_of_datetime"] = as_of_datetime
             except ValueError:
                 pass
         
+        # Filter theo lớp
+        if class_name:
+            conditions.append("re.current_class = %(class_name)s")
+            values["class_name"] = class_name
+        
+        # Filter theo khối
+        if grade_code and source_school_year_id:
+            conditions.append("""
+                EXISTS (
+                    SELECT 1 FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE cs.student_id = re.student_id
+                      AND cs.school_year_id = %(source_school_year_id)s
+                      AND eg.grade_code = %(grade_code)s
+                )
+            """)
+            values["source_school_year_id"] = source_school_year_id
+            values["grade_code"] = grade_code
+        
+        # Filter theo cấp học
+        if education_stage_id and source_school_year_id:
+            conditions.append("""
+                EXISTS (
+                    SELECT 1 FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE cs.student_id = re.student_id
+                      AND cs.school_year_id = %(source_school_year_id_stage)s
+                      AND eg.education_stage_id = %(education_stage_id)s
+                )
+            """)
+            values["source_school_year_id_stage"] = source_school_year_id
+            values["education_stage_id"] = education_stage_id
+        
+        where_clause = " AND ".join(conditions)
+        
         # Thống kê theo quyết định
         decision_stats = frappe.db.sql(f"""
-            SELECT 
-                decision,
-                COUNT(*) as count
-            FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s{date_filter}
+            SELECT decision, COUNT(*) as count
+            FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause}
             GROUP BY decision
-        """, filter_values, as_dict=True)
+        """, values, as_dict=True)
         
         # Thống kê theo trạng thái
         status_stats = frappe.db.sql(f"""
-            SELECT 
-                status,
-                COUNT(*) as count
-            FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s{date_filter}
+            SELECT status, COUNT(*) as count
+            FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause}
             GROUP BY status
-        """, filter_values, as_dict=True)
+        """, values, as_dict=True)
         
-        # Thống kê theo phương thức thanh toán (chỉ cho những người tái ghi danh)
+        # Thống kê theo phương thức thanh toán
         payment_stats = frappe.db.sql(f"""
-            SELECT 
-                payment_type,
-                COUNT(*) as count
-            FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND decision = 're_enroll'{date_filter}
+            SELECT payment_type, COUNT(*) as count
+            FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause} AND re.decision = 're_enroll'
             GROUP BY payment_type
-        """, filter_values, as_dict=True)
+        """, values, as_dict=True)
         
         # Tổng số
-        if as_of_date:
-            try:
-                from datetime import datetime
-                dt = datetime.strptime(as_of_date, "%Y-%m-%d")
-                as_of_datetime = dt.strftime("%Y-%m-%d 23:59:59.999999")
-                total = frappe.db.sql("""
-                    SELECT COUNT(*) as count FROM `tabSIS Re-enrollment`
-                    WHERE config_id = %s AND (COALESCE(submitted_at, creation) <= %s)
-                """, [config_id, as_of_datetime], as_dict=True)[0].count
-            except ValueError:
-                total = frappe.db.count("SIS Re-enrollment", {"config_id": config_id})
-        else:
-            total = frappe.db.count("SIS Re-enrollment", {"config_id": config_id})
+        total = frappe.db.sql(f"""
+            SELECT COUNT(*) as count FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause}
+        """, values, as_dict=True)[0].count
         
         # Lấy thông tin config
         config = frappe.db.get_value(
@@ -1763,7 +1798,6 @@ def get_statistics():
         
         # Số học sinh trong campus (để so sánh)
         if config:
-            # Đếm số học sinh active trong campus
             total_students = frappe.db.sql("""
                 SELECT COUNT(DISTINCT cs.student_id) as count
                 FROM `tabSIS Class Student` cs
@@ -1778,19 +1812,17 @@ def get_statistics():
         status_dict = {item.status: item.count for item in status_stats}
         payment_dict = {item.payment_type: item.count for item in payment_stats if item.payment_type}
         
-        # Đếm số chưa làm đơn (decision = NULL hoặc rỗng)
+        # Đếm số chưa làm đơn
         not_submitted_count = frappe.db.sql(f"""
-            SELECT COUNT(*) as count
-            FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND (decision IS NULL OR decision = ''){date_filter}
-        """, filter_values, as_dict=True)[0].count
+            SELECT COUNT(*) as count FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause} AND (re.decision IS NULL OR re.decision = '')
+        """, values, as_dict=True)[0].count
         
         # Đếm số yêu cầu điều chỉnh
         adjustment_requested_count = frappe.db.sql(f"""
-            SELECT COUNT(*) as count
-            FROM `tabSIS Re-enrollment`
-            WHERE config_id = %s AND adjustment_status = 'requested'{date_filter}
-        """, filter_values, as_dict=True)[0].count
+            SELECT COUNT(*) as count FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause} AND re.adjustment_status = 'requested'
+        """, values, as_dict=True)[0].count
         
         logs.append(f"Thống kê cho config {config_id}")
         
