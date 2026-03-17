@@ -1933,7 +1933,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
             if t in max_by_type and val > max_by_type[t]:
                 max_by_type[t] = val
 
-        max_lesson_score = max_by_type["homework"] + max_by_type["behavior"] + max_by_type["participation"]
+        # max_lesson_score = tổng 3 options được đánh dấu is_default (homework + behavior + participation)
+        max_lesson_score = (default_values["homework"] or 0) + (default_values["behavior"] or 0) + (default_values["participation"] or 0)
         if max_lesson_score <= 0:
             max_lesson_score = 15
 
@@ -2291,8 +2292,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                     if att_status is not None:
                         if att_status not in ("present", "late", "excused", "absent"):
                             att_status = "absent"
-                        # wis-point.md 2.2: Có mặt + muộn + vắng có phép tính vào c; vắng không phép không tính
-                        if att_status in ("present", "late", "excused"):
+                        # Có mặt + muộn + vắng không phép tính vào c. Chỉ vắng có phép (excused) không tính
+                        if att_status in ("present", "late", "absent"):
                             c += 1
                         penalty = ATTENDANCE_PENALTY.get(att_status, 0)
                     else:
@@ -2305,16 +2306,20 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         if student_log is None:
                             pnum_per = _extract_period_num(period)
                             student_log = student_period_data.get((student_id, pnum_per)) if pnum_per else None
-                        hw_val = _get_score_value(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
-                        beh_val = _get_score_value(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
-                        part_val = _get_score_value(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
-                        # wis-point.md: praise_score = value từ SIS Class Log Score (top_performance). Ưu tiên link, else default, fallback +1 khi được khen
-                        if student_log and student_log.get("is_top_performance"):
-                            praise_val = _get_score_value(student_log.get("top_performance")) if student_log.get("top_performance") else default_values["top_performance"]
-                            if (praise_val or 0) == 0:
-                                praise_val = 1  # Được khen nhưng chưa cấu hình → +1 điểm
+                        # Vắng không phép: dùng 0 cho hw/beh/part/praise, chỉ áp penalty -3 (h = 4*15 - 3 = 57)
+                        if att_status is not None and att_status == "absent":
+                            hw_val, beh_val, part_val, praise_val = 0, 0, 0, 0
                         else:
-                            praise_val = 0
+                            hw_val = _get_score_value(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
+                            beh_val = _get_score_value(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
+                            part_val = _get_score_value(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
+                            # wis-point.md: praise_score = value từ SIS Class Log Score (top_performance). Ưu tiên link, else default, fallback +1 khi được khen
+                            if student_log and student_log.get("is_top_performance"):
+                                praise_val = _get_score_value(student_log.get("top_performance")) if student_log.get("top_performance") else default_values["top_performance"]
+                                if (praise_val or 0) == 0:
+                                    praise_val = 1  # Được khen nhưng chưa cấu hình → +1 điểm
+                            else:
+                                praise_val = 0
                     else:
                         # Không có class log -> mặc định 0 cho tất cả thông số
                         hw_val = 0
@@ -2323,8 +2328,8 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         praise_val = 0
 
                     lesson_score = (hw_val or 0) + (beh_val or 0) + (part_val or 0) + (praise_val or 0) + penalty
-                    # wis-point.md: Tiết nghỉ không phép → h=0 cho tiết đó (không cộng lesson_score vào h)
-                    if att_status is not None and att_status == "absent":
+                    # Vắng có phép (excused) → h=0, không cộng. Vắng không phép (absent) → cộng lesson_score (có penalty -3)
+                    if att_status is not None and att_status == "excused":
                         h += 0
                     else:
                         h += lesson_score

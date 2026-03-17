@@ -466,21 +466,40 @@ def receive_student_at_clinic():
 def _revert_attendance_for_visit(visit):
     """
     Revert attendance về present khi cancel/reject visit.
-    Chỉ revert nếu visit.attendance_record_id tồn tại.
+    Ưu tiên dùng attendance_record_id. Nếu null (visit cũ) thì fallback: query theo
+    student+class+date+excused+remarks chứa "Xuống Y tế" - chỉ revert khi tìm đúng 1 bản ghi.
     """
-    if not visit.get("attendance_record_id"):
-        frappe.logger().warning(
-            f"[_revert_attendance_for_visit] Visit {visit.name} không có attendance_record_id, bỏ qua revert"
+    att_id = visit.get("attendance_record_id")
+    if not att_id:
+        # Fallback cho visit cũ (chưa có attendance_record_id)
+        candidates = frappe.get_all(
+            "SIS Class Attendance",
+            filters={
+                "student_id": visit.student_id,
+                "class_id": visit.class_id,
+                "date": visit.visit_date,
+                "status": "excused",
+                "remarks": ["like", "%Xuống Y tế%"]
+            },
+            pluck="name"
         )
-        return False
+        if len(candidates) == 1:
+            att_id = candidates[0]
+            frappe.logger().info(f"[_revert_attendance_for_visit] Fallback: tìm thấy 1 attendance {att_id} cho visit {visit.name}")
+        else:
+            frappe.logger().warning(
+                f"[_revert_attendance_for_visit] Visit {visit.name} không có attendance_record_id, "
+                f"fallback tìm thấy {len(candidates)} bản ghi - bỏ qua revert"
+            )
+            return False
     try:
         frappe.db.set_value(
             "SIS Class Attendance",
-            visit.attendance_record_id,
+            att_id,
             "status",
             "present"
         )
-        frappe.logger().info(f"[_revert_attendance_for_visit] Đã revert attendance {visit.attendance_record_id} về present")
+        frappe.logger().info(f"[_revert_attendance_for_visit] Đã revert attendance {att_id} về present")
         return True
     except Exception as e:
         frappe.logger().warning(f"[_revert_attendance_for_visit] Không thể revert: {str(e)}")
@@ -541,8 +560,9 @@ def cancel_health_visit():
 @frappe.whitelist(allow_guest=False)
 def reject_health_visit():
     """
-    Y tế từ chối tiếp nhận học sinh
-    Chỉ cho phép khi status = left_class
+    Y tế từ chối tiếp nhận học sinh.
+    Khác với GV hủy: chuyển status = returned (đã về lớp), KHÔNG revert attendance.
+    Lý do: học sinh cần thời gian di chuyển về lớp → GV thấy học sinh → điểm danh lại thủ công.
     Params:
         - visit_id: ID của visit (required)
         - reject_reason: Lý do từ chối (optional)
@@ -565,17 +585,19 @@ def reject_health_visit():
                 code="INVALID_STATUS"
             )
         
-        visit.status = "rejected"
+        # Chuyển sang returned (đã về lớp) - KHÔNG revert attendance
+        # Học sinh đang trên đường về lớp, GV sẽ điểm danh lại khi thấy học sinh
+        visit.status = "returned"
+        visit.leave_clinic_time = nowtime()
         if reject_reason:
             visit.checkout_notes = f"[Y tế từ chối] {reject_reason}"
         visit.save()
         
-        _revert_attendance_for_visit(visit)
         frappe.db.commit()
         
         return success_response(
             data={"name": visit.name, "status": visit.status},
-            message="Đã từ chối tiếp nhận"
+            message="Đã từ chối tiếp nhận - học sinh đang về lớp, GV điểm danh lại khi thấy học sinh"
         )
     
     except frappe.DoesNotExistError:
