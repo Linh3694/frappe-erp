@@ -1706,6 +1706,9 @@ def get_statistics():
                 "SIS Re-enrollment Config", config_id, "source_school_year_id"
             )
         
+        # Khởi tạo values trước (dùng trong grade_subquery)
+        values = {"config_id": config_id}
+        
         # Tối ưu: Dùng IN (subquery) thay vì EXISTS - subquery không tương quan nên MySQL
         # chỉ chạy 1 lần thay vì mỗi row (EXISTS chạy ~1400 lần x 7 query = rất chậm)
         grade_subquery = None
@@ -1731,7 +1734,6 @@ def get_statistics():
         
         # Build điều kiện filter
         conditions = ["re.config_id = %(config_id)s"]
-        values = {"config_id": config_id}
         
         # Điều kiện ngày cập nhật
         if as_of_date:
@@ -1752,6 +1754,8 @@ def get_statistics():
         # Filter theo khối/cấp học: IN (subquery) - non-correlated, chạy 1 lần
         if grade_subquery:
             conditions.append(grade_subquery)
+        
+        where_clause = " AND ".join(conditions)
         
         # Tối ưu: 1 query thay vì 7 - dùng conditional aggregation
         stats_row = frappe.db.sql(f"""
