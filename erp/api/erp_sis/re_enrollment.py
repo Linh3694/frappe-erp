@@ -1502,6 +1502,17 @@ def update_submission():
             changes.append(f"• Khảo sát: Đã cập nhật câu trả lời")
             important_changes.append('answers')
         
+        # Tự động đánh dấu hoàn tất điều chỉnh khi admin sửa đơn có yêu cầu điều chỉnh
+        # Đảm bảo Parent Portal hiển thị đúng trạng thái "Đã đăng ký" sau khi nhận announcement
+        if (old_values.get('adjustment_status') == 'requested'
+            and important_changes
+            and submission.adjustment_status != 'completed'):
+            submission.adjustment_status = 'completed'
+            if 'adjustment_completed' not in important_changes:
+                important_changes.append('adjustment_completed')
+            if not any('Trạng thái điều chỉnh' in c for c in changes):
+                changes.append("• Trạng thái điều chỉnh: Yêu cầu điều chỉnh → Đã điều chỉnh (tự động khi admin cập nhật)")
+        
         # Nếu có thay đổi thì tạo log
         if changes:
             log_content = f"Admin {current_user_name} đã cập nhật đơn:\n" + "\n".join(changes)
@@ -2312,6 +2323,12 @@ def update_submission_decision():
         # Ghi nhận admin sửa
         submission.modified_by_admin = frappe.session.user
         submission.admin_modified_at = now()
+        
+        # Tự động đánh dấu hoàn tất điều chỉnh khi admin cập nhật decision cho đơn có yêu cầu điều chỉnh
+        # Đảm bảo Parent Portal hiển thị đúng trạng thái sau khi nhận announcement
+        if submission.adjustment_status == 'requested':
+            submission.adjustment_status = 'completed'
+            logs.append("Đã tự động đánh dấu hoàn tất điều chỉnh")
         
         submission.save()
         frappe.db.commit()
