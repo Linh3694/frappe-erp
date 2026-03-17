@@ -293,8 +293,8 @@ def _create_re_enrollment_announcement(
         payment_vi = ""
         payment_en = ""
         if payment_type:
-            payment_vi = "Đóng theo năm" if payment_type == 'annual' else "Đóng theo kỳ"
-            payment_en = "Annual" if payment_type == 'annual' else "Semester"
+            payment_vi = "Đóng 01 lần theo năm" if payment_type == 'annual' else "Đóng 02 lần theo kỳ"
+            payment_en = "Annual (1 payment)" if payment_type == 'annual' else "Semester (2 payments)"
         
         status_vi = {"pending": "Chờ xử lý", "approved": "Đã duyệt", "rejected": "Từ chối"}.get(status, status)
         status_en = {"pending": "Pending", "approved": "Approved", "rejected": "Rejected"}.get(status, status)
@@ -322,7 +322,7 @@ def _create_re_enrollment_announcement(
                 except:
                     discount_deadline_display = str(discount_deadline)
             
-            # Build thông tin đơn theo format mới cho update
+            # Build Section 1: Thông tin đăng ký Tái ghi danh
             info_lines_vn = [
                 f"- Năm học tái ghi danh: **{school_year}**",
                 f"- Quyết định: **{decision_vi}**"
@@ -335,10 +335,21 @@ def _create_re_enrollment_announcement(
                 if discount_deadline_display:
                     info_lines_vn.append(f"- Mốc thanh toán lựa chọn: **{discount_deadline_display}**")
                 
-                if discount_name and discount_percent:
-                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **Giảm {discount_percent}%** (theo hạn ưu đãi: trước {discount_deadline_display})")
+                if discount_percent is not None:
+                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **Giảm {discount_percent}%** (theo hạn ưu đãi: trước {discount_deadline_display or '...'})")
+                elif discount_name:
+                    info_lines_vn.append(f"- Ưu đãi tài chính được áp dụng: **{discount_name}**")
             
-            info_details_vn = "\n".join(info_lines_vn)
+            info_section1_vn = "\n".join(info_lines_vn)
+            
+            # Build Section 2: Thông tin đăng ký Dịch vụ (câu hỏi khảo sát)
+            service_lines_vn = []
+            for ans in answers:
+                q_vn = ans.get('question_text_vn') or ans.get('question_text_en') or ''
+                a_vn = ans.get('selected_options_text_vn') or ans.get('selected_options_text_en') or '-'
+                if q_vn:
+                    service_lines_vn.append(f"- {q_vn}: **{a_vn}**")
+            service_section_vn = "\n".join(service_lines_vn) if service_lines_vn else "- (Không có)"
             
             content_vn = f"""Kính gửi Quý Phụ huynh,
 
@@ -346,7 +357,11 @@ Nhà trường xác nhận việc điều chỉnh và cập nhật hồ sơ Tái
 
 Hồ sơ Tái ghi danh của Học sinh **{student_name}** – **{student_code}** đã được hệ thống ghi nhận vào **{time_display_vi}**, với các nội dung như sau:
 
-{info_details_vn}
+1. Thông tin đăng ký Tái ghi danh
+{info_section1_vn}
+
+2. Thông tin đăng ký Dịch vụ
+{service_section_vn}
 
 Trường hợp Quý Phụ huynh có nhu cầu tiếp tục điều chỉnh thông tin, bổ sung hồ sơ hoặc cần hỗ trợ thêm liên quan đến kế hoạch tái ghi danh, xin vui lòng liên hệ Bộ phận Kết nối WISers – Phòng Tuyển sinh qua các kênh sau:
 📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
@@ -356,7 +371,7 @@ Nhà trường trân trọng cảm ơn sự phối hợp và đồng hành của
 Trân trọng,
 **Hệ thống Trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
 
-            # Build thông tin đơn tiếng Anh cho update
+            # Build Section 1 (English) cho update
             info_lines_en = [
                 f"- School Year: **{school_year}**",
                 f"- Decision: **{decision_en}**"
@@ -369,10 +384,21 @@ Trân trọng,
                 if discount_deadline_display:
                     info_lines_en.append(f"- Selected Payment Milestone: **{discount_deadline_display}**")
                 
-                if discount_name and discount_percent:
-                    info_lines_en.append(f"- Financial Discount Applied: **{discount_percent}% off** (discount deadline: before {discount_deadline_display})")
+                if discount_percent is not None:
+                    info_lines_en.append(f"- Financial Discount Applied: **{discount_percent}% off** (discount deadline: before {discount_deadline_display or '...'})")
+                elif discount_name:
+                    info_lines_en.append(f"- Financial Discount Applied: **{discount_name}**")
             
-            info_details_en = "\n".join(info_lines_en)
+            info_section1_en = "\n".join(info_lines_en)
+            
+            # Build Section 2: Service registration (survey Q&A) - English
+            service_lines_en = []
+            for ans in answers:
+                q_en = ans.get('question_text_en') or ans.get('question_text_vn') or ''
+                a_en = ans.get('selected_options_text_en') or ans.get('selected_options_text_vn') or '-'
+                if q_en:
+                    service_lines_en.append(f"- {q_en}: **{a_en}**")
+            service_section_en = "\n".join(service_lines_en) if service_lines_en else "- (None)"
             
             content_en = f"""Dear Parents,
 
@@ -380,7 +406,11 @@ The School confirms that the re-enrollment application for School Year {school_y
 
 The re-enrollment application for student **{student_name}** – **{student_code}** has been recorded in the system on **{time_display_en}**, with the following details:
 
-{info_details_en}
+1. Re-enrollment Registration Information
+{info_section1_en}
+
+2. Service Registration Information
+{service_section_en}
 
 If you need to continue adjusting information, supplementing documents, or require further support regarding the re-enrollment plan, please contact the WISers Connection Department – Admissions Office through the following channels:
 📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
