@@ -2958,7 +2958,7 @@ def get_parent_health_records():
                 visit_data = frappe.db.get_value(
                     "SIS Daily Health Visit",
                     exam["visit_id"],
-                    ["checkout_notes", "reason", "transfer_hospital"],
+                    ["checkout_notes", "reason", "transfer_hospital", "leave_clinic_time"],
                     as_dict=True
                 )
                 if visit_data:
@@ -2966,6 +2966,8 @@ def get_parent_health_records():
                     exam["visit_reason"] = visit_data.get("reason") or ""
                     # Bệnh viện chuyển tới từ visit (khi checkout chuyển viện) - dùng cho màn PH và GVCN
                     exam["transfer_hospital"] = visit_data.get("transfer_hospital") or ""
+                    # Thời gian ra về: ưu tiên exam.clinic_checkout_time, fallback visit.leave_clinic_time (dữ liệu cũ)
+                    exam["clinic_checkout_time"] = exam.get("clinic_checkout_time") or visit_data.get("leave_clinic_time") or ""
                 else:
                     exam["visit_reason"] = ""
                     exam["transfer_hospital"] = ""
