@@ -1012,6 +1012,11 @@ def get_application_detail(application_id=None):
                 "approver_name": score_doc.approver_name
             }
         
+        # Lấy class_type từ SIS Class để hiển thị Lớp homeroom (chỉ khi type = regular)
+        class_type = None
+        if app.class_id:
+            class_type = frappe.db.get_value("SIS Class", app.class_id, "class_type")
+
         # Kiểm tra quyền chấm điểm của user hiện tại
         user = frappe.session.user
         user_roles = frappe.get_roles(user)
@@ -1041,6 +1046,7 @@ def get_application_detail(application_id=None):
                 "student_image": student_image,
                 "class_id": app.class_id,
                 "class_name": app.class_name,
+                "class_type": class_type,
                 "education_stage_id": app.education_stage_id,
                 "education_stage_name": app.education_stage_name,
                 "status": app.status,

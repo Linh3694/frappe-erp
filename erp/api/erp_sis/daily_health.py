@@ -2610,11 +2610,21 @@ def get_class_health_examinations():
                         img["image"] = frappe.utils.get_url("/files/" + img["image"])
             exam["images"] = images
 
-            # Lấy reason từ visit tương ứng (mỗi lượt xuống Y tế có lý do riêng từ GV)
+            # Lấy reason và leave_clinic_time từ visit tương ứng
             visit_id = exam.get("visit_id")
             if visit_id:
-                visit_reason = frappe.db.get_value("SIS Daily Health Visit", visit_id, "reason")
-                exam["visit_reason"] = visit_reason or ""
+                visit_data = frappe.db.get_value(
+                    "SIS Daily Health Visit",
+                    visit_id,
+                    ["reason", "leave_clinic_time"],
+                    as_dict=True
+                )
+                if visit_data:
+                    exam["visit_reason"] = visit_data.get("reason") or ""
+                    # Thời gian ra về: ưu tiên exam.clinic_checkout_time, fallback visit.leave_clinic_time (dữ liệu cũ)
+                    exam["clinic_checkout_time"] = exam.get("clinic_checkout_time") or visit_data.get("leave_clinic_time") or ""
+                else:
+                    exam["visit_reason"] = ""
             else:
                 exam["visit_reason"] = ""
             
