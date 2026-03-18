@@ -1390,6 +1390,15 @@ def update_submission():
             submission.selected_discount_id = None
             submission.selected_discount_name = None
             submission.selected_discount_deadline = None
+        elif decision in (None, ''):
+            # Chuyển về "Chưa làm đơn" - clear tất cả field liên quan, giữ nguyên notes (lịch sử)
+            submission.payment_type = None
+            submission.selected_discount_id = None
+            submission.selected_discount_name = None
+            submission.selected_discount_deadline = None
+            submission.not_re_enroll_reason = None
+            if hasattr(submission, 'selected_discount_percent'):
+                submission.selected_discount_percent = None
         
         # Xử lý answers (câu trả lời khảo sát)
         answers_data = data.get('answers', [])
@@ -1419,14 +1428,17 @@ def update_submission():
         important_changes = []  # Các thay đổi quan trọng cần gửi notification (Trạng thái, Khảo sát)
         decision_map = {
             're_enroll': 'Tái ghi danh',
-            'considering': 'Cân nhắc', 
-            'not_re_enroll': 'Không tái ghi danh'
+            'considering': 'Cân nhắc',
+            'not_re_enroll': 'Không tái ghi danh',
+            '': 'Chưa làm đơn',
+            None: 'Chưa làm đơn'
         }
         payment_type_map = {'annual': 'Đóng theo năm', 'semester': 'Đóng theo kỳ'}
         payment_status_map = {'unpaid': 'Chưa đóng', 'paid': 'Đã đóng', 'refunded': 'Hoàn tiền'}
         
         # So sánh decision (QUAN TRỌNG - gửi notification)
-        new_decision = data.get('decision') or submission.decision
+        # Dùng 'decision' in data để phân biệt decision='' (Chưa làm đơn) với không gửi
+        new_decision = data['decision'] if 'decision' in data else submission.decision
         if old_values['decision'] != new_decision:
             old_display = decision_map.get(old_values['decision'], old_values['decision'] or 'Chưa có')
             new_display = decision_map.get(new_decision, new_decision)
