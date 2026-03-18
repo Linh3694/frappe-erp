@@ -638,9 +638,10 @@ def get_active_period():
             
             students.append(student_info)
         
-        # Lấy cấu hình hạng mục thành tích
+        # Lấy cấu hình hạng mục thành tích (dùng as_dict để đảm bảo lấy đủ các field mới)
         achievement_categories = []
         for category in period_doc.achievement_categories:
+            cat_dict = category.as_dict() if hasattr(category, 'as_dict') else {}
             achievement_categories.append({
                 "name": category.name,
                 "title_vn": category.title_vn,
@@ -649,14 +650,14 @@ def get_active_period():
                 "description_en": category.description_en,
                 "example_vn": category.example_vn,
                 "example_en": category.example_en,
-                "list_field_title_vn": getattr(category, 'list_field_title_vn', None),
-                "list_field_title_en": getattr(category, 'list_field_title_en', None),
-                "list_field_description_vn": getattr(category, 'list_field_description_vn', None),
-                "list_field_description_en": getattr(category, 'list_field_description_en', None),
-                "attachment_field_title_vn": getattr(category, 'attachment_field_title_vn', None),
-                "attachment_field_title_en": getattr(category, 'attachment_field_title_en', None),
-                "attachment_field_description_vn": getattr(category, 'attachment_field_description_vn', None),
-                "attachment_field_description_en": getattr(category, 'attachment_field_description_en', None),
+                "list_field_title_vn": cat_dict.get('list_field_title_vn') or getattr(category, 'list_field_title_vn', None),
+                "list_field_title_en": cat_dict.get('list_field_title_en') or getattr(category, 'list_field_title_en', None),
+                "list_field_description_vn": cat_dict.get('list_field_description_vn') or getattr(category, 'list_field_description_vn', None),
+                "list_field_description_en": cat_dict.get('list_field_description_en') or getattr(category, 'list_field_description_en', None),
+                "attachment_field_title_vn": cat_dict.get('attachment_field_title_vn') or getattr(category, 'attachment_field_title_vn', None),
+                "attachment_field_title_en": cat_dict.get('attachment_field_title_en') or getattr(category, 'attachment_field_title_en', None),
+                "attachment_field_description_vn": cat_dict.get('attachment_field_description_vn') or getattr(category, 'attachment_field_description_vn', None),
+                "attachment_field_description_en": cat_dict.get('attachment_field_description_en') or getattr(category, 'attachment_field_description_en', None),
                 "is_required": category.is_required,
                 "sort_order": category.sort_order
             })
