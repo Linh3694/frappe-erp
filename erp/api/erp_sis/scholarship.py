@@ -223,6 +223,14 @@ def get_scholarship_period(period_id=None):
                 "description_en": category.description_en,
                 "example_vn": category.example_vn,
                 "example_en": category.example_en,
+                "list_field_title_vn": getattr(category, 'list_field_title_vn', None),
+                "list_field_title_en": getattr(category, 'list_field_title_en', None),
+                "list_field_description_vn": getattr(category, 'list_field_description_vn', None),
+                "list_field_description_en": getattr(category, 'list_field_description_en', None),
+                "attachment_field_title_vn": getattr(category, 'attachment_field_title_vn', None),
+                "attachment_field_title_en": getattr(category, 'attachment_field_title_en', None),
+                "attachment_field_description_vn": getattr(category, 'attachment_field_description_vn', None),
+                "attachment_field_description_en": getattr(category, 'attachment_field_description_en', None),
                 "is_required": category.is_required,
                 "sort_order": category.sort_order
             })
@@ -364,6 +372,14 @@ def create_scholarship_period():
                 "description_en": category.get('description_en'),
                 "example_vn": category.get('example_vn'),
                 "example_en": category.get('example_en'),
+                "list_field_title_vn": category.get('list_field_title_vn'),
+                "list_field_title_en": category.get('list_field_title_en'),
+                "list_field_description_vn": category.get('list_field_description_vn'),
+                "list_field_description_en": category.get('list_field_description_en'),
+                "attachment_field_title_vn": category.get('attachment_field_title_vn'),
+                "attachment_field_title_en": category.get('attachment_field_title_en'),
+                "attachment_field_description_vn": category.get('attachment_field_description_vn'),
+                "attachment_field_description_en": category.get('attachment_field_description_en'),
                 "is_required": category.get('is_required', 0),
                 "sort_order": category.get('sort_order', idx)
             })
@@ -486,6 +502,14 @@ def update_scholarship_period():
                     "description_en": category.get('description_en'),
                     "example_vn": category.get('example_vn'),
                     "example_en": category.get('example_en'),
+                    "list_field_title_vn": category.get('list_field_title_vn'),
+                    "list_field_title_en": category.get('list_field_title_en'),
+                    "list_field_description_vn": category.get('list_field_description_vn'),
+                    "list_field_description_en": category.get('list_field_description_en'),
+                    "attachment_field_title_vn": category.get('attachment_field_title_vn'),
+                    "attachment_field_title_en": category.get('attachment_field_title_en'),
+                    "attachment_field_description_vn": category.get('attachment_field_description_vn'),
+                    "attachment_field_description_en": category.get('attachment_field_description_en'),
                     "is_required": category.get('is_required', 0),
                     "sort_order": category.get('sort_order', idx)
                 })

@@ -649,6 +649,14 @@ def get_active_period():
                 "description_en": category.description_en,
                 "example_vn": category.example_vn,
                 "example_en": category.example_en,
+                "list_field_title_vn": getattr(category, 'list_field_title_vn', None),
+                "list_field_title_en": getattr(category, 'list_field_title_en', None),
+                "list_field_description_vn": getattr(category, 'list_field_description_vn', None),
+                "list_field_description_en": getattr(category, 'list_field_description_en', None),
+                "attachment_field_title_vn": getattr(category, 'attachment_field_title_vn', None),
+                "attachment_field_title_en": getattr(category, 'attachment_field_title_en', None),
+                "attachment_field_description_vn": getattr(category, 'attachment_field_description_vn', None),
+                "attachment_field_description_en": getattr(category, 'attachment_field_description_en', None),
                 "is_required": category.is_required,
                 "sort_order": category.sort_order
             })
@@ -838,6 +846,7 @@ def get_application_detail(application_id=None):
                 "achievement_type": ach.achievement_type,
                 "title": ach.title,
                 "description": ach.description,
+                "list_text": ach.description,  # Phần liệt kê lưu trong description
                 "files": files
             })
         
@@ -1628,11 +1637,12 @@ def submit_application_with_files():
                     category_index = cat_data.get('category_index', 0)
                     category_title_vn = cat_data.get('category_title_vn', '')
                     category_title_en = cat_data.get('category_title_en', '')
+                    list_text = cat_data.get('list_text', '')
                     file_count = cat_data.get('file_count', 0)
                     existing_files = cat_data.get('existing_files', [])
                     
-                    # Bỏ qua nếu không có file nào (cả mới và cũ)
-                    if file_count == 0 and len(existing_files) == 0:
+                    # Bỏ qua nếu không có list text và không có file nào
+                    if not list_text and file_count == 0 and len(existing_files) == 0:
                         continue
                     
                     # Map category title to achievement_type dựa vào tên
@@ -1660,11 +1670,11 @@ def submit_application_with_files():
                     # Gộp nhiều file URLs thành 1 string, phân cách bằng |
                     attachment_str = ' | '.join(attachment_urls) if attachment_urls else None
                     
-                    # Tạo 1 achievement record cho category với tất cả files
+                    # Tạo 1 achievement record - description lưu list text (phần liệt kê)
                     app.append("achievements", {
                         "achievement_type": achievement_type,
                         "title": category_title_vn,
-                        "description": f"{category_title_vn} ({category_title_en})" if category_title_en else category_title_vn,
+                        "description": list_text if list_text else (f"{category_title_vn} ({category_title_en})" if category_title_en else category_title_vn),
                         "attachment": attachment_str
                     })
                     logs.append(f"  Added {len(attachment_urls)} total files for category {category_title_vn}")

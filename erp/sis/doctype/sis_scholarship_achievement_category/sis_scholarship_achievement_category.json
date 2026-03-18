@@ -21,6 +21,14 @@
   "description_en",
   "example_vn",
   "example_en",
+  "list_field_title_vn",
+  "list_field_title_en",
+  "list_field_description_vn",
+  "list_field_description_en",
+  "attachment_field_title_vn",
+  "attachment_field_title_en",
+  "attachment_field_description_vn",
+  "attachment_field_description_en",
   "is_required",
   "sort_order"
  ],
@@ -65,6 +73,54 @@
    "fieldtype": "Data",
    "label": "Ví dụ (EN)",
    "description": "Ví dụ minh họa (tiếng Anh)"
+  },
+  {
+   "fieldname": "list_field_title_vn",
+   "fieldtype": "Data",
+   "label": "Tiêu đề phần liệt kê (VN)",
+   "description": "VD: Vui lòng liệt kê các bài thi chuẩn hóa Quốc tế (có hiệu lực trong vòng 2 năm) vào ô dưới đây"
+  },
+  {
+   "fieldname": "list_field_title_en",
+   "fieldtype": "Data",
+   "label": "Tiêu đề phần liệt kê (EN)",
+   "description": "E.g., Please list international standardized tests (valid within 2 years) in the box below"
+  },
+  {
+   "fieldname": "list_field_description_vn",
+   "fieldtype": "Small Text",
+   "label": "Mô tả phần liệt kê (VN)",
+   "description": "Mô tả chi tiết cho phần nhập liệt kê"
+  },
+  {
+   "fieldname": "list_field_description_en",
+   "fieldtype": "Small Text",
+   "label": "Mô tả phần liệt kê (EN)",
+   "description": "Description for the list input section"
+  },
+  {
+   "fieldname": "attachment_field_title_vn",
+   "fieldtype": "Data",
+   "label": "Tiêu đề phần đính kèm (VN)",
+   "description": "VD: Vui lòng đính kèm bản scan các chứng chỉ vào ô dưới đây"
+  },
+  {
+   "fieldname": "attachment_field_title_en",
+   "fieldtype": "Data",
+   "label": "Tiêu đề phần đính kèm (EN)",
+   "description": "E.g., Please attach scanned copies of certificates in the box below"
+  },
+  {
+   "fieldname": "attachment_field_description_vn",
+   "fieldtype": "Small Text",
+   "label": "Mô tả phần đính kèm (VN)",
+   "description": "Mô tả chi tiết cho phần upload file"
+  },
+  {
+   "fieldname": "attachment_field_description_en",
+   "fieldtype": "Small Text",
+   "label": "Mô tả phần đính kèm (EN)",
+   "description": "Description for the attachment upload section"
   },
   {
    "fieldname": "is_required",
