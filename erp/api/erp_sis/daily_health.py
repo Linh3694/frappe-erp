@@ -1498,8 +1498,7 @@ def complete_health_visit():
             errors["outcome"] = ["outcome là bắt buộc"]
         elif outcome not in ["returned", "picked_up", "transferred"]:
             errors["outcome"] = ["outcome phải là returned, picked_up, hoặc transferred"]
-        if not checkout_notes:
-            errors["checkout_notes"] = ["Đề xuất của nhân viên y tế là bắt buộc"]
+        # checkout_notes: không bắt buộc (trường đã chốt)
         
         if errors:
             return validation_error_response("Dữ liệu không hợp lệ", errors)

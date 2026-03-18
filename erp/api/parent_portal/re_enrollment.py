@@ -284,7 +284,7 @@ def _send_submission_notification_email(
                 break
         submission_link = f"{base_url}/admission/re-enrollment/submissions?config={config_id}"
         
-        subject = f"ĐƠN TÁI GHI DANH MỚI - {config_title}"
+        subject = f"ĐƠN TÁI GHI DANH MỚI - {student_name}"
         
         extra_rows = ""
         if payment_display:
