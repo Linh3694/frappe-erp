@@ -19,8 +19,8 @@ from erp.utils.api_response import (
     not_found_response
 )
 
-# Email nhận thông báo yêu cầu điều chỉnh
-ADJUSTMENT_NOTIFICATION_EMAILS = [
+# Email nhận thông báo tái ghi danh (nộp đơn mới + yêu cầu điều chỉnh)
+TUYENSINH_NOTIFICATION_EMAILS = [
     "linh.nguyenhai@wellspring.edu.vn",
     "hieu.nguyenduy@wellspring.edu.vn",
     "tuyensinh@wellspring.edu.vn"
@@ -223,7 +223,7 @@ def _send_adjustment_notification_email(student_name, student_code, requested_at
         
         # Gửi email
         result = _send_email_via_service(
-            to_list=ADJUSTMENT_NOTIFICATION_EMAILS,
+            to_list=TUYENSINH_NOTIFICATION_EMAILS,
             subject=subject,
             body=body
         )
@@ -237,6 +237,155 @@ def _send_adjustment_notification_email(student_name, student_code, requested_at
         
     except Exception as e:
         frappe.logger().error(f"Error sending adjustment notification email: {str(e)}")
+        return {"success": False, "message": str(e)}
+
+
+def _send_submission_notification_email(
+    student_name, student_code, submitted_at, decision_display,
+    re_enrollment_id, config_id, config_title,
+    payment_display=None, reason=None
+):
+    """
+    Gửi email thông báo phụ huynh nộp đơn tái ghi danh thành công đến bộ phận tuyển sinh.
+    Tương tự _send_adjustment_notification_email - cùng danh sách email tuyensinh@...
+    
+    Args:
+        student_name: Tên học sinh
+        student_code: Mã học sinh
+        submitted_at: Thời gian nộp đơn
+        decision_display: Quyết định hiển thị (Tái ghi danh / Đang cân nhắc / Không tái ghi danh)
+        re_enrollment_id: ID đơn tái ghi danh
+        config_id: ID config tái ghi danh
+        config_title: Tên kỳ tái ghi danh
+        payment_display: Phương thức thanh toán (nếu re_enroll)
+        reason: Lý do (nếu considering/not_re_enroll)
+    """
+    try:
+        from datetime import datetime
+        if isinstance(submitted_at, str):
+            try:
+                if 'T' in submitted_at:
+                    dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.strptime(submitted_at[:19], '%Y-%m-%d %H:%M:%S')
+            except (ValueError, TypeError):
+                dt = datetime.now()
+        else:
+            dt = submitted_at or datetime.now()
+        
+        time_str = dt.strftime('%H:%M')
+        date_str = dt.strftime('%d/%m/%Y')
+        
+        allow_cors = frappe.conf.get('allow_cors') or []
+        base_url = 'https://wis.wellspring.edu.vn'
+        for cors_url in allow_cors:
+            if 'wis.wellspring.edu.vn' in cors_url or 'wis-staging.wellspring.edu.vn' in cors_url:
+                base_url = cors_url
+                break
+        submission_link = f"{base_url}/admission/re-enrollment/submissions?config={config_id}"
+        
+        subject = f"ĐƠN TÁI GHI DANH MỚI - {config_title}"
+        
+        extra_rows = ""
+        if payment_display:
+            extra_rows += f"""
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Phương thức thanh toán:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {payment_display}
+                        </td>
+                    </tr>"""
+        if reason:
+            extra_rows += f"""
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Lý do:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {reason}
+                        </td>
+                    </tr>"""
+        
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #002855; border-bottom: 2px solid #BED232; padding-bottom: 10px;">
+                    ĐƠN TÁI GHI DANH MỚI - {student_name}
+                </h2>
+                
+                <p>Phụ huynh đã nộp đơn tái ghi danh thành công cho Học sinh:</p>
+                
+                <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold; width: 40%;">
+                            Họ và Tên Học sinh:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {student_name} ({student_code})
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Quyết định:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {decision_display}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Thời gian nộp đơn:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {time_str}, Ngày {date_str}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Link xem đơn:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            <a href="{submission_link}" style="color: #00687F; text-decoration: none;">
+                                Xem chi tiết đơn
+                            </a>
+                        </td>
+                    </tr>
+                    {extra_rows}
+                </table>
+                
+                <p style="color: #00687F; font-weight: bold;">
+                    Vui lòng xử lý đơn trong thời gian sớm nhất.
+                </p>
+                
+                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                
+                <p style="font-size: 12px; color: #666;">
+                    Email này được gửi tự động từ hệ thống Wellspring SIS.<br>
+                    Vui lòng không reply trực tiếp vào email này.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        result = _send_email_via_service(
+            to_list=TUYENSINH_NOTIFICATION_EMAILS,
+            subject=subject,
+            body=body
+        )
+        
+        if result.get('success'):
+            frappe.logger().info(f"Submission notification email sent for {re_enrollment_id}")
+        else:
+            frappe.logger().error(f"Failed to send submission notification email: {result.get('message')}")
+        
+        return result
+        
+    except Exception as e:
+        frappe.logger().error(f"Error sending submission notification email: {str(e)}")
         return {"success": False, "message": str(e)}
 
 
@@ -1539,6 +1688,30 @@ def submit_re_enrollment():
         except Exception as notif_err:
             logs.append(f"Lỗi tạo thông báo: {str(notif_err)}")
             frappe.logger().error(f"Error creating re-enrollment notification: {str(notif_err)}")
+        
+        # Gửi email thông báo đến bộ phận tuyển sinh (tương tự yêu cầu điều chỉnh)
+        try:
+            decision_display = DECISION_DISPLAY_MAP_VI.get(decision, decision)
+            payment_display = "Đóng theo năm" if decision == 're_enroll' and data.get('payment_type') == 'annual' else ("Đóng theo kỳ" if decision == 're_enroll' and data.get('payment_type') == 'semester' else None)
+            config_title = config.title or "Tái Ghi Danh"
+            email_result = _send_submission_notification_email(
+                student_name=student.student_name,
+                student_code=student.student_code,
+                submitted_at=re_enrollment_doc.submitted_at,
+                decision_display=decision_display,
+                re_enrollment_id=re_enrollment_doc.name,
+                config_id=config.name,
+                config_title=config_title,
+                payment_display=payment_display,
+                reason=reason_value
+            )
+            if email_result.get('success'):
+                logs.append("Đã gửi email thông báo đến bộ phận tuyển sinh")
+            else:
+                logs.append(f"Không thể gửi email thông báo: {email_result.get('message')}")
+        except Exception as email_err:
+            logs.append(f"Lỗi gửi email thông báo: {str(email_err)}")
+            frappe.logger().error(f"Failed to send submission notification email: {str(email_err)}")
         
         # Chuẩn bị response
         decision_display_map = {
