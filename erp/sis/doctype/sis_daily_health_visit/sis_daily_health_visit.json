@@ -204,7 +204,7 @@
   {
    "fieldname": "accompanying_teacher",
    "fieldtype": "Data",
-   "label": "GV đi cùng"
+   "label": "Thầy/ cô đi cùng"
   },
   {
    "fieldname": "accompanying_health_staff",

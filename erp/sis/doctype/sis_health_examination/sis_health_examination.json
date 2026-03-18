@@ -399,7 +399,7 @@
   {
    "fieldname": "followup_accompanying_teacher",
    "fieldtype": "Data",
-   "label": "GV đi cùng (khám bổ sung)"
+   "label": "Thầy/ cô đi cùng (khám bổ sung)"
   },
   {
    "fieldname": "followup_accompanying_health_staff",

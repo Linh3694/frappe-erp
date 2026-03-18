@@ -1474,7 +1474,7 @@ def complete_health_visit():
         - leave_clinic_time: Thời gian rời Y tế (optional, default: now)
         - checkout_notes: Ghi chú/Dặn dò khi checkout (optional)
         - transfer_hospital: Bệnh viện chuyển tới (optional, khi chuyển viện)
-        - accompanying_teacher: GV đi cùng (optional, khi chuyển viện)
+        - accompanying_teacher: Thầy/ cô đi cùng (optional, khi chuyển viện)
         - accompanying_health_staff: NVYT đi cùng (optional, khi chuyển viện)
     """
     try:
@@ -1516,20 +1516,21 @@ def complete_health_visit():
             visit.accompanying_health_staff = accompanying_health_staff
         visit.save()
         
-        # Cập nhật outcome cho TẤT CẢ examinations liên quan đến visit này
+        # Cập nhật outcome và clinic_checkout_time cho TẤT CẢ examinations liên quan đến visit này
+        # Thời gian ra về (clinic_checkout_time) = thời gian checkout từ visit.leave_clinic_time
         exam_outcome_map = {
             "returned": "return_class",
             "picked_up": "picked_up",
             "transferred": "transferred"
         }
         exam_outcome = exam_outcome_map.get(outcome)
-        if exam_outcome:
-            related_exams = frappe.get_all(
-                "SIS Health Examination",
-                filters={"visit_id": visit_id},
-                fields=["name"]
-            )
-            for exam in related_exams:
+        related_exams = frappe.get_all(
+            "SIS Health Examination",
+            filters={"visit_id": visit_id},
+            fields=["name"]
+        )
+        for exam in related_exams:
+            if exam_outcome:
                 frappe.db.set_value(
                     "SIS Health Examination",
                     exam.name,
@@ -1537,6 +1538,14 @@ def complete_health_visit():
                     exam_outcome,
                     update_modified=False
                 )
+            # Đồng bộ thời gian ra về từ checkout vào exam - dùng cho Thời gian lưu trú (Parent Portal, GVCN)
+            frappe.db.set_value(
+                "SIS Health Examination",
+                exam.name,
+                "clinic_checkout_time",
+                leave_clinic_time,
+                update_modified=False
+            )
         
         frappe.db.commit()
         
@@ -2949,14 +2958,17 @@ def get_parent_health_records():
                 visit_data = frappe.db.get_value(
                     "SIS Daily Health Visit",
                     exam["visit_id"],
-                    ["checkout_notes", "reason"],
+                    ["checkout_notes", "reason", "transfer_hospital"],
                     as_dict=True
                 )
                 if visit_data:
                     exam["checkout_notes"] = visit_data.get("checkout_notes")
                     exam["visit_reason"] = visit_data.get("reason") or ""
+                    # Bệnh viện chuyển tới từ visit (khi checkout chuyển viện) - dùng cho màn PH và GVCN
+                    exam["transfer_hospital"] = visit_data.get("transfer_hospital") or ""
                 else:
                     exam["visit_reason"] = ""
+                    exam["transfer_hospital"] = ""
         
         # Group theo ngày
         grouped = {}
