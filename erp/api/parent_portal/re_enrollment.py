@@ -33,12 +33,16 @@ DECISION_TYPES = ['re_enroll', 'considering', 'not_re_enroll']
 DECISION_DISPLAY_MAP_VI = {
     're_enroll': 'Tái ghi danh',
     'considering': 'Đang cân nhắc',
-    'not_re_enroll': 'Không tái ghi danh'
+    'not_re_enroll': 'Không tái ghi danh',
+    '': 'Chưa làm đơn',
+    None: 'Chưa làm đơn'
 }
 DECISION_DISPLAY_MAP_EN = {
     're_enroll': 'Re-enroll',
     'considering': 'Considering',
-    'not_re_enroll': 'Not Re-enrolling'
+    'not_re_enroll': 'Not Re-enrolling',
+    '': 'Not Yet Submitted',
+    None: 'Not Yet Submitted'
 }
 
 
@@ -609,6 +613,114 @@ Best regards,
         return None
 
 
+def _create_reset_to_not_submitted_announcement(
+    student_id: str,
+    student_name: str,
+    student_code: str,
+    school_year: str
+):
+    """
+    Tạo Announcement riêng khi Admin reset đơn về trạng thái "Chưa làm đơn".
+    Nội dung khác với announcement cập nhật đơn - thông báo phụ huynh cần làm lại đơn.
+    
+    Args:
+        student_id: ID học sinh (CRM Student)
+        student_name: Tên học sinh
+        student_code: Mã học sinh
+        school_year: Năm học (VD: "2026-2027")
+    """
+    try:
+        from datetime import datetime
+        time_display_vi = datetime.now().strftime('%d/%m/%Y %H:%M')
+        time_display_en = datetime.now().strftime('%b %d, %Y %H:%M')
+        
+        title_vn = f"Yêu cầu làm lại đơn tái ghi danh - {student_name}"
+        title_en = f"Re-submit Re-enrollment Application - {student_name}"
+        
+        content_vn = f"""Kính gửi Quý Phụ huynh,
+
+Nhà trường thông báo hồ sơ Tái ghi danh cho Năm học **{school_year}** của Học sinh **{student_name}** – **{student_code}** đã được chuyển về trạng thái chưa làm đơn.
+
+Quý Phụ huynh vui lòng đăng nhập vào Cổng Phụ huynh và thực hiện làm đơn tái ghi danh lại theo hướng dẫn.
+
+Thời gian thao tác: **{time_display_vi}**
+
+Trường hợp Quý Phụ huynh cần hỗ trợ thêm, xin vui lòng liên hệ Bộ phận Kết nối WISers – Phòng Tuyển sinh:
+📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
+
+Trân trọng,
+**Hệ thống Trường Phổ thông Liên cấp Song ngữ Quốc tế Wellspring – Wellspring Hanoi**"""
+
+        content_en = f"""Dear Parents,
+
+The School would like to inform you that the Re-enrollment application for School Year **{school_year}** for student **{student_name}** – **{student_code}** has been reset to "Not Yet Submitted" status.
+
+Please log in to the Parent Portal and complete the re-enrollment application again as instructed.
+
+Action time: **{time_display_en}**
+
+If you need additional support, please contact the WISers Connection Department – Admissions Office:
+📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
+
+Best regards,
+**Wellspring International Bilingual School Hanoi**"""
+
+        campus_id = frappe.db.get_value("CRM Student", student_id, "campus_id")
+        
+        announcement = frappe.get_doc({
+            "doctype": "SIS Announcement",
+            "title_vn": title_vn,
+            "title_en": title_en,
+            "content_vn": content_vn,
+            "content_en": content_en,
+            "campus_id": campus_id,
+            "status": "sent",
+            "sent_at": now(),
+            "recipients": json.dumps([{
+                "id": student_id,
+                "type": "student",
+                "display_name": student_name
+            }]),
+            "recipient_type": "specific"
+        })
+        announcement.insert(ignore_permissions=True)
+        frappe.db.commit()
+        
+        frappe.logger().info(f"✅ Created reset-to-not-submitted announcement: {announcement.name} for student {student_id}")
+        
+        push_body_vi = f"Đơn tái ghi danh của {student_name} cần được làm lại"
+        push_body_en = f"Re-enrollment application for {student_name} needs to be re-submitted"
+        
+        try:
+            from erp.utils.notification_handler import send_bulk_parent_notifications
+            send_bulk_parent_notifications(
+                recipient_type="announcement",
+                recipients_data={
+                    "student_ids": [student_id],
+                    "announcement_id": announcement.name
+                },
+                title="Đơn tái ghi danh",
+                body=push_body_vi,
+                icon="/icon.png",
+                data={
+                    "type": "announcement",
+                    "announcement_id": announcement.name,
+                    "student_id": student_id,
+                    "title_en": title_en,
+                    "title_vn": title_vn,
+                    "url": f"/announcement?id={announcement.name}&student={student_id}"
+                }
+            )
+        except Exception as push_err:
+            frappe.logger().error(f"❌ Error sending reset announcement push: {str(push_err)}")
+        
+        return announcement.name
+    except Exception as e:
+        frappe.logger().error(f"❌ Error creating reset-to-not-submitted announcement: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Create Reset Re-enrollment Announcement Error")
+        return None
+
+
 def _get_current_parent():
     """Lấy thông tin phụ huynh đang đăng nhập"""
     user_email = frappe.session.user
@@ -908,17 +1020,19 @@ def get_active_config():
             )
             
             if existing:
-                # Đã nộp = có submitted_at (PHHS đã điền form)
-                student["has_submitted"] = bool(existing.submitted_at)
-                if existing.submitted_at:
+                # Đã làm đơn = có submitted_at VÀ có decision (re_enroll/considering/not_re_enroll)
+                # Khi Admin reset về Chưa làm đơn: decision='' hoặc None -> coi là chưa làm, hiện form để PHHS làm lại
+                has_decision = existing.decision and existing.decision not in ('', None)
+                student["has_submitted"] = bool(existing.submitted_at and has_decision)
+                if student["has_submitted"]:
                     sub_dict = dict(existing)
                     if sub_dict.get("selected_discount_deadline"):
                         sub_dict["selected_discount_deadline"] = str(sub_dict["selected_discount_deadline"])
                     student["submission"] = sub_dict
                 else:
                     student["submission"] = None
-                student["re_enrollment_id"] = existing.name  # ID để update khi submit
-                logs.append(f"Student {student['name']} - record: {existing.name}, submitted_at: {existing.submitted_at}")
+                student["re_enrollment_id"] = existing.name  # ID để update khi submit (kể cả khi reset)
+                logs.append(f"Student {student['name']} - record: {existing.name}, has_submitted: {student['has_submitted']}, decision: {existing.decision}")
             else:
                 student["has_submitted"] = False
                 student["submission"] = None
@@ -1233,7 +1347,7 @@ def submit_re_enrollment():
         existing_record = frappe.db.get_value(
             "SIS Re-enrollment",
             {"student_id": student_id, "config_id": config.name},
-            ["name", "submitted_at"],
+            ["name", "submitted_at", "decision"],
             as_dict=True
         )
         
@@ -1243,8 +1357,10 @@ def submit_re_enrollment():
                 logs=logs
             )
         
-        # Kiểm tra đã nộp chưa (submitted_at có giá trị = đã nộp)
-        if existing_record.submitted_at:
+        # Chặn nộp đơn khi đã có quyết định (re_enroll/considering/not_re_enroll)
+        # Cho phép nộp lại khi Admin đã reset (decision rỗng) - dù submitted_at có thể còn (lịch sử)
+        has_decision = existing_record.decision and existing_record.decision not in ('', None)
+        if existing_record.submitted_at and has_decision:
             return error_response(
                 f"Học sinh đã nộp đơn tái ghi danh. Mã đơn: {existing_record.name}",
                 logs=logs

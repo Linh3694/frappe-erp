@@ -1439,11 +1439,16 @@ def update_submission():
         # So sánh decision (QUAN TRỌNG - gửi notification)
         # Dùng 'decision' in data để phân biệt decision='' (Chưa làm đơn) với không gửi
         new_decision = data['decision'] if 'decision' in data else submission.decision
+        is_reset_to_not_submitted = False  # Reset về Chưa làm đơn - gửi announcement riêng
         if old_values['decision'] != new_decision:
             old_display = decision_map.get(old_values['decision'], old_values['decision'] or 'Chưa có')
             new_display = decision_map.get(new_decision, new_decision)
             changes.append(f"• Quyết định: {old_display} → {new_display}")
-            important_changes.append('decision')
+            if new_decision in (None, ''):
+                # Reset về Chưa làm đơn - KHÔNG dùng announcement cập nhật, sẽ gửi announcement riêng
+                is_reset_to_not_submitted = True
+            else:
+                important_changes.append('decision')
         
         # So sánh payment_type (QUAN TRỌNG - gửi notification)
         new_payment_type = data.get('payment_type') or submission.payment_type
@@ -1549,66 +1554,74 @@ def update_submission():
         
         logs.append(f"Đã cập nhật đơn: {submission_id}")
         
-        # Chỉ gửi thông báo khi có thay đổi quan trọng (Trạng thái hoặc Khảo sát)
-        # KHÔNG gửi khi chỉ thay đổi payment_status hoặc thêm note
-        # KHÔNG gửi khi config đã đóng (is_active = false)
-        if important_changes:
+        # Lấy thông tin config và năm học (dùng chung cho cả 2 loại announcement)
+        school_year = ""
+        config_is_active = False
+        try:
+            config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
+            config_is_active = config_doc.is_active
+            if config_doc.school_year_id:
+                school_year_info = frappe.db.get_value(
+                    "SIS School Year",
+                    config_doc.school_year_id,
+                    ["title_vn", "title_en"],
+                    as_dict=True
+                )
+                if school_year_info:
+                    school_year = school_year_info.title_vn or school_year_info.title_en or ""
+            if not school_year and config_doc.title:
+                school_year = config_doc.title
+        except Exception as e:
+            frappe.logger().error(f"Lỗi lấy school_year cho announcement: {str(e)}")
+        
+        # Chỉ gửi thông báo khi config còn active
+        if not config_is_active:
+            logs.append("Không gửi thông báo (kỳ tái ghi danh đã đóng)")
+        elif is_reset_to_not_submitted:
+            # Reset về Chưa làm đơn - gửi announcement riêng (tách khỏi cập nhật đơn)
+            try:
+                from erp.api.parent_portal.re_enrollment import _create_reset_to_not_submitted_announcement
+                _create_reset_to_not_submitted_announcement(
+                    student_id=submission.student_id,
+                    student_name=submission.student_name,
+                    student_code=submission.student_code,
+                    school_year=school_year
+                )
+                logs.append("Đã gửi thông báo yêu cầu làm lại đơn cho phụ huynh")
+            except Exception as notif_err:
+                logs.append(f"Lỗi gửi thông báo reset: {str(notif_err)}")
+                frappe.logger().error(f"Error sending reset-to-not-submitted notification: {str(notif_err)}")
+        elif important_changes:
+            # Cập nhật đơn thông thường - gửi announcement cập nhật
             try:
                 from erp.api.parent_portal.re_enrollment import _create_re_enrollment_announcement
-                
-                # Lấy thông tin config và năm học (SIS School Year dùng title_vn, title_en)
-                school_year = ""
-                config_is_active = False
-                try:
-                    config_doc = frappe.get_doc("SIS Re-enrollment Config", submission.config_id)
-                    config_is_active = config_doc.is_active
-                    if config_doc.school_year_id:
-                        school_year_info = frappe.db.get_value(
-                            "SIS School Year",
-                            config_doc.school_year_id,
-                            ["title_vn", "title_en"],
-                            as_dict=True
-                        )
-                        if school_year_info:
-                            school_year = school_year_info.title_vn or school_year_info.title_en or ""
-                    if not school_year and config_doc.title:
-                        school_year = config_doc.title
-                except Exception as e:
-                    frappe.logger().error(f"Lỗi lấy school_year cho announcement: {str(e)}")
-                
-                # Chỉ gửi notification nếu config còn active
-                if not config_is_active:
-                    logs.append("Không gửi thông báo (kỳ tái ghi danh đã đóng)")
-                else:
-                    # Lấy answers từ submission để gửi vào announcement
-                    answers_for_announcement = []
-                    for answer in submission.answers:
-                        answers_for_announcement.append({
-                            'question_text_vn': answer.question_text_vn,
-                            'question_text_en': answer.question_text_en,
-                            'selected_options_text_vn': answer.selected_options_text_vn,
-                            'selected_options_text_en': answer.selected_options_text_en
-                        })
-                    
-                    _create_re_enrollment_announcement(
-                        student_id=submission.student_id,
-                        student_name=submission.student_name,
-                        student_code=submission.student_code,
-                        submission_data={
-                            'decision': submission.decision,
-                            'payment_type': submission.payment_type,
-                            'discount_name': submission.selected_discount_name,
-                            'discount_percent': submission.selected_discount_percent,
-                            'discount_deadline': str(submission.selected_discount_deadline) if submission.selected_discount_deadline else None,
-                            'reason': submission.not_re_enroll_reason,
-                            'school_year': school_year,
-                            'submitted_at': str(now()),
-                            'status': submission.status or 'pending',
-                            'answers': answers_for_announcement  # Câu trả lời khảo sát
-                        },
-                        is_update=True
-                    )
-                    logs.append(f"Đã gửi thông báo cập nhật cho phụ huynh (thay đổi: {', '.join(important_changes)})")
+                answers_for_announcement = []
+                for answer in submission.answers:
+                    answers_for_announcement.append({
+                        'question_text_vn': answer.question_text_vn,
+                        'question_text_en': answer.question_text_en,
+                        'selected_options_text_vn': answer.selected_options_text_vn,
+                        'selected_options_text_en': answer.selected_options_text_en
+                    })
+                _create_re_enrollment_announcement(
+                    student_id=submission.student_id,
+                    student_name=submission.student_name,
+                    student_code=submission.student_code,
+                    submission_data={
+                        'decision': submission.decision,
+                        'payment_type': submission.payment_type,
+                        'discount_name': submission.selected_discount_name,
+                        'discount_percent': submission.selected_discount_percent,
+                        'discount_deadline': str(submission.selected_discount_deadline) if submission.selected_discount_deadline else None,
+                        'reason': submission.not_re_enroll_reason,
+                        'school_year': school_year,
+                        'submitted_at': str(now()),
+                        'status': submission.status or 'pending',
+                        'answers': answers_for_announcement
+                    },
+                    is_update=True
+                )
+                logs.append(f"Đã gửi thông báo cập nhật cho phụ huynh (thay đổi: {', '.join(important_changes)})")
             except Exception as notif_err:
                 logs.append(f"Lỗi gửi thông báo: {str(notif_err)}")
                 frappe.logger().error(f"Error sending admin update notification: {str(notif_err)}")
