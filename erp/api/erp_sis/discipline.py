@@ -583,6 +583,7 @@ def update_discipline_violation(
     name: str = None,
     title: str = None,
     classification: str = None,
+    campus: str = None,
     enabled: int = None,
     student_points: list = None,
     class_points: list = None,
@@ -597,6 +598,7 @@ def update_discipline_violation(
         name = name or data.get("name")
         title = title if title is not None else data.get("title")
         classification = classification if classification is not None else data.get("classification")
+        campus = campus if campus is not None else data.get("campus")
         enabled_val = data.get("enabled")
         if enabled is None and enabled_val is not None:
             enabled = int(enabled_val) if enabled_val not in [None, ""] else None
@@ -616,6 +618,9 @@ def update_discipline_violation(
 
         if classification is not None:
             doc.classification = classification
+
+        if campus is not None:
+            doc.campus = campus
 
         if enabled is not None:
             doc.enabled = enabled
