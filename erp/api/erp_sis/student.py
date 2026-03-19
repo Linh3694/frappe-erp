@@ -1330,6 +1330,35 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
             # Remove redundant fields
             student.pop('current_class_title', None)
             student.pop('current_class_id', None)
+
+        # Bổ sung ảnh đại diện từ SIS Photo (user_image/photo) cho avatar - chuẩn hóa full URL như search_students
+        if students:
+            try:
+                student_ids = [s.get('name') for s in students if s.get('name')]
+                if student_ids:
+                    photos = frappe.db.sql("""
+                        SELECT student_id, photo
+                        FROM `tabSIS Photo`
+                        WHERE student_id IN %(ids)s AND type = 'student' AND status = 'Active'
+                        ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                                 upload_date DESC, creation DESC
+                    """, {"ids": student_ids, "sy": school_year_id}, as_dict=True)
+                    photo_map = {}
+                    for p in photos:
+                        sid = p.get('student_id')
+                        if sid and sid not in photo_map and p.get('photo'):
+                            purl = p['photo']
+                            # Chuẩn hóa thành full URL giống search_students (mobile dùng trực tiếp)
+                            if purl.startswith("/files/"):
+                                purl = frappe.utils.get_url(purl)
+                            elif purl and not purl.startswith("http"):
+                                purl = frappe.utils.get_url("/files/" + purl.lstrip("/"))
+                            photo_map[sid] = purl
+                    for s in students:
+                        s['user_image'] = photo_map.get(s.get('name'))
+                        s['photo'] = photo_map.get(s.get('name'))
+            except Exception as photo_err:
+                frappe.logger().warning(f"search_students_by_school_year photo enrich: {photo_err}")
         
         frappe.logger().info(f"Found {len(students)} students in school year '{school_year_id}'")
         
