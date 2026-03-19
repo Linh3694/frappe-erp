@@ -977,12 +977,18 @@ def get_student_violation_stats(
 
 
 @frappe.whitelist(allow_guest=False)
-def get_class_violation_stats(class_id: str = None, violation_id: str = None):
+def get_class_violation_stats(
+    class_id: str = None,
+    violation_id: str = None,
+    date_from: str = None,
+    date_to: str = None,
+):
     """
-    Lấy thống kê vi phạm của lớp cho 1 loại vi phạm trong tháng hiện tại.
+    Lấy thống kê vi phạm của lớp cho 1 loại vi phạm.
     Tính tương tự học sinh: đếm số record có lớp trong target_classes.
-    - Số lần vi phạm: count records trong tháng
+    - Số lần vi phạm: count records trong khoảng ngày
     - Cấp độ, Điểm trừ: từ student_points của Violation (dựa trên count)
+    - date_from, date_to (YYYY-MM-DD): tùy chọn. Nếu không truyền thì dùng tháng hiện tại.
     """
     try:
         from datetime import date
@@ -990,6 +996,8 @@ def get_class_violation_stats(class_id: str = None, violation_id: str = None):
         data = _get_request_data()
         class_id = class_id or data.get("class_id")
         violation_id = violation_id or data.get("violation_id")
+        date_from = date_from or data.get("date_from")
+        date_to = date_to or data.get("date_to")
 
         if not class_id or not violation_id:
             return error_response(
@@ -998,8 +1006,12 @@ def get_class_violation_stats(class_id: str = None, violation_id: str = None):
             )
 
         today = date.today()
-        first_day = today.replace(day=1)
-        last_day = today
+        if date_from and date_to:
+            first_day = date.fromisoformat(date_from)
+            last_day = date.fromisoformat(date_to)
+        else:
+            first_day = today.replace(day=1)
+            last_day = today
 
         # Đếm số bản ghi: lớp này có trong target_classes, violation khớp, trong tháng
         count_sql = """
