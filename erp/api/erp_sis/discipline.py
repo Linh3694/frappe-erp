@@ -569,11 +569,16 @@ def get_discipline_violation(name: str = None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_discipline_violations(campus: str = None):
+def get_discipline_violations(campus: str = None, include_points: str = None):
     """
-    Lấy danh sách vi phạm kỷ luật theo campus
+    Lấy danh sách vi phạm kỷ luật theo campus.
+    include_points: "1" = thêm student_points, class_points cho mỗi vi phạm (để tính điểm trừ).
     """
     try:
+        data = _get_request_data()
+        campus = campus or data.get("campus")
+        include_points = include_points if include_points is not None else data.get("include_points", "0")
+
         filters = {"enabled": 1}
         if campus:
             filters["campus"] = campus
@@ -593,6 +598,27 @@ def get_discipline_violations(campus: str = None):
             ],
             order_by="title asc",
         )
+
+        # Thêm student_points, class_points nếu include_points=1
+        if include_points == "1":
+            for v in violations:
+                doc = frappe.get_doc("SIS Discipline Violation", v["name"])
+                v["student_points"] = [
+                    {
+                        "violation_count": int(p.get("violation_count", 0)),
+                        "level": p.get("level", "1"),
+                        "points": int(p.get("points", 0)),
+                    }
+                    for p in (getattr(doc, "student_points", []) or [])
+                ]
+                v["class_points"] = [
+                    {
+                        "violation_count": int(p.get("violation_count", 0)),
+                        "level": p.get("level", "1"),
+                        "points": int(p.get("points", 0)),
+                    }
+                    for p in (getattr(doc, "class_points", []) or [])
+                ]
 
         # Thêm classification_title cho mỗi violation
         for v in violations:
@@ -846,11 +872,17 @@ def delete_discipline_violation(name: str = None):
 
 
 @frappe.whitelist(allow_guest=False)
-def get_student_violation_stats(student_id: str = None, violation_id: str = None):
+def get_student_violation_stats(
+    student_id: str = None,
+    violation_id: str = None,
+    date_from: str = None,
+    date_to: str = None,
+):
     """
-    Lấy thống kê vi phạm của học sinh cho 1 loại vi phạm trong tháng hiện tại.
-    - Số lần vi phạm: count records trong tháng
+    Lấy thống kê vi phạm của học sinh cho 1 loại vi phạm.
+    - Số lần vi phạm: count records trong khoảng ngày
     - Cấp độ, Điểm trừ: từ Điểm áp dụng cho học sinh của Doctype Vi phạm (student_points)
+    - date_from, date_to (YYYY-MM-DD): tùy chọn. Nếu không truyền thì dùng tháng hiện tại.
     """
     try:
         from datetime import date
@@ -858,6 +890,8 @@ def get_student_violation_stats(student_id: str = None, violation_id: str = None
         data = _get_request_data()
         student_id = student_id or data.get("student_id")
         violation_id = violation_id or data.get("violation_id")
+        date_from = date_from or data.get("date_from")
+        date_to = date_to or data.get("date_to")
 
         if not student_id or not violation_id:
             return error_response(
@@ -866,10 +900,14 @@ def get_student_violation_stats(student_id: str = None, violation_id: str = None
             )
 
         today = date.today()
-        first_day = today.replace(day=1)
-        last_day = today  # tháng hiện tại đến hôm nay
+        if date_from and date_to:
+            first_day = date.fromisoformat(date_from)
+            last_day = date.fromisoformat(date_to)
+        else:
+            first_day = today.replace(day=1)
+            last_day = today
 
-        # Đếm số bản ghi: học sinh này mắc lỗi violation_id trong tháng
+        # Đếm số bản ghi: học sinh này mắc lỗi violation_id trong khoảng ngày
         # - target_student: record ghi trực tiếp 1 học sinh
         # - target_students (SIS Discipline Record Student Entry): record ghi nhiều học sinh
         # - target_classes (SIS Discipline Record Class Entry): record ghi theo lớp -> học sinh nằm trong SIS Class Student
