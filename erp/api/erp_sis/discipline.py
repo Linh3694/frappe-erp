@@ -938,6 +938,87 @@ def get_student_violation_stats(student_id: str = None, violation_id: str = None
         )
 
 
+@frappe.whitelist(allow_guest=False)
+def get_class_violation_stats(class_id: str = None, violation_id: str = None):
+    """
+    Lấy thống kê vi phạm của lớp cho 1 loại vi phạm trong tháng hiện tại.
+    Tính tương tự học sinh: đếm số record có lớp trong target_classes.
+    - Số lần vi phạm: count records trong tháng
+    - Cấp độ, Điểm trừ: từ student_points của Violation (dựa trên count)
+    """
+    try:
+        from datetime import date
+
+        data = _get_request_data()
+        class_id = class_id or data.get("class_id")
+        violation_id = violation_id or data.get("violation_id")
+
+        if not class_id or not violation_id:
+            return error_response(
+                message="class_id và violation_id là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        today = date.today()
+        first_day = today.replace(day=1)
+        last_day = today
+
+        # Đếm số bản ghi: lớp này có trong target_classes, violation khớp, trong tháng
+        count_sql = """
+            SELECT COUNT(DISTINCT r.name) as cnt
+            FROM `tabSIS Discipline Record` r
+            INNER JOIN `tabSIS Discipline Record Class Entry` ce
+                ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+            WHERE r.violation = %(violation_id)s
+                AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+                AND ce.class_id = %(class_id)s
+        """
+        result = frappe.db.sql(
+            count_sql,
+            {"violation_id": violation_id, "class_id": class_id, "first_day": first_day, "last_day": last_day},
+            as_dict=True,
+        )
+        count = result[0]["cnt"] if result else 0
+
+        # Lấy student_points từ Violation (dùng chung logic cấp độ/điểm)
+        doc = frappe.get_doc("SIS Discipline Violation", violation_id)
+        student_points = getattr(doc, "student_points", []) or []
+
+        sorted_points = sorted(
+            [{"violation_count": int(p.get("violation_count", 0)), "level": p.get("level", "1"), "points": int(p.get("points", 0))} for p in student_points],
+            key=lambda x: x["violation_count"],
+            reverse=True,
+        )
+        matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
+        if not matched and sorted_points:
+            matched = min(sorted_points, key=lambda x: x["violation_count"])
+
+        level = matched.get("level", "1") if matched else "1"
+        points = matched.get("points", 0) if matched else 0
+
+        return success_response(
+            data={
+                "count": count,
+                "level": level,
+                "level_label": f"Cấp độ {level}",
+                "points": points,
+            },
+            message="Lấy thống kê thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy vi phạm",
+            code="VIOLATION_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error get_class_violation_stats: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy thống kê: {str(e)}",
+            code="GET_CLASS_VIOLATION_STATS_ERROR",
+        )
+
+
 # ==================== GHI NHẬN LỖI (RECORD) CRUD ====================
 
 
