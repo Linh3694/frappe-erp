@@ -870,15 +870,25 @@ def get_student_violation_stats(student_id: str = None, violation_id: str = None
         last_day = today  # tháng hiện tại đến hôm nay
 
         # Đếm số bản ghi: học sinh này mắc lỗi violation_id trong tháng
-        # Record có target_student = student HOẶC student trong target_students (child table)
+        # - target_student: record ghi trực tiếp 1 học sinh
+        # - target_students (SIS Discipline Record Student Entry): record ghi nhiều học sinh
+        # - target_classes (SIS Discipline Record Class Entry): record ghi theo lớp -> học sinh nằm trong SIS Class Student
         count_sql = """
             SELECT COUNT(DISTINCT r.name) as cnt
             FROM `tabSIS Discipline Record` r
             LEFT JOIN `tabSIS Discipline Record Student Entry` se
                 ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+            LEFT JOIN `tabSIS Discipline Record Class Entry` ce
+                ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+            LEFT JOIN `tabSIS Class Student` cs
+                ON cs.class_id = ce.class_id AND cs.student_id = %(student_id)s
             WHERE r.violation = %(violation_id)s
                 AND r.date >= %(first_day)s AND r.date <= %(last_day)s
-                AND (r.target_student = %(student_id)s OR se.student_id = %(student_id)s)
+                AND (
+                    r.target_student = %(student_id)s
+                    OR se.student_id = %(student_id)s
+                    OR (ce.class_id IS NOT NULL AND cs.student_id IS NOT NULL)
+                )
         """
         result = frappe.db.sql(
             count_sql,
@@ -1363,6 +1373,8 @@ def create_discipline_record(
         if target_student and target_student not in student_ids:
             student_ids.insert(0, target_student)
 
+        # target_student: set khi có đúng 1 học sinh (để thống kê đếm được)
+        single_student_id = student_ids[0] if len(student_ids) == 1 else None
         doc = frappe.get_doc(
             {
                 "doctype": "SIS Discipline Record",
@@ -1370,8 +1382,7 @@ def create_discipline_record(
                 "classification": classification,
                 "violation_count": int(violation_count),
                 "target_type": target_type,
-                # target_student: chỉ dùng khi student đơn và dùng param cũ (tương thích ngược)
-                "target_student": target_student if target_type == "student" and len(student_ids) == 1 and target_student and not target_student_ids else None,
+                "target_student": single_student_id if (target_type in ("student", "mixed") and single_student_id) else None,
                 "violation": violation,
                 "form": form,
                 "penalty_points": str(penalty_points),
@@ -1391,16 +1402,13 @@ def create_discipline_record(
                 if cid:
                     doc.append("target_classes", {"class_id": cid})
 
-        # Học sinh: target_students (nhiều học sinh) hoặc target_student (1 học sinh - tương thích cũ)
+        # Học sinh: target_students (child table) - luôn append để có dữ liệu đầy đủ
         if student_ids:
-            if len(student_ids) == 1 and target_student and not target_student_ids:
-                doc.target_student = student_ids[0]
-            else:
-                for sid in student_ids:
-                    if isinstance(sid, dict):
-                        sid = sid.get("student_id") or sid.get("name")
-                    if sid:
-                        doc.append("target_students", {"student_id": sid})
+            for sid in student_ids:
+                if isinstance(sid, dict):
+                    sid = sid.get("student_id") or sid.get("name")
+                if sid:
+                    doc.append("target_students", {"student_id": sid})
 
         for img in proof_images:
             url = img.get("image") if isinstance(img, dict) else img
@@ -1493,15 +1501,16 @@ def update_discipline_record(
                 if cid:
                     doc.append("target_classes", {"class_id": cid})
 
+        # Học sinh: target_student (1 người) + target_students (child table)
         if student_ids:
-            if len(student_ids) == 1 and target_student and not target_student_ids:
-                doc.target_student = student_ids[0]
-            else:
-                for sid in student_ids:
-                    if isinstance(sid, dict):
-                        sid = sid.get("student_id") or sid.get("name")
-                    if sid:
-                        doc.append("target_students", {"student_id": sid})
+            single_id = student_ids[0] if len(student_ids) == 1 else None
+            if single_id and doc.target_type in ("student", "mixed"):
+                doc.target_student = single_id
+            for sid in student_ids:
+                if isinstance(sid, dict):
+                    sid = sid.get("student_id") or sid.get("name")
+                if sid:
+                    doc.append("target_students", {"student_id": sid})
         if violation is not None:
             doc.violation = violation
         if form is not None:
