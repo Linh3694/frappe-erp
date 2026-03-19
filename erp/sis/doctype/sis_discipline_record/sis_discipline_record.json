@@ -22,6 +22,9 @@
   "form",
   "penalty_points",
   "time_slot",
+  "time_slot_id",
+  "record_time",
+  "description",
   "column_break_2",
   "proof_images",
   "campus"
@@ -52,9 +55,9 @@
    "default": "1",
    "fieldname": "violation_count",
    "fieldtype": "Int",
-   "in_list_view": 1,
-   "label": "Số lần vi phạm",
-   "reqd": 1
+   "hidden": 1,
+   "label": "Số lần vi phạm (deprecated - tính từ count records)",
+   "reqd": 0
   },
   {
    "fieldname": "column_break_1",
@@ -121,16 +124,35 @@
   {
    "fieldname": "penalty_points",
    "fieldtype": "Select",
-   "in_list_view": 1,
-   "label": "Điểm trừ thi đua",
-   "options": "1\n5\n10\n15",
-   "reqd": 1
+   "hidden": 1,
+   "label": "Điểm trừ thi đua (deprecated)",
+   "options": "1\n5\n10\n15"
   },
   {
    "fieldname": "time_slot",
    "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Thời gian (deprecated)"
+  },
+  {
+   "fieldname": "time_slot_id",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Thời gian"
+   "label": "Tiết",
+   "options": "SIS Discipline Time"
+  },
+  {
+   "fieldname": "record_time",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Thời gian",
+   "description": "Định dạng HH:MM"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text",
+   "in_list_view": 1,
+   "label": "Mô tả"
   },
   {
    "fieldname": "column_break_2",

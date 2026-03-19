@@ -924,6 +924,9 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                 "form",
                 "penalty_points",
                 "time_slot",
+                "time_slot_id",
+                "record_time",
+                "description",
                 "owner",
                 "modified",
                 "campus",
@@ -1008,6 +1011,15 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                 ) or r["form"]
             else:
                 r["form_title"] = ""
+
+            if r.get("time_slot_id"):
+                r["time_slot_title"] = frappe.db.get_value(
+                    "SIS Discipline Time",
+                    r["time_slot_id"],
+                    "title",
+                ) or r["time_slot_id"]
+            else:
+                r["time_slot_title"] = ""
 
             # Người cập nhật = owner (người tạo)
             owner_user = r.get("owner")
@@ -1125,6 +1137,14 @@ def get_discipline_record(name: str = None):
                 d["form"],
                 "title",
             ) or d["form"]
+        if d.get("time_slot_id"):
+            d["time_slot_title"] = frappe.db.get_value(
+                "SIS Discipline Time",
+                d["time_slot_id"],
+                "title",
+            ) or d["time_slot_id"]
+        else:
+            d["time_slot_title"] = ""
         if d.get("owner"):
             d["owner_name"] = frappe.db.get_value(
                 "User", d["owner"], "full_name"
@@ -1186,8 +1206,11 @@ def create_discipline_record(
 
         violation = violation or data.get("violation")
         form = form or data.get("form")
-        penalty_points = penalty_points or data.get("penalty_points")
+        penalty_points = penalty_points or data.get("penalty_points") or "1"
         time_slot = time_slot or data.get("time_slot")
+        time_slot_id = data.get("time_slot_id")
+        record_time = data.get("record_time")
+        description = data.get("description")
         proof_images = proof_images or data.get("proof_images") or []
         campus = campus or data.get("campus") or get_current_campus_from_context()
 
@@ -1243,16 +1266,6 @@ def create_discipline_record(
                 message="Hình thức là bắt buộc",
                 code="MISSING_REQUIRED_FIELDS",
             )
-        if not penalty_points:
-            return error_response(
-                message="Điểm trừ thi đua là bắt buộc",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if penalty_points not in ("1", "5", "10", "15"):
-            return error_response(
-                message="Điểm trừ phải là 1, 5, 10 hoặc 15",
-                code="INVALID_PENALTY_POINTS",
-            )
         if not campus:
             return error_response(
                 message="Trường học là bắt buộc",
@@ -1277,6 +1290,9 @@ def create_discipline_record(
                 "form": form,
                 "penalty_points": str(penalty_points),
                 "time_slot": time_slot or "",
+                "time_slot_id": time_slot_id or None,
+                "record_time": record_time or "",
+                "description": description or "",
                 "campus": campus,
             }
         )
@@ -1335,6 +1351,9 @@ def update_discipline_record(
     form=None,
     penalty_points=None,
     time_slot=None,
+    time_slot_id=None,
+    record_time=None,
+    description=None,
     proof_images=None,
 ):
     """Cập nhật ghi nhận lỗi - hỗ trợ mixed (nhiều lớp + nhiều học sinh)"""
@@ -1410,6 +1429,12 @@ def update_discipline_record(
             doc.penalty_points = str(penalty_points)
         if time_slot is not None:
             doc.time_slot = time_slot
+        if "time_slot_id" in data:
+            doc.time_slot_id = data.get("time_slot_id") or None
+        if "record_time" in data:
+            doc.record_time = data.get("record_time") or ""
+        if "description" in data:
+            doc.description = data.get("description") or ""
         if proof_images is not None:
             doc.proof_images = []
             for img in proof_images:
