@@ -389,6 +389,138 @@ def delete_discipline_form(name: str = None):
         )
 
 
+# ==================== KHAI BÁO THỜI GIAN (TIME) CRUD ====================
+# Cấu trúc giống Hình thức - trường Thời gian (title)
+
+@frappe.whitelist(allow_guest=False)
+def get_discipline_times(campus: str = None):
+    """Lấy danh sách khai báo thời gian kỷ luật theo campus"""
+    try:
+        filters = {"enabled": 1}
+        if campus:
+            filters["campus"] = campus
+
+        times = frappe.get_all(
+            "SIS Discipline Time",
+            filters=filters,
+            fields=["name", "title", "campus", "enabled", "creation", "modified"],
+            order_by="title asc",
+        )
+
+        return success_response(
+            data={"data": times, "total": len(times)},
+            message="Lấy danh sách thời gian thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error getting discipline times: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách thời gian: {str(e)}",
+            code="GET_DISCIPLINE_TIMES_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def create_discipline_time(title: str = None, campus: str = None):
+    """Tạo mới khai báo thời gian kỷ luật"""
+    try:
+        data = _get_request_data()
+        title = title or data.get("title")
+        campus = campus or data.get("campus")
+
+        if not title or not str(title).strip():
+            return error_response(message="Thời gian là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+        if not campus:
+            return error_response(message="Trường học là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+
+        doc = frappe.get_doc(
+            {
+                "doctype": "SIS Discipline Time",
+                "title": str(title).strip(),
+                "campus": campus,
+                "enabled": 1,
+            }
+        )
+        doc.insert()
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Tạo thời gian thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error creating discipline time: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo thời gian: {str(e)}",
+            code="CREATE_DISCIPLINE_TIME_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def update_discipline_time(name: str = None, title: str = None, enabled: int = None):
+    """Cập nhật khai báo thời gian kỷ luật"""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        title = title if title is not None else data.get("title")
+        enabled_val = data.get("enabled")
+        if enabled is None and enabled_val is not None:
+            enabled = int(enabled_val) if enabled_val not in [None, ""] else None
+
+        if not name:
+            return error_response(message="ID thời gian là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+
+        doc = frappe.get_doc("SIS Discipline Time", name)
+
+        if title is not None:
+            doc.title = str(title).strip()
+        if enabled is not None:
+            doc.enabled = enabled
+
+        doc.save()
+        frappe.db.commit()
+
+        return success_response(
+            data={"name": doc.name, "title": doc.title},
+            message="Cập nhật thời gian thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(message="Không tìm thấy thời gian", code="TIME_NOT_FOUND")
+    except Exception as e:
+        frappe.log_error(f"Error updating discipline time: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi cập nhật thời gian: {str(e)}",
+            code="UPDATE_DISCIPLINE_TIME_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_discipline_time(name: str = None):
+    """Xóa khai báo thời gian kỷ luật"""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+
+        if not name:
+            return error_response(message="ID thời gian là bắt buộc", code="MISSING_REQUIRED_FIELDS")
+
+        frappe.delete_doc("SIS Discipline Time", name)
+        frappe.db.commit()
+
+        return success_response(data={"name": name}, message="Xóa thời gian thành công")
+
+    except frappe.DoesNotExistError:
+        return error_response(message="Không tìm thấy thời gian", code="TIME_NOT_FOUND")
+    except Exception as e:
+        frappe.log_error(f"Error deleting discipline time: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi xóa thời gian: {str(e)}",
+            code="DELETE_DISCIPLINE_TIME_ERROR",
+        )
+
+
 # ==================== VI PHẠM (VIOLATION) CRUD ====================
 
 @frappe.whitelist(allow_guest=False)
