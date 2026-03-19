@@ -1,0 +1,49 @@
+{
+  "actions": [],
+  "creation": "2025-03-19 08:00:00.000000",
+  "doctype": "DocType",
+  "editable_grid": 1,
+  "engine": "InnoDB",
+  "field_order": [
+    "violation_count",
+    "level",
+    "points"
+  ],
+  "fields": [
+    {
+      "fieldname": "violation_count",
+      "fieldtype": "Int",
+      "in_list_view": 1,
+      "label": "Số lần vi phạm",
+      "reqd": 1
+    },
+    {
+      "fieldname": "level",
+      "fieldtype": "Select",
+      "in_list_view": 1,
+      "label": "Cấp độ",
+      "options": "1\n2\n3",
+      "reqd": 1
+    },
+    {
+      "fieldname": "points",
+      "fieldtype": "Int",
+      "in_list_view": 1,
+      "label": "Điểm",
+      "reqd": 1
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "istable": 1,
+  "links": [],
+  "modified": "2025-03-19 08:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Sis",
+  "name": "SIS Discipline Violation Student Point",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": [],
+  "track_changes": 0
+}

@@ -392,6 +392,51 @@ def delete_discipline_form(name: str = None):
 # ==================== VI PHẠM (VIOLATION) CRUD ====================
 
 @frappe.whitelist(allow_guest=False)
+def get_discipline_violation(name: str = None):
+    """
+    Lấy chi tiết 1 vi phạm kỷ luật (bao gồm bảng điểm học sinh và lớp)
+    """
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="ID vi phạm là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc("SIS Discipline Violation", name)
+        d = doc.as_dict()
+
+        # Thêm classification_title
+        if d.get("classification"):
+            d["classification_title"] = frappe.db.get_value(
+                "SIS Discipline Classification",
+                d["classification"],
+                "title",
+            ) or d["classification"]
+        else:
+            d["classification_title"] = ""
+
+        return success_response(
+            data=d,
+            message="Lấy chi tiết vi phạm thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy vi phạm",
+            code="VIOLATION_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error getting discipline violation: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy chi tiết vi phạm: {str(e)}",
+            code="GET_DISCIPLINE_VIOLATION_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def get_discipline_violations(campus: str = None):
     """
     Lấy danh sách vi phạm kỷ luật theo campus
@@ -448,19 +493,22 @@ def get_discipline_violations(campus: str = None):
 def create_discipline_violation(
     title: str = None,
     classification: str = None,
-    severity_level: str = None,
     campus: str = None,
+    student_points: list = None,
+    class_points: list = None,
 ):
     """
-    Tạo mới vi phạm kỷ luật
-    severity_level: "1", "2", "3" (Mức độ 1, 2, 3)
+    Tạo mới vi phạm kỷ luật.
+    student_points: [{"violation_count": 1, "level": "1", "points": 1}, ...]
+    class_points: [{"violation_count": 1, "level": "1", "points": 10}, ...]
     """
     try:
         data = _get_request_data()
         title = title or data.get("title")
         classification = classification or data.get("classification")
-        severity_level = severity_level or data.get("severity_level")
         campus = campus or data.get("campus")
+        student_points = student_points or data.get("student_points") or []
+        class_points = class_points or data.get("class_points") or []
 
         if not title or not str(title).strip():
             return error_response(
@@ -474,12 +522,6 @@ def create_discipline_violation(
                 code="MISSING_REQUIRED_FIELDS",
             )
 
-        if severity_level not in ("1", "2", "3"):
-            return error_response(
-                message="Mức độ phải là 1, 2 hoặc 3",
-                code="INVALID_SEVERITY_LEVEL",
-            )
-
         if not campus:
             return error_response(
                 message="Trường học là bắt buộc",
@@ -491,11 +533,35 @@ def create_discipline_violation(
                 "doctype": "SIS Discipline Violation",
                 "title": str(title).strip(),
                 "classification": classification,
-                "severity_level": severity_level,
                 "campus": campus,
                 "enabled": 1,
             }
         )
+
+        # Thêm điểm học sinh
+        for row in student_points:
+            if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+                doc.append(
+                    "student_points",
+                    {
+                        "violation_count": int(row.get("violation_count", 0)),
+                        "level": str(row.get("level", "1")),
+                        "points": int(row.get("points", 0)),
+                    },
+                )
+
+        # Thêm điểm lớp
+        for row in class_points:
+            if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+                doc.append(
+                    "class_points",
+                    {
+                        "violation_count": int(row.get("violation_count", 0)),
+                        "level": str(row.get("level", "1")),
+                        "points": int(row.get("points", 0)),
+                    },
+                )
+
         doc.insert()
         frappe.db.commit()
 
@@ -517,21 +583,25 @@ def update_discipline_violation(
     name: str = None,
     title: str = None,
     classification: str = None,
-    severity_level: str = None,
     enabled: int = None,
+    student_points: list = None,
+    class_points: list = None,
 ):
     """
-    Cập nhật vi phạm kỷ luật
+    Cập nhật vi phạm kỷ luật.
+    student_points: [{"violation_count": 1, "level": "1", "points": 1}, ...]
+    class_points: [{"violation_count": 1, "level": "1", "points": 10}, ...]
     """
     try:
         data = _get_request_data()
         name = name or data.get("name")
         title = title if title is not None else data.get("title")
         classification = classification if classification is not None else data.get("classification")
-        severity_level = severity_level if severity_level is not None else data.get("severity_level")
         enabled_val = data.get("enabled")
         if enabled is None and enabled_val is not None:
             enabled = int(enabled_val) if enabled_val not in [None, ""] else None
+        student_points = student_points if student_points is not None else data.get("student_points")
+        class_points = class_points if class_points is not None else data.get("class_points")
 
         if not name:
             return error_response(
@@ -547,16 +617,36 @@ def update_discipline_violation(
         if classification is not None:
             doc.classification = classification
 
-        if severity_level is not None:
-            if severity_level not in ("1", "2", "3"):
-                return error_response(
-                    message="Mức độ phải là 1, 2 hoặc 3",
-                    code="INVALID_SEVERITY_LEVEL",
-                )
-            doc.severity_level = severity_level
-
         if enabled is not None:
             doc.enabled = enabled
+
+        # Cập nhật bảng điểm học sinh
+        if student_points is not None:
+            doc.student_points = []
+            for row in student_points:
+                if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+                    doc.append(
+                        "student_points",
+                        {
+                            "violation_count": int(row.get("violation_count", 0)),
+                            "level": str(row.get("level", "1")),
+                            "points": int(row.get("points", 0)),
+                        },
+                    )
+
+        # Cập nhật bảng điểm lớp
+        if class_points is not None:
+            doc.class_points = []
+            for row in class_points:
+                if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+                    doc.append(
+                        "class_points",
+                        {
+                            "violation_count": int(row.get("violation_count", 0)),
+                            "level": str(row.get("level", "1")),
+                            "points": int(row.get("points", 0)),
+                        },
+                    )
 
         doc.save()
         frappe.db.commit()

@@ -12,7 +12,11 @@
   "severity_level",
   "column_break_1",
   "campus",
-  "enabled"
+  "enabled",
+  "section_student_points",
+  "student_points",
+  "section_class_points",
+  "class_points"
  ],
  "fields": [
   {
@@ -36,11 +40,9 @@
   {
    "fieldname": "severity_level",
    "fieldtype": "Select",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Mức độ",
-   "options": "1\n2\n3",
-   "reqd": 1
+   "hidden": 1,
+   "label": "Mức độ (deprecated)",
+   "options": "1\n2\n3"
   },
   {
    "fieldname": "column_break_1",
@@ -61,6 +63,28 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Kích hoạt"
+  },
+  {
+   "fieldname": "section_student_points",
+   "fieldtype": "Section Break",
+   "label": "Điểm học sinh"
+  },
+  {
+   "fieldname": "student_points",
+   "fieldtype": "Table",
+   "label": "Điểm áp dụng cho học sinh",
+   "options": "SIS Discipline Violation Student Point"
+  },
+  {
+   "fieldname": "section_class_points",
+   "fieldtype": "Section Break",
+   "label": "Điểm lớp"
+  },
+  {
+   "fieldname": "class_points",
+   "fieldtype": "Table",
+   "label": "Điểm áp dụng cho lớp",
+   "options": "SIS Discipline Violation Class Point"
   }
  ],
  "index_web_pages_for_search": 0,
