@@ -3005,8 +3005,12 @@ def get_parent_health_records():
                     exam["visit_reason"] = visit_data.get("reason") or ""
                     # Bệnh viện chuyển tới từ visit (khi checkout chuyển viện) - dùng cho màn PH và GVCN
                     exam["transfer_hospital"] = visit_data.get("transfer_hospital") or ""
-                    # Thời gian ra về: ưu tiên exam.clinic_checkout_time, fallback visit.leave_clinic_time (dữ liệu cũ)
-                    exam["clinic_checkout_time"] = exam.get("clinic_checkout_time") or visit_data.get("leave_clinic_time") or ""
+                    # Thời gian ra về: ưu tiên exam.clinic_checkout_time (nếu hợp lệ), fallback visit.leave_clinic_time
+                    # Lưu ý: Frappe lưu Time rỗng thành "00:00:00" - coi là rỗng để fallback sang visit (fix Thời gian lưu trú không hiển thị)
+                    raw_checkout = exam.get("clinic_checkout_time")
+                    raw_str = (str(raw_checkout).strip() if raw_checkout else "")[:8]
+                    if not raw_str or raw_str in ("00:00:00", "00:00"):
+                        exam["clinic_checkout_time"] = visit_data.get("leave_clinic_time") or ""
                 else:
                     exam["visit_reason"] = ""
                     exam["transfer_hospital"] = ""
