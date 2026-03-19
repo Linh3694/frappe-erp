@@ -1043,10 +1043,14 @@ def update_health_examination():
                 exam.followup_medical_staff_name = None
         
         # Khi followup outcome thay đổi, cập nhật visit status tương ứng
+        # Đồng thời set leave_clinic_time và sync clinic_checkout_time cho tất cả exam liên quan
+        # (tránh trường hợp PH đón/chuyển viện không ghi nhận giờ checkout trên Parent Portal)
         if followup_outcome in ("transferred", "picked_up") and exam.visit_id:
             try:
                 visit_doc = frappe.get_doc("SIS Daily Health Visit", exam.visit_id)
                 visit_doc.status = followup_outcome
+                if not visit_doc.leave_clinic_time:
+                    visit_doc.leave_clinic_time = nowtime()
                 if followup_outcome == "transferred":
                     if followup_transfer_hospital:
                         visit_doc.transfer_hospital = followup_transfer_hospital
@@ -1055,11 +1059,36 @@ def update_health_examination():
                     if followup_accompanying_health_staff:
                         visit_doc.accompanying_health_staff = followup_accompanying_health_staff
                 visit_doc.save()
+                leave_time = visit_doc.leave_clinic_time
+                if leave_time:
+                    exam.clinic_checkout_time = leave_time  # Để exam.save() lưu đúng cho thăm khám ban đầu
                 related_exams = frappe.get_all("SIS Health Examination", filters={"visit_id": exam.visit_id}, fields=["name"])
                 for re in related_exams:
                     frappe.db.set_value("SIS Health Examination", re.name, "outcome", followup_outcome, update_modified=False)
+                    if leave_time:
+                        frappe.db.set_value("SIS Health Examination", re.name, "clinic_checkout_time", leave_time, update_modified=False)
             except Exception as e:
                 frappe.logger().error(f"Error updating visit status for followup: {str(e)}")
+
+        # Khi outcome thăm khám ban đầu thay đổi (transferred/picked_up/return_class) qua form cập nhật,
+        # cập nhật visit và sync clinic_checkout_time - tránh thiếu giờ checkout trên Parent Portal
+        if outcome in ("transferred", "picked_up", "return_class") and exam.visit_id:
+            try:
+                visit_doc = frappe.get_doc("SIS Daily Health Visit", exam.visit_id)
+                visit_map = {"return_class": "returned", "picked_up": "picked_up", "transferred": "transferred"}
+                visit_doc.status = visit_map.get(outcome, outcome)
+                if not visit_doc.leave_clinic_time:
+                    visit_doc.leave_clinic_time = nowtime()
+                visit_doc.save()
+                leave_time = visit_doc.leave_clinic_time
+                if leave_time:
+                    exam.clinic_checkout_time = leave_time  # Để exam.save() lưu đúng
+                related_exams = frappe.get_all("SIS Health Examination", filters={"visit_id": exam.visit_id}, fields=["name"])
+                for re in related_exams:
+                    if leave_time and re.name != exam.name:
+                        frappe.db.set_value("SIS Health Examination", re.name, "clinic_checkout_time", leave_time, update_modified=False)
+            except Exception as e:
+                frappe.logger().error(f"Error updating visit for initial outcome: {str(e)}")
         
         # Update images if provided (cho phép empty array để clear tất cả)
         if images is not None and isinstance(images, list):
