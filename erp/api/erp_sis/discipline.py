@@ -24,7 +24,14 @@ def _get_student_display_info(sid):
         "CRM Student", sid, ["student_name", "student_code"], as_dict=True
     )
     if not s:
-        return {"student_id": sid, "student_name": "", "student_code": "", "student_class_title": "", "student_photo_url": None}
+        return {
+            "student_id": sid,
+            "student_name": "",
+            "student_code": "",
+            "student_class_title": "",
+            "student_class_id": None,
+            "student_photo_url": None,
+        }
     current_sy = frappe.db.get_value(
         "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
     )
@@ -80,6 +87,7 @@ def _get_student_display_info(sid):
         "student_name": s.get("student_name") or "",
         "student_code": s.get("student_code") or "",
         "student_class_title": class_title,
+        "student_class_id": cs,
         "student_photo_url": photo_url,
     }
 
@@ -992,8 +1000,10 @@ def get_class_violation_stats(
 ):
     """
     Lấy thống kê vi phạm của lớp cho 1 loại vi phạm.
-    Tính tương tự học sinh: đếm số record có lớp trong target_classes.
-    - Số lần vi phạm: count records trong khoảng ngày
+    Đếm bản ghi DISTINCT khi:
+    - Lớp nằm trong target_classes (SIS Discipline Record Class Entry), hoặc
+    - Đối tượng là học sinh (target_student / Student Entry) mà HS thuộc lớp regular
+      (SIS Class Student: class_id + class_type = regular), cùng logic lấy lớp hiển thị HS.
     - Cấp độ, Điểm trừ: từ student_points của Violation (dựa trên count)
     - date_from, date_to (YYYY-MM-DD): tùy chọn. Nếu không truyền thì dùng tháng hiện tại.
     """
@@ -1020,15 +1030,36 @@ def get_class_violation_stats(
             first_day = today.replace(day=1)
             last_day = today
 
-        # Đếm số bản ghi: lớp này có trong target_classes, violation khớp, trong tháng
+        # Đếm DISTINCT: target lớp HOẶC HS trên bản ghi thuộc lớp regular này
         count_sql = """
             SELECT COUNT(DISTINCT r.name) as cnt
             FROM `tabSIS Discipline Record` r
-            INNER JOIN `tabSIS Discipline Record Class Entry` ce
-                ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
             WHERE r.violation = %(violation_id)s
                 AND r.date >= %(first_day)s AND r.date <= %(last_day)s
-                AND ce.class_id = %(class_id)s
+                AND (
+                    EXISTS (
+                        SELECT 1 FROM `tabSIS Discipline Record Class Entry` ce
+                        WHERE ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+                            AND ce.class_id = %(class_id)s
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM `tabSIS Discipline Record Student Entry` se
+                        INNER JOIN `tabSIS Class Student` cs
+                            ON cs.student_id = se.student_id
+                            AND cs.class_id = %(class_id)s
+                            AND cs.class_type = 'regular'
+                        WHERE se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+                    )
+                    OR (
+                        IFNULL(r.target_student, '') != ''
+                        AND EXISTS (
+                            SELECT 1 FROM `tabSIS Class Student` cs
+                            WHERE cs.student_id = r.target_student
+                                AND cs.class_id = %(class_id)s
+                                AND cs.class_type = 'regular'
+                        )
+                    )
+                )
         """
         result = frappe.db.sql(
             count_sql,
