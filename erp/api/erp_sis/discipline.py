@@ -96,6 +96,55 @@ def _get_request_data():
     return data
 
 
+# --- Phân quyền ghi nhận lỗi: SIS Supervisory (chỉ bản ghi của mình), SIS Supervisory Admin (mọi bản ghi) ---
+
+
+def _discipline_session_matches_owner(doc_owner):
+    if not doc_owner:
+        return False
+    u = (frappe.session.user or "").strip()
+    o = (doc_owner or "").strip()
+    if not u or not o:
+        return False
+    if o == u:
+        return True
+    if "@" in u and o.lower() == u.lower():
+        return True
+    return False
+
+
+def _can_create_discipline_record():
+    """Tạo bản ghi: Supervisory / Supervisory Admin / System Manager / SIS BOD / Administrator"""
+    if frappe.session.user in (None, "Guest"):
+        return False, "Chưa đăng nhập"
+    roles = set(frappe.get_roles(frappe.session.user))
+    if roles & {"System Manager", "SIS BOD", "Administrator"}:
+        return True, None
+    if "SIS Supervisory Admin" in roles or "SIS Supervisory" in roles:
+        return True, None
+    return False, "Không có quyền tạo ghi nhận lỗi"
+
+
+def _can_write_existing_discipline_record(doc_owner):
+    """
+    Sửa/xóa bản ghi đã tồn tại.
+    Supervisory Admin + quyền hệ thống: mọi bản ghi.
+    Chỉ SIS Supervisory: owner phải khớp session.
+    """
+    if frappe.session.user in (None, "Guest"):
+        return False, "Chưa đăng nhập"
+    roles = set(frappe.get_roles(frappe.session.user))
+    if roles & {"System Manager", "SIS BOD", "Administrator"}:
+        return True, None
+    if "SIS Supervisory Admin" in roles:
+        return True, None
+    if "SIS Supervisory" in roles:
+        if _discipline_session_matches_owner(doc_owner):
+            return True, None
+        return False, "Bạn chỉ được sửa/xóa bản ghi do chính mình tạo"
+    return False, "Không có quyền thao tác ghi nhận lỗi"
+
+
 @frappe.whitelist(allow_guest=False)
 def get_discipline_classifications(campus: str = None):
     """
@@ -1676,6 +1725,13 @@ def create_discipline_record(
                 code="MISSING_REQUIRED_FIELDS",
             )
 
+        allowed_create, deny_create = _can_create_discipline_record()
+        if not allowed_create:
+            return error_response(
+                message=deny_create or "Không có quyền",
+                code="DISCIPLINE_RECORD_FORBIDDEN",
+            )
+
         # Thu thập danh sách học sinh (target_student cũ hoặc target_student_ids mới)
         student_ids = list(target_student_ids) if target_student_ids else []
         if target_student and target_student not in student_ids:
@@ -1769,6 +1825,13 @@ def update_discipline_record(
             )
 
         doc = frappe.get_doc("SIS Discipline Record", name)
+
+        allowed_write, deny_write = _can_write_existing_discipline_record(doc.get("owner"))
+        if not allowed_write:
+            return error_response(
+                message=deny_write or "Không có quyền",
+                code="DISCIPLINE_RECORD_FORBIDDEN",
+            )
 
         target_type = target_type or data.get("target_type")
         target_student = target_student or data.get("target_student")
@@ -1876,6 +1939,14 @@ def delete_discipline_record(name: str = None):
             return error_response(
                 message="ID bản ghi là bắt buộc",
                 code="MISSING_REQUIRED_FIELDS",
+            )
+
+        owner = frappe.db.get_value("SIS Discipline Record", name, "owner")
+        allowed_del, deny_del = _can_write_existing_discipline_record(owner)
+        if not allowed_del:
+            return error_response(
+                message=deny_del or "Không có quyền",
+                code="DISCIPLINE_RECORD_FORBIDDEN",
             )
 
         frappe.delete_doc("SIS Discipline Record", name)
