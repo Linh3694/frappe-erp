@@ -44,6 +44,7 @@ def create_lead_from_chatbot():
     Input (optional):
     - guardian_name: str - Ten phu huynh
     - student_name: str - Ten hoc sinh
+    - visit_preference: str - Ngay/gio mong muon tham quan (text tu do tu chatbot)
 
     Auth: Header X-Chatbot-API-Key phai khop voi chatbot_api_key trong site_config.json
     """
@@ -69,6 +70,7 @@ def create_lead_from_chatbot():
 
     guardian_name = (data.get("guardian_name") or "").strip() or None
     student_name = (data.get("student_name") or "").strip() or None
+    visit_preference = (data.get("visit_preference") or "").strip() or None
 
     try:
         # 1. Tao CRM Lead o buoc Draft
@@ -81,6 +83,10 @@ def create_lead_from_chatbot():
             doc.guardian_name = guardian_name
         if student_name:
             doc.student_name = student_name
+        # Ghi nhan lich tham quan mong muon (chatbot) vao student_note de tuyen sinh xem tren CRM
+        if visit_preference:
+            prefix = "[Chatbot AI] Lịch tham quan mong muốn: "
+            doc.student_note = (prefix + visit_preference).strip()
 
         doc.append("phone_numbers", {
             "phone_number": normalize_phone_number(phone_number),
