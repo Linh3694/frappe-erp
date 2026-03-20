@@ -17,6 +17,7 @@
   "visit_info_section",
   "visit_date",
   "reason",
+  "reported_period",
   "column_break_2",
   "leave_class_time",
   "arrive_clinic_time",
@@ -106,6 +107,14 @@
    "fieldtype": "Text",
    "label": "Lý do xuống Y tế",
    "reqd": 1
+  },
+  {
+   "fieldname": "reported_period",
+   "fieldtype": "Data",
+   "label": "Tiết báo xuống Y tế",
+   "description": "Khớp tên tiết trên TKB (LessonLog); dùng khi không resolve được khung giờ tiết",
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "fieldname": "column_break_2",

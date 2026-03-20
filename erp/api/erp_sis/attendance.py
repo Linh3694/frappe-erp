@@ -9,6 +9,21 @@ from erp.utils.api_response import success_response, error_response
 ATTENDANCE_STATUSES = {"present", "absent", "late", "excused"}
 
 
+def invalidate_class_attendance_cache(class_id, date_str, period):
+	"""
+	Xóa cache Redis của get_class_attendance (key attendance:{class_id}:{date}:{period}).
+	Gọi sau khi điểm danh đổi từ luồng Y tế để client không đọc dữ liệu cũ 5 phút.
+	"""
+	if not class_id or not date_str or not period:
+		return
+	cache_key = f"attendance:{class_id}:{date_str}:{period}"
+	try:
+		frappe.cache().delete_key(cache_key)
+		frappe.logger().info(f"[attendance] Invalidated cache {cache_key}")
+	except Exception as e:
+		frappe.logger().warning(f"[attendance] Cache invalidate failed for {cache_key}: {e}")
+
+
 def _to_bool(val):
 	if isinstance(val, bool):
 		return val

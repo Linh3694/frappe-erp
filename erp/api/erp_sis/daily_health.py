@@ -151,6 +151,9 @@ def report_student_to_clinic():
             "reported_by": reported_by_user,
             "reported_by_name": reported_by_name
         }
+        # Lưu tiết báo cáo — dùng khi TKB không resolve được khung giờ (tránh hiện visit trên mọi tiết)
+        if period:
+            visit_data["reported_period"] = period
         
         # Nếu Y tế tự tạo (at_clinic), cập nhật thêm thông tin tiếp nhận
         if initial_status == "at_clinic":
@@ -210,6 +213,12 @@ def report_student_to_clinic():
                     visit.db_set("attendance_record_id", attendance_record_id)
                     
                 frappe.logger().info(f"[report_student_to_clinic] Updated attendance to excused for student {student_id}, period {period}")
+                # Làm mới cache điểm danh tiết (get_class_attendance TTL 5 phút)
+                try:
+                    from erp.api.erp_sis.attendance import invalidate_class_attendance_cache
+                    invalidate_class_attendance_cache(class_id, str(today()), period)
+                except Exception as inv_err:
+                    frappe.logger().warning(f"[report_student_to_clinic] Invalidate attendance cache: {inv_err}")
             except Exception as att_err:
                 # Không fail toàn bộ request nếu không thể cập nhật attendance
                 frappe.logger().warning(f"[report_student_to_clinic] Could not update attendance: {str(att_err)}")
@@ -465,7 +474,7 @@ def receive_student_at_clinic():
 
 def _revert_attendance_for_visit(visit):
     """
-    Revert attendance về present khi cancel/reject visit.
+    Revert attendance về present khi GV hủy đơn (cancel) hoặc checkout outcome returned (đã về lớp).
     Ưu tiên dùng attendance_record_id. Nếu null (visit cũ) thì fallback: query theo
     student+class+date+excused+remarks chứa "Xuống Y tế" - chỉ revert khi tìm đúng 1 bản ghi.
     """
@@ -506,6 +515,25 @@ def _revert_attendance_for_visit(visit):
         return False
 
 
+def _invalidate_attendance_cache_for_visit(visit):
+    """Làm mới cache Redis get_class_attendance cho tiết gắn với visit (qua attendance_record_id)."""
+    from erp.api.erp_sis.attendance import invalidate_class_attendance_cache
+
+    att_id = getattr(visit, "attendance_record_id", None)
+    if not att_id and hasattr(visit, "get"):
+        att_id = visit.get("attendance_record_id")
+    if not att_id:
+        return
+    row = frappe.db.get_value(
+        "SIS Class Attendance",
+        att_id,
+        ["class_id", "date", "period"],
+        as_dict=True,
+    )
+    if row and row.get("class_id") and row.get("date") and row.get("period"):
+        invalidate_class_attendance_cache(row["class_id"], str(row["date"]), row["period"])
+
+
 @frappe.whitelist(allow_guest=False)
 def cancel_health_visit():
     """
@@ -539,6 +567,7 @@ def cancel_health_visit():
         visit.save()
         
         _revert_attendance_for_visit(visit)
+        _invalidate_attendance_cache_for_visit(visit)
         frappe.db.commit()
         
         # Gửi push notification cho Mobile Medical (Hủy y tế)
@@ -1585,7 +1614,12 @@ def complete_health_visit():
                 leave_clinic_time,
                 update_modified=False
             )
-        
+
+        # Đã về lớp: hoàn tác điểm danh excused tự động (đồng bộ LessonLog/ClassLog)
+        if outcome == "returned":
+            _revert_attendance_for_visit(visit)
+        _invalidate_attendance_cache_for_visit(visit)
+
         frappe.db.commit()
         
         # Gửi push notification cho Homeroom + Vice-homeroom + Mobile Medical
@@ -1694,21 +1728,20 @@ def _time_to_seconds(time_val):
 def get_health_status_for_period():
     """
     Lấy trạng thái Y tế của học sinh theo tiết học (cho LessonLog).
-    Trả về tất cả visit liên quan đến tiết học, kể cả đã checkout.
-    
+    Trả về visit liên quan đến đúng tiết (theo khung giờ TKB hoặc tiết đã ghi trên visit/điểm danh).
+
     Params:
         - class_id: ID lớp (required)
         - date: Ngày (required)
         - period: Tên tiết học, VD: "Tiết 1" (required)
-    
+
     Returns:
         students: Record<student_id, {visit_id, status, leave_class_time, leave_clinic_time}>
-        
+
     Logic:
-        - Nếu có thời gian tiết học:
-          1. Học sinh rời lớp TRONG tiết → luôn hiển thị (kể cả đã checkout: returned, picked_up, transferred)
-          2. Học sinh rời lớp TRƯỚC tiết nhưng chưa về hoặc về sau tiết bắt đầu → hiển thị
-        - Nếu không có thời gian tiết: hiển thị tất cả visit trong ngày
+        - Có khung giờ tiết: rời lớp trong tiết, hoặc rời trước tiết nhưng còn ở Y tế trong tiết.
+        - Không có khung giờ (TKB lệch tên tiết / thiếu schedule): KHÔNG broadcast cả ngày;
+          chỉ trả visit có reported_period hoặc period của bản ghi điểm danh khớp period request.
     """
     try:
         _check_teacher_permission()
@@ -1740,8 +1773,12 @@ def get_health_status_for_period():
         has_period_times = period_start_sec is not None and period_end_sec is not None
         
         if not has_period_times:
-            frappe.logger().warning(f"[get_health_status_for_period] Cannot get period times for {period_name}, using fallback logic")
-        
+            frappe.logger().warning(
+                f"[get_health_status_for_period] Không resolve được khung giờ tiết "
+                f"class_id={class_id} date={visit_date} period={period_name} "
+                f"— chỉ trả visit khớp reported_period / period trên SIS Class Attendance"
+            )
+
         # Query tất cả visits trong ngày của lớp
         visits = frappe.get_all(
             "SIS Daily Health Visit",
@@ -1750,57 +1787,80 @@ def get_health_status_for_period():
                 "visit_date": visit_date
             },
             fields=[
-                "name", "student_id", "status",
-                "leave_class_time", "leave_clinic_time"
+                "name",
+                "student_id",
+                "status",
+                "leave_class_time",
+                "leave_clinic_time",
+                "reported_period",
+                "attendance_record_id",
             ],
             order_by="leave_class_time desc"
         )
-        
+
+        att_ids = list(
+            {
+                v["attendance_record_id"]
+                for v in visits
+                if v.get("attendance_record_id") and not (v.get("reported_period") or "").strip()
+            }
+        )
+        att_period_by_id = {}
+        if att_ids:
+            for row in frappe.get_all(
+                "SIS Class Attendance",
+                filters={"name": ["in", att_ids]},
+                fields=["name", "period"],
+            ):
+                att_period_by_id[row.name] = row.period
+
         # Filter học sinh có visit liên quan đến tiết học
-        # Logic mới: Nếu học sinh rời lớp trong tiết đó, luôn hiển thị trạng thái (kể cả đã checkout)
         students_at_clinic = {}
-        
+        period_name_norm = str(period_name).strip()
+
         for visit in visits:
             # Bỏ qua visit đã hủy hoặc từ chối - không hiển thị trong LessonLog
             if visit.status in ("cancelled", "rejected"):
                 continue
-            
+
             student_id = visit.student_id
-            
+
             # Nếu student đã có trong result (ưu tiên visit mới nhất), skip
             if student_id in students_at_clinic:
                 continue
-            
+
             leave_class_sec = _time_to_seconds(visit.leave_class_time)
             leave_clinic_sec = _time_to_seconds(visit.leave_clinic_time)
-            
+
+            eff_rp = (visit.get("reported_period") or "").strip() or (
+                att_period_by_id.get(visit.get("attendance_record_id")) or ""
+            ).strip()
+
             should_include = False
-            
+
             if has_period_times and leave_class_sec is not None:
-                # Logic có thời gian tiết học:
-                # Học sinh rời lớp trong khoảng thời gian tiết → luôn hiển thị (kể cả đã checkout)
-                # Hoặc: rời lớp trước tiết nhưng vẫn ở Y tế trong tiết
                 left_during_period = period_start_sec <= leave_class_sec < period_end_sec
-                
-                # Rời lớp trước tiết nhưng chưa về hoặc về trong/sau tiết
                 left_before_but_still_at_clinic = (
-                    leave_class_sec < period_start_sec and
-                    (leave_clinic_sec is None or leave_clinic_sec > period_start_sec)
+                    leave_class_sec < period_start_sec
+                    and (leave_clinic_sec is None or leave_clinic_sec > period_start_sec)
                 )
-                
                 if left_during_period or left_before_but_still_at_clinic:
                     should_include = True
+            elif has_period_times:
+                # Có khung giờ nhưng không parse được leave_class_time — chỉ khớp tiết đã lưu
+                if eff_rp and eff_rp == period_name_norm:
+                    should_include = True
             else:
-                # Fallback: không có thông tin tiết học, hiển thị tất cả visit trong ngày
-                # Để giáo viên biết học sinh đã/đang ở Y tế
-                should_include = True
-            
+                # Không có khung giờ: không broadcast visit cả ngày ra mọi tiết (fix bug UI)
+                if eff_rp and eff_rp == period_name_norm:
+                    should_include = True
+
             if should_include:
                 students_at_clinic[student_id] = {
                     "visit_id": visit.name,
                     "status": visit.status,
                     "leave_class_time": str(visit.leave_class_time) if visit.leave_class_time else None,
-                    "leave_clinic_time": str(visit.leave_clinic_time) if visit.leave_clinic_time else None
+                    "leave_clinic_time": str(visit.leave_clinic_time) if visit.leave_clinic_time else None,
                 }
         
         return success_response(
