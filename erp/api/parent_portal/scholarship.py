@@ -96,7 +96,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
         student_code: mã học sinh
         class_name: tên lớp
         portal_link: link portal giáo viên (base URL)
-        deadline_str: hạn chót gửi thư (format dd/mm/yyyy cho VN, Month dd, yyyy cho EN)
+        deadline_str: ngày hạn chót gửi thư (dd/mm/yyyy) — email ghi rõ 23h59/11:59 PM cuối ngày đó
     
     Returns:
         tuple (subject, body_html)
@@ -117,7 +117,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
 
         <p>Học sinh <strong>{student_name}</strong> (Mã học sinh: <strong>{student_code}</strong>, <strong>{class_name}</strong>) đã nộp hồ sơ đăng ký Học bổng Tài năng Wellspring Năm học 2026-2027 và lựa chọn Thầy/Cô là giáo viên viết thư giới thiệu cho học sinh.</p>
 
-        <p>Thầy/Cô vui lòng đăng nhập hệ thống Portal để viết và gửi thư giới thiệu trước <strong>17h00 ngày {deadline_str}</strong>.</p>
+        <p>Thầy/Cô vui lòng đăng nhập hệ thống Portal để viết và gửi thư giới thiệu trước <strong>23h59 ngày {deadline_str}</strong>.</p>
 
         <div style="background: #f5f7fa; border-left: 4px solid #1976d2; padding: 16px 20px; margin: 24px 0; border-radius: 4px;">
             <p style="margin: 0 0 12px 0; font-weight: bold;">📝 HƯỚNG DẪN GỬI THƯ GIỚI THIỆU:</p>
@@ -144,7 +144,7 @@ def _build_scholarship_email(teacher_name, student_name, student_code, class_nam
 
         <p>Student <strong>{student_name}</strong> (Student ID: <strong>{student_code}</strong>, <strong>{class_name}</strong>) has submitted their application for the 2026-2027 Wellspring Talent Scholarship and has selected you as their recommender.</p>
 
-        <p>We kindly ask that you log in to the Portal system to complete and submit the letter of recommendation by <strong>5:00 PM on {deadline_str}</strong>.</p>
+        <p>We kindly ask that you log in to the Portal system to complete and submit the letter of recommendation by <strong>11:59 PM on {deadline_str}</strong>.</p>
 
         <div style="background: #f5f7fa; border-left: 4px solid #1976d2; padding: 16px 20px; margin: 24px 0; border-radius: 4px;">
             <p style="margin: 0 0 12px 0; font-weight: bold;">📝 INSTRUCTIONS FOR SUBMITTING THE LETTER OF RECOMMENDATION:</p>

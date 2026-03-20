@@ -1395,6 +1395,183 @@ def get_discipline_record(name: str = None):
         )
 
 
+def _format_discipline_changelog_scalar(fieldname, value):
+    """Chuỗi hiển thị cho 1 giá trị field (date, link, select...) — dùng cho lịch sử chỉnh sửa."""
+    if value is None or value == "":
+        return "-"
+    meta = frappe.get_meta("SIS Discipline Record")
+    df = meta.get_field(fieldname)
+    if df and df.fieldtype == "Date":
+        try:
+            from frappe.utils import getdate
+
+            d = getdate(value)
+            return f"{d.day:02d}/{d.month:02d}/{d.year}"
+        except Exception:
+            return str(value)
+    if df and df.fieldtype == "Link" and df.options:
+        link_meta = frappe.get_meta(df.options)
+        tf = link_meta.get_title_field()
+        title = frappe.db.get_value(df.options, value, tf)
+        if title:
+            return title
+        return str(value)
+    if fieldname == "target_type" and value:
+        mapping = {"class": "Lớp", "student": "Học sinh", "mixed": "Lớp và học sinh"}
+        return mapping.get(str(value), str(value))
+    return str(value)
+
+
+def _discipline_changelog_child_summary(fieldname):
+    """Nhãn ngắn cho thay đổi bảng con (học sinh / lớp / ảnh)."""
+    meta = frappe.get_meta("SIS Discipline Record")
+    df = meta.get_field(fieldname)
+    return (df.label if df and df.label else fieldname) if df else fieldname
+
+
+@frappe.whitelist(allow_guest=False)
+def get_discipline_record_changelog(name: str = None):
+    """
+    Lịch sử thao tác trên bản ghi kỷ luật: tạo + các lần chỉnh (từ bảng Version, track_changes).
+    Trả về mảng theo thời gian tăng dần để hiển thị timeline.
+    """
+    DOCTYPE = "SIS Discipline Record"
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="ID bản ghi là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc(DOCTYPE, name)
+
+        meta = frappe.get_meta(DOCTYPE)
+        entries = []
+
+        owner_name = frappe.db.get_value("User", doc.owner, "full_name") or doc.owner
+        entries.append(
+            {
+                "kind": "create",
+                "at": str(doc.creation),
+                "user_id": doc.owner,
+                "user_name": owner_name,
+            }
+        )
+
+        versions = frappe.get_all(
+            "Version",
+            filters={"ref_doctype": DOCTYPE, "docname": str(name)},
+            fields=["owner", "creation", "data"],
+            order_by="creation asc",
+            limit=500,
+        )
+
+        for ver in versions:
+            if not ver.data:
+                continue
+            try:
+                payload = json.loads(ver.data)
+            except Exception:
+                continue
+
+            user_name = frappe.db.get_value("User", ver.owner, "full_name") or ver.owner
+            changes = []
+
+            for row in payload.get("changed") or []:
+                if not row or len(row) < 3:
+                    continue
+                fn, old_v, new_v = row[0], row[1], row[2]
+                df = meta.get_field(fn)
+                label = (df.label if df and df.label else fn) if df else fn
+                changes.append(
+                    {
+                        "field": fn,
+                        "field_label": label,
+                        "old": _format_discipline_changelog_scalar(fn, old_v),
+                        "new": _format_discipline_changelog_scalar(fn, new_v),
+                    }
+                )
+
+            for _table, _row_name, _idx, cell_changes in payload.get("row_changed") or []:
+                tbl_label = _discipline_changelog_child_summary(_table)
+                for cell in cell_changes or []:
+                    if not cell or len(cell) < 3:
+                        continue
+                    cfn, cold, cnew = cell[0], cell[1], cell[2]
+                    child_meta = meta.get_field(_table)
+                    child_dt = child_meta.options if child_meta and child_meta.fieldtype == "Table" else None
+                    clabel = cfn
+                    if child_dt:
+                        cm = frappe.get_meta(child_dt)
+                        cdf = cm.get_field(cfn)
+                        if cdf and cdf.label:
+                            clabel = cdf.label
+                    changes.append(
+                        {
+                            "field": f"{_table}.{cfn}",
+                            "field_label": f"{tbl_label} — {clabel}",
+                            "old": str(cold) if cold not in (None, "") else "-",
+                            "new": str(cnew) if cnew not in (None, "") else "-",
+                        }
+                    )
+
+            for added in payload.get("added") or []:
+                if not added or len(added) < 2:
+                    continue
+                tbl, _row = added[0], added[1]
+                changes.append(
+                    {
+                        "field": tbl,
+                        "field_label": _discipline_changelog_child_summary(tbl),
+                        "old": "-",
+                        "new": "(Thêm dòng)",
+                    }
+                )
+
+            for removed in payload.get("removed") or []:
+                if not removed or len(removed) < 2:
+                    continue
+                tbl, _row = removed[0], removed[1]
+                changes.append(
+                    {
+                        "field": tbl,
+                        "field_label": _discipline_changelog_child_summary(tbl),
+                        "old": "(Có dòng)",
+                        "new": "-",
+                    }
+                )
+
+            if changes:
+                entries.append(
+                    {
+                        "kind": "update",
+                        "at": str(ver.creation),
+                        "user_id": ver.owner,
+                        "user_name": user_name,
+                        "changes": changes,
+                    }
+                )
+
+        return success_response(
+            data={"entries": entries},
+            message="Lấy lịch sử bản ghi thành công",
+        )
+
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy bản ghi",
+            code="RECORD_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error discipline record changelog: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy lịch sử: {str(e)}",
+            code="DISCIPLINE_RECORD_CHANGELOG_ERROR",
+        )
+
+
 @frappe.whitelist(allow_guest=False)
 def create_discipline_record(
     date=None,
