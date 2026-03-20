@@ -769,8 +769,8 @@ def _create_reset_to_not_submitted_announcement(
     school_year: str
 ):
     """
-    Tạo Announcement riêng khi Admin reset đơn về trạng thái "Chưa làm đơn".
-    Nội dung khác với announcement cập nhật đơn - thông báo phụ huynh cần làm lại đơn.
+    Tạo Announcement riêng khi Admin reset đơn về trạng thái "Chưa đăng ký".
+    Nội dung thông báo phụ huynh đơn đã được điều chỉnh về trạng thái Chưa đăng ký, cần đăng ký tái ghi danh lại.
     
     Args:
         student_id: ID học sinh (CRM Student)
@@ -780,21 +780,21 @@ def _create_reset_to_not_submitted_announcement(
     """
     try:
         from datetime import datetime
-        time_display_vi = datetime.now().strftime('%d/%m/%Y %H:%M')
-        time_display_en = datetime.now().strftime('%b %d, %Y %H:%M')
+        # Format thời gian: "13:34, ngày 19/03/2026" (gộp trong câu thông báo)
+        time_display_vi = datetime.now().strftime('%H:%M, ngày %d/%m/%Y')
+        time_display_en = datetime.now().strftime('%H:%M, %b %d, %Y')
         
         title_vn = f"Yêu cầu làm lại đơn tái ghi danh - {student_name}"
         title_en = f"Re-submit Re-enrollment Application - {student_name}"
         
+        # Format thông báo khi đơn được reset về "Chưa đăng ký" (theo mẫu nhà trường)
         content_vn = f"""Kính gửi Quý Phụ huynh,
 
-Nhà trường thông báo hồ sơ Tái ghi danh cho Năm học **{school_year}** của Học sinh **{student_name}** – **{student_code}** đã được chuyển về trạng thái chưa làm đơn.
+Nhà trường xin thông báo: Hồ sơ Tái ghi danh cho Năm học **{school_year}** của Học sinh **{student_name}** – **{student_code}** hiện đã được điều chỉnh về trạng thái "Chưa đăng ký" (thời gian cập nhật: {time_display_vi}).
 
-Quý Phụ huynh vui lòng đăng nhập vào Cổng Phụ huynh và thực hiện làm đơn tái ghi danh lại theo hướng dẫn.
+Kính đề nghị Quý Phụ huynh vui lòng đăng nhập Cổng thông tin Phụ huynh (Parent Portal) và thực hiện đăng ký tái ghi danh theo hướng dẫn của Nhà trường.
 
-Thời gian thao tác: **{time_display_vi}**
-
-Trường hợp Quý Phụ huynh cần hỗ trợ thêm, xin vui lòng liên hệ Bộ phận Kết nối WISers – Phòng Tuyển sinh:
+Trong trường hợp cần hỗ trợ, Quý Phụ huynh vui lòng liên hệ Bộ phận Kết nối WISers – Phòng Tuyển sinh:
 📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
 
 Trân trọng,
@@ -802,11 +802,9 @@ Trân trọng,
 
         content_en = f"""Dear Parents,
 
-The School would like to inform you that the Re-enrollment application for School Year **{school_year}** for student **{student_name}** – **{student_code}** has been reset to "Not Yet Submitted" status.
+The School would like to inform you: The Re-enrollment application for School Year **{school_year}** for student **{student_name}** – **{student_code}** has been adjusted to "Not Yet Registered" status (updated at: {time_display_en}).
 
-Please log in to the Parent Portal and complete the re-enrollment application again as instructed.
-
-Action time: **{time_display_en}**
+Please log in to the Parent Portal and complete the re-enrollment registration as instructed by the School.
 
 If you need additional support, please contact the WISers Connection Department – Admissions Office:
 📞 0973 759 229 | 0915 846 229 | (024) 37305 8668
