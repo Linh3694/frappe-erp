@@ -7,6 +7,8 @@ Chỉ có 1 trường: title (tiêu đề)
 """
 
 import json
+from collections import Counter
+
 import frappe
 from erp.utils.api_response import success_response, error_response
 from erp.sis.discipline_record_permissions import (
@@ -1526,10 +1528,22 @@ def get_discipline_record_changelog(name: str = None):
                         }
                     )
 
-            for added in payload.get("added") or []:
-                if not added or len(added) < 2:
-                    continue
+            # Bảng con: Frappe Version hay ghi cặp added+removed cùng số dòng khi save lại
+            # (đổi name nội bộ của row) dù user chỉ sửa field khác → ẩn log "(Thêm dòng)"/"(Có dòng)" thừa
+            added_rows = [a for a in (payload.get("added") or []) if a and len(a) >= 2]
+            removed_rows = [r for r in (payload.get("removed") or []) if r and len(r) >= 2]
+            added_by_tbl = Counter(x[0] for x in added_rows)
+            removed_by_tbl = Counter(x[0] for x in removed_rows)
+            skip_child_row_noise_tables = {
+                t
+                for t, n in added_by_tbl.items()
+                if n > 0 and removed_by_tbl.get(t, 0) == n
+            }
+
+            for added in added_rows:
                 tbl, _row = added[0], added[1]
+                if tbl in skip_child_row_noise_tables:
+                    continue
                 changes.append(
                     {
                         "field": tbl,
@@ -1539,10 +1553,10 @@ def get_discipline_record_changelog(name: str = None):
                     }
                 )
 
-            for removed in payload.get("removed") or []:
-                if not removed or len(removed) < 2:
-                    continue
+            for removed in removed_rows:
                 tbl, _row = removed[0], removed[1]
+                if tbl in skip_child_row_noise_tables:
+                    continue
                 changes.append(
                     {
                         "field": tbl,
