@@ -9,6 +9,11 @@ Chỉ có 1 trường: title (tiêu đề)
 import json
 import frappe
 from erp.utils.api_response import success_response, error_response
+from erp.sis.discipline_record_permissions import (
+    discipline_session_matches_owner as _discipline_session_matches_owner,
+    user_can_create_discipline_record as _can_create_discipline_record,
+    user_can_write_existing_discipline_record as _can_write_existing_discipline_record,
+)
 
 
 def _get_student_display_info(sid):
@@ -94,55 +99,6 @@ def _get_request_data():
     if form_dict:
         data.update(dict(form_dict))
     return data
-
-
-# --- Phân quyền ghi nhận lỗi: SIS Supervisory (chỉ bản ghi của mình), SIS Supervisory Admin (mọi bản ghi) ---
-
-
-def _discipline_session_matches_owner(doc_owner):
-    if not doc_owner:
-        return False
-    u = (frappe.session.user or "").strip()
-    o = (doc_owner or "").strip()
-    if not u or not o:
-        return False
-    if o == u:
-        return True
-    if "@" in u and o.lower() == u.lower():
-        return True
-    return False
-
-
-def _can_create_discipline_record():
-    """Tạo bản ghi: Supervisory / Supervisory Admin / System Manager / SIS BOD / Administrator"""
-    if frappe.session.user in (None, "Guest"):
-        return False, "Chưa đăng nhập"
-    roles = set(frappe.get_roles(frappe.session.user))
-    if roles & {"System Manager", "SIS BOD", "Administrator"}:
-        return True, None
-    if "SIS Supervisory Admin" in roles or "SIS Supervisory" in roles:
-        return True, None
-    return False, "Không có quyền tạo ghi nhận lỗi"
-
-
-def _can_write_existing_discipline_record(doc_owner):
-    """
-    Sửa/xóa bản ghi đã tồn tại.
-    Supervisory Admin + quyền hệ thống: mọi bản ghi.
-    Chỉ SIS Supervisory: owner phải khớp session.
-    """
-    if frappe.session.user in (None, "Guest"):
-        return False, "Chưa đăng nhập"
-    roles = set(frappe.get_roles(frappe.session.user))
-    if roles & {"System Manager", "SIS BOD", "Administrator"}:
-        return True, None
-    if "SIS Supervisory Admin" in roles:
-        return True, None
-    if "SIS Supervisory" in roles:
-        if _discipline_session_matches_owner(doc_owner):
-            return True, None
-        return False, "Bạn chỉ được sửa/xóa bản ghi do chính mình tạo"
-    return False, "Không có quyền thao tác ghi nhận lỗi"
 
 
 @frappe.whitelist(allow_guest=False)
@@ -1305,6 +1261,7 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                 ) or owner_user
             else:
                 r["owner_name"] = ""
+            r["record_creator"] = owner_user
 
             # Lấy thông tin học sinh: target_student (1 người) hoặc target_student_ids (nhiều người / mixed)
             student_ids_to_fetch = r.get("target_student_ids") or []
@@ -1426,9 +1383,12 @@ def get_discipline_record(name: str = None):
                 "User", d["owner"], "full_name"
             ) or d["owner"]
 
+        # Luôn gửi người tạo (owner) rõ ràng cho frontend phân quyền — tránh thiếu field khi parse
+        d["record_creator"] = doc.owner
+
         return success_response(
             data=d,
-            message="Lấy danh sách ghi nhận lỗi thành công",
+            message="Lấy chi tiết bản ghi thành công",
         )
 
     except frappe.DoesNotExistError:
