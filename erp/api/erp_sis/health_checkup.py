@@ -57,6 +57,149 @@ def _normalize_checkup_phase(phase):
     return None
 
 
+def _session_campus_key():
+    """Mã cơ sở lưu kèm phiên khám (rỗng khi không có campus trong context)."""
+    from erp.utils.campus_utils import get_current_campus_from_context
+    campus_id = get_current_campus_from_context()
+    return campus_id or ""
+
+
+def _health_checkup_session_table_exists():
+    return bool(
+        frappe.db.sql("SHOW TABLES LIKE 'tabSIS Health Checkup Session'")
+    )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_health_checkup_session_meta(school_year_id=None, checkup_phase=None):
+    """
+    Lấy meta phiên khám theo năm học + đợt (vd: Đơn vị khám), theo campus context.
+    """
+    try:
+        data = _get_request_data()
+        if not school_year_id:
+            school_year_id = data.get("school_year_id") or frappe.form_dict.get(
+                "school_year_id"
+            ) or frappe.request.args.get("school_year_id")
+        if checkup_phase is None:
+            checkup_phase = data.get("checkup_phase") or frappe.form_dict.get(
+                "checkup_phase"
+            ) or frappe.request.args.get("checkup_phase")
+        checkup_phase = _normalize_checkup_phase(checkup_phase)
+        if not school_year_id:
+            return error_response(
+                message="school_year_id là bắt buộc", code="VALIDATION_ERROR"
+            )
+        if checkup_phase is None:
+            return error_response(
+                message="checkup_phase phải là beginning hoặc end",
+                code="VALIDATION_ERROR",
+            )
+        if not _health_checkup_session_table_exists():
+            return success_response(
+                data={"exam_unit": ""},
+                message="Chưa có bảng phiên khám (migrate để lưu Đơn vị khám)",
+            )
+        campus_key = _session_campus_key()
+        rows = frappe.get_all(
+            "SIS Health Checkup Session",
+            filters={
+                "school_year_id": school_year_id,
+                "checkup_phase": checkup_phase,
+                "campus_id": campus_key,
+            },
+            fields=["exam_unit"],
+            limit=1,
+        )
+        exam_unit = (rows[0].get("exam_unit") or "") if rows else ""
+        return success_response(
+            data={"exam_unit": exam_unit},
+            message="Lấy meta phiên khám thành công",
+        )
+    except Exception as e:
+        import traceback
+        frappe.log_error(
+            f"get_health_checkup_session_meta: {str(e)}\n{traceback.format_exc()}"
+        )
+        return error_response(
+            message=f"Có lỗi khi lấy meta phiên khám: {str(e)}",
+            code="SESSION_META_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def save_health_checkup_session_meta(
+    school_year_id=None, checkup_phase=None, exam_unit=None
+):
+    """
+    Lưu Đơn vị khám (và meta tương lai) cho năm học + đợt + campus context.
+    """
+    try:
+        data = _get_request_data()
+        if not school_year_id:
+            school_year_id = data.get("school_year_id")
+        if checkup_phase is None:
+            checkup_phase = data.get("checkup_phase")
+        if exam_unit is None:
+            exam_unit = data.get("exam_unit")
+        checkup_phase = _normalize_checkup_phase(checkup_phase)
+        if not school_year_id:
+            return error_response(
+                message="school_year_id là bắt buộc", code="VALIDATION_ERROR"
+            )
+        if checkup_phase is None:
+            return error_response(
+                message="checkup_phase phải là beginning hoặc end",
+                code="VALIDATION_ERROR",
+            )
+        exam_unit = (exam_unit or "").strip() if isinstance(exam_unit, str) else ""
+        if not _health_checkup_session_table_exists():
+            return error_response(
+                message="Chưa có DocType phiên khám trên server (cần migrate)",
+                code="SESSION_TABLE_MISSING",
+            )
+        campus_key = _session_campus_key()
+        rows = frappe.get_all(
+            "SIS Health Checkup Session",
+            filters={
+                "school_year_id": school_year_id,
+                "checkup_phase": checkup_phase,
+                "campus_id": campus_key,
+            },
+            pluck="name",
+            limit=1,
+        )
+        if rows:
+            doc = frappe.get_doc("SIS Health Checkup Session", rows[0])
+            doc.exam_unit = exam_unit
+            doc.save(ignore_permissions=True)
+        else:
+            doc = frappe.get_doc(
+                {
+                    "doctype": "SIS Health Checkup Session",
+                    "school_year_id": school_year_id,
+                    "checkup_phase": checkup_phase,
+                    "campus_id": campus_key,
+                    "exam_unit": exam_unit,
+                }
+            )
+            doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        return success_response(
+            data={"exam_unit": exam_unit},
+            message="Lưu Đơn vị khám thành công",
+        )
+    except Exception as e:
+        import traceback
+        frappe.log_error(
+            f"save_health_checkup_session_meta: {str(e)}\n{traceback.format_exc()}"
+        )
+        return error_response(
+            message=f"Có lỗi khi lưu meta phiên khám: {str(e)}",
+            code="SESSION_META_SAVE_ERROR",
+        )
+
+
 @frappe.whitelist(allow_guest=False)
 def get_students_health_checkup(school_year_id=None):
     """
@@ -90,6 +233,15 @@ def get_students_health_checkup(school_year_id=None):
         # Build query - lấy tất cả học sinh Regular class theo năm học
         campus_filter = "AND cs.campus_id = %(campus_id)s" if campus_id else ""
         
+        approval_cols = ""
+        if checkup_table_exists and frappe.db.has_column(
+            "tabSIS Student Health Checkup", "approval_status"
+        ):
+            approval_cols = """
+                    , shc_b.approval_status as checkup_beginning_status
+                    , shc_e.approval_status as checkup_end_status
+            """
+
         if checkup_table_exists:
             # Hai LEFT JOIN theo đợt: đầu năm / cuối năm
             sql = f"""
@@ -102,6 +254,7 @@ def get_students_health_checkup(school_year_id=None):
                     c.title as class_name,
                     shc_b.name as checkup_beginning_id,
                     shc_e.name as checkup_end_id
+                    {approval_cols}
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
@@ -327,6 +480,17 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
                 message="Vui lòng chạy 'bench migrate' để tạo bảng dữ liệu khám sức khoẻ",
                 code="TABLE_NOT_EXISTS"
             )
+
+        # Phê duyệt: chỉ SIS Medical (hoặc System Manager) được nhập; chỉ sửa khi draft
+        roles = frappe.get_roles()
+        has_medical = "SIS Medical" in roles
+        is_system = "System Manager" in roles
+        if frappe.db.has_column("tabSIS Student Health Checkup", "approval_status"):
+            if not has_medical and not is_system:
+                return error_response(
+                    message="Chỉ vai trò SIS Medical được nhập phiếu khám định kỳ",
+                    code="FORBIDDEN",
+                )
         
         # Kiểm tra xem đã có record chưa (theo đợt)
         existing = frappe.db.get_value(
@@ -371,6 +535,16 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
         if existing:
             # Update existing record
             doc = frappe.get_doc("SIS Student Health Checkup", existing)
+            if (
+                frappe.db.has_column("tabSIS Student Health Checkup", "approval_status")
+                and getattr(doc, "approval_status", None)
+                and doc.approval_status != "draft"
+                and not is_system
+            ):
+                return error_response(
+                    message="Phiếu đang chờ phê duyệt hoặc đã công bố — không thể sửa",
+                    code="READONLY_CHECKUP",
+                )
             for field in allowed_fields:
                 if field in data:
                     setattr(doc, field, data[field])
@@ -385,6 +559,8 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
                 "checkup_phase": checkup_phase,
                 "checkup_date": data.get("checkup_date") or today()
             }
+            if frappe.db.has_column("tabSIS Student Health Checkup", "approval_status"):
+                doc_data["approval_status"] = "draft"
             for field in allowed_fields:
                 if field in data and data[field] is not None:
                     doc_data[field] = data[field]
@@ -628,6 +804,13 @@ def import_health_checkup(school_year_id=None, data=None):
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
+
+        _ir = frappe.get_roles()
+        if "SIS Medical" not in _ir and "System Manager" not in _ir:
+            return error_response(
+                message="Chỉ SIS Medical được import phiếu khám định kỳ",
+                code="FORBIDDEN",
+            )
         
         # Kiểm tra xem doctype đã tồn tại chưa
         checkup_table_exists = frappe.db.sql(
@@ -702,6 +885,15 @@ def import_health_checkup(school_year_id=None, data=None):
                 if existing:
                     # Update
                     doc = frappe.get_doc("SIS Student Health Checkup", existing)
+                    if (
+                        frappe.db.has_column("tabSIS Student Health Checkup", "approval_status")
+                        and getattr(doc, "approval_status", None)
+                        and doc.approval_status != "draft"
+                        and "System Manager" not in frappe.get_roles()
+                    ):
+                        errors.append({"row": idx + 1, "error": "Phiếu không ở trạng thái nháp — bỏ qua"})
+                        error_count += 1
+                        continue
                     for field in allowed_fields:
                         if field in row and row[field] is not None and row[field] != "":
                             setattr(doc, field, row[field])
@@ -716,6 +908,8 @@ def import_health_checkup(school_year_id=None, data=None):
                         "checkup_phase": checkup_phase,
                         "checkup_date": today()
                     }
+                    if frappe.db.has_column("tabSIS Student Health Checkup", "approval_status"):
+                        doc_data["approval_status"] = "draft"
                     for field in allowed_fields:
                         if field in row and row[field] is not None and row[field] != "":
                             doc_data[field] = row[field]
@@ -747,3 +941,15 @@ def import_health_checkup(school_year_id=None, data=None):
             message=f"Có lỗi xảy ra khi import: {str(e)}",
             code="IMPORT_CHECKUP_ERROR"
         )
+
+
+# Workflow phê duyệt (re-export từ module riêng)
+from erp.api.erp_sis.health_checkup_workflow import (  # noqa: E402
+    submit_student_health_checkup,
+    approve_health_checkup_l2,
+    reject_health_checkup_l2,
+    approve_health_checkup_l3,
+    reject_health_checkup_l3,
+    get_health_checkup_approval_queue_l2,
+    get_class_periodic_health_checkups,
+)

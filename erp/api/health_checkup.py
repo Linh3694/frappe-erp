@@ -12,7 +12,16 @@ from erp.api.erp_sis.health_checkup import (
     get_student_health_checkup,
     save_student_health_checkup,
     export_health_checkup,
-    import_health_checkup
+    import_health_checkup,
+    get_health_checkup_session_meta,
+    save_health_checkup_session_meta,
+    submit_student_health_checkup,
+    approve_health_checkup_l2,
+    reject_health_checkup_l2,
+    approve_health_checkup_l3,
+    reject_health_checkup_l3,
+    get_health_checkup_approval_queue_l2,
+    get_class_periodic_health_checkups,
 )
 
 __all__ = [
@@ -20,5 +29,14 @@ __all__ = [
     'get_student_health_checkup',
     'save_student_health_checkup',
     'export_health_checkup',
-    'import_health_checkup'
+    'import_health_checkup',
+    'get_health_checkup_session_meta',
+    'save_health_checkup_session_meta',
+    'submit_student_health_checkup',
+    'approve_health_checkup_l2',
+    'reject_health_checkup_l2',
+    'approve_health_checkup_l3',
+    'reject_health_checkup_l3',
+    'get_health_checkup_approval_queue_l2',
+    'get_class_periodic_health_checkups',
 ]

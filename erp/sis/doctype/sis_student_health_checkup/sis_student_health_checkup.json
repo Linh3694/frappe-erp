@@ -77,7 +77,21 @@
   "health_classification",
   "notes_section",
   "doctor_recommendation",
-  "reference_notes"
+  "reference_notes",
+  "workflow_section",
+  "approval_status",
+  "column_break_wf_1",
+  "returned_from_level",
+  "last_rejection_comment",
+  "column_break_wf_2",
+  "submitted_at",
+  "submitted_by",
+  "column_break_wf_3",
+  "l2_action_at",
+  "l2_action_by",
+  "column_break_wf_4",
+  "l3_action_at",
+  "l3_action_by"
  ],
  "fields": [
   {
@@ -473,6 +487,87 @@
    "fieldname": "reference_notes",
    "fieldtype": "Text",
    "label": "Tham chiếu"
+  },
+  {
+   "fieldname": "workflow_section",
+   "fieldtype": "Section Break",
+   "label": "Phê duyệt"
+  },
+  {
+   "default": "published",
+   "fieldname": "approval_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái phê duyệt",
+   "options": "draft\npending_l2\npending_l3\npublished",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_wf_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "returned_from_level",
+   "fieldtype": "Select",
+   "label": "Trả từ cấp",
+   "options": "\nl2\nl3"
+  },
+  {
+   "fieldname": "last_rejection_comment",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú trả gần nhất"
+  },
+  {
+   "fieldname": "column_break_wf_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Gửi duyệt lúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "label": "Người gửi duyệt",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_wf_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "l2_action_at",
+   "fieldtype": "Datetime",
+   "label": "L2 xử lý lúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "l2_action_by",
+   "fieldtype": "Link",
+   "label": "L2 xử lý bởi",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_wf_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "l3_action_at",
+   "fieldtype": "Datetime",
+   "label": "L3 xử lý lúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "l3_action_by",
+   "fieldtype": "Link",
+   "label": "L3 xử lý bởi",
+   "options": "User",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 0,

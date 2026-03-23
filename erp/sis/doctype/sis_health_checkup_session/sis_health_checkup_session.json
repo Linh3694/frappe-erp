@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-03-24 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "school_year_id",
+  "checkup_phase",
+  "campus_id",
+  "exam_unit"
+ ],
+ "fields": [
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "reqd": 1
+  },
+  {
+   "default": "beginning",
+   "fieldname": "checkup_phase",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Đợt khám",
+   "options": "beginning\nend",
+   "reqd": 1
+  },
+  {
+   "description": "Rỗng = toàn cơ sở khi không có campus trong context",
+   "fieldname": "campus_id",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Mã cơ sở"
+  },
+  {
+   "fieldname": "exam_unit",
+   "fieldtype": "Data",
+   "label": "Đơn vị khám"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-03-24 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Health Checkup Session",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "school_year_id",
+ "track_changes": 1,
+ "unique_together": [["school_year_id", "checkup_phase", "campus_id"]]
+}
