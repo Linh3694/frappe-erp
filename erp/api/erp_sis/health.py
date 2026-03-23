@@ -18,6 +18,129 @@ from erp.utils.api_response import (
     validation_error_response
 )
 
+# Email bộ phận cháo: có thể ghi đè trong site_config.json → "porridge_notification_emails": "a@x.com, b@x.com"
+DEFAULT_PORRIDGE_NOTIFICATION_EMAILS = (
+    "hieu.nguyenduy@wellspring.edu.vn",
+    "le.vuthinhat@wellspring.edu.vn",
+    "linh.nguyenhai@wellspring.edu.vn",
+    "nha.duongduc@wellspring.edu.vn",
+    "tuyet.nguyenthiminh@wellspring.edu.vn",
+    )
+
+
+def _get_porridge_notification_recipients():
+    """Danh sách email nhận thông báo đăng ký cháo (mặc định + cấu hình site)."""
+    conf = frappe.conf.get("porridge_notification_emails")
+    if conf:
+        if isinstance(conf, str):
+            return [e.strip() for e in conf.replace("\n", ",").split(",") if e.strip()]
+        if isinstance(conf, (list, tuple)):
+            return [str(e).strip() for e in conf if str(e).strip()]
+    return list(DEFAULT_PORRIDGE_NOTIFICATION_EMAILS)
+
+
+def _porridge_state_signature(registration, note, rows):
+    """Chuỗi so sánh trạng thái đăng ký cháo (để tránh gửi mail khi chỉ sửa mô tả SK)."""
+    if not registration:
+        return "off"
+    note = (note or "").strip()
+    if not rows:
+        return f"on_empty|{note}"
+    normalized = []
+    for r in sorted(rows, key=lambda x: str(x.get("date"))):
+        normalized.append(
+            [
+                str(r.get("date")),
+                int(bool(r.get("breakfast"))),
+                int(bool(r.get("lunch"))),
+                int(bool(r.get("afternoon"))),
+            ]
+        )
+    return json.dumps({"note": note, "rows": normalized}, sort_keys=True)
+
+
+def _porridge_state_signature_from_doc(doc):
+    rows = frappe.get_all(
+        "SIS Health Report Porridge",
+        filters={"parent": doc.name},
+        fields=["date", "breakfast", "lunch", "afternoon"],
+        order_by="date asc",
+    )
+    return _porridge_state_signature(bool(doc.porridge_registration), doc.porridge_note, rows)
+
+
+def _format_porridge_dates_for_email(porridge_dates):
+    """porridge_dates: list dict (API) hoặc DB rows."""
+    lines = []
+    meal_labels = {"breakfast": "Sáng", "lunch": "Trưa", "afternoon": "Xế"}
+    for pd in (porridge_dates or []):
+        d = pd.get("date") if isinstance(pd, dict) else None
+        if not d:
+            continue
+        meals = []
+        for m, label in meal_labels.items():
+            v = pd.get(m)
+            if v is None:
+                continue
+            if isinstance(v, (int, float)) and int(v):
+                meals.append(label)
+            elif v is True:
+                meals.append(label)
+        lines.append(f"  - {d}: {', '.join(meals) if meals else '(chưa chọn bữa)'}")
+    return "\n".join(lines) if lines else "  (không có ngày cụ thể)"
+
+
+def _send_porridge_registration_email(
+    *,
+    report_name,
+    student_name,
+    student_code,
+    class_name,
+    porridge_dates,
+    porridge_note,
+    created_by_name,
+    is_update=False,
+):
+    """Gửi email cho bộ phận cháo khi đăng ký cháo thành công. Lỗi gửi mail không làm fail API."""
+    recipients = _get_porridge_notification_recipients()
+    if not recipients:
+        return
+    try:
+        action = "Cập nhật đăng ký cháo" if is_update else "Đăng ký cháo mới"
+        subject = f"[SIS] {action} — {student_name} ({student_code}) — {class_name or ''}"
+        body_lines = [
+            f"{action} từ báo cáo Y tế lớp.",
+            "",
+            f"Học sinh: {student_name}",
+            f"Mã HS: {student_code}",
+            f"Lớp: {class_name or '-'}",
+            f"Mã báo cáo: {report_name}",
+            f"Người gửi: {created_by_name or '-'}",
+            "",
+            "Ngày / bữa đăng ký cháo:",
+            _format_porridge_dates_for_email(porridge_dates),
+            "",
+            f"Lưu ý cháo: {porridge_note.strip() if porridge_note else '(không có)'}",
+            "",
+            "",
+            "— Hệ thống SIS",
+        ]
+        message = "\n".join(body_lines)
+        frappe.sendmail(
+            recipients=recipients,
+            subject=subject,
+            message=message,
+            delayed=False,
+            reference_doctype="SIS Health Report",
+            reference_name=report_name,
+        )
+    except Exception as e:
+        frappe.log_error(
+            frappe.get_traceback(),
+            "Porridge registration notification email failed",
+        )
+        frappe.logger().error(f"Porridge registration email failed: {str(e)}")
+
 
 def _check_teacher_permission():
     """Check if user has teacher permission"""
@@ -234,6 +357,19 @@ def create_health_report():
                 ))
         
         frappe.db.commit()
+
+        # Thông báo email bộ phận cháo khi tạo mới kèm đăng ký cháo thành công
+        if porridge_registration and porridge_dates:
+            _send_porridge_registration_email(
+                report_name=report_name,
+                student_name=student_name,
+                student_code=student_code,
+                class_name=class_name,
+                porridge_dates=porridge_dates,
+                porridge_note=porridge_note,
+                created_by_name=created_by_name,
+                is_update=False,
+            )
         
         return success_response(
             data={"name": report_name},
@@ -277,8 +413,9 @@ def update_health_report():
         if not report_id:
             return validation_error_response("report_id là bắt buộc", {"report_id": ["report_id là bắt buộc"]})
         
-        # Lấy document
+        # Lấy document — snapshot trạng thái cháo trước khi sửa (để gửi mail khi có thay đổi đăng ký)
         doc = frappe.get_doc("SIS Health Report", report_id)
+        old_porridge_signature = _porridge_state_signature_from_doc(doc)
         
         # Cập nhật các trường
         if description is not None:
@@ -318,6 +455,28 @@ def update_health_report():
         
         doc.save()
         frappe.db.commit()
+
+        # Gửi email bộ phận cháo khi đăng ký cháo thay đổi và còn ít nhất một ngày/bữa
+        new_sig = _porridge_state_signature_from_doc(doc)
+        if new_sig != old_porridge_signature and doc.porridge_registration:
+            cnt = frappe.db.count("SIS Health Report Porridge", {"parent": doc.name})
+            if cnt > 0:
+                rows = frappe.get_all(
+                    "SIS Health Report Porridge",
+                    filters={"parent": doc.name},
+                    fields=["date", "breakfast", "lunch", "afternoon"],
+                    order_by="date asc",
+                )
+                _send_porridge_registration_email(
+                    report_name=doc.name,
+                    student_name=doc.student_name or "",
+                    student_code=doc.student_code or "",
+                    class_name=doc.class_name or "",
+                    porridge_dates=rows,
+                    porridge_note=doc.porridge_note,
+                    created_by_name=doc.created_by_name or doc.created_by_user or "",
+                    is_update=True,
+                )
         
         return success_response(
             data={"name": doc.name},
