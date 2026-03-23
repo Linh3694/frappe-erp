@@ -9,7 +9,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, getdate, now
 import json
-import requests
+from erp.utils.email_service import send_email_via_service as _send_email_via_service
 from erp.utils.api_response import (
     validation_error_response, 
     list_response, 
@@ -44,88 +44,6 @@ DECISION_DISPLAY_MAP_EN = {
     '': 'Not Yet Submitted',
     None: 'Not Yet Submitted'
 }
-
-
-def _send_email_via_service(to_list, subject, body):
-    """
-    Gửi email qua email service GraphQL API
-    
-    Args:
-        to_list: List các email người nhận
-        subject: Tiêu đề email
-        body: Nội dung email (HTML)
-    
-    Returns:
-        dict: {"success": True/False, "message": "..."}
-    """
-    try:
-        # Lấy URL email service từ config hoặc mặc định
-        email_service_url = frappe.conf.get('email_service_url') or 'http://localhost:5030'
-        graphql_endpoint = f"{email_service_url}/graphql"
-        
-        # GraphQL mutation gửi email
-        graphql_query = """
-        mutation SendEmail($input: SendEmailInput!) {
-            sendEmail(input: $input) {
-                success
-                message
-                messageId
-            }
-        }
-        """
-        
-        # Variables cho GraphQL mutation
-        variables = {
-            "input": {
-                "to": to_list,
-                "subject": subject,
-                "body": body,
-                "contentType": "HTML"
-            }
-        }
-        
-        # GraphQL request payload
-        payload = {
-            "query": graphql_query,
-            "variables": variables
-        }
-        
-        # Gửi request đến email service
-        response = requests.post(
-            graphql_endpoint,
-            json=payload,
-            headers={'Content-Type': 'application/json'},
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            
-            # Kiểm tra lỗi GraphQL
-            if result.get('errors'):
-                error_messages = [err.get('message', 'Unknown error') for err in result['errors']]
-                frappe.logger().error(f"GraphQL errors: {error_messages}")
-                return {"success": False, "message": f"GraphQL errors: {', '.join(error_messages)}"}
-            
-            # Kiểm tra kết quả mutation
-            send_email_result = result.get('data', {}).get('sendEmail')
-            if send_email_result and send_email_result.get('success'):
-                frappe.logger().info(f"Email sent successfully to {to_list} - MessageId: {send_email_result.get('messageId')}")
-                return {"success": True, "message": send_email_result.get('message')}
-            else:
-                error_msg = send_email_result.get('message', 'Unknown error') if send_email_result else 'No response data'
-                frappe.logger().error(f"Email service returned error: {error_msg}")
-                return {"success": False, "message": error_msg}
-        else:
-            frappe.logger().error(f"Email service HTTP error: {response.status_code} - {response.text}")
-            return {"success": False, "message": f"HTTP {response.status_code}: {response.text}"}
-    
-    except requests.exceptions.RequestException as e:
-        frappe.logger().error(f"Request error sending email: {str(e)}")
-        return {"success": False, "message": f"Request error: {str(e)}"}
-    except Exception as e:
-        frappe.logger().error(f"Error sending email: {str(e)}")
-        return {"success": False, "message": f"Error: {str(e)}"}
 
 
 def _send_adjustment_notification_email(student_name, student_code, requested_at, re_enrollment_id, config_id):

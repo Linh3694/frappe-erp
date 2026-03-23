@@ -8,8 +8,9 @@ Handles health reports from homeroom teachers and porridge registration
 
 import frappe
 from frappe import _
-from frappe.utils import today, now, get_datetime
+from frappe.utils import today, now, get_datetime, escape_html
 import json
+from erp.utils.email_service import send_email_via_service
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -90,6 +91,32 @@ def _format_porridge_dates_for_email(porridge_dates):
     return "\n".join(lines) if lines else "  (không có ngày cụ thể)"
 
 
+def _format_porridge_dates_html(porridge_dates):
+    """Danh sách ngày/bữa dạng HTML (đã escape)."""
+    items = []
+    meal_labels = {"breakfast": "Sáng", "lunch": "Trưa", "afternoon": "Xế"}
+    for pd in porridge_dates or []:
+        d = pd.get("date") if isinstance(pd, dict) else None
+        if not d:
+            continue
+        meals = []
+        for m, label in meal_labels.items():
+            v = pd.get(m)
+            if v is None:
+                continue
+            if isinstance(v, (int, float)) and int(v):
+                meals.append(label)
+            elif v is True:
+                meals.append(label)
+        meal_str = ", ".join(meals) if meals else "(chưa chọn bữa)"
+        items.append(
+            f"<li><strong>{escape_html(str(d))}</strong>: {escape_html(meal_str)}</li>"
+        )
+    if not items:
+        return "<p>(không có ngày cụ thể)</p>"
+    return f"<ul style='margin:8px 0;padding-left:20px;'>{''.join(items)}</ul>"
+
+
 def _send_porridge_registration_email(
     *,
     report_name,
@@ -101,39 +128,63 @@ def _send_porridge_registration_email(
     created_by_name,
     is_update=False,
 ):
-    """Gửi email cho bộ phận cháo khi đăng ký cháo thành công. Lỗi gửi mail không làm fail API."""
+    """Gửi email cho bộ phận cháo khi đăng ký cháo thành công (GraphQL email service giống Scholarship / Re-enrollment). Lỗi gửi mail không làm fail API."""
     recipients = _get_porridge_notification_recipients()
     if not recipients:
         return
     try:
         action = "Cập nhật đăng ký cháo" if is_update else "Đăng ký cháo mới"
-        subject = f"[SIS] {action} — {student_name} ({student_code}) — {class_name or ''}"
-        body_lines = [
-            f"{action} từ báo cáo Y tế lớp.",
-            "",
-            f"Học sinh: {student_name}",
-            f"Mã HS: {student_code}",
-            f"Lớp: {class_name or '-'}",
-            f"Mã báo cáo: {report_name}",
-            f"Người gửi: {created_by_name or '-'}",
-            "",
-            "Ngày / bữa đăng ký cháo:",
-            _format_porridge_dates_for_email(porridge_dates),
-            "",
-            f"Lưu ý cháo: {porridge_note.strip() if porridge_note else '(không có)'}",
-            "",
-            "",
-            "— Hệ thống SIS",
-        ]
-        message = "\n".join(body_lines)
-        frappe.sendmail(
-            recipients=recipients,
-            subject=subject,
-            message=message,
-            delayed=False,
-            reference_doctype="SIS Health Report",
-            reference_name=report_name,
+        # Tiêu đề plain text (không HTML)
+        subject = f"[SIS] {action} — {student_name or ''} ({student_code or ''}) — {class_name or ''}"
+        note_plain = porridge_note.strip() if porridge_note else ""
+        note_block = (
+            f"<p><strong>Lưu ý cháo:</strong> {escape_html(note_plain)}</p>"
+            if note_plain
+            else "<p><strong>Lưu ý cháo:</strong> <em>(không có)</em></p>"
         )
+        body = f"""
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #002855; border-bottom: 2px solid #F05023; padding-bottom: 10px;">
+            {escape_html(action)}
+        </h2>
+        <p>{escape_html(action)} từ báo cáo Y tế lớp.</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+            <tr>
+                <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold; width: 36%;">Học sinh</td>
+                <td style="padding: 10px; border: 1px solid #ddd;">{escape_html(student_name or '')} ({escape_html(student_code or '')})</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">Lớp</td>
+                <td style="padding: 10px; border: 1px solid #ddd;">{escape_html(class_name or '-')}</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">Mã báo cáo</td>
+                <td style="padding: 10px; border: 1px solid #ddd;">{escape_html(report_name or '')}</td>
+            </tr>
+            <tr>
+                <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">Người gửi</td>
+                <td style="padding: 10px; border: 1px solid #ddd;">{escape_html(created_by_name or '-')}</td>
+            </tr>
+        </table>
+        <p><strong>Ngày / bữa đăng ký cháo</strong></p>
+        {_format_porridge_dates_html(porridge_dates)}
+        {note_block}
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+        <p style="font-size: 12px; color: #666;">
+            Email này được gửi tự động từ hệ thống Wellspring SIS.<br>
+            Vui lòng không reply trực tiếp vào email này.
+        </p>
+    </div>
+</body>
+</html>
+"""
+        result = send_email_via_service(recipients, subject, body)
+        if not result.get("success"):
+            frappe.logger().error(
+                f"Porridge registration email failed: {result.get('message', 'unknown')}"
+            )
     except Exception as e:
         frappe.log_error(
             frappe.get_traceback(),

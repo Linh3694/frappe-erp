@@ -9,7 +9,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, getdate, now
 import json
-import requests
+from erp.utils.email_service import send_email_via_service as _send_email_via_service
 from erp.utils.api_response import (
     validation_error_response, 
     list_response, 
@@ -18,72 +18,6 @@ from erp.utils.api_response import (
     single_item_response,
     not_found_response
 )
-
-
-def _send_email_via_service(to_list, subject, body):
-    """
-    Gửi email qua email service GraphQL API
-    
-    Args:
-        to_list: danh sách email recipients
-        subject: tiêu đề email
-        body: nội dung email HTML
-    """
-    try:
-        # Lấy URL email service từ config hoặc mặc định
-        email_service_url = frappe.conf.get('email_service_url') or 'http://localhost:5030'
-        graphql_endpoint = f"{email_service_url}/graphql"
-        
-        # GraphQL mutation
-        graphql_query = """
-        mutation SendEmail($input: SendEmailInput!) {
-            sendEmail(input: $input) {
-                success
-                message
-                messageId
-            }
-        }
-        """
-        
-        variables = {
-            "input": {
-                "to": to_list,
-                "subject": subject,
-                "body": body,
-                "contentType": "HTML"
-            }
-        }
-        
-        payload = {
-            "query": graphql_query,
-            "variables": variables
-        }
-        
-        # Gửi request đến email service
-        response = requests.post(
-            graphql_endpoint,
-            json=payload,
-            headers={'Content-Type': 'application/json'},
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            if result.get('errors'):
-                frappe.logger().error(f"GraphQL errors: {result['errors']}")
-                return {"success": False, "message": str(result['errors'])}
-            
-            send_result = result.get('data', {}).get('sendEmail')
-            if send_result and send_result.get('success'):
-                frappe.logger().info(f"Email sent successfully to {to_list}")
-                return {"success": True, "message": "Email sent"}
-        
-        frappe.logger().error(f"Email service error: {response.status_code}")
-        return {"success": False, "message": f"HTTP {response.status_code}"}
-        
-    except Exception as e:
-        frappe.logger().error(f"Error sending email: {str(e)}")
-        return {"success": False, "message": str(e)}
 
 
 def _build_scholarship_email(teacher_name, student_name, student_code, class_name, portal_link, deadline_str):
