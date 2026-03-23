@@ -119,7 +119,6 @@ def _format_porridge_dates_html(porridge_dates):
 
 def _send_porridge_registration_email(
     *,
-    report_name,
     student_name,
     student_code,
     class_name,
@@ -152,16 +151,12 @@ def _send_porridge_registration_email(
         <p>{escape_html(action)} từ báo cáo Y tế lớp.</p>
         <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
             <tr>
-                <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold; width: 36%;">Học sinh</td>
+                <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold; width: 40%;">Học sinh</td>
                 <td style="padding: 10px; border: 1px solid #ddd;">{escape_html(student_name or '')} ({escape_html(student_code or '')})</td>
             </tr>
             <tr>
                 <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">Lớp</td>
                 <td style="padding: 10px; border: 1px solid #ddd;">{escape_html(class_name or '-')}</td>
-            </tr>
-            <tr>
-                <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">Mã báo cáo</td>
-                <td style="padding: 10px; border: 1px solid #ddd;">{escape_html(report_name or '')}</td>
             </tr>
             <tr>
                 <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">Người gửi</td>
@@ -171,7 +166,9 @@ def _send_porridge_registration_email(
         <p><strong>Ngày / bữa đăng ký cháo</strong></p>
         {_format_porridge_dates_html(porridge_dates)}
         {note_block}
+        
         <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+        
         <p style="font-size: 12px; color: #666;">
             Email này được gửi tự động từ hệ thống Wellspring SIS.<br>
             Vui lòng không reply trực tiếp vào email này.
@@ -412,7 +409,6 @@ def create_health_report():
         # Thông báo email bộ phận cháo khi tạo mới kèm đăng ký cháo thành công
         if porridge_registration and porridge_dates:
             _send_porridge_registration_email(
-                report_name=report_name,
                 student_name=student_name,
                 student_code=student_code,
                 class_name=class_name,
@@ -519,7 +515,6 @@ def update_health_report():
                     order_by="date asc",
                 )
                 _send_porridge_registration_email(
-                    report_name=doc.name,
                     student_name=doc.student_name or "",
                     student_code=doc.student_code or "",
                     class_name=doc.class_name or "",
