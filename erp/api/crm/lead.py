@@ -274,33 +274,39 @@ def create_lead():
             })
         
         doc.insert(ignore_permissions=True)
-        
-        # Tu dong kiem tra trung lap SĐT voi ho so trong he thong (khong check voi ban ghi Verify)
-        from erp.api.crm.duplicate import _find_matching_leads
-        
-        raw_phones = [p.get("phone_number", "") for p in phone_numbers]
-        matches = _find_matching_leads(
-            raw_phones,
-            doc.student_name,
-            doc.guardian_name,
-            exclude_draft=True,
-            exclude_verify=True
-        )
-        # Loai bo chinh no
-        matches = [m for m in matches if m["name"] != doc.name]
-        
-        doc.step = "Verify"
-        # Mac dinh gan ma CRM cho ho so tao tu Lead, bat ke trung hay khong
-        if not doc.crm_code:
-            doc.crm_code = generate_crm_code()
-        
-        # Mac dinh trang thai Can kiem tra - user se xac nhan hanh dong tiep theo trong VerifyTab
-        doc.status = "Can kiem tra"
-        
-        doc.save(ignore_permissions=True)
+
+        # skip_verify=True: giu o buoc Draft, khong kiem tra trung / khong dua vao Verify (nhap lieu nhap)
+        skip_verify = bool(data.get("skip_verify"))
+
+        if not skip_verify:
+            # Tu dong kiem tra trung lap SĐT voi ho so trong he thong (khong check voi ban ghi Verify)
+            from erp.api.crm.duplicate import _find_matching_leads
+
+            raw_phones = [p.get("phone_number", "") for p in phone_numbers]
+            matches = _find_matching_leads(
+                raw_phones,
+                doc.student_name,
+                doc.guardian_name,
+                exclude_draft=True,
+                exclude_verify=True
+            )
+            # Loai bo chinh no
+            matches = [m for m in matches if m["name"] != doc.name]
+
+            doc.step = "Verify"
+            # Mac dinh gan ma CRM cho ho so tao tu Lead, bat ke trung hay khong
+            if not doc.crm_code:
+                doc.crm_code = generate_crm_code()
+
+            # Mac dinh trang thai Can kiem tra - user se xac nhan hanh dong tiep theo trong VerifyTab
+            doc.status = "Can kiem tra"
+
+            doc.save(ignore_permissions=True)
+
         frappe.db.commit()
-        
-        return single_item_response(doc.as_dict(), "Tao ho so thanh cong")
+
+        msg = "Tao ho so Draft thanh cong" if skip_verify else "Tao ho so thanh cong"
+        return single_item_response(doc.as_dict(), msg)
     
     except Exception as e:
         frappe.db.rollback()

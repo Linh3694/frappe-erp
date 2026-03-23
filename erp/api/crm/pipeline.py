@@ -193,14 +193,16 @@ def advance_step():
         "Graduated": "Tot nghiep"
     }
     doc.status = default_statuses.get(target_step, "")
-    
-    # Sinh crm_code khi chuyen sang Lead
+
+    # Sinh crm_code khi chuyen sang Lead hoac Draft -> Verify (dong bo voi create_lead)
     if target_step == "Lead" and not doc.crm_code:
         doc.crm_code = generate_crm_code()
-    
+    if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
+        doc.crm_code = generate_crm_code()
+
     doc.save(ignore_permissions=True)
     frappe.db.commit()
-    
+
     _log_step_change(name, old_step, target_step, old_status, doc.status)
     
     # Tao CRM Family tu lead_guardians khi chuyen Deal -> Enrolled (co linked_student)
@@ -258,10 +260,12 @@ def bulk_advance_step():
                 "Graduated": "Tot nghiep"
             }
             doc.status = default_statuses.get(target_step, "")
-            
+
             if target_step == "Lead" and not doc.crm_code:
                 doc.crm_code = generate_crm_code()
-            
+            if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
+                doc.crm_code = generate_crm_code()
+
             doc.save(ignore_permissions=True)
             
             _log_step_change(lead_name, old_step, target_step, old_status, doc.status)
