@@ -226,6 +226,88 @@ def _get_registration_dates(period_id):
     return [str(d.date) for d in dates]
 
 
+def _get_active_school_year_id():
+    """Năm học đang bật (SIS School Year.is_enable = 1), ưu tiên start_date mới nhất."""
+    return frappe.db.get_value(
+        "SIS School Year",
+        {"is_enable": 1},
+        "name",
+        order_by="start_date desc",
+    )
+
+
+def _get_period_education_stage_ids(period_id):
+    """Danh sách cấp học áp dụng của kỳ (child table)."""
+    rows = frappe.get_all(
+        "SIS Menu Registration Period Education Stage",
+        filters={"parent": period_id},
+        fields=["education_stage_id"],
+    )
+    return [r.education_stage_id for r in rows if r.get("education_stage_id")]
+
+
+def _count_distinct_students_class_student(active_school_year_id, education_stage_ids):
+    """
+    Đếm học sinh (distinct) trong SIS Class Student theo năm học active và các cấp học.
+    """
+    if not active_school_year_id or not education_stage_ids:
+        return 0
+    ph = ",".join(["%s"] * len(education_stage_ids))
+    sql = f"""
+        SELECT COUNT(DISTINCT cs.student_id) as count
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+        INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+        WHERE cs.school_year_id = %s
+        AND eg.education_stage_id IN ({ph})
+    """
+    params = (active_school_year_id,) + tuple(education_stage_ids)
+    rows = frappe.db.sql(sql, params, as_dict=True)
+    return int(rows[0].count) if rows and rows[0].get("count") is not None else 0
+
+
+def _count_fully_registered_students(
+    period_id, registration_dates, active_school_year_id, education_stage_ids
+):
+    """
+    Số học sinh (trong tập Class Student đủ điều kiện) đã đăng ký đủ mọi ngày trong kỳ.
+    """
+    if (
+        not registration_dates
+        or not active_school_year_id
+        or not education_stage_ids
+    ):
+        return 0
+    n = len(registration_dates)
+    n_stages = len(education_stage_ids)
+    ph_dates = ",".join(["%s"] * n)
+    ph_stages = ",".join(["%s"] * n_stages)
+    sql = f"""
+        SELECT COUNT(*) as cnt FROM (
+            SELECT r.student_id
+            FROM `tabSIS Menu Registration` r
+            INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
+            WHERE r.period = %s
+            AND DATE(ri.date) IN ({ph_dates})
+            AND r.student_id IN (
+                SELECT DISTINCT cs.student_id
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                WHERE cs.school_year_id = %s
+                AND eg.education_stage_id IN ({ph_stages})
+            )
+            GROUP BY r.student_id
+            HAVING COUNT(DISTINCT DATE(ri.date)) = %s
+        ) t
+    """
+    params = (period_id,) + tuple(registration_dates) + (active_school_year_id,) + tuple(
+        education_stage_ids
+    ) + (n,)
+    rows = frappe.db.sql(sql, params, as_dict=True)
+    return int(rows[0].cnt) if rows and rows[0].get("cnt") is not None else 0
+
+
 def _check_parent_timeline(period):
     """Kiểm tra có trong timeline phụ huynh không"""
     from frappe.utils import now_datetime, get_datetime
@@ -844,6 +926,8 @@ def get_period_list(status=None, page=1, page_size=20):
 def get_period_stats(period_id=None):
     """
     Lấy thống kê cho kỳ đăng ký (Tổng/Á/Âu/Chưa đăng ký).
+    - Tổng học sinh: HS thuộc các cấp của kỳ, theo SIS Class Student + năm học đang active (is_enable).
+    - Chưa đăng ký: HS trong tổng trên chưa đăng ký đủ tất cả ngày của kỳ.
     """
     logs = []
     
@@ -861,8 +945,8 @@ def get_period_stats(period_id=None):
         period = frappe.db.get_value(
             "SIS Menu Registration Period",
             period_id,
-            ["name", "month", "year", "education_stage_id", "school_year_id"],
-            as_dict=True
+            ["name", "month", "year", "school_year_id"],
+            as_dict=True,
         )
         
         if not period:
@@ -877,23 +961,21 @@ def get_period_stats(period_id=None):
         
         total_days = len(registration_dates)
         
-        # Đếm tổng số học sinh thuộc cấp học
-        # TODO: Query từ SIS Class Student theo education_stage và school_year
-        total_students = frappe.db.sql("""
-            SELECT COUNT(DISTINCT cs.student_id) as count
-            FROM `tabSIS Class Student` cs
-            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
-            INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
-            WHERE cs.school_year_id = %s
-            AND eg.education_stage_id = %s
-        """, (period.school_year_id, period.education_stage_id), as_dict=True)
-        
-        total_student_count = total_students[0].count if total_students else 0
-        
-        # Đếm số đăng ký
+        # Cấp học áp dụng của kỳ (child table)
+        education_stage_ids = _get_period_education_stage_ids(period_id)
+        active_school_year_id = _get_active_school_year_id()
+        if not active_school_year_id:
+            logs.append("Không có năm học nào đang bật (is_enable) — total_students = 0")
+        if not education_stage_ids:
+            logs.append("Kỳ không có cấp học trong child table — kiểm tra cấu hình kỳ")
+
+        total_student_count = _count_distinct_students_class_student(
+            active_school_year_id, education_stage_ids
+        )
+
+        # Đếm tổng lượt chọn Á/Âu (giữ nguyên logic cũ)
         registrations = frappe.db.sql("""
             SELECT 
-                COUNT(DISTINCT r.student_id) as registered_students,
                 SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as choice_a,
                 SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as choice_au
             FROM `tabSIS Menu Registration` r
@@ -902,12 +984,17 @@ def get_period_stats(period_id=None):
         """, (period_id,), as_dict=True)
         
         stats = registrations[0] if registrations else {}
-        registered_students = stats.get("registered_students") or 0
         choice_a = stats.get("choice_a") or 0
         choice_au = stats.get("choice_au") or 0
-        
-        # Tính số chưa đăng ký
-        not_registered = total_student_count - registered_students
+
+        # Đã đăng ký đủ: đủ từng ngày trong kỳ (chỉ HS trong tập Class Student + cấp + năm active)
+        fully_registered = _count_fully_registered_students(
+            period_id, registration_dates, active_school_year_id, education_stage_ids
+        )
+        registered_students = fully_registered
+
+        # Chưa đăng ký đủ
+        not_registered = max(0, total_student_count - fully_registered)
         
         # Đếm Á/Âu theo từng ngày (cho header cột trong bảng)
         count_by_date_sql = """
@@ -945,6 +1032,8 @@ def get_period_stats(period_id=None):
                 "registration_dates": registration_dates,
                 "wednesdays": registration_dates,  # Backward compatibility
                 "count_by_date": count_by_date,
+                "active_school_year_id": active_school_year_id,
+                "education_stage_ids": education_stage_ids,
             },
             message="Lấy thống kê thành công",
             logs=logs
