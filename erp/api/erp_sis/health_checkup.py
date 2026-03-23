@@ -485,7 +485,7 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
         roles = frappe.get_roles()
         has_medical = "SIS Medical" in roles
         is_system = "System Manager" in roles
-        if frappe.db.has_column("tabSIS Student Health Checkup", "approval_status"):
+        if frappe.db.has_column("SIS Student Health Checkup", "approval_status"):
             if not has_medical and not is_system:
                 return error_response(
                     message="Chỉ vai trò SIS Medical được nhập phiếu khám định kỳ",
@@ -536,7 +536,7 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
             # Update existing record
             doc = frappe.get_doc("SIS Student Health Checkup", existing)
             if (
-                frappe.db.has_column("tabSIS Student Health Checkup", "approval_status")
+                frappe.db.has_column("SIS Student Health Checkup", "approval_status")
                 and getattr(doc, "approval_status", None)
                 and doc.approval_status != "draft"
                 and not is_system
@@ -559,7 +559,7 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
                 "checkup_phase": checkup_phase,
                 "checkup_date": data.get("checkup_date") or today()
             }
-            if frappe.db.has_column("tabSIS Student Health Checkup", "approval_status"):
+            if frappe.db.has_column("SIS Student Health Checkup", "approval_status"):
                 doc_data["approval_status"] = "draft"
             for field in allowed_fields:
                 if field in data and data[field] is not None:
@@ -886,7 +886,7 @@ def import_health_checkup(school_year_id=None, data=None):
                     # Update
                     doc = frappe.get_doc("SIS Student Health Checkup", existing)
                     if (
-                        frappe.db.has_column("tabSIS Student Health Checkup", "approval_status")
+                        frappe.db.has_column("SIS Student Health Checkup", "approval_status")
                         and getattr(doc, "approval_status", None)
                         and doc.approval_status != "draft"
                         and "System Manager" not in frappe.get_roles()
@@ -908,7 +908,7 @@ def import_health_checkup(school_year_id=None, data=None):
                         "checkup_phase": checkup_phase,
                         "checkup_date": today()
                     }
-                    if frappe.db.has_column("tabSIS Student Health Checkup", "approval_status"):
+                    if frappe.db.has_column("SIS Student Health Checkup", "approval_status"):
                         doc_data["approval_status"] = "draft"
                     for field in allowed_fields:
                         if field in row and row[field] is not None and row[field] != "":

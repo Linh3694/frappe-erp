@@ -55,7 +55,7 @@ def _has_role(role: str) -> bool:
 
 
 def _has_approval_column():
-    return frappe.db.has_column("tabSIS Student Health Checkup", "approval_status")
+    return frappe.db.has_column("SIS Student Health Checkup", "approval_status")
 
 
 def _notify_workflow(recipient_emails, subject: str, body_html: str):

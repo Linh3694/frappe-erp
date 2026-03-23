@@ -8,7 +8,7 @@ import frappe
 def execute():
     if not frappe.db.table_exists("tabSIS Student Health Checkup"):
         return
-    if not frappe.db.has_column("tabSIS Student Health Checkup", "approval_status"):
+    if not frappe.db.has_column("SIS Student Health Checkup", "approval_status"):
         return
     frappe.db.sql(
         """
