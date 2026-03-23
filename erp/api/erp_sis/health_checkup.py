@@ -47,6 +47,16 @@ def _get_request_data():
     return data
 
 
+def _normalize_checkup_phase(phase):
+    """Chuẩn hoá đợt khám: beginning | end. None nếu không hợp lệ."""
+    if phase is None or str(phase).strip() == "":
+        return "beginning"
+    p = str(phase).strip().lower()
+    if p in ("beginning", "end"):
+        return p
+    return None
+
+
 @frappe.whitelist(allow_guest=False)
 def get_students_health_checkup(school_year_id=None):
     """
@@ -81,7 +91,7 @@ def get_students_health_checkup(school_year_id=None):
         campus_filter = "AND cs.campus_id = %(campus_id)s" if campus_id else ""
         
         if checkup_table_exists:
-            # LEFT JOIN với SIS Student Health Checkup để biết đã có data chưa
+            # Hai LEFT JOIN theo đợt: đầu năm / cuối năm
             sql = f"""
                 SELECT 
                     s.name as student_id,
@@ -90,13 +100,19 @@ def get_students_health_checkup(school_year_id=None):
                     s.gender,
                     c.name as class_id,
                     c.title as class_name,
-                    shc.name as checkup_id
+                    shc_b.name as checkup_beginning_id,
+                    shc_e.name as checkup_end_id
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
-                LEFT JOIN `tabSIS Student Health Checkup` shc 
-                    ON shc.student_id = cs.student_id 
-                    AND shc.school_year_id = cs.school_year_id
+                LEFT JOIN `tabSIS Student Health Checkup` shc_b 
+                    ON shc_b.student_id = cs.student_id 
+                    AND shc_b.school_year_id = cs.school_year_id
+                    AND shc_b.checkup_phase = 'beginning'
+                LEFT JOIN `tabSIS Student Health Checkup` shc_e 
+                    ON shc_e.student_id = cs.student_id 
+                    AND shc_e.school_year_id = cs.school_year_id
+                    AND shc_e.checkup_phase = 'end'
                 WHERE cs.school_year_id = %(school_year_id)s
                     AND c.class_type = 'regular'
                     {campus_filter}
@@ -112,7 +128,8 @@ def get_students_health_checkup(school_year_id=None):
                     s.gender,
                     c.name as class_id,
                     c.title as class_name,
-                    NULL as checkup_id
+                    NULL as checkup_beginning_id,
+                    NULL as checkup_end_id
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
@@ -161,6 +178,10 @@ def get_student_health_checkup(student_id=None, school_year_id=None):
             student_id = frappe.form_dict.get("student_id") or frappe.request.args.get("student_id")
         if not school_year_id:
             school_year_id = frappe.form_dict.get("school_year_id") or frappe.request.args.get("school_year_id")
+        checkup_phase = frappe.form_dict.get("checkup_phase") or frappe.request.args.get("checkup_phase")
+        checkup_phase = _normalize_checkup_phase(checkup_phase)
+        if checkup_phase is None:
+            return error_response(message="checkup_phase phải là beginning hoặc end", code="VALIDATION_ERROR")
         
         if not student_id:
             return error_response(message="student_id là bắt buộc", code="VALIDATION_ERROR")
@@ -189,13 +210,30 @@ def get_student_health_checkup(student_id=None, school_year_id=None):
         checkup_table_exists = frappe.db.sql(
             "SHOW TABLES LIKE 'tabSIS Student Health Checkup'"
         )
+        reference_checkup_data = None
         if checkup_table_exists:
             checkup_data = frappe.db.get_value(
                 "SIS Student Health Checkup",
-                {"student_id": student_id, "school_year_id": school_year_id},
+                {
+                    "student_id": student_id,
+                    "school_year_id": school_year_id,
+                    "checkup_phase": checkup_phase,
+                },
                 ["*"],
-                as_dict=True
+                as_dict=True,
             )
+            # Đợt cuối năm: trả thêm dữ liệu đầu năm để đối chiếu
+            if checkup_phase == "end":
+                reference_checkup_data = frappe.db.get_value(
+                    "SIS Student Health Checkup",
+                    {
+                        "student_id": student_id,
+                        "school_year_id": school_year_id,
+                        "checkup_phase": "beginning",
+                    },
+                    ["*"],
+                    as_dict=True,
+                )
         
         # Build response
         response_data = {
@@ -206,7 +244,9 @@ def get_student_health_checkup(student_id=None, school_year_id=None):
             "class_id": class_id,
             "class_name": class_name,
             "school_year_id": school_year_id,
-            "checkup_data": checkup_data
+            "checkup_phase": checkup_phase,
+            "checkup_data": checkup_data,
+            "reference_checkup_data": reference_checkup_data,
         }
         
         return success_response(
@@ -264,6 +304,16 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
         if not data:
             data = {}
         
+        # Đợt khám: body hoặc top-level request
+        checkup_phase = request_data.get("checkup_phase")
+        if isinstance(data, dict) and data.get("checkup_phase") is not None:
+            checkup_phase = data.get("checkup_phase")
+        checkup_phase = _normalize_checkup_phase(checkup_phase)
+        if checkup_phase is None:
+            return error_response(message="checkup_phase phải là beginning hoặc end", code="VALIDATION_ERROR")
+        if isinstance(data, dict) and "checkup_phase" in data:
+            data = {k: v for k, v in data.items() if k != "checkup_phase"}
+        
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
@@ -278,11 +328,15 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
                 code="TABLE_NOT_EXISTS"
             )
         
-        # Kiểm tra xem đã có record chưa
+        # Kiểm tra xem đã có record chưa (theo đợt)
         existing = frappe.db.get_value(
             "SIS Student Health Checkup",
-            {"student_id": student_id, "school_year_id": school_year_id},
-            "name"
+            {
+                "student_id": student_id,
+                "school_year_id": school_year_id,
+                "checkup_phase": checkup_phase,
+            },
+            "name",
         )
         
         # Các fields được phép update
@@ -328,6 +382,7 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
                 "student_id": student_id,
                 "school_year_id": school_year_id,
                 "campus_id": campus_id,
+                "checkup_phase": checkup_phase,
                 "checkup_date": data.get("checkup_date") or today()
             }
             for field in allowed_fields:
@@ -372,6 +427,11 @@ def export_health_checkup(school_year_id=None):
         if not school_year_id:
             return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
         
+        checkup_phase = frappe.form_dict.get("checkup_phase") or frappe.request.args.get("checkup_phase")
+        checkup_phase = _normalize_checkup_phase(checkup_phase)
+        if checkup_phase is None:
+            return error_response(message="checkup_phase phải là beginning hoặc end", code="VALIDATION_ERROR")
+        
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
         campus_id = get_current_campus_from_context()
@@ -383,7 +443,7 @@ def export_health_checkup(school_year_id=None):
             "SHOW TABLES LIKE 'tabSIS Student Health Checkup'"
         )
         
-        # Query tất cả học sinh kèm data khám (nếu có)
+        # Query tất cả học sinh kèm data khám (nếu có) — theo đợt khám
         if checkup_table_exists:
             sql = f"""
                 SELECT 
@@ -437,6 +497,7 @@ def export_health_checkup(school_year_id=None):
                 LEFT JOIN `tabSIS Student Health Checkup` shc 
                     ON shc.student_id = cs.student_id 
                     AND shc.school_year_id = cs.school_year_id
+                    AND shc.checkup_phase = %(checkup_phase)s
                 WHERE cs.school_year_id = %(school_year_id)s
                     AND c.class_type = 'regular'
                     {campus_filter}
@@ -499,7 +560,7 @@ def export_health_checkup(school_year_id=None):
                 ORDER BY c.title ASC, s.student_name ASC
             """
         
-        params = {"school_year_id": school_year_id}
+        params = {"school_year_id": school_year_id, "checkup_phase": checkup_phase}
         if campus_id:
             params["campus_id"] = campus_id
         
@@ -511,7 +572,8 @@ def export_health_checkup(school_year_id=None):
         return success_response(
             data={
                 "students": data,
-                "school_year_name": school_year_name
+                "school_year_name": school_year_name,
+                "checkup_phase": checkup_phase,
             },
             message=f"Xuất dữ liệu {len(data)} học sinh thành công"
         )
@@ -558,6 +620,10 @@ def import_health_checkup(school_year_id=None, data=None):
         
         if not isinstance(data, list):
             return error_response(message="data phải là danh sách", code="VALIDATION_ERROR")
+        
+        checkup_phase = _normalize_checkup_phase(request_data.get("checkup_phase"))
+        if checkup_phase is None:
+            return error_response(message="checkup_phase phải là beginning hoặc end", code="VALIDATION_ERROR")
         
         # Lấy campus từ context
         from erp.utils.campus_utils import get_current_campus_from_context
@@ -622,11 +688,15 @@ def import_health_checkup(school_year_id=None, data=None):
                     error_count += 1
                     continue
                 
-                # Kiểm tra xem đã có record chưa
+                # Kiểm tra xem đã có record chưa (theo đợt)
                 existing = frappe.db.get_value(
                     "SIS Student Health Checkup",
-                    {"student_id": student_id, "school_year_id": school_year_id},
-                    "name"
+                    {
+                        "student_id": student_id,
+                        "school_year_id": school_year_id,
+                        "checkup_phase": checkup_phase,
+                    },
+                    "name",
                 )
                 
                 if existing:
@@ -643,6 +713,7 @@ def import_health_checkup(school_year_id=None, data=None):
                         "student_id": student_id,
                         "school_year_id": school_year_id,
                         "campus_id": campus_id,
+                        "checkup_phase": checkup_phase,
                         "checkup_date": today()
                     }
                     for field in allowed_fields:

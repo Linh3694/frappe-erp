@@ -7,3 +7,6 @@
 
 # Performance optimization for Time Attendance
 erp.patches.v1_0.add_time_attendance_index
+
+# Khám SK định kỳ: 2 đợt/năm — gán đợt cho dữ liệu cũ
+erp.patches.v1_0.backfill_health_checkup_phase

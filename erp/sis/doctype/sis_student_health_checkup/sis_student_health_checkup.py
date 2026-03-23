@@ -8,7 +8,7 @@ from frappe.model.document import Document
 class SISStudentHealthCheckup(Document):
     """
     Doctype lưu kết quả khám sức khoẻ định kỳ của học sinh.
-    Mỗi học sinh chỉ có 1 record/năm học (unique constraint: student_id + school_year_id).
+    Mỗi học sinh tối đa 2 record/năm học: đầu năh và cuối năh (unique: student_id + school_year_id + checkup_phase).
     """
     
     def before_save(self):
@@ -18,20 +18,22 @@ class SISStudentHealthCheckup(Document):
             self.bmi = round(self.weight / (height_m ** 2), 2)
     
     def validate(self):
-        # Validate unique constraint (student_id + school_year_id)
+        # Trùng theo (student_id, school_year_id, checkup_phase)
+        if not self.checkup_phase:
+            frappe.throw("Đợt khám (checkup_phase) là bắt buộc", title="Thiếu dữ liệu")
+
+        filters = {
+            "student_id": self.student_id,
+            "school_year_id": self.school_year_id,
+            "checkup_phase": self.checkup_phase,
+        }
         if not self.is_new():
-            return
-        
-        existing = frappe.db.exists(
-            "SIS Student Health Checkup",
-            {
-                "student_id": self.student_id,
-                "school_year_id": self.school_year_id,
-                "name": ("!=", self.name)
-            }
-        )
+            filters["name"] = ("!=", self.name)
+
+        existing = frappe.db.exists("SIS Student Health Checkup", filters)
         if existing:
+            phase_label = "đầu năm học" if self.checkup_phase == "beginning" else "cuối năm học"
             frappe.throw(
-                f"Học sinh {self.student_name or self.student_id} đã có bản ghi khám sức khoẻ trong năm học này.",
-                title="Trùng lặp"
+                f"Học sinh {self.student_name or self.student_id} đã có bản ghi khám sức khoẻ ({phase_label}) trong năm học này.",
+                title="Trùng lặp",
             )

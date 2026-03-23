@@ -13,6 +13,7 @@
   "student_code",
   "column_break_basic_1",
   "school_year_id",
+  "checkup_phase",
   "campus_id",
   "checkup_date",
   "body_metrics_section",
@@ -120,6 +121,16 @@
    "in_standard_filter": 1,
    "label": "Năm học",
    "options": "SIS School Year",
+   "reqd": 1
+  },
+  {
+   "default": "beginning",
+   "fieldname": "checkup_phase",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Đợt khám",
+   "options": "beginning\nend",
    "reqd": 1
   },
   {
@@ -515,5 +526,5 @@
  "states": [],
  "title_field": "student_name",
  "track_changes": 1,
- "unique_together": [["student_id", "school_year_id"]]
+ "unique_together": [["student_id", "school_year_id", "checkup_phase"]]
 }
