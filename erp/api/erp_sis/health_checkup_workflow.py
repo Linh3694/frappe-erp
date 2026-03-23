@@ -55,7 +55,11 @@ def _has_role(role: str) -> bool:
 
 
 def _has_approval_column():
-    return frappe.db.has_column("SIS Student Health Checkup", "approval_status")
+    """Tên DocType không có prefix tab (has_column tự nối tab). Bọc try khi bảng chưa migrate."""
+    try:
+        return frappe.db.has_column("SIS Student Health Checkup", "approval_status")
+    except Exception:
+        return False
 
 
 def _notify_workflow(recipient_emails, subject: str, body_html: str):
