@@ -15,7 +15,7 @@ Performance target: <500ms cho 100 instances
 
 import frappe
 from typing import Dict, List, Optional, Tuple
-from datetime import timedelta
+from datetime import date as date_type, timedelta
 
 
 # ============= PUBLIC API =============
@@ -252,6 +252,9 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 	3. Get ALL assignments for class + subject
 	4. Create/update override rows with ALL teachers in child table
 	
+	⚡ FIX: Chỉ tạo override khi pattern row còn hiệu lực đúng ngày (valid_from/valid_to),
+	tránh dùng bản pattern cũ (cùng subject) ghi đè ô đã đổi môn trong đợt mới.
+	
 	NO MORE CONFLICTS: Since we support unlimited teachers, no conflict detection needed.
 	
 	Args:
@@ -369,8 +372,16 @@ def sync_date_range_assignment(assignment, replace_teacher_map: dict = None) -> 
 		
 		for date in dates:
 			for row in rows:
+				# Chỉ sync từ pattern còn hiệu lực tại ngày đó (khớp logic get_class_week)
+				if not pattern_row_covers_date(row, date):
+					continue
 				override_specs.append((date, row))
 	
+	before_dedupe = len(override_specs)
+	override_specs = dedupe_override_specs_by_slot(override_specs)
+	debug_info.append(
+		f"📊 Override specs: {before_dedupe} → {len(override_specs)} sau dedupe (cùng ngày + slot)"
+	)
 	debug_info.append(f"📊 Total override specs to process: {len(override_specs)}")
 	
 	# APPLY: Bulk create/update override rows
@@ -712,6 +723,48 @@ def validate_assignment_for_sync(assignment) -> Dict:
 	return {"valid": True}
 
 
+def pattern_row_covers_date(row: dict, target_date) -> bool:
+	"""
+	Kiểm tra pattern row (date NULL trên instance) có hiệu lực vào target_date không.
+	Trùng ý nghĩa với filter valid_from/valid_to trong _build_entries (get_class_week).
+	Không có valid_from và valid_to → legacy, coi như luôn hiệu lực.
+	"""
+	if target_date is None:
+		return False
+	d = frappe.utils.getdate(target_date)
+
+	vf = row.get("valid_from")
+	vt = row.get("valid_to")
+	if not vf and not vt:
+		return True
+
+	if vf and frappe.utils.getdate(vf) > d:
+		return False
+	if vt and frappe.utils.getdate(vt) < d:
+		return False
+	return True
+
+
+def dedupe_override_specs_by_slot(override_specs: List[Tuple]) -> List[Tuple]:
+	"""
+	Cùng (date, day_of_week, timetable_column_id) có thể còn nhiều pattern (lịch sử);
+	giữ một bản: ưu tiên valid_from mới nhất (slice đang thắng khi trùng chồng dữ liệu).
+	"""
+	def _vf_key(r: dict) -> date_type:
+		vf = r.get("valid_from")
+		if not vf:
+			return date_type(1900, 1, 1)
+		return frappe.utils.getdate(vf)
+
+	best: dict = {}
+	for date, row in override_specs:
+		key = (date, row.get("day_of_week"), row.get("timetable_column_id"))
+		prev = best.get(key)
+		if prev is None or _vf_key(row) >= _vf_key(prev[1]):
+			best[key] = (date, row)
+	return list(best.values())
+
+
 def find_pattern_rows(class_id: str, actual_subject_id: str, campus_id: str) -> List[Dict]:
 	"""
 	Find pattern rows (date=NULL) cho class + subject.
@@ -721,7 +774,8 @@ def find_pattern_rows(class_id: str, actual_subject_id: str, campus_id: str) -> 
 	different SIS Subjects for the same Actual Subject.
 	
 	Returns list of dicts with fields: name, parent, subject_id, day_of_week,
-	timetable_column_id, period_priority, period_name, teacher_1_id, teacher_2_id, room_id
+	timetable_column_id, period_priority, period_name, teacher_1_id, teacher_2_id, room_id,
+	valid_from, valid_to
 	"""
 	# ⚡ FIX: Get ALL SIS Subject IDs from Actual Subject (across education_stages)
 	subject_ids = get_all_subject_ids_from_actual(actual_subject_id, campus_id)
@@ -759,7 +813,8 @@ def find_pattern_rows(class_id: str, actual_subject_id: str, campus_id: str) -> 
 		SELECT 
 			name, parent, subject_id, day_of_week,
 			timetable_column_id, period_priority, period_name,
-			teacher_1_id, teacher_2_id, room_id
+			teacher_1_id, teacher_2_id, room_id,
+			valid_from, valid_to
 		FROM `tabSIS Timetable Instance Row`
 		WHERE parent IN ({instances})
 		  AND subject_id IN ({subjects})
