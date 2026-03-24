@@ -413,8 +413,8 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
 
         # Một phiếu khám = một dòng; không JOIN Class Student trực tiếp (một HS có thể có nhiều
         # bản ghi lớp/năm → gây duplicate). Lấy tên lớp regular qua subquery LIMIT 1.
-        sql = f"""
-            SELECT
+        # items_top: chỉ pending_l2 — màn Admin L2 chỉ cần phiếu đang chờ duyệt tại cấp này.
+        select_cols = """
                 shc.name,
                 shc.student_id,
                 shc.student_name,
@@ -435,35 +435,37 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
                     ORDER BY c.title ASC
                     LIMIT 1
                 ) AS class_name
+        """
+        sql_top = f"""
+            SELECT
+                {select_cols}
             FROM `tabSIS Student Health Checkup` shc
             WHERE shc.school_year_id = %(sy)s
                 AND shc.checkup_phase = %(ph)s
+                AND shc.approval_status = 'pending_l2'
                 {campus_filter}
-            ORDER BY
-                CASE shc.approval_status
-                    WHEN 'pending_l2' THEN 0
-                    WHEN 'draft' THEN 1
-                    WHEN 'pending_l3' THEN 2
-                    WHEN 'published' THEN 9
-                    ELSE 5
-                END,
-                shc.modified DESC
+            ORDER BY shc.submitted_at IS NULL, shc.submitted_at ASC, shc.name ASC
+        """
+        sql_published = f"""
+            SELECT
+                {select_cols}
+            FROM `tabSIS Student Health Checkup` shc
+            WHERE shc.school_year_id = %(sy)s
+                AND shc.checkup_phase = %(ph)s
+                AND shc.approval_status = 'published'
+                {campus_filter}
+            ORDER BY shc.modified DESC
+            LIMIT 500
         """
         params = {"sy": school_year_id, "ph": checkup_phase}
         if campus_id:
             params["campus_id"] = campus_id
 
-        rows = frappe.db.sql(sql, params, as_dict=True)
-        # Trên: chờ L2 xử lý hoặc bản nháp sau trả; Dưới: đã published
-        items_top = [
-            r
-            for r in rows
-            if r.get("approval_status") in ("pending_l2", "draft", "pending_l3")
-        ]
-        items_published = [r for r in rows if r.get("approval_status") == "published"]
+        items_top = frappe.db.sql(sql_top, params, as_dict=True)
+        items_published = frappe.db.sql(sql_published, params, as_dict=True)
 
         return success_response(
-            data={"items_top": items_top, "items_published": items_published, "all": rows},
+            data={"items_top": items_top, "items_published": items_published},
             message="OK",
         )
     except Exception as e:
