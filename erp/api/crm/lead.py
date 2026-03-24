@@ -303,8 +303,15 @@ def create_lead():
 
             doc.save(ignore_permissions=True)
 
+        # PIC mac dinh (SIS Sales, can bang tai) khi dua vao Verify — giu nguyen khi sau nay chuyen Lead
+        if not skip_verify and not doc.pic:
+            from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+            assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+
         frappe.db.commit()
 
+        doc = frappe.get_doc("CRM Lead", doc.name)
         msg = "Tao ho so Draft thanh cong" if skip_verify else "Tao ho so thanh cong"
         return single_item_response(doc.as_dict(), msg)
     

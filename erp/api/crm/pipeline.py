@@ -200,6 +200,14 @@ def advance_step():
     if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
         doc.crm_code = generate_crm_code()
 
+    # PIC mac dinh SIS Sales (can bang tai) khi vao Verify hoac Lead ma chua co pic — giu pic khi da gan
+    if target_step in ("Verify", "Lead") and not doc.pic:
+        from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+        pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+        if pic:
+            doc.pic = pic
+
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -265,6 +273,13 @@ def bulk_advance_step():
                 doc.crm_code = generate_crm_code()
             if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
                 doc.crm_code = generate_crm_code()
+
+            if target_step in ("Verify", "Lead") and not doc.pic:
+                from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+                pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+                if pic:
+                    doc.pic = pic
 
             doc.save(ignore_permissions=True)
             

@@ -1,5 +1,5 @@
 """
-CRM PIC Assignment API - Phan bo PIC round-robin
+CRM PIC Assignment API - Phan bo PIC round-robin (CRM PIC Config) + can bang tai SIS Sales (assign_pic_sales_weight_balance)
 """
 
 import frappe
@@ -65,6 +65,45 @@ def update_pic_config():
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Loi cap nhat cau hinh PIC: {str(e)}")
+
+
+def _get_active_sis_sales_user_names():
+    """Danh sach User (name) co role SIS Sales va enabled=1."""
+    rows = frappe.db.sql(
+        """
+        SELECT u.name FROM `tabUser` u
+        INNER JOIN `tabHas Role` r ON r.parent = u.name AND r.parenttype = 'User'
+        WHERE r.role = 'SIS Sales' AND IFNULL(u.enabled, 0) = 1
+        ORDER BY u.name
+        """
+    )
+    return [r[0] for r in rows] if rows else []
+
+
+def assign_pic_sales_weight_balance(lead_name, campus_id=None):
+    """
+    Gan PIC mac dinh: user SIS Sales dang dam nhan it ho so CRM Lead nhat (can bang tai / least-loaded).
+    Khong ghi de neu ho so da co pic. campus_id: chi dem ho so cung campus khi co gia tri.
+    """
+    existing = frappe.db.get_value("CRM Lead", lead_name, "pic")
+    if existing:
+        return None
+
+    users = _get_active_sis_sales_user_names()
+    if not users:
+        return None
+
+    counts = {}
+    for u in users:
+        filters = {"pic": u, "docstatus": ["<", 2]}
+        if campus_id:
+            filters["campus_id"] = campus_id
+        counts[u] = frappe.db.count("CRM Lead", filters=filters)
+
+    # Chon user co count nho nhat; hoa: sap xep theo name
+    chosen = min(users, key=lambda x: (counts.get(x, 0), x))
+    frappe.db.set_value("CRM Lead", lead_name, "pic", chosen)
+    return chosen
 
 
 def assign_pic_internal(lead_name, campus_id):

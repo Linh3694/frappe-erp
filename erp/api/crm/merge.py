@@ -133,7 +133,14 @@ def merge_leads():
                 primary_doc.crm_code = generate_crm_code()
             primary_doc.duplicate_lead = ""
             primary_doc.duplicate_fields = ""
-        
+
+        if primary_doc.step == "Lead" and not primary_doc.pic:
+            from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+            pic = assign_pic_sales_weight_balance(primary_doc.name, primary_doc.campus_id)
+            if pic:
+                primary_doc.pic = pic
+
         primary_doc.save(ignore_permissions=True)
         frappe.db.commit()
         
@@ -166,6 +173,12 @@ def skip_merge():
             doc.crm_code = generate_crm_code()
         doc.duplicate_lead = ""
         doc.duplicate_fields = ""
+        if not doc.pic:
+            from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+            pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+            if pic:
+                doc.pic = pic
         doc.save(ignore_permissions=True)
         frappe.db.commit()
     
