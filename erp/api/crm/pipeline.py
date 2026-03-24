@@ -56,6 +56,83 @@ def _sync_lead_guardians_to_family_if_needed(doc):
         frappe.log_error(f"Loi sync lead_guardians sang CRM Family: {str(e)}")
 
 
+def _prepare_advance_step_doc(name, target_step, extra_data):
+    """
+    Load CRM Lead va ap dung toan bo thay doi advance_step.
+    Goi lai ham nay sau khi reload khi save gap TimestampMismatch (cap nhat dong thoi).
+    Tra ve ((doc, old_step, old_status), None) hoac (None, error_response dict).
+    """
+    doc = frappe.get_doc("CRM Lead", name)
+    old_step = doc.step
+    old_status = doc.status
+
+    validate_step_transition(old_step, target_step)
+
+    if old_step == "QLead" and target_step == "Test":
+        student_type = extra_data.get("student_type", "new")
+        if student_type == "new":
+            from erp.api.crm.student_code import _generate_code_internal
+
+            code = _generate_code_internal(
+                extra_data.get("campus_code", "WS1"),
+                extra_data.get("academic_year", ""),
+                extra_data.get("grade", doc.target_grade or "01"),
+            )
+            doc.student_code = code
+        elif student_type == "existing":
+            doc.student_code = extra_data.get("student_code", "")
+            doc.linked_student = extra_data.get("linked_student", "")
+
+    if old_step == "Deal" and target_step == "Enrolled":
+        if doc.status not in ["Paid", "Deposit"]:
+            return None, error_response(
+                "Chi co the nhap hoc ho so co trang thai Paid hoac Deposit"
+            )
+        if doc.linked_student:
+            existing = frappe.db.exists(
+                "CRM Lead",
+                {
+                    "linked_student": doc.linked_student,
+                    "step": "Enrolled",
+                    "name": ["!=", name],
+                },
+            )
+            if existing:
+                return None, error_response(
+                    "Hoc sinh nay da co ho so o buoc Enrolled"
+                )
+
+    doc.step = target_step
+    default_statuses = {
+        "Verify": "Can kiem tra",
+        "Lead": "Moi",
+        "QLead": "Moi",
+        "Test": "Pre-test",
+        "Deal": "Booked",
+        "Enrolled": "Dang hoc",
+        "Re-Enroll": "Unpaid",
+        "Withdraw": "Chuyen truong",
+        "Graduated": "Tot nghiep",
+    }
+    doc.status = default_statuses.get(target_step, "")
+    if target_step == "Verify" and old_step == "Lead":
+        doc.status = "Da kiem tra - Trung hoc sinh"
+
+    if target_step == "Lead" and not doc.crm_code:
+        doc.crm_code = generate_crm_code()
+    if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
+        doc.crm_code = generate_crm_code()
+
+    if target_step in ("Verify", "Lead") and not doc.pic:
+        from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+        pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+        if pic:
+            doc.pic = pic
+
+    return (doc, old_step, old_status), None
+
+
 def _log_step_change(lead_name, old_step, new_step, old_status, new_status,
                      reject_reason=None, reject_detail=None):
     """Ghi nhan lich su chuyen buoc. Khi new_status=Lost thi luu reject_reason, reject_detail."""
@@ -99,22 +176,33 @@ def change_status():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
-    doc = frappe.get_doc("CRM Lead", name)
-    valid_statuses = get_valid_statuses_for_step(doc.step)
-    
-    if new_status not in valid_statuses:
-        return error_response(
-            f"Trang thai '{new_status}' khong hop le cho buoc {doc.step}. "
-            f"Cac trang thai hop le: {', '.join(valid_statuses)}"
-        )
-    
-    old_status = doc.status
-    doc.status = new_status
-    if new_status == "Lost":
-        doc.reject_reason = reject_reason
-        doc.reject_detail = reject_detail
-    doc.save(ignore_permissions=True)
+
+    doc = None
+    old_status = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", name)
+        valid_statuses = get_valid_statuses_for_step(doc.step)
+
+        if new_status not in valid_statuses:
+            return error_response(
+                f"Trang thai '{new_status}' khong hop le cho buoc {doc.step}. "
+                f"Cac trang thai hop le: {', '.join(valid_statuses)}"
+            )
+
+        old_status = doc.status
+        doc.status = new_status
+        if new_status == "Lost":
+            doc.reject_reason = reject_reason
+            doc.reject_detail = reject_detail
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                return error_response(
+                    "Ho so da duoc cap nhat dong thoi. Vui long lam moi va thu lai."
+                )
+
     frappe.db.commit()
     
     _log_step_change(name, doc.step, doc.step, old_status, new_status,
@@ -142,76 +230,24 @@ def advance_step():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
-    doc = frappe.get_doc("CRM Lead", name)
-    old_step = doc.step
-    old_status = doc.status
-    
-    # Validate chuyen buoc
-    validate_step_transition(old_step, target_step)
-    
-    # Xu ly dac biet khi chuyen QLead -> Test
-    if old_step == "QLead" and target_step == "Test":
-        student_type = extra_data.get("student_type", "new")
-        if student_type == "new":
-            from erp.api.crm.student_code import _generate_code_internal
-            code = _generate_code_internal(
-                extra_data.get("campus_code", "WS1"),
-                extra_data.get("academic_year", ""),
-                extra_data.get("grade", doc.target_grade or "01")
-            )
-            doc.student_code = code
-        elif student_type == "existing":
-            doc.student_code = extra_data.get("student_code", "")
-            doc.linked_student = extra_data.get("linked_student", "")
-    
-    # Xu ly khi chuyen Deal -> Enrolled
-    if old_step == "Deal" and target_step == "Enrolled":
-        if doc.status not in ["Paid", "Deposit"]:
-            return error_response("Chi co the nhap hoc ho so co trang thai Paid hoac Deposit")
-        # Kiem tra khong cho Enroll 2 ho so cung 1 hoc sinh
-        if doc.linked_student:
-            existing = frappe.db.exists("CRM Lead", {
-                "linked_student": doc.linked_student,
-                "step": "Enrolled",
-                "name": ["!=", name]
-            })
-            if existing:
-                return error_response("Hoc sinh nay da co ho so o buoc Enrolled")
-    
-    # Cap nhat step va status mac dinh
-    doc.step = target_step
-    default_statuses = {
-        "Verify": "Can kiem tra",
-        "Lead": "Moi",
-        "QLead": "Moi",
-        "Test": "Pre-test",
-        "Deal": "Booked",
-        "Enrolled": "Dang hoc",
-        "Re-Enroll": "Unpaid",
-        "Withdraw": "Chuyen truong",
-        "Graduated": "Tot nghiep"
-    }
-    doc.status = default_statuses.get(target_step, "")
-    # Lead -> Verify (bao trung tu Lead): trang thai "Da kiem tra - Trung hoc sinh"
-    if target_step == "Verify" and old_step == "Lead":
-        doc.status = "Da kiem tra - Trung hoc sinh"
 
-    # Sinh crm_code khi chuyen sang Lead hoac Draft -> Verify (dong bo voi create_lead)
-    if target_step == "Lead" and not doc.crm_code:
-        doc.crm_code = generate_crm_code()
-    if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
-        doc.crm_code = generate_crm_code()
+    doc = None
+    old_step = None
+    old_status = None
+    for attempt in range(2):
+        prepared, prep_err = _prepare_advance_step_doc(name, target_step, extra_data)
+        if prep_err is not None:
+            return prep_err
+        doc, old_step, old_status = prepared
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                return error_response(
+                    "Ho so da duoc cap nhat dong thoi. Vui long lam moi va thu lai."
+                )
 
-    # PIC mac dinh SIS Sales (can bang tai) khi vao Verify hoac Lead ma chua co pic — giu pic khi da gan
-    if target_step in ("Verify", "Lead") and not doc.pic:
-        from erp.api.crm.assignment import assign_pic_sales_weight_balance
-
-        pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
-        if pic:
-            doc.pic = pic
-
-    doc.save(ignore_permissions=True)
     frappe.db.commit()
 
     _log_step_change(name, old_step, target_step, old_status, doc.status)
@@ -252,42 +288,50 @@ def bulk_advance_step():
                 results["errors"].append({"name": lead_name, "error": "Khong tim thay"})
                 continue
             
-            doc = frappe.get_doc("CRM Lead", lead_name)
-            old_step = doc.step
-            old_status = doc.status
-            
-            validate_step_transition(old_step, target_step)
-            
-            doc.step = target_step
-            default_statuses = {
-                "Verify": "Can kiem tra",
-                "Lead": "Moi",
-                "QLead": "Moi",
-                "Test": "Pre-test",
-                "Deal": "Booked",
-                "Enrolled": "Dang hoc",
-                "Re-Enroll": "Unpaid",
-                "Withdraw": "Chuyen truong",
-                "Graduated": "Tot nghiep"
-            }
-            doc.status = default_statuses.get(target_step, "")
-            if target_step == "Verify" and old_step == "Lead":
-                doc.status = "Da kiem tra - Trung hoc sinh"
+            old_step = None
+            old_status = None
+            for attempt in range(2):
+                doc = frappe.get_doc("CRM Lead", lead_name)
+                old_step = doc.step
+                old_status = doc.status
 
-            if target_step == "Lead" and not doc.crm_code:
-                doc.crm_code = generate_crm_code()
-            if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
-                doc.crm_code = generate_crm_code()
+                validate_step_transition(old_step, target_step)
 
-            if target_step in ("Verify", "Lead") and not doc.pic:
-                from erp.api.crm.assignment import assign_pic_sales_weight_balance
+                doc.step = target_step
+                default_statuses = {
+                    "Verify": "Can kiem tra",
+                    "Lead": "Moi",
+                    "QLead": "Moi",
+                    "Test": "Pre-test",
+                    "Deal": "Booked",
+                    "Enrolled": "Dang hoc",
+                    "Re-Enroll": "Unpaid",
+                    "Withdraw": "Chuyen truong",
+                    "Graduated": "Tot nghiep",
+                }
+                doc.status = default_statuses.get(target_step, "")
+                if target_step == "Verify" and old_step == "Lead":
+                    doc.status = "Da kiem tra - Trung hoc sinh"
 
-                pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
-                if pic:
-                    doc.pic = pic
+                if target_step == "Lead" and not doc.crm_code:
+                    doc.crm_code = generate_crm_code()
+                if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
+                    doc.crm_code = generate_crm_code()
 
-            doc.save(ignore_permissions=True)
-            
+                if target_step in ("Verify", "Lead") and not doc.pic:
+                    from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+                    pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+                    if pic:
+                        doc.pic = pic
+
+                try:
+                    doc.save(ignore_permissions=True)
+                    break
+                except frappe.TimestampMismatchError:
+                    if attempt == 1:
+                        raise
+
             _log_step_change(lead_name, old_step, target_step, old_status, doc.status)
             results["success"].append(lead_name)
         
@@ -311,19 +355,35 @@ def enroll_lead():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
-    doc = frappe.get_doc("CRM Lead", name)
-    
-    if doc.step != "Deal":
-        return error_response(f"Chi co the nhap hoc tu buoc Deal. Ho so hien tai o buoc {doc.step}")
-    if doc.status not in ["Paid", "Deposit"]:
-        return error_response("Chi co the nhap hoc ho so co trang thai Paid hoac Deposit")
-    
-    old_step = doc.step
-    old_status = doc.status
-    doc.step = "Enrolled"
-    doc.status = "Dang hoc"
-    doc.save(ignore_permissions=True)
+
+    doc = None
+    old_step = None
+    old_status = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", name)
+
+        if doc.step != "Deal":
+            return error_response(
+                f"Chi co the nhap hoc tu buoc Deal. Ho so hien tai o buoc {doc.step}"
+            )
+        if doc.status not in ["Paid", "Deposit"]:
+            return error_response(
+                "Chi co the nhap hoc ho so co trang thai Paid hoac Deposit"
+            )
+
+        old_step = doc.step
+        old_status = doc.status
+        doc.step = "Enrolled"
+        doc.status = "Dang hoc"
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                return error_response(
+                    "Ho so da duoc cap nhat dong thoi. Vui long lam moi va thu lai."
+                )
+
     frappe.db.commit()
     
     _log_step_change(name, old_step, "Enrolled", old_status, "Dang hoc")
@@ -347,18 +407,30 @@ def transfer_to_withdraw():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
-    doc = frappe.get_doc("CRM Lead", name)
-    if doc.step != "Enrolled":
-        return error_response("Chi co the chuyen truong tu buoc Enrolled")
-    
-    old_step = doc.step
-    old_status = doc.status
-    doc.step = "Withdraw"
-    doc.status = "Chuyen truong"
-    if reason:
-        doc.reject_reason = reason
-    doc.save(ignore_permissions=True)
+
+    doc = None
+    old_step = None
+    old_status = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", name)
+        if doc.step != "Enrolled":
+            return error_response("Chi co the chuyen truong tu buoc Enrolled")
+
+        old_step = doc.step
+        old_status = doc.status
+        doc.step = "Withdraw"
+        doc.status = "Chuyen truong"
+        if reason:
+            doc.reject_reason = reason
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                return error_response(
+                    "Ho so da duoc cap nhat dong thoi. Vui long lam moi va thu lai."
+                )
+
     frappe.db.commit()
     
     _log_step_change(name, old_step, "Withdraw", old_status, "Chuyen truong")
@@ -378,16 +450,28 @@ def reserve_enrollment():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
-    doc = frappe.get_doc("CRM Lead", name)
-    if doc.step != "Enrolled":
-        return error_response("Chi co the bao luu tu buoc Enrolled")
-    
-    old_step = doc.step
-    old_status = doc.status
-    doc.step = "Re-Enroll"
-    doc.status = "Unpaid"
-    doc.save(ignore_permissions=True)
+
+    doc = None
+    old_step = None
+    old_status = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", name)
+        if doc.step != "Enrolled":
+            return error_response("Chi co the bao luu tu buoc Enrolled")
+
+        old_step = doc.step
+        old_status = doc.status
+        doc.step = "Re-Enroll"
+        doc.status = "Unpaid"
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                return error_response(
+                    "Ho so da duoc cap nhat dong thoi. Vui long lam moi va thu lai."
+                )
+
     frappe.db.commit()
     
     _log_step_change(name, old_step, "Re-Enroll", old_status, "Unpaid")
@@ -407,16 +491,28 @@ def move_back_to_reenroll():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
-    doc = frappe.get_doc("CRM Lead", name)
-    if doc.step != "Graduated":
-        return error_response("Chi co the chuyen tu Graduated ve Re-Enroll")
-    
-    old_step = doc.step
-    old_status = doc.status
-    doc.step = "Re-Enroll"
-    doc.status = "Unpaid"
-    doc.save(ignore_permissions=True)
+
+    doc = None
+    old_step = None
+    old_status = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", name)
+        if doc.step != "Graduated":
+            return error_response("Chi co the chuyen tu Graduated ve Re-Enroll")
+
+        old_step = doc.step
+        old_status = doc.status
+        doc.step = "Re-Enroll"
+        doc.status = "Unpaid"
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                return error_response(
+                    "Ho so da duoc cap nhat dong thoi. Vui long lam moi va thu lai."
+                )
+
     frappe.db.commit()
     
     _log_step_change(name, old_step, "Re-Enroll", old_status, "Unpaid")
@@ -445,22 +541,39 @@ def auto_enroll_paid_leads():
     errors = []
     for lead in leads:
         try:
-            doc = frappe.get_doc("CRM Lead", lead["name"])
-            # Kiem tra khong enroll 2 ho so cung 1 hoc sinh
-            if doc.linked_student:
-                existing = frappe.db.exists("CRM Lead", {
-                    "linked_student": doc.linked_student,
-                    "step": "Enrolled",
-                    "name": ["!=", doc.name]
-                })
-                if existing:
-                    continue
-            
-            old_step = doc.step
-            old_status = doc.status
-            doc.step = "Enrolled"
-            doc.status = "Dang hoc"
-            doc.save(ignore_permissions=True)
+            lead_name = lead["name"]
+            skipped = False
+            old_step = None
+            old_status = None
+            for attempt in range(2):
+                doc = frappe.get_doc("CRM Lead", lead_name)
+                if doc.linked_student:
+                    existing = frappe.db.exists(
+                        "CRM Lead",
+                        {
+                            "linked_student": doc.linked_student,
+                            "step": "Enrolled",
+                            "name": ["!=", doc.name],
+                        },
+                    )
+                    if existing:
+                        skipped = True
+                        break
+                if doc.step != "Deal" or doc.status not in ["Paid", "Deposit"]:
+                    skipped = True
+                    break
+                old_step = doc.step
+                old_status = doc.status
+                doc.step = "Enrolled"
+                doc.status = "Dang hoc"
+                try:
+                    doc.save(ignore_permissions=True)
+                    break
+                except frappe.TimestampMismatchError:
+                    if attempt == 1:
+                        raise
+            if skipped or old_step is None:
+                continue
             _log_step_change(doc.name, old_step, "Enrolled", old_status, "Dang hoc")
             _sync_lead_guardians_to_family_if_needed(doc)
             enrolled_count += 1
@@ -494,22 +607,31 @@ def end_of_year_transition():
     
     for lead in enrolled_leads:
         try:
-            doc = frappe.get_doc("CRM Lead", lead["name"])
-            old_step = doc.step
-            old_status = doc.status
-            
-            if doc.target_grade == "12":
-                doc.step = "Graduated"
-                doc.status = "Tot nghiep"
-                results["graduated"] += 1
-            else:
-                doc.step = "Re-Enroll"
-                doc.status = "Unpaid"
-                results["re_enroll"] += 1
-            
-            doc.save(ignore_permissions=True)
-            _log_step_change(doc.name, old_step, doc.step, old_status, doc.status)
-        
+            lead_name = lead["name"]
+            for attempt in range(2):
+                doc = frappe.get_doc("CRM Lead", lead_name)
+                old_step = doc.step
+                old_status = doc.status
+
+                if doc.target_grade == "12":
+                    doc.step = "Graduated"
+                    doc.status = "Tot nghiep"
+                    bump = "graduated"
+                else:
+                    doc.step = "Re-Enroll"
+                    doc.status = "Unpaid"
+                    bump = "re_enroll"
+                try:
+                    doc.save(ignore_permissions=True)
+                    results[bump] += 1
+                    _log_step_change(
+                        doc.name, old_step, doc.step, old_status, doc.status
+                    )
+                    break
+                except frappe.TimestampMismatchError:
+                    if attempt == 1:
+                        raise
+
         except Exception as e:
             results["errors"].append({"name": lead["name"], "error": str(e)})
     
