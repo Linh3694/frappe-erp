@@ -246,6 +246,91 @@ def _get_period_education_stage_ids(period_id):
     return [r.education_stage_id for r in rows if r.get("education_stage_id")]
 
 
+def _get_period_education_stages_for_ui(period_id):
+    """Cấp học của kỳ kèm tên hiển thị (cho filter trên FE, khớp phạm vi kỳ)."""
+    rows = frappe.get_all(
+        "SIS Menu Registration Period Education Stage",
+        filters={"parent": period_id},
+        fields=["education_stage_id", "education_stage_name"],
+        order_by="idx asc",
+    )
+    out = []
+    for r in rows:
+        sid = r.get("education_stage_id")
+        if not sid:
+            continue
+        name = (r.get("education_stage_name") or "").strip() or frappe.db.get_value(
+            "SIS Education Stage", sid, "title_vn"
+        )
+        out.append({"id": sid, "name": name or sid})
+    return out
+
+
+def _get_eligible_classes_for_period(active_school_year_id, education_stage_ids):
+    """
+    Các lớp (distinct) có ít nhất 1 HS trong phạm vi kỳ (Class Student + cấp + năm active).
+    Dùng cho dropdown lọc lớp trên FE.
+    """
+    if not active_school_year_id or not education_stage_ids:
+        return []
+    ph = ",".join(["%s"] * len(education_stage_ids))
+    sql = f"""
+        SELECT DISTINCT c.name AS class_id, c.title AS class_name, eg.education_stage_id
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+        INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+        WHERE cs.school_year_id = %s
+        AND eg.education_stage_id IN ({ph})
+        ORDER BY c.title ASC
+    """
+    return frappe.db.sql(
+        sql, (active_school_year_id,) + tuple(education_stage_ids), as_dict=True
+    )
+
+
+def _resolve_menu_reg_list_filters(period_education_stage_ids, fe_stage, fe_class):
+    """
+    Chuẩn hóa lọc cấp/lớp cho get_period_registrations (lọc trên toàn bộ HS + phân trang).
+    Trả về (effective_stage_ids, filter_class_id, error_key).
+    error_key: None | invalid_education_stage | invalid_class | class_out_of_scope | class_stage_mismatch
+    """
+    if not period_education_stage_ids:
+        return None, None, None
+
+    effective = list(period_education_stage_ids)
+    fs = (str(fe_stage).strip() if fe_stage else "") or None
+    fc = (str(fe_class).strip() if fe_class else "") or None
+
+    if fs and fs not in period_education_stage_ids:
+        return None, None, "invalid_education_stage"
+
+    if fs:
+        effective = [fs]
+
+    if fc:
+        row = frappe.db.sql(
+            """
+            SELECT eg.education_stage_id
+            FROM `tabSIS Class` c
+            INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+            WHERE c.name = %s
+            """,
+            (fc,),
+            as_dict=True,
+        )
+        if not row:
+            return None, None, "invalid_class"
+        stage_for_class = row[0].get("education_stage_id")
+        if stage_for_class not in period_education_stage_ids:
+            return None, None, "class_out_of_scope"
+        if fs and stage_for_class != fs:
+            return None, None, "class_stage_mismatch"
+        if not fs:
+            effective = [stage_for_class]
+
+    return effective, fc or None, None
+
+
 def _count_distinct_students_class_student(active_school_year_id, education_stage_ids):
     """
     Đếm học sinh (distinct) trong SIS Class Student theo năm học active và các cấp học.
@@ -1019,7 +1104,12 @@ def get_period_stats(period_id=None):
                     "a": row.count_a or 0,
                     "au": row.count_au or 0,
                 }
-        
+
+        education_stages_ui = _get_period_education_stages_for_ui(period_id)
+        eligible_classes = _get_eligible_classes_for_period(
+            active_school_year_id, education_stage_ids
+        )
+
         return success_response(
             data={
                 "period_id": period_id,
@@ -1034,6 +1124,8 @@ def get_period_stats(period_id=None):
                 "count_by_date": count_by_date,
                 "active_school_year_id": active_school_year_id,
                 "education_stage_ids": education_stage_ids,
+                "education_stages": education_stages_ui,
+                "eligible_classes": eligible_classes,
             },
             message="Lấy thống kê thành công",
             logs=logs
@@ -1156,12 +1248,21 @@ def get_class_registrations(class_id=None, month=None, year=None):
 
 
 @frappe.whitelist()
-def get_period_registrations(period_id=None, page=1, page_size=50, search=None, incomplete_only=None):
+def get_period_registrations(
+    period_id=None,
+    page=1,
+    page_size=50,
+    search=None,
+    incomplete_only=None,
+    education_stage_id=None,
+    class_id=None,
+):
     """
     Lấy danh sách học sinh trong kỳ đăng ký (cho trang chi tiết kỳ đăng ký).
     - Mặc định: toàn bộ HS thuộc tổng kỳ (SIS Class Student + cấp của kỳ + năm học active),
       khớp card "Tổng học sinh"; HS chưa có đơn vẫn có dòng (items rỗng).
     - incomplete_only=1: chỉ HS chưa đăng ký đủ mọi ngày (khớp thống kê not_registered).
+    - education_stage_id, class_id: lọc trên toàn bộ dữ liệu (không chỉ trang hiện tại).
 
     Lưu ý: incomplete_only phải có trong chữ ký hàm — Frappe mới truyền từ query/body vào (không chỉ đọc form_dict).
     """
@@ -1180,7 +1281,14 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None, 
         # Ưu tiên tham số hàm (Frappe inject từ ?incomplete_only=1), fallback form_dict
         incomplete_only_raw = incomplete_only if incomplete_only is not None else _get_param("incomplete_only", None)
         incomplete_only_flag = str(incomplete_only_raw or "").lower() in ("1", "true", "yes")
-        
+
+        fe_stage = education_stage_id if education_stage_id is not None else _get_param("education_stage_id", None)
+        fe_class = class_id if class_id is not None else _get_param("class_id", None)
+        if fe_stage is not None:
+            fe_stage = str(fe_stage).strip() or None
+        if fe_class is not None:
+            fe_class = str(fe_class).strip() or None
+
         if not period_id:
             return validation_error_response(
                 "Thiếu period_id",
@@ -1217,20 +1325,49 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None, 
                     logs=logs,
                 )
 
+            eff_stages, fc_filter, err_key = _resolve_menu_reg_list_filters(
+                education_stage_ids, fe_stage, fe_class
+            )
+            if err_key == "invalid_education_stage":
+                return validation_error_response(
+                    "Cấp học không thuộc kỳ này",
+                    {"education_stage_id": ["Cấp học không hợp lệ"]},
+                )
+            if err_key == "invalid_class":
+                return validation_error_response(
+                    "Không tìm thấy lớp",
+                    {"class_id": ["Lớp không tồn tại"]},
+                )
+            if err_key == "class_out_of_scope":
+                return validation_error_response(
+                    "Lớp không thuộc phạm vi kỳ",
+                    {"class_id": ["Lớp không nằm trong cấp của kỳ"]},
+                )
+            if err_key == "class_stage_mismatch":
+                return validation_error_response(
+                    "Lớp không khớp cấp học đã chọn",
+                    {"class_id": ["Lớp phải thuộc cấp đã chọn"]},
+                )
+
             n_days = len(registration_dates)
-            n_stages = len(education_stage_ids)
+            n_stages = len(eff_stages)
             ph_dates = ",".join(["%s"] * n_days)
             ph_stages = ",".join(["%s"] * n_stages)
+            class_extra = " AND cs.class_id = %s " if fc_filter else ""
+            class_extra_inner = " AND cs2.class_id = %s " if fc_filter else ""
+            class_extra_params = (fc_filter,) if fc_filter else ()
 
             eligible_where = f"""
                 cs.school_year_id = %s
                 AND eg.education_stage_id IN ({ph_stages})
+                {class_extra}
             """
             eligible_where_inner = f"""
                 cs2.school_year_id = %s
                 AND eg2.education_stage_id IN ({ph_stages})
+                {class_extra_inner}
             """
-            eligible_params = (active_school_year_id,) + tuple(education_stage_ids)
+            eligible_params = (active_school_year_id,) + tuple(eff_stages) + class_extra_params
 
             fully_sub = f"""
                 SELECT t.student_id FROM (
@@ -1255,14 +1392,22 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None, 
             search_clause = ""
             search_params = ()
             if search:
-                search_clause = " AND (s.student_name LIKE %s OR s.student_code LIKE %s)"
                 sp = f"%{search}%"
-                search_params = (sp, sp)
+                search_clause = """
+                    AND (
+                        s.student_name LIKE %s OR s.student_code LIKE %s
+                        OR EXISTS (
+                            SELECT 1 FROM `tabSIS Class` cx
+                            WHERE cx.name = inc.class_id AND cx.title LIKE %s
+                        )
+                    )
+                """
+                search_params = (sp, sp, sp)
 
             count_sql = f"""
                 SELECT COUNT(*) AS cnt
                 FROM (
-                    SELECT cs.student_id
+                    SELECT cs.student_id, MIN(cs.class_id) AS class_id
                     FROM `tabSIS Class Student` cs
                     INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
                     INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
@@ -1364,25 +1509,61 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None, 
                 logs=logs,
             )
 
-        n_stages = len(education_stage_ids)
+        eff_stages, fc_filter, err_key = _resolve_menu_reg_list_filters(
+            education_stage_ids, fe_stage, fe_class
+        )
+        if err_key == "invalid_education_stage":
+            return validation_error_response(
+                "Cấp học không thuộc kỳ này",
+                {"education_stage_id": ["Cấp học không hợp lệ"]},
+            )
+        if err_key == "invalid_class":
+            return validation_error_response(
+                "Không tìm thấy lớp",
+                {"class_id": ["Lớp không tồn tại"]},
+            )
+        if err_key == "class_out_of_scope":
+            return validation_error_response(
+                "Lớp không thuộc phạm vi kỳ",
+                {"class_id": ["Lớp không nằm trong cấp của kỳ"]},
+            )
+        if err_key == "class_stage_mismatch":
+            return validation_error_response(
+                "Lớp không khớp cấp học đã chọn",
+                {"class_id": ["Lớp phải thuộc cấp đã chọn"]},
+            )
+
+        n_stages = len(eff_stages)
         ph_stages = ",".join(["%s"] * n_stages)
+        class_extra = " AND cs.class_id = %s " if fc_filter else ""
+        class_extra_params = (fc_filter,) if fc_filter else ()
+
         eligible_where = f"""
                 cs.school_year_id = %s
                 AND eg.education_stage_id IN ({ph_stages})
+                {class_extra}
             """
-        eligible_params = (active_school_year_id,) + tuple(education_stage_ids)
+        eligible_params = (active_school_year_id,) + tuple(eff_stages) + class_extra_params
 
         search_clause = ""
         search_params = ()
         if search:
-            search_clause = " AND (s.student_name LIKE %s OR s.student_code LIKE %s)"
             sp = f"%{search}%"
-            search_params = (sp, sp)
+            search_clause = """
+                    AND (
+                        s.student_name LIKE %s OR s.student_code LIKE %s
+                        OR EXISTS (
+                            SELECT 1 FROM `tabSIS Class` cx
+                            WHERE cx.name = inc.class_id AND cx.title LIKE %s
+                        )
+                    )
+                """
+            search_params = (sp, sp, sp)
 
         count_sql = f"""
                 SELECT COUNT(*) AS cnt
                 FROM (
-                    SELECT cs.student_id
+                    SELECT cs.student_id, MIN(cs.class_id) AS class_id
                     FROM `tabSIS Class Student` cs
                     INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
                     INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name

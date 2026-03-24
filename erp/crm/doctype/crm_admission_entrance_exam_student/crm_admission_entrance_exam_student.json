@@ -10,6 +10,7 @@
   "crm_lead_id",
   "status",
   "exam_result",
+  "result_link",
   "scores"
  ],
  "fields": [
@@ -43,6 +44,11 @@
    "in_list_view": 1,
    "label": "Kết quả thi",
    "options": "\npass\nconditional_pass\nretake\nfail"
+  },
+  {
+   "fieldname": "result_link",
+   "fieldtype": "Data",
+   "label": "Link kết quả"
   },
   {
    "fieldname": "scores",
