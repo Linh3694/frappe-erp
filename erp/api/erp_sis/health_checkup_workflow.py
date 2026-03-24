@@ -388,17 +388,25 @@ def reject_health_checkup_l3(checkup_name=None, comment=None):
         return error_response(message=str(e), code="L3_REJECT_ERROR")
 
 
+def _health_checkup_l2_list_filters():
+    """Các bước duyệt: Y tế (draft) → Trưởng phòng (pending_l2) → GVCN (pending_l3) → published."""
+    return frozenset(("draft", "pending_l2", "pending_l3", "published"))
+
+
 @frappe.whitelist(allow_guest=False)
-def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None):
-    """Danh sách phiếu cho màn L2: ưu tiên chưa xử lý + draft sau trả, published cuối."""
+def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None, list_filter=None):
+    """Màn L2: tổng hợp counts theo bước duyệt + danh sách theo list_filter (mặc định pending_l2)."""
     try:
         data = _get_request_data()
         school_year_id = school_year_id or data.get("school_year_id")
         checkup_phase = _normalize_checkup_phase(checkup_phase or data.get("checkup_phase"))
+        list_filter = (list_filter or data.get("list_filter") or "pending_l2").strip()
         if not school_year_id:
             return error_response(message="school_year_id là bắt buộc", code="VALIDATION_ERROR")
         if checkup_phase is None:
             return error_response(message="checkup_phase không hợp lệ", code="VALIDATION_ERROR")
+        if list_filter not in _health_checkup_l2_list_filters():
+            return error_response(message="list_filter không hợp lệ", code="VALIDATION_ERROR")
 
         if not _has_role(ROLE_SIS_MEDICAL_ADMIN) and "System Manager" not in frappe.get_roles():
             return error_response(message="Không có quyền xem hàng đợi L2", code="FORBIDDEN")
@@ -409,11 +417,17 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
         campus_filter = "AND shc.campus_id = %(campus_id)s" if campus_id else ""
 
         if not _has_approval_column():
-            return success_response(data={"pending": [], "published": []}, message="OK")
+            return success_response(
+                data={
+                    "counts": {"draft": 0, "pending_l2": 0, "pending_l3": 0, "published": 0},
+                    "items": [],
+                    "list_filter": list_filter,
+                },
+                message="OK",
+            )
 
         # Một phiếu khám = một dòng; không JOIN Class Student trực tiếp (một HS có thể có nhiều
         # bản ghi lớp/năm → gây duplicate). Lấy tên lớp regular qua subquery LIMIT 1.
-        # items_top: chỉ pending_l2 — màn Admin L2 chỉ cần phiếu đang chờ duyệt tại cấp này.
         select_cols = """
                 shc.name,
                 shc.student_id,
@@ -436,36 +450,49 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
                     LIMIT 1
                 ) AS class_name
         """
-        sql_top = f"""
-            SELECT
-                {select_cols}
-            FROM `tabSIS Student Health Checkup` shc
-            WHERE shc.school_year_id = %(sy)s
-                AND shc.checkup_phase = %(ph)s
-                AND shc.approval_status = 'pending_l2'
-                {campus_filter}
-            ORDER BY shc.submitted_at IS NULL, shc.submitted_at ASC, shc.name ASC
-        """
-        sql_published = f"""
-            SELECT
-                {select_cols}
-            FROM `tabSIS Student Health Checkup` shc
-            WHERE shc.school_year_id = %(sy)s
-                AND shc.checkup_phase = %(ph)s
-                AND shc.approval_status = 'published'
-                {campus_filter}
-            ORDER BY shc.modified DESC
-            LIMIT 500
-        """
         params = {"sy": school_year_id, "ph": checkup_phase}
         if campus_id:
             params["campus_id"] = campus_id
 
-        items_top = frappe.db.sql(sql_top, params, as_dict=True)
-        items_published = frappe.db.sql(sql_published, params, as_dict=True)
+        sql_counts = f"""
+            SELECT shc.approval_status, COUNT(*) AS cnt
+            FROM `tabSIS Student Health Checkup` shc
+            WHERE shc.school_year_id = %(sy)s
+                AND shc.checkup_phase = %(ph)s
+                {campus_filter}
+            GROUP BY shc.approval_status
+        """
+        count_rows = frappe.db.sql(sql_counts, params, as_dict=True)
+        counts = {"draft": 0, "pending_l2": 0, "pending_l3": 0, "published": 0}
+        for r in count_rows:
+            st = r.get("approval_status")
+            if st in counts:
+                counts[st] = int(r.get("cnt") or 0)
+
+        order_by = {
+            "draft": "shc.modified DESC, shc.name ASC",
+            "pending_l2": "shc.submitted_at IS NULL, shc.submitted_at ASC, shc.name ASC",
+            "pending_l3": "shc.submitted_at IS NULL, shc.submitted_at ASC, shc.name ASC",
+            "published": "shc.modified DESC, shc.name ASC",
+        }[list_filter]
+        limit_sql = " LIMIT 500" if list_filter == "published" else ""
+
+        sql_items = f"""
+            SELECT
+                {select_cols}
+            FROM `tabSIS Student Health Checkup` shc
+            WHERE shc.school_year_id = %(sy)s
+                AND shc.checkup_phase = %(ph)s
+                AND shc.approval_status = %(lf)s
+                {campus_filter}
+            ORDER BY {order_by}
+            {limit_sql}
+        """
+        params_items = {**params, "lf": list_filter}
+        items = frappe.db.sql(sql_items, params_items, as_dict=True)
 
         return success_response(
-            data={"items_top": items_top, "items_published": items_published},
+            data={"counts": counts, "items": items, "list_filter": list_filter},
             message="OK",
         )
     except Exception as e:
