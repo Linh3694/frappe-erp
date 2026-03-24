@@ -475,7 +475,8 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
             "pending_l3": "shc.submitted_at IS NULL, shc.submitted_at ASC, shc.name ASC",
             "published": "shc.modified DESC, shc.name ASC",
         }[list_filter]
-        limit_sql = " LIMIT 500" if list_filter == "published" else ""
+        # Giới hạn tải — published thường nhiều nhất nên 500; các bước khác 2000
+        limit_sql = " LIMIT 500" if list_filter == "published" else " LIMIT 2000"
 
         sql_items = f"""
             SELECT
