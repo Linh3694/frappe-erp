@@ -14,7 +14,13 @@ CRM_STEPS = [
 
 STEP_STATUSES: Dict[str, List[str]] = {
     "Draft": [],
-    "Verify": ["Can kiem tra", "Trung", "Da kiem tra - Gop ho so", "Da kiem tra - Bao trung"],
+    "Verify": [
+        "Can kiem tra",
+        "Trung",
+        "Da kiem tra - Gop ho so",
+        "Da kiem tra - Bao trung",
+        "Da kiem tra - Trung hoc sinh",
+    ],
     "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Lost"],
     "QLead": ["Moi", "Follow Up", "Pre-Event", "Event", "Pre-school Tour/ School Tour", "Lost"],
     "Test": ["Pre-test", "Test", "Offered", "Failed", "Retake", "Lost"],
@@ -28,7 +34,7 @@ STEP_STATUSES: Dict[str, List[str]] = {
 VALID_STEP_TRANSITIONS = {
     "Draft": ["Lead", "Verify"],
     "Verify": ["Lead"],
-    "Lead": ["QLead"],
+    "Lead": ["QLead", "Verify"],
     "QLead": ["Test"],
     "Test": ["Deal"],
     "Deal": ["Enrolled"],

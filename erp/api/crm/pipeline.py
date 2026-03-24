@@ -193,6 +193,9 @@ def advance_step():
         "Graduated": "Tot nghiep"
     }
     doc.status = default_statuses.get(target_step, "")
+    # Lead -> Verify (bao trung tu Lead): trang thai "Da kiem tra - Trung hoc sinh"
+    if target_step == "Verify" and old_step == "Lead":
+        doc.status = "Da kiem tra - Trung hoc sinh"
 
     # Sinh crm_code khi chuyen sang Lead hoac Draft -> Verify (dong bo voi create_lead)
     if target_step == "Lead" and not doc.crm_code:
@@ -268,6 +271,8 @@ def bulk_advance_step():
                 "Graduated": "Tot nghiep"
             }
             doc.status = default_statuses.get(target_step, "")
+            if target_step == "Verify" and old_step == "Lead":
+                doc.status = "Da kiem tra - Trung hoc sinh"
 
             if target_step == "Lead" and not doc.crm_code:
                 doc.crm_code = generate_crm_code()
