@@ -1158,9 +1158,10 @@ def get_class_registrations(class_id=None, month=None, year=None):
 @frappe.whitelist()
 def get_period_registrations(period_id=None, page=1, page_size=50, search=None, incomplete_only=None):
     """
-    Lấy danh sách phụ huynh đã đăng ký trong kỳ (cho trang chi tiết kỳ đăng ký).
-    - incomplete_only=1: chỉ HS thuộc tổng kỳ (Class Student + cấp + năm active) chưa đăng ký đủ mọi ngày
-      (khớp thống kê not_registered; gồm cả HS chưa có đơn).
+    Lấy danh sách học sinh trong kỳ đăng ký (cho trang chi tiết kỳ đăng ký).
+    - Mặc định: toàn bộ HS thuộc tổng kỳ (SIS Class Student + cấp của kỳ + năm học active),
+      khớp card "Tổng học sinh"; HS chưa có đơn vẫn có dòng (items rỗng).
+    - incomplete_only=1: chỉ HS chưa đăng ký đủ mọi ngày (khớp thống kê not_registered).
 
     Lưu ý: incomplete_only phải có trong chữ ký hàm — Frappe mới truyền từ query/body vào (không chỉ đọc form_dict).
     """
@@ -1337,76 +1338,123 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None, 
                 message="Lấy danh sách đăng ký thành công",
                 logs=logs,
             )
-        
-        # Build query
-        conditions = ["r.period = %s"]
-        params = [period_id]
-        
+
+        # --- Mặc định: toàn bộ HS trong tổng kỳ (khớp get_period_stats.total_students), kể cả chưa có đơn ---
+        period = frappe.db.get_value(
+            "SIS Menu Registration Period",
+            period_id,
+            ["month", "year"],
+            as_dict=True,
+        )
+        if not period:
+            return not_found_response("Không tìm thấy kỳ đăng ký")
+
+        education_stage_ids = _get_period_education_stage_ids(period_id)
+        active_school_year_id = _get_active_school_year_id()
+
+        if not active_school_year_id or not education_stage_ids:
+            return success_response(
+                data={
+                    "items": [],
+                    "total": 0,
+                    "page": int(page),
+                    "page_size": int(page_size),
+                },
+                message="Lấy danh sách đăng ký thành công",
+                logs=logs,
+            )
+
+        n_stages = len(education_stage_ids)
+        ph_stages = ",".join(["%s"] * n_stages)
+        eligible_where = f"""
+                cs.school_year_id = %s
+                AND eg.education_stage_id IN ({ph_stages})
+            """
+        eligible_params = (active_school_year_id,) + tuple(education_stage_ids)
+
+        search_clause = ""
+        search_params = ()
         if search:
-            conditions.append("(s.student_name LIKE %s OR s.student_code LIKE %s)")
-            search_param = f"%{search}%"
-            params.extend([search_param, search_param])
-        
-        where_clause = " AND ".join(conditions)
-        
-        # Count total
+            search_clause = " AND (s.student_name LIKE %s OR s.student_code LIKE %s)"
+            sp = f"%{search}%"
+            search_params = (sp, sp)
+
         count_sql = f"""
-            SELECT COUNT(DISTINCT r.name) as count
-            FROM `tabSIS Menu Registration` r
-            INNER JOIN `tabCRM Student` s ON r.student_id = s.name
-            WHERE {where_clause}
-        """
-        total = frappe.db.sql(count_sql, params, as_dict=True)[0].count
-        
-        # Get list - JOIN thêm để lấy education_stage
+                SELECT COUNT(*) AS cnt
+                FROM (
+                    SELECT cs.student_id
+                    FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE {eligible_where}
+                    GROUP BY cs.student_id
+                ) inc
+                INNER JOIN `tabCRM Student` s ON s.name = inc.student_id
+                WHERE 1=1 {search_clause}
+            """
+        count_params = eligible_params + search_params
+        total = frappe.db.sql(count_sql, count_params, as_dict=True)[0].cnt or 0
+
         offset = (int(page) - 1) * int(page_size)
         list_sql = f"""
-            SELECT 
-                r.name,
-                r.student_id,
-                s.student_name,
-                s.student_code,
-                r.class_id,
-                c.title as class_name,
-                r.registration_date,
-                r.registered_by,
-                es.name as education_stage_id,
-                es.title_vn as education_stage_name
-            FROM `tabSIS Menu Registration` r
-            INNER JOIN `tabCRM Student` s ON r.student_id = s.name
-            LEFT JOIN `tabSIS Class` c ON r.class_id = c.name
-            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
-            LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
-            WHERE {where_clause}
-            ORDER BY r.registration_date DESC
-            LIMIT %s OFFSET %s
-        """
-        params.extend([int(page_size), offset])
-        
-        registrations = frappe.db.sql(list_sql, params, as_dict=True)
-        
-        # Enrich với chi tiết đăng ký
+                SELECT
+                    COALESCE(r.name, '') AS name,
+                    s.name AS student_id,
+                    s.student_name,
+                    s.student_code,
+                    COALESCE(r.class_id, inc.class_id) AS class_id,
+                    c.title AS class_name,
+                    r.registration_date,
+                    r.registered_by,
+                    es.name AS education_stage_id,
+                    es.title_vn AS education_stage_name
+                FROM (
+                    SELECT cs.student_id, MIN(cs.class_id) AS class_id
+                    FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE {eligible_where}
+                    GROUP BY cs.student_id
+                ) inc
+                INNER JOIN `tabCRM Student` s ON s.name = inc.student_id
+                LEFT JOIN `tabSIS Menu Registration` r ON r.period = %s AND r.student_id = inc.student_id
+                LEFT JOIN `tabSIS Class` c ON COALESCE(r.class_id, inc.class_id) = c.name
+                LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
+                WHERE 1=1 {search_clause}
+                ORDER BY s.student_name ASC
+                LIMIT %s OFFSET %s
+            """
+        list_params = (
+            eligible_params + (period_id,) + search_params + (int(page_size), offset)
+        )
+        registrations = frappe.db.sql(list_sql, list_params, as_dict=True)
+
         for reg in registrations:
-            items = frappe.get_all(
-                "SIS Menu Registration Item",
-                filters={"parent": reg.name},
-                fields=["date", "choice"]
-            )
-            reg["items"] = items
-            
-            # Đếm A/AU
-            reg["choice_a_count"] = len([i for i in items if i.choice == "A"])
-            reg["choice_au_count"] = len([i for i in items if i.choice == "AU"])
-        
+            reg_name = (reg.get("name") or "").strip()
+            if reg_name:
+                items = frappe.get_all(
+                    "SIS Menu Registration Item",
+                    filters={"parent": reg_name},
+                    fields=["date", "choice"],
+                )
+                reg["items"] = items
+                reg["choice_a_count"] = len([i for i in items if i.choice == "A"])
+                reg["choice_au_count"] = len([i for i in items if i.choice == "AU"])
+            else:
+                reg["items"] = []
+                reg["choice_a_count"] = 0
+                reg["choice_au_count"] = 0
+
         return success_response(
             data={
                 "items": registrations,
-                "total": total,
+                "total": int(total),
                 "page": int(page),
-                "page_size": int(page_size)
+                "page_size": int(page_size),
             },
             message="Lấy danh sách đăng ký thành công",
-            logs=logs
+            logs=logs,
         )
         
     except Exception as e:

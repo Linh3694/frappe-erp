@@ -224,6 +224,44 @@ def _enrich_entrance_student_row(item):
     return item
 
 
+def _serialize_entrance_exam_student_detail(record_id):
+    """Chi tiết một bản ghi học sinh trong kỳ (kèm điểm môn) — dùng API detail và tab CRM."""
+    if not record_id or not frappe.db.exists("CRM Admission Entrance Exam Student", record_id):
+        return None
+    doc = frappe.get_doc("CRM Admission Entrance Exam Student", record_id)
+    lead = frappe.db.get_value(
+        "CRM Lead",
+        doc.crm_lead_id,
+        ["crm_code", "student_name", "student_dob", "target_grade"],
+        as_dict=True,
+    )
+    exam = frappe.db.get_value(
+        "CRM Admission Entrance Exam",
+        doc.entrance_exam_id,
+        ["exam_name", "exam_date", "exam_time", "school_year_id"],
+        as_dict=True,
+    )
+    data = doc.as_dict()
+    if doc.modified_by:
+        data["modified_by_name"] = (
+            frappe.db.get_value("User", doc.modified_by, "full_name") or doc.modified_by
+        )
+    else:
+        data["modified_by_name"] = None
+    data["crm_code"] = (lead or {}).get("crm_code") or doc.crm_lead_id
+    data["student_name"] = (lead or {}).get("student_name") or "-"
+    data["student_dob"] = (lead or {}).get("student_dob")
+    data["target_grade"] = (lead or {}).get("target_grade") or ""
+    data["exam_name"] = (exam or {}).get("exam_name")
+    data["exam_date"] = (exam or {}).get("exam_date")
+    data["exam_time"] = (exam or {}).get("exam_time")
+    data["school_year_id"] = (exam or {}).get("school_year_id")
+    data["scores"] = [
+        {"subject": row.subject, "score": row.score} for row in (doc.scores or [])
+    ]
+    return data
+
+
 @frappe.whitelist()
 def get_entrance_exam_students():
     """Danh sách học sinh trong một kỳ khảo sát"""
