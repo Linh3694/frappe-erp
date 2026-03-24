@@ -324,6 +324,7 @@ def get_entrance_exam_students():
             "crm_lead_id",
             "status",
             "exam_result",
+            "result_link",
             "modified",
             "modified_by",
         ],
@@ -433,6 +434,43 @@ def update_entrance_exam_student_result():
         row = doc.as_dict()
         _enrich_entrance_student_row(row)
         return single_item_response(row, "Cập nhật kết quả thành công")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Lỗi: {str(e)}")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_entrance_exam_student_meta():
+    """
+    Cập nhật trạng thái, kết quả, link kết quả — không chỉnh bảng điểm môn.
+    Body: name (bắt buộc), status, exam_result, result_link (tùy chọn, gửi đủ 3 từ client).
+    """
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name")
+    if not name:
+        return validation_error_response("Thiếu name", {"name": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Admission Entrance Exam Student", name):
+        return not_found_response("Không tìm thấy bản ghi")
+    try:
+        doc = frappe.get_doc("CRM Admission Entrance Exam Student", name)
+        if "status" in data:
+            new_status = data.get("status")
+            if new_status not in VALID_ENTRANCE_STATUSES:
+                return validation_error_response("Trạng thái không hợp lệ", {"status": ["Không hợp lệ"]})
+            doc.status = new_status
+        if "exam_result" in data:
+            exam_result = data.get("exam_result")
+            if exam_result not in VALID_EXAM_RESULTS:
+                return validation_error_response("Kết quả không hợp lệ", {"exam_result": ["Không hợp lệ"]})
+            doc.exam_result = exam_result or None
+        if "result_link" in data:
+            doc.result_link = (data.get("result_link") or "").strip()
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        row = doc.as_dict()
+        _enrich_entrance_student_row(row)
+        return single_item_response(row, "Cập nhật thành công")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Lỗi: {str(e)}")
