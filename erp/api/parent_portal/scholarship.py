@@ -609,16 +609,16 @@ def get_active_period():
         
         logs.append(f"Tìm thấy kỳ {period_data.name}, {len(students)} học sinh có thể đăng ký")
 
-        # Tên kỳ tiếng Anh: đọc thẳng từ DB (tránh DocType/meta cache khiến getattr(period_doc, title_en) rỗng)
-        period_title_en = ""
-        try:
-            raw_en = frappe.db.get_value("SIS Scholarship Period", period_data.name, "title_en")
-            if raw_en:
-                period_title_en = str(raw_en).strip()
-        except Exception:
-            period_title_en = ""
-
+        # Tên kỳ: ưu tiên title_en từ cùng row SQL; bổ sung get_value nếu query cũ không có cột title_en
         period_title_vn = (period_data.get("title") or "").strip()
+        period_title_en = (period_data.get("title_en") or "").strip() if "title_en" in period_data else ""
+        if not period_title_en:
+            try:
+                raw_en = frappe.db.get_value("SIS Scholarship Period", period_data.name, "title_en")
+                if raw_en:
+                    period_title_en = str(raw_en).strip()
+            except Exception:
+                pass
 
         return success_response(
             data={

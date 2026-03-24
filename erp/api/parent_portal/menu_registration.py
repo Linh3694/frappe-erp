@@ -1008,11 +1008,12 @@ def get_period_list(status=None, page=1, page_size=20):
 
 
 @frappe.whitelist()
-def get_period_stats(period_id=None):
+def get_period_stats(period_id=None, education_stage_id=None, class_id=None):
     """
     Lấy thống kê cho kỳ đăng ký (Tổng/Á/Âu/Chưa đăng ký).
     - Tổng học sinh: HS thuộc các cấp của kỳ, theo SIS Class Student + năm học đang active (is_enable).
     - Chưa đăng ký: HS trong tổng trên chưa đăng ký đủ tất cả ngày của kỳ.
+    - education_stage_id, class_id (tùy chọn): count_by_date chỉ đếm đơn của HS trong phạm vi lọc (khớp bảng).
     """
     logs = []
     
@@ -1020,7 +1021,18 @@ def get_period_stats(period_id=None):
         # Lấy period_id từ request args nếu không có trong function params
         if not period_id:
             period_id = frappe.form_dict.get('period_id') or (frappe.request.args.get('period_id') if frappe.request else None)
-        
+
+        def _get_param(key, default):
+            val = frappe.form_dict.get(key) or (frappe.request.args.get(key) if frappe.request else None)
+            return val if val is not None else default
+
+        fe_stage = education_stage_id if education_stage_id is not None else _get_param("education_stage_id", None)
+        fe_class = class_id if class_id is not None else _get_param("class_id", None)
+        if fe_stage is not None:
+            fe_stage = str(fe_stage).strip() or None
+        if fe_class is not None:
+            fe_class = str(fe_class).strip() or None
+
         if not period_id:
             return validation_error_response(
                 "Thiếu period_id",
@@ -1080,30 +1092,93 @@ def get_period_stats(period_id=None):
 
         # Chưa đăng ký đủ
         not_registered = max(0, total_student_count - fully_registered)
-        
-        # Đếm Á/Âu theo từng ngày (cho header cột trong bảng)
-        count_by_date_sql = """
-            SELECT 
-                ri.date,
-                SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as count_a,
-                SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as count_au
-            FROM `tabSIS Menu Registration` r
-            INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
-            WHERE r.period = %s
-            GROUP BY ri.date
-            ORDER BY ri.date
-        """
-        count_by_date_rows = frappe.db.sql(count_by_date_sql, (period_id,), as_dict=True)
+
+        # Đếm Á/Âu theo từng ngày (header cột) — chỉ HS trong phạm vi lọc (khớp get_period_registrations)
         count_by_date = {}
         for d in registration_dates:
             count_by_date[d] = {"a": 0, "au": 0}
-        for row in count_by_date_rows:
-            date_str = str(row.date) if row.date else None
-            if date_str and date_str in count_by_date:
-                count_by_date[date_str] = {
-                    "a": row.count_a or 0,
-                    "au": row.count_au or 0,
-                }
+
+        if active_school_year_id and education_stage_ids:
+            eff_stages, fc_filter, err_key = _resolve_menu_reg_list_filters(
+                education_stage_ids, fe_stage, fe_class
+            )
+            if err_key == "invalid_education_stage":
+                return validation_error_response(
+                    "Cấp học không thuộc kỳ này",
+                    {"education_stage_id": ["Cấp học không hợp lệ"]},
+                )
+            if err_key == "invalid_class":
+                return validation_error_response(
+                    "Không tìm thấy lớp",
+                    {"class_id": ["Lớp không tồn tại"]},
+                )
+            if err_key == "class_out_of_scope":
+                return validation_error_response(
+                    "Lớp không thuộc phạm vi kỳ",
+                    {"class_id": ["Lớp không nằm trong cấp của kỳ"]},
+                )
+            if err_key == "class_stage_mismatch":
+                return validation_error_response(
+                    "Lớp không khớp cấp học đã chọn",
+                    {"class_id": ["Lớp phải thuộc cấp đã chọn"]},
+                )
+
+            n_st = len(eff_stages)
+            ph_stages = ",".join(["%s"] * n_st)
+            class_extra = " AND cs.class_id = %s " if fc_filter else ""
+            class_extra_params = (fc_filter,) if fc_filter else ()
+            eligible_sub_params = (active_school_year_id,) + tuple(eff_stages) + class_extra_params
+
+            count_by_date_sql = f"""
+                SELECT
+                    ri.date,
+                    SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as count_a,
+                    SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as count_au
+                FROM `tabSIS Menu Registration` r
+                INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
+                WHERE r.period = %s
+                AND r.student_id IN (
+                    SELECT DISTINCT cs.student_id
+                    FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE cs.school_year_id = %s
+                    AND eg.education_stage_id IN ({ph_stages})
+                    {class_extra}
+                )
+                GROUP BY ri.date
+                ORDER BY ri.date
+            """
+            count_by_date_params = (period_id,) + eligible_sub_params
+            count_by_date_rows = frappe.db.sql(count_by_date_sql, count_by_date_params, as_dict=True)
+            for row in count_by_date_rows:
+                date_str = str(row.date) if row.date else None
+                if date_str and date_str in count_by_date:
+                    count_by_date[date_str] = {
+                        "a": row.count_a or 0,
+                        "au": row.count_au or 0,
+                    }
+        else:
+            # Không có năm học active / cấp kỳ — fallback đếm mọi đơn trong kỳ (hành vi cũ)
+            count_by_date_sql = """
+                SELECT
+                    ri.date,
+                    SUM(CASE WHEN ri.choice = 'A' THEN 1 ELSE 0 END) as count_a,
+                    SUM(CASE WHEN ri.choice = 'AU' THEN 1 ELSE 0 END) as count_au
+                FROM `tabSIS Menu Registration` r
+                INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
+                WHERE r.period = %s
+                GROUP BY ri.date
+                ORDER BY ri.date
+            """
+            count_by_date_rows = frappe.db.sql(count_by_date_sql, (period_id,), as_dict=True)
+            for row in count_by_date_rows:
+                date_str = str(row.date) if row.date else None
+                if date_str and date_str in count_by_date:
+                    count_by_date[date_str] = {
+                        "a": row.count_a or 0,
+                        "au": row.count_au or 0,
+                    }
 
         education_stages_ui = _get_period_education_stages_for_ui(period_id)
         eligible_classes = _get_eligible_classes_for_period(
