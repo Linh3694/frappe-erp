@@ -1156,11 +1156,13 @@ def get_class_registrations(class_id=None, month=None, year=None):
 
 
 @frappe.whitelist()
-def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
+def get_period_registrations(period_id=None, page=1, page_size=50, search=None, incomplete_only=None):
     """
     Lấy danh sách phụ huynh đã đăng ký trong kỳ (cho trang chi tiết kỳ đăng ký).
     - incomplete_only=1: chỉ HS thuộc tổng kỳ (Class Student + cấp + năm active) chưa đăng ký đủ mọi ngày
       (khớp thống kê not_registered; gồm cả HS chưa có đơn).
+
+    Lưu ý: incomplete_only phải có trong chữ ký hàm — Frappe mới truyền từ query/body vào (không chỉ đọc form_dict).
     """
     logs = []
     
@@ -1174,8 +1176,9 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
         page = max(1, int(_get_param('page', page) or 1))
         page_size = min(200, max(1, int(_get_param('page_size', page_size) or 50)))  # 1-200
         search = search if (search is not None and str(search).strip() != '') else _get_param('search', None)
-        incomplete_only_raw = _get_param("incomplete_only", None)
-        incomplete_only = str(incomplete_only_raw or "").lower() in ("1", "true", "yes")
+        # Ưu tiên tham số hàm (Frappe inject từ ?incomplete_only=1), fallback form_dict
+        incomplete_only_raw = incomplete_only if incomplete_only is not None else _get_param("incomplete_only", None)
+        incomplete_only_flag = str(incomplete_only_raw or "").lower() in ("1", "true", "yes")
         
         if not period_id:
             return validation_error_response(
@@ -1184,7 +1187,7 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None):
             )
 
         # Danh sách HS chưa đăng ký đủ (đồng bộ với get_period_stats.not_registered)
-        if incomplete_only:
+        if incomplete_only_flag:
             period = frappe.db.get_value(
                 "SIS Menu Registration Period",
                 period_id,
