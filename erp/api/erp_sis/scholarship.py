@@ -249,6 +249,7 @@ def get_scholarship_period(period_id=None):
             data={
                 "name": period.name,
                 "title": period.title,
+                "title_en": getattr(period, "title_en", None) or "",
                 "academic_year_id": period.academic_year_id,
                 "academic_year_name_vn": school_year.title_vn if school_year else None,
                 "academic_year_name_en": school_year.title_en if school_year else None,
@@ -317,6 +318,7 @@ def create_scholarship_period():
         period_doc = frappe.get_doc({
             "doctype": "SIS Scholarship Period",
             "title": data['title'],
+            "title_en": (data.get('title_en') or "").strip(),
             "academic_year_id": data['academic_year_id'],
             "campus_id": resolved_campus_id,
             "status": data.get('status', 'Draft'),
@@ -439,7 +441,7 @@ def update_scholarship_period():
         period_doc = frappe.get_doc("SIS Scholarship Period", period_id)
         
         # Update các trường cơ bản
-        update_fields = ['title', 'academic_year_id', 'campus_id', 'status', 
+        update_fields = ['title', 'title_en', 'academic_year_id', 'campus_id', 'status', 
                         'from_date', 'to_date']
         
         for field in update_fields:
