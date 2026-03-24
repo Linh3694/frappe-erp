@@ -42,6 +42,7 @@
   "agreement_accepted",
   "payment_section",
   "payment_status",
+  "dvhs_payment_status",
   "adjustment_section",
   "adjustment_status",
   "adjustment_requested_at",
@@ -235,6 +236,14 @@
    "default": "unpaid",
    "in_list_view": 1,
    "description": "unpaid: Chưa đóng, partial: Đóng một phần, paid: Đã đóng, refunded: Hoàn tiền"
+  },
+  {
+   "fieldname": "dvhs_payment_status",
+   "fieldtype": "Select",
+   "label": "DVHS (đã/chưa đóng)",
+   "options": "\nunpaid\npaid",
+   "default": "unpaid",
+   "description": "Dịch vụ học sinh: unpaid = Chưa đóng, paid = Đã đóng"
   },
   {
    "fieldname": "adjustment_section",

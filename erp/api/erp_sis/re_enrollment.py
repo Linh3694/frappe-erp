@@ -981,6 +981,7 @@ def get_submissions():
                     fs.outstanding_amount as finance_outstanding_amount,
                     re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
                     re.selected_discount_deadline,
+                    re.dvhs_payment_status,
                     re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
@@ -1001,6 +1002,7 @@ def get_submissions():
                     re.decision, re.payment_type, re.not_re_enroll_reason,
                     re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
                     re.selected_discount_deadline,
+                    re.dvhs_payment_status,
                     re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
@@ -1029,10 +1031,13 @@ def get_submissions():
             # Payment status display
             payment_status_map = {
                 "unpaid": "Chưa đóng",
+                "partial": "Đóng một phần",
                 "paid": "Đã đóng",
                 "refunded": "Hoàn tiền"
             }
             sub["payment_status_display"] = payment_status_map.get(sub.payment_status, "-")
+            dvhs_map = {"unpaid": "Chưa đóng", "paid": "Đã đóng"}
+            sub["dvhs_payment_status_display"] = dvhs_map.get(sub.get("dvhs_payment_status"), "-")
             
             # Convert selected_discount_deadline sang string nếu có
             if sub.get("selected_discount_deadline"):
@@ -1284,6 +1289,11 @@ def update_submission():
         
         submission = frappe.get_doc("SIS Re-enrollment", submission_id)
         
+        # Config có liên kết năm tài chính → không cho sửa payment_status (học phí) qua API
+        config_finance_year_id = frappe.db.get_value(
+            "SIS Re-enrollment Config", submission.config_id, "finance_year_id"
+        )
+        
         # Lưu lại giá trị cũ để so sánh và tạo log
         old_values = {
             'decision': submission.decision,
@@ -1291,6 +1301,7 @@ def update_submission():
             'selected_discount_id': submission.selected_discount_id,
             'not_re_enroll_reason': submission.not_re_enroll_reason,
             'payment_status': submission.payment_status,
+            'dvhs_payment_status': getattr(submission, 'dvhs_payment_status', None) or 'unpaid',
             'adjustment_status': submission.adjustment_status
         }
         
@@ -1316,10 +1327,13 @@ def update_submission():
         
         # Các trường admin có thể sửa
         updatable_fields = ['decision', 'payment_type', 'selected_discount_id', 
-                          'not_re_enroll_reason', 'payment_status', 'adjustment_status']
+                          'not_re_enroll_reason', 'payment_status', 'dvhs_payment_status', 'adjustment_status']
         
         for field in updatable_fields:
             if field in data:
+                # Khi có năm tài chính, học phí lấy từ Finance — không ghi đè payment_status từ form
+                if field == 'payment_status' and config_finance_year_id:
+                    continue
                 submission.set(field, data[field])
         
         # Xử lý discount info nếu chọn
@@ -1390,6 +1404,7 @@ def update_submission():
             submission.selected_discount_id = None
             submission.selected_discount_name = None
             submission.selected_discount_deadline = None
+            submission.dvhs_payment_status = 'unpaid'
         elif decision in (None, ''):
             # Chuyển về "Chưa làm đơn" - clear tất cả field liên quan, giữ nguyên notes (lịch sử)
             submission.payment_type = None
@@ -1397,6 +1412,7 @@ def update_submission():
             submission.selected_discount_name = None
             submission.selected_discount_deadline = None
             submission.not_re_enroll_reason = None
+            submission.dvhs_payment_status = 'unpaid'
             if hasattr(submission, 'selected_discount_percent'):
                 submission.selected_discount_percent = None
         
@@ -1434,7 +1450,10 @@ def update_submission():
             None: 'Chưa làm đơn'
         }
         payment_type_map = {'annual': 'Đóng theo năm', 'semester': 'Đóng theo kỳ'}
-        payment_status_map = {'unpaid': 'Chưa đóng', 'paid': 'Đã đóng', 'refunded': 'Hoàn tiền'}
+        payment_status_map = {
+            'unpaid': 'Chưa đóng', 'partial': 'Đóng một phần', 'paid': 'Đã đóng', 'refunded': 'Hoàn tiền'
+        }
+        dvhs_status_map = {'unpaid': 'Chưa đóng DVHS', 'paid': 'Đã đóng DVHS'}
         
         # So sánh decision (QUAN TRỌNG - gửi notification)
         # Dùng 'decision' in data để phân biệt decision='' (Chưa làm đơn) với không gửi
@@ -1459,12 +1478,19 @@ def update_submission():
             important_changes.append('payment_type')
         
         # So sánh payment_status (KHÔNG gửi notification - chỉ log)
-        new_payment_status = data.get('payment_status') or submission.payment_status
+        new_payment_status = submission.payment_status
         if old_values['payment_status'] != new_payment_status:
             old_display = payment_status_map.get(old_values['payment_status'], old_values['payment_status'] or 'Chưa có')
             new_display = payment_status_map.get(new_payment_status, new_payment_status)
-            changes.append(f"• Thanh toán: {old_display} → {new_display}")
+            changes.append(f"• Học phí: {old_display} → {new_display}")
             # Không thêm vào important_changes
+        
+        # So sánh DVHS (KHÔNG gửi notification - chỉ log)
+        new_dvhs = getattr(submission, 'dvhs_payment_status', None) or 'unpaid'
+        if old_values.get('dvhs_payment_status') != new_dvhs:
+            old_display = dvhs_status_map.get(old_values.get('dvhs_payment_status'), old_values.get('dvhs_payment_status') or 'Chưa có')
+            new_display = dvhs_status_map.get(new_dvhs, new_dvhs)
+            changes.append(f"• DVHS: {old_display} → {new_display}")
         
         # So sánh adjustment_status (QUAN TRỌNG - gửi notification khi hoàn tất điều chỉnh)
         adjustment_status_map = {'requested': 'Yêu cầu điều chỉnh', 'completed': 'Đã điều chỉnh'}
@@ -2599,6 +2625,7 @@ def export_decision_template(config_id=None):
             return not_found_response("Không tìm thấy cấu hình tái ghi danh")
         
         config = frappe.get_doc("SIS Re-enrollment Config", config_id)
+        config_finance_year_id = getattr(config, "finance_year_id", None)
         logs.append(f"Xuất template cho config: {config.title}")
         
         # Lấy danh sách học sinh từ config
@@ -2714,9 +2741,21 @@ def export_decision_template(config_id=None):
         submissions_with_reason = frappe.get_all(
             "SIS Re-enrollment",
             filters={"config_id": config_id},
-            fields=["name", "student_code", "student_name", "current_class", "decision", "selected_discount_id", "payment_type", "not_re_enroll_reason"],
+            fields=[
+                "name", "student_code", "student_name", "current_class", "decision",
+                "selected_discount_id", "payment_type", "not_re_enroll_reason",
+                "payment_status", "dvhs_payment_status",
+            ],
             order_by="student_code asc"
         )
+        
+        tuition_display_map = {
+            "unpaid": "Chưa đóng",
+            "partial": "Đóng một phần",
+            "paid": "Đã đóng",
+            "refunded": "Hoàn tiền",
+        }
+        dvhs_display_map = {"unpaid": "Chưa đóng", "paid": "Đã đóng"}
         
         # Sheet 1: Danh sách học sinh - dùng tên cột tiếng Việt thân thiện
         students_data = []
@@ -2728,6 +2767,8 @@ def export_decision_template(config_id=None):
             # Chuyển payment_type sang tiếng Việt
             payment_type_vn = payment_type_map.get(sub.payment_type, '') if sub.payment_type else ''
             
+            ps = sub.get("payment_status") or "unpaid"
+            dvh = sub.get("dvhs_payment_status") or "unpaid"
             row_data = {
                 "Mã học sinh": sub.student_code or "",
                 "Họ tên": sub.student_name or "",
@@ -2735,6 +2776,8 @@ def export_decision_template(config_id=None):
                 "Quyết định": decision_vn,
                 "Ưu đãi (hạn đóng)": discount_deadline,
                 "Đóng theo": payment_type_vn,
+                "Học phí": tuition_display_map.get(ps, ps),
+                "DVHS": dvhs_display_map.get(dvh, dvh),
                 "Lý do": sub.not_re_enroll_reason or ""  # Lý do cho Cân nhắc / Không tái ghi danh
             }
             
@@ -2758,6 +2801,23 @@ def export_decision_template(config_id=None):
             {"Cột": "Quyết định", "Mô tả": "Quyết định tái ghi danh (BẮT BUỘC)", "Giá trị hợp lệ": "Tái ghi danh | Cân nhắc | Không tái ghi danh"},
             {"Cột": "Ưu đãi (hạn đóng)", "Mô tả": "Hạn đóng tiền để hưởng ưu đãi (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Xem bảng ưu đãi bên dưới (điền ngày VD: 05/02/2026)"},
             {"Cột": "Đóng theo", "Mô tả": "Đóng tiền theo năm hay theo kỳ (BẮT BUỘC nếu Tái ghi danh)", "Giá trị hợp lệ": "Theo năm | Theo kỳ"},
+            {
+                "Cột": "Học phí",
+                "Mô tả": (
+                    "Trạng thái đóng học phí (khi Tái ghi danh). "
+                    + (
+                        "Đợt này có liên kết năm tài chính — cột sẽ bị bỏ qua khi import (lấy từ Finance)."
+                        if config_finance_year_id
+                        else "Đợt không liên kết năm tài chính — import sẽ cập nhật trên hệ thống."
+                    )
+                ),
+                "Giá trị hợp lệ": "Đã đóng | Chưa đóng (hoặc Đóng một phần, Hoàn tiền)",
+            },
+            {
+                "Cột": "DVHS",
+                "Mô tả": "Trạng thái đóng DVHS (khi Tái ghi danh)",
+                "Giá trị hợp lệ": "Đã đóng | Chưa đóng",
+            },
             {"Cột": "Lý do", "Mô tả": "Lý do (BẮT BUỘC nếu Cân nhắc hoặc Không tái ghi danh)", "Giá trị hợp lệ": "Điền lý do tự do"},
         ]
         # Thêm hướng dẫn cho các cột câu hỏi khảo sát
@@ -2888,6 +2948,8 @@ def import_decision_from_excel():
         
         logs.append(f"Import quyết định cho config: {config_id}")
         
+        import_config_fy = frappe.db.get_value("SIS Re-enrollment Config", config_id, "finance_year_id")
+        
         # Lấy danh sách ưu đãi với đầy đủ thông tin
         discounts = frappe.get_all(
             "SIS Re-enrollment Discount",
@@ -2983,6 +3045,12 @@ def import_decision_from_excel():
             'lý do': 'reason',
             'Ly do': 'reason',
             'reason': 'reason',
+            'Học phí': 'tuition_payment',
+            'học phí': 'tuition_payment',
+            'Hoc phi': 'tuition_payment',
+            'hoc phi': 'tuition_payment',
+            'DVHS': 'dvhs_payment',
+            'dvhs': 'dvhs_payment',
         }
         df = df.rename(columns=column_mapping)
         
@@ -2998,6 +3066,29 @@ def import_decision_from_excel():
             'kỳ': 'semester',
             'ky': 'semester',
             'semester': 'semester',
+        }
+        
+        tuition_status_mapping = {
+            'đã đóng': 'paid',
+            'da dong': 'paid',
+            'paid': 'paid',
+            'chưa đóng': 'unpaid',
+            'chua dong': 'unpaid',
+            'unpaid': 'unpaid',
+            'đóng một phần': 'partial',
+            'dong mot phan': 'partial',
+            'partial': 'partial',
+            'hoàn tiền': 'refunded',
+            'hoan tien': 'refunded',
+            'refunded': 'refunded',
+        }
+        dvhs_status_mapping = {
+            'đã đóng': 'paid',
+            'da dong': 'paid',
+            'paid': 'paid',
+            'chưa đóng': 'unpaid',
+            'chua dong': 'unpaid',
+            'unpaid': 'unpaid',
         }
         
         logs.append(f"Columns sau rename: {list(df.columns)}")
@@ -3183,6 +3274,42 @@ def import_decision_from_excel():
                     else:
                         submission.not_re_enroll_reason = None
                 
+                # Học phí & DVHS (chỉ khi tái ghi danh; học phí chỉ ghi khi không liên kết năm tài chính)
+                if decision == 're_enroll':
+                    tuition_raw = (
+                        str(row.get('tuition_payment', '')).strip()
+                        if pd.notna(row.get('tuition_payment'))
+                        else ''
+                    )
+                    dvhs_raw = (
+                        str(row.get('dvhs_payment', '')).strip()
+                        if pd.notna(row.get('dvhs_payment'))
+                        else ''
+                    )
+                    if tuition_raw and tuition_raw.lower() != 'nan':
+                        if not import_config_fy:
+                            mapped_t = tuition_status_mapping.get(tuition_raw.lower())
+                            if not mapped_t:
+                                errors.append({
+                                    "row": row_num,
+                                    "error": f"'Học phí' = '{tuition_raw}' không hợp lệ. Giá trị hợp lệ: Đã đóng, Chưa đóng, Đóng một phần, Hoàn tiền",
+                                    "data": {"student_code": student_code},
+                                })
+                                error_count += 1
+                                continue
+                            submission.payment_status = mapped_t
+                    if dvhs_raw and dvhs_raw.lower() != 'nan':
+                        mapped_d = dvhs_status_mapping.get(dvhs_raw.lower())
+                        if not mapped_d:
+                            errors.append({
+                                "row": row_num,
+                                "error": f"'DVHS' = '{dvhs_raw}' không hợp lệ. Giá trị hợp lệ: Đã đóng, Chưa đóng",
+                                "data": {"student_code": student_code},
+                            })
+                            error_count += 1
+                            continue
+                        submission.dvhs_payment_status = mapped_d
+                
                 # Xử lý câu trả lời khảo sát (chỉ khi Tái ghi danh)
                 if decision == 're_enroll' and questions:
                     # Xóa câu trả lời cũ (nếu có)
@@ -3196,8 +3323,12 @@ def import_decision_from_excel():
                         logs.append(f"Các câu hỏi khảo sát: {[q['question_vn'] for q in questions]}")
                     
                     # Lấy các cột ngoài các cột chuẩn (có thể là cột câu hỏi)
-                    standard_cols = ['student_code', 'student_name', 'current_class', 'decision', 'discount_deadline', 'payment_type', 'reason',
-                                     'Mã học sinh', 'Họ tên', 'Lớp', 'Quyết định', 'Ưu đãi (hạn đóng)', 'Đóng theo', 'Lý do']
+                    standard_cols = [
+                        'student_code', 'student_name', 'current_class', 'decision', 'discount_deadline',
+                        'payment_type', 'reason', 'tuition_payment', 'dvhs_payment',
+                        'Mã học sinh', 'Họ tên', 'Lớp', 'Quyết định', 'Ưu đãi (hạn đóng)', 'Đóng theo',
+                        'Lý do', 'Học phí', 'DVHS',
+                    ]
                     extra_cols = [c for c in df_columns if c not in standard_cols]
                     
                     for q in questions:
