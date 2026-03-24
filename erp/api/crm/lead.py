@@ -411,6 +411,32 @@ CRM_LEAD_DELETE_ROLES = [
     "SIS Sales Admin",
 ]
 
+# Cac DocType co Link toi CRM Lead (khong nam trong child table cua chinh CRM Lead) — can xoa truoc khi xoa ho so
+_CRM_LEAD_LINKED_DOCTYPES = (
+    ("CRM Lead Step History", "lead"),
+    ("CRM Lead Note", "lead"),
+    ("CRM Issue", "lead"),
+    ("CRM Exam Score", "lead"),
+    ("CRM Exam Student", "lead"),
+    ("CRM Admission Event Student", "crm_lead_id"),
+    ("CRM Admission Course Student", "crm_lead_id"),
+)
+
+
+def _delete_docs_linked_to_crm_lead(lead_name: str) -> None:
+    """Xoa ban ghi phu thuoc + go duplicate_lead tro toi ho so nay (tranh LinkExistsError)."""
+    frappe.db.sql(
+        "UPDATE `tabCRM Lead` SET duplicate_lead = NULL WHERE duplicate_lead = %s",
+        (lead_name,),
+    )
+    for doctype, fieldname in _CRM_LEAD_LINKED_DOCTYPES:
+        names = frappe.get_all(doctype, filters={fieldname: lead_name}, pluck="name")
+        for doc_name in names:
+            frappe.delete_doc(doctype, doc_name, ignore_permissions=True, force=True)
+    # Lich su Frappe Version + Comment timeline (khong chan xoa nhung nen don dep)
+    frappe.db.delete("Version", {"ref_doctype": "CRM Lead", "docname": lead_name})
+    frappe.db.delete("Comment", {"reference_doctype": "CRM Lead", "reference_name": lead_name})
+
 
 @frappe.whitelist(methods=["POST"])
 def delete_lead():
@@ -426,6 +452,7 @@ def delete_lead():
         return not_found_response(f"Khong tim thay ho so {name}")
     
     try:
+        _delete_docs_linked_to_crm_lead(name)
         frappe.delete_doc("CRM Lead", name, ignore_permissions=True)
         frappe.db.commit()
         return success_response(message=f"Da xoa ho so {name}")
