@@ -1232,7 +1232,7 @@ def get_period_registrations(period_id=None, page=1, page_size=50, search=None, 
             eligible_params = (active_school_year_id,) + tuple(education_stage_ids)
 
             fully_sub = f"""
-                SELECT r.student_id FROM (
+                SELECT t.student_id FROM (
                     SELECT r.student_id
                     FROM `tabSIS Menu Registration` r
                     INNER JOIN `tabSIS Menu Registration Item` ri ON ri.parent = r.name
