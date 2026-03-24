@@ -43,7 +43,14 @@ VALID_STEP_TRANSITIONS = {
     "Graduated": ["Re-Enroll"],
 }
 
-ALLOWED_ROLES = ["System Manager", "SIS Manager", "Registrar", "SIS Sales"]
+ALLOWED_ROLES = [
+    "System Manager",
+    "SIS Manager",
+    "Registrar",
+    "SIS Sales",
+    "SIS Sales Care Admin",
+    "SIS Sales Admin",
+]
 
 
 def check_crm_permission(required_roles: Optional[List[str]] = None) -> bool:

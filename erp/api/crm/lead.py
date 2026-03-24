@@ -404,10 +404,18 @@ def update_lead():
         return error_response(f"Loi cap nhat ho so: {str(e)}")
 
 
+# Chi cac role nay duoc xoa ho so CRM o bat ky buoc nao
+CRM_LEAD_DELETE_ROLES = [
+    "System Manager",
+    "SIS Sales Care Admin",
+    "SIS Sales Admin",
+]
+
+
 @frappe.whitelist(methods=["POST"])
 def delete_lead():
-    """Xoa lead (chi cho phep o Draft)"""
-    check_crm_permission()
+    """Xoa lead — chi System Manager, SIS Sales Care Admin, SIS Sales Admin; moi buoc."""
+    check_crm_permission(CRM_LEAD_DELETE_ROLES)
     data = get_request_data()
     
     name = data.get("name")
@@ -416,10 +424,6 @@ def delete_lead():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
-    step = frappe.db.get_value("CRM Lead", name, "step")
-    if step != "Draft":
-        return error_response(f"Chi co the xoa ho so o buoc Draft. Ho so hien tai o buoc {step}")
     
     try:
         frappe.delete_doc("CRM Lead", name, ignore_permissions=True)
