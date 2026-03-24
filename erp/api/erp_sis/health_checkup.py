@@ -251,6 +251,18 @@ def get_students_health_checkup(school_year_id=None):
                     , shc_b.approval_status as checkup_beginning_status
                     , shc_e.approval_status as checkup_end_status
             """
+        returned_cols = ""
+        if checkup_table_exists:
+            try:
+                if frappe.db.has_column(
+                    "SIS Student Health Checkup", "returned_from_level"
+                ):
+                    returned_cols = """
+                    , shc_b.returned_from_level as checkup_beginning_returned_from_level
+                    , shc_e.returned_from_level as checkup_end_returned_from_level
+                    """
+            except Exception:
+                returned_cols = ""
 
         if checkup_table_exists:
             # Hai LEFT JOIN theo đợt: đầu năm / cuối năm
@@ -265,6 +277,7 @@ def get_students_health_checkup(school_year_id=None):
                     shc_b.name as checkup_beginning_id,
                     shc_e.name as checkup_end_id
                     {approval_cols}
+                    {returned_cols}
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
