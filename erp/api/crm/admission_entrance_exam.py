@@ -33,6 +33,22 @@ VALID_ENTRANCE_STATUSES = frozenset(
 VALID_EXAM_RESULTS = frozenset({"", "pass", "conditional_pass", "retake", "fail"})
 
 
+def _resolve_crm_lead_name(ref):
+    """
+    Chuẩn hóa tham chiếu CRM Lead: docname (name) hoặc mã crm_code.
+    API tab CRM và thêm HS có thể gửi một trong hai — bản ghi Link luôn lưu name.
+    """
+    if not ref:
+        return None
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    if frappe.db.exists("CRM Lead", ref):
+        return ref
+    lead_name = frappe.db.get_value("CRM Lead", {"crm_code": ref}, "name")
+    return lead_name
+
+
 # ========== KỲ KHẢO SÁT ==========
 
 
@@ -228,7 +244,7 @@ def _serialize_entrance_exam_student_detail(record_id):
     """Chi tiết một bản ghi học sinh trong kỳ (kèm điểm môn) — dùng API detail và tab CRM."""
     if not record_id or not frappe.db.exists("CRM Admission Entrance Exam Student", record_id):
         return None
-    doc = frappe.get_doc("CRM Admission Entrance Exam Student", record_id)
+    doc = frappe.get_doc("CRM Admission Entrance Exam Student", record_id, ignore_permissions=True)
     lead = frappe.db.get_value(
         "CRM Lead",
         doc.crm_lead_id,
@@ -329,15 +345,16 @@ def add_entrance_exam_student():
     check_crm_permission()
     data = get_request_data()
     exam_id = data.get("exam_id") or data.get("entrance_exam_id")
-    crm_lead_id = data.get("crm_lead_id")
-    if not exam_id or not crm_lead_id:
+    crm_lead_raw = data.get("crm_lead_id")
+    if not exam_id or not crm_lead_raw:
         return validation_error_response(
             "Thiếu exam_id hoặc crm_lead_id",
             {"exam_id": ["Bắt buộc"], "crm_lead_id": ["Bắt buộc"]},
         )
     if not frappe.db.exists("CRM Admission Entrance Exam", exam_id):
         return not_found_response("Không tìm thấy kỳ khảo sát")
-    if not frappe.db.exists("CRM Lead", crm_lead_id):
+    crm_lead_id = _resolve_crm_lead_name(crm_lead_raw)
+    if not crm_lead_id:
         return not_found_response("Không tìm thấy CRM Lead")
 
     existing = frappe.db.exists(
@@ -456,17 +473,20 @@ def get_entrance_exam_student_detail():
 def get_entrance_exam_student_details_for_lead():
     """Danh sách chi tiết khảo sát đầu vào của một CRM Lead (tab Thông tin chung)."""
     check_crm_permission()
-    crm_lead_id = frappe.request.args.get("crm_lead_id")
-    if not crm_lead_id:
+    crm_lead_raw = frappe.request.args.get("crm_lead_id")
+    if not crm_lead_raw:
         return validation_error_response("Thiếu crm_lead_id", {"crm_lead_id": ["Bắt buộc"]})
-    if not frappe.db.exists("CRM Lead", crm_lead_id):
+    crm_lead_id = _resolve_crm_lead_name(crm_lead_raw)
+    if not crm_lead_id:
         return not_found_response("Không tìm thấy CRM Lead")
 
+    # get_all mặc định áp quyền đọc DocType; insert HS dùng ignore_permissions — có thể lệch → cần ignore ở đây
     row_names = frappe.get_all(
         "CRM Admission Entrance Exam Student",
         filters={"crm_lead_id": crm_lead_id},
         pluck="name",
         order_by="modified desc",
+        ignore_permissions=True,
     )
     items = []
     for name in row_names:
