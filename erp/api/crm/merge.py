@@ -24,28 +24,55 @@ def get_merge_candidates():
         return not_found_response(f"Khong tim thay ho so {lead_name}")
     
     doc = frappe.get_doc("CRM Lead", lead_name)
-    
-    # Tim ho so trung theo duplicate_lead
+
+    from erp.api.crm.duplicate import _find_matching_leads, _find_matching_leads_by_names
+
     candidates = []
+
+    def _merge_or_append(full_dict, matched_fields):
+        """Gop candidate: neu trung name thi gop matched_fields."""
+        name = full_dict.get("name")
+        if name == lead_name:
+            return
+        for c in candidates:
+            if c.get("name") == name:
+                mf = set(c.get("matched_fields") or [])
+                mf.update(matched_fields or [])
+                c["matched_fields"] = list(mf)
+                return
+        full_dict["matched_fields"] = list(matched_fields or [])
+        candidates.append(full_dict)
+
+    # Tim ho so trung theo duplicate_lead
     if doc.duplicate_lead:
         dup_doc = frappe.get_doc("CRM Lead", doc.duplicate_lead)
-        candidates.append(dup_doc.as_dict())
-    
-    # Tim them theo SDT (chi check voi ho so trong he thong, tru Verify)
+        d = dup_doc.as_dict()
+        _merge_or_append(d, d.get("matched_fields") or [])
+
+    # Tim theo SDT (check voi ho so trong he thong, khong lay ban ghi Verify khac)
     phones = [p.phone_number for p in doc.phone_numbers]
     if phones:
-        from erp.api.crm.duplicate import _find_matching_leads
         matches = _find_matching_leads(
             phones, doc.student_name, doc.guardian_name,
             exclude_draft=True, exclude_verify=True
         )
         for match in matches:
-            if match["name"] != lead_name and match["name"] not in [c.get("name") for c in candidates]:
-                full_doc = frappe.get_doc("CRM Lead", match["name"])
-                match_data = full_doc.as_dict()
-                match_data["matched_fields"] = match.get("matched_fields", [])
-                candidates.append(match_data)
-    
+            if match["name"] == lead_name:
+                continue
+            full_doc = frappe.get_doc("CRM Lead", match["name"]).as_dict()
+            _merge_or_append(full_doc, match.get("matched_fields", []))
+
+    # Tim theo cap ten PH + ten HS (bo sung ngoai SĐT)
+    name_matches = _find_matching_leads_by_names(
+        doc.student_name, doc.guardian_name,
+        exclude_draft=True, exclude_verify=True
+    )
+    for match in name_matches:
+        if match["name"] == lead_name:
+            continue
+        full_doc = frappe.get_doc("CRM Lead", match["name"]).as_dict()
+        _merge_or_append(full_doc, match.get("matched_fields", []))
+
     return list_response(candidates)
 
 

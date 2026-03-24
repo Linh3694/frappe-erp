@@ -13,6 +13,49 @@ from erp.api.crm.utils import (
 )
 
 
+def _normalize_person_name(name):
+    """Chuan hoa ten de so sanh: trim, gop khoang trang, lower."""
+    if not name:
+        return None
+    s = " ".join(str(name).strip().split())
+    if not s:
+        return None
+    return s.lower()
+
+
+def _find_matching_leads_by_names(student_name, guardian_name, exclude_draft=False, exclude_verify=False):
+    """
+    Tim ho so trung cap (ten PH + ten HS), khong dua vao SDT.
+    Chi chay khi ca hai ten deu co gia tri (tranh false positive).
+    Dung cung rule exclude Draft / Verify nhu tim theo SDT (doi chieu voi ho so trong he thong).
+    """
+    sn = _normalize_person_name(student_name)
+    gn = _normalize_person_name(guardian_name)
+    if not sn or not gn:
+        return []
+
+    wheres = [
+        "LOWER(TRIM(IFNULL(cl.student_name, ''))) = %s",
+        "LOWER(TRIM(IFNULL(cl.guardian_name, ''))) = %s",
+    ]
+    params = [sn, gn]
+    if exclude_draft:
+        wheres.append("cl.step != 'Draft'")
+    if exclude_verify:
+        wheres.append("cl.step != 'Verify'")
+
+    query = """
+        SELECT DISTINCT cl.name, cl.step, cl.status, cl.student_name, cl.guardian_name,
+               cl.modified, cl.pic, cl.campus_id
+        FROM `tabCRM Lead` cl
+        WHERE """ + " AND ".join(wheres)
+
+    rows = frappe.db.sql(query, tuple(params), as_dict=True)
+    for row in rows:
+        row["matched_fields"] = ["student_name", "guardian_name"]
+    return rows
+
+
 def _find_matching_leads(phone_numbers, student_name=None, guardian_name=None, exclude_draft=False, exclude_verify=False):
     """
     Tim ho so trung dua tren SDT, ten HS, ten PH.
