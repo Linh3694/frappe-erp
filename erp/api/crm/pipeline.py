@@ -106,7 +106,7 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
     default_statuses = {
         "Verify": "Can kiem tra",
         "Lead": "Moi",
-        "QLead": "Moi",
+        "QLead": "Follow Up",
         "Test": "Pre-test",
         "Deal": "Booked",
         "Enrolled": "Dang hoc",
@@ -301,7 +301,7 @@ def bulk_advance_step():
                 default_statuses = {
                     "Verify": "Can kiem tra",
                     "Lead": "Moi",
-                    "QLead": "Moi",
+                    "QLead": "Follow Up",
                     "Test": "Pre-test",
                     "Deal": "Booked",
                     "Enrolled": "Dang hoc",

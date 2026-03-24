@@ -1,0 +1,93 @@
+{
+ "actions": [],
+ "autoname": "format:CRM-ADM-ENT-STU-{#####}",
+ "creation": "2025-03-24 00:00:00.000000",
+ "description": "Học sinh trong kỳ khảo sát đầu vào — CRM Lead + điểm môn",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "entrance_exam_id",
+  "crm_lead_id",
+  "status",
+  "exam_result",
+  "scores"
+ ],
+ "fields": [
+  {
+   "fieldname": "entrance_exam_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Kỳ khảo sát",
+   "options": "CRM Admission Entrance Exam",
+   "reqd": 1
+  },
+  {
+   "fieldname": "crm_lead_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "CRM Lead",
+   "options": "CRM Lead",
+   "reqd": 1
+  },
+  {
+   "default": "new",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trạng thái",
+   "options": "new\nschedule_notified\nnot_attending\nexam_taken\ncompleted"
+  },
+  {
+   "fieldname": "exam_result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Kết quả thi",
+   "options": "\npass\nconditional_pass\nretake\nfail"
+  },
+  {
+   "fieldname": "scores",
+   "fieldtype": "Table",
+   "label": "Điểm theo môn",
+   "options": "CRM Admission Entrance Exam Score"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-03-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Admission Entrance Exam Student",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "SIS Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "Registrar",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "SIS Sales"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

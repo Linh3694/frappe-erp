@@ -22,7 +22,7 @@ STEP_STATUSES: Dict[str, List[str]] = {
         "Da kiem tra - Trung hoc sinh",
     ],
     "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Lost"],
-    "QLead": ["Moi", "Follow Up", "Pre-Event", "Event", "Pre-school Tour/ School Tour", "Lost"],
+    "QLead": ["Follow Up", "Pre-Event", "Event", "Pre-school Tour/ School Tour", "Lost"],
     "Test": ["Pre-test", "Test", "Offered", "Failed", "Retake", "Lost"],
     "Deal": ["Booked", "Deposit", "Lost", "Refund", "Reserved", "Paid"],
     "Enrolled": ["Dang hoc"],
