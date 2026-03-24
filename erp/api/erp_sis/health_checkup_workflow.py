@@ -411,6 +411,8 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
         if not _has_approval_column():
             return success_response(data={"pending": [], "published": []}, message="OK")
 
+        # Một phiếu khám = một dòng; không JOIN Class Student trực tiếp (một HS có thể có nhiều
+        # bản ghi lớp/năm → gây duplicate). Lấy tên lớp regular qua subquery LIMIT 1.
         sql = f"""
             SELECT
                 shc.name,
@@ -423,11 +425,17 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
                 shc.submitted_at,
                 shc.returned_from_level,
                 shc.last_rejection_comment,
-                c.title as class_name
+                (
+                    SELECT c.title
+                    FROM `tabSIS Class Student` cs2
+                    INNER JOIN `tabSIS Class` c ON c.name = cs2.class_id
+                        AND IFNULL(c.class_type, '') = 'regular'
+                    WHERE cs2.student_id = shc.student_id
+                        AND cs2.school_year_id = shc.school_year_id
+                    ORDER BY c.title ASC
+                    LIMIT 1
+                ) AS class_name
             FROM `tabSIS Student Health Checkup` shc
-            LEFT JOIN `tabSIS Class Student` cs
-                ON cs.student_id = shc.student_id AND cs.school_year_id = shc.school_year_id
-            LEFT JOIN `tabSIS Class` c ON c.name = cs.class_id AND IFNULL(c.class_type,'') = 'regular'
             WHERE shc.school_year_id = %(sy)s
                 AND shc.checkup_phase = %(ph)s
                 {campus_filter}
