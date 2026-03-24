@@ -449,13 +449,24 @@ def get_active_period():
             return error_response("Không tìm thấy thông tin phụ huynh", logs=logs)
         
         # Tìm kỳ học bổng được hiển thị trên Parent Portal (độc lập với status và thời gian)
-        period = frappe.db.sql("""
-            SELECT name, title, academic_year_id, campus_id, status, from_date, to_date
-            FROM `tabSIS Scholarship Period`
-            WHERE show_on_parent_portal = 1
-            ORDER BY modified DESC
-            LIMIT 1
-        """, as_dict=True)
+        # Cố gắng SELECT luôn title_en; site chưa migrate cột thì fallback query không có cột đó
+        try:
+            period = frappe.db.sql("""
+                SELECT name, title, IFNULL(`title_en`, '') AS title_en,
+                    academic_year_id, campus_id, status, from_date, to_date
+                FROM `tabSIS Scholarship Period`
+                WHERE show_on_parent_portal = 1
+                ORDER BY modified DESC
+                LIMIT 1
+            """, as_dict=True)
+        except Exception:
+            period = frappe.db.sql("""
+                SELECT name, title, academic_year_id, campus_id, status, from_date, to_date
+                FROM `tabSIS Scholarship Period`
+                WHERE show_on_parent_portal = 1
+                ORDER BY modified DESC
+                LIMIT 1
+            """, as_dict=True)
         
         if not period:
             return success_response(
@@ -597,13 +608,26 @@ def get_active_period():
             })
         
         logs.append(f"Tìm thấy kỳ {period_data.name}, {len(students)} học sinh có thể đăng ký")
-        
+
+        # Tên kỳ tiếng Anh: đọc thẳng từ DB (tránh DocType/meta cache khiến getattr(period_doc, title_en) rỗng)
+        period_title_en = ""
+        try:
+            raw_en = frappe.db.get_value("SIS Scholarship Period", period_data.name, "title_en")
+            if raw_en:
+                period_title_en = str(raw_en).strip()
+        except Exception:
+            period_title_en = ""
+
+        period_title_vn = (period_data.get("title") or "").strip()
+
         return success_response(
             data={
                 "status": "open",
                 "config": {
                     "name": period_data.name,
-                    "title": period_data.title,
+                    "title": period_title_vn,
+                    "title_vn": period_title_vn,
+                    "title_en": period_title_en,
                     "academic_year_id": period_data.academic_year_id,
                     "school_year_name_vn": school_year.title_vn if school_year else None,
                     "school_year_name_en": school_year.title_en if school_year else None,
