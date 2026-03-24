@@ -11,6 +11,7 @@ from erp.utils.api_response import success_response, error_response
 from erp.utils.email_service import send_email_via_service
 
 import json
+from collections import defaultdict
 
 ROLE_SIS_MEDICAL = "SIS Medical"
 ROLE_SIS_MEDICAL_ADMIN = "SIS Medical Admin"
@@ -136,6 +137,29 @@ def _homeroom_emails_for_student(student_id, school_year_id):
     return emails
 
 
+def _homeroom_emails_for_class(class_id):
+    """Email GVCN + phó GVCN của một lớp (dùng gửi 1 thông báo / lớp sau duyệt L2)."""
+    if not class_id:
+        return []
+    cls = frappe.db.get_value(
+        "SIS Class",
+        class_id,
+        ["homeroom_teacher", "vice_homeroom_teacher"],
+        as_dict=True,
+    )
+    if not cls:
+        return []
+    emails = []
+    for tid in (cls.get("homeroom_teacher"), cls.get("vice_homeroom_teacher")):
+        if not tid:
+            continue
+        uid = frappe.db.get_value("SIS Teacher", tid, "user_id")
+        em = _email_for_user(uid)
+        if em and em not in emails:
+            emails.append(em)
+    return emails
+
+
 def _is_homeroom_for_student(student_id, school_year_id) -> bool:
     tid = _teacher_id_from_session_user()
     if not tid:
@@ -241,9 +265,30 @@ def approve_health_checkup_l2(checkup_name=None):
             doc.save(ignore_permissions=True)
             done.append(name)
 
-            emails = _homeroom_emails_for_student(doc.student_id, doc.school_year_id)
-            subj = f"[Khám SK] Phiếu chờ GVCN — {doc.student_name or doc.student_id}"
-            body = f"Học sinh: {doc.student_name}. Đợt: {doc.checkup_phase}. Phiếu: {doc.name}."
+        # Gom thông báo theo lớp: 1 email tới GVCN + phó GVCN / lớp (không gửi từng học sinh)
+        by_class = defaultdict(list)
+        for name in done:
+            doc = frappe.get_doc("SIS Student Health Checkup", name)
+            row = _get_regular_class_row(doc.student_id, doc.school_year_id)
+            if not row:
+                continue
+            cid = row[0].get("class_id")
+            if cid:
+                by_class[cid].append(doc)
+
+        for class_id, docs in by_class.items():
+            emails = _homeroom_emails_for_class(class_id)
+            if not emails or not docs:
+                continue
+            class_title = frappe.db.get_value("SIS Class", class_id, "title") or class_id
+            lines = []
+            for d in docs:
+                lines.append(
+                    f"- {d.student_name or d.student_id} ({d.student_code or ''}): phiếu {d.name}"
+                )
+            phase = docs[0].checkup_phase
+            subj = f"[Khám SK] {len(docs)} phiếu chờ GVCN — lớp {class_title}"
+            body = f"Đợt khám: {phase}.<br/>" + "<br/>".join(lines)
             _notify_workflow(emails, subj, body)
 
         frappe.db.commit()
@@ -441,6 +486,16 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
                 shc.submitted_at,
                 shc.returned_from_level,
                 shc.last_rejection_comment,
+                (
+                    SELECT c.name
+                    FROM `tabSIS Class Student` cs2
+                    INNER JOIN `tabSIS Class` c ON c.name = cs2.class_id
+                        AND IFNULL(c.class_type, '') = 'regular'
+                    WHERE cs2.student_id = shc.student_id
+                        AND cs2.school_year_id = shc.school_year_id
+                    ORDER BY c.title ASC
+                    LIMIT 1
+                ) AS class_id,
                 (
                     SELECT c.title
                     FROM `tabSIS Class Student` cs2
