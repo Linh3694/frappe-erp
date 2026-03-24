@@ -5,9 +5,25 @@ Handles student timetable retrieval for parent portal
 
 import frappe
 from frappe import _
+from frappe.utils import getdate
 from datetime import datetime, timedelta
 import json
 from erp.utils.api_response import validation_error_response, list_response, error_response
+
+
+def _timetable_row_applies_to_target_date(row_dict, instance_start, instance_end, target_date_str):
+    """
+    Kiểm tra dòng TKB có hiệu lực cho ngày target (theo valid_from/valid_to trên row,
+    fallback về start_date/end_date của instance khi null).
+    """
+    td = getdate(target_date_str)
+    vf = row_dict.get("valid_from") or instance_start
+    vt = row_dict.get("valid_to") or instance_end
+    if vf and td < getdate(vf):
+        return False
+    if vt and td > getdate(vt):
+        return False
+    return True
 
 
 def _parse_iso_date(date_str):
@@ -167,13 +183,17 @@ def _get_class_timetable_for_date(class_id, target_date):
                 SELECT DISTINCT
                     tir.timetable_column_id
                 FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Timetable Instance` ti ON ti.name = tir.parent
                 WHERE tir.parent IN %(instance_ids)s
                 AND tir.day_of_week = %(day_of_week)s
+                AND %(target_date)s >= IFNULL(tir.valid_from, ti.start_date)
+                AND %(target_date)s <= IFNULL(tir.valid_to, ti.end_date)
             """
             
             study_columns = frappe.db.sql(study_columns_sql, {
                 "instance_ids": tuple(instance_ids),
-                "day_of_week": day_of_week
+                "day_of_week": day_of_week,
+                "target_date": target_date_str,
             }, as_dict=True)
             
             study_column_ids = {row['timetable_column_id'] for row in study_columns}
@@ -409,15 +429,19 @@ def _get_class_timetable_for_date(class_id, target_date):
                     tir.room_id,
                     tir.day_of_week
                 FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Timetable Instance` ti ON ti.name = tir.parent
                 WHERE tir.parent IN %(instance_ids)s
                 AND tir.day_of_week = %(day_of_week)s
                 AND tir.subject_id IS NOT NULL
+                AND %(target_date)s >= IFNULL(tir.valid_from, ti.start_date)
+                AND %(target_date)s <= IFNULL(tir.valid_to, ti.end_date)
                 ORDER BY tir.timetable_column_id
             """
 
             existing_rows = frappe.db.sql(existing_rows_sql, {
                 "instance_ids": tuple(instance_ids),
-                "day_of_week": day_of_week
+                "day_of_week": day_of_week,
+                "target_date": target_date_str,
             }, as_dict=True)
 
             logs.append(f"✅ Found {len(existing_rows)} study period rows for {day_of_week}")
@@ -538,12 +562,25 @@ def _get_class_timetable_for_date(class_id, target_date):
                         "subject_id",
                         "teacher_1_id",
                         "teacher_2_id",
-                        "room_id"
+                        "room_id",
+                        "valid_from",
+                        "valid_to",
                     ],
                     filters=row_filters,
                     order_by="timetable_column_id asc",
                     ignore_permissions=True
                 )
+                # Lọc theo valid_from/valid_to giống nhánh SQL chính (tránh áp dụng sai mọi tuần)
+                instance_lookup = {i["name"]: i for i in instances}
+                all_columns = [
+                    r for r in all_columns
+                    if _timetable_row_applies_to_target_date(
+                        r,
+                        instance_lookup.get(r.get("parent"), {}).get("start_date"),
+                        instance_lookup.get(r.get("parent"), {}).get("end_date"),
+                        target_date_str,
+                    )
+                ]
                 logs.append(f"✅ Fallback query found {len(all_columns)} rows")
             except Exception as e2:
                 logs.append(f"❌ Fallback query also failed: {str(e2)}")
