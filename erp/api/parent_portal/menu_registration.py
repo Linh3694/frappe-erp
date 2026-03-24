@@ -1652,6 +1652,32 @@ def get_period_registrations(
         total = frappe.db.sql(count_sql, count_params, as_dict=True)[0].cnt or 0
 
         offset = (int(page) - 1) * int(page_size)
+
+        # Mặc định không lọc cấp/lớp: HS đã đăng ký đủ mọi ngày kỳ lên trước, sau đó theo tên
+        registration_dates_ord = _get_registration_dates(period_id)
+        if not registration_dates_ord:
+            registration_dates_ord = _get_wednesdays_in_month(period.month, period.year)
+        n_ord = len(registration_dates_ord)
+        sort_completed_first = not fe_stage and not fe_class and n_ord > 0
+        if sort_completed_first:
+            ph_ord_dates = ",".join(["%s"] * n_ord)
+            order_clause = f"""
+                ORDER BY
+                    CASE WHEN COALESCE((
+                        SELECT COUNT(DISTINCT DATE(ri_ord.date))
+                        FROM `tabSIS Menu Registration` r_ord
+                        INNER JOIN `tabSIS Menu Registration Item` ri_ord ON ri_ord.parent = r_ord.name
+                        WHERE r_ord.period = %s
+                        AND r_ord.student_id = inc.student_id
+                        AND DATE(ri_ord.date) IN ({ph_ord_dates})
+                    ), 0) >= %s THEN 0 ELSE 1 END ASC,
+                    s.student_name ASC
+            """
+            order_params = (period_id,) + tuple(registration_dates_ord) + (n_ord,)
+        else:
+            order_clause = "ORDER BY s.student_name ASC"
+            order_params = ()
+
         list_sql = f"""
                 SELECT
                     COALESCE(r.name, '') AS name,
@@ -1678,11 +1704,11 @@ def get_period_registrations(
                 LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
                 LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
                 WHERE 1=1 {search_clause}
-                ORDER BY s.student_name ASC
+                {order_clause}
                 LIMIT %s OFFSET %s
             """
         list_params = (
-            eligible_params + (period_id,) + search_params + (int(page_size), offset)
+            eligible_params + (period_id,) + search_params + order_params + (int(page_size), offset)
         )
         registrations = frappe.db.sql(list_sql, list_params, as_dict=True)
 

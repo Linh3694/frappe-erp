@@ -166,7 +166,7 @@ EVENT_STATUS_MAP = {
 
 @frappe.whitelist()
 def get_lead_events():
-    """Lấy danh sách sự kiện mà lead đã tham gia (status = attended) - dùng cho DealSection"""
+    """Lấy mọi sự kiện đã gắn lead (mọi trạng thái: registered / attended / not_attended) — DealSection CRM."""
     check_crm_permission()
     crm_lead_id = frappe.request.args.get("crm_lead_id")
     if not crm_lead_id:
@@ -174,10 +174,9 @@ def get_lead_events():
     if not frappe.db.exists("CRM Lead", crm_lead_id):
         return not_found_response("Không tìm thấy CRM Lead")
 
-    # Lấy các Event Student records với status attended
     event_students = frappe.get_all(
         "CRM Admission Event Student",
-        filters={"crm_lead_id": crm_lead_id, "status": "attended"},
+        filters={"crm_lead_id": crm_lead_id},
         fields=["name", "event_id", "status", "modified"],
         order_by="modified desc",
     )
@@ -209,7 +208,7 @@ def get_lead_events():
 
 @frappe.whitelist()
 def get_lead_courses():
-    """Lấy danh sách khoá học/CLB mà lead đã đóng tiền (status = paid) - dùng cho DealSection"""
+    """Lấy mọi khoá học/CLB đã gắn lead (mọi trạng thái) — DealSection CRM."""
     check_crm_permission()
     crm_lead_id = frappe.request.args.get("crm_lead_id")
     if not crm_lead_id:
@@ -217,10 +216,9 @@ def get_lead_courses():
     if not frappe.db.exists("CRM Lead", crm_lead_id):
         return not_found_response("Không tìm thấy CRM Lead")
 
-    # Lấy các Course Student records với status paid (Đã đóng tiền trở đi)
     course_students = frappe.get_all(
         "CRM Admission Course Student",
-        filters={"crm_lead_id": crm_lead_id, "status": "paid"},
+        filters={"crm_lead_id": crm_lead_id},
         fields=["name", "course_id", "status", "modified"],
         order_by="modified desc",
     )
@@ -238,13 +236,14 @@ def get_lead_courses():
     for cs in course_students:
         co = course_map.get(cs["course_id"])
         if co:
+            st = cs.get("status") or ""
             result.append({
                 "name": cs["name"],
                 "course_id": cs["course_id"],
                 "course_name": co.get("course_name") or "-",
                 "event_date": co.get("event_date"),
-                "status": cs["status"],
-                "status_label": "Đã đóng tiền",
+                "status": st,
+                "status_label": STATUS_MAP.get(st, st),
                 "modified": cs["modified"],
             })
     return list_response(result, "Thành công")
