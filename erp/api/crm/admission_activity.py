@@ -14,6 +14,21 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import check_crm_permission, get_request_data
 
 
+def _resolve_crm_lead_name(ref):
+    """
+    Chuẩn hóa tham chiếu CRM Lead: docname (name) hoặc mã crm_code.
+    Tab CRM có thể gửi URL param là crm_code; bản ghi Event/Course Student luôn lưu link theo name.
+    """
+    if not ref:
+        return None
+    ref = (ref or "").strip()
+    if not ref:
+        return None
+    if frappe.db.exists("CRM Lead", ref):
+        return ref
+    return frappe.db.get_value("CRM Lead", {"crm_code": ref}, "name")
+
+
 # ========== SỰ KIỆN (CRM Admission Event) ==========
 
 
@@ -168,10 +183,11 @@ EVENT_STATUS_MAP = {
 def get_lead_events():
     """Lấy mọi sự kiện đã gắn lead (mọi trạng thái: registered / attended / not_attended) — DealSection CRM."""
     check_crm_permission()
-    crm_lead_id = frappe.request.args.get("crm_lead_id")
-    if not crm_lead_id:
+    crm_lead_raw = frappe.request.args.get("crm_lead_id")
+    if not crm_lead_raw:
         return validation_error_response("Thiếu crm_lead_id", {"crm_lead_id": ["Bắt buộc"]})
-    if not frappe.db.exists("CRM Lead", crm_lead_id):
+    crm_lead_id = _resolve_crm_lead_name(crm_lead_raw)
+    if not crm_lead_id:
         return not_found_response("Không tìm thấy CRM Lead")
 
     event_students = frappe.get_all(
@@ -210,10 +226,11 @@ def get_lead_events():
 def get_lead_courses():
     """Lấy mọi khoá học/CLB đã gắn lead (mọi trạng thái) — DealSection CRM."""
     check_crm_permission()
-    crm_lead_id = frappe.request.args.get("crm_lead_id")
-    if not crm_lead_id:
+    crm_lead_raw = frappe.request.args.get("crm_lead_id")
+    if not crm_lead_raw:
         return validation_error_response("Thiếu crm_lead_id", {"crm_lead_id": ["Bắt buộc"]})
-    if not frappe.db.exists("CRM Lead", crm_lead_id):
+    crm_lead_id = _resolve_crm_lead_name(crm_lead_raw)
+    if not crm_lead_id:
         return not_found_response("Không tìm thấy CRM Lead")
 
     course_students = frappe.get_all(
@@ -328,12 +345,13 @@ def add_event_student():
     check_crm_permission()
     data = get_request_data()
     event_id = data.get("event_id")
-    crm_lead_id = data.get("crm_lead_id")
-    if not event_id or not crm_lead_id:
+    crm_lead_raw = data.get("crm_lead_id")
+    if not event_id or not crm_lead_raw:
         return validation_error_response("Thiếu event_id hoặc crm_lead_id", {"event_id": ["Bắt buộc"], "crm_lead_id": ["Bắt buộc"]})
     if not frappe.db.exists("CRM Admission Event", event_id):
         return not_found_response("Không tìm thấy sự kiện")
-    if not frappe.db.exists("CRM Lead", crm_lead_id):
+    crm_lead_id = _resolve_crm_lead_name(crm_lead_raw)
+    if not crm_lead_id:
         return not_found_response("Không tìm thấy CRM Lead")
 
     existing = frappe.db.exists(
@@ -890,12 +908,13 @@ def add_course_student():
     check_crm_permission()
     data = get_request_data()
     course_id = data.get("course_id")
-    crm_lead_id = data.get("crm_lead_id")
-    if not course_id or not crm_lead_id:
+    crm_lead_raw = data.get("crm_lead_id")
+    if not course_id or not crm_lead_raw:
         return validation_error_response("Thiếu course_id hoặc crm_lead_id", {"course_id": ["Bắt buộc"], "crm_lead_id": ["Bắt buộc"]})
     if not frappe.db.exists("CRM Admission Course", course_id):
         return not_found_response("Không tìm thấy khoá học")
-    if not frappe.db.exists("CRM Lead", crm_lead_id):
+    crm_lead_id = _resolve_crm_lead_name(crm_lead_raw)
+    if not crm_lead_id:
         return not_found_response("Không tìm thấy CRM Lead")
 
     # Kiểm tra trùng
