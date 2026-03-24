@@ -394,7 +394,9 @@ def reject_health_checkup_l3(checkup_name=None, comment=None):
         names = _load_checkup_names(data)
         if checkup_name:
             names = [checkup_name]
-        comment = comment or data.get("comment") or data.get("rejection_comment") or ""
+        comment = (comment or data.get("comment") or data.get("rejection_comment") or "").strip()
+        if not comment:
+            return error_response(message="Vui lòng nhập lý do trả phiếu", code="VALIDATION_ERROR")
 
         if not names:
             return error_response(message="Thiếu phiếu", code="VALIDATION_ERROR")
@@ -416,7 +418,7 @@ def reject_health_checkup_l3(checkup_name=None, comment=None):
                     continue
             doc.approval_status = "draft"
             doc.returned_from_level = "l3"
-            doc.last_rejection_comment = (comment or "")[:500]
+            doc.last_rejection_comment = comment[:500]
             doc.l3_action_at = now_datetime()
             doc.l3_action_by = frappe.session.user
             doc.save(ignore_permissions=True)
@@ -424,7 +426,7 @@ def reject_health_checkup_l3(checkup_name=None, comment=None):
 
             target = _email_for_user(doc.submitted_by) or _email_for_user(doc.owner)
             subj = f"[Khám SK] Phiếu bị trả L3 — {doc.student_name or doc.student_id}"
-            body = f"Phiếu {doc.name}. Lý do: {comment or '(không có)'}."
+            body = f"Phiếu {doc.name}. Lý do: {comment}."
             _notify_workflow([target] if target else [], subj, body)
 
         frappe.db.commit()
