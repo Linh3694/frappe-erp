@@ -1260,6 +1260,7 @@ def update_submission():
         "selected_discount_id": "...",
         "not_re_enroll_reason": "...",
         "payment_status": "unpaid" | "paid" | "refunded",
+        "dvhs_payment_status": "unpaid" | "paid",
         "notes": [{"note": "...", "created_by_name": "..."}]
     }
     """
@@ -2790,6 +2791,24 @@ def export_decision_template(config_id=None):
                 row_data[col_name] = ",".join(answer_indices) if answer_indices else ""
             
             students_data.append(row_data)
+        
+        # Không có học sinh trong đợt: vẫn xuất sheet có đủ cột (Học phí, DVHS, khảo sát...)
+        # để pandas không tạo DataFrame rỗng không có header
+        if not students_data:
+            empty_row = {
+                "Mã học sinh": "",
+                "Họ tên": "",
+                "Lớp": "",
+                "Quyết định": "",
+                "Ưu đãi (hạn đóng)": "",
+                "Đóng theo": "",
+                "Học phí": "",
+                "DVHS": "",
+                "Lý do": "",
+            }
+            for q in questions:
+                empty_row[q["question_vn"]] = ""
+            students_data = [empty_row]
         
         df_students = pd.DataFrame(students_data)
         
