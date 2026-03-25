@@ -14,33 +14,18 @@ import json
 
 
 def get_mobile_staff_users():
-    """Get users with Mobile IT or Mobile BOD role for feedback notifications"""
+    """Get users with Mobile IT, Mobile BOD or Mobile Sales Care role for feedback notifications"""
     try:
-        # Get users with Mobile IT role (can take action)
-        mobile_it_users = frappe.db.sql("""
+        # Lấy tất cả user có role Mobile IT / Mobile BOD / Mobile Sales Care, loại trùng
+        all_users = frappe.db.sql("""
             SELECT DISTINCT u.name as email, u.full_name
             FROM `tabUser` u
             INNER JOIN `tabHas Role` hr ON hr.parent = u.name
             WHERE u.enabled = 1
-                AND hr.role = 'Mobile IT'
+                AND hr.role IN ('Mobile IT', 'Mobile BOD', 'Mobile Sales Care')
         """, as_dict=True)
-
-        # Get users with Mobile BOD role (view only)
-        mobile_bod_users = frappe.db.sql("""
-            SELECT DISTINCT u.name as email, u.full_name
-            FROM `tabUser` u
-            INNER JOIN `tabHas Role` hr ON hr.parent = u.name
-            WHERE u.enabled = 1
-                AND hr.role = 'Mobile BOD'
-                AND u.name NOT IN (
-                    SELECT parent FROM `tabHas Role` WHERE role = 'Mobile IT'
-                )
-        """, as_dict=True)
-
-        # Combine lists
-        all_users = list(mobile_it_users) + list(mobile_bod_users)
         
-        frappe.logger().info(f"📱 [Feedback Notification] Found {len(all_users)} mobile staff users ({len(mobile_it_users)} IT, {len(mobile_bod_users)} BOD)")
+        frappe.logger().info(f"📱 [Feedback Notification] Found {len(all_users)} mobile staff users (IT + BOD + Sales Care)")
         
         return all_users
     
