@@ -981,6 +981,7 @@ def import_health_checkup(school_year_id=None, data=None):
 # Workflow phê duyệt (re-export từ module riêng)
 from erp.api.erp_sis.health_checkup_workflow import (  # noqa: E402
     submit_student_health_checkup,
+    submit_student_health_checkup_bulk,
     approve_health_checkup_l2,
     reject_health_checkup_l2,
     approve_health_checkup_l3,

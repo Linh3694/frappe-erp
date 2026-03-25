@@ -238,6 +238,54 @@ def _load_checkup_names(data):
 
 
 @frappe.whitelist(allow_guest=False)
+def submit_student_health_checkup_bulk():
+    """L1 gửi duyệt hàng loạt: draft → pending_l2 (nhận checkup_names[])."""
+    try:
+        data = _get_request_data()
+        names = _load_checkup_names(data)
+        if not names:
+            return error_response(message="Thiếu checkup_names", code="VALIDATION_ERROR")
+
+        if not _has_approval_column():
+            return error_response(message="Chưa migrate DocType phê duyệt", code="MIGRATE_REQUIRED")
+
+        if not _has_role(ROLE_SIS_MEDICAL) and "System Manager" not in frappe.get_roles():
+            return error_response(message="Chỉ SIS Medical được gửi duyệt", code="FORBIDDEN")
+
+        done = []
+        skipped = []
+        for name in names:
+            doc = frappe.get_doc("SIS Student Health Checkup", name)
+            if doc.approval_status != "draft":
+                skipped.append(name)
+                continue
+            doc.approval_status = "pending_l2"
+            doc.submitted_at = now_datetime()
+            doc.submitted_by = frappe.session.user
+            doc.returned_from_level = None
+            doc.last_rejection_comment = None
+            doc.save(ignore_permissions=True)
+            done.append(name)
+
+        frappe.db.commit()
+
+        if done:
+            recipients = _user_emails_with_role(ROLE_SIS_MEDICAL_ADMIN)
+            subj = f"[Khám SK] {len(done)} phiếu chờ duyệt L2"
+            body = f"Có {len(done)} phiếu vừa được gửi duyệt hàng loạt."
+            _notify_workflow(recipients, subj, body)
+
+        return success_response(
+            data={"submitted": done, "skipped": skipped},
+            message=f"Đã gửi {len(done)} phiếu, bỏ qua {len(skipped)}",
+        )
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(f"submit_student_health_checkup_bulk: {str(e)}")
+        return error_response(message=str(e), code="BULK_SUBMIT_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
 def approve_health_checkup_l2(checkup_name=None):
     """L2 duyệt: pending_l2 → pending_l3."""
     try:
@@ -629,7 +677,7 @@ def get_class_periodic_health_checkups(class_id=None, school_year_id=None, check
             """
             SELECT s.name as student_id, s.student_name, s.student_code, s.gender,
                 shc.name as checkup_id,
-                IFNULL(shc.approval_status, 'published') as approval_status
+                IFNULL(shc.approval_status, '') as approval_status
             FROM `tabSIS Class Student` cs
             INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
             LEFT JOIN `tabSIS Student Health Checkup` shc

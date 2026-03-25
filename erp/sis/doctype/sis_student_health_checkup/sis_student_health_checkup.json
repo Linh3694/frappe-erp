@@ -494,7 +494,7 @@
    "label": "Phê duyệt"
   },
   {
-   "default": "published",
+   "default": "draft",
    "fieldname": "approval_status",
    "fieldtype": "Select",
    "in_list_view": 1,
