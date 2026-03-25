@@ -83,14 +83,22 @@ def get_all_templates(
         if is_published is not None and str(is_published) != "":
             filters["is_published"] = int(is_published)
 
+        base_fields = [
+            "name", "title", "campus_id", "curriculum", "education_stage",
+            "education_grade", "class_ids", "school_year", "semester_part", "is_published",
+            "creation", "modified", "owner",
+        ]
+        
+        # Thêm fields mới nếu tồn tại trên DocType
+        meta = frappe.get_meta("SIS Report Card Template")
+        extra_fields = ["program_type", "form_id", "intl_scoreboard_enabled"]
+        for f in extra_fields:
+            if meta.has_field(f):
+                base_fields.append(f)
+        
         rows = frappe.get_all(
             "SIS Report Card Template",
-            fields=[
-                "name", "title", "campus_id", "curriculum", "education_stage",
-                "education_grade", "class_ids", "school_year", "semester_part", "is_published",
-                "creation", "modified", "owner",
-                "program_type", "form_id", "intl_scoreboard_enabled",
-            ],
+            fields=base_fields,
             filters=filters,
             order_by="modified desc",
             limit_start=offset,
