@@ -202,6 +202,19 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
         if deleted_count > 0:
             logs.append(f"Đã xóa {deleted_count} học sinh lớp 12 (chưa submit)")
         
+        # Lấy sẵn guardian cho tất cả học sinh (key_person = 1) để tránh N+1 query
+        student_ids = [s.student_id for s in students]
+        guardian_map = {}
+        if student_ids:
+            guardian_rows = frappe.db.sql("""
+                SELECT fr.student, fr.guardian
+                FROM `tabCRM Family Relationship` fr
+                WHERE fr.student IN %(student_ids)s
+                  AND fr.key_person = 1
+            """, {"student_ids": student_ids}, as_dict=True)
+            for row in guardian_rows:
+                guardian_map[row.student] = row.guardian
+
         # Tạo records cho từng học sinh
         for student in students:
             try:
@@ -215,6 +228,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                     continue
                 
                 # Tạo record mới (chưa có decision, chưa submit)
+                key_guardian = guardian_map.get(student.student_id)
                 re_doc = frappe.get_doc({
                     "doctype": "SIS Re-enrollment",
                     "config_id": config_id,
@@ -223,9 +237,9 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                     "student_code": student.student_code,
                     "current_class": student.class_title or student.class_name,
                     "campus_id": campus_id,
-                    "finance_student_id": student.get("finance_student_id"),  # Link nếu từ Finance Year
+                    "finance_student_id": student.get("finance_student_id"),
+                    "guardian_id": key_guardian or None,
                     "status": "pending"
-                    # decision và submitted_at để trống = chưa làm đơn
                 })
                 # Skip validation thời gian khi admin tạo records
                 re_doc.flags.skip_config_validation = True
@@ -972,7 +986,9 @@ def get_submissions():
             query = f"""
                 SELECT 
                     re.name, re.config_id, re.student_id, re.student_name, re.student_code,
-                    re.guardian_id, re.guardian_name, g.phone_number as guardian_phone, g.email as guardian_email, 
+                    COALESCE(re.guardian_id, fr.guardian) as guardian_id,
+                    COALESCE(re.guardian_name, g.guardian_name) as guardian_name,
+                    g.phone_number as guardian_phone, g.email as guardian_email,
                     re.current_class, re.campus_id,
                     re.decision, re.payment_type, re.not_re_enroll_reason,
                     COALESCE(fs.payment_status, re.payment_status) as payment_status,
@@ -985,7 +1001,10 @@ def get_submissions():
                     re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
-                LEFT JOIN `tabCRM Guardian` g ON re.guardian_id = g.name
+                LEFT JOIN `tabCRM Family Relationship` fr
+                    ON fr.student = re.student_id AND fr.key_person = 1
+                LEFT JOIN `tabCRM Guardian` g
+                    ON g.name = COALESCE(re.guardian_id, fr.guardian)
                 LEFT JOIN `tabSIS Finance Student` fs ON fs.student_id = re.student_id 
                     AND fs.finance_year_id = %(finance_year_id)s
                 WHERE {where_clause}
@@ -993,11 +1012,12 @@ def get_submissions():
                 LIMIT {page_size} OFFSET {offset}
             """
         else:
-            # Không có finance_year_id, dùng query cũ
             query = f"""
                 SELECT 
                     re.name, re.config_id, re.student_id, re.student_name, re.student_code,
-                    re.guardian_id, re.guardian_name, g.phone_number as guardian_phone, g.email as guardian_email, 
+                    COALESCE(re.guardian_id, fr.guardian) as guardian_id,
+                    COALESCE(re.guardian_name, g.guardian_name) as guardian_name,
+                    g.phone_number as guardian_phone, g.email as guardian_email,
                     re.current_class, re.campus_id,
                     re.decision, re.payment_type, re.not_re_enroll_reason,
                     re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
@@ -1006,7 +1026,10 @@ def get_submissions():
                     re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
-                LEFT JOIN `tabCRM Guardian` g ON re.guardian_id = g.name
+                LEFT JOIN `tabCRM Family Relationship` fr
+                    ON fr.student = re.student_id AND fr.key_person = 1
+                LEFT JOIN `tabCRM Guardian` g
+                    ON g.name = COALESCE(re.guardian_id, fr.guardian)
                 WHERE {where_clause}
                 ORDER BY re.submitted_at DESC
                 LIMIT {page_size} OFFSET {offset}
@@ -1200,13 +1223,20 @@ def get_submission(submission_id=None):
             as_dict=True
         )
         
-        # Lấy thông tin guardian (phone, email) từ CRM Guardian
+        # Lấy thông tin guardian: ưu tiên từ re-enrollment, fallback qua CRM Family Relationship
+        guardian_id = submission.guardian_id
+        if not guardian_id and submission.student_id:
+            guardian_id = frappe.db.get_value(
+                "CRM Family Relationship",
+                {"student": submission.student_id, "key_person": 1},
+                "guardian"
+            )
         guardian_info = frappe.db.get_value(
             "CRM Guardian",
-            submission.guardian_id,
-            ["phone_number", "email"],
+            guardian_id,
+            ["guardian_name", "phone_number", "email"],
             as_dict=True
-        ) if submission.guardian_id else None
+        ) if guardian_id else None
         
         return single_item_response(
             data={
@@ -1216,8 +1246,8 @@ def get_submission(submission_id=None):
                 "student_id": submission.student_id,
                 "student_name": submission.student_name,
                 "student_code": submission.student_code,
-                "guardian_id": submission.guardian_id,
-                "guardian_name": submission.guardian_name,
+                "guardian_id": guardian_id,
+                "guardian_name": submission.guardian_name or (guardian_info.guardian_name if guardian_info else None),
                 "guardian_phone": guardian_info.phone_number if guardian_info else None,
                 "guardian_email": guardian_info.email if guardian_info else None,
                 "current_class": submission.current_class,
