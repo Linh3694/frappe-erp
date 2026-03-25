@@ -9,6 +9,10 @@ from frappe import _
 from frappe.utils import now_datetime
 from erp.utils.api_response import success_response, error_response
 from erp.utils.email_service import send_email_via_service
+from erp.api.erp_sis.health_checkup_images import (
+    delete_health_checkup_images_files,
+    folder_has_health_checkup_images,
+)
 
 import json
 from collections import defaultdict
@@ -412,6 +416,24 @@ def approve_health_checkup_l3(checkup_name=None):
         if not tid and "System Manager" not in frappe.get_roles():
             return error_response(message="Không xác định giáo viên chủ nhiệm", code="FORBIDDEN")
 
+        # Bắt buộc đã upload ảnh phiếu (page_*.png) trước khi công bố — đồng bộ với Parent Portal hiển thị ảnh
+        missing_images = []
+        for name in names:
+            doc_chk = frappe.get_doc("SIS Student Health Checkup", name)
+            if doc_chk.approval_status != "pending_l3":
+                continue
+            if "System Manager" not in frappe.get_roles():
+                if not _is_homeroom_for_student(doc_chk.student_id, doc_chk.school_year_id):
+                    continue
+            if not folder_has_health_checkup_images(name):
+                missing_images.append(name)
+        if missing_images:
+            return error_response(
+                message="Vui lòng tạo và tải ảnh phiếu khám lên trước khi công bố.",
+                code="MISSING_CHECKUP_IMAGES",
+                data={"missing_checkups": missing_images},
+            )
+
         done = []
         for name in names:
             doc = frappe.get_doc("SIS Student Health Checkup", name)
@@ -423,6 +445,10 @@ def approve_health_checkup_l3(checkup_name=None):
             doc.approval_status = "published"
             doc.l3_action_at = now_datetime()
             doc.l3_action_by = frappe.session.user
+            # Xóa dấu thu hồi trước đó (nếu có cột)
+            if frappe.db.has_column("SIS Student Health Checkup", "revoked_at"):
+                doc.revoked_at = None
+                doc.revoked_by = None
             doc.save(ignore_permissions=True)
             done.append(name)
 
@@ -520,6 +546,53 @@ def reject_health_checkup_l3(checkup_name=None, comment=None):
         frappe.db.rollback()
         frappe.log_error(f"reject_health_checkup_l3: {str(e)}")
         return error_response(message=str(e), code="L3_REJECT_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def revoke_health_checkup_l3(checkup_name=None):
+    """
+    Thu hồi công bố: published -> pending_l3, xóa ảnh phiếu trên disk.
+    Phụ huynh không còn thấy phiếu (approval_status != published).
+    """
+    try:
+        data = _get_request_data()
+        names = _load_checkup_names(data)
+        if checkup_name:
+            names = [checkup_name]
+        if not names:
+            return error_response(message="Thiếu phiếu", code="VALIDATION_ERROR")
+
+        if not _has_approval_column():
+            return error_response(message="Chưa migrate DocType phê duyệt", code="MIGRATE_REQUIRED")
+
+        tid = _teacher_id_from_session_user()
+        if not tid and "System Manager" not in frappe.get_roles():
+            return error_response(message="Không xác định giáo viên chủ nhiệm", code="FORBIDDEN")
+
+        done = []
+        for name in names:
+            doc = frappe.get_doc("SIS Student Health Checkup", name)
+            if doc.approval_status != "published":
+                continue
+            if "System Manager" not in frappe.get_roles():
+                if not _is_homeroom_for_student(doc.student_id, doc.school_year_id):
+                    continue
+            # Xóa ảnh đã gửi PH
+            delete_health_checkup_images_files(name)
+            doc = frappe.get_doc("SIS Student Health Checkup", name)
+            doc.approval_status = "pending_l3"
+            if frappe.db.has_column("SIS Student Health Checkup", "revoked_at"):
+                doc.revoked_at = now_datetime()
+                doc.revoked_by = frappe.session.user
+            doc.save(ignore_permissions=True)
+            done.append(name)
+
+        frappe.db.commit()
+        return success_response(data={"revoked": done}, message=f"Đã thu hồi {len(done)} phiếu")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(f"revoke_health_checkup_l3: {str(e)}")
+        return error_response(message=str(e), code="L3_REVOKE_ERROR")
 
 
 def _health_checkup_l2_list_filters():

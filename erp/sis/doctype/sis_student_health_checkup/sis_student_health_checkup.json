@@ -91,7 +91,11 @@
   "l2_action_by",
   "column_break_wf_4",
   "l3_action_at",
-  "l3_action_by"
+  "l3_action_by",
+  "column_break_wf_5",
+  "health_checkup_images_folder",
+  "revoked_at",
+  "revoked_by"
  ],
  "fields": [
   {
@@ -566,6 +570,30 @@
    "fieldname": "l3_action_by",
    "fieldtype": "Link",
    "label": "L3 xử lý bởi",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_wf_5",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Thư mục ảnh phiếu khám gửi Parent Portal (đường dẫn /files/health_checkup/...)",
+   "fieldname": "health_checkup_images_folder",
+   "fieldtype": "Data",
+   "label": "Thư mục ảnh phiếu khám",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revoked_at",
+   "fieldtype": "Datetime",
+   "label": "Thu hồi lúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revoked_by",
+   "fieldtype": "Link",
+   "label": "Thu hồi bởi",
    "options": "User",
    "read_only": 1
   }

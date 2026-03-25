@@ -21,8 +21,12 @@ from erp.api.erp_sis.health_checkup import (
     reject_health_checkup_l2,
     approve_health_checkup_l3,
     reject_health_checkup_l3,
+    revoke_health_checkup_l3,
     get_health_checkup_approval_queue_l2,
     get_class_periodic_health_checkups,
+    upload_health_checkup_images,
+    delete_health_checkup_images,
+    get_health_checkup_images,
 )
 
 __all__ = [
@@ -39,6 +43,10 @@ __all__ = [
     'reject_health_checkup_l2',
     'approve_health_checkup_l3',
     'reject_health_checkup_l3',
+    'revoke_health_checkup_l3',
     'get_health_checkup_approval_queue_l2',
     'get_class_periodic_health_checkups',
+    'upload_health_checkup_images',
+    'delete_health_checkup_images',
+    'get_health_checkup_images',
 ]

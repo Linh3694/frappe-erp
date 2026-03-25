@@ -986,6 +986,14 @@ from erp.api.erp_sis.health_checkup_workflow import (  # noqa: E402
     reject_health_checkup_l2,
     approve_health_checkup_l3,
     reject_health_checkup_l3,
+    revoke_health_checkup_l3,
     get_health_checkup_approval_queue_l2,
     get_class_periodic_health_checkups,
+)
+
+# Ảnh phiếu khám gửi Parent Portal
+from erp.api.erp_sis.health_checkup_images import (  # noqa: E402
+    upload_health_checkup_images,
+    delete_health_checkup_images,
+    get_health_checkup_images,
 )

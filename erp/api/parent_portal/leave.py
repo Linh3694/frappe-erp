@@ -259,71 +259,47 @@ def _send_leave_notification_to_teachers(student_id, student_name, parent_name, 
 
 
 def _validate_parent_student_access(parent_id, student_ids):
-	"""Validate that parent has access to all students and is key person
+	"""Validate phụ huynh có quan hệ gia đình với các học sinh
 	
-	Query CRM Family Relationship directly to get guardian-student relationships with key_person flag.
+	Chỉ cần có quan hệ trong CRM Family Relationship là đủ quyền tạo đơn.
+	Không yêu cầu key_person nữa.
 	
 	Args:
 		parent_id: Guardian name (from _get_current_parent)
 		student_ids: List of student IDs to validate
 	
 	Returns:
-		True if guardian is key person for ALL students, False otherwise
+		True nếu guardian có quan hệ với TẤT CẢ các student, False nếu không
 	"""
-	frappe.logger().info(f"🔍 [KEY_PERSON_CHECK] Validating access - Guardian: {parent_id}, Students: {student_ids}")
+	frappe.logger().info(f"🔍 [FAMILY_CHECK] Validating access - Guardian: {parent_id}, Students: {student_ids}")
 	
-	# Verify parent_id exists
 	if not parent_id:
-		frappe.logger().error(f"❌ [KEY_PERSON_CHECK] parent_id is empty!")
+		frappe.logger().error(f"❌ [FAMILY_CHECK] parent_id is empty!")
 		return False
 	
 	try:
-		# Query CRM Family Relationship directly
-		# Find all relationships where guardian = parent_id AND key_person = 1
 		all_relationships = frappe.get_all(
 			"CRM Family Relationship",
 			filters={"guardian": parent_id},
-			fields=["name", "student", "key_person", "access", "relationship_type", "parent"]
+			fields=["name", "student", "relationship_type", "parent"]
 		)
 		
-		frappe.logger().info(f"✅ [KEY_PERSON_CHECK] Guardian {parent_id} found")
-		frappe.logger().info(f"   Total relationships in DB: {len(all_relationships)}")
-		
-		# Log all relationships
-		for idx, rel in enumerate(all_relationships):
-			frappe.logger().info(f"   [{idx}] Student: {rel.student}, Key Person: {rel.key_person}, Access: {rel.access}, Type: {rel.relationship_type}, Family: {rel.parent}")
+		frappe.logger().info(f"✅ [FAMILY_CHECK] Guardian {parent_id} found, total relationships: {len(all_relationships)}")
 		
 	except Exception as e:
-		frappe.logger().error(f"❌ [KEY_PERSON_CHECK] Error loading relationships: {str(e)}")
+		frappe.logger().error(f"❌ [FAMILY_CHECK] Error loading relationships: {str(e)}")
 		return False
 	
-	# Create a dict for quick lookup: {student_id: {key_person, access, ...}}
-	student_relationships = {}
-	for rel in all_relationships:
-		if rel.student not in student_relationships:
-			student_relationships[rel.student] = rel
+	student_set = set(rel.student for rel in all_relationships)
 	
-	# Check each student
 	for student_id in student_ids:
-		frappe.logger().info(f"🔎 [KEY_PERSON_CHECK] Checking student: {student_id}")
-		
-		if student_id not in student_relationships:
-			frappe.logger().error(f"❌ [KEY_PERSON_CHECK] Student {student_id} NOT FOUND in relationships for guardian {parent_id}")
-			frappe.logger().error(f"   Available students: {list(student_relationships.keys())}")
+		if student_id not in student_set:
+			frappe.logger().error(f"❌ [FAMILY_CHECK] Student {student_id} NOT FOUND in relationships for guardian {parent_id}")
 			return False
 		
-		rel = student_relationships[student_id]
-		frappe.logger().info(f"   Found relationship - Student: {rel.student}, Key Person: {rel.key_person} (type: {type(rel.key_person)}), Access: {rel.access}")
-		
-		# Check if key_person is True/1
-		if not rel.key_person:
-			frappe.logger().error(f"❌ [KEY_PERSON_CHECK] Guardian {parent_id} is NOT key_person for student {student_id}")
-			frappe.logger().error(f"   Key person flag: {rel.key_person}")
-			return False
-		
-		frappe.logger().info(f"✅ [KEY_PERSON_CHECK] Guardian {parent_id} IS key_person for student {student_id}")
+		frappe.logger().info(f"✅ [FAMILY_CHECK] Guardian {parent_id} has relationship with student {student_id}")
 
-	frappe.logger().info(f"✅ [KEY_PERSON_CHECK] SUCCESS - Guardian {parent_id} is key_person for all {len(student_ids)} students")
+	frappe.logger().info(f"✅ [FAMILY_CHECK] SUCCESS - Guardian {parent_id} has access to all {len(student_ids)} students")
 	return True
 
 
@@ -386,10 +362,10 @@ def submit_leave_request():
 		# Log the request
 		frappe.logger().info(f"📝 [SUBMIT_LEAVE_REQUEST] Parent: {parent_id}, Students requested: {students}, Reason: {data.get('reason')}, Dates: {data.get('start_date')} to {data.get('end_date')}")
 
-		# Validate parent has access to all students AND is key person
+		# Validate phụ huynh có quan hệ gia đình với học sinh
 		if not _validate_parent_student_access(parent_id, students):
-			error_msg = "Bạn chưa được cấp quyền tạo đơn, hãy liên hệ người liên hệ chính hoặc nhà trường để cấp quyền tạo đơn."
-			frappe.logger().error(f"❌ Parent {parent_id} failed key_person validation for students {students}")
+			error_msg = "Bạn không có quan hệ gia đình với học sinh được chọn. Vui lòng liên hệ nhà trường."
+			frappe.logger().error(f"❌ Parent {parent_id} has no family relationship with students {students}")
 			
 			return error_response(error_msg)
 

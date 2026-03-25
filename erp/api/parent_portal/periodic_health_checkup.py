@@ -8,6 +8,7 @@ import json
 import frappe
 
 from erp.api.parent_portal.report_card import _get_parent_student_ids
+from erp.api.erp_sis.health_checkup_images import get_health_checkup_image_urls_for_checkup
 from erp.utils.api_response import error_response, success_response
 
 # Không trả về client PH
@@ -22,6 +23,9 @@ _WORKFLOW_FIELDS = frozenset(
         "l2_action_by",
         "l3_action_at",
         "l3_action_by",
+        "health_checkup_images_folder",
+        "revoked_at",
+        "revoked_by",
     }
 )
 
@@ -163,6 +167,7 @@ def get_parent_published_periodic_checkups():
                 if ref_row:
                     ref = _strip_workflow_fields(ref_row)
 
+            image_urls = get_health_checkup_image_urls_for_checkup(row.get("name"))
             items.append(
                 {
                     "checkup": checkup,
@@ -171,6 +176,9 @@ def get_parent_published_periodic_checkups():
                     "class_name": class_name,
                     "student": st,
                     "reference_checkup_data": ref,
+                    "has_images": len(image_urls) > 0,
+                    "images_folder": row.get("health_checkup_images_folder"),
+                    "image_urls": image_urls,
                 }
             )
 
@@ -184,3 +192,63 @@ def get_parent_published_periodic_checkups():
             message="Không thể tải phiếu khám định kỳ",
             code="FETCH_PERIODIC_CHECKUP_ERROR",
         )
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_parent_health_checkup_images():
+    """
+    Danh sách URL ảnh phiếu khám định kỳ (chỉ khi published + PH được quyền xem HS).
+
+    Params: student_id, checkup_name (query hoặc JSON body).
+    """
+    try:
+        student_id = _parse_request_student_id()
+        checkup_name = frappe.form_dict.get("checkup_name") or frappe.request.args.get("checkup_name")
+        if not checkup_name and frappe.request.data:
+            try:
+                raw = frappe.request.data
+                body = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+                if body and body.strip():
+                    data = json.loads(body)
+                    if isinstance(data, dict):
+                        checkup_name = data.get("checkup_name")
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass
+
+        if not student_id or not checkup_name:
+            return error_response(
+                message="Thiếu student_id hoặc checkup_name",
+                code="MISSING_PARAMS",
+            )
+
+        parent_email = frappe.session.user
+        if student_id not in (_get_parent_student_ids(parent_email) or []):
+            return error_response(message="Không có quyền xem", code="PERMISSION_DENIED")
+
+        stu = frappe.db.get_value(
+            "SIS Student Health Checkup",
+            checkup_name,
+            ["student_id", "approval_status"],
+            as_dict=True,
+        )
+        if not stu or stu.get("student_id") != student_id:
+            return error_response(message="Phiếu không hợp lệ", code="NOT_FOUND")
+        if stu.get("approval_status") != "published":
+            return success_response(
+                data={"checkup_name": checkup_name, "image_urls": [], "has_images": False},
+                message="Phiếu chưa được công bố",
+            )
+
+        image_urls = get_health_checkup_image_urls_for_checkup(checkup_name)
+        return success_response(
+            data={
+                "checkup_name": checkup_name,
+                "image_urls": image_urls,
+                "has_images": len(image_urls) > 0,
+                "total_pages": len(image_urls),
+            },
+            message="OK",
+        )
+    except Exception as e:
+        frappe.log_error(f"get_parent_health_checkup_images: {str(e)}")
+        return error_response(message=str(e), code="FETCH_IMAGES_ERROR")
