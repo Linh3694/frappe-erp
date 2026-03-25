@@ -373,6 +373,7 @@ def map_frontend_type_to_db(frontend_type):
 		'leave': 'system',  # Leave uses system type
 		'system': 'system',
 		'health_examination': 'health_examination',
+		'periodic_health_checkup': 'periodic_health_checkup',
 	}
 	return type_mapping.get(frontend_type, frontend_type)
 
@@ -386,7 +387,7 @@ def map_db_type_to_frontend(db_type, data):
 	if custom_type == 'ticket':
 		return 'ticket'
 	
-	if custom_type in ['contact_log', 'report_card', 'student_attendance', 'attendance', 'announcement', 'news', 'leave', 'health_examination', 'health', 'daily_health']:
+	if custom_type in ['contact_log', 'report_card', 'student_attendance', 'attendance', 'announcement', 'news', 'leave', 'health_examination', 'health', 'daily_health', 'periodic_health_checkup']:
 		if custom_type == 'student_attendance':
 			return 'attendance'
 		if custom_type in ['health', 'daily_health']:
@@ -411,6 +412,7 @@ def map_db_type_to_frontend(db_type, data):
 		'health_examination': 'health_examination',
 		'health': 'health_examination',
 		'daily_health': 'health_examination',
+		'periodic_health_checkup': 'periodic_health_checkup',
 	}
 	
 	return type_mapping.get(db_type, 'system')
@@ -458,6 +460,9 @@ def generate_action_url(notif_type, data, student_id=None):
 	
 	elif notif_type == 'health_examination':
 		return f"/health?student={student_id}" if student_id else "/health"
+	
+	elif notif_type == 'periodic_health_checkup':
+		return f"/health?student={student_id}&tab=periodic" if student_id else "/health?tab=periodic"
 	
 	# Default
 	return "/dashboard"

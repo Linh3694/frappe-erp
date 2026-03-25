@@ -432,22 +432,29 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
         # Get actual subject details - these are subjects the student ACTUALLY studies
         actual_subject_ids = [s["actual_subject_id"] for s in student_subjects if s.get("actual_subject_id")]
 
-        # 🆕 FALLBACK: For INTL programs, if SIS Student Subject is empty, use ALL subjects from template
-        # This handles cases where timetable data hasn't been synced to SIS Student Subject yet
-        # For VN programs, we keep strict filtering to match historical behavior
+        # FALLBACK: Nếu SIS Student Subject rỗng, dùng tất cả subjects từ template
+        # Phòng trường hợp HS được assign vào lớp nhưng chưa đồng bộ thời khoá biểu
         program_type = getattr(template, 'program_type', 'vn') or 'vn'
         use_template_subjects_as_fallback = False
         
-        if program_type == 'intl' and len(actual_subject_ids) == 0:
+        if len(actual_subject_ids) == 0:
             frappe.logger().warning(
-                f"[INTL Report Card] SIS Student Subject empty for student {student_id} in class {class_id}. "
-                f"Using ALL subjects from template as fallback."
+                f"[Report Card] SIS Student Subject empty for student {student_id} in class {class_id} "
+                f"(program={program_type}). Using ALL subjects from template as fallback."
             )
             use_template_subjects_as_fallback = True
             
-            # Extract all subject IDs from template configuration
+            # Thu thập subject IDs từ cấu hình template (scores + subjects)
+            fallback_ids = set()
             if hasattr(template, 'subjects') and template.subjects:
-                actual_subject_ids = [s.subject_id for s in template.subjects if s.subject_id]
+                for s in template.subjects:
+                    if s.subject_id:
+                        fallback_ids.add(s.subject_id)
+            if hasattr(template, 'scores') and template.scores:
+                for s in template.scores:
+                    if s.subject_id:
+                        fallback_ids.add(s.subject_id)
+            actual_subject_ids = list(fallback_ids)
         
         # Get actual subject names/titles for reference
         subjects_info = {}
@@ -764,6 +771,105 @@ def create_student_reports_for_template():
             f"Creating report cards for {sum(len(students) for students in students_by_class.values())} "
             f"students across {len(students_by_class)} classes using SIS Class Student data"
         )
+        
+        # AUTO-SYNC: Đảm bảo mỗi HS có SIS Student Subject trước khi tạo report
+        # Phòng trường hợp assign HS vào lớp nhưng quên đồng bộ thời khoá biểu
+        auto_sync_logs = []
+        for class_id, students in students_by_class.items():
+            student_ids_in_class = [s["student_id"] for s in students]
+            
+            students_with_subjects = frappe.get_all(
+                "SIS Student Subject",
+                fields=["student_id"],
+                filters={
+                    "campus_id": campus_id,
+                    "class_id": class_id,
+                    "student_id": ["in", student_ids_in_class]
+                },
+                distinct=True
+            )
+            students_with_subject_ids = set(s["student_id"] for s in students_with_subjects)
+            missing_students = [sid for sid in student_ids_in_class if sid not in students_with_subject_ids]
+            
+            if not missing_students:
+                continue
+            
+            auto_sync_logs.append(
+                f"Class {class_id}: {len(missing_students)} HS thiếu Student Subject, đang tự động đồng bộ..."
+            )
+            
+            timetable_instances = frappe.get_all(
+                "SIS Timetable Instance",
+                fields=["name"],
+                filters={"campus_id": campus_id, "class_id": class_id}
+            )
+            
+            if not timetable_instances:
+                auto_sync_logs.append(f"Class {class_id}: Chưa có thời khoá biểu, không thể auto-sync")
+                continue
+            
+            instance_ids = [t["name"] for t in timetable_instances]
+            school_year_id = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+            
+            if not school_year_id:
+                auto_sync_logs.append(f"Class {class_id}: Không xác định được năm học")
+                continue
+            
+            timetable_subjects = frappe.db.sql("""
+                SELECT DISTINCT subject_id
+                FROM `tabSIS Timetable Instance Row`
+                WHERE parent IN %s
+                AND subject_id IS NOT NULL AND subject_id != ''
+            """, [instance_ids], as_dict=True)
+            
+            tt_subject_ids = [s["subject_id"] for s in timetable_subjects if s.get("subject_id")]
+            
+            if not tt_subject_ids:
+                auto_sync_logs.append(f"Class {class_id}: Thời khoá biểu không có môn học")
+                continue
+            
+            synced_count = 0
+            for sid in missing_students:
+                for subj_id in tt_subject_ids:
+                    try:
+                        actual_subject_id = frappe.db.get_value("SIS Subject", subj_id, "actual_subject_id")
+                        if not actual_subject_id:
+                            continue
+                        
+                        existing = frappe.db.exists("SIS Student Subject", {
+                            "campus_id": campus_id,
+                            "student_id": sid,
+                            "class_id": class_id,
+                            "subject_id": subj_id,
+                            "school_year_id": school_year_id
+                        })
+                        if existing:
+                            continue
+                        
+                        doc = frappe.get_doc({
+                            "doctype": "SIS Student Subject",
+                            "campus_id": campus_id,
+                            "student_id": sid,
+                            "class_id": class_id,
+                            "subject_id": subj_id,
+                            "actual_subject_id": actual_subject_id,
+                            "school_year_id": school_year_id
+                        })
+                        doc.insert(ignore_permissions=True)
+                        synced_count += 1
+                    except Exception as sync_err:
+                        frappe.log_error(
+                            f"Auto-sync error: student={sid}, subject={subj_id}: {str(sync_err)}"
+                        )
+            
+            if synced_count > 0:
+                frappe.db.commit()
+            auto_sync_logs.append(
+                f"Class {class_id}: Đã tự động tạo {synced_count} Student Subject cho {len(missing_students)} HS"
+            )
+        
+        if auto_sync_logs:
+            frappe.logger().info(f"[AUTO-SYNC] Report card creation pre-sync: {auto_sync_logs}")
         
         created_reports = []
         failed_students = []

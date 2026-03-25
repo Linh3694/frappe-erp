@@ -91,6 +91,7 @@ from .student_report import (
     delete_report,
     sync_new_subjects_to_reports,
     get_previous_semester_score,
+    repair_student_report_data,
 )
 
 __all__ = [
@@ -150,4 +151,5 @@ __all__ = [
     "delete_report",
     "sync_new_subjects_to_reports",
     "get_previous_semester_score",
+    "repair_student_report_data",
 ]

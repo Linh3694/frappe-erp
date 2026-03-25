@@ -379,6 +379,43 @@ def approve_health_checkup_l3(checkup_name=None):
             done.append(name)
 
         frappe.db.commit()
+
+        # Thông báo in-app + push tới phụ huynh khi công bố phiếu (L3)
+        if done:
+            try:
+                from erp.utils.notification_handler import send_bulk_parent_notifications
+
+                for name in done:
+                    doc = frappe.get_doc("SIS Student Health Checkup", name)
+                    phase_label_vi = "cuối năm" if doc.checkup_phase == "end" else "đầu năm"
+                    phase_label_en = "year-end" if doc.checkup_phase == "end" else "beginning of year"
+                    st_name = doc.student_name or doc.student_id or ""
+                    title = {
+                        "vi": f"Kết quả khám sức khỏe định kỳ ({phase_label_vi})",
+                        "en": f"Periodic health checkup ({phase_label_en})",
+                    }
+                    body = {
+                        "vi": f"Đã có kết quả khám SK định kỳ cho {st_name}. Mở ứng dụng để xem chi tiết.",
+                        "en": f"Periodic health checkup results are available for {st_name}. Open the app to view details.",
+                    }
+                    send_bulk_parent_notifications(
+                        recipient_type="periodic_health_checkup",
+                        recipients_data={"student_ids": [doc.student_id]},
+                        title=title,
+                        body=body,
+                        icon="/health-icon.png",
+                        data={
+                            "type": "periodic_health_checkup",
+                            "student_id": doc.student_id,
+                            "school_year_id": doc.school_year_id,
+                            "checkup_phase": doc.checkup_phase,
+                            "checkup_name": doc.name,
+                            "timestamp": str(now_datetime()),
+                        },
+                    )
+            except Exception as ne:
+                frappe.log_error(f"approve_health_checkup_l3 parent notify: {str(ne)}")
+
         return success_response(data={"approved": done}, message=f"Đã công bố {len(done)} phiếu")
     except Exception as e:
         frappe.db.rollback()

@@ -468,6 +468,10 @@ def send_bulk_parent_notifications(
                 exam_ids_list = data.get("exam_ids", [])
                 exam_ids_key = ",".join(sorted(exam_ids_list)) if exam_ids_list else ""
                 debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{exam_ids_key}"
+            elif recipient_type == "periodic_health_checkup" and data:
+                # Mỗi phiếu khám SK định kỳ (checkup_name) một thông báo — không gộp theo phút
+                checkup_key = (data.get("checkup_name") or "").strip()
+                debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{checkup_key}"
             else:
                 event_ts = data.get("timestamp", "") if data else ""
                 # Round timestamp to minute để debounce trong cùng 1 phút

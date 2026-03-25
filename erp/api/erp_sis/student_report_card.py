@@ -21,6 +21,7 @@ from erp.api.erp_sis.report_card.student_report import (
     sync_new_subjects_to_reports,
     get_previous_semester_score,
     update_report_field,
+    repair_student_report_data,
 )
 
 # Export cho backward compatibility
@@ -35,4 +36,5 @@ __all__ = [
     "sync_new_subjects_to_reports",
     "get_previous_semester_score",
     "update_report_field",
+    "repair_student_report_data",
 ]

@@ -1332,3 +1332,326 @@ def update_report_field():
     except Exception as e:
         frappe.log_error(f"update_report_field error: {str(e)}")
         return error_response(f"Lỗi cập nhật: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def repair_student_report_data():
+    """
+    Sửa chữa student report cards bị thiếu môn học do không đồng bộ SIS Student Subject.
+    
+    Luồng xử lý:
+    1. Tìm report cards thuộc template_id (hoặc student_ids cụ thể)
+    2. Với mỗi HS thiếu SIS Student Subject -> tự động sync từ timetable
+    3. Re-initialize data_json từ template, merge dữ liệu đã nhập (giữ nguyên điểm đã có)
+    
+    Request payload:
+        {
+            "template_id": "TEMPLATE-XXX",          // Bắt buộc
+            "student_ids": ["STUDENT-1"],            // Optional - chỉ sửa HS cụ thể
+            "class_ids": ["CLASS-A"],                // Optional - chỉ sửa lớp cụ thể
+            "dry_run": false                         // Optional - chỉ kiểm tra, không sửa
+        }
+    """
+    try:
+        data = get_request_payload()
+        campus_id = get_current_campus_id()
+        
+        template_id = data.get("template_id")
+        if not template_id:
+            return validation_error_response(
+                "Validation failed",
+                {"template_id": ["Template ID is required"]}
+            )
+        
+        try:
+            template = frappe.get_doc("SIS Report Card Template", template_id)
+            if template.campus_id != campus_id:
+                return forbidden_response("Template access denied")
+        except frappe.DoesNotExistError:
+            return not_found_response("Report card template not found")
+        
+        student_ids = data.get("student_ids")
+        class_ids = data.get("class_ids")
+        dry_run = data.get("dry_run", False)
+        
+        # Tìm report cards cần sửa
+        report_filters = {
+            "template_id": template_id,
+            "campus_id": campus_id,
+        }
+        if student_ids:
+            report_filters["student_id"] = ["in", student_ids]
+        if class_ids:
+            report_filters["class_id"] = ["in", class_ids]
+        
+        reports = frappe.get_all(
+            "SIS Student Report Card",
+            fields=["name", "student_id", "class_id", "data_json"],
+            filters=report_filters
+        )
+        
+        if not reports:
+            return success_response({
+                "repaired": 0,
+                "skipped": 0,
+                "total": 0,
+                "logs": ["Không tìm thấy report card nào cần sửa"],
+                "dry_run": dry_run
+            })
+        
+        logs: List[str] = []
+        repaired_count = 0
+        skipped_count = 0
+        synced_subjects_count = 0
+        details: List[Dict[str, Any]] = []
+        
+        # Nhóm reports theo class_id để batch sync timetable
+        reports_by_class: Dict[str, List] = {}
+        for report in reports:
+            cid = report.get("class_id", "unknown")
+            if cid not in reports_by_class:
+                reports_by_class[cid] = []
+            reports_by_class[cid].append(report)
+        
+        for repair_class_id, class_reports in reports_by_class.items():
+            # Bước 1: Sync SIS Student Subject từ timetable cho HS thiếu
+            student_ids_in_class = list(set(r["student_id"] for r in class_reports))
+            
+            students_with_subjects = frappe.get_all(
+                "SIS Student Subject",
+                fields=["student_id"],
+                filters={
+                    "campus_id": campus_id,
+                    "class_id": repair_class_id,
+                    "student_id": ["in", student_ids_in_class]
+                },
+                distinct=True
+            )
+            students_with_ids = set(s["student_id"] for s in students_with_subjects)
+            missing_students = [sid for sid in student_ids_in_class if sid not in students_with_ids]
+            
+            if missing_students:
+                logs.append(f"Lớp {repair_class_id}: {len(missing_students)} HS thiếu Student Subject")
+                
+                if not dry_run:
+                    timetable_instances = frappe.get_all(
+                        "SIS Timetable Instance",
+                        fields=["name"],
+                        filters={"campus_id": campus_id, "class_id": repair_class_id}
+                    )
+                    
+                    if timetable_instances:
+                        instance_ids = [t["name"] for t in timetable_instances]
+                        school_year_id = frappe.db.get_value("SIS Class", repair_class_id, "school_year_id")
+                        
+                        if school_year_id:
+                            timetable_subjects = frappe.db.sql("""
+                                SELECT DISTINCT subject_id
+                                FROM `tabSIS Timetable Instance Row`
+                                WHERE parent IN %s
+                                AND subject_id IS NOT NULL AND subject_id != ''
+                            """, [instance_ids], as_dict=True)
+                            
+                            tt_subject_ids = [s["subject_id"] for s in timetable_subjects if s.get("subject_id")]
+                            
+                            for sid in missing_students:
+                                for subj_id in tt_subject_ids:
+                                    try:
+                                        actual_subject_id = frappe.db.get_value(
+                                            "SIS Subject", subj_id, "actual_subject_id"
+                                        )
+                                        if not actual_subject_id:
+                                            continue
+                                        existing = frappe.db.exists("SIS Student Subject", {
+                                            "campus_id": campus_id,
+                                            "student_id": sid,
+                                            "class_id": repair_class_id,
+                                            "subject_id": subj_id,
+                                            "school_year_id": school_year_id
+                                        })
+                                        if not existing:
+                                            doc = frappe.get_doc({
+                                                "doctype": "SIS Student Subject",
+                                                "campus_id": campus_id,
+                                                "student_id": sid,
+                                                "class_id": repair_class_id,
+                                                "subject_id": subj_id,
+                                                "actual_subject_id": actual_subject_id,
+                                                "school_year_id": school_year_id
+                                            })
+                                            doc.insert(ignore_permissions=True)
+                                            synced_subjects_count += 1
+                                    except Exception as sync_err:
+                                        logs.append(f"Sync error: student={sid}, subject={subj_id}: {str(sync_err)}")
+                            
+                            frappe.db.commit()
+                            logs.append(
+                                f"Lớp {repair_class_id}: Đã sync {synced_subjects_count} Student Subject"
+                            )
+                    else:
+                        logs.append(f"Lớp {repair_class_id}: Chưa có thời khoá biểu")
+            
+            # Bước 2: Re-initialize data_json, merge giữ dữ liệu đã nhập
+            for report in class_reports:
+                try:
+                    current_data = {}
+                    if report.get("data_json"):
+                        try:
+                            current_data = json.loads(report["data_json"]) if isinstance(report["data_json"], str) else report["data_json"]
+                        except (json.JSONDecodeError, TypeError):
+                            current_data = {}
+                    
+                    # Kiểm tra xem report có bị thiếu môn không
+                    is_empty = _is_report_data_empty(current_data, template)
+                    
+                    if not is_empty:
+                        skipped_count += 1
+                        continue
+                    
+                    if dry_run:
+                        details.append({
+                            "report_id": report["name"],
+                            "student_id": report["student_id"],
+                            "class_id": repair_class_id,
+                            "status": "would_repair",
+                        })
+                        repaired_count += 1
+                        continue
+                    
+                    # Re-initialize từ template với student filter
+                    try:
+                        from erp.api.erp_sis.student_subject import (
+                            _initialize_report_data_from_template as init_with_filter,
+                        )
+                        new_data = init_with_filter(template, report["student_id"], repair_class_id)
+                    except ImportError:
+                        new_data = initialize_report_data_from_template(template, repair_class_id)
+                    
+                    # Merge: giữ nguyên dữ liệu đã nhập, chỉ bổ sung môn thiếu
+                    merged_data = _merge_report_data(current_data, new_data)
+                    
+                    report_doc = frappe.get_doc("SIS Student Report Card", report["name"])
+                    report_doc.data_json = json.dumps(merged_data, ensure_ascii=False)
+                    report_doc.save(ignore_permissions=True)
+                    
+                    repaired_count += 1
+                    details.append({
+                        "report_id": report["name"],
+                        "student_id": report["student_id"],
+                        "class_id": repair_class_id,
+                        "status": "repaired",
+                    })
+                    logs.append(f"Đã sửa report {report['name']} cho HS {report['student_id']}")
+                    
+                except Exception as repair_err:
+                    logs.append(f"Lỗi sửa report {report['name']}: {str(repair_err)}")
+        
+        if not dry_run and repaired_count > 0:
+            frappe.db.commit()
+        
+        return success_response({
+            "repaired": repaired_count,
+            "skipped": skipped_count,
+            "synced_subjects": synced_subjects_count,
+            "total": len(reports),
+            "dry_run": dry_run,
+            "details": details[:20],
+            "logs": logs,
+        })
+    
+    except Exception as e:
+        frappe.log_error(f"repair_student_report_data error: {str(e)}")
+        return error_response(f"Lỗi sửa chữa báo cáo: {str(e)}")
+
+
+def _is_report_data_empty(data: dict, template) -> bool:
+    """Kiểm tra report data có bị thiếu môn học không."""
+    if not data:
+        return True
+    
+    program_type = getattr(template, "program_type", "vn") or "vn"
+    
+    if program_type == "vn":
+        if getattr(template, "scores_enabled", 0):
+            scores = data.get("scores", {})
+            if not scores or len(scores) == 0:
+                return True
+        
+        if getattr(template, "subject_eval_enabled", 0):
+            subject_eval = data.get("subject_eval", {})
+            if not subject_eval or len(subject_eval) == 0:
+                return True
+    else:
+        intl_scores = data.get("intl_scores", {})
+        if not intl_scores or len(intl_scores) == 0:
+            return True
+    
+    return False
+
+
+def _merge_report_data(current: dict, new_data: dict) -> dict:
+    """
+    Merge dữ liệu report: giữ nguyên dữ liệu đã nhập, chỉ bổ sung môn thiếu.
+    current = dữ liệu hiện tại (có thể rỗng hoặc thiếu)
+    new_data = dữ liệu mới từ template (đầy đủ)
+    """
+    if not current:
+        return new_data
+    
+    merged = copy.deepcopy(new_data)
+    
+    # Merge scores: giữ điểm đã nhập
+    if "scores" in current and "scores" in merged:
+        for subj_id, subj_data in current["scores"].items():
+            if subj_id in merged["scores"]:
+                has_data = any(
+                    subj_data.get(key)
+                    for key in ["hs1_scores", "hs2_scores", "hs3_scores", "final_average"]
+                    if subj_data.get(key) not in (None, [], 0)
+                )
+                if has_data:
+                    merged["scores"][subj_id] = subj_data
+    
+    # Merge subject_eval: giữ đánh giá đã nhập
+    if "subject_eval" in current and "subject_eval" in merged:
+        for subj_id, subj_data in current["subject_eval"].items():
+            if subj_id in merged["subject_eval"]:
+                has_data = any(
+                    bool(v) for v in [
+                        subj_data.get("criteria"),
+                        subj_data.get("comments"),
+                        subj_data.get("test_point_values"),
+                    ]
+                    if v not in (None, {}, [])
+                )
+                if has_data:
+                    merged["subject_eval"][subj_id] = subj_data
+    
+    # Merge intl_scores: giữ điểm INTL đã nhập
+    if "intl_scores" in current and "intl_scores" in merged:
+        for subj_id, subj_data in current["intl_scores"].items():
+            if subj_id in merged["intl_scores"]:
+                has_data = any(
+                    bool(v) for v in [
+                        subj_data.get("main_scores"),
+                        subj_data.get("component_scores"),
+                        subj_data.get("ielts_scores"),
+                    ]
+                    if v not in (None, {})
+                )
+                if has_data:
+                    merged["intl_scores"][subj_id] = subj_data
+    
+    # Merge homeroom: giữ nhận xét đã nhập
+    if "homeroom" in current and "homeroom" in merged:
+        for key in ["conduct", "conduct_year"]:
+            if current.get("homeroom", {}).get(key):
+                merged["homeroom"][key] = current["homeroom"][key]
+        
+        current_comments = current.get("homeroom", {}).get("comments", {})
+        if current_comments:
+            for title, comment in current_comments.items():
+                if comment and title in merged.get("homeroom", {}).get("comments", {}):
+                    merged["homeroom"]["comments"][title] = comment
+    
+    return merged
