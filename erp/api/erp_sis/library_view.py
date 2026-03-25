@@ -19,9 +19,12 @@ from erp.utils.api_response import (
 
 # DocType constants
 TITLE_DTYPE = "SIS Library Title"
+LOOKUP_DTYPE = "SIS Library Lookup"
 EVENT_DTYPE = "SIS Library Event"
 EVENT_DAY_DTYPE = "SIS Library Event Day"
 BOOK_INTRO_DTYPE = "SIS Library Book Introduction"
+
+VALID_PUBLIC_LOOKUP_TYPES = {"document_type", "series"}
 
 
 def _create_slug(title: str) -> str:
@@ -116,6 +119,44 @@ def _transform_title_to_public(doc) -> Dict[str, Any]:
         "borrowCount": 0,  # TODO: Count from copies if needed
         "rating": 4,  # Default rating
     }
+
+
+@frappe.whitelist(allow_guest=True)
+def list_public_lookups(type: str = ""):
+    """
+    Lấy danh mục thư viện cho public (chỉ document_type và series).
+    URL: /api/method/erp.api.erp_sis.library_view.list_public_lookups
+    Params: type - "document_type" | "series" (nếu trống sẽ lấy cả 2)
+    """
+    try:
+        lookup_type = (
+            type
+            or (frappe.request.args.get("type") if frappe.request else None)
+            or frappe.form_dict.get("type")
+            or ""
+        )
+
+        filters = {}
+        if lookup_type:
+            if lookup_type not in VALID_PUBLIC_LOOKUP_TYPES:
+                return validation_error_response(
+                    message="Loại danh mục không hợp lệ",
+                    errors={"type": [f"Chỉ hỗ trợ: {', '.join(VALID_PUBLIC_LOOKUP_TYPES)}"]},
+                )
+            filters["lookup_type"] = lookup_type
+        else:
+            filters["lookup_type"] = ["in", list(VALID_PUBLIC_LOOKUP_TYPES)]
+
+        items = frappe.get_all(
+            LOOKUP_DTYPE,
+            filters=filters,
+            fields=["name as id", "code", "lookup_type as type", "name_vi as name"],
+            order_by="lookup_type asc, modified desc",
+        )
+        return success_response(data=items, message="Fetched public lookups")
+    except Exception as ex:
+        frappe.log_error(f"list_public_lookups failed: {ex}")
+        return error_response(message="Không lấy được danh mục", code="PUBLIC_LOOKUP_ERROR")
 
 
 @frappe.whitelist(allow_guest=True)
