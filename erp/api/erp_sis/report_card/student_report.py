@@ -1405,6 +1405,17 @@ def repair_student_report_data():
         synced_subjects_count = 0
         details: List[Dict[str, Any]] = []
         
+        # Lấy danh sách subject IDs từ template để so sánh
+        template_subject_ids = set()
+        if hasattr(template, 'scores') and template.scores:
+            for s in template.scores:
+                if s.subject_id:
+                    template_subject_ids.add(s.subject_id)
+        if hasattr(template, 'subjects') and template.subjects:
+            for s in template.subjects:
+                if s.subject_id:
+                    template_subject_ids.add(s.subject_id)
+        
         # Nhóm reports theo class_id để batch sync timetable
         reports_by_class: Dict[str, List] = {}
         for report in reports:
@@ -1413,8 +1424,11 @@ def repair_student_report_data():
                 reports_by_class[cid] = []
             reports_by_class[cid].append(report)
         
+        students_needing_sync: List[str] = []
+        
         for repair_class_id, class_reports in reports_by_class.items():
-            # Bước 1: Sync SIS Student Subject từ timetable cho HS thiếu
+            # Bước 1: Kiểm tra + Sync SIS Student Subject từ timetable cho HS thiếu
+            # Đây là bước QUAN TRỌNG NHẤT: Sub Eval query SIS Student Subject để hiển thị HS
             student_ids_in_class = list(set(r["student_id"] for r in class_reports))
             
             students_with_subjects = frappe.get_all(
@@ -1431,7 +1445,11 @@ def repair_student_report_data():
             missing_students = [sid for sid in student_ids_in_class if sid not in students_with_ids]
             
             if missing_students:
-                logs.append(f"Lớp {repair_class_id}: {len(missing_students)} HS thiếu Student Subject")
+                students_needing_sync.extend(missing_students)
+                logs.append(
+                    f"Lớp {repair_class_id}: {len(missing_students)} HS thiếu SIS Student Subject "
+                    f"(sẽ không hiển thị trong Sub Eval)"
+                )
                 
                 if not dry_run:
                     timetable_instances = frappe.get_all(
@@ -1491,7 +1509,7 @@ def repair_student_report_data():
                     else:
                         logs.append(f"Lớp {repair_class_id}: Chưa có thời khoá biểu")
             
-            # Bước 2: Re-initialize data_json, merge giữ dữ liệu đã nhập
+            # Bước 2: Re-initialize data_json cho report thiếu môn, merge giữ dữ liệu đã nhập
             for report in class_reports:
                 try:
                     current_data = {}
@@ -1501,10 +1519,9 @@ def repair_student_report_data():
                         except (json.JSONDecodeError, TypeError):
                             current_data = {}
                     
-                    # Kiểm tra xem report có bị thiếu môn không
-                    is_empty = _is_report_data_empty(current_data, template)
+                    needs_repair = _is_report_missing_subjects(current_data, template, template_subject_ids)
                     
-                    if not is_empty:
+                    if not needs_repair:
                         skipped_count += 1
                         continue
                     
@@ -1513,12 +1530,11 @@ def repair_student_report_data():
                             "report_id": report["name"],
                             "student_id": report["student_id"],
                             "class_id": repair_class_id,
-                            "status": "would_repair",
+                            "status": "would_repair_data",
                         })
                         repaired_count += 1
                         continue
                     
-                    # Re-initialize từ template với student filter
                     try:
                         from erp.api.erp_sis.student_subject import (
                             _initialize_report_data_from_template as init_with_filter,
@@ -1527,7 +1543,6 @@ def repair_student_report_data():
                     except ImportError:
                         new_data = initialize_report_data_from_template(template, repair_class_id)
                     
-                    # Merge: giữ nguyên dữ liệu đã nhập, chỉ bổ sung môn thiếu
                     merged_data = _merge_report_data(current_data, new_data)
                     
                     report_doc = frappe.get_doc("SIS Student Report Card", report["name"])
@@ -1549,11 +1564,16 @@ def repair_student_report_data():
         if not dry_run and repaired_count > 0:
             frappe.db.commit()
         
+        # Tổng hợp: cần sửa = HS thiếu SIS Student Subject HOẶC report thiếu môn
+        total_needs_fix = len(students_needing_sync) + repaired_count
+        
         return success_response({
             "repaired": repaired_count,
             "skipped": skipped_count,
             "synced_subjects": synced_subjects_count,
+            "students_needing_sync": len(students_needing_sync),
             "total": len(reports),
+            "total_needs_fix": total_needs_fix,
             "dry_run": dry_run,
             "details": details[:20],
             "logs": logs,
@@ -1564,26 +1584,56 @@ def repair_student_report_data():
         return error_response(f"Lỗi sửa chữa báo cáo: {str(e)}")
 
 
-def _is_report_data_empty(data: dict, template) -> bool:
-    """Kiểm tra report data có bị thiếu môn học không."""
+def _is_report_missing_subjects(data: dict, template, template_subject_ids: set) -> bool:
+    """
+    Kiểm tra report data có bị thiếu môn học so với template không.
+    Phát hiện cả trường hợp rỗng hoàn toàn LẪN thiếu một phần.
+    """
     if not data:
         return True
+    
+    if not template_subject_ids:
+        return False
     
     program_type = getattr(template, "program_type", "vn") or "vn"
     
     if program_type == "vn":
         if getattr(template, "scores_enabled", 0):
             scores = data.get("scores", {})
-            if not scores or len(scores) == 0:
+            if not isinstance(scores, dict):
+                return True
+            if not scores:
+                return True
+            report_score_ids = set(scores.keys())
+            template_score_ids = set()
+            if hasattr(template, 'scores') and template.scores:
+                template_score_ids = set(s.subject_id for s in template.scores if s.subject_id)
+            if template_score_ids and not template_score_ids.issubset(report_score_ids):
                 return True
         
         if getattr(template, "subject_eval_enabled", 0):
             subject_eval = data.get("subject_eval", {})
-            if not subject_eval or len(subject_eval) == 0:
+            if not isinstance(subject_eval, dict):
+                return True
+            if not subject_eval:
+                return True
+            report_eval_ids = set(subject_eval.keys())
+            template_eval_ids = set()
+            if hasattr(template, 'subjects') and template.subjects:
+                template_eval_ids = set(s.subject_id for s in template.subjects if s.subject_id)
+            if template_eval_ids and not template_eval_ids.issubset(report_eval_ids):
                 return True
     else:
         intl_scores = data.get("intl_scores", {})
-        if not intl_scores or len(intl_scores) == 0:
+        if not isinstance(intl_scores, dict):
+            return True
+        if not intl_scores:
+            return True
+        report_intl_ids = set(intl_scores.keys())
+        template_intl_ids = set()
+        if hasattr(template, 'subjects') and template.subjects:
+            template_intl_ids = set(s.subject_id for s in template.subjects if s.subject_id)
+        if template_intl_ids and not template_intl_ids.issubset(report_intl_ids):
             return True
     
     return False
