@@ -89,6 +89,7 @@ def get_all_templates(
                 "name", "title", "campus_id", "curriculum", "education_stage",
                 "education_grade", "class_ids", "school_year", "semester_part", "is_published",
                 "creation", "modified", "owner",
+                "program_type", "form_id", "intl_scoreboard_enabled",
             ],
             filters=filters,
             order_by="modified desc",
