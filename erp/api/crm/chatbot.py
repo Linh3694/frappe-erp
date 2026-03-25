@@ -152,3 +152,85 @@ def create_lead_from_chatbot():
         frappe.db.rollback()
         frappe.log_error(f"Loi tao CRM Lead tu chatbot: {str(e)}")
         return error_response(f"Loi tao ho so: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def update_lead_visit_preference():
+    """
+    Cap nhat lich tham quan mong muon tren lead da tao tu chatbot.
+
+    Input:
+    - lead_name: str - Ten (name hoac crm_code) cua CRM Lead (bat buoc)
+    - visit_preference: str - Thoi gian moi mong muon (bat buoc)
+
+    Auth: Header X-Chatbot-API-Key
+    """
+    if not _verify_chatbot_api_key():
+        return forbidden_response("API key khong hop le hoac chua cau hinh")
+
+    data = _get_request_data()
+
+    lead_name = (data.get("lead_name") or "").strip()
+    visit_preference = (data.get("visit_preference") or "").strip()
+
+    if not lead_name:
+        return validation_error_response(
+            "Thieu tham so lead_name",
+            {"lead_name": ["Bat buoc"]}
+        )
+
+    if not visit_preference:
+        return validation_error_response(
+            "Thieu tham so visit_preference",
+            {"visit_preference": ["Bat buoc"]}
+        )
+
+    try:
+        # Tim lead theo name hoac crm_code
+        doc = None
+        if frappe.db.exists("CRM Lead", lead_name):
+            doc = frappe.get_doc("CRM Lead", lead_name)
+        else:
+            leads = frappe.get_all(
+                "CRM Lead",
+                filters={"crm_code": lead_name},
+                fields=["name"],
+                limit=1,
+            )
+            if leads:
+                doc = frappe.get_doc("CRM Lead", leads[0]["name"])
+
+        if not doc:
+            return error_response(f"Khong tim thay ho so: {lead_name}")
+
+        # Cap nhat student_note voi lich moi (giu prefix de nhan biet tu chatbot)
+        prefix = "[Chatbot AI] Lịch tham quan mong muốn: "
+        old_note = (doc.student_note or "").strip()
+
+        # Thay the dong chatbot cu neu co, hoac them moi
+        import re as _re
+        pattern = r"\[Chatbot AI\] Lịch tham quan mong muốn: [^\n]+"
+        new_line = prefix + visit_preference
+        if _re.search(pattern, old_note):
+            doc.student_note = _re.sub(pattern, new_line, old_note)
+        elif old_note:
+            doc.student_note = old_note + "\n" + new_line
+        else:
+            doc.student_note = new_line
+
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+
+        return success_response(
+            "Cap nhat lich tham quan thanh cong",
+            {
+                "name": doc.name,
+                "crm_code": doc.crm_code or "",
+                "visit_preference": visit_preference,
+            }
+        )
+
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(f"Loi cap nhat visit_preference tu chatbot: {str(e)}")
+        return error_response(f"Loi cap nhat: {str(e)}")
