@@ -465,12 +465,12 @@ def approve_health_checkup_l3(checkup_name=None):
                     phase_label_en = "year-end" if doc.checkup_phase == "end" else "beginning of year"
                     st_name = doc.student_name or doc.student_id or ""
                     title = {
-                        "vi": f"Kết quả khám sức khỏe định kỳ ({phase_label_vi})",
-                        "en": f"Periodic health checkup ({phase_label_en})",
+                        "vi": "Kết quả khám sức khoẻ định kỳ",
+                        "en": "Periodic health checkup results",
                     }
                     body = {
-                        "vi": f"Đã có kết quả khám SK định kỳ cho {st_name}. Mở ứng dụng để xem chi tiết.",
-                        "en": f"Periodic health checkup results are available for {st_name}. Open the app to view details.",
+                        "vi": f"Đã có kết quả khám sức khoẻ định kỳ {phase_label_vi} của {st_name}. Mở ứng dụng để xem chi tiết.",
+                        "en": f"The {phase_label_en} periodic health checkup results for {st_name} are available. Open the app to view details.",
                     }
                     send_bulk_parent_notifications(
                         recipient_type="periodic_health_checkup",
