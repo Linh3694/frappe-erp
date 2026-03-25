@@ -716,8 +716,8 @@ def batch_get_homeroom_class_logs():
         # This endpoint aggregates: class logs + class attendance + event attendance
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
-        # v5: subject_title tra theo recorded_by từ SIS Teacher Timetable (chính xác theo GV ghi log)
-        cache_key = f"homeroom_class_logs_v5:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        # v6: Fix subject_title - thêm valid_from/valid_to filter, dedup, date overrides
+        cache_key = f"homeroom_class_logs_v6:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -978,6 +978,16 @@ def batch_get_homeroom_class_logs():
         
         frappe.logger().info(f"📝 [Backend] Found {len(all_subject_logs)} class log subjects ({step_times['5_class_log_subjects']:.0f}ms)")
         
+        # Helper: Parse valid_from thành date object để so sánh (dùng cho Step 5b và 7c)
+        def _parse_valid_from(vf):
+            if not vf:
+                return None
+            if hasattr(vf, 'date') and callable(vf.date):
+                return vf.date()
+            if isinstance(vf, str):
+                return dt.strptime(vf, "%Y-%m-%d").date()
+            return vf
+        
         # ⭐ Step 5b: Lấy subject_title từ SIS Teacher Timetable theo người ghi (recorded_by)
         # Ưu tiên tra môn học theo đúng giáo viên đã ghi log (chính xác hơn tra theo lớp)
         # Vì nhiều GV khác nhau có thể ghi log cùng 1 tiết dưới cùng 1 lớp chủ nhiệm
@@ -1041,6 +1051,7 @@ def batch_get_homeroom_class_logs():
 
             # Fallback (ưu tiên 2): SIS Timetable Instance Row cho các log chưa có subject_title
             # (khi recorded_by không phải là GV có trong SIS Teacher Timetable)
+            # ⚡ FIX: Thêm filter valid_from/valid_to và dedup ưu tiên row mới nhất
             logs_without_subject = [log for log in all_subject_logs if not log.get('subject_title')]
             if logs_without_subject and instance_ids:
                 date_obj_5b = dt.strptime(date, "%Y-%m-%d")
@@ -1048,7 +1059,8 @@ def batch_get_homeroom_class_logs():
 
                 sis_timetable_rows = frappe.db.sql("""
                     SELECT ti.class_id, tc.period_name, tc.period_priority,
-                        COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
+                        COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title,
+                        tir.valid_from, tir.valid_to
                     FROM `tabSIS Timetable Instance Row` tir
                     INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
                     INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
@@ -1058,21 +1070,40 @@ def batch_get_homeroom_class_logs():
                         AND tir.day_of_week = %(day_of_week)s
                         AND tir.subject_id IS NOT NULL
                         AND LOWER(tc.period_name) LIKE '%%tiết%%'
-                """, {"instance_ids": instance_ids, "day_of_week": day_of_week_5b}, as_dict=True)
+                        AND tir.parentfield = 'weekly_pattern'
+                        AND (tir.valid_from IS NULL OR tir.valid_from <= %(target_date)s)
+                        AND (tir.valid_to IS NULL OR tir.valid_to >= %(target_date)s)
+                """, {
+                    "instance_ids": instance_ids,
+                    "day_of_week": day_of_week_5b,
+                    "target_date": date
+                }, as_dict=True)
 
+                def _update_map_if_newer(map_dict, vf_dict, k, title, vf_val):
+                    """Cập nhật map nếu chưa có hoặc valid_from mới hơn"""
+                    if k not in map_dict:
+                        map_dict[k] = title
+                        vf_dict[k] = vf_val
+                    elif vf_val and (not vf_dict.get(k) or vf_val > vf_dict[k]):
+                        map_dict[k] = title
+                        vf_dict[k] = vf_val
+
+                # Dedup: ưu tiên row có valid_from mới nhất (giống _build_entries_with_date_precedence)
                 sis_subject_title_map = {}
+                sis_subject_valid_from = {}
                 for row in sis_timetable_rows:
                     if not row.get('subject_title'):
                         continue
+                    vf = _parse_valid_from(row.get('valid_from'))
+                    
                     key_exact = (row['class_id'], row['period_name'])
-                    if key_exact not in sis_subject_title_map:
-                        sis_subject_title_map[key_exact] = row['subject_title']
+                    _update_map_if_newer(sis_subject_title_map, sis_subject_valid_from, key_exact, row['subject_title'], vf)
+                    
                     p_priority = row.get('period_priority')
                     if p_priority and p_priority in period_number_to_combined:
                         combined = period_number_to_combined[p_priority]
                         key_combined = (row['class_id'], combined)
-                        if key_combined not in sis_subject_title_map:
-                            sis_subject_title_map[key_combined] = row['subject_title']
+                        _update_map_if_newer(sis_subject_title_map, sis_subject_valid_from, key_combined, row['subject_title'], vf)
 
                 for log in logs_without_subject:
                     key = (log['class_id'], log['period'])
@@ -1230,16 +1261,20 @@ def batch_get_homeroom_class_logs():
         
         # ⚡ Step 7c: Build map (class_id, period) -> subject_title từ thời khóa biểu
         # Dùng SIS Timetable Instance Row (weekly pattern theo day_of_week)
-        # Giống cách parent portal lấy thời khoá biểu, đã kiểm chứng chính xác
+        # ⚡ FIX: Thêm valid_from/valid_to filter + dedup ưu tiên row mới nhất
+        # + date_overrides từ Instance Row + Timetable_Date_Override
         step_start = time.time()
         timetable_subject_map = {}  # (class_id, period) -> subject_title
+        timetable_subject_vf = {}   # (class_id, period) -> valid_from (để dedup)
         if instance_ids:
             date_obj_7c = dt.strptime(date, "%Y-%m-%d")
             day_of_week_7c = date_obj_7c.strftime("%A").lower()[:3]
 
+            # 7c-1: Weekly pattern rows (có filter valid_from/valid_to)
             timetable_instance_subjects = frappe.db.sql("""
                 SELECT ti.class_id, tc.period_name, tc.period_priority,
-                    COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
+                    COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title,
+                    tir.valid_from, tir.valid_to
                 FROM `tabSIS Timetable Instance Row` tir
                 INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
                 INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
@@ -1249,30 +1284,113 @@ def batch_get_homeroom_class_logs():
                     AND tir.day_of_week = %(day_of_week)s
                     AND tir.subject_id IS NOT NULL
                     AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                    AND tir.parentfield = 'weekly_pattern'
+                    AND (tir.valid_from IS NULL OR tir.valid_from <= %(target_date)s)
+                    AND (tir.valid_to IS NULL OR tir.valid_to >= %(target_date)s)
             """, {
                 "instance_ids": instance_ids,
-                "day_of_week": day_of_week_7c
+                "day_of_week": day_of_week_7c,
+                "target_date": date
             }, as_dict=True)
+            
+            def _update_7c(k, title, vf_val):
+                if k not in timetable_subject_map:
+                    timetable_subject_map[k] = title
+                    timetable_subject_vf[k] = vf_val
+                elif vf_val and (not timetable_subject_vf.get(k) or vf_val > timetable_subject_vf[k]):
+                    timetable_subject_map[k] = title
+                    timetable_subject_vf[k] = vf_val
+            
             for row in timetable_instance_subjects:
-                class_id = row.get('class_id')
-                if not class_id:
+                cid = row.get('class_id')
+                if not cid:
                     continue
                 period_name = row.get('period_name') or ''
                 period_priority = row.get('period_priority')
                 subject_title = row.get('subject_title')
                 if not subject_title:
                     continue
+                
+                vf = _parse_valid_from(row.get('valid_from'))
+                
                 if period_name in periods:
-                    key = (class_id, period_name)
-                    if key not in timetable_subject_map:
-                        timetable_subject_map[key] = subject_title
+                    _update_7c((cid, period_name), subject_title, vf)
                 if period_priority is not None and period_priority in period_number_to_combined:
                     combined = period_number_to_combined[period_priority]
-                    key = (class_id, combined)
-                    if key not in timetable_subject_map:
-                        timetable_subject_map[key] = subject_title
+                    _update_7c((cid, combined), subject_title, vf)
+            
+            # 7c-2: Date-specific overrides từ SIS Timetable Instance Row (parentfield='date_overrides')
+            date_override_subjects = frappe.db.sql("""
+                SELECT ti.class_id, tc.period_name, tc.period_priority,
+                    COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
+                FROM `tabSIS Timetable Instance Row` tir
+                INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
+                INNER JOIN `tabSIS Timetable Column` tc ON tir.timetable_column_id = tc.name
+                INNER JOIN `tabSIS Subject` sub ON tir.subject_id = sub.name
+                LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+                WHERE ti.name IN %(instance_ids)s
+                    AND tir.date = %(target_date)s
+                    AND tir.subject_id IS NOT NULL
+                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                    AND tir.parentfield = 'date_overrides'
+            """, {
+                "instance_ids": instance_ids,
+                "target_date": date
+            }, as_dict=True)
+            
+            # Date overrides luôn ưu tiên cao hơn pattern rows → ghi đè trực tiếp
+            for row in date_override_subjects:
+                cid = row.get('class_id')
+                if not cid or not row.get('subject_title'):
+                    continue
+                period_name = row.get('period_name') or ''
+                period_priority = row.get('period_priority')
+                if period_name in periods:
+                    timetable_subject_map[(cid, period_name)] = row['subject_title']
+                if period_priority is not None and period_priority in period_number_to_combined:
+                    combined = period_number_to_combined[period_priority]
+                    timetable_subject_map[(cid, combined)] = row['subject_title']
+            
+            # 7c-3: Timetable_Date_Override (ưu tiên cao nhất - override theo ngày cụ thể)
+            try:
+                class_ids_for_override = list(all_classes_to_query)
+                if class_ids_for_override:
+                    date_overrides = frappe.db.sql("""
+                        SELECT tdo.target_id as class_id, tc.period_name, tc.period_priority,
+                            COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
+                        FROM `tabTimetable_Date_Override` tdo
+                        INNER JOIN `tabSIS Timetable Column` tc ON tdo.timetable_column_id = tc.name
+                        INNER JOIN `tabSIS Subject` sub ON tdo.subject_id = sub.name
+                        LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+                        WHERE tdo.target_type = 'Class'
+                            AND tdo.target_id IN %(class_ids)s
+                            AND tdo.date = %(target_date)s
+                            AND tdo.subject_id IS NOT NULL
+                            AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                    """, {
+                        "class_ids": class_ids_for_override,
+                        "target_date": date
+                    }, as_dict=True)
+                    
+                    for row in date_overrides:
+                        cid = row.get('class_id')
+                        if not cid or not row.get('subject_title'):
+                            continue
+                        period_name = row.get('period_name') or ''
+                        period_priority = row.get('period_priority')
+                        if period_name in periods:
+                            timetable_subject_map[(cid, period_name)] = row['subject_title']
+                        if period_priority is not None and period_priority in period_number_to_combined:
+                            combined = period_number_to_combined[period_priority]
+                            timetable_subject_map[(cid, combined)] = row['subject_title']
+                    
+                    if date_overrides:
+                        frappe.logger().info(f"📚 [Backend] Applied {len(date_overrides)} Timetable_Date_Override entries")
+            except Exception as override_err:
+                frappe.logger().warning(f"⚠️ [Backend] Could not load Timetable_Date_Override: {str(override_err)}")
+        
         step_times['7c_timetable_subjects'] = (time.time() - step_start) * 1000
-        frappe.logger().info(f"📚 [Backend] Built timetable_subject_map with {len(timetable_subject_map)} entries from Timetable Instance Row ({step_times['7c_timetable_subjects']:.0f}ms)")
+        frappe.logger().info(f"📚 [Backend] Built timetable_subject_map with {len(timetable_subject_map)} entries (pattern+overrides) ({step_times['7c_timetable_subjects']:.0f}ms)")
         
         # Step 8: Build result for each period
         step_start = time.time()

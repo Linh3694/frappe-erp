@@ -7,6 +7,7 @@ Pattern tương tự erp.api.erp_sis.report_card.images (lưu public/files/...).
 
 import glob
 import os
+import re
 import shutil
 
 import frappe
@@ -38,6 +39,24 @@ def _health_checkup_folder_url(doc):
     school_year = doc.school_year_id or "unknown"
     phase = doc.checkup_phase or "beginning"
     return f"/files/health_checkup/{student_code}/{school_year}/{phase}"
+
+
+def _sort_health_checkup_page_png_paths(paths):
+    """Sắp page_1.png, page_2.png, … đúng thứ tự (tránh sort chữ: page_10 trước page_2)."""
+    def sort_key(p):
+        m = re.search(r"page_(\d+)\.png$", os.path.basename(p), re.IGNORECASE)
+        return int(m.group(1)) if m else 0
+
+    return sorted(paths, key=sort_key)
+
+
+def _public_file_url_with_mtime_cache_bust(base_url: str, filename: str, disk_path: str) -> str:
+    """URL + ?t=mtime — tránh cache ảnh cũ trên Parent Portal sau khi ghi đè file cùng tên."""
+    try:
+        mt = int(os.path.getmtime(disk_path)) if os.path.isfile(disk_path) else 0
+    except OSError:
+        mt = 0
+    return f"{base_url}/{filename}?t={mt}"
 
 
 def _teacher_id_from_session_user():
@@ -213,12 +232,18 @@ def get_health_checkup_images(checkup_name=None):
             return error_response(message="Không có quyền", code="FORBIDDEN")
 
         folder_disk = _health_checkup_folder_path(doc)
-        image_files = sorted(glob.glob(os.path.join(folder_disk, "page_*.png")))
+        image_files = _sort_health_checkup_page_png_paths(glob.glob(os.path.join(folder_disk, "page_*.png")))
         base_url = _health_checkup_folder_url(doc)
         image_urls = []
         for idx, p in enumerate(image_files):
             fn = os.path.basename(p)
-            image_urls.append({"page": idx + 1, "filename": fn, "url": f"{base_url}/{fn}"})
+            image_urls.append(
+                {
+                    "page": idx + 1,
+                    "filename": fn,
+                    "url": _public_file_url_with_mtime_cache_bust(base_url, fn, p),
+                }
+            )
 
         return success_response(
             data={
@@ -255,9 +280,15 @@ def get_health_checkup_image_urls_for_checkup(checkup_name: str):
         return []
     folder_disk = _health_checkup_folder_path(doc)
     base_url = _health_checkup_folder_url(doc)
-    image_files = sorted(glob.glob(os.path.join(folder_disk, "page_*.png")))
+    image_files = _sort_health_checkup_page_png_paths(glob.glob(os.path.join(folder_disk, "page_*.png")))
     out = []
     for idx, p in enumerate(image_files):
         fn = os.path.basename(p)
-        out.append({"page": idx + 1, "filename": fn, "url": f"{base_url}/{fn}"})
+        out.append(
+            {
+                "page": idx + 1,
+                "filename": fn,
+                "url": _public_file_url_with_mtime_cache_bust(base_url, fn, p),
+            }
+        )
     return out
