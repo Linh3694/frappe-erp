@@ -548,6 +548,35 @@ def reject_health_checkup_l3(checkup_name=None, comment=None):
         return error_response(message=str(e), code="L3_REJECT_ERROR")
 
 
+def _archive_periodic_checkup_notifications(checkup_names):
+    """Soft-delete (archive) tất cả ERP Notification liên quan đến các phiếu khám đã thu hồi."""
+    if not checkup_names:
+        return
+    try:
+        has_table = frappe.db.sql(
+            "SHOW TABLES LIKE 'tabERP Notification'", as_list=True
+        )
+        if not has_table:
+            return
+    except Exception:
+        return
+
+    for ck_name in checkup_names:
+        # data là JSON string chứa checkup_name — dùng LIKE để tìm
+        notifs = frappe.db.sql(
+            """
+            SELECT name FROM `tabERP Notification`
+            WHERE notification_type = 'periodic_health_checkup'
+              AND IFNULL(read_status, '') != 'archived'
+              AND data LIKE %(pattern)s
+            """,
+            {"pattern": f"%{ck_name}%"},
+            as_dict=True,
+        )
+        for n in notifs:
+            frappe.db.set_value("ERP Notification", n.name, "read_status", "archived", update_modified=False)
+
+
 @frappe.whitelist(allow_guest=False)
 def revoke_health_checkup_l3(checkup_name=None):
     """
@@ -586,6 +615,13 @@ def revoke_health_checkup_l3(checkup_name=None):
                 doc.revoked_by = frappe.session.user
             doc.save(ignore_permissions=True)
             done.append(name)
+
+        # Xóa (archive) notification liên quan đến các phiếu đã thu hồi
+        if done:
+            try:
+                _archive_periodic_checkup_notifications(done)
+            except Exception as ne:
+                frappe.log_error(f"revoke_health_checkup_l3 cleanup notifications: {str(ne)}")
 
         frappe.db.commit()
         return success_response(data={"revoked": done}, message=f"Đã thu hồi {len(done)} phiếu")
