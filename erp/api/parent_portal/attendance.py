@@ -98,6 +98,31 @@ def get_student_attendance(student_id=None, start_date=None, end_date=None):
         Attendance records grouped by date
     """
     try:
+        # Fallback: form_dict → JSON body (Bearer token + POST không tự parse params)
+        if not student_id:
+            student_id = frappe.form_dict.get("student_id")
+        if not start_date:
+            start_date = frappe.form_dict.get("start_date")
+        if not end_date:
+            end_date = frappe.form_dict.get("end_date")
+
+        if (not student_id or not start_date or not end_date):
+            if hasattr(frappe.request, 'content_type') and frappe.request.content_type and 'json' in frappe.request.content_type.lower():
+                try:
+                    raw_data = frappe.request.get_data(as_text=True)
+                    if raw_data:
+                        json_data = json.loads(raw_data)
+                        student_id = student_id or json_data.get("student_id")
+                        start_date = start_date or json_data.get("start_date")
+                        end_date = end_date or json_data.get("end_date")
+                except Exception:
+                    pass
+
+        frappe.logger().info(
+            f"🔍 [Backend] get_student_attendance: "
+            f"student_id={student_id}, start_date={start_date}, end_date={end_date}"
+        )
+
         # Get current user email
         user_email = frappe.session.user
         if not user_email:
@@ -105,9 +130,6 @@ def get_student_attendance(student_id=None, start_date=None, end_date=None):
 
         # Validate student belongs to parent
         parent_student_ids = _get_parent_student_ids(user_email)
-        # Debug: temporarily disable validation to test API
-        # if student_id not in parent_student_ids:
-        #     return error_response(message="Access denied: Student not found in your family", code="ACCESS_DENIED")
         frappe.logger().info(f"🔍 [Backend] parent_student_ids: {parent_student_ids}, received student_id: {student_id}")
 
         if not start_date or not end_date:

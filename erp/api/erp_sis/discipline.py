@@ -1626,6 +1626,159 @@ def get_discipline_record_changelog(name: str = None):
         )
 
 
+def _create_discipline_record_core(
+    date,
+    classification,
+    violation_count,
+    target_type,
+    target_student,
+    target_student_ids,
+    target_class_ids,
+    violation,
+    form,
+    penalty_points,
+    time_slot,
+    time_slot_id,
+    record_time,
+    description,
+    proof_images,
+    campus,
+):
+    """
+    Tạo bản ghi kỷ luật từ tham số đã chuẩn hoá (dùng chung API và import Excel).
+    """
+    if not date:
+        return error_response(
+            message="Ngày là bắt buộc",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+    if not classification:
+        return error_response(
+            message="Phân loại là bắt buộc",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+    if violation_count is None:
+        violation_count = 1
+    # Xác định target_type từ dữ liệu: mixed (cả lớp + học sinh), class, student
+    has_classes = bool(target_class_ids)
+    has_students = bool(target_student_ids) or bool(target_student)
+    if not target_type:
+        if has_classes and has_students:
+            target_type = "mixed"
+        elif has_classes:
+            target_type = "class"
+        elif has_students:
+            target_type = "student"
+        else:
+            return error_response(
+                message="Chọn ít nhất một lớp hoặc một học sinh",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+    if target_type == "student" and not target_student_ids and not target_student:
+        return error_response(
+            message="Học sinh là bắt buộc khi đối tượng là Học sinh",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+    if target_type == "class" and not target_class_ids:
+        return error_response(
+            message="Lớp là bắt buộc khi đối tượng là Lớp",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+    if target_type == "mixed" and (
+        not target_class_ids and not target_student_ids and not target_student
+    ):
+        return error_response(
+            message="Chọn ít nhất một lớp hoặc một học sinh",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+    if not violation:
+        return error_response(
+            message="Vi phạm là bắt buộc",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+    if not form:
+        return error_response(
+            message="Hình thức là bắt buộc",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+    if not campus:
+        return error_response(
+            message="Trường học là bắt buộc",
+            code="MISSING_REQUIRED_FIELDS",
+        )
+
+    allowed_create, deny_create = _can_create_discipline_record()
+    if not allowed_create:
+        return error_response(
+            message=deny_create or "Không có quyền",
+            code="DISCIPLINE_RECORD_FORBIDDEN",
+        )
+
+    # Thu thập danh sách học sinh (target_student cũ hoặc target_student_ids mới)
+    student_ids = list(target_student_ids) if target_student_ids else []
+    if target_student and target_student not in student_ids:
+        student_ids.insert(0, target_student)
+
+    # target_student: set khi có đúng 1 học sinh (để thống kê đếm được)
+    single_student_id = student_ids[0] if len(student_ids) == 1 else None
+    doc = frappe.get_doc(
+        {
+            "doctype": "SIS Discipline Record",
+            "date": date,
+            "classification": classification,
+            "violation_count": int(violation_count),
+            "target_type": target_type,
+            "target_student": single_student_id
+            if (target_type in ("student", "mixed") and single_student_id)
+            else None,
+            "violation": violation,
+            "form": form,
+            "penalty_points": str(penalty_points),
+            "time_slot": time_slot or "",
+            "time_slot_id": time_slot_id or None,
+            "record_time": record_time or "",
+            "description": description or "",
+            "campus": campus,
+        }
+    )
+
+    # Lớp: target_classes (class hoặc mixed)
+    if target_type in ("class", "mixed") and target_class_ids:
+        for cid in target_class_ids:
+            if isinstance(cid, dict):
+                cid = cid.get("class_id") or cid.get("name")
+            if cid:
+                doc.append("target_classes", {"class_id": cid})
+
+    # Học sinh: target_students (child table) - luôn append để có dữ liệu đầy đủ
+    if student_ids:
+        for sid in student_ids:
+            if isinstance(sid, dict):
+                sid = sid.get("student_id") or sid.get("name")
+            if sid:
+                doc.append("target_students", {"student_id": sid})
+
+    for img in proof_images or []:
+        url = img.get("image") if isinstance(img, dict) else img
+        if url:
+            doc.append("proof_images", {"image": url})
+
+    try:
+        doc.insert()
+        frappe.db.commit()
+    except Exception as e:
+        frappe.log_error(f"Error creating discipline record: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo ghi nhận lỗi: {str(e)}",
+            code="CREATE_DISCIPLINE_RECORD_ERROR",
+        )
+
+    return success_response(
+        data={"name": doc.name},
+        message="Tạo ghi nhận lỗi thành công",
+    )
+
+
 @frappe.whitelist(allow_guest=False)
 def create_discipline_record(
     date=None,
@@ -1655,7 +1808,7 @@ def create_discipline_record(
         data = _get_request_data()
         date = date or data.get("date")
         classification = classification or data.get("classification")
-        violation_count = violation_count or data.get("violation_count")
+        violation_count = violation_count if violation_count is not None else data.get("violation_count")
 
         target_type = target_type or data.get("target_type")
         target_student = target_student or data.get("target_student")
@@ -1672,61 +1825,71 @@ def create_discipline_record(
         proof_images = proof_images or data.get("proof_images") or []
         campus = campus or data.get("campus") or get_current_campus_from_context()
 
-        if not date:
-            return error_response(
-                message="Ngày là bắt buộc",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if not classification:
-            return error_response(
-                message="Phân loại là bắt buộc",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if violation_count is None:
-            violation_count = 1
-        # Xác định target_type từ dữ liệu: mixed (cả lớp + học sinh), class, student
-        has_classes = bool(target_class_ids)
-        has_students = bool(target_student_ids) or bool(target_student)
-        if not target_type:
-            if has_classes and has_students:
-                target_type = "mixed"
-            elif has_classes:
-                target_type = "class"
-            elif has_students:
-                target_type = "student"
-            else:
-                return error_response(
-                    message="Chọn ít nhất một lớp hoặc một học sinh",
-                    code="MISSING_REQUIRED_FIELDS",
-                )
-        if target_type == "student" and not target_student_ids and not target_student:
-            return error_response(
-                message="Học sinh là bắt buộc khi đối tượng là Học sinh",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if target_type == "class" and not target_class_ids:
-            return error_response(
-                message="Lớp là bắt buộc khi đối tượng là Lớp",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if target_type == "mixed" and (not target_class_ids and not target_student_ids and not target_student):
-            return error_response(
-                message="Chọn ít nhất một lớp hoặc một học sinh",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if not violation:
-            return error_response(
-                message="Vi phạm là bắt buộc",
-                code="MISSING_REQUIRED_FIELDS",
-            )
-        if not form:
-            return error_response(
-                message="Hình thức là bắt buộc",
-                code="MISSING_REQUIRED_FIELDS",
-            )
+        return _create_discipline_record_core(
+            date=date,
+            classification=classification,
+            violation_count=violation_count,
+            target_type=target_type,
+            target_student=target_student,
+            target_student_ids=target_student_ids,
+            target_class_ids=target_class_ids,
+            violation=violation,
+            form=form,
+            penalty_points=penalty_points,
+            time_slot=time_slot,
+            time_slot_id=time_slot_id,
+            record_time=record_time,
+            description=description,
+            proof_images=proof_images,
+            campus=campus,
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error creating discipline record: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi tạo ghi nhận lỗi: {str(e)}",
+            code="CREATE_DISCIPLINE_RECORD_ERROR",
+        )
+
+
+def _split_csv_codes(raw):
+    """Tách chuỗi mã / tên phân cách bởi dấu phẩy."""
+    if raw is None:
+        return []
+    s = str(raw).strip()
+    if not s:
+        return []
+    return [p.strip() for p in s.split(",") if p.strip()]
+
+
+@frappe.whitelist(allow_guest=False)
+def import_discipline_records():
+    """
+    Import nhiều bản ghi kỷ luật từ dữ liệu đã parse ở frontend (JSON).
+
+    Body JSON:
+        campus: bắt buộc
+        data: list dict, mỗi phần tử có thể gồm:
+            date, classification_title, violation_title, form_title,
+            student_codes (chuỗi mã HS phân cách bởi dấu phẩy),
+            class_titles (chuỗi tên lớp phân cách bởi dấu phẩy),
+            time_slot_title, record_time, description
+
+    Trả về: total_count, success_count, error_count, errors[{ row, error, data }]
+    """
+    try:
+        payload = _get_request_data()
+        campus = payload.get("campus")
+        rows = payload.get("data") or []
+
         if not campus:
             return error_response(
-                message="Trường học là bắt buộc",
+                message="Trường học (campus) là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not isinstance(rows, list) or len(rows) == 0:
+            return error_response(
+                message="Danh sách dữ liệu (data) không hợp lệ hoặc rỗng",
                 code="MISSING_REQUIRED_FIELDS",
             )
 
@@ -1737,66 +1900,192 @@ def create_discipline_record(
                 code="DISCIPLINE_RECORD_FORBIDDEN",
             )
 
-        # Thu thập danh sách học sinh (target_student cũ hoặc target_student_ids mới)
-        student_ids = list(target_student_ids) if target_student_ids else []
-        if target_student and target_student not in student_ids:
-            student_ids.insert(0, target_student)
-
-        # target_student: set khi có đúng 1 học sinh (để thống kê đếm được)
-        single_student_id = student_ids[0] if len(student_ids) == 1 else None
-        doc = frappe.get_doc(
-            {
-                "doctype": "SIS Discipline Record",
-                "date": date,
-                "classification": classification,
-                "violation_count": int(violation_count),
-                "target_type": target_type,
-                "target_student": single_student_id if (target_type in ("student", "mixed") and single_student_id) else None,
-                "violation": violation,
-                "form": form,
-                "penalty_points": str(penalty_points),
-                "time_slot": time_slot or "",
-                "time_slot_id": time_slot_id or None,
-                "record_time": record_time or "",
-                "description": description or "",
-                "campus": campus,
-            }
+        # Năm học đang bật (lọc lớp theo năm học)
+        sy_filters = {"is_enable": 1, "campus_id": campus}
+        sy_list = frappe.get_all(
+            "SIS School Year",
+            filters=sy_filters,
+            fields=["name"],
+            order_by="start_date desc",
+            limit=1,
         )
+        if not sy_list:
+            sy_list = frappe.get_all(
+                "SIS School Year",
+                filters={"is_enable": 1},
+                fields=["name"],
+                order_by="start_date desc",
+                limit=1,
+            )
+        school_year_id = sy_list[0]["name"] if sy_list else None
 
-        # Lớp: target_classes (class hoặc mixed)
-        if target_type in ("class", "mixed") and target_class_ids:
-            for cid in target_class_ids:
-                if isinstance(cid, dict):
-                    cid = cid.get("class_id") or cid.get("name")
-                if cid:
-                    doc.append("target_classes", {"class_id": cid})
+        errors = []
+        success_count = 0
+        total_count = len(rows)
 
-        # Học sinh: target_students (child table) - luôn append để có dữ liệu đầy đủ
-        if student_ids:
-            for sid in student_ids:
-                if isinstance(sid, dict):
-                    sid = sid.get("student_id") or sid.get("name")
-                if sid:
-                    doc.append("target_students", {"student_id": sid})
+        for idx, row in enumerate(rows):
+            row_num = idx + 1
+            if not isinstance(row, dict):
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": "Dòng không phải object",
+                        "data": {},
+                    }
+                )
+                continue
 
-        for img in proof_images:
-            url = img.get("image") if isinstance(img, dict) else img
-            if url:
-                doc.append("proof_images", {"image": url})
+            try:
+                date = (row.get("date") or "").strip()
+                classification_title = (row.get("classification_title") or "").strip()
+                violation_title = (row.get("violation_title") or "").strip()
+                form_title = (row.get("form_title") or "").strip()
+                student_codes = _split_csv_codes(row.get("student_codes"))
+                class_titles = _split_csv_codes(row.get("class_titles"))
+                time_slot_title = (row.get("time_slot_title") or "").strip()
+                record_time = (row.get("record_time") or "").strip()
+                description = (row.get("description") or "").strip()
 
-        doc.insert()
-        frappe.db.commit()
+                if not date:
+                    raise ValueError("Thiếu ngày")
+                if not classification_title:
+                    raise ValueError("Thiếu phân loại")
+                if not violation_title:
+                    raise ValueError("Thiếu vi phạm")
+                if not form_title:
+                    raise ValueError("Thiếu hình thức")
+                if not student_codes and not class_titles:
+                    raise ValueError(
+                        "Cần ít nhất một mã học sinh hoặc một tên lớp"
+                    )
 
+                classification_name = frappe.db.get_value(
+                    "SIS Discipline Classification",
+                    {"title": classification_title, "campus": campus, "enabled": 1},
+                    "name",
+                )
+                if not classification_name:
+                    raise ValueError(
+                        f"Không tìm thấy phân loại: {classification_title}"
+                    )
+
+                violation_name = frappe.db.get_value(
+                    "SIS Discipline Violation",
+                    {
+                        "title": violation_title,
+                        "classification": classification_name,
+                        "enabled": 1,
+                    },
+                    "name",
+                )
+                if not violation_name:
+                    raise ValueError(f"Không tìm thấy vi phạm: {violation_title}")
+
+                form_name = frappe.db.get_value(
+                    "SIS Discipline Form",
+                    {"title": form_title, "campus": campus, "enabled": 1},
+                    "name",
+                )
+                if not form_name:
+                    raise ValueError(f"Không tìm thấy hình thức: {form_title}")
+
+                time_slot_id = None
+                if time_slot_title:
+                    time_slot_id = frappe.db.get_value(
+                        "SIS Discipline Time",
+                        {"title": time_slot_title, "campus": campus, "enabled": 1},
+                        "name",
+                    )
+                    if not time_slot_id:
+                        raise ValueError(f"Không tìm thấy tiết: {time_slot_title}")
+
+                target_student_ids = []
+                if student_codes:
+                    for code in student_codes:
+                        sid = frappe.db.get_value(
+                            "CRM Student",
+                            {"student_code": code},
+                            "name",
+                        )
+                        if not sid:
+                            raise ValueError(f"Không tìm thấy học sinh mã: {code}")
+                        target_student_ids.append(sid)
+
+                target_class_ids = []
+                if class_titles:
+                    if not school_year_id:
+                        raise ValueError(
+                            "Chưa có năm học được kích hoạt — không thể gán lớp"
+                        )
+                    for ct in class_titles:
+                        cid = frappe.db.get_value(
+                            "SIS Class",
+                            {
+                                "title": ct,
+                                "school_year_id": school_year_id,
+                                "campus_id": campus,
+                            },
+                            "name",
+                        )
+                        if not cid:
+                            raise ValueError(
+                                f"Không tìm thấy lớp '{ct}' trong năm học hiện tại"
+                            )
+                        target_class_ids.append(cid)
+
+                target_type = None
+                target_student = None
+                result = _create_discipline_record_core(
+                    date=date,
+                    classification=classification_name,
+                    violation_count=1,
+                    target_type=target_type,
+                    target_student=target_student,
+                    target_student_ids=target_student_ids,
+                    target_class_ids=target_class_ids,
+                    violation=violation_name,
+                    form=form_name,
+                    penalty_points="1",
+                    time_slot=None,
+                    time_slot_id=time_slot_id,
+                    record_time=record_time,
+                    description=description,
+                    proof_images=[],
+                    campus=campus,
+                )
+
+                if not result or not result.get("success"):
+                    raise ValueError(
+                        (result or {}).get("message", "Tạo bản ghi thất bại")
+                    )
+                success_count += 1
+
+            except Exception as ex:
+                err_msg = str(ex)
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": err_msg,
+                        "data": row if isinstance(row, dict) else {},
+                    }
+                )
+
+        error_count = len(errors)
         return success_response(
-            data={"name": doc.name},
-            message="Tạo ghi nhận lỗi thành công",
+            data={
+                "total_count": total_count,
+                "success_count": success_count,
+                "error_count": error_count,
+                "errors": errors,
+            },
+            message=f"Import xong: {success_count}/{total_count} thành công",
         )
 
     except Exception as e:
-        frappe.log_error(f"Error creating discipline record: {str(e)}")
+        frappe.log_error(f"Error import_discipline_records: {str(e)}")
         return error_response(
-            message=f"Lỗi khi tạo ghi nhận lỗi: {str(e)}",
-            code="CREATE_DISCIPLINE_RECORD_ERROR",
+            message=f"Lỗi import: {str(e)}",
+            code="IMPORT_DISCIPLINE_RECORDS_ERROR",
         )
 
 

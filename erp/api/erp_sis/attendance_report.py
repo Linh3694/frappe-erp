@@ -1235,7 +1235,8 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
                         date: "YYYY-MM-DD",
                         day_of_week: 1-7,
                         faceid: { check_in, check_out, status_morning, status_afternoon } | null,
-                        homeroom: [ { period, status } ] | []
+                        homeroom: [ { period, status } ] | [],
+                        leave_request_id: name đơn SIS Student Leave Request phủ ngày này | null
                     }
                 ]
             }
@@ -1404,8 +1405,30 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
             if date_str not in homeroom_map:
                 homeroom_map[date_str] = []
             homeroom_map[date_str].append({"period": rec.period, "status": rec.status})
-        
-        # 3. Build danh sách ngày trong tháng
+
+        # 3. Đơn nghỉ phép (SIS Student Leave Request) — có đơn phủ ngày `d` nếu start_date <= d <= end_date
+        leave_request_rows = frappe.db.sql(
+            """
+            SELECT name, start_date, end_date
+            FROM `tabSIS Student Leave Request`
+            WHERE student_id = %(student_id)s
+              AND end_date >= %(start)s AND start_date <= %(end)s
+            ORDER BY modified DESC
+            """,
+            {"student_id": student_id, "start": start_date, "end": end_date},
+            as_dict=True,
+        )
+
+        def _leave_request_id_for_date(d):
+            d = frappe.utils.getdate(d)
+            for lr in leave_request_rows:
+                sd = frappe.utils.getdate(lr.start_date)
+                ed = frappe.utils.getdate(lr.end_date)
+                if sd <= d <= ed:
+                    return lr.name
+            return None
+
+        # 4. Build danh sách ngày trong tháng
         days_result = []
         current = start_date
         while current <= end_date:
@@ -1416,7 +1439,8 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
                 "date": date_str,
                 "day_of_week": current.isoweekday(),
                 "faceid": faceid,
-                "homeroom": homeroom
+                "homeroom": homeroom,
+                "leave_request_id": _leave_request_id_for_date(current),
             })
             current += timedelta(days=1)
         
