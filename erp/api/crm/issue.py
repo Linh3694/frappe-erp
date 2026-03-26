@@ -109,6 +109,26 @@ def _sync_issue_students(doc, data):
     doc.student = st
 
 
+def _enrich_pic_info(issues):
+    """Them pic_full_name va pic_user_image vao danh sach issues"""
+    pic_emails = list({r.get("pic") or r.pic for r in issues if (r.get("pic") if isinstance(r, dict) else getattr(r, "pic", None))})
+    if not pic_emails:
+        return
+    users = {
+        u.name: u
+        for u in frappe.get_all("User", filters={"name": ["in", pic_emails]}, fields=["name", "full_name", "user_image"])
+    }
+    for r in issues:
+        pic = r.get("pic") if isinstance(r, dict) else getattr(r, "pic", None)
+        u = users.get(pic)
+        if isinstance(r, dict):
+            r["pic_full_name"] = u.full_name if u else ""
+            r["pic_user_image"] = u.user_image if u else ""
+        else:
+            r.pic_full_name = u.full_name if u else ""
+            r.pic_user_image = u.user_image if u else ""
+
+
 def _compute_sla_deadline(occurred_at, sla_hours):
     """occurred_at: string/datetime, sla_hours: float"""
     if not occurred_at or sla_hours is None:
@@ -200,6 +220,7 @@ def get_issues():
         page_length=per_page,
     )
 
+    _enrich_pic_info(issues)
     return paginated_response(issues, page, total, per_page)
 
 
@@ -251,7 +272,12 @@ def get_issue():
         return not_found_response(f"Khong tim thay van de {name}")
 
     doc = frappe.get_doc("CRM Issue", name)
-    return single_item_response(doc.as_dict())
+    data = doc.as_dict()
+    if data.get("pic"):
+        u = frappe.db.get_value("User", data["pic"], ["full_name", "user_image"], as_dict=True)
+        data["pic_full_name"] = u.full_name if u else ""
+        data["pic_user_image"] = u.user_image if u else ""
+    return single_item_response(data)
 
 
 @frappe.whitelist(methods=["POST"])
