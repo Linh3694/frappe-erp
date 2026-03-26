@@ -122,6 +122,30 @@ def _compute_sla_deadline(occurred_at, sla_hours):
 
 
 @frappe.whitelist()
+def get_issue_pic_candidates():
+    """Tra ve danh sach user co role PIC hop le (SIS Sales, Sales Admin, Sales Care, Sales Care Admin)"""
+    check_crm_permission()
+
+    pic_roles = list(DIRECT_ISSUE_ROLES)
+    user_emails = frappe.get_all(
+        "Has Role",
+        filters={"role": ["in", pic_roles], "parenttype": "User"},
+        fields=["parent"],
+        pluck="parent",
+    )
+    unique_emails = list(set(user_emails))
+    if not unique_emails:
+        return success_response([])
+
+    users = frappe.get_all(
+        "User",
+        filters={"name": ["in", unique_emails], "enabled": 1},
+        fields=["name as user_id", "full_name", "email", "user_image"],
+    )
+    return success_response(users)
+
+
+@frappe.whitelist()
 def get_issues():
     """Lay danh sach van de"""
     check_crm_permission()
