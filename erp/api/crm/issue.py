@@ -448,8 +448,8 @@ def change_issue_status():
         return error_response("Van de chua duoc duyet, khong doi trang thai xu ly")
 
     doc.status = status
-    if result:
-        doc.result = result
+    if "result" in data:
+        doc.result = result or ""
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -479,12 +479,16 @@ def add_process_log():
 
     try:
         doc = frappe.get_doc("CRM Issue", issue_name)
+        current_user = frappe.session.user
+        user_full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
         doc.append(
             "process_logs",
             {
                 "title": data["title"],
                 "content": data["content"],
                 "logged_at": data.get("logged_at", now()),
+                "logged_by": current_user,
+                "logged_by_name": user_full_name,
                 "assignees": data.get("assignees", ""),
                 "attachment": data.get("attachment", ""),
             },

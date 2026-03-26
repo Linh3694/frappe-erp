@@ -8,6 +8,8 @@
   "title",
   "content",
   "logged_at",
+  "logged_by",
+  "logged_by_name",
   "assignees",
   "attachment"
  ],
@@ -31,6 +33,18 @@
    "fieldtype": "Datetime",
    "in_list_view": 1,
    "label": "Logged At"
+  },
+  {
+   "fieldname": "logged_by",
+   "fieldtype": "Link",
+   "label": "Logged By",
+   "options": "User"
+  },
+  {
+   "fieldname": "logged_by_name",
+   "fieldtype": "Data",
+   "label": "Logged By Name",
+   "read_only": 1
   },
   {
    "fieldname": "assignees",
