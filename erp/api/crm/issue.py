@@ -109,24 +109,55 @@ def _sync_issue_students(doc, data):
     doc.student = st
 
 
-def _enrich_pic_info(issues):
-    """Them pic_full_name va pic_user_image vao danh sach issues"""
-    pic_emails = list({r.get("pic") or r.pic for r in issues if (r.get("pic") if isinstance(r, dict) else getattr(r, "pic", None))})
-    if not pic_emails:
+def _normalize_vn_name(full_name):
+    """Chuẩn hoá tên tiếng Việt: 'Linh Nguyễn Hải' → 'Nguyễn Hải Linh' (Họ đệm Tên)"""
+    if not full_name or not full_name.strip():
+        return full_name or ""
+    parts = full_name.strip().split()
+    if len(parts) <= 1:
+        return full_name.strip()
+    first = parts[0]
+    if first[0].isupper() and any(c.islower() for c in first):
+        pass
+    # Frappe thường lưu First Last → "Linh Nguyễn Hải"
+    # Chuẩn VN: Họ Đệm Tên → đưa phần tử đầu xuống cuối
+    return " ".join(parts[1:] + [parts[0]])
+
+
+def _enrich_user_info(issues):
+    """Them pic_full_name, pic_user_image, created_by_name vao danh sach issues"""
+    emails = set()
+    for r in issues:
+        _get = r.get if isinstance(r, dict) else lambda k, d=None: getattr(r, k, d)
+        if _get("pic"):
+            emails.add(_get("pic"))
+        if _get("created_by_user"):
+            emails.add(_get("created_by_user"))
+    if not emails:
         return
     users = {
         u.name: u
-        for u in frappe.get_all("User", filters={"name": ["in", pic_emails]}, fields=["name", "full_name", "user_image"])
+        for u in frappe.get_all("User", filters={"name": ["in", list(emails)]}, fields=["name", "full_name", "user_image"])
     }
     for r in issues:
-        pic = r.get("pic") if isinstance(r, dict) else getattr(r, "pic", None)
-        u = users.get(pic)
-        if isinstance(r, dict):
-            r["pic_full_name"] = u.full_name if u else ""
-            r["pic_user_image"] = u.user_image if u else ""
+        is_dict = isinstance(r, dict)
+        _get = r.get if is_dict else lambda k, d=None: getattr(r, k, d)
+
+        pic_u = users.get(_get("pic") or "")
+        pic_name = _normalize_vn_name(pic_u.full_name) if pic_u else ""
+        creator_u = users.get(_get("created_by_user") or "")
+        creator_name = _normalize_vn_name(creator_u.full_name) if creator_u else ""
+
+        if is_dict:
+            r["pic_full_name"] = pic_name
+            r["pic_user_image"] = pic_u.user_image if pic_u else ""
+            r["created_by_name"] = creator_name
+            r["created_by_image"] = creator_u.user_image if creator_u else ""
         else:
-            r.pic_full_name = u.full_name if u else ""
-            r.pic_user_image = u.user_image if u else ""
+            r.pic_full_name = pic_name
+            r.pic_user_image = pic_u.user_image if pic_u else ""
+            r.created_by_name = creator_name
+            r.created_by_image = creator_u.user_image if creator_u else ""
 
 
 def _compute_sla_deadline(occurred_at, sla_hours):
@@ -207,10 +238,12 @@ def get_issues():
             "status",
             "result",
             "pic",
+            "created_by_user",
             "occurred_at",
             "lead",
             "student",
             "modified",
+            "creation",
             "approval_status",
             "sla_deadline",
             "department",
@@ -220,7 +253,7 @@ def get_issues():
         page_length=per_page,
     )
 
-    _enrich_pic_info(issues)
+    _enrich_user_info(issues)
     return paginated_response(issues, page, total, per_page)
 
 
@@ -273,10 +306,7 @@ def get_issue():
 
     doc = frappe.get_doc("CRM Issue", name)
     data = doc.as_dict()
-    if data.get("pic"):
-        u = frappe.db.get_value("User", data["pic"], ["full_name", "user_image"], as_dict=True)
-        data["pic_full_name"] = u.full_name if u else ""
-        data["pic_user_image"] = u.user_image if u else ""
+    _enrich_user_info([data])
     return single_item_response(data)
 
 
