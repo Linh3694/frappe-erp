@@ -292,7 +292,7 @@ def create_issue():
 
         sla_h = float(mod.sla_hours or 0)
         doc.sla_hours = sla_h
-        doc.sla_deadline = _compute_sla_deadline(occurred_at, sla_h)
+        doc.sla_deadline = _compute_sla_deadline(now(), sla_h)
 
         # PIC: payload > student lead > department first member
         pic = data.get("pic") or ""
@@ -405,7 +405,7 @@ def update_issue():
                 doc.issue_module = data["issue_module"]
                 mod = frappe.get_doc("CRM Issue Module", doc.issue_module)
                 doc.sla_hours = float(mod.sla_hours or 0)
-                doc.sla_deadline = _compute_sla_deadline(doc.occurred_at, doc.sla_hours)
+                doc.sla_deadline = _compute_sla_deadline(doc.creation, doc.sla_hours)
                 doc.issue_code = doc.issue_code or _generate_issue_code(mod.code)
 
         doc.save(ignore_permissions=True)
