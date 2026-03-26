@@ -539,6 +539,122 @@ def verify_otp_and_login(phone_number, otp):
         }
 
 
+@frappe.whitelist(allow_guest=True)
+def phone_login(phone_number):
+    """
+    Đăng nhập trực tiếp bằng SĐT — không cần OTP.
+    Dành cho MVP Parent Assistant (AI agent). Phân quyền qua role Guardian.
+    """
+    logs = []
+
+    try:
+        if not phone_number or not phone_number.strip():
+            return {
+                "success": False,
+                "message": "Số điện thoại không được để trống",
+                "logs": logs
+            }
+
+        normalized_phone = normalize_phone_number(phone_number)
+        logs.append(f"📱 Phone login: {normalized_phone}")
+
+        # Tìm guardian theo SĐT
+        guardian_list = frappe.db.get_list(
+            "CRM Guardian",
+            filters={"phone_number": ["in", [normalized_phone, f"+{normalized_phone}"]]},
+            fields=["name", "guardian_name", "phone_number", "email", "guardian_id"],
+            ignore_permissions=True
+        )
+
+        if not guardian_list:
+            return {
+                "success": False,
+                "message": "Không tìm thấy phụ huynh với số điện thoại này",
+                "logs": logs
+            }
+
+        guardian = guardian_list[0]
+        logs.append(f"✅ Found guardian: {guardian['guardian_name']}")
+
+        # Tạo / lấy User cho guardian
+        user_email = f"{guardian['guardian_id']}@parent.wellspring.edu.vn"
+        frappe.set_user("Administrator")
+
+        try:
+            if not frappe.db.exists("User", user_email):
+                user_doc = frappe.get_doc({
+                    "doctype": "User",
+                    "email": user_email,
+                    "first_name": guardian["guardian_name"],
+                    "enabled": 1,
+                    "user_type": "Website User",
+                    "send_welcome_email": 0
+                })
+                user_doc.flags.ignore_permissions = True
+                user_doc.insert(ignore_permissions=True)
+                user_doc.add_roles("Parent")
+                user_doc.add_roles("Guardian")
+                logs.append(f"✅ User created: {user_email}")
+            else:
+                user_doc = frappe.get_doc("User", user_email)
+                if "Guardian" not in [r.role for r in user_doc.roles]:
+                    user_doc.add_roles("Guardian")
+                    user_doc.save()
+                logs.append(f"✅ User exists: {user_email}")
+
+            # Tạo JWT token
+            from erp.api.parent_portal.guardian_auth import generate_guardian_jwt_token
+            token = generate_guardian_jwt_token(user_email, guardian["name"])
+            logs.append("✅ JWT token generated")
+        finally:
+            frappe.set_user("Guest")
+
+        # Cập nhật login stats
+        try:
+            update_guardian_login_stats(guardian["name"])
+        except Exception as e:
+            logs.append(f"⚠️ Login stats error: {str(e)}")
+
+        # Lấy comprehensive data
+        comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
+        first_login_at = frappe.db.get_value("CRM Guardian", guardian["name"], "first_login_at")
+
+        return {
+            "success": True,
+            "message": "Đăng nhập thành công",
+            "data": {
+                "guardian": {
+                    "name": guardian["name"],
+                    "guardian_id": guardian["guardian_id"],
+                    "guardian_name": guardian["guardian_name"],
+                    "phone_number": guardian["phone_number"],
+                    "email": guardian.get("email", ""),
+                    "first_login_at": str(first_login_at) if first_login_at else None
+                },
+                "user": {
+                    "email": user_email,
+                    "full_name": guardian["guardian_name"]
+                },
+                "family": comprehensive_data.get("data", {}).get("family", {}),
+                "families": comprehensive_data.get("data", {}).get("families", []),
+                "students": comprehensive_data.get("data", {}).get("students", []),
+                "campus": comprehensive_data.get("data", {}).get("campus", {}),
+                "token": token,
+                "expires_in": 365 * 24 * 60 * 60
+            },
+            "logs": logs
+        }
+
+    except Exception as e:
+        logs.append(f"❌ Error: {str(e)}")
+        frappe.log_error(f"Phone Login Error: {str(e)}\nLogs: {json.dumps(logs)}", "Parent Portal Phone Login")
+        return {
+            "success": False,
+            "message": f"Lỗi hệ thống: {str(e)}",
+            "logs": logs
+        }
+
+
 @frappe.whitelist()
 def get_guardian_info():
     """

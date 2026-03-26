@@ -1,7 +1,6 @@
 # Copyright (c) 2026, Wellspring International School and contributors
 """
 Workflow phê duyệt phiếu khám SK định kỳ (L1 → L2 Medical Admin → L3 GVCN).
-Thông báo email: tạm override qua health_checkup_notify_override_email hoặc mặc định test.
 """
 
 import frappe
@@ -19,8 +18,6 @@ from collections import defaultdict
 
 ROLE_SIS_MEDICAL = "SIS Medical"
 ROLE_SIS_MEDICAL_ADMIN = "SIS Medical Admin"
-# Email test QA — bỏ override trong site_config khi gửi user thật
-_DEFAULT_NOTIFY_OVERRIDE = "linh.nguyenhai@wellspring.edu.vn"
 
 
 def _get_request_data():
@@ -67,19 +64,43 @@ def _has_approval_column():
         return False
 
 
+def _phase_label(phase):
+    """Nhãn tiếng Việt cho đợt khám."""
+    return "Cuối năm" if phase == "end" else "Đầu năm"
+
+
+def _build_email_html(title: str, rows: list[tuple[str, str]], footer: str = ""):
+    """
+    Tạo HTML email chuẩn cho workflow khám SK.
+    rows: danh sách (label, value) hiển thị dạng bảng.
+    """
+    detail_rows = ""
+    for label, value in rows:
+        detail_rows += (
+            f'<tr><td style="padding:6px 12px;font-weight:600;color:#555;'
+            f'white-space:nowrap;vertical-align:top;">{label}</td>'
+            f'<td style="padding:6px 12px;">{value}</td></tr>'
+        )
+    footer_html = f'<p style="margin-top:16px;font-size:13px;color:#888;">{footer}</p>' if footer else ""
+    return (
+        f'<div style="font-family:Arial,Helvetica,sans-serif;max-width:600px;margin:auto;">'
+        f'<h2 style="color:#2563eb;margin-bottom:8px;">{title}</h2>'
+        f'<table style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;'
+        f'border-radius:6px;overflow:hidden;">{detail_rows}</table>'
+        f'{footer_html}'
+        f'<hr style="margin-top:24px;border:none;border-top:1px solid #e5e7eb;"/>'
+        f'<p style="font-size:12px;color:#aaa;">Hệ thống Wellspring SIS — Email tự động, vui lòng không trả lời.</p>'
+        f'</div>'
+    )
+
+
 def _notify_workflow(recipient_emails, subject: str, body_html: str):
-    """
-    Gửi email thông báo workflow. Override: site_config health_checkup_notify_override_email
-    hoặc mặc định email test (chỉ 1 người nhận khi đang test).
-    """
-    override = frappe.conf.get("health_checkup_notify_override_email")
-    if override is None or str(override).strip() == "":
-        override = _DEFAULT_NOTIFY_OVERRIDE
-    to_list = [override] if override else [e for e in (recipient_emails or []) if e]
+    """Gửi email thông báo workflow đến danh sách người nhận thực tế."""
+    to_list = [e for e in (recipient_emails or []) if e]
     if not to_list:
         return
     try:
-        send_email_via_service(to_list, subject, f"<p>{body_html}</p>")
+        send_email_via_service(to_list, subject, body_html)
     except Exception as e:
         frappe.log_error(f"health_checkup notify: {str(e)}")
 
@@ -219,10 +240,18 @@ def submit_student_health_checkup(checkup_name=None, student_id=None, school_yea
         doc.save(ignore_permissions=True)
         frappe.db.commit()
 
-        # Thông báo L2
         recipients = _user_emails_with_role(ROLE_SIS_MEDICAL_ADMIN)
-        subj = f"[Khám SK] Phiếu chờ duyệt L2 — {doc.student_name or doc.student_id}"
-        body = f"Học sinh: {doc.student_name} ({doc.student_code}). Đợt: {doc.checkup_phase}. Mã phiếu: {doc.name}."
+        subj = f"[Khám SK] Phiếu chờ duyệt — {doc.student_name or doc.student_id}"
+        body = _build_email_html(
+            title="Phiếu khám sức khoẻ chờ phê duyệt",
+            rows=[
+                ("Học sinh", f"{doc.student_name} ({doc.student_code})"),
+                ("Đợt khám", _phase_label(doc.checkup_phase)),
+                ("Mã phiếu", doc.name),
+                ("Người gửi", frappe.session.user),
+            ],
+            footer="Vui lòng đăng nhập hệ thống để phê duyệt phiếu.",
+        )
         _notify_workflow(recipients, subj, body)
 
         return success_response(data=doc.as_dict(), message="Đã gửi duyệt")
@@ -275,8 +304,15 @@ def submit_student_health_checkup_bulk():
 
         if done:
             recipients = _user_emails_with_role(ROLE_SIS_MEDICAL_ADMIN)
-            subj = f"[Khám SK] {len(done)} phiếu chờ duyệt L2"
-            body = f"Có {len(done)} phiếu vừa được gửi duyệt hàng loạt."
+            subj = f"[Khám SK] {len(done)} phiếu chờ phê duyệt"
+            body = _build_email_html(
+                title="Phiếu khám sức khoẻ chờ phê duyệt (hàng loạt)",
+                rows=[
+                    ("Số lượng phiếu", str(len(done))),
+                    ("Người gửi", frappe.session.user),
+                ],
+                footer="Vui lòng đăng nhập hệ thống để phê duyệt.",
+            )
             _notify_workflow(recipients, subj, body)
 
         return success_response(
@@ -333,14 +369,22 @@ def approve_health_checkup_l2(checkup_name=None):
             if not emails or not docs:
                 continue
             class_title = frappe.db.get_value("SIS Class", class_id, "title") or class_id
-            lines = []
-            for d in docs:
-                lines.append(
-                    f"- {d.student_name or d.student_id} ({d.student_code or ''}): phiếu {d.name}"
-                )
+            student_lines = "<br/>".join(
+                f"• {d.student_name or d.student_id} ({d.student_code or ''}) — mã phiếu {d.name}"
+                for d in docs
+            )
             phase = docs[0].checkup_phase
-            subj = f"[Khám SK] {len(docs)} phiếu chờ GVCN — lớp {class_title}"
-            body = f"Đợt khám: {phase}.<br/>" + "<br/>".join(lines)
+            subj = f"[Khám SK] {len(docs)} phiếu chờ gửi phụ huynh — lớp {class_title}"
+            body = _build_email_html(
+                title="Phiếu khám sức khoẻ đã được Trưởng phòng duyệt",
+                rows=[
+                    ("Lớp", class_title),
+                    ("Đợt khám", _phase_label(phase)),
+                    ("Số phiếu", str(len(docs))),
+                    ("Danh sách", student_lines),
+                ],
+                footer="Vui lòng kiểm tra và công bố phiếu cho phụ huynh.",
+            )
             _notify_workflow(emails, subj, body)
 
         frappe.db.commit()
@@ -386,8 +430,18 @@ def reject_health_checkup_l2(checkup_name=None, comment=None):
             done.append(name)
 
             target = _email_for_user(doc.submitted_by) or _email_for_user(doc.owner)
-            subj = f"[Khám SK] Phiếu bị trả L2 — {doc.student_name or doc.student_id}"
-            body = f"Phiếu {doc.name}. Lý do: {comment}."
+            subj = f"[Khám SK] Phiếu bị trả lại — {doc.student_name or doc.student_id}"
+            body = _build_email_html(
+                title="Phiếu khám sức khoẻ bị Trưởng phòng trả lại",
+                rows=[
+                    ("Học sinh", f"{doc.student_name} ({doc.student_code})"),
+                    ("Đợt khám", _phase_label(doc.checkup_phase)),
+                    ("Mã phiếu", doc.name),
+                    ("Lý do trả", comment),
+                    ("Người trả", frappe.session.user),
+                ],
+                footer="Vui lòng chỉnh sửa và gửi duyệt lại.",
+            )
             _notify_workflow([target] if target else [], subj, body)
 
         frappe.db.commit()
@@ -536,8 +590,18 @@ def reject_health_checkup_l3(checkup_name=None, comment=None):
             done.append(name)
 
             target = _email_for_user(doc.submitted_by) or _email_for_user(doc.owner)
-            subj = f"[Khám SK] Phiếu bị trả L3 — {doc.student_name or doc.student_id}"
-            body = f"Phiếu {doc.name}. Lý do: {comment}."
+            subj = f"[Khám SK] Phiếu bị GVCN trả lại — {doc.student_name or doc.student_id}"
+            body = _build_email_html(
+                title="Phiếu khám sức khoẻ bị GVCN trả lại",
+                rows=[
+                    ("Học sinh", f"{doc.student_name} ({doc.student_code})"),
+                    ("Đợt khám", _phase_label(doc.checkup_phase)),
+                    ("Mã phiếu", doc.name),
+                    ("Lý do trả", comment),
+                    ("Người trả", frappe.session.user),
+                ],
+                footer="Vui lòng chỉnh sửa và gửi duyệt lại.",
+            )
             _notify_workflow([target] if target else [], subj, body)
 
         frappe.db.commit()
