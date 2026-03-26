@@ -271,16 +271,23 @@ def get_pending_issues():
             "title",
             "issue_module",
             "status",
+            "result",
             "pic",
             "created_by_user",
-            "creation",
-            "student",
+            "occurred_at",
             "lead",
+            "student",
+            "modified",
+            "creation",
+            "approval_status",
+            "sla_deadline",
+            "department",
         ],
         order_by="creation asc",
         start=offset,
         page_length=per_page,
     )
+    _enrich_user_info(issues)
     return paginated_response(issues, page, total, per_page)
 
 
