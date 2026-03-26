@@ -48,8 +48,10 @@ ALLOWED_ROLES = [
     "SIS Manager",
     "Registrar",
     "SIS Sales",
+    "SIS Sales Care",
     "SIS Sales Care Admin",
     "SIS Sales Admin",
+    "SIS BOD",
 ]
 
 

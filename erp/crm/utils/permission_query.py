@@ -36,7 +36,15 @@ def crm_issue_query(user):
     if "System Manager" in frappe.get_roles(user):
         return ""
     
-    allowed_roles = ["SIS Manager", "Registrar", "SIS Sales"]
+    allowed_roles = [
+        "SIS Manager",
+        "Registrar",
+        "SIS Sales",
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+        "SIS Sales Admin",
+        "SIS BOD",
+    ]
     user_roles = frappe.get_roles(user)
     if any(role in user_roles for role in allowed_roles):
         return ""
@@ -49,7 +57,15 @@ def has_crm_permission(doc, ptype, user):
     if "System Manager" in frappe.get_roles(user):
         return True
     
-    allowed_roles = ["SIS Manager", "Registrar", "SIS Sales"]
+    allowed_roles = [
+        "SIS Manager",
+        "Registrar",
+        "SIS Sales",
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+        "SIS Sales Admin",
+        "SIS BOD",
+    ]
     user_roles = frappe.get_roles(user)
     if any(role in user_roles for role in allowed_roles):
         return True

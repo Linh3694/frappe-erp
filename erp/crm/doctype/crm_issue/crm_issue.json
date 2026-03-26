@@ -9,7 +9,7 @@
   "issue_info",
   "issue_code",
   "title",
-  "issue_type",
+  "issue_module",
   "cb_issue_1",
   "lead",
   "student",
@@ -19,7 +19,13 @@
   "attachment",
   "issue_assignment",
   "pic",
-  "departments",
+  "department",
+  "approval_section",
+  "approval_status",
+  "created_by_user",
+  "sla_hours",
+  "sla_deadline",
+  "rejection_reason",
   "cb_issue_2",
   "status",
   "result",
@@ -32,7 +38,7 @@
    "fieldtype": "Section Break"
   },
   {
-   "description": "Auto: I-xxx or C-xxx",
+   "description": "Tu dong: PREFIX-00001 theo module",
    "fieldname": "issue_code",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -47,11 +53,11 @@
    "reqd": 1
   },
   {
-   "fieldname": "issue_type",
-   "fieldtype": "Select",
+   "fieldname": "issue_module",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Issue Type",
-   "options": "Ho tro, cham soc\nPhan anh, phan nan",
+   "options": "CRM Issue Module",
    "reqd": 1
   },
   {
@@ -102,9 +108,47 @@
    "options": "User"
   },
   {
-   "fieldname": "departments",
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Related Department",
+   "options": "CRM Issue Department"
+  },
+  {
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Approval"
+  },
+  {
+   "default": "Da duyet",
+   "fieldname": "approval_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Approval Status",
+   "options": "Cho duyet\nDa duyet\nTu choi",
+   "reqd": 1
+  },
+  {
+   "fieldname": "created_by_user",
+   "fieldtype": "Data",
+   "label": "Created By User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sla_hours",
+   "fieldtype": "Float",
+   "label": "SLA Hours",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sla_deadline",
+   "fieldtype": "Datetime",
+   "label": "SLA Deadline",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejection_reason",
    "fieldtype": "Small Text",
-   "label": "Related Departments"
+   "label": "Rejection Reason"
   },
   {
    "fieldname": "cb_issue_2",
@@ -116,7 +160,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Tiep nhan\nDang xu ly\nHoan thanh",
+   "options": "Cho duyet\nTiep nhan\nDang xu ly\nHoan thanh",
    "reqd": 1
   },
   {
