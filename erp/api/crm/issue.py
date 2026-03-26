@@ -110,18 +110,10 @@ def _sync_issue_students(doc, data):
 
 
 def _normalize_vn_name(full_name):
-    """Chuẩn hoá tên tiếng Việt: 'Linh Nguyễn Hải' → 'Nguyễn Hải Linh' (Họ đệm Tên)"""
-    if not full_name or not full_name.strip():
-        return full_name or ""
-    parts = full_name.strip().split()
-    if len(parts) <= 1:
-        return full_name.strip()
-    first = parts[0]
-    if first[0].isupper() and any(c.islower() for c in first):
-        pass
-    # Frappe thường lưu First Last → "Linh Nguyễn Hải"
-    # Chuẩn VN: Họ Đệm Tên → đưa phần tử đầu xuống cuối
-    return " ".join(parts[1:] + [parts[0]])
+    """Tra ve full_name nguyen ban tu User (Frappe da luu dung thu tu, khong reorder)."""
+    if not full_name:
+        return ""
+    return (full_name or "").strip()
 
 
 def _enrich_user_info(issues):

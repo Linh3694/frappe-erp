@@ -8,7 +8,7 @@ Guardians can create, view, update, delete feedback and add replies
 
 import frappe
 from frappe import _
-from frappe.utils import now, get_datetime
+from frappe.utils import now, get_datetime, escape_html
 import json
 import base64
 from erp.utils.api_response import (
@@ -19,6 +19,11 @@ from erp.utils.api_response import (
     not_found_response,
     list_response,
     forbidden_response
+)
+from erp.api.crm.issue import (
+    _compute_sla_deadline,
+    _generate_issue_code,
+    _sync_issue_students,
 )
 
 
@@ -126,6 +131,107 @@ def _get_request_data():
     frappe.logger().info(f"DEBUG [FINAL_DATA] Parsed data keys: {list(data.keys())}")
     frappe.logger().info(f"DEBUG [FINAL_DATA] 'feedback_type' value: {data.get('feedback_type', 'NOT FOUND')}")
     return data
+
+
+def _ensure_feedback_issue_module():
+    """Dam bao module CRM Issue loai Gop y (ma FB) ton tai; tra ve docname module."""
+    existing = frappe.db.get_value("CRM Issue Module", {"code": "FB"}, "name")
+    if existing:
+        return existing
+    mod = frappe.get_doc(
+        {
+            "doctype": "CRM Issue Module",
+            "module_name": "Góp ý",
+            "code": "FB",
+            "is_active": 1,
+            "sla_hours": 24,
+        }
+    )
+    mod.insert(ignore_permissions=True)
+    return mod.name
+
+
+def _get_student_ids_for_guardian(guardian_name):
+    """Lay danh sach CRM Student (con) tu CRM Family Relationship theo guardian."""
+    if not guardian_name:
+        return []
+    rows = frappe.get_all(
+        "CRM Family Relationship",
+        filters={"guardian": guardian_name},
+        pluck="student",
+    )
+    seen = set()
+    out = []
+    for s in rows or []:
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _get_next_care_admin_pic():
+    """Round-robin: user role SIS Sales Care Admin co it CRM Issue (pic) nhat."""
+    admins = frappe.get_all(
+        "Has Role",
+        filters={"role": "SIS Sales Care Admin", "parenttype": "User"},
+        pluck="parent",
+    )
+    admins = list(set(admins or []))
+    enabled = [
+        u
+        for u in admins
+        if u and frappe.db.get_value("User", u, "enabled")
+    ]
+    if not enabled:
+        return ""
+    counts = {u: frappe.db.count("CRM Issue", {"pic": u}) for u in enabled}
+    return min(enabled, key=lambda u: counts.get(u, 0))
+
+
+def _create_issue_from_feedback(feedback_doc, guardian_name):
+    """
+    Tu dong tao CRM Issue khi phu huynh gui feedback loai 'Gop y' (chi loai nay).
+    Noi dung issue = noi dung feedback; hoc sinh = cac con cua guardian; PIC = Care Admin (round-robin).
+    """
+    if not feedback_doc or getattr(feedback_doc, "feedback_type", None) != "Góp ý":
+        return None
+
+    module_name = _ensure_feedback_issue_module()
+    mod = frappe.get_doc("CRM Issue Module", module_name)
+    if not mod.is_active:
+        frappe.logger().warning("Module FB khong active, van tao issue theo SLA module")
+
+    student_ids = _get_student_ids_for_guardian(guardian_name)
+    pic = _get_next_care_admin_pic()
+
+    raw = (getattr(feedback_doc, "content", None) or "").strip()
+    content_html = "<p>" + escape_html(raw).replace("\n", "<br>") + "</p>"
+
+    doc = frappe.new_doc("CRM Issue")
+    doc.title = (getattr(feedback_doc, "title", None) or "").strip() or "Góp ý từ phụ huynh"
+    doc.content = content_html
+    doc.issue_module = module_name
+    doc.issue_code = _generate_issue_code(mod.code)
+    doc.occurred_at = now()
+    doc.lead = ""
+    doc.department = ""
+    doc.attachment = ""
+
+    _sync_issue_students(doc, {"students": student_ids})
+
+    sla_h = float(mod.sla_hours or 0)
+    doc.sla_hours = sla_h
+    doc.sla_deadline = _compute_sla_deadline(now(), sla_h)
+
+    doc.pic = pic or ""
+    doc.created_by_user = frappe.session.user
+    doc.approval_status = "Da duyet"
+    doc.status = "Tiep nhan"
+
+    doc.flags.ignore_permissions = True
+    doc.insert()
+    frappe.db.commit()
+    return doc.name
 
 
 @frappe.whitelist(allow_guest=False)
@@ -244,7 +350,15 @@ def create():
         feedback.save()
 
         frappe.db.commit()
-        
+
+        # Tu dong tao CRM Issue (van de chung) chi voi feedback loai Gop y
+        if feedback_type == "Góp ý":
+            try:
+                _create_issue_from_feedback(feedback, guardian)
+            except Exception as issue_err:
+                frappe.logger().error(f"Tạo CRM Issue từ feedback thất bại: {str(issue_err)}")
+                frappe.log_error(frappe.get_traceback(), "Create CRM Issue from Feedback")
+
         # Send push notification to mobile staff (cho cả Góp ý và Đánh giá)
         # Chạy async (background job) để không block response
         # LƯU Ý: Truyền feedback_name thay vì feedback object vì object không serialize được
