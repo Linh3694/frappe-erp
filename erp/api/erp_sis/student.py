@@ -1302,6 +1302,7 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
             WHERE s.campus_id = %s
               AND cs.school_year_id = %s
               AND c.school_year_id = %s
+              AND cs.class_type = 'regular'
         """
         
         params = [campus_id, school_year_id, school_year_id]
@@ -1320,16 +1321,13 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
         
         students = frappe.db.sql(sql_query, params, as_dict=True)
         
-        # Format data to include current_class object
+        # Giữ current_class_title / current_class_id flat field + thêm nested object cho backward compat
         for student in students:
             if student.get('current_class_title'):
                 student['current_class'] = {
                     'name': student.get('current_class_id'),
                     'title': student.get('current_class_title')
                 }
-            # Remove redundant fields
-            student.pop('current_class_title', None)
-            student.pop('current_class_id', None)
 
         # Bổ sung ảnh đại diện từ SIS Photo (user_image/photo) cho avatar - chuẩn hóa full URL như search_students
         if students:

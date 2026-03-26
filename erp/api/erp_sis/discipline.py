@@ -1004,7 +1004,7 @@ def get_class_violation_stats(
     - Lớp nằm trong target_classes (SIS Discipline Record Class Entry), hoặc
     - Đối tượng là học sinh (target_student / Student Entry) mà HS thuộc lớp regular
       (SIS Class Student: class_id + class_type = regular), cùng logic lấy lớp hiển thị HS.
-    - Cấp độ, Điểm trừ: từ student_points của Violation (dựa trên count)
+    - Cấp độ, Điểm trừ: từ class_points của Violation (dựa trên count)
     - date_from, date_to (YYYY-MM-DD): tùy chọn. Nếu không truyền thì dùng tháng hiện tại.
     """
     try:
@@ -1068,12 +1068,12 @@ def get_class_violation_stats(
         )
         count = result[0]["cnt"] if result else 0
 
-        # Lấy student_points từ Violation (dùng chung logic cấp độ/điểm)
+        # Lấy class_points từ Violation (bảng điểm áp dụng cho lớp)
         doc = frappe.get_doc("SIS Discipline Violation", violation_id)
-        student_points = getattr(doc, "student_points", []) or []
+        class_points = getattr(doc, "class_points", []) or []
 
         sorted_points = sorted(
-            [{"violation_count": int(p.get("violation_count", 0)), "level": p.get("level", "1"), "points": int(p.get("points", 0))} for p in student_points],
+            [{"violation_count": int(p.get("violation_count", 0)), "level": p.get("level", "1"), "points": int(p.get("points", 0))} for p in class_points],
             key=lambda x: x["violation_count"],
             reverse=True,
         )
