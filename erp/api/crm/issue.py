@@ -35,6 +35,54 @@ APPROVER_ROLES = frozenset(
 )
 
 
+def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_user=None):
+    """Gui push notification Expo cho user (workspace-mobile)."""
+    try:
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+    except Exception as e:
+        frappe.logger().warning(f"CRM Issue: khong import send_mobile_notification: {e}")
+        return
+    seen = set()
+    for email in users or []:
+        if not email or email in ("Guest",) or email == exclude_user:
+            continue
+        if email in seen:
+            continue
+        seen.add(email)
+        try:
+            send_mobile_notification(
+                user_email=email,
+                title=title,
+                body=body,
+                data={
+                    "type": notif_type,
+                    "issueId": issue_doc.name,
+                    "issueCode": (issue_doc.issue_code or ""),
+                },
+            )
+        except Exception as ex:
+            frappe.logger().error(f"CRM Issue push notify failed for {email}: {ex}")
+
+
+def _approver_emails():
+    """User co role duyet van de."""
+    roles = list(APPROVER_ROLES)
+    rows = frappe.get_all(
+        "Has Role",
+        filters={"role": ["in", roles], "parenttype": "User"},
+        pluck="parent",
+    )
+    return list(set(rows or []))
+
+
+def _department_member_emails(department_name):
+    """Email thanh vien phong ban CRM Issue."""
+    if not department_name or not frappe.db.exists("CRM Issue Department", department_name):
+        return []
+    dept = frappe.get_doc("CRM Issue Department", department_name)
+    return [m.user for m in (dept.members or [])]
+
+
 def _user_roles():
     return set(frappe.get_roles(frappe.session.user))
 
@@ -384,6 +432,20 @@ def create_issue():
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
 
+        # Push: co van de cho duyet -> thong bao nguoi duyet
+        try:
+            if doc.approval_status == "Cho duyet":
+                _notify_crm_issue_mobile(
+                    _approver_emails(),
+                    "Vấn đề mới chờ duyệt",
+                    f"{doc.issue_code}: {doc.title}",
+                    doc,
+                    "crm_issue_created",
+                    exclude_user=frappe.session.user,
+                )
+        except Exception as e:
+            frappe.logger().error(f"CRM Issue notify create: {e}")
+
         return single_item_response(doc.as_dict(), "Tao van de thanh cong")
     except Exception as e:
         frappe.db.rollback()
@@ -410,6 +472,24 @@ def approve_issue():
     doc.status = "Tiep nhan"
     doc.save(ignore_permissions=True)
     frappe.db.commit()
+
+    try:
+        recipients = []
+        if doc.pic:
+            recipients.append(doc.pic)
+        if doc.created_by_user:
+            recipients.append(doc.created_by_user)
+        _notify_crm_issue_mobile(
+            recipients,
+            "Vấn đề đã được duyệt",
+            f"{doc.issue_code}: {doc.title}",
+            doc,
+            "crm_issue_approved",
+            exclude_user=frappe.session.user,
+        )
+    except Exception as e:
+        frappe.logger().error(f"CRM Issue notify approve: {e}")
+
     return single_item_response(doc.as_dict(), "Da duyet van de")
 
 
@@ -435,6 +515,20 @@ def reject_issue():
     doc.status = "Hoan thanh"
     doc.save(ignore_permissions=True)
     frappe.db.commit()
+
+    try:
+        if doc.created_by_user:
+            _notify_crm_issue_mobile(
+                [doc.created_by_user],
+                "Vấn đề bị từ chối",
+                f"{doc.issue_code}: {doc.title}",
+                doc,
+                "crm_issue_rejected",
+                exclude_user=frappe.session.user,
+            )
+    except Exception as e:
+        frappe.logger().error(f"CRM Issue notify reject: {e}")
+
     return single_item_response(doc.as_dict(), "Da tu choi")
 
 
@@ -455,6 +549,8 @@ def update_issue():
         doc = frappe.get_doc("CRM Issue", name)
         if not _can_edit_issue(doc):
             return error_response("Khong co quyen sua van de nay")
+
+        old_pic = doc.pic
 
         updatable = [
             "title",
@@ -482,6 +578,21 @@ def update_issue():
 
         doc.save(ignore_permissions=True)
         frappe.db.commit()
+
+        try:
+            new_pic = (doc.pic or "").strip()
+            old_pic_s = (old_pic or "").strip()
+            if new_pic and new_pic != old_pic_s:
+                _notify_crm_issue_mobile(
+                    [new_pic],
+                    "Bạn được giao PIC vấn đề",
+                    f"{doc.issue_code}: {doc.title}",
+                    doc,
+                    "crm_issue_pic_changed",
+                    exclude_user=frappe.session.user,
+                )
+        except Exception as e:
+            frappe.logger().error(f"CRM Issue notify pic change: {e}")
 
         return single_item_response(doc.as_dict(), "Cap nhat van de thanh cong")
     except Exception as e:
@@ -525,6 +636,24 @@ def change_issue_status():
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
+    try:
+        recipients = []
+        if doc.pic:
+            recipients.append(doc.pic)
+        if doc.created_by_user:
+            recipients.append(doc.created_by_user)
+        recipients.extend(_department_member_emails(doc.department))
+        _notify_crm_issue_mobile(
+            recipients,
+            "Cập nhật trạng thái vấn đề",
+            f"{doc.issue_code}: {status}",
+            doc,
+            "crm_issue_status_changed",
+            exclude_user=frappe.session.user,
+        )
+    except Exception as e:
+        frappe.logger().error(f"CRM Issue notify status: {e}")
+
     return single_item_response(doc.as_dict(), f"Da chuyen trang thai sang {status}")
 
 
@@ -567,6 +696,24 @@ def add_process_log():
         )
         doc.save(ignore_permissions=True)
         frappe.db.commit()
+
+        try:
+            recipients = []
+            if doc.pic:
+                recipients.append(doc.pic)
+            if doc.created_by_user:
+                recipients.append(doc.created_by_user)
+            recipients.extend(_department_member_emails(doc.department))
+            _notify_crm_issue_mobile(
+                recipients,
+                "Log xử lý vấn đề mới",
+                f"{doc.issue_code}: {data.get('title', '')}",
+                doc,
+                "crm_issue_log_added",
+                exclude_user=frappe.session.user,
+            )
+        except Exception as e:
+            frappe.logger().error(f"CRM Issue notify log: {e}")
 
         return single_item_response(doc.as_dict(), "Them log xu ly thanh cong")
     except Exception as e:

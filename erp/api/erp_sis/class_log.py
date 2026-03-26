@@ -716,8 +716,8 @@ def batch_get_homeroom_class_logs():
         # This endpoint aggregates: class logs + class attendance + event attendance
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
-        # v6: Fix subject_title - thêm valid_from/valid_to filter, dedup, date overrides
-        cache_key = f"homeroom_class_logs_v6:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        # v7: Fix subject_title priority - ưu tiên timetable_subject_map (có date overrides) thay vì teacher timetable
+        cache_key = f"homeroom_class_logs_v7:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -1481,9 +1481,10 @@ def batch_get_homeroom_class_logs():
             all_subjects = []
             
             # Thêm homeroom class subject nếu có
-            # subject_title từ Step 5b, fallback sang timetable_subject_map nếu null
+            # Ưu tiên timetable_subject_map (chính xác hơn vì bao gồm date overrides),
+            # fallback sang subject_title từ Step 5b (Teacher Timetable)
             if homeroom_subject_log:
-                homeroom_subj_title = homeroom_subject_log.get('subject_title') or timetable_subject_map.get((homeroom_subject_log['class_id'], period))
+                homeroom_subj_title = timetable_subject_map.get((homeroom_subject_log['class_id'], period)) or homeroom_subject_log.get('subject_title')
                 all_subjects.append({
                     "name": homeroom_subject_log['name'],
                     "subject_title": homeroom_subj_title,
@@ -1498,9 +1499,9 @@ def batch_get_homeroom_class_logs():
                 })
             
             # Thêm mixed class subjects
-            # subject_title từ Step 5b, fallback sang timetable_subject_map nếu null
+            # Ưu tiên timetable_subject_map (bao gồm date overrides), fallback sang Step 5b
             for mixed_class_id, mixed_log in mixed_subject_logs.items():
-                mixed_subj_title = mixed_log.get('subject_title') or timetable_subject_map.get((mixed_log['class_id'], period))
+                mixed_subj_title = timetable_subject_map.get((mixed_log['class_id'], period)) or mixed_log.get('subject_title')
                 all_subjects.append({
                     "name": mixed_log['name'],
                     "subject_title": mixed_subj_title,
@@ -1535,10 +1536,10 @@ def batch_get_homeroom_class_logs():
                         })
                         break
             
-            # subject_title cho subject chính: ưu tiên Step 5b, fallback timetable_subject_map
+            # subject_title cho subject chính: ưu tiên timetable (chính xác hơn), fallback Step 5b
             primary_subj_title = None
             if primary_subject:
-                primary_subj_title = primary_subject.get('subject_title') or timetable_subject_map.get((primary_subject['class_id'], period))
+                primary_subj_title = timetable_subject_map.get((primary_subject['class_id'], period)) or primary_subject.get('subject_title')
             
             result[period] = {
                 "subject": {

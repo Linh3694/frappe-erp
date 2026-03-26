@@ -617,6 +617,9 @@ def send_mobile_notification(user_email, title, body, data=None):
             ):
                 channel_id = "daily_health"
                 sound_name = "default"
+            elif notification_type and str(notification_type).startswith("crm_issue"):
+                channel_id = "crm_issue"
+                sound_name = "default"
             else:
                 channel_id = "default"
                 sound_name = "default"

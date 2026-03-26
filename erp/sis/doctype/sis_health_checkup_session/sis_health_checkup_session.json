@@ -10,7 +10,8 @@
   "school_year_id",
   "checkup_phase",
   "campus_id",
-  "exam_unit"
+  "exam_unit",
+  "session_checkup_date"
  ],
  "fields": [
   {
@@ -43,12 +44,18 @@
    "fieldname": "exam_unit",
    "fieldtype": "Data",
    "label": "Đơn vị khám"
+  },
+  {
+   "description": "Ngày kiểm tra chung cho cả đợt (gợi ý trên danh sách khám; từng phiếu HS có thể có ngày riêng)",
+   "fieldname": "session_checkup_date",
+   "fieldtype": "Date",
+   "label": "Ngày kiểm tra (phiên)"
   }
  ],
  "index_web_pages_for_search": 0,
  "istable": 0,
  "links": [],
- "modified": "2026-03-24 12:00:00.000000",
+ "modified": "2026-03-26 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Health Checkup Session",

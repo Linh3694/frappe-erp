@@ -8,7 +8,7 @@ API endpoints cho việc quản lý và xem kết quả khám sức khoẻ đị
 
 import frappe
 from frappe import _
-from frappe.utils import today
+from frappe.utils import today, getdate
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
     not_found_response
@@ -70,6 +70,29 @@ def _health_checkup_session_table_exists():
     )
 
 
+def _parse_session_checkup_date(val):
+    """Chuẩn hoá ngày kiểm tra phiên — None nếu rỗng / không hợp lệ."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s:
+        return None
+    try:
+        return getdate(val)
+    except Exception:
+        return None
+
+
+def _format_date_iso(d):
+    """Trả chuỗi yyyy-mm-dd cho JSON (d là date/datetime/str)."""
+    if d is None:
+        return ""
+    try:
+        return str(getdate(d))
+    except Exception:
+        return ""
+
+
 def _sis_health_checkup_has_approval_status_column():
     """
     Có cột approval_status trên bảng khám SK định kỳ hay không.
@@ -109,10 +132,16 @@ def get_health_checkup_session_meta(school_year_id=None, checkup_phase=None):
             )
         if not _health_checkup_session_table_exists():
             return success_response(
-                data={"exam_unit": ""},
+                data={"exam_unit": "", "session_checkup_date": ""},
                 message="Chưa có bảng phiên khám (migrate để lưu Đơn vị khám)",
             )
         campus_key = _session_campus_key()
+        fields = ["exam_unit"]
+        try:
+            if frappe.db.has_column("SIS Health Checkup Session", "session_checkup_date"):
+                fields.append("session_checkup_date")
+        except Exception:
+            pass
         rows = frappe.get_all(
             "SIS Health Checkup Session",
             filters={
@@ -120,12 +149,17 @@ def get_health_checkup_session_meta(school_year_id=None, checkup_phase=None):
                 "checkup_phase": checkup_phase,
                 "campus_id": campus_key,
             },
-            fields=["exam_unit"],
+            fields=fields,
             limit=1,
         )
         exam_unit = (rows[0].get("exam_unit") or "") if rows else ""
+        raw_sd = rows[0].get("session_checkup_date") if rows else None
+        session_checkup_date = _format_date_iso(raw_sd) if raw_sd else ""
         return success_response(
-            data={"exam_unit": exam_unit},
+            data={
+                "exam_unit": exam_unit,
+                "session_checkup_date": session_checkup_date,
+            },
             message="Lấy meta phiên khám thành công",
         )
     except Exception as e:
