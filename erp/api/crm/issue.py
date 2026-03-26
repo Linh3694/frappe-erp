@@ -47,6 +47,20 @@ def _can_approve():
     return bool(APPROVER_ROLES & _user_roles())
 
 
+def _can_edit_issue(doc) -> bool:
+    """Chi SIS Sales Care Admin, PIC, hoac nguoi tao (created_by_user) duoc sua van de."""
+    user = frappe.session.user
+    if not user or user == "Guest":
+        return False
+    if "SIS Sales Care Admin" in frappe.get_roles(user):
+        return True
+    if getattr(doc, "pic", None) and doc.pic == user:
+        return True
+    if getattr(doc, "created_by_user", None) and doc.created_by_user == user:
+        return True
+    return False
+
+
 def _generate_issue_code(prefix: str) -> str:
     """Sinh ma PREFIX-00001 theo prefix module (VD: KL)."""
     p = (prefix or "X").strip().upper()
@@ -439,6 +453,9 @@ def update_issue():
 
     try:
         doc = frappe.get_doc("CRM Issue", name)
+        if not _can_edit_issue(doc):
+            return error_response("Khong co quyen sua van de nay")
+
         updatable = [
             "title",
             "content",
