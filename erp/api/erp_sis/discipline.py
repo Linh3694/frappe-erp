@@ -1862,6 +1862,55 @@ def _split_csv_codes(raw):
     return [p.strip() for p in s.split(",") if p.strip()]
 
 
+def _resolve_sis_class_id_for_import(class_label, school_year_id, campus):
+    """
+    Tìm name của SIS Class từ nhãn người dùng nhập (Excel).
+
+    - Khớp cả `title` lẫn `short_title` (UI thường hiển thị title nhưng user hay gõ tên ngắn).
+    - Ưu tiên đúng năm học + campus; nếu không có thì fallback cùng campus, ưu tiên đúng năm học.
+    """
+    ct = (class_label or "").strip()
+    if not ct or not campus:
+        return None
+
+    # 1) Đúng năm học đang dùng + campus + (title hoặc short_title), không phân biệt hoa thường
+    if school_year_id:
+        row = frappe.db.sql(
+            """
+            SELECT name FROM `tabSIS Class`
+            WHERE school_year_id = %s AND campus_id = %s
+              AND (
+                  LOWER(TRIM(title)) = LOWER(%s)
+                  OR LOWER(IFNULL(TRIM(short_title), '')) = LOWER(%s)
+              )
+            LIMIT 1
+            """,
+            (school_year_id, campus, ct, ct),
+        )
+        if row:
+            return row[0][0]
+
+    # 2) Cùng campus: title hoặc short_title, ưu tiên bản ghi đúng năm học (nếu có)
+    order_sy = school_year_id or ""
+    row = frappe.db.sql(
+        """
+        SELECT name FROM `tabSIS Class`
+        WHERE campus_id = %s
+          AND (
+              LOWER(TRIM(title)) = LOWER(%s)
+              OR LOWER(IFNULL(TRIM(short_title), '')) = LOWER(%s)
+          )
+        ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END, modified DESC
+        LIMIT 1
+        """,
+        (campus, ct, ct, order_sy),
+    )
+    if row:
+        return row[0][0]
+
+    return None
+
+
 @frappe.whitelist(allow_guest=False)
 def import_discipline_records():
     """
@@ -2018,18 +2067,12 @@ def import_discipline_records():
                             "Chưa có năm học được kích hoạt — không thể gán lớp"
                         )
                     for ct in class_titles:
-                        cid = frappe.db.get_value(
-                            "SIS Class",
-                            {
-                                "title": ct,
-                                "school_year_id": school_year_id,
-                                "campus_id": campus,
-                            },
-                            "name",
+                        cid = _resolve_sis_class_id_for_import(
+                            ct, school_year_id, campus
                         )
                         if not cid:
                             raise ValueError(
-                                f"Không tìm thấy lớp '{ct}' trong năm học hiện tại"
+                                f"Không tìm thấy lớp '{ct}' (thử đúng Title hoặc Short Title trên SIS Class, đúng cơ sở)"
                             )
                         target_class_ids.append(cid)
 
