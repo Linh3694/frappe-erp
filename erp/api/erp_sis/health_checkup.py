@@ -93,6 +93,73 @@ def _format_date_iso(d):
         return ""
 
 
+def _bulk_apply_session_checkup_date_to_student_checkups(
+    school_year_id, checkup_phase, campus_key, date_val
+):
+    """
+    Gán cùng ngày kiểm tra cho mọi phiếu SIS Student Health Checkup đã tồn tại
+    trong cùng năm học + đợt + campus (khớp meta phiên).
+    """
+    if date_val is None:
+        return 0
+    if not frappe.db.sql("SHOW TABLES LIKE 'tabSIS Student Health Checkup'"):
+        return 0
+    try:
+        if not frappe.db.has_column("SIS Student Health Checkup", "checkup_date"):
+            return 0
+    except Exception:
+        return 0
+    campus_key = campus_key or ""
+    cnt_row = frappe.db.sql(
+        """
+        SELECT COUNT(*) FROM `tabSIS Student Health Checkup`
+        WHERE school_year_id = %(sy)s
+          AND checkup_phase = %(ph)s
+          AND IFNULL(campus_id, '') = %(campus)s
+        """,
+        {"sy": school_year_id, "ph": checkup_phase, "campus": campus_key},
+    )
+    cnt = int(cnt_row[0][0]) if cnt_row else 0
+    if cnt == 0:
+        return 0
+    frappe.db.sql(
+        """
+        UPDATE `tabSIS Student Health Checkup`
+        SET checkup_date = %(d)s, modified = NOW()
+        WHERE school_year_id = %(sy)s
+          AND checkup_phase = %(ph)s
+          AND IFNULL(campus_id, '') = %(campus)s
+        """,
+        {"d": date_val, "sy": school_year_id, "ph": checkup_phase, "campus": campus_key},
+    )
+    return cnt
+
+
+def _get_session_checkup_date_for_new_student(school_year_id, checkup_phase, campus_key):
+    """Ngày kiểm tra đã khai báo ở meta phiên — dùng khi tạo phiếu HS mới (nếu không gửi checkup_date)."""
+    if not _health_checkup_session_table_exists():
+        return None
+    try:
+        if not frappe.db.has_column("SIS Health Checkup Session", "session_checkup_date"):
+            return None
+    except Exception:
+        return None
+    rows = frappe.get_all(
+        "SIS Health Checkup Session",
+        filters={
+            "school_year_id": school_year_id,
+            "checkup_phase": checkup_phase,
+            "campus_id": campus_key or "",
+        },
+        fields=["session_checkup_date"],
+        limit=1,
+    )
+    if not rows:
+        return None
+    raw = rows[0].get("session_checkup_date")
+    return _parse_session_checkup_date(raw) if raw else None
+
+
 def _sis_health_checkup_has_approval_status_column():
     """
     Có cột approval_status trên bảng khám SK định kỳ hay không.
@@ -175,10 +242,11 @@ def get_health_checkup_session_meta(school_year_id=None, checkup_phase=None):
 
 @frappe.whitelist(allow_guest=False)
 def save_health_checkup_session_meta(
-    school_year_id=None, checkup_phase=None, exam_unit=None
+    school_year_id=None, checkup_phase=None, exam_unit=None, session_checkup_date=None
 ):
     """
-    Lưu Đơn vị khám (và meta tương lai) cho năm học + đợt + campus context.
+    Lưu Đơn vị khám + Ngày kiểm tra (phiên) cho năm học + đợt + campus.
+    Nếu có ngày — đồng bộ checkup_date lên toàn bộ phiếu HS đã có trong phiên.
     """
     try:
         data = _get_request_data()
@@ -188,6 +256,8 @@ def save_health_checkup_session_meta(
             checkup_phase = data.get("checkup_phase")
         if exam_unit is None:
             exam_unit = data.get("exam_unit")
+        if session_checkup_date is None:
+            session_checkup_date = data.get("session_checkup_date")
         checkup_phase = _normalize_checkup_phase(checkup_phase)
         if not school_year_id:
             return error_response(
@@ -199,12 +269,21 @@ def save_health_checkup_session_meta(
                 code="VALIDATION_ERROR",
             )
         exam_unit = (exam_unit or "").strip() if isinstance(exam_unit, str) else ""
+        parsed_session_date = _parse_session_checkup_date(session_checkup_date)
         if not _health_checkup_session_table_exists():
             return error_response(
                 message="Chưa có DocType phiên khám trên server (cần migrate)",
                 code="SESSION_TABLE_MISSING",
             )
         campus_key = _session_campus_key()
+        has_sd_col = False
+        try:
+            has_sd_col = frappe.db.has_column(
+                "SIS Health Checkup Session", "session_checkup_date"
+            )
+        except Exception:
+            has_sd_col = False
+
         rows = frappe.get_all(
             "SIS Health Checkup Session",
             filters={
@@ -218,25 +297,47 @@ def save_health_checkup_session_meta(
         if rows:
             doc = frappe.get_doc("SIS Health Checkup Session", rows[0])
             doc.exam_unit = exam_unit
+            if has_sd_col:
+                doc.session_checkup_date = parsed_session_date
             doc.save(ignore_permissions=True)
         else:
-            doc = frappe.get_doc(
-                {
-                    "doctype": "SIS Health Checkup Session",
-                    "school_year_id": school_year_id,
-                    "checkup_phase": checkup_phase,
-                    "campus_id": campus_key,
-                    "exam_unit": exam_unit,
-                }
-            )
+            row = {
+                "doctype": "SIS Health Checkup Session",
+                "school_year_id": school_year_id,
+                "checkup_phase": checkup_phase,
+                "campus_id": campus_key,
+                "exam_unit": exam_unit,
+            }
+            if has_sd_col:
+                row["session_checkup_date"] = parsed_session_date
+            doc = frappe.get_doc(row)
             doc.insert(ignore_permissions=True)
+
+        # Đồng bộ ngày kiểm tra lên mọi phiếu HS đã tạo (cùng phiên)
+        student_rows_updated = 0
+        if parsed_session_date is not None:
+            student_rows_updated = _bulk_apply_session_checkup_date_to_student_checkups(
+                school_year_id, checkup_phase, campus_key, parsed_session_date
+            )
+
         frappe.db.commit()
+        out_sd = _format_date_iso(parsed_session_date) if parsed_session_date else ""
+        msg = "Lưu meta phiên khám thành công"
+        if student_rows_updated:
+            msg = _(
+                "Đã lưu meta phiên và cập nhật ngày kiểm tra cho {0} phiếu học sinh"
+            ).format(student_rows_updated)
         return success_response(
-            data={"exam_unit": exam_unit},
-            message="Lưu Đơn vị khám thành công",
+            data={
+                "exam_unit": exam_unit,
+                "session_checkup_date": out_sd,
+                "student_checkups_updated": student_rows_updated,
+            },
+            message=msg,
         )
     except Exception as e:
         import traceback
+        frappe.db.rollback()
         frappe.log_error(
             f"save_health_checkup_session_meta: {str(e)}\n{traceback.format_exc()}"
         )
@@ -619,14 +720,22 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
                     setattr(doc, field, data[field])
             doc.save()
         else:
-            # Create new record
+            # Create new record — ưu tiên ngày gửi lên; không thì meta phiên; cuối cùng là today()
+            cd_in = data.get("checkup_date")
+            if cd_in is not None and str(cd_in).strip() != "":
+                default_cd = getdate(cd_in)
+            else:
+                session_cd = _get_session_checkup_date_for_new_student(
+                    school_year_id, checkup_phase, campus_id or ""
+                )
+                default_cd = session_cd if session_cd is not None else getdate(today())
             doc_data = {
                 "doctype": "SIS Student Health Checkup",
                 "student_id": student_id,
                 "school_year_id": school_year_id,
                 "campus_id": campus_id,
                 "checkup_phase": checkup_phase,
-                "checkup_date": data.get("checkup_date") or today()
+                "checkup_date": default_cd,
             }
             if _sis_health_checkup_has_approval_status_column():
                 doc_data["approval_status"] = "draft"

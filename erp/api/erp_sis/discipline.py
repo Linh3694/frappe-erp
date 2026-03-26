@@ -10,7 +10,7 @@ import json
 from collections import Counter
 
 import frappe
-from erp.utils.api_response import success_response, error_response
+from erp.utils.api_response import success_response, error_response, paginated_response
 from erp.sis.discipline_record_permissions import (
     discipline_session_matches_owner as _discipline_session_matches_owner,
     user_can_create_discipline_record as _can_create_discipline_record,
@@ -90,6 +90,143 @@ def _get_student_display_info(sid):
         "student_class_id": cs,
         "student_photo_url": photo_url,
     }
+
+
+def _batch_get_student_display_info(student_ids):
+    """
+    Lấy thông tin hiển thị nhiều học sinh trong vài query (thay N lần _get_student_display_info).
+    Trả dict: student_id -> cùng cấu trúc _get_student_display_info.
+    """
+    if not student_ids:
+        return {}
+
+    student_ids = list(dict.fromkeys([s for s in student_ids if s]))
+    if not student_ids:
+        return {}
+
+    def empty_row(sid):
+        return {
+            "student_id": sid,
+            "student_name": "",
+            "student_code": "",
+            "student_class_title": "",
+            "student_class_id": None,
+            "student_photo_url": None,
+        }
+
+    out = {sid: empty_row(sid) for sid in student_ids}
+
+    for row in frappe.get_all(
+        "CRM Student",
+        filters={"name": ["in", student_ids]},
+        fields=["name", "student_name", "student_code"],
+    ):
+        sid = row["name"]
+        out[sid]["student_name"] = row.get("student_name") or ""
+        out[sid]["student_code"] = row.get("student_code") or ""
+
+    current_sy = frappe.db.get_value(
+        "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+    )
+
+    cs_by_student = {}
+    if current_sy:
+        cs_rows = frappe.get_all(
+            "SIS Class Student",
+            filters={
+                "student_id": ["in", student_ids],
+                "school_year_id": current_sy,
+                "class_type": "regular",
+            },
+            fields=["student_id", "class_id"],
+        )
+        seen = set()
+        for row in cs_rows:
+            sid = row["student_id"]
+            if sid not in seen:
+                seen.add(sid)
+                cs_by_student[sid] = row["class_id"]
+
+    missing = [sid for sid in student_ids if sid not in cs_by_student]
+    if missing:
+        fb = frappe.db.sql(
+            """
+            SELECT cs.student_id, cs.class_id
+            FROM `tabSIS Class Student` cs
+            INNER JOIN (
+                SELECT student_id, MAX(creation) AS mc
+                FROM `tabSIS Class Student`
+                WHERE student_id IN %(sids)s AND class_type = 'regular'
+                GROUP BY student_id
+            ) t ON cs.student_id = t.student_id AND cs.creation = t.mc AND cs.class_type = 'regular'
+            """,
+            {"sids": tuple(missing)},
+            as_dict=True,
+        )
+        for row in fb:
+            sid = row["student_id"]
+            if sid not in cs_by_student:
+                cs_by_student[sid] = row["class_id"]
+
+    all_cids = list({c for c in cs_by_student.values() if c})
+    class_titles = {}
+    if all_cids:
+        for c in frappe.get_all(
+            "SIS Class", filters={"name": ["in", all_cids]}, fields=["name", "title"]
+        ):
+            class_titles[c["name"]] = c.get("title") or c["name"]
+
+    for sid in student_ids:
+        cid = cs_by_student.get(sid)
+        if cid:
+            out[sid]["student_class_id"] = cid
+            out[sid]["student_class_title"] = class_titles.get(cid, "") or ""
+
+    ph_all = frappe.get_all(
+        "SIS Photo",
+        filters={
+            "student_id": ["in", student_ids],
+            "type": "student",
+            "status": "Active",
+        },
+        fields=["student_id", "photo", "school_year_id", "upload_date", "creation"],
+    )
+    from collections import defaultdict
+
+    by_sid = defaultdict(list)
+    for p in ph_all:
+        by_sid[p["student_id"]].append(p)
+
+    def _ts(row, field):
+        v = row.get(field)
+        if not v:
+            return 0.0
+        try:
+            return frappe.utils.get_datetime(v).timestamp()
+        except Exception:
+            return 0.0
+
+    for sid in student_ids:
+        rows = by_sid.get(sid, [])
+        if not rows:
+            continue
+        rows.sort(
+            key=lambda r: (
+                0 if r.get("school_year_id") == current_sy else 1,
+                -_ts(r, "upload_date"),
+                -_ts(r, "creation"),
+            )
+        )
+        best = rows[0]
+        purl = best.get("photo")
+        if purl:
+            if purl.startswith("/files/"):
+                purl = frappe.utils.get_url(purl)
+            elif not str(purl).startswith("http"):
+                purl = frappe.utils.get_url("/files/" + str(purl))
+            out[sid]["student_photo_url"] = purl
+
+    return out
 
 
 def _get_request_data():
@@ -1107,6 +1244,382 @@ def get_class_violation_stats(
         )
 
 
+def _student_violation_stats_internal(student_id, violation_id, first_day, last_day):
+    """Logic thống kê HS–vi phạm (dùng chung get_student_violation_stats và batch)."""
+    count_sql = """
+        SELECT COUNT(DISTINCT r.name) as cnt
+        FROM `tabSIS Discipline Record` r
+        LEFT JOIN `tabSIS Discipline Record Student Entry` se
+            ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+        LEFT JOIN `tabSIS Discipline Record Class Entry` ce
+            ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+        LEFT JOIN `tabSIS Class Student` cs
+            ON cs.class_id = ce.class_id AND cs.student_id = %(student_id)s
+        WHERE r.violation = %(violation_id)s
+            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+            AND (
+                r.target_student = %(student_id)s
+                OR se.student_id = %(student_id)s
+                OR (ce.class_id IS NOT NULL AND cs.student_id IS NOT NULL)
+            )
+    """
+    result = frappe.db.sql(
+        count_sql,
+        {
+            "violation_id": violation_id,
+            "student_id": student_id,
+            "first_day": first_day,
+            "last_day": last_day,
+        },
+        as_dict=True,
+    )
+    count = result[0]["cnt"] if result else 0
+    try:
+        doc = frappe.get_doc("SIS Discipline Violation", violation_id)
+    except frappe.DoesNotExistError:
+        return {"count": count, "level": "1", "level_label": "Cấp độ 1", "points": 0}
+    student_points = getattr(doc, "student_points", []) or []
+    sorted_points = sorted(
+        [
+            {
+                "violation_count": int(p.get("violation_count", 0)),
+                "level": p.get("level", "1"),
+                "points": int(p.get("points", 0)),
+            }
+            for p in student_points
+        ],
+        key=lambda x: x["violation_count"],
+        reverse=True,
+    )
+    matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
+    if not matched and sorted_points:
+        matched = min(sorted_points, key=lambda x: x["violation_count"])
+    level = matched.get("level", "1") if matched else "1"
+    points = matched.get("points", 0) if matched else 0
+    return {
+        "count": count,
+        "level": level,
+        "level_label": f"Cấp độ {level}",
+        "points": points,
+    }
+
+
+def _class_violation_stats_internal(class_id, violation_id, first_day, last_day):
+    """Logic thống kê Lớp–vi phạm (dùng chung get_class_violation_stats và batch)."""
+    count_sql = """
+        SELECT COUNT(DISTINCT r.name) as cnt
+        FROM `tabSIS Discipline Record` r
+        WHERE r.violation = %(violation_id)s
+            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+            AND (
+                EXISTS (
+                    SELECT 1 FROM `tabSIS Discipline Record Class Entry` ce
+                    WHERE ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+                        AND ce.class_id = %(class_id)s
+                )
+                OR EXISTS (
+                    SELECT 1 FROM `tabSIS Discipline Record Student Entry` se
+                    INNER JOIN `tabSIS Class Student` cs
+                        ON cs.student_id = se.student_id
+                        AND cs.class_id = %(class_id)s
+                        AND cs.class_type = 'regular'
+                    WHERE se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+                )
+                OR (
+                    IFNULL(r.target_student, '') != ''
+                    AND EXISTS (
+                        SELECT 1 FROM `tabSIS Class Student` cs
+                        WHERE cs.student_id = r.target_student
+                            AND cs.class_id = %(class_id)s
+                            AND cs.class_type = 'regular'
+                    )
+                )
+            )
+    """
+    result = frappe.db.sql(
+        count_sql,
+        {
+            "violation_id": violation_id,
+            "class_id": class_id,
+            "first_day": first_day,
+            "last_day": last_day,
+        },
+        as_dict=True,
+    )
+    count = result[0]["cnt"] if result else 0
+    try:
+        doc = frappe.get_doc("SIS Discipline Violation", violation_id)
+    except frappe.DoesNotExistError:
+        return {"count": count, "level": "1", "level_label": "Cấp độ 1", "points": 0}
+    class_points = getattr(doc, "class_points", []) or []
+    sorted_points = sorted(
+        [
+            {
+                "violation_count": int(p.get("violation_count", 0)),
+                "level": p.get("level", "1"),
+                "points": int(p.get("points", 0)),
+            }
+            for p in class_points
+        ],
+        key=lambda x: x["violation_count"],
+        reverse=True,
+    )
+    matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
+    if not matched and sorted_points:
+        matched = min(sorted_points, key=lambda x: x["violation_count"])
+    level = matched.get("level", "1") if matched else "1"
+    points = matched.get("points", 0) if matched else 0
+    return {
+        "count": count,
+        "level": level,
+        "level_label": f"Cấp độ {level}",
+        "points": points,
+    }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_bulk_violation_stats(pairs=None, date_from=None, date_to=None):
+    """
+    Thống kê hàng loạt cặp (học sinh|vi phạm) và (lớp|vi phạm) trong một request.
+    pairs: JSON array hoặc list — mỗi phần tử: {"type": "student"|"class", "entity_id": "...", "violation_id": "..."}
+    Trả về data.stats: dict key "s|entity_id|violation_id" hoặc "c|entity_id|violation_id" -> {count, level, level_label, points}
+    """
+    try:
+        from datetime import date
+
+        data = _get_request_data()
+        pairs = pairs or data.get("pairs")
+        date_from = date_from or data.get("date_from")
+        date_to = date_to or data.get("date_to")
+        if isinstance(pairs, str):
+            pairs = json.loads(pairs)
+        if not pairs or not isinstance(pairs, list):
+            return success_response(
+                data={"stats": {}},
+                message="Không có cặp cần thống kê",
+            )
+
+        today = date.today()
+        if date_from and date_to:
+            first_day = date.fromisoformat(str(date_from))
+            last_day = date.fromisoformat(str(date_to))
+        else:
+            first_day = today.replace(day=1)
+            last_day = today
+
+        stats = {}
+        for item in pairs:
+            if not isinstance(item, dict):
+                continue
+            kind = (item.get("type") or "").strip().lower()
+            entity_id = item.get("entity_id") or item.get("entityId")
+            vid = item.get("violation_id") or item.get("violationId")
+            if not entity_id or not vid:
+                continue
+            if kind == "student":
+                key = f"s|{entity_id}|{vid}"
+                stats[key] = _student_violation_stats_internal(
+                    entity_id, vid, first_day, last_day
+                )
+            elif kind == "class":
+                key = f"c|{entity_id}|{vid}"
+                stats[key] = _class_violation_stats_internal(
+                    entity_id, vid, first_day, last_day
+                )
+
+        return success_response(
+            data={"stats": stats},
+            message="Lấy thống kê hàng loạt thành công",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error get_bulk_violation_stats: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy thống kê hàng loạt: {str(e)}",
+            code="GET_BULK_VIOLATION_STATS_ERROR",
+        )
+
+
+def _search_discipline_record_names(search_term, campus, owner_user):
+    """
+    Trả list name bản ghi khớp tìm kiếm (tiêu đề VP/PL, mã/tên HS, mã bản ghi).
+    """
+    term = f"%{search_term}%"
+    params = {"term": term}
+    campus_sql = "1=1"
+    if campus:
+        campus_sql = "r.campus = %(campus)s"
+        params["campus"] = campus
+    owner_sql = ""
+    if owner_user:
+        owner_sql = " AND r.owner = %(owner)s"
+        params["owner"] = owner_user
+
+    sql = f"""
+        SELECT DISTINCT r.name
+        FROM `tabSIS Discipline Record` r
+        LEFT JOIN `tabSIS Discipline Violation` v ON v.name = r.violation
+        LEFT JOIN `tabSIS Discipline Classification` cl ON cl.name = r.classification
+        WHERE {campus_sql}
+        {owner_sql}
+        AND (
+            IFNULL(v.title, '') LIKE %(term)s
+            OR IFNULL(cl.title, '') LIKE %(term)s
+            OR r.name LIKE %(term)s
+            OR EXISTS (
+                SELECT 1 FROM `tabCRM Student` st
+                WHERE st.name = r.target_student
+                AND (st.student_name LIKE %(term)s OR st.student_code LIKE %(term)s)
+            )
+            OR EXISTS (
+                SELECT 1 FROM `tabSIS Discipline Record Student Entry` se
+                INNER JOIN `tabCRM Student` st2 ON st2.name = se.student_id
+                WHERE se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+                AND (st2.student_name LIKE %(term)s OR st2.student_code LIKE %(term)s)
+            )
+        )
+    """
+    rows = frappe.db.sql(sql, params, as_dict=True)
+    return [r["name"] for r in rows]
+
+
+def _enrich_discipline_records_list(records):
+    """Gán title/owner/target_students bằng batch query (không N+1)."""
+    if not records:
+        return records
+
+    cls_ids = list({r["classification"] for r in records if r.get("classification")})
+    viol_ids = list({r["violation"] for r in records if r.get("violation")})
+    form_ids = list({r["form"] for r in records if r.get("form")})
+    ts_ids = list({r["time_slot_id"] for r in records if r.get("time_slot_id")})
+    owner_ids = list({r["owner"] for r in records if r.get("owner")})
+
+    cls_map = {}
+    if cls_ids:
+        for row in frappe.get_all(
+            "SIS Discipline Classification",
+            filters={"name": ["in", cls_ids]},
+            fields=["name", "title"],
+        ):
+            cls_map[row["name"]] = row.get("title") or row["name"]
+    viol_map = {}
+    if viol_ids:
+        for row in frappe.get_all(
+            "SIS Discipline Violation",
+            filters={"name": ["in", viol_ids]},
+            fields=["name", "title"],
+        ):
+            viol_map[row["name"]] = row.get("title") or row["name"]
+    form_map = {}
+    if form_ids:
+        for row in frappe.get_all(
+            "SIS Discipline Form",
+            filters={"name": ["in", form_ids]},
+            fields=["name", "title"],
+        ):
+            form_map[row["name"]] = row.get("title") or row["name"]
+    ts_map = {}
+    if ts_ids:
+        for row in frappe.get_all(
+            "SIS Discipline Time",
+            filters={"name": ["in", ts_ids]},
+            fields=["name", "title"],
+        ):
+            ts_map[row["name"]] = row.get("title") or row["name"]
+    user_map = {}
+    if owner_ids:
+        for row in frappe.get_all(
+            "User", filters={"name": ["in", owner_ids]}, fields=["name", "full_name"]
+        ):
+            user_map[row["name"]] = row.get("full_name") or row["name"]
+
+    all_stu = []
+    for r in records:
+        st_ids = r.get("target_student_ids") or []
+        if not st_ids and r.get("target_student"):
+            st_ids = [r["target_student"]]
+        if (r.get("target_type") in ("student", "mixed")) and st_ids:
+            all_stu.extend(st_ids)
+    st_batch = _batch_get_student_display_info(list(dict.fromkeys(all_stu)))
+
+    def empty_st(sid):
+        return {
+            "student_id": sid,
+            "student_name": "",
+            "student_code": "",
+            "student_class_title": "",
+            "student_class_id": None,
+            "student_photo_url": None,
+        }
+
+    for r in records:
+        if r.get("classification"):
+            r["classification_title"] = cls_map.get(r["classification"]) or r["classification"]
+        else:
+            r["classification_title"] = ""
+        if r.get("violation"):
+            r["violation_title"] = viol_map.get(r["violation"]) or r["violation"]
+        else:
+            r["violation_title"] = ""
+        if r.get("form"):
+            r["form_title"] = form_map.get(r["form"]) or r["form"]
+        else:
+            r["form_title"] = ""
+        if r.get("time_slot_id"):
+            r["time_slot_title"] = ts_map.get(r["time_slot_id"]) or r["time_slot_id"]
+        else:
+            r["time_slot_title"] = ""
+
+        owner_user = r.get("owner")
+        if owner_user:
+            r["owner_name"] = user_map.get(owner_user) or owner_user
+        else:
+            r["owner_name"] = ""
+        r["record_creator"] = owner_user
+
+        student_ids_to_fetch = r.get("target_student_ids") or []
+        if not student_ids_to_fetch and r.get("target_student"):
+            student_ids_to_fetch = [r["target_student"]]
+        has_students = (r.get("target_type") in ("student", "mixed")) and student_ids_to_fetch
+
+        if has_students and len(student_ids_to_fetch) == 1:
+            r["target_student"] = student_ids_to_fetch[0]
+            st_info = st_batch.get(r["target_student"]) or empty_st(r["target_student"])
+            r["target_students"] = [st_info]
+            r["student_name"] = st_info.get("student_name") or ""
+            r["student_code"] = st_info.get("student_code") or ""
+            r["student_photo_url"] = st_info.get("student_photo_url")
+            r["student_class_title"] = st_info.get("student_class_title") or ""
+        elif has_students and len(student_ids_to_fetch) > 1:
+            r["target_students"] = [
+                st_batch.get(sid) or empty_st(sid) for sid in student_ids_to_fetch
+            ]
+            names = [
+                (st["student_name"] or "") + " (" + (st["student_code"] or "") + ")"
+                for st in r["target_students"]
+            ]
+            r["student_name"] = ", ".join(names)
+            r["student_code"] = ""
+            r["student_class_title"] = ", ".join(r.get("target_class_titles") or []) or "-"
+            r["student_photo_url"] = None
+            r["target_student"] = student_ids_to_fetch[0]
+        else:
+            r["student_name"] = ""
+            r["student_code"] = ""
+            r["student_class_title"] = ""
+            r["student_photo_url"] = None
+
+    return records
+
+
+def _parse_int_optional(val, default=None):
+    if val is None or val == "":
+        return default
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
 # ==================== GHI NHẬN LỖI (RECORD) CRUD ====================
 
 
@@ -1159,9 +1672,29 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
     """
     Lấy danh sách ghi nhận lỗi.
     owner_only: "1" = Lỗi của tôi (owner = current user), "0" = Toàn bộ lỗi
+    Tùy chọn (query/body): page, per_page, search, date_from, date_to (YYYY-MM-DD).
+    Khi có page: trả pagination + data là mảng bản ghi; khi không: data = { data, total } (tương thích cũ).
     """
     try:
         from erp.utils.campus_utils import get_current_campus_from_context
+
+        req = _get_request_data()
+        if frappe.form_dict:
+            merged = dict(frappe.form_dict)
+            merged.update(req)
+            req = merged
+
+        owner_only = str(req.get("owner_only", owner_only or "0"))
+        campus = req.get("campus") or campus
+        page = _parse_int_optional(req.get("page"))
+        per_page = _parse_int_optional(req.get("per_page"), 50) or 50
+        if per_page < 1:
+            per_page = 50
+        if per_page > 500:
+            per_page = 500
+        search = (req.get("search") or "").strip()
+        date_from = (req.get("date_from") or "").strip()
+        date_to = (req.get("date_to") or "").strip()
 
         filters = {}
         if campus:
@@ -1171,13 +1704,38 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             if campus_id:
                 filters["campus"] = campus_id
 
+        campus_for_search = filters.get("campus")
+        owner_for_search = None
         if owner_only == "1":
             filters["owner"] = frappe.session.user
+            owner_for_search = frappe.session.user
 
-        records = frappe.get_all(
-            "SIS Discipline Record",
-            filters=filters,
-            fields=[
+        if date_from and date_to:
+            filters["date"] = ["between", [date_from, date_to]]
+
+        if search:
+            names = _search_discipline_record_names(
+                search, campus_for_search, owner_for_search
+            )
+            if not names:
+                if page is not None:
+                    return paginated_response(
+                        [],
+                        max(1, page),
+                        0,
+                        per_page,
+                        message="Lấy danh sách ghi nhận lỗi thành công",
+                    )
+                return success_response(
+                    data={"data": [], "total": 0},
+                    message="Lấy danh sách ghi nhận lỗi thành công",
+                )
+            filters["name"] = ["in", names]
+
+        list_kwargs = {
+            "doctype": "SIS Discipline Record",
+            "filters": filters,
+            "fields": [
                 "name",
                 "date",
                 "classification",
@@ -1196,10 +1754,20 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                 "modified",
                 "campus",
             ],
-            order_by="modified desc",
-        )
+            "order_by": "modified desc",
+        }
 
-        # Lấy target_classes và target_students cho mỗi record
+        if page is not None:
+            total = frappe.db.count("SIS Discipline Record", filters=filters)
+            page = max(1, page)
+            offset = (page - 1) * per_page
+            list_kwargs["start"] = offset
+            list_kwargs["page_length"] = per_page
+            records = frappe.get_all(**list_kwargs)
+        else:
+            records = frappe.get_all(**list_kwargs)
+            total = len(records)
+
         record_ids = [r["name"] for r in records]
         if record_ids:
             class_entries = frappe.get_all(
@@ -1211,7 +1779,6 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             for ce in class_entries:
                 class_map.setdefault(ce["parent"], []).append(ce["class_id"])
 
-            # Lấy target_students (bảng mới cho nhiều học sinh / mixed)
             student_entries = frappe.get_all(
                 "SIS Discipline Record Student Entry",
                 filters={"parent": ["in", record_ids]},
@@ -1221,7 +1788,6 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             for se in student_entries:
                 student_map.setdefault(se["parent"], []).append(se["student_id"])
 
-            # Lấy class titles
             class_ids = list(set(c for ids in class_map.values() for c in ids))
             class_titles = {}
             if class_ids:
@@ -1237,7 +1803,6 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                 r["target_class_titles"] = [
                     class_titles.get(cid, cid) for cid in r["target_class_ids"]
                 ]
-                # target_student_ids: từ target_students table hoặc target_student (1 người)
                 stu_ids = student_map.get(r["name"], [])
                 if not stu_ids and r.get("target_student"):
                     stu_ids = [r["target_student"]]
@@ -1246,91 +1811,23 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             for r in records:
                 r["target_class_ids"] = []
                 r["target_class_titles"] = []
-                r["target_student_ids"] = [r["target_student"]] if r.get("target_student") else []
+                r["target_student_ids"] = (
+                    [r["target_student"]] if r.get("target_student") else []
+                )
 
-        # Enrich: classification_title, violation_title, form_title
-        for r in records:
-            if r.get("classification"):
-                r["classification_title"] = frappe.db.get_value(
-                    "SIS Discipline Classification",
-                    r["classification"],
-                    "title",
-                ) or r["classification"]
-            else:
-                r["classification_title"] = ""
+        _enrich_discipline_records_list(records)
 
-            if r.get("violation"):
-                r["violation_title"] = frappe.db.get_value(
-                    "SIS Discipline Violation",
-                    r["violation"],
-                    "title",
-                ) or r["violation"]
-            else:
-                r["violation_title"] = ""
-
-            if r.get("form"):
-                r["form_title"] = frappe.db.get_value(
-                    "SIS Discipline Form",
-                    r["form"],
-                    "title",
-                ) or r["form"]
-            else:
-                r["form_title"] = ""
-
-            if r.get("time_slot_id"):
-                r["time_slot_title"] = frappe.db.get_value(
-                    "SIS Discipline Time",
-                    r["time_slot_id"],
-                    "title",
-                ) or r["time_slot_id"]
-            else:
-                r["time_slot_title"] = ""
-
-            # Người cập nhật = owner (người tạo)
-            owner_user = r.get("owner")
-            if owner_user:
-                r["owner_name"] = frappe.db.get_value(
-                    "User", owner_user, "full_name"
-                ) or owner_user
-            else:
-                r["owner_name"] = ""
-            r["record_creator"] = owner_user
-
-            # Lấy thông tin học sinh: target_student (1 người) hoặc target_student_ids (nhiều người / mixed)
-            student_ids_to_fetch = r.get("target_student_ids") or []
-            if not student_ids_to_fetch and r.get("target_student"):
-                student_ids_to_fetch = [r["target_student"]]
-            has_students = (r.get("target_type") in ("student", "mixed")) and student_ids_to_fetch
-
-            if has_students and len(student_ids_to_fetch) == 1:
-                # 1 học sinh: target_students + các field cũ
-                r["target_student"] = student_ids_to_fetch[0]
-                st_info = _get_student_display_info(r["target_student"])
-                r["target_students"] = [st_info]
-                r["student_name"] = st_info.get("student_name") or ""
-                r["student_code"] = st_info.get("student_code") or ""
-                r["student_photo_url"] = st_info.get("student_photo_url")
-                r["student_class_title"] = st_info.get("student_class_title") or ""
-            elif has_students and len(student_ids_to_fetch) > 1:
-                # Nhiều học sinh: target_students với avatar, tên, lớp từng người
-                r["target_students"] = [_get_student_display_info(sid) for sid in student_ids_to_fetch]
-                names = [
-                    (st["student_name"] or "") + " (" + (st["student_code"] or "") + ")"
-                    for st in r["target_students"]
-                ]
-                r["student_name"] = ", ".join(names)
-                r["student_code"] = ""
-                r["student_class_title"] = ", ".join(r.get("target_class_titles") or []) or "-"
-                r["student_photo_url"] = None
-                r["target_student"] = student_ids_to_fetch[0]
-            else:
-                r["student_name"] = ""
-                r["student_code"] = ""
-                r["student_class_title"] = ""
-                r["student_photo_url"] = None
+        if page is not None:
+            return paginated_response(
+                records,
+                page,
+                total,
+                per_page,
+                message="Lấy danh sách ghi nhận lỗi thành công",
+            )
 
         return success_response(
-            data={"data": records, "total": len(records)},
+            data={"data": records, "total": total},
             message="Lấy danh sách ghi nhận lỗi thành công",
         )
 
