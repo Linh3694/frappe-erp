@@ -137,7 +137,7 @@ def get_student_attendance(student_id=None, start_date=None, end_date=None):
             },
             fields=[
                 "name", "student_id", "student_code", "student_name",
-                "class_id", "class_name", "date", "period", "status", "remarks"
+                "class_id", "date", "period", "status", "remarks",
             ],
             order_by="date asc, period asc",
             ignore_permissions=True
