@@ -85,6 +85,30 @@ def _pic_from_department(dept_name: str):
     return None
 
 
+def _sync_issue_students(doc, data):
+    """
+    Dong bo bang con issue_students + truong student (hoc sinh dau tien, tuong thich PIC/legacy).
+    - Neu co khoa students (list): dung lam nguon that.
+    - Neu khong: dung student (mot hoc sinh) nhu truoc.
+    """
+    if "students" in data:
+        ids = []
+        for x in data.get("students") or []:
+            sid = (x or "").strip() if isinstance(x, str) else ""
+            if sid and frappe.db.exists("CRM Student", sid) and sid not in ids:
+                ids.append(sid)
+        doc.issue_students = []
+        for sid in ids:
+            doc.append("issue_students", {"student": sid})
+        doc.student = ids[0] if ids else ""
+        return
+    st = (data.get("student") or "").strip()
+    doc.issue_students = []
+    if st and frappe.db.exists("CRM Student", st):
+        doc.append("issue_students", {"student": st})
+    doc.student = st
+
+
 def _compute_sla_deadline(occurred_at, sla_hours):
     """occurred_at: string/datetime, sla_hours: float"""
     if not occurred_at or sla_hours is None:
@@ -238,7 +262,7 @@ def create_issue():
         occurred_at = data.get("occurred_at") or now()
         doc.occurred_at = occurred_at
         doc.lead = data.get("lead") or ""
-        doc.student = data.get("student") or ""
+        _sync_issue_students(doc, data)
         doc.department = data.get("department") or ""
         doc.attachment = data.get("attachment") or ""
 
@@ -343,12 +367,14 @@ def update_issue():
             "pic",
             "attachment",
             "lead",
-            "student",
             "department",
         ]
         for field in updatable:
             if field in data:
                 doc.set(field, data[field])
+
+        if "students" in data or "student" in data:
+            _sync_issue_students(doc, data)
 
         if "issue_module" in data and data["issue_module"]:
             if frappe.db.exists("CRM Issue Module", data["issue_module"]):

@@ -13,6 +13,7 @@
   "cb_issue_1",
   "lead",
   "student",
+  "issue_students",
   "occurred_at",
   "issue_content",
   "content",
@@ -75,6 +76,12 @@
    "fieldtype": "Link",
    "label": "Student",
    "options": "CRM Student"
+  },
+  {
+   "fieldname": "issue_students",
+   "fieldtype": "Table",
+   "label": "Students",
+   "options": "CRM Issue Student"
   },
   {
    "fieldname": "occurred_at",
