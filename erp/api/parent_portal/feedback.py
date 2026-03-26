@@ -169,6 +169,54 @@ def _get_student_ids_for_guardian(guardian_name):
     return out
 
 
+def _parse_feedback_attachments_list(feedback_doc):
+    """Lay danh sach metadata file tu feedback.attachments (JSON hoac list)."""
+    raw = getattr(feedback_doc, "attachments", None)
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        return json.loads(raw) if isinstance(raw, str) else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _is_image_file(file_type, file_name):
+    """Dung cho hien thi <img> trong noi dung issue."""
+    ft = (file_type or "").lower()
+    if ft.startswith("image/"):
+        return True
+    ext = (file_name or "").rsplit(".", 1)[-1].lower() if file_name else ""
+    return ext in ("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic")
+
+
+def _append_remaining_attachments_to_content(content_html, attachment_list):
+    """
+    Chen them file vao HTML noi dung issue (file dau tien thuong da gan vao truong attachment).
+    Moi phan tu: file_url, file_name, file_type.
+    """
+    if not attachment_list:
+        return content_html
+    blocks = ['<p><strong>File đính kèm (góp ý phụ huynh):</strong></p>']
+    for att in attachment_list:
+        url = (att.get("file_url") or "").strip()
+        fname = att.get("file_name") or "file"
+        if not url:
+            continue
+        safe_url = escape_html(url)
+        safe_name = escape_html(fname)
+        if _is_image_file(att.get("file_type"), fname):
+            blocks.append(
+                f'<p><img src="{safe_url}" alt="{safe_name}" style="max-width:100%;height:auto;" /></p>'
+            )
+        else:
+            blocks.append(
+                f'<p><a href="{safe_url}" target="_blank" rel="noopener noreferrer">{safe_name}</a></p>'
+            )
+    return content_html + "".join(blocks)
+
+
 def _get_next_care_admin_pic():
     """Round-robin: user role SIS Sales Care Admin co it CRM Issue (pic) nhat."""
     admins = frappe.get_all(
@@ -207,6 +255,12 @@ def _create_issue_from_feedback(feedback_doc, guardian_name):
     raw = (getattr(feedback_doc, "content", None) or "").strip()
     content_html = "<p>" + escape_html(raw).replace("\n", "<br>") + "</p>"
 
+    # File dinh kem feedback: file dau -> truong attachment; tat ca file -> chen vao noi dung (anh/link)
+    att_list = _parse_feedback_attachments_list(feedback_doc)
+    first_url = (att_list[0].get("file_url") or "").strip() if att_list else ""
+    if att_list:
+        content_html = _append_remaining_attachments_to_content(content_html, att_list)
+
     doc = frappe.new_doc("CRM Issue")
     doc.title = (getattr(feedback_doc, "title", None) or "").strip() or "Góp ý từ phụ huynh"
     doc.content = content_html
@@ -215,7 +269,7 @@ def _create_issue_from_feedback(feedback_doc, guardian_name):
     doc.occurred_at = now()
     doc.lead = ""
     doc.department = ""
-    doc.attachment = ""
+    doc.attachment = first_url or ""
 
     _sync_issue_students(doc, {"students": student_ids})
 
