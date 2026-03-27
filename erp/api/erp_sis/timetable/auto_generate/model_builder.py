@@ -86,10 +86,9 @@ class ModelBuilder:
 	def _add_hard_constraints(self):
 		self._constraint_one_subject_per_slot()
 		self._constraint_required_periods()
-		self._constraint_teacher_no_conflict()
 		self._constraint_max_periods_per_day_subject()
-		# HC8, HC9 (teacher workload) chuyển thành soft cho beta
-		# vì dữ liệu thực tế GV dạy nhiều lớp dễ vượt giới hạn
+		# Teacher conflict (HC3) chuyển thành soft:
+		# TKB phải fill đủ tiết trước, GV thiếu thì tuyển thêm sau
 
 	def _constraint_one_subject_per_slot(self):
 		"""HC1: Mỗi lớp chỉ học 1 môn mỗi tiết."""
@@ -110,7 +109,7 @@ class ModelBuilder:
 						self.model.Add(sum(slot_vars) <= 1)
 
 	def _constraint_required_periods(self):
-		"""HC2: Số tiết/tuần theo requirement. Dùng <= để đảm bảo luôn khả thi, tối ưu bằng objective."""
+		"""HC2: Đủ CHÍNH XÁC số tiết/tuần theo requirement."""
 		inp = self.inp
 		sm = self.solver_model
 
@@ -118,12 +117,20 @@ class ModelBuilder:
 		for req in inp.requirements:
 			req_map[(req.education_grade_id, req.timetable_subject_id)] = req
 
-		# Dùng <= cho hard constraint, maximize tổng tiết qua objective (soft)
-		self._period_targets = []
+		num_slots = len(inp.periods) * len(inp.working_days)
 
 		for c in inp.classes:
 			grade = c.education_grade_id
 			subjects = inp.grade_subjects.get(grade, [])
+
+			total_required = sum(
+				(req_map.get((grade, ts_id)) or SubjectRequirement(
+					timetable_subject_id=ts_id, timetable_subject_title="", education_grade_id=grade,
+					periods_per_week=0)).periods_per_week
+				for ts_id in subjects
+			)
+			# Nếu tổng vượt capacity thì dùng <= (best effort)
+			use_exact = total_required <= num_slots
 
 			for ts_id in subjects:
 				req = req_map.get((grade, ts_id))
@@ -138,10 +145,10 @@ class ModelBuilder:
 							week_vars.append(sm.x[key])
 
 				if week_vars:
-					# Hard: không vượt quá số tiết yêu cầu
-					self.model.Add(sum(week_vars) <= req.periods_per_week)
-					# Lưu lại để soft objective maximize đạt đúng target
-					self._period_targets.append((week_vars, req.periods_per_week))
+					if use_exact:
+						self.model.Add(sum(week_vars) == req.periods_per_week)
+					else:
+						self.model.Add(sum(week_vars) <= req.periods_per_week)
 
 	def _constraint_teacher_no_conflict(self):
 		"""HC3: Mỗi GV chỉ dạy 1 lớp mỗi tiết."""
@@ -286,15 +293,6 @@ class ModelBuilder:
 	def _add_soft_constraints(self):
 		"""Soft constraints: ảnh hưởng hàm mục tiêu, không bắt buộc."""
 		objectives = []
-
-		# Ưu tiên cao nhất: đạt đúng số tiết yêu cầu (từ HC2 <= target)
-		if hasattr(self, '_period_targets'):
-			for week_vars, target in self._period_targets:
-				# Mỗi tiết được xếp = +1000 điểm (ưu tiên rất cao)
-				for v in week_vars:
-					objectives.append(v * 1000)
-
-		# Các soft rules từ config (ưu tiên thấp hơn)
 		soft = self.inp.soft_rules
 
 		if soft.consecutive_bonus > 0:
@@ -305,8 +303,6 @@ class ModelBuilder:
 
 		if soft.subject_pair_exclusions:
 			objectives.extend(self._soft_subject_pair_exclusions(soft.subject_pair_exclusions))
-
-		# Bỏ teacher_gap_minimization và workload_balance cho beta (quá nặng cho solver)
 
 		if objectives:
 			self.model.Maximize(sum(objectives))
