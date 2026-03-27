@@ -12,6 +12,28 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import check_crm_permission, get_request_data
 
+
+def _enrich_members_user_image(data):
+    """Gắn user_image (User) cho từng dòng members — mobile cần full URL qua resolve."""
+    members = data.get("members") or []
+    if not members:
+        return
+    emails = [m.get("user") for m in members if m.get("user")]
+    if not emails:
+        return
+    users = {
+        u.name: u
+        for u in frappe.get_all(
+            "User",
+            filters={"name": ["in", emails]},
+            fields=["name", "user_image"],
+        )
+    }
+    for m in members:
+        u = users.get(m.get("user") or "")
+        m["user_image"] = (u.user_image if u else "") or ""
+
+
 CONFIG_ROLES = [
     "System Manager",
     "SIS Manager",
@@ -58,7 +80,9 @@ def get_department():
     if not frappe.db.exists("CRM Issue Department", name):
         return not_found_response("Khong tim thay phong ban")
     doc = frappe.get_doc("CRM Issue Department", name)
-    return single_item_response(doc.as_dict())
+    payload = doc.as_dict()
+    _enrich_members_user_image(payload)
+    return single_item_response(payload)
 
 
 @frappe.whitelist(methods=["POST"])

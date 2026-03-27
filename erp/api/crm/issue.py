@@ -214,6 +214,60 @@ def _enrich_user_info(issues):
             r.created_by_image = creator_u.user_image if creator_u else ""
 
 
+def _enrich_issue_students_display(data):
+    """Gắn student_display_name, student_class_title cho issue_students — mobile hiển thị Tên (Lớp)."""
+    if not isinstance(data, dict):
+        return
+    try:
+        rows = data.get("issue_students") or []
+        ids = []
+        for r in rows:
+            sid = (r.get("student") or "").strip()
+            if sid and sid not in ids:
+                ids.append(sid)
+        single = (data.get("student") or "").strip()
+        if single and single not in ids:
+            ids.append(single)
+        if not ids:
+            return
+        stud_rows = frappe.get_all(
+            "CRM Student",
+            filters={"name": ["in", ids]},
+            fields=["name", "student_name"],
+        )
+        name_to_display = {s["name"]: (s.get("student_name") or "").strip() for s in (stud_rows or [])}
+        class_by_student = {}
+        current_sy = frappe.db.get_value(
+            "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+        )
+        if current_sy:
+            class_rows = frappe.db.sql(
+                """
+                SELECT cs.student_id, c.title AS class_title
+                FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                WHERE cs.student_id IN %(ids)s
+                  AND cs.school_year_id = %(year)s
+                  AND c.school_year_id = %(year)s
+                """,
+                {"ids": tuple(ids), "year": current_sy},
+                as_dict=True,
+            )
+            for cr in class_rows or []:
+                sid = cr.get("student_id")
+                if sid and sid not in class_by_student:
+                    class_by_student[sid] = (cr.get("class_title") or "").strip()
+        for r in rows:
+            sid = (r.get("student") or "").strip()
+            r["student_display_name"] = name_to_display.get(sid) or sid
+            r["student_class_title"] = class_by_student.get(sid, "")
+        if single:
+            data["student_display_name"] = name_to_display.get(single) or single
+            data["student_class_title"] = class_by_student.get(single, "")
+    except Exception as e:
+        frappe.logger().error(f"_enrich_issue_students_display: {e}")
+
+
 def _compute_sla_deadline(occurred_at, sla_hours):
     """occurred_at: string/datetime, sla_hours: float"""
     if not occurred_at or sla_hours is None:
@@ -368,6 +422,7 @@ def get_issue():
     doc = frappe.get_doc("CRM Issue", name)
     data = doc.as_dict()
     _enrich_user_info([data])
+    _enrich_issue_students_display(data)
     return single_item_response(data)
 
 
