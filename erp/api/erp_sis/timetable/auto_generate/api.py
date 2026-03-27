@@ -11,6 +11,7 @@ from datetime import datetime
 
 import frappe
 from frappe import _
+from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
 	error_response,
 	single_item_response,
@@ -44,15 +45,19 @@ def create_session(**kwargs):
 	try:
 		data = _get_json_data()
 		title = data.get("title")
-		campus_id = data.get("campus_id")
 		school_year_id = data.get("school_year_id")
 		education_stage_id = data.get("education_stage_id")
 		schedule_id = data.get("schedule_id")
 		class_ids = data.get("class_ids")
 		solver_time_limit = data.get("solver_time_limit", 120)
 
-		if not all([title, campus_id, school_year_id, education_stage_id, schedule_id]):
-			return error_response("Thiếu thông tin bắt buộc: title, campus, school_year, education_stage, schedule")
+		# Lấy campus từ server context (giống pattern chuẩn các API khác)
+		campus_id = get_current_campus_from_context()
+		if not campus_id:
+			return error_response("Không xác định được campus từ phiên đăng nhập")
+
+		if not all([title, school_year_id, education_stage_id, schedule_id]):
+			return error_response("Thiếu thông tin bắt buộc: title, school_year, education_stage, schedule")
 
 		doc = frappe.get_doc({
 			"doctype": "SIS Timetable Generation Session",
