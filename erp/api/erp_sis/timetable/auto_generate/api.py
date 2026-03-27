@@ -15,7 +15,6 @@ from erp.utils.api_response import (
 	error_response,
 	single_item_response,
 	list_response,
-	validation_error_response,
 )
 
 
@@ -38,7 +37,7 @@ def create_session(title=None, campus_id=None, school_year_id=None,
 		solver_time_limit = solver_time_limit or frappe.form_dict.get("solver_time_limit", 120)
 
 		if not all([title, campus_id, school_year_id, education_stage_id, schedule_id]):
-			return validation_error_response("Thiếu thông tin bắt buộc: title, campus, school_year, education_stage, schedule")
+			return error_response("Thiếu thông tin bắt buộc: title, campus, school_year, education_stage, schedule")
 
 		doc = frappe.get_doc({
 			"doctype": "SIS Timetable Generation Session",
@@ -67,7 +66,7 @@ def get_session(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		doc = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		return single_item_response(_format_session(doc))
@@ -114,11 +113,11 @@ def update_session(session_id=None, **kwargs):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		doc = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		if doc.status not in ("Configuring", "Completed", "Failed"):
-			return validation_error_response(f"Không thể sửa session ở trạng thái {doc.status}")
+			return error_response(f"Không thể sửa session ở trạng thái {doc.status}")
 
 		updatable = ["title", "soft_rules", "class_ids", "solver_time_limit", "optimization_priority"]
 		for field in updatable:
@@ -146,11 +145,11 @@ def delete_session(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		doc = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		if doc.status == "Published":
-			return validation_error_response("Không thể xóa session đã publish")
+			return error_response("Không thể xóa session đã publish")
 
 		# Xóa requirements
 		frappe.db.sql(
@@ -181,7 +180,7 @@ def get_requirements_matrix(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 
@@ -236,16 +235,16 @@ def save_requirements(session_id=None, requirements=None):
 		requirements = requirements or frappe.form_dict.get("requirements")
 
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 		if not requirements:
-			return validation_error_response("Thiếu requirements data")
+			return error_response("Thiếu requirements data")
 
 		if isinstance(requirements, str):
 			requirements = json.loads(requirements)
 
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		if session.status not in ("Configuring", "Completed", "Failed"):
-			return validation_error_response(f"Không thể sửa requirements ở trạng thái {session.status}")
+			return error_response(f"Không thể sửa requirements ở trạng thái {session.status}")
 
 		saved = 0
 		deleted = 0
@@ -306,7 +305,7 @@ def copy_requirements_from_session(target_session_id=None, source_session_id=Non
 		source_session_id = source_session_id or frappe.form_dict.get("source_session_id")
 
 		if not target_session_id or not source_session_id:
-			return validation_error_response("Thiếu target_session_id hoặc source_session_id")
+			return error_response("Thiếu target_session_id hoặc source_session_id")
 
 		source_reqs = frappe.get_all(
 			"SIS Timetable Generation Requirement",
@@ -347,7 +346,7 @@ def validate_session(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		from .data_collector import TimetableDataCollector
 		from .solver import TimetableSolver
@@ -391,11 +390,11 @@ def generate(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		if session.status not in ("Configuring", "Completed", "Failed"):
-			return validation_error_response(f"Không thể chạy solver ở trạng thái {session.status}")
+			return error_response(f"Không thể chạy solver ở trạng thái {session.status}")
 
 		# Enqueue background job
 		frappe.enqueue(
@@ -421,7 +420,7 @@ def get_generation_status(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 
@@ -461,7 +460,7 @@ def preview_class_week(session_id=None, class_id=None):
 		class_id = class_id or frappe.form_dict.get("class_id")
 
 		if not session_id or not class_id:
-			return validation_error_response("Thiếu session_id hoặc class_id")
+			return error_response("Thiếu session_id hoặc class_id")
 
 		rows = frappe.db.sql("""
 			SELECT
@@ -516,7 +515,7 @@ def preview_teacher_week(session_id=None, teacher_id=None):
 		teacher_id = teacher_id or frappe.form_dict.get("teacher_id")
 
 		if not session_id or not teacher_id:
-			return validation_error_response("Thiếu session_id hoặc teacher_id")
+			return error_response("Thiếu session_id hoặc teacher_id")
 
 		# Lấy tất cả kết quả có chứa teacher_id
 		all_rows = frappe.db.sql("""
@@ -573,7 +572,7 @@ def get_preview_stats(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		# Tổng slot
 		total = frappe.db.sql(
@@ -623,7 +622,7 @@ def publish_session(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		from .publisher import TimetablePublisher
 		publisher = TimetablePublisher(session_id)
@@ -641,11 +640,11 @@ def discard_session(session_id=None):
 	try:
 		session_id = session_id or frappe.form_dict.get("session_id")
 		if not session_id:
-			return validation_error_response("Thiếu session_id")
+			return error_response("Thiếu session_id")
 
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		if session.status == "Published":
-			return validation_error_response("Không thể hủy session đã publish")
+			return error_response("Không thể hủy session đã publish")
 
 		# Xóa results
 		frappe.db.sql(
