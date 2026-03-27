@@ -35,6 +35,16 @@ def _get_json_data() -> Dict:
 	return data
 
 
+def _get_param(key: str, default=None):
+	"""Đọc 1 param từ query string hoặc form_dict (dùng cho GET requests)."""
+	val = frappe.form_dict.get(key)
+	if val:
+		return val
+	if frappe.request and frappe.request.args:
+		val = frappe.request.args.get(key)
+	return val or default
+
+
 # ════════════════════════════════════════════════════════
 # Session Management
 # ════════════════════════════════════════════════════════
@@ -84,7 +94,7 @@ def create_session(**kwargs):
 def get_session(session_id=None):
 	"""Lấy thông tin session."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		session_id = session_id or _get_param("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -101,15 +111,17 @@ def get_session(session_id=None):
 def list_sessions(campus_id=None, school_year_id=None, education_stage_id=None):
 	"""Danh sách sessions."""
 	try:
-		campus_id = campus_id or frappe.form_dict.get("campus_id")
+		campus_id = campus_id or _get_param("campus_id")
 
 		filters = {}
 		if campus_id:
 			filters["campus_id"] = campus_id
-		if school_year_id or frappe.form_dict.get("school_year_id"):
-			filters["school_year_id"] = school_year_id or frappe.form_dict.get("school_year_id")
-		if education_stage_id or frappe.form_dict.get("education_stage_id"):
-			filters["education_stage_id"] = education_stage_id or frappe.form_dict.get("education_stage_id")
+		school_year_val = school_year_id or _get_param("school_year_id")
+		if school_year_val:
+			filters["school_year_id"] = school_year_val
+		stage_val = education_stage_id or _get_param("education_stage_id")
+		if stage_val:
+			filters["education_stage_id"] = stage_val
 
 		sessions = frappe.get_all(
 			"SIS Timetable Generation Session",
@@ -128,10 +140,11 @@ def list_sessions(campus_id=None, school_year_id=None, education_stage_id=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["PUT", "POST"])
-def update_session(session_id=None, **kwargs):
+def update_session(**kwargs):
 	"""Cập nhật session (soft rules, class_ids, solver config)."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		data = _get_json_data()
+		session_id = data.get("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -141,7 +154,7 @@ def update_session(session_id=None, **kwargs):
 
 		updatable = ["title", "soft_rules", "class_ids", "solver_time_limit", "optimization_priority"]
 		for field in updatable:
-			value = kwargs.get(field) or frappe.form_dict.get(field)
+			value = data.get(field)
 			if value is not None:
 				if field in ("soft_rules", "class_ids") and isinstance(value, (dict, list)):
 					value = json.dumps(value)
@@ -160,10 +173,11 @@ def update_session(session_id=None, **kwargs):
 
 
 @frappe.whitelist(allow_guest=False, methods=["DELETE"])
-def delete_session(session_id=None):
+def delete_session(**kwargs):
 	"""Xóa session + requirements + results."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		data = _get_json_data()
+		session_id = data.get("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -198,7 +212,7 @@ def delete_session(session_id=None):
 def get_requirements_matrix(session_id=None):
 	"""Trả về ma trận: rows = timetable_subjects, cols = grades, cells = config."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		session_id = session_id or _get_param("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -248,11 +262,12 @@ def get_requirements_matrix(session_id=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def save_requirements(session_id=None, requirements=None):
+def save_requirements(**kwargs):
 	"""Lưu hàng loạt requirements (bulk upsert)."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
-		requirements = requirements or frappe.form_dict.get("requirements")
+		data = _get_json_data()
+		session_id = data.get("session_id")
+		requirements = data.get("requirements")
 
 		if not session_id:
 			return error_response("Thiếu session_id")
@@ -318,11 +333,12 @@ def save_requirements(session_id=None, requirements=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def copy_requirements_from_session(target_session_id=None, source_session_id=None):
+def copy_requirements_from_session(**kwargs):
 	"""Copy requirements từ session cũ."""
 	try:
-		target_session_id = target_session_id or frappe.form_dict.get("target_session_id")
-		source_session_id = source_session_id or frappe.form_dict.get("source_session_id")
+		data = _get_json_data()
+		target_session_id = data.get("target_session_id")
+		source_session_id = data.get("source_session_id")
 
 		if not target_session_id or not source_session_id:
 			return error_response("Thiếu target_session_id hoặc source_session_id")
@@ -361,10 +377,11 @@ def copy_requirements_from_session(target_session_id=None, source_session_id=Non
 # ════════════════════════════════════════════════════════
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def validate_session(session_id=None):
+def validate_session(**kwargs):
 	"""Kiểm tra dữ liệu đầy đủ trước khi chạy solver."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		data = _get_json_data()
+		session_id = data.get("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -405,10 +422,11 @@ def validate_session(session_id=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def generate(session_id=None):
+def generate(**kwargs):
 	"""Chạy solver (background job)."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		data = _get_json_data()
+		session_id = data.get("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -438,7 +456,7 @@ def generate(session_id=None):
 def get_generation_status(session_id=None):
 	"""Polling trạng thái solver."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		session_id = session_id or _get_param("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -476,8 +494,8 @@ def get_generation_status(session_id=None):
 def preview_class_week(session_id=None, class_id=None):
 	"""Xem TKB draft theo lớp (format tương thích WeeklyGrid)."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
-		class_id = class_id or frappe.form_dict.get("class_id")
+		session_id = session_id or _get_param("session_id")
+		class_id = class_id or _get_param("class_id")
 
 		if not session_id or not class_id:
 			return error_response("Thiếu session_id hoặc class_id")
@@ -531,8 +549,8 @@ def preview_class_week(session_id=None, class_id=None):
 def preview_teacher_week(session_id=None, teacher_id=None):
 	"""Xem TKB draft theo GV."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
-		teacher_id = teacher_id or frappe.form_dict.get("teacher_id")
+		session_id = session_id or _get_param("session_id")
+		teacher_id = teacher_id or _get_param("teacher_id")
 
 		if not session_id or not teacher_id:
 			return error_response("Thiếu session_id hoặc teacher_id")
@@ -590,7 +608,7 @@ def preview_teacher_week(session_id=None, teacher_id=None):
 def get_preview_stats(session_id=None):
 	"""Thống kê tổng quan kết quả draft."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		session_id = session_id or _get_param("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -637,10 +655,11 @@ def get_preview_stats(session_id=None):
 # ════════════════════════════════════════════════════════
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def publish_session(session_id=None):
+def publish_session(**kwargs):
 	"""Publish draft -> doctype chính."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		data = _get_json_data()
+		session_id = data.get("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -655,10 +674,11 @@ def publish_session(session_id=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def discard_session(session_id=None):
+def discard_session(**kwargs):
 	"""Hủy phiên, xóa kết quả draft."""
 	try:
-		session_id = session_id or frappe.form_dict.get("session_id")
+		data = _get_json_data()
+		session_id = data.get("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
