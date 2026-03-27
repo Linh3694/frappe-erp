@@ -10,10 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 import frappe
-from ortools.sat.python import cp_model
 
 from .data_collector import TimetableDataCollector, TimetableInput
-from .model_builder import ModelBuilder
 
 
 @dataclass
@@ -58,6 +56,10 @@ class TimetableSolver:
 			if not inp.requirements:
 				result.errors.append("Chưa có yêu cầu số tiết/tuần nào (Requirements matrix trống)")
 				return result
+
+			# Lazy import ortools (chỉ cần khi thực sự chạy solver)
+			from ortools.sat.python import cp_model
+			from .model_builder import ModelBuilder
 
 			# Build model
 			builder = ModelBuilder(inp)

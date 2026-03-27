@@ -405,13 +405,11 @@ def validate_session(**kwargs):
 			return error_response("Thiếu session_id")
 
 		from .data_collector import TimetableDataCollector
-		from .solver import TimetableSolver
 
 		collector = TimetableDataCollector(session_id)
 		inp = collector.collect()
 
-		solver = TimetableSolver(session_id)
-		warnings = solver._validate_input(inp)
+		warnings = _validate_input_data(inp)
 
 		errors = []
 		if not inp.classes:
@@ -724,6 +722,40 @@ def discard_session(**kwargs):
 # ════════════════════════════════════════════════════════
 # Helpers
 # ════════════════════════════════════════════════════════
+
+def _validate_input_data(inp) -> list:
+	"""Kiểm tra dữ liệu đầu vào, trả về danh sách cảnh báo. Không cần ortools."""
+	warnings = []
+
+	for c in inp.classes:
+		grade = c.education_grade_id
+		for ts_id in inp.grade_subjects.get(grade, []):
+			key_a = f"{c.name}|{ts_id}"
+			teachers = inp.class_subject_teachers.get(key_a, [])
+			if not teachers:
+				req = next((r for r in inp.requirements
+							if r.education_grade_id == grade and r.timetable_subject_id == ts_id), None)
+				subject_name = req.timetable_subject_title if req else ts_id
+				warnings.append(f"Lớp {c.title} chưa có GV phân công cho môn {subject_name}")
+
+	num_periods = len(inp.periods)
+	num_days = len(inp.working_days)
+	max_slots_per_week = num_periods * num_days
+
+	for c in inp.classes:
+		grade = c.education_grade_id
+		total_required = sum(
+			r.periods_per_week for r in inp.requirements
+			if r.education_grade_id == grade
+		)
+		if total_required > max_slots_per_week:
+			warnings.append(
+				f"Lớp {c.title}: tổng yêu cầu {total_required} tiết/tuần "
+				f"vượt khả năng {max_slots_per_week} slot ({num_periods} tiết x {num_days} ngày)"
+			)
+
+	return warnings
+
 
 def _format_session(doc) -> Dict:
 	"""Format session doc thành dict cho API response."""

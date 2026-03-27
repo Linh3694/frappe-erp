@@ -5,10 +5,8 @@ Hard constraints được hardcode (không thay đổi).
 Soft constraints được đọc từ session config.
 """
 
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
-
-from ortools.sat.python import cp_model
 
 from .data_collector import TimetableInput, SubjectRequirement
 
@@ -19,25 +17,27 @@ DAY_ORDER = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 
 @dataclass
 class SolverModel:
 	"""Kết quả build: chứa model + biến + metadata để extract solution."""
-	model: cp_model.CpModel = field(default_factory=cp_model.CpModel)
+	model: Any = None
 
 	# x[(class_id, subject_id, day, period_idx)] = BoolVar
-	x: Dict[Tuple[str, str, str, int], cp_model.IntVar] = field(default_factory=dict)
+	x: Dict[Tuple[str, str, str, int], Any] = field(default_factory=dict)
 
 	# room_assign[(class_id, day, period_idx)] = IntVar (domain = room indices)
-	room_assign: Dict[Tuple[str, str, int], cp_model.IntVar] = field(default_factory=dict)
+	room_assign: Dict[Tuple[str, str, int], Any] = field(default_factory=dict)
 
 	# Metadata
 	input: Optional[TimetableInput] = None
-	period_index_map: Dict[str, int] = field(default_factory=dict)  # period_name -> idx
-	room_index_map: Dict[str, int] = field(default_factory=dict)    # room_name -> idx
-	room_list: List[str] = field(default_factory=list)               # idx -> room_name
+	period_index_map: Dict[str, int] = field(default_factory=dict)
+	room_index_map: Dict[str, int] = field(default_factory=dict)
+	room_list: List[str] = field(default_factory=list)
 
 
 class ModelBuilder:
 	"""Xây dựng OR-Tools CP-SAT model từ TimetableInput."""
 
 	def __init__(self, inp: TimetableInput):
+		from ortools.sat.python import cp_model
+		self.cp_model = cp_model
 		self.inp = inp
 		self.model = cp_model.CpModel()
 		self.solver_model = SolverModel(model=self.model, input=inp)
