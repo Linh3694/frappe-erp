@@ -61,6 +61,23 @@ class TimetableSolver:
 			from ortools.sat.python import cp_model
 			from .model_builder import ModelBuilder
 
+			# Log thống kê input
+			num_slots = len(inp.periods) * len(inp.working_days)
+			grade_totals = {}
+			for req in inp.requirements:
+				grade_totals.setdefault(req.education_grade_id, 0)
+				grade_totals[req.education_grade_id] += req.periods_per_week
+			for grade, total in grade_totals.items():
+				if total > num_slots:
+					result.warnings.append(
+						f"Khối {grade}: tổng {total} tiết/tuần > {num_slots} slot khả dụng → solver sẽ xếp best-effort"
+					)
+				frappe.logger().info(f"[Solver] Grade {grade}: {total}/{num_slots} tiết/tuần")
+
+			frappe.logger().info(f"[Solver] {len(inp.classes)} lớp, {len(inp.periods)} tiết/ngày, "
+								f"{len(inp.working_days)} ngày, {len(inp.requirements)} requirements, "
+								f"{len(inp.assignments)} assignments")
+
 			# Build model
 			builder = ModelBuilder(inp)
 			solver_model = builder.build()

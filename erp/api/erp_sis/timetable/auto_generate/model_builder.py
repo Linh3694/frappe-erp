@@ -111,7 +111,7 @@ class ModelBuilder:
 						self.model.Add(sum(slot_vars) <= 1)
 
 	def _constraint_required_periods(self):
-		"""HC2: Đủ số tiết/tuần theo requirement."""
+		"""HC2: Số tiết/tuần theo requirement. Dùng == nếu khả thi, fallback <= nếu tổng vượt capacity."""
 		inp = self.inp
 		sm = self.solver_model
 
@@ -119,9 +119,22 @@ class ModelBuilder:
 		for req in inp.requirements:
 			req_map[(req.education_grade_id, req.timetable_subject_id)] = req
 
+		num_slots = len(inp.periods) * len(inp.working_days)
+
 		for c in inp.classes:
 			grade = c.education_grade_id
 			subjects = inp.grade_subjects.get(grade, [])
+
+			# Tính tổng tiết yêu cầu cho lớp này
+			total_required = sum(
+				(req_map.get((grade, ts_id)) or SubjectRequirement(
+					timetable_subject_id=ts_id, timetable_subject_title="", education_grade_id=grade,
+					periods_per_week=0)).periods_per_week
+				for ts_id in subjects
+			)
+			# Nếu tổng vượt capacity → dùng <= (best effort)
+			use_exact = total_required <= num_slots
+
 			for ts_id in subjects:
 				req = req_map.get((grade, ts_id))
 				if not req or req.periods_per_week == 0:
@@ -135,8 +148,10 @@ class ModelBuilder:
 							week_vars.append(sm.x[key])
 
 				if week_vars:
-					# Đủ số tiết yêu cầu
-					self.model.Add(sum(week_vars) == req.periods_per_week)
+					if use_exact:
+						self.model.Add(sum(week_vars) == req.periods_per_week)
+					else:
+						self.model.Add(sum(week_vars) <= req.periods_per_week)
 
 	def _constraint_teacher_no_conflict(self):
 		"""HC3: Mỗi GV chỉ dạy 1 lớp mỗi tiết."""
@@ -166,22 +181,23 @@ class ModelBuilder:
 						self.model.Add(sum(slot_vars) <= 1)
 
 	def _constraint_teacher_weekday_availability(self):
-		"""HC4: GV chỉ dạy những ngày có trong weekdays của Subject Assignment."""
+		"""HC4: GV chỉ dạy những ngày có trong weekdays. Chỉ áp dụng khi lớp+môn CHỈ có 1 GV duy nhất."""
 		inp = self.inp
 		sm = self.solver_model
 
-		# Build weekday map: (teacher, class, subject) -> allowed_days
-		weekday_map: Dict[Tuple[str, str, str], set] = {}
+		# Chỉ block ngày nếu TẤT CẢ GV của (class, subject) đều không dạy ngày đó
+		# Nếu có nhiều GV, chỉ cần 1 GV dạy ngày đó là được
+		class_subject_weekdays: Dict[Tuple[str, str], set] = {}
 		for a in inp.assignments:
-			key = (a.teacher_id, a.class_id, a.timetable_subject_id)
-			if a.weekdays:
-				weekday_map[key] = set(a.weekdays)
-			# weekdays trống = tất cả ngày -> không cần constraint
+			key = (a.class_id, a.timetable_subject_id)
+			allowed = set(a.weekdays) if a.weekdays else set(inp.working_days)
+			if key not in class_subject_weekdays:
+				class_subject_weekdays[key] = set()
+			class_subject_weekdays[key].update(allowed)
 
-		for (t_id, c_id, ts_id), allowed_days in weekday_map.items():
+		for (c_id, ts_id), allowed_days in class_subject_weekdays.items():
 			for day in inp.working_days:
 				if day not in allowed_days:
-					# GV này KHÔNG dạy ngày này -> tất cả x cho lớp+môn này ở ngày này = 0
 					for p_idx in range(len(inp.periods)):
 						key = (c_id, ts_id, day, p_idx)
 						if key in sm.x:
