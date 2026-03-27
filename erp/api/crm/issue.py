@@ -204,17 +204,29 @@ def _enrich_user_info(issues):
         creator_key = (_get("created_by_user") or _get("owner") or "").strip()
         creator_u = users.get(creator_key) if creator_key else None
         creator_name = _normalize_vn_name(creator_u.full_name) if creator_u else ""
+        creator_img = (creator_u.user_image if creator_u else "") or ""
+        # Batch get_all doi khi khong khop — tra truc tiep User
+        if creator_key and not creator_name:
+            row_u = frappe.db.get_value(
+                "User",
+                creator_key,
+                ["full_name", "user_image"],
+                as_dict=True,
+            )
+            if row_u:
+                creator_name = _normalize_vn_name((row_u.get("full_name") or "").strip())
+                creator_img = (row_u.get("user_image") or "").strip()
 
         if is_dict:
             r["pic_full_name"] = pic_name
             r["pic_user_image"] = pic_u.user_image if pic_u else ""
             r["created_by_name"] = creator_name
-            r["created_by_image"] = creator_u.user_image if creator_u else ""
+            r["created_by_image"] = creator_img
         else:
             r.pic_full_name = pic_name
             r.pic_user_image = pic_u.user_image if pic_u else ""
             r.created_by_name = creator_name
-            r.created_by_image = creator_u.user_image if creator_u else ""
+            r.created_by_image = creator_img
 
 
 def _enrich_issue_students_display(data):
