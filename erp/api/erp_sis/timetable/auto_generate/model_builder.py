@@ -500,7 +500,7 @@ class ModelBuilder:
 
 		return penalties
 
-	def extract_solution(self, solver: cp_model.CpSolver) -> List[Dict]:
+	def extract_solution(self, solver) -> List[Dict]:
 		"""Trích xuất solution thành danh sách slot."""
 		inp = self.inp
 		sm = self.solver_model

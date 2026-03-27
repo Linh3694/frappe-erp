@@ -471,12 +471,20 @@ def generate(**kwargs):
 			run_solver(session_id)
 
 			session.reload()
-			return single_item_response({
+			result = {
 				"session_id": session_id,
 				"status": session.status,
 				"total_classes": session.total_classes,
 				"total_slots_generated": session.total_slots_generated,
-			})
+			}
+			if session.error_log:
+				result["error_log"] = session.error_log
+			if session.solver_stats:
+				try:
+					result["solver_stats"] = json.loads(session.solver_stats) if isinstance(session.solver_stats, str) else session.solver_stats
+				except (json.JSONDecodeError, TypeError):
+					pass
+			return single_item_response(result)
 
 	except Exception as e:
 		return error_response(str(e))
