@@ -185,8 +185,10 @@ def _enrich_user_info(issues):
         _get = r.get if isinstance(r, dict) else lambda k, d=None: getattr(r, k, d)
         if _get("pic"):
             emails.add(_get("pic"))
-        if _get("created_by_user"):
-            emails.add(_get("created_by_user"))
+        # created_by_user co the trong (ban ghi cu); owner la nguoi tao chuan Frappe
+        creator_id = (_get("created_by_user") or _get("owner") or "").strip()
+        if creator_id:
+            emails.add(creator_id)
     if not emails:
         return
     users = {
@@ -199,7 +201,8 @@ def _enrich_user_info(issues):
 
         pic_u = users.get(_get("pic") or "")
         pic_name = _normalize_vn_name(pic_u.full_name) if pic_u else ""
-        creator_u = users.get(_get("created_by_user") or "")
+        creator_key = (_get("created_by_user") or _get("owner") or "").strip()
+        creator_u = users.get(creator_key) if creator_key else None
         creator_name = _normalize_vn_name(creator_u.full_name) if creator_u else ""
 
         if is_dict:
@@ -347,6 +350,7 @@ def get_issues():
             "result",
             "pic",
             "created_by_user",
+            "owner",
             "occurred_at",
             "lead",
             "student",
@@ -390,6 +394,7 @@ def get_pending_issues():
             "result",
             "pic",
             "created_by_user",
+            "owner",
             "occurred_at",
             "lead",
             "student",
