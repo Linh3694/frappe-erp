@@ -250,11 +250,30 @@ def get_requirements_matrix(session_id=None):
 			key = f"{r['education_grade_id']}|{r['timetable_subject_id']}"
 			req_map[key] = r
 
+		# Đếm số tiết study/ngày từ schedule
+		study_periods_count = frappe.db.count("SIS Timetable Column", filters={
+			"schedule_id": session.schedule_id,
+			"period_type": "study",
+		})
+		if not study_periods_count:
+			# Fallback: đếm theo campus + stage (legacy)
+			study_periods_count = frappe.db.count("SIS Timetable Column", filters={
+				"campus_id": session.campus_id,
+				"education_stage_id": session.education_stage_id,
+				"period_type": "study",
+			})
+
+		working_days = 5
+		max_slots_per_week = (study_periods_count or 10) * working_days
+
 		return single_item_response({
 			"grades": grades,
 			"subjects": subjects,
 			"requirements": req_map,
 			"session_id": session_id,
+			"study_periods_per_day": study_periods_count or 0,
+			"working_days": working_days,
+			"max_slots_per_week": max_slots_per_week,
 		})
 
 	except Exception as e:
