@@ -6,6 +6,7 @@ Chỉ đọc dữ liệu từ các doctype hiện có, ghi vào doctype mới + 
 """
 
 import json
+from typing import Dict
 from datetime import datetime
 
 import frappe
