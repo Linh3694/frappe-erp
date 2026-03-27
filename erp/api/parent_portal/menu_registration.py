@@ -400,8 +400,10 @@ def _check_parent_timeline(period):
     
     if period.get("parent_start_datetime") and period.get("parent_end_datetime"):
         start = get_datetime(period.parent_start_datetime)
-        end = get_datetime(period.parent_end_datetime)
-        return start <= now <= end
+        # So sánh end theo ngày để kỳ đăng ký còn hiệu lực cả ngày cuối
+        end_date = getdate(period.parent_end_datetime)
+        today = getdate(nowdate())
+        return start <= now and today <= end_date
     
     # Fallback: kiểm tra theo deprecated fields
     if period.get("start_date") and period.get("end_date"):
@@ -497,8 +499,11 @@ def get_active_period():
         # Tìm kỳ đăng ký đang mở (status = 'Open') và trong parent timeline
         from frappe.utils import now_datetime
         now = now_datetime()
+        today = getdate(nowdate())
         
         # Query kỳ đăng ký - ưu tiên check parent_start_datetime/parent_end_datetime
+        # Start: so sánh datetime chính xác (tôn trọng giờ mở)
+        # End: so sánh theo ngày (DATE) để kỳ đăng ký còn hiệu lực cả ngày cuối
         period = frappe.db.sql("""
             SELECT 
                 name, title, month, year, 
@@ -509,12 +514,12 @@ def get_active_period():
             FROM `tabSIS Menu Registration Period`
             WHERE status = 'Open'
             AND (
-                (parent_start_datetime IS NOT NULL AND parent_start_datetime <= %s AND parent_end_datetime >= %s)
+                (parent_start_datetime IS NOT NULL AND parent_start_datetime <= %s AND DATE(parent_end_datetime) >= %s)
                 OR (parent_start_datetime IS NULL AND start_date <= %s AND end_date >= %s)
             )
             ORDER BY creation DESC
             LIMIT 1
-        """, (now, now, getdate(nowdate()), getdate(nowdate())), as_dict=True)
+        """, (now, today, today, today), as_dict=True)
         
         if not period:
             logs.append("Không có kỳ đăng ký suất ăn nào đang mở cho phụ huynh")

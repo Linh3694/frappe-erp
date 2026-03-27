@@ -18,23 +18,38 @@ from erp.utils.api_response import (
 )
 
 
+def _get_json_data() -> Dict:
+	"""Parse JSON body từ request (pattern chuẩn cho POST endpoints)."""
+	data = {}
+	if frappe.request and frappe.request.data:
+		try:
+			json_data = json.loads(frappe.request.data)
+			if json_data and isinstance(json_data, dict):
+				data = json_data
+		except (json.JSONDecodeError, TypeError):
+			pass
+	# Fallback: đọc từ form_dict
+	if not data:
+		data = dict(frappe.form_dict)
+	return data
+
+
 # ════════════════════════════════════════════════════════
 # Session Management
 # ════════════════════════════════════════════════════════
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
-def create_session(title=None, campus_id=None, school_year_id=None,
-				   education_stage_id=None, schedule_id=None,
-				   class_ids=None, solver_time_limit=120):
+def create_session(**kwargs):
 	"""Tạo phiên gen TKB mới."""
 	try:
-		title = title or frappe.form_dict.get("title")
-		campus_id = campus_id or frappe.form_dict.get("campus_id")
-		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
-		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
-		schedule_id = schedule_id or frappe.form_dict.get("schedule_id")
-		class_ids = class_ids or frappe.form_dict.get("class_ids")
-		solver_time_limit = solver_time_limit or frappe.form_dict.get("solver_time_limit", 120)
+		data = _get_json_data()
+		title = data.get("title")
+		campus_id = data.get("campus_id")
+		school_year_id = data.get("school_year_id")
+		education_stage_id = data.get("education_stage_id")
+		schedule_id = data.get("schedule_id")
+		class_ids = data.get("class_ids")
+		solver_time_limit = data.get("solver_time_limit", 120)
 
 		if not all([title, campus_id, school_year_id, education_stage_id, schedule_id]):
 			return error_response("Thiếu thông tin bắt buộc: title, campus, school_year, education_stage, schedule")
