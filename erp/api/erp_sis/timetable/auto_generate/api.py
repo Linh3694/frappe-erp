@@ -440,10 +440,12 @@ def validate_session(**kwargs):
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def generate(**kwargs):
-	"""Chạy solver (background job)."""
+	"""Chạy solver. Mặc định chạy synchronous để tránh vấn đề worker."""
 	try:
 		data = _get_json_data()
 		session_id = data.get("session_id")
+		run_async = data.get("async", False)
+
 		if not session_id:
 			return error_response("Thiếu session_id")
 
@@ -451,19 +453,30 @@ def generate(**kwargs):
 		if session.status not in ("Configuring", "Completed", "Failed"):
 			return error_response(f"Không thể chạy solver ở trạng thái {session.status}")
 
-		# Enqueue background job
-		frappe.enqueue(
-			"erp.api.erp_sis.timetable.auto_generate.solver.run_solver",
-			session_id=session_id,
-			queue="long",
-			timeout=600,
-		)
+		if run_async:
+			# Background job (cần ortools cài trong bench virtualenv)
+			frappe.enqueue(
+				"erp.api.erp_sis.timetable.auto_generate.solver.run_solver",
+				session_id=session_id,
+				queue="long",
+				timeout=600,
+			)
+			session.status = "Running"
+			session.save(ignore_permissions=True)
+			frappe.db.commit()
+			return single_item_response({"session_id": session_id, "status": "queued"})
+		else:
+			# Synchronous -- chạy trực tiếp trong request
+			from .solver import run_solver
+			run_solver(session_id)
 
-		session.status = "Validating"
-		session.save(ignore_permissions=True)
-		frappe.db.commit()
-
-		return single_item_response({"session_id": session_id, "status": "queued"})
+			session.reload()
+			return single_item_response({
+				"session_id": session_id,
+				"status": session.status,
+				"total_classes": session.total_classes,
+				"total_slots_generated": session.total_slots_generated,
+			})
 
 	except Exception as e:
 		return error_response(str(e))
