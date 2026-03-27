@@ -1,0 +1,261 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-TKB-GEN-{#####}",
+ "beta": 1,
+ "creation": "2026-03-27 09:00:00.000000",
+ "custom": 0,
+ "description": "Phiên tự động sinh thời khoá biểu (Beta). Mỗi session chứa toàn bộ config + kết quả draft, cách ly hoàn toàn với TKB đang dùng.",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "title",
+  "campus_id",
+  "column_break_basic",
+  "school_year_id",
+  "education_stage_id",
+  "schedule_id",
+  "scope_section",
+  "class_ids",
+  "config_section",
+  "solver_time_limit",
+  "column_break_config",
+  "optimization_priority",
+  "soft_rules_section",
+  "soft_rules",
+  "status_section",
+  "status",
+  "column_break_status",
+  "started_at",
+  "completed_at",
+  "result_section",
+  "solver_stats",
+  "published_timetable_id",
+  "column_break_result",
+  "total_classes",
+  "total_slots_generated",
+  "error_section",
+  "error_log"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Basic Information"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "education_stage_id",
+   "fieldtype": "Link",
+   "label": "Education Stage",
+   "options": "SIS Education Stage",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "schedule_id",
+   "fieldtype": "Link",
+   "label": "Schedule",
+   "options": "SIS Schedule",
+   "reqd": 1,
+   "description": "Kỳ học (HK1/HK2) - xác định khoảng ngày + tiết học"
+  },
+  {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Scope"
+  },
+  {
+   "fieldname": "class_ids",
+   "fieldtype": "JSON",
+   "label": "Class IDs",
+   "description": "Danh sách lớp sẽ gen TKB (null = tất cả lớp trong cấp học)"
+  },
+  {
+   "fieldname": "config_section",
+   "fieldtype": "Section Break",
+   "label": "Solver Configuration"
+  },
+  {
+   "fieldname": "solver_time_limit",
+   "fieldtype": "Int",
+   "label": "Solver Time Limit (seconds)",
+   "default": "120",
+   "description": "Thời gian tối đa cho solver chạy"
+  },
+  {
+   "fieldname": "column_break_config",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "optimization_priority",
+   "fieldtype": "Select",
+   "label": "Optimization Priority",
+   "options": "\nteacher_workload_balance\nminimize_gaps\nroom_efficiency",
+   "default": "teacher_workload_balance"
+  },
+  {
+   "fieldname": "soft_rules_section",
+   "fieldtype": "Section Break",
+   "label": "Soft Rules",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "soft_rules",
+   "fieldtype": "JSON",
+   "label": "Soft Rules",
+   "description": "JSON chứa các ràng buộc mềm: subject pair exclusions, time preferences, weights..."
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Configuring\nValidating\nRunning\nCompleted\nFailed\nPublished\nDiscarded",
+   "default": "Configuring",
+   "in_list_view": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "completed_at",
+   "fieldtype": "Datetime",
+   "label": "Completed At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "result_section",
+   "fieldtype": "Section Break",
+   "label": "Results",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "solver_stats",
+   "fieldtype": "JSON",
+   "label": "Solver Stats",
+   "read_only": 1,
+   "description": "Số biến, ràng buộc, thời gian chạy, status solver"
+  },
+  {
+   "fieldname": "published_timetable_id",
+   "fieldtype": "Link",
+   "label": "Published Timetable",
+   "options": "SIS Timetable",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_result",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_classes",
+   "fieldtype": "Int",
+   "label": "Total Classes",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_slots_generated",
+   "fieldtype": "Int",
+   "label": "Total Slots Generated",
+   "read_only": 1
+  },
+  {
+   "fieldname": "error_section",
+   "fieldtype": "Section Break",
+   "label": "Error Log",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "error_log",
+   "fieldtype": "Long Text",
+   "label": "Error Log",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-03-27 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Timetable Generation Session",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

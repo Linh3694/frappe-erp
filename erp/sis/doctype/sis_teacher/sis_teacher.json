@@ -22,7 +22,10 @@
   "gender",
   "education_stage_id",
   "subject_department_id",
-  "is_manager"
+  "is_manager",
+  "scheduling_section",
+  "max_periods_per_day",
+  "max_consecutive_periods"
  ],
  "fields": [
   {
@@ -72,6 +75,26 @@
    "fieldtype": "Check",
    "label": "Is Manager",
    "default": 0
+  },
+  {
+   "fieldname": "scheduling_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduling",
+   "description": "Cấu hình giới hạn giảng dạy cho tự động xếp TKB"
+  },
+  {
+   "fieldname": "max_periods_per_day",
+   "fieldtype": "Int",
+   "label": "Max Periods Per Day",
+   "default": 8,
+   "description": "Số tiết tối đa GV dạy trong 1 ngày (mặc định 8)"
+  },
+  {
+   "fieldname": "max_consecutive_periods",
+   "fieldtype": "Int",
+   "label": "Max Consecutive Periods",
+   "default": 4,
+   "description": "Số tiết liên tiếp tối đa trước khi nghỉ (mặc định 4)"
   }
  ],
  "index_web_pages_for_search": 1,
