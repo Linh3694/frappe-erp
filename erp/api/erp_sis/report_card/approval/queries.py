@@ -483,6 +483,7 @@ def get_pending_approvals(level: Optional[str] = None):
                                 or_filters=or_filters,
                                 fields=[
                                     "name", "title", "student_id", "class_id", "approval_status",
+                                    "template_id",
                                     "homeroom_approval_status", "scores_approval_status",
                                     "homeroom_l2_approved", "all_sections_l2_approved",
                                     "scores_submitted_count", "scores_l2_approved_count", "scores_total_count",
@@ -556,8 +557,12 @@ def get_pending_approvals(level: Optional[str] = None):
                         templates = frappe.get_all(
                             "SIS Report Card Template",
                             filters={"education_stage": config.education_stage_id, "campus_id": campus_id},
-                            fields=["name"]
+                            fields=["name", "program_type"]
                         )
+                        # Map template_id -> program_type (đồng bộ L3 + filter frontend ApprovalList)
+                        template_program_type = {
+                            t["name"]: t.get("program_type") for t in templates
+                        }
                         if templates:
                             reports_l4 = frappe.get_all(
                                 "SIS Student Report Card",
@@ -566,10 +571,18 @@ def get_pending_approvals(level: Optional[str] = None):
                                     "approval_status": ["in", ["reviewed", "published"]],
                                     "campus_id": campus_id
                                 },
-                                fields=["name", "title", "student_id", "class_id", "approval_status"]
+                                fields=[
+                                    "name", "title", "student_id", "class_id", "approval_status",
+                                    "template_id",
+                                ]
                             )
                             for r in reports_l4:
                                 r["pending_level"] = "publish"
+                                # Đồng bộ với L3: progress.program_type để lọc VN/INTL trên frontend
+                                tmpl_pt = template_program_type.get(r.get("template_id")) or "vn"
+                                r["progress"] = {
+                                    "program_type": "intl" if tmpl_pt == "intl" else "vn"
+                                }
                                 # Mark as viewer only if manager không phải là actual L4 approver
                                 if is_manager and not is_l4:
                                     r["is_viewer_only"] = True
