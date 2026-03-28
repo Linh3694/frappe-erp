@@ -50,32 +50,30 @@ def get_students_day_map(date=None, codes=None):
 
 		date_obj = frappe.utils.getdate(date)
 
-		# SQL trực tiếp — 1 query, bypass permission check
+		# SQL trực tiếp — không load raw_data (nặng), dùng stored fields
 		placeholders = ", ".join(["%s"] * len(codes))
 		records = frappe.db.sql(f"""
 			SELECT employee_code, employee_name, date,
-			       check_in_time, check_out_time, total_check_ins, raw_data
+			       check_in_time, check_out_time, total_check_ins
 			FROM `tabERP Time Attendance`
 			WHERE employee_code IN ({placeholders})
 			  AND date = %s
 		""", (*codes, date_obj), as_dict=True)
 
-		# Case-insensitive fallback nếu không tìm thấy
+		# Case-insensitive fallback
 		if not records:
 			all_variants = list({c for code in codes for c in (code, code.upper(), code.lower())})
 			placeholders2 = ", ".join(["%s"] * len(all_variants))
 			records = frappe.db.sql(f"""
 				SELECT employee_code, employee_name, date,
-				       check_in_time, check_out_time, total_check_ins, raw_data
+				       check_in_time, check_out_time, total_check_ins
 				FROM `tabERP Time Attendance`
 				WHERE employee_code IN ({placeholders2})
 				  AND date = %s
 			""", (*all_variants, date_obj), as_dict=True)
 
-		# Init result
 		result = {code: {"checkInTime": None, "checkOutTime": None, "totalCheckIns": 0, "employeeName": None} for code in codes}
 		codes_lower_map = {code.lower(): code for code in codes}
-		vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
 
 		def _fmt_time(time_obj, rec_date):
 			if not time_obj:
@@ -87,23 +85,13 @@ def get_students_day_map(date=None, codes=None):
 			if not matched:
 				continue
 
-			ci, co, cnt = rec.check_in_time, rec.check_out_time, rec.total_check_ins or 0
+			ci = rec.check_in_time
+			co = rec.check_out_time
+			cnt = rec.total_check_ins or 0
 
-			if rec.raw_data:
-				try:
-					raw = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
-					if raw:
-						times = []
-						for item in raw:
-							ts = item['timestamp']
-							parsed = frappe.utils.get_datetime(ts)
-							if parsed.tzinfo is not None:
-								parsed = parsed.astimezone(vn_tz).replace(tzinfo=None)
-							times.append(parsed)
-						times.sort()
-						ci, co, cnt = times[0], times[-1], len(times)
-				except Exception:
-					pass
+			# Chỉ 1 lần quẹt → chưa có giờ ra, không nên hiển thị checkOut = checkIn
+			if cnt <= 1 and ci and co and ci == co:
+				co = None
 
 			result[matched] = {
 				"checkInTime": _fmt_time(ci, rec.date),
@@ -224,11 +212,15 @@ def get_employee_attendance_range(**kwargs):
 		formatted = []
 		for rec in records:
 			ci, co, cnt = rec.check_in_time, rec.check_out_time, rec.total_check_ins or 0
-			# Recalculate từ raw_data nếu có (chính xác hơn stored fields)
-			if rec.get("raw_data"):
+			# Recalculate từ raw_data chỉ khi explicitly requested
+			if include_raw and rec.get("raw_data"):
 				rci, rco, rcnt = _parse_raw_times(rec.raw_data)
 				if rcnt > 0:
 					ci, co, cnt = rci, rco, rcnt
+
+			# Chỉ 1 lần quẹt → chưa có giờ ra
+			if cnt <= 1 and ci and co and ci == co:
+				co = None
 
 			date_str = rec.date.strftime('%Y-%m-%d') if rec.date else None
 			item = {
