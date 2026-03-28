@@ -170,97 +170,130 @@ def _get_class_info(class_id):
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def get_student_contact_logs():
     """
-    Get contact logs for a student (parent view)
-    Only shows logs with status "Sent" (not Draft or Recalled)
+    Get contact logs for a student (parent view).
+    Only shows logs with status "Sent" (not Draft or Recalled).
+    Hỗ trợ lọc theo khoảng ngày: start_date / end_date (YYYY-MM-DD).
+    Body: {student_id, start_date?, end_date?, limit?, offset?}
     """
     try:
-        # Get request body - try multiple methods
         body = {}
         try:
             request_data = frappe.request.get_data(as_text=True)
             if request_data:
                 body = json.loads(request_data)
         except Exception:
-            # Fallback to form_dict
             body = frappe.form_dict
-        
+
         student_id = body.get('student_id')
         limit = int(body.get('limit', 50))
         offset = int(body.get('offset', 0))
-        
-        print(f"📞 get_student_contact_logs called:")
-        print(f"   - student_id: {student_id}")
-        print(f"   - parent_email: {frappe.session.user}")
-        
+        start_date = body.get('start_date')
+        end_date = body.get('end_date')
+
         if not student_id:
             return error_response(message="Missing student_id", code="MISSING_PARAMS")
-        
-        # Verify parent has access to this student
+
         parent_email = frappe.session.user
         parent_student_ids = _get_parent_student_ids(parent_email)
-        
+
         if student_id not in parent_student_ids:
             return error_response(
                 message="You do not have permission to view this student's contact logs",
                 code="PERMISSION_DENIED"
             )
-        
-        # Get student info
+
         student_name = frappe.db.get_value("CRM Student", student_id, "student_name")
-        
-        # Query contact logs with status "Sent" only
+
+        # Khi có start_date/end_date → dùng SQL JOIN lọc theo log_date (hiệu quả hơn)
+        if start_date and end_date:
+            logs = frappe.db.sql("""
+                SELECT
+                    cls.name,
+                    cls.student_id,
+                    cls.class_student_id,
+                    cls.subject_id,
+                    cls.badges,
+                    cls.contact_log_comment,
+                    cls.contact_log_status,
+                    cls.contact_log_sent_by,
+                    cls.contact_log_sent_at,
+                    cls.contact_log_viewed_count,
+                    subj.log_date,
+                    COALESCE(csm_c.title, subj_c.title) AS class_name,
+                    COALESCE(csm.class_id, subj.class_id) AS class_id
+                FROM `tabSIS Class Log Student` cls
+                LEFT JOIN `tabSIS Class Log Subject` subj ON cls.subject_id = subj.name
+                LEFT JOIN `tabSIS Class Student` csm ON cls.class_student_id = csm.name
+                LEFT JOIN `tabSIS Class` csm_c ON csm.class_id = csm_c.name
+                LEFT JOIN `tabSIS Class` subj_c ON subj.class_id = subj_c.name
+                WHERE cls.student_id = %(student_id)s
+                  AND cls.contact_log_status = 'Sent'
+                  AND subj.log_date BETWEEN %(start_date)s AND %(end_date)s
+                ORDER BY subj.log_date DESC, cls.contact_log_sent_at DESC
+                LIMIT %(limit)s OFFSET %(offset)s
+            """, {
+                "student_id": student_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit,
+                "offset": offset,
+            }, as_dict=True)
+
+            enriched_logs = []
+            for log in logs:
+                log["student_name"] = student_name
+                log["log_date"] = str(log["log_date"]) if log.get("log_date") else None
+                enriched_logs.append(log)
+
+            return success_response(
+                message=f"Found {len(enriched_logs)} contact logs",
+                data={
+                    "logs": enriched_logs,
+                    "total": len(enriched_logs),
+                    "student_name": student_name
+                }
+            )
+
+        # Fallback: không có date → giữ logic cũ (N+1 queries, enriched response)
         logs = frappe.get_all(
             "SIS Class Log Student",
             filters={
                 "student_id": student_id,
-                "contact_log_status": "Sent"  # Only show sent logs
+                "contact_log_status": "Sent"
             },
             fields=[
-                "name",
-                "student_id",
-                "class_student_id",
-                "subject_id",
-                "badges",
-                "contact_log_comment",
-                "contact_log_status",
-                "contact_log_sent_by",
-                "contact_log_sent_at",
-                "contact_log_viewed_count"
+                "name", "student_id", "class_student_id", "subject_id",
+                "badges", "contact_log_comment", "contact_log_status",
+                "contact_log_sent_by", "contact_log_sent_at", "contact_log_viewed_count"
             ],
             order_by="contact_log_sent_at DESC",
             limit_start=offset,
             limit_page_length=limit
         )
-        
-        # Enrich logs with class and teacher information
+
         enriched_logs = []
         for log in logs:
-            # Get class info - ưu tiên từ class_student_id, fallback về subject_id
             class_id = None
-            
+
             if log['class_student_id']:
                 try:
                     class_student = frappe.get_doc("SIS Class Student", log['class_student_id'])
                     class_id = class_student.class_id
                 except Exception:
                     pass
-            
-            # Fallback: lấy class_id từ subject_id nếu không có class_student_id
+
             if not class_id and log['subject_id']:
                 class_id = frappe.db.get_value("SIS Class Log Subject", log['subject_id'], "class_id")
-            
-            # Skip log nếu không xác định được class_id
+
             if not class_id:
-                print(f"⚠️ Skipping log {log['name']}: cannot determine class_id")
                 continue
-            
+
             class_info = _get_class_info(class_id)
-            
-            # Get log date from subject
+
             log_date = None
             if log['subject_id']:
                 log_date = frappe.db.get_value("SIS Class Log Subject", log['subject_id'], "log_date")
-            
+
             enriched_log = {
                 **log,
                 "student_name": student_name,
@@ -271,7 +304,7 @@ def get_student_contact_logs():
                 "log_date": str(log_date) if log_date else None
             }
             enriched_logs.append(enriched_log)
-        
+
         return success_response(
             message=f"Found {len(enriched_logs)} contact logs",
             data={
@@ -280,16 +313,97 @@ def get_student_contact_logs():
                 "student_name": student_name
             }
         )
-    
+
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
         print(f"❌ get_student_contact_logs error: {str(e)}")
         print(error_detail)
-        # Don't use frappe.log_error to avoid nested CharacterLengthExceededError
         return error_response(
             message=f"Failed to get contact logs: {str(e)[:200]}",
             code="GET_LOGS_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def get_student_contact_logs_by_date():
+    """
+    API gọn cho AI agent: lấy nhận xét GV theo khoảng ngày.
+    Dùng SQL JOIN — 1 query duy nhất, chỉ trả fields cần thiết.
+    Body: {student_id, start_date?, end_date?, limit?}
+    """
+    try:
+        body = {}
+        try:
+            raw = frappe.request.get_data(as_text=True)
+            if raw:
+                body = json.loads(raw)
+        except Exception:
+            body = frappe.form_dict
+
+        student_id = body.get("student_id")
+        if not student_id:
+            return error_response(message="Missing student_id", code="MISSING_PARAMS")
+
+        # Kiểm tra quyền phụ huynh
+        parent_email = frappe.session.user
+        parent_student_ids = _get_parent_student_ids(parent_email)
+        if student_id not in parent_student_ids:
+            return error_response(
+                message="Permission denied",
+                code="PERMISSION_DENIED",
+            )
+
+        from datetime import date as _date, timedelta
+        today = _date.today().isoformat()
+        start_date = body.get("start_date") or today
+        end_date = body.get("end_date") or today
+        limit = min(int(body.get("limit", 20)), 50)
+
+        student_name = frappe.db.get_value("CRM Student", student_id, "student_name")
+
+        logs = frappe.db.sql("""
+            SELECT
+                cls.contact_log_comment  AS comment,
+                cls.badges               AS badges,
+                cls.contact_log_sent_at  AS sent_at,
+                subj.log_date            AS log_date,
+                c.title                  AS class_name,
+                u.full_name              AS teacher_name
+            FROM `tabSIS Class Log Student` cls
+            LEFT JOIN `tabSIS Class Log Subject` subj ON cls.subject_id = subj.name
+            LEFT JOIN `tabSIS Class Student` csm  ON cls.class_student_id = csm.name
+            LEFT JOIN `tabSIS Class` c
+                ON c.name = COALESCE(csm.class_id, subj.class_id)
+            LEFT JOIN `tabUser` u ON cls.contact_log_sent_by = u.name
+            WHERE cls.student_id = %(student_id)s
+              AND cls.contact_log_status = 'Sent'
+              AND subj.log_date BETWEEN %(start_date)s AND %(end_date)s
+            ORDER BY subj.log_date DESC, cls.contact_log_sent_at DESC
+            LIMIT %(limit)s
+        """, {
+            "student_id": student_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "limit": limit,
+        }, as_dict=True)
+
+        return success_response(
+            message=f"Found {len(logs)} contact logs",
+            data={
+                "logs": logs,
+                "total": len(logs),
+                "student_name": student_name,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return error_response(
+            message=f"Failed to get contact logs: {str(e)[:200]}",
+            code="GET_LOGS_ERROR",
         )
 
 
