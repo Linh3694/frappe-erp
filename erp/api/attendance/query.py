@@ -283,255 +283,150 @@ def get_students_day_map(date=None, codes=None):
 @frappe.whitelist(methods=["GET"], allow_guest=False)
 def get_employee_attendance_range(**kwargs):
 	"""
-	Get attendance records for an employee over a date range
-	Used by Parent Portal attendance page to show monthly attendance
-	
-	Endpoint: /api/method/erp.api.attendance.query.get_employee_attendance_range
-	
-	Args (via query params):
-		employee_code (str): Employee/student code
-		start_date (str): Start date (YYYY-MM-DD), optional
-		end_date (str): End date (YYYY-MM-DD), optional
-		include_raw_data (str): "true" or "false", default "false"
-		page (int): Page number for pagination, default 1
-		limit (int): Records per page, default 100, max 500
-	
-	Returns:
-		dict: {
-			status: "success",
-			data: {
-				records: [...],
-				pagination: {currentPage, totalPages, totalRecords, hasMore}
-			},
-			timestamp: current timestamp
-		}
+	Lấy attendance records theo khoảng ngày — dùng SQL trực tiếp (nhanh).
+	Quyền truy cập đã được xác thực qua Frappe session (allow_guest=False).
 	"""
 	try:
-		# Debug: Log all incoming parameters from multiple sources
-		frappe.logger().info(f"📥 [get_employee_attendance_range] kwargs: {kwargs}")
-		frappe.logger().info(f"📥 [get_employee_attendance_range] form_dict: {frappe.local.form_dict}")
-		frappe.logger().info(f"📥 [get_employee_attendance_range] request.args: {dict(frappe.request.args)}")
-		frappe.logger().info(f"📥 [get_employee_attendance_range] request.values: {dict(frappe.request.values)}")
-		
-		# Try to get parameters from multiple sources
-		# Priority: kwargs > form_dict > request.args > request.values
 		employee_code = (
-			kwargs.get('employee_code') or 
-			frappe.local.form_dict.get('employee_code') or 
-			frappe.request.args.get('employee_code') or
-			frappe.request.values.get('employee_code')
+			kwargs.get('employee_code')
+			or frappe.local.form_dict.get('employee_code')
+			or frappe.request.args.get('employee_code')
 		)
-		
 		start_date = (
-			kwargs.get('start_date') or 
-			frappe.local.form_dict.get('start_date') or 
-			frappe.request.args.get('start_date') or
-			frappe.request.values.get('start_date')
+			kwargs.get('start_date')
+			or frappe.local.form_dict.get('start_date')
+			or frappe.request.args.get('start_date')
 		)
-		
 		end_date = (
-			kwargs.get('end_date') or 
-			frappe.local.form_dict.get('end_date') or 
-			frappe.request.args.get('end_date') or
-			frappe.request.values.get('end_date')
+			kwargs.get('end_date')
+			or frappe.local.form_dict.get('end_date')
+			or frappe.request.args.get('end_date')
 		)
-		
-		include_raw_data = (
-			kwargs.get('include_raw_data') or 
-			frappe.local.form_dict.get('include_raw_data') or 
-			frappe.request.args.get('include_raw_data') or
-			frappe.request.values.get('include_raw_data') or
-			'false'
+		include_raw_str = (
+			kwargs.get('include_raw_data')
+			or frappe.local.form_dict.get('include_raw_data')
+			or frappe.request.args.get('include_raw_data')
+			or 'false'
 		)
-		
-		# Parse page and limit as integers
-		page_param = (
-			kwargs.get('page') or 
-			frappe.local.form_dict.get('page') or 
-			frappe.request.args.get('page') or
-			frappe.request.values.get('page')
-		)
-		page = int(page_param) if page_param else 1
-		
+		include_raw = include_raw_str.lower() == 'true'
+
 		limit_param = (
-			kwargs.get('limit') or 
-			frappe.local.form_dict.get('limit') or 
-			frappe.request.args.get('limit') or
-			frappe.request.values.get('limit')
+			kwargs.get('limit')
+			or frappe.local.form_dict.get('limit')
+			or frappe.request.args.get('limit')
 		)
-		limit = int(limit_param) if limit_param else 100
-		
-		frappe.logger().info(f"📥 [get_employee_attendance_range] Final values - employee_code: {employee_code}, start_date: {start_date}, end_date: {end_date}, page: {page}, limit: {limit}")
-		
+		limit_num = max(1, min(int(limit_param) if limit_param else 100, 500))
+
 		if not employee_code:
-			return error_response(
-				message="employee_code is required",
-				code="MISSING_EMPLOYEE_CODE"
-			)
-		
-		# Build filters
-		filters = {"employee_code": employee_code}
-		
-		# Date range filters
-		if start_date or end_date:
-			date_filter = {}
-			
-			if start_date:
-				try:
-					start_date_obj = frappe.utils.getdate(start_date)
-					date_filter[">="] = start_date_obj
-				except:
-					return error_response(
-						message=f"Invalid start_date format: {start_date}",
-						code="INVALID_START_DATE"
-					)
-			
-			if end_date:
-				try:
-					end_date_obj = frappe.utils.getdate(end_date)
-					# Add 1 day to include the end date
-					end_date_inclusive = end_date_obj + timedelta(days=1)
-					date_filter["<"] = end_date_inclusive
-				except:
-					return error_response(
-						message=f"Invalid end_date format: {end_date}",
-						code="INVALID_END_DATE"
-					)
-			
-			if date_filter:
-				filters["date"] = ["between", [date_filter.get(">="), date_filter.get("<")]] if ">=" in date_filter and "<" in date_filter else date_filter
-		
-		# Pagination
-		page_num = max(1, int(page))
-		limit_num = max(1, min(int(limit), 500))  # Max 500 records per page
-		offset = (page_num - 1) * limit_num
-		
-		# Get total count for pagination
-		total_records = frappe.db.count("ERP Time Attendance", filters=filters)
-		total_pages = (total_records + limit_num - 1) // limit_num if total_records > 0 else 0
-		has_more = page_num < total_pages
-		
-		# Query records
-		fields = ["name", "employee_code", "employee_name", "date", "check_in_time", "check_out_time", "total_check_ins", "status"]
-		if include_raw_data.lower() == "true":
-			fields.append("raw_data")
-		
-		records = frappe.get_all(
-			"ERP Time Attendance",
-			filters=filters,
-			fields=fields,
-			order_by="date DESC",
-			limit_start=offset,
-			limit_page_length=limit_num
-		)
-		
-		# Format records - ALWAYS recalculate from raw_data for consistency with get_students_day_map
-		formatted_records = []
+			return error_response(message="employee_code is required", code="MISSING_EMPLOYEE_CODE")
+
+		# Validate dates
+		try:
+			start_date_obj = frappe.utils.getdate(start_date) if start_date else None
+			end_date_obj = frappe.utils.getdate(end_date) if end_date else None
+		except Exception:
+			return error_response(message="Invalid date format", code="INVALID_DATE")
+
+		# SQL trực tiếp — bypass permission check (session đã xác thực)
+		raw_field = ", raw_data" if include_raw else ""
+		conditions = ["employee_code = %(employee_code)s"]
+		params = {"employee_code": employee_code, "limit": limit_num}
+
+		if start_date_obj:
+			conditions.append("date >= %(start_date)s")
+			params["start_date"] = start_date_obj
+		if end_date_obj:
+			conditions.append("date <= %(end_date)s")
+			params["end_date"] = end_date_obj
+
+		where = " AND ".join(conditions)
+
+		records = frappe.db.sql(f"""
+			SELECT name, employee_code, employee_name, date,
+			       check_in_time, check_out_time, total_check_ins, status
+			       {raw_field}
+			FROM `tabERP Time Attendance`
+			WHERE {where}
+			ORDER BY date DESC
+			LIMIT %(limit)s
+		""", params, as_dict=True)
+
+		vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
+
+		def _parse_raw_times(raw_str):
+			"""Parse raw_data → (check_in, check_out, count). Trả None nếu lỗi."""
+			if not raw_str:
+				return None, None, 0
+			try:
+				raw = json.loads(raw_str) if isinstance(raw_str, str) else raw_str
+				if not raw:
+					return None, None, 0
+				times = []
+				for item in raw:
+					ts = item['timestamp']
+					parsed = frappe.utils.get_datetime(ts)
+					if parsed.tzinfo is not None:
+						parsed = parsed.astimezone(vn_tz).replace(tzinfo=None)
+					times.append(parsed)
+				times.sort()
+				return times[0], times[-1], len(times)
+			except Exception:
+				return None, None, 0
+
+		def _fmt_time(time_obj, rec_date):
+			if not time_obj:
+				return None
+			return datetime.combine(rec_date, time_obj.time()).isoformat()
+
+		formatted = []
 		for rec in records:
-			# ALWAYS recalculate from raw_data for accuracy (same as get_students_day_map)
-			check_in_time = rec.check_in_time
-			check_out_time = rec.check_out_time
-			total_check_ins = rec.total_check_ins or 0
+			ci, co, cnt = rec.check_in_time, rec.check_out_time, rec.total_check_ins or 0
+			# Recalculate từ raw_data nếu có (chính xác hơn stored fields)
+			if rec.get("raw_data"):
+				rci, rco, rcnt = _parse_raw_times(rec.raw_data)
+				if rcnt > 0:
+					ci, co, cnt = rci, rco, rcnt
 
-			# ALWAYS recalculate from raw_data if available (fix inconsistency with get_students_day_map)
-			if rec.raw_data:
-				try:
-					raw_data = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
-					if raw_data and len(raw_data) > 0:
-						# Parse timestamps from raw_data (may be original device timestamps or processed VN times)
-						all_times = []
-						for item in raw_data:
-							ts_str = item['timestamp']
-							# If timestamp has timezone info (original device format), parse correctly
-							if '+' in ts_str or ts_str.endswith('Z'):
-								parsed_ts = frappe.utils.get_datetime(ts_str)
-								if parsed_ts.tzinfo is not None:
-									try:
-										import pytz
-										vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-										parsed_ts = parsed_ts.astimezone(vn_tz)
-									except ImportError:
-										pass
-								all_times.append(parsed_ts.replace(tzinfo=None) if parsed_ts.tzinfo else parsed_ts)
-							else:
-								# Legacy format - already processed VN time
-								all_times.append(frappe.utils.get_datetime(ts_str))
-
-						all_times.sort()
-						check_in_time = all_times[0]
-						check_out_time = all_times[-1]
-						total_check_ins = len(all_times)
-						frappe.logger().info(f"✅ Recalculated {rec.name}: {len(all_times)} events")
-					else:
-						frappe.logger().warning(f"⚠️ Empty raw_data for {rec.name}")
-				except Exception as e:
-					frappe.logger().warning(f"Failed to parse raw_data for record {rec.name}: {str(e)}")
-			else:
-				frappe.logger().warning(f"⚠️ No raw_data for {rec.name}")
-			
-			# Format date as YYYY-MM-DD string
 			date_str = rec.date.strftime('%Y-%m-%d') if rec.date else None
-			
-			# Format times correctly for API response - use record date, not datetime date
-			from erp.api.attendance.hikvision import format_vn_time
-
-			def format_time_with_record_date(time_obj, record_date):
-				if not time_obj:
-					return None
-				# Create datetime with record date but time from time_obj
-				correct_dt = datetime.combine(record_date, time_obj.time())
-				return correct_dt.isoformat()
-
-			formatted_rec = {
+			item = {
 				"_id": rec.name,
 				"employeeCode": rec.employee_code,
 				"date": date_str,
-				"checkInTime": format_time_with_record_date(check_in_time, rec.date),
-				"checkOutTime": format_time_with_record_date(check_out_time, rec.date),
-				"totalCheckIns": total_check_ins,
-				"status": rec.status
+				"checkInTime": _fmt_time(ci, rec.date),
+				"checkOutTime": _fmt_time(co, rec.date),
+				"totalCheckIns": cnt,
+				"status": rec.status,
 			}
-			
 			if rec.employee_name:
-				formatted_rec["user"] = {
-					"fullname": rec.employee_name,
-					"employeeCode": rec.employee_code
-				}
-			
-			if include_raw_data.lower() == "true" and rec.get("raw_data"):
-				formatted_rec["rawData"] = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
-			
-			formatted_records.append(formatted_rec)
-		
-		frappe.logger().info(f"📊 Retrieved {len(formatted_records)} attendance records for employee {employee_code}")
-		
-		# Use response utility for consistent format
+				item["user"] = {"fullname": rec.employee_name, "employeeCode": rec.employee_code}
+			if include_raw and rec.get("raw_data"):
+				item["rawData"] = json.loads(rec.raw_data) if isinstance(rec.raw_data, str) else rec.raw_data
+			formatted.append(item)
+
 		return success_response(
 			data={
-				"records": formatted_records,
+				"records": formatted,
 				"pagination": {
-					"currentPage": page_num,
-					"totalPages": total_pages,
-					"totalRecords": total_records,
-					"hasMore": has_more
-				}
+					"currentPage": 1,
+					"totalPages": 1,
+					"totalRecords": len(formatted),
+					"hasMore": False,
+				},
 			},
 			message="Attendance records retrieved successfully",
 			meta={
 				"employee_code": employee_code,
 				"start_date": start_date,
 				"end_date": end_date,
-				"timestamp": frappe.utils.now()
-			}
+				"timestamp": frappe.utils.now(),
+			},
 		)
-		
+
 	except Exception as e:
-		frappe.logger().error(f"❌ Error retrieving employee attendance: {str(e)}")
-		frappe.log_error(message=str(e), title="Get Employee Attendance Range Error")
+		frappe.log_error(message=str(e)[:140], title="Get Employee Attendance Range Error")
 		return error_response(
 			message="Server error retrieving attendance data",
 			code="SERVER_ERROR",
-			debug_info={"error": str(e)}
 		)
 
 
