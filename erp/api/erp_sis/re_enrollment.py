@@ -981,7 +981,6 @@ def get_submissions():
         offset = (page - 1) * page_size
         
         if finance_year_id:
-            # JOIN với Finance Student để lấy payment_status từ đó
             values["finance_year_id"] = finance_year_id
             query = f"""
                 SELECT 
@@ -1001,12 +1000,21 @@ def get_submissions():
                     re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
-                LEFT JOIN `tabCRM Family Relationship` fr
-                    ON fr.student = re.student_id AND fr.key_person = 1
+                LEFT JOIN (
+                    SELECT fr_inner.student, fr_inner.guardian
+                    FROM `tabCRM Family Relationship` fr_inner
+                    WHERE fr_inner.key_person = 1
+                    GROUP BY fr_inner.student
+                ) fr ON fr.student = re.student_id
                 LEFT JOIN `tabCRM Guardian` g
                     ON g.name = COALESCE(re.guardian_id, fr.guardian)
-                LEFT JOIN `tabSIS Finance Student` fs ON fs.student_id = re.student_id 
-                    AND fs.finance_year_id = %(finance_year_id)s
+                LEFT JOIN (
+                    SELECT fs_inner.student_id, fs_inner.payment_status,
+                           fs_inner.total_amount, fs_inner.paid_amount, fs_inner.outstanding_amount
+                    FROM `tabSIS Finance Student` fs_inner
+                    WHERE fs_inner.finance_year_id = %(finance_year_id)s
+                    GROUP BY fs_inner.student_id
+                ) fs ON fs.student_id = re.student_id
                 WHERE {where_clause}
                 ORDER BY re.submitted_at DESC
                 LIMIT {page_size} OFFSET {offset}
@@ -1026,8 +1034,12 @@ def get_submissions():
                     re.adjustment_status, re.adjustment_requested_at,
                     re.submitted_at, re.modified_by_admin, re.admin_modified_at
                 FROM `tabSIS Re-enrollment` re
-                LEFT JOIN `tabCRM Family Relationship` fr
-                    ON fr.student = re.student_id AND fr.key_person = 1
+                LEFT JOIN (
+                    SELECT fr_inner.student, fr_inner.guardian
+                    FROM `tabCRM Family Relationship` fr_inner
+                    WHERE fr_inner.key_person = 1
+                    GROUP BY fr_inner.student
+                ) fr ON fr.student = re.student_id
                 LEFT JOIN `tabCRM Guardian` g
                     ON g.name = COALESCE(re.guardian_id, fr.guardian)
                 WHERE {where_clause}
