@@ -716,8 +716,8 @@ def batch_get_homeroom_class_logs():
         # This endpoint aggregates: class logs + class attendance + event attendance
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
-        # v7: Fix subject_title priority - ưu tiên timetable_subject_map (có date overrides) thay vì teacher timetable
-        cache_key = f"homeroom_class_logs_v7:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        # v8: Fix period_priority mismatch - dùng extract_period_number(period_name) thay vì period_priority
+        cache_key = f"homeroom_class_logs_v8:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -999,7 +999,7 @@ def batch_get_homeroom_class_logs():
             teacher_timetable_rows = []
             if recorded_bys and class_ids_for_teacher:
                 teacher_timetable_rows = frappe.db.sql("""
-                    SELECT t.user_id as user_id, tt.class_id, tc.period_name, tc.period_priority,
+                    SELECT t.user_id as user_id, tt.class_id, tc.period_name,
                         COALESCE(ts.title_vn, ts.title_en, s.title) as subject_title
                     FROM `tabSIS Teacher Timetable` tt
                     INNER JOIN `tabSIS Teacher` t ON tt.teacher_id = t.name
@@ -1024,10 +1024,11 @@ def batch_get_homeroom_class_logs():
                 key_exact = (row['user_id'], row['class_id'], row['period_name'])
                 if key_exact not in teacher_subject_map:
                     teacher_subject_map[key_exact] = row['subject_title']
-                # Cũng map theo period_priority -> combined period name
-                p_priority = row.get('period_priority')
-                if p_priority and p_priority in period_number_to_combined:
-                    combined = period_number_to_combined[p_priority]
+                # Map theo số tiết trong period_name -> combined period name
+                # (dùng extract_period_number thay vì period_priority vì priority là thứ tự toàn bộ cột bao gồm cả giải lao, ăn trưa...)
+                p_num = extract_period_number(row.get('period_name'))
+                if p_num and p_num in period_number_to_combined:
+                    combined = period_number_to_combined[p_num]
                     key_combined = (row['user_id'], row['class_id'], combined)
                     if key_combined not in teacher_subject_map:
                         teacher_subject_map[key_combined] = row['subject_title']
@@ -1058,7 +1059,7 @@ def batch_get_homeroom_class_logs():
                 day_of_week_5b = date_obj_5b.strftime("%A").lower()[:3]
 
                 sis_timetable_rows = frappe.db.sql("""
-                    SELECT ti.class_id, tc.period_name, tc.period_priority,
+                    SELECT ti.class_id, tc.period_name,
                         COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title,
                         tir.valid_from, tir.valid_to
                     FROM `tabSIS Timetable Instance Row` tir
@@ -1099,9 +1100,9 @@ def batch_get_homeroom_class_logs():
                     key_exact = (row['class_id'], row['period_name'])
                     _update_map_if_newer(sis_subject_title_map, sis_subject_valid_from, key_exact, row['subject_title'], vf)
                     
-                    p_priority = row.get('period_priority')
-                    if p_priority and p_priority in period_number_to_combined:
-                        combined = period_number_to_combined[p_priority]
+                    p_num = extract_period_number(row.get('period_name'))
+                    if p_num and p_num in period_number_to_combined:
+                        combined = period_number_to_combined[p_num]
                         key_combined = (row['class_id'], combined)
                         _update_map_if_newer(sis_subject_title_map, sis_subject_valid_from, key_combined, row['subject_title'], vf)
 
@@ -1272,7 +1273,7 @@ def batch_get_homeroom_class_logs():
 
             # 7c-1: Weekly pattern rows (có filter valid_from/valid_to)
             timetable_instance_subjects = frappe.db.sql("""
-                SELECT ti.class_id, tc.period_name, tc.period_priority,
+                SELECT ti.class_id, tc.period_name,
                     COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title,
                     tir.valid_from, tir.valid_to
                 FROM `tabSIS Timetable Instance Row` tir
@@ -1306,7 +1307,6 @@ def batch_get_homeroom_class_logs():
                 if not cid:
                     continue
                 period_name = row.get('period_name') or ''
-                period_priority = row.get('period_priority')
                 subject_title = row.get('subject_title')
                 if not subject_title:
                     continue
@@ -1315,13 +1315,14 @@ def batch_get_homeroom_class_logs():
                 
                 if period_name in periods:
                     _update_7c((cid, period_name), subject_title, vf)
-                if period_priority is not None and period_priority in period_number_to_combined:
-                    combined = period_number_to_combined[period_priority]
+                p_num = extract_period_number(period_name)
+                if p_num and p_num in period_number_to_combined:
+                    combined = period_number_to_combined[p_num]
                     _update_7c((cid, combined), subject_title, vf)
             
             # 7c-2: Date-specific overrides từ SIS Timetable Instance Row (parentfield='date_overrides')
             date_override_subjects = frappe.db.sql("""
-                SELECT ti.class_id, tc.period_name, tc.period_priority,
+                SELECT ti.class_id, tc.period_name,
                     COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
                 FROM `tabSIS Timetable Instance Row` tir
                 INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
@@ -1344,11 +1345,11 @@ def batch_get_homeroom_class_logs():
                 if not cid or not row.get('subject_title'):
                     continue
                 period_name = row.get('period_name') or ''
-                period_priority = row.get('period_priority')
                 if period_name in periods:
                     timetable_subject_map[(cid, period_name)] = row['subject_title']
-                if period_priority is not None and period_priority in period_number_to_combined:
-                    combined = period_number_to_combined[period_priority]
+                p_num = extract_period_number(period_name)
+                if p_num and p_num in period_number_to_combined:
+                    combined = period_number_to_combined[p_num]
                     timetable_subject_map[(cid, combined)] = row['subject_title']
             
             # 7c-3: Timetable_Date_Override (ưu tiên cao nhất - override theo ngày cụ thể)
@@ -1356,7 +1357,7 @@ def batch_get_homeroom_class_logs():
                 class_ids_for_override = list(all_classes_to_query)
                 if class_ids_for_override:
                     date_overrides = frappe.db.sql("""
-                        SELECT tdo.target_id as class_id, tc.period_name, tc.period_priority,
+                        SELECT tdo.target_id as class_id, tc.period_name,
                             COALESCE(ts.title_vn, ts.title_en, sub.title) as subject_title
                         FROM `tabTimetable_Date_Override` tdo
                         INNER JOIN `tabSIS Timetable Column` tc ON tdo.timetable_column_id = tc.name
@@ -1377,11 +1378,11 @@ def batch_get_homeroom_class_logs():
                         if not cid or not row.get('subject_title'):
                             continue
                         period_name = row.get('period_name') or ''
-                        period_priority = row.get('period_priority')
                         if period_name in periods:
                             timetable_subject_map[(cid, period_name)] = row['subject_title']
-                        if period_priority is not None and period_priority in period_number_to_combined:
-                            combined = period_number_to_combined[period_priority]
+                        p_num = extract_period_number(period_name)
+                        if p_num and p_num in period_number_to_combined:
+                            combined = period_number_to_combined[p_num]
                             timetable_subject_map[(cid, combined)] = row['subject_title']
                     
                     if date_overrides:
