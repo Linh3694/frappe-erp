@@ -1,0 +1,125 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:AICFB-{#####}",
+ "creation": "2026-03-30 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "message_id",
+  "agent_type",
+  "feedback_type",
+  "dislike_reason",
+  "dislike_detail",
+  "user_question",
+  "ai_answer",
+  "user_email",
+  "user_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "message_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Message ID",
+   "reqd": 1
+  },
+  {
+   "fieldname": "agent_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Agent",
+   "options": "WISers\nReceptionist\nParent",
+   "reqd": 1
+  },
+  {
+   "fieldname": "feedback_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại phản hồi",
+   "options": "Like\nDislike",
+   "reqd": 1
+  },
+  {
+   "fieldname": "dislike_reason",
+   "fieldtype": "Select",
+   "label": "Lý do (Dislike)",
+   "options": "\nĐúng kiến thức\nĐúng kiến thức/ Cách trình bày chưa hợp lý\nSai kiến thức\nThiếu kiến thức\nChưa có kiến thức\nDữ liệu sai"
+  },
+  {
+   "fieldname": "dislike_detail",
+   "fieldtype": "Small Text",
+   "label": "Chi tiết thêm"
+  },
+  {
+   "fieldname": "user_question",
+   "fieldtype": "Text",
+   "label": "Câu hỏi người dùng"
+  },
+  {
+   "fieldname": "ai_answer",
+   "fieldtype": "Text",
+   "label": "Câu trả lời AI"
+  },
+  {
+   "fieldname": "user_email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Email người gửi"
+  },
+  {
+   "fieldname": "user_name",
+   "fieldtype": "Data",
+   "label": "Tên người gửi"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-03-30 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS AI Chat Feedback",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 0
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS IT",
+   "share": 1,
+   "write": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
