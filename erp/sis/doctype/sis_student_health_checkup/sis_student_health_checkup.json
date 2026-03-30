@@ -72,6 +72,8 @@
   "column_break_conclusion_1",
   "nutrition_conclusion",
   "nutrition_classification",
+  "height_evaluation",
+  "bmi_evaluation",
   "column_break_conclusion_2",
   "disease_condition",
   "health_classification",
@@ -462,6 +464,16 @@
    "fieldname": "nutrition_classification",
    "fieldtype": "Data",
    "label": "Phân loại dinh dưỡng"
+  },
+  {
+   "fieldname": "height_evaluation",
+   "fieldtype": "Data",
+   "label": "Đánh giá chiều cao"
+  },
+  {
+   "fieldname": "bmi_evaluation",
+   "fieldtype": "Data",
+   "label": "Đánh giá BMI"
   },
   {
    "fieldname": "column_break_conclusion_2",

@@ -162,6 +162,97 @@ def _homeroom_emails_for_student(student_id, school_year_id):
     return emails
 
 
+def _medical_email_for_l2_reject(doc):
+    """Email y tế nhận thông báo khi L2 trả phiếu (ưu tiên người gửi duyệt, sau đó chủ phiếu)."""
+    return _email_for_user(doc.submitted_by) or _email_for_user(doc.owner)
+
+
+def _notify_medical_l2_reject(rejected_docs: list, comment: str):
+    """
+    Gửi mail cho y tế khi Trưởng phòng (L2) trả phiếu.
+    - 1 phiếu: 1 mail theo học sinh (tiêu đề + chi tiết như cũ).
+    - Nhiều phiếu: gom 1 mail / lớp (cùng lớp regular + cùng người nhận); HS không có lớp: gửi từng mail như trường hợ 1 phiếu.
+    """
+    if not rejected_docs:
+        return
+    comment = (comment or "").strip()
+
+    if len(rejected_docs) == 1:
+        doc = rejected_docs[0]
+        target = _medical_email_for_l2_reject(doc)
+        subj = f"[Khám SK] Phiếu bị trả lại — {doc.student_name or doc.student_id}"
+        body = _build_email_html(
+            title="Phiếu khám sức khoẻ bị Trưởng phòng trả lại",
+            rows=[
+                ("Học sinh", f"{doc.student_name} ({doc.student_code})"),
+                ("Đợt khám", _phase_label(doc.checkup_phase)),
+                ("Mã phiếu", doc.name),
+                ("Lý do trả", comment),
+                ("Người trả", frappe.session.user),
+            ],
+            footer="Vui lòng chỉnh sửa và gửi duyệt lại.",
+        )
+        _notify_workflow([target] if target else [], subj, body)
+        return
+
+    # Nhiều phiếu: gom theo lớp + cùng email người nhận (người gửi duyệt)
+    by_class_and_recipient = defaultdict(list)
+    no_class_docs = []
+    for doc in rejected_docs:
+        target = _medical_email_for_l2_reject(doc)
+        if not target:
+            continue
+        row = _get_regular_class_row(doc.student_id, doc.school_year_id)
+        cid = row[0].get("class_id") if row else None
+        if cid:
+            by_class_and_recipient[(cid, target)].append(doc)
+        else:
+            no_class_docs.append(doc)
+
+    for doc in no_class_docs:
+        target = _medical_email_for_l2_reject(doc)
+        if not target:
+            continue
+        subj = f"[Khám SK] Phiếu bị trả lại — {doc.student_name or doc.student_id}"
+        body = _build_email_html(
+            title="Phiếu khám sức khoẻ bị Trưởng phòng trả lại",
+            rows=[
+                ("Học sinh", f"{doc.student_name} ({doc.student_code})"),
+                ("Đợt khám", _phase_label(doc.checkup_phase)),
+                ("Mã phiếu", doc.name),
+                ("Lý do trả", comment),
+                ("Người trả", frappe.session.user),
+            ],
+            footer="Vui lòng chỉnh sửa và gửi duyệt lại.",
+        )
+        _notify_workflow([target], subj, body)
+
+    for (class_id, target), docs in by_class_and_recipient.items():
+        if not docs:
+            continue
+        class_title = frappe.db.get_value("SIS Class", class_id, "title") or class_id
+        student_lines = "<br/>".join(
+            f"• {d.student_name or d.student_id} ({d.student_code or ''}) — mã phiếu {d.name}"
+            for d in docs
+        )
+        phase = docs[0].checkup_phase
+        n = len(docs)
+        subj = f"[Khám SK] {n} phiếu bị trả lại — lớp {class_title}"
+        body = _build_email_html(
+            title="Phiếu khám sức khoẻ bị Trưởng phòng trả lại",
+            rows=[
+                ("Lớp", class_title),
+                ("Đợt khám", _phase_label(phase)),
+                ("Số phiếu", str(n)),
+                ("Danh sách học sinh", student_lines),
+                ("Lý do trả", comment),
+                ("Người trả", frappe.session.user),
+            ],
+            footer="Vui lòng chỉnh sửa và gửi duyệt lại.",
+        )
+        _notify_workflow([target], subj, body)
+
+
 def _homeroom_emails_for_class(class_id):
     """Email GVCN + phó GVCN của một lớp (dùng gửi 1 thông báo / lớp sau duyệt L2)."""
     if not class_id:
@@ -376,7 +467,7 @@ def approve_health_checkup_l2(checkup_name=None):
             phase = docs[0].checkup_phase
             subj = f"[Khám SK] {len(docs)} phiếu chờ gửi phụ huynh — lớp {class_title}"
             body = _build_email_html(
-                title="Phiếu khám sức khoẻ đã được Trưởng phòng duyệt",
+                title="Báo cáo khám sức khỏe Học sinh đã có, vui lòng rà soát thông tin trước khi gửi PHHS",
                 rows=[
                     ("Lớp", class_title),
                     ("Đợt khám", _phase_label(phase)),
@@ -417,6 +508,7 @@ def reject_health_checkup_l2(checkup_name=None, comment=None):
             return error_response(message="Chỉ SIS Medical Admin được trả L2", code="FORBIDDEN")
 
         done = []
+        rejected_docs = []
         for name in names:
             doc = frappe.get_doc("SIS Student Health Checkup", name)
             if doc.approval_status != "pending_l2":
@@ -428,21 +520,9 @@ def reject_health_checkup_l2(checkup_name=None, comment=None):
             doc.l2_action_by = frappe.session.user
             doc.save(ignore_permissions=True)
             done.append(name)
+            rejected_docs.append(doc)
 
-            target = _email_for_user(doc.submitted_by) or _email_for_user(doc.owner)
-            subj = f"[Khám SK] Phiếu bị trả lại — {doc.student_name or doc.student_id}"
-            body = _build_email_html(
-                title="Phiếu khám sức khoẻ bị Trưởng phòng trả lại",
-                rows=[
-                    ("Học sinh", f"{doc.student_name} ({doc.student_code})"),
-                    ("Đợt khám", _phase_label(doc.checkup_phase)),
-                    ("Mã phiếu", doc.name),
-                    ("Lý do trả", comment),
-                    ("Người trả", frappe.session.user),
-                ],
-                footer="Vui lòng chỉnh sửa và gửi duyệt lại.",
-            )
-            _notify_workflow([target] if target else [], subj, body)
+        _notify_medical_l2_reject(rejected_docs, comment)
 
         frappe.db.commit()
         return success_response(data={"rejected": done}, message=f"Đã trả {len(done)} phiếu")

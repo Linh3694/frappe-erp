@@ -6,6 +6,8 @@ Health Checkup API - Khám sức khoẻ định kỳ
 API endpoints cho việc quản lý và xem kết quả khám sức khoẻ định kỳ của học sinh.
 """
 
+from datetime import datetime, timedelta
+
 import frappe
 from frappe import _
 from frappe.utils import today, getdate
@@ -91,6 +93,28 @@ def _format_date_iso(d):
         return str(getdate(d))
     except Exception:
         return ""
+
+
+def _parse_import_checkup_date(val):
+    """
+    Parse ngày kiểm tra từ import (chuỗi yyyy-mm-dd, hoặc số serial Excel).
+    Trả date object hoặc None nếu rỗng / không parse được.
+    """
+    if val is None:
+        return None
+    if isinstance(val, str) and not val.strip():
+        return None
+    if isinstance(val, (int, float)):
+        # Serial Excel (epoch 1899-12-30)
+        try:
+            excel_epoch = datetime(1899, 12, 30)
+            return (excel_epoch + timedelta(days=float(val))).date()
+        except Exception:
+            return None
+    try:
+        return getdate(val)
+    except Exception:
+        return None
 
 
 def _bulk_apply_session_checkup_date_to_student_checkups(
@@ -697,6 +721,7 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
             # Conclusion
             "bmi", "pbf", "body_score",
             "nutrition_conclusion", "nutrition_classification",
+            "height_evaluation", "bmi_evaluation",
             "disease_condition", "health_classification",
             # Notes
             "doctor_recommendation", "reference_notes"
@@ -805,6 +830,7 @@ def export_health_checkup(school_year_id=None):
                     s.student_name,
                     s.gender,
                     c.title as class_name,
+                    shc.checkup_date,
                     shc.height,
                     shc.weight,
                     shc.water_content,
@@ -841,6 +867,8 @@ def export_health_checkup(school_year_id=None):
                     shc.body_score,
                     shc.nutrition_conclusion,
                     shc.nutrition_classification,
+                    shc.height_evaluation,
+                    shc.bmi_evaluation,
                     shc.disease_condition,
                     shc.health_classification,
                     shc.doctor_recommendation,
@@ -865,6 +893,7 @@ def export_health_checkup(school_year_id=None):
                     s.student_name,
                     s.gender,
                     c.title as class_name,
+                    NULL as checkup_date,
                     NULL as height,
                     NULL as weight,
                     NULL as water_content,
@@ -901,6 +930,8 @@ def export_health_checkup(school_year_id=None):
                     NULL as body_score,
                     NULL as nutrition_conclusion,
                     NULL as nutrition_classification,
+                    NULL as height_evaluation,
+                    NULL as bmi_evaluation,
                     NULL as disease_condition,
                     NULL as health_classification,
                     NULL as doctor_recommendation,
@@ -1002,6 +1033,7 @@ def import_health_checkup(school_year_id=None, data=None):
         
         # Các fields được phép import
         allowed_fields = [
+            "checkup_date",
             "height", "weight",
             "water_content", "water_range",
             "protein", "protein_range",
@@ -1016,6 +1048,7 @@ def import_health_checkup(school_year_id=None, data=None):
             "circulation", "respiratory", "digestive", "renal_urinary", "other_clinical",
             "bmi", "pbf", "body_score",
             "nutrition_conclusion", "nutrition_classification",
+            "height_evaluation", "bmi_evaluation",
             "disease_condition", "health_classification",
             "doctor_recommendation", "reference_notes"
         ]
@@ -1026,6 +1059,23 @@ def import_health_checkup(school_year_id=None, data=None):
         
         for idx, row in enumerate(data):
             try:
+                row = dict(row)
+                # Ngày kiểm tra: parse từ Excel (chuỗi hoặc serial)
+                cd_raw = row.pop("checkup_date", None)
+                parsed_cd = None
+                if cd_raw is not None and cd_raw != "":
+                    parsed_cd = _parse_import_checkup_date(cd_raw)
+                    if parsed_cd is None:
+                        errors.append(
+                            {
+                                "row": idx + 1,
+                                "error": "Ngày kiểm tra không hợp lệ",
+                            }
+                        )
+                        error_count += 1
+                        continue
+                    row["checkup_date"] = parsed_cd
+
                 student_code = row.get("student_code")
                 if not student_code:
                     errors.append({"row": idx + 1, "error": "Thiếu mã học sinh"})
@@ -1084,7 +1134,9 @@ def import_health_checkup(school_year_id=None, data=None):
                         "school_year_id": school_year_id,
                         "campus_id": campus_id,
                         "checkup_phase": checkup_phase,
-                        "checkup_date": today()
+                        "checkup_date": parsed_cd
+                        if parsed_cd is not None
+                        else getdate(today()),
                     }
                     if _sis_health_checkup_has_approval_status_column():
                         doc_data["approval_status"] = "draft"
