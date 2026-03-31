@@ -1051,69 +1051,172 @@ def reject_class_reports():
                     frappe.logger().info(f"[REJECT] L3 INTL reject: board_type={board_type}")
                     
                 else:
-                    detected_board_type = "all"
+                    # L1/L2 catch-all: reject tất cả sections
+                    if not reject_all_sections:
+                        detected_board_type = "all"
+                        for section_key in ["scores", "subject_eval"]:
+                            if section_key in data_json and isinstance(data_json[section_key], dict):
+                                for subj_id in data_json[section_key]:
+                                    if isinstance(data_json[section_key][subj_id], dict):
+                                        data_json[section_key][subj_id]["approval"] = rejection_info.copy()
+                        
+                        if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
+                            data_json["homeroom"]["approval"] = rejection_info.copy()
+                        
+                        if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
+                            for subj_id in data_json["intl_scores"]:
+                                if isinstance(data_json["intl_scores"][subj_id], dict):
+                                    for intl_section in ["main_scores", "ielts", "comments"]:
+                                        approval_key = f"{intl_section}_approval"
+                                        data_json["intl_scores"][subj_id][approval_key] = rejection_info.copy()
+                
+                # ── reject_all_sections (L3/L4 trả về cả lớp) ──
+                # Đồng bộ logic với reject_single_report nhánh "both"
+                if reject_all_sections and pending_level == "review":
+                    detected_board_type = "both"
+                    
+                    has_homeroom_l2 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_2', None))) if template_for_rollback else False
+                    has_homeroom_l1 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_1', None))) if template_for_rollback else False
+                    
+                    if has_homeroom_l2:
+                        homeroom_target_status = 'level_1_approved'
+                    elif has_homeroom_l1:
+                        homeroom_target_status = 'submitted'
+                    else:
+                        homeroom_target_status = 'draft'
+                    
+                    scores_target_status = 'level_1_approved'
+                    overall_status = homeroom_target_status if homeroom_target_status in ['draft', 'submitted'] else scores_target_status
+                    
+                    # data_json: set approval status phù hợp (không phải "rejected")
+                    if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
+                        data_json["homeroom"]["approval"] = {
+                            "status": homeroom_target_status,
+                            "rejection_reason": reason,
+                            "rejected_from_level": rejected_from_level_value,
+                            "rejected_by": user,
+                            "rejected_at": str(now)
+                        }
+                    
                     for section_key in ["scores", "subject_eval"]:
                         if section_key in data_json and isinstance(data_json[section_key], dict):
                             for subj_id in data_json[section_key]:
                                 if isinstance(data_json[section_key][subj_id], dict):
-                                    data_json[section_key][subj_id]["approval"] = rejection_info.copy()
-                    
-                    if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
-                        data_json["homeroom"]["approval"] = rejection_info.copy()
+                                    data_json[section_key][subj_id]["approval"] = {
+                                        "status": scores_target_status,
+                                        "rejection_reason": reason,
+                                        "rejected_from_level": rejected_from_level_value,
+                                        "rejected_by": user,
+                                        "rejected_at": str(now)
+                                    }
                     
                     if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
-                        for subj_id in data_json["intl_scores"]:
-                            if isinstance(data_json["intl_scores"][subj_id], dict):
-                                for intl_section in ["main_scores", "ielts", "comments"]:
-                                    approval_key = f"{intl_section}_approval"
-                                    data_json["intl_scores"][subj_id][approval_key] = rejection_info.copy()
-                
-                # Determine rollback status
-                status_rollback_map = {
-                    "level_1": "rejected",
-                    "level_2": "submitted",
-                    "review": "level_1_approved",
-                    "publish": "level_2_approved"
-                }
-                new_status = status_rollback_map.get(pending_level, "rejected")
-                
-                if pending_level == "review" and is_homeroom and template_for_rollback:
-                    # Multi-select: check có ít nhất 1 reviewer
-                    has_homeroom_l2 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_2', None)))
-                    has_homeroom_l1 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_1', None)))
+                        for intl_section in ["main_scores", "ielts", "comments"]:
+                            approval_key = f"{intl_section}_approval"
+                            intl_rej = {
+                                "status": "level_1_approved",
+                                "rejection_reason": reason,
+                                "rejected_from_level": rejected_from_level_value,
+                                "rejected_by": user,
+                                "rejected_at": str(now)
+                            }
+                            for subj_id in data_json["intl_scores"]:
+                                if isinstance(data_json["intl_scores"][subj_id], dict):
+                                    existing = data_json["intl_scores"][subj_id].get(approval_key, {})
+                                    if isinstance(existing, dict) and existing.get("status") == "level_2_approved":
+                                        data_json["intl_scores"][subj_id][approval_key] = intl_rej.copy()
                     
-                    if has_homeroom_l2:
-                        new_status = "level_1_approved"
-                    elif has_homeroom_l1:
-                        new_status = "submitted"
-                    else:
-                        new_status = "draft"
+                    update_values = {
+                        "approval_status": overall_status,
+                        "homeroom_approval_status": homeroom_target_status,
+                        "scores_approval_status": scores_target_status,
+                        "homeroom_l2_approved": 0,
+                        "all_sections_l2_approved": 0,
+                        "rejected_at": now,
+                        "rejected_by": user,
+                        "rejection_reason": reason,
+                        "rejected_from_level": rejected_from_level_value,
+                        "rejected_section": section,
+                        "homeroom_rejection_reason": reason,
+                        "homeroom_rejected_by": user,
+                        "homeroom_rejected_at": now,
+                        "scores_rejection_reason": reason,
+                        "scores_rejected_by": user,
+                        "scores_rejected_at": now,
+                        "data_json": json.dumps(data_json, ensure_ascii=False)
+                    }
                     
-                    frappe.logger().info(f"[REJECT_CLASS] L3 reject homeroom: has_L1={has_homeroom_l1}, has_L2={has_homeroom_l2} → new_status={new_status}")
-                
-                update_values = {
-                    rejection_fields["status_field"]: new_status,
-                    rejection_fields["rejected_at"]: now,
-                    rejection_fields["rejected_by"]: user,
-                    rejection_fields["rejection_reason"]: reason,
-                    "rejected_from_level": rejected_from_level_value,
-                    "rejected_section": section,
-                    "data_json": json.dumps(data_json, ensure_ascii=False)
-                }
-                
-                if pending_level == "review":
-                    if is_homeroom or reject_all_sections:
-                        update_values["homeroom_l2_approved"] = 0
-                        update_values["homeroom_approval_status"] = new_status
-                    if reject_all_sections:
-                        update_values["scores_approval_status"] = new_status
-                        update_values["homeroom_rejection_reason"] = reason
-                        update_values["homeroom_rejected_by"] = user
-                        update_values["homeroom_rejected_at"] = now
-                        update_values["scores_rejection_reason"] = reason
-                        update_values["scores_rejected_by"] = user
-                        update_values["scores_rejected_at"] = now
-                    update_values["all_sections_l2_approved"] = 0
+                elif reject_all_sections and pending_level == "publish":
+                    detected_board_type = "both"
+                    
+                    # data_json: set tất cả về level_2_approved
+                    for section_key in ["scores", "subject_eval"]:
+                        if section_key in data_json and isinstance(data_json[section_key], dict):
+                            for subj_id in data_json[section_key]:
+                                if isinstance(data_json[section_key][subj_id], dict):
+                                    data_json[section_key][subj_id]["approval"] = {
+                                        "status": "level_2_approved",
+                                        "rejection_reason": reason,
+                                        "rejected_from_level": rejected_from_level_value,
+                                        "rejected_by": user,
+                                        "rejected_at": str(now)
+                                    }
+                    
+                    if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
+                        data_json["homeroom"]["approval"] = {
+                            "status": "level_2_approved",
+                            "rejection_reason": reason,
+                            "rejected_from_level": rejected_from_level_value,
+                            "rejected_by": user,
+                            "rejected_at": str(now)
+                        }
+                    
+                    update_values = {
+                        "approval_status": "level_2_approved",
+                        "rejected_at": now,
+                        "rejected_by": user,
+                        "rejection_reason": reason,
+                        "rejected_from_level": rejected_from_level_value,
+                        "rejected_section": section,
+                        "data_json": json.dumps(data_json, ensure_ascii=False)
+                    }
+                    
+                else:
+                    # L1/L2 hoặc section cụ thể
+                    status_rollback_map = {
+                        "level_1": "rejected",
+                        "level_2": "submitted",
+                        "review": "level_1_approved",
+                        "publish": "level_2_approved"
+                    }
+                    new_status = status_rollback_map.get(pending_level, "rejected")
+                    
+                    if pending_level == "review" and is_homeroom and template_for_rollback:
+                        has_homeroom_l2 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_2', None)))
+                        has_homeroom_l1 = bool(_parse_reviewer_list(getattr(template_for_rollback, 'homeroom_reviewer_level_1', None)))
+                        
+                        if has_homeroom_l2:
+                            new_status = "level_1_approved"
+                        elif has_homeroom_l1:
+                            new_status = "submitted"
+                        else:
+                            new_status = "draft"
+                    
+                    update_values = {
+                        rejection_fields["status_field"]: new_status,
+                        rejection_fields["rejected_at"]: now,
+                        rejection_fields["rejected_by"]: user,
+                        rejection_fields["rejection_reason"]: reason,
+                        "rejected_from_level": rejected_from_level_value,
+                        "rejected_section": section,
+                        "data_json": json.dumps(data_json, ensure_ascii=False)
+                    }
+                    
+                    if pending_level == "review":
+                        if is_homeroom:
+                            update_values["homeroom_l2_approved"] = 0
+                            update_values["homeroom_approval_status"] = new_status
+                        update_values["all_sections_l2_approved"] = 0
                 
                 frappe.db.set_value(
                     "SIS Student Report Card",
