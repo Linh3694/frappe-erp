@@ -751,7 +751,18 @@ def approve_class_reports():
                 
                 # ✅ FIX: Chỉ gọi update_report_counters nếu chưa set counters ở trên
                 if pending_level in ["level_1", "level_2"] and not counters_already_set:
-                    update_report_counters(report_data.name, data_json, template)
+                    new_counters = update_report_counters(report_data.name, data_json, template)
+                    
+                    # Sau khi recompute counters, nếu tất cả sections đã L2 → promote approval_status
+                    if new_counters and new_counters.get("all_sections_l2_approved") == 1:
+                        current_approval = frappe.db.get_value("SIS Student Report Card", report_data.name, "approval_status")
+                        if current_approval not in ("level_2_approved", "reviewed", "published"):
+                            frappe.db.set_value(
+                                "SIS Student Report Card",
+                                report_data.name,
+                                {"approval_status": "level_2_approved"},
+                                update_modified=True
+                            )
                 
                 report.reload()
                 add_approval_history(
