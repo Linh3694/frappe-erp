@@ -19,7 +19,7 @@ def execute():
 	"""Add composite index on employee_code and date for ERP Time Attendance table"""
 	
 	# Kiểm tra xem bảng có tồn tại không
-	if not frappe.db.table_exists("tabERP Time Attendance"):
+	if not frappe.db.table_exists("ERP Time Attendance"):
 		frappe.logger().info("Table tabERP Time Attendance does not exist, skipping index creation")
 		return
 	

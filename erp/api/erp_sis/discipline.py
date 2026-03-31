@@ -848,7 +848,7 @@ def create_discipline_violation(
             }
         )
 
-        use_point_version = bool(effective_date) and frappe.db.table_exists("tabSIS Discipline Violation Point Version")
+        use_point_version = bool(effective_date) and frappe.db.table_exists("SIS Discipline Violation Point Version")
 
         if use_point_version:
             doc.insert()
@@ -1089,7 +1089,7 @@ def _get_violation_point_tables_for_stats(violation_id, reference_date):
     student_rows = []
     class_rows = []
 
-    if frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+    if frappe.db.table_exists("SIS Discipline Violation Point Version"):
         pv_list = frappe.get_all(
             "SIS Discipline Violation Point Version",
             filters={"violation": violation_id, "effective_date": ["<=", reference_date]},
@@ -1201,7 +1201,7 @@ def get_violation_point_versions(violation: str = None):
         parent_err = _point_api_parent_violation_error(violation, "read")
         if parent_err:
             return parent_err
-        if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+        if not frappe.db.table_exists("SIS Discipline Violation Point Version"):
             return success_response(
                 data={"data": [], "total": 0},
                 message="Chưa có bảng phiên bản điểm — chạy bench migrate",
@@ -1437,7 +1437,7 @@ def get_applicable_point_version(violation: str = None, date: str = None):
         if parent_err:
             return parent_err
         ref = _parse_reference_date(date_s) if date_s else _parse_reference_date(None)
-        if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+        if not frappe.db.table_exists("SIS Discipline Violation Point Version"):
             return success_response(data={"version": None}, message="OK")
 
         pv_list = frappe.get_all(

@@ -7,7 +7,7 @@ import frappe
 
 
 def execute():
-	if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+	if not frappe.db.table_exists("SIS Discipline Violation Point Version"):
 		return
 
 	for vname in frappe.get_all("SIS Discipline Violation", pluck="name"):

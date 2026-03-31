@@ -8,7 +8,7 @@ import frappe
 
 def execute():
 	"""Đảm bảo mọi bản ghi đều có đợt khám (mặc định đầu năm học)."""
-	if not frappe.db.table_exists("tabSIS Student Health Checkup"):
+	if not frappe.db.table_exists("SIS Student Health Checkup"):
 		return
 	frappe.db.sql(
 		"""

@@ -10,7 +10,7 @@ class SISDisciplineViolation(Document):
 
     def on_trash(self):
         # Xóa các phiên bản điểm gắn vi phạm (tránh bản ghi mồ côi)
-        if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+        if not frappe.db.table_exists("SIS Discipline Violation Point Version"):
             return
         for row in frappe.get_all(
             "SIS Discipline Violation Point Version",
