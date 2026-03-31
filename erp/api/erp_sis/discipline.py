@@ -2808,6 +2808,202 @@ def _resolve_sis_class_id_for_import(class_label, school_year_id, campus):
     return None
 
 
+def _normalize_point_rows_for_import(points):
+    """Chuẩn hóa list dict điểm (HS/lớp) từ JSON import."""
+    out = []
+    for row in points or []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("violation_count") is None or row.get("points") is None:
+            continue
+        out.append(
+            {
+                "violation_count": int(row.get("violation_count", 0)),
+                "level": str(row.get("level", "1")),
+                "points": int(row.get("points", 0)),
+            }
+        )
+    return out
+
+
+@frappe.whitelist(allow_guest=False)
+def import_discipline_violations():
+    """
+    Import nhiều định nghĩa vi phạm từ JSON (frontend parse Excel).
+
+    Body JSON:
+        campus: bắt buộc
+        data: list dict, mỗi phần tử:
+            title, classification_title,
+            point_version_label (tùy, mặc định "Mặc định"),
+            effective_date (YYYY-MM-DD — bắt buộc khi đã có bảng phiên bản điểm),
+            student_points, class_points: [{"violation_count", "level", "points"}, ...]
+
+    Trả về: total_count, success_count, error_count, errors[{ row, error, data }]
+    """
+    try:
+        payload = _get_request_data()
+        campus = payload.get("campus")
+        rows = payload.get("data") or []
+
+        if not campus:
+            return error_response(
+                message="Trường học (campus) là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not isinstance(rows, list) or len(rows) == 0:
+            return error_response(
+                message="Danh sách dữ liệu (data) không hợp lệ hoặc rỗng",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        has_pv_table = frappe.db.table_exists("SIS Discipline Violation Point Version")
+        errors = []
+        success_count = 0
+        total_count = len(rows)
+
+        for idx, row in enumerate(rows):
+            row_num = idx + 1
+            if not isinstance(row, dict):
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": "Dòng không phải object",
+                        "data": {},
+                    }
+                )
+                continue
+
+            try:
+                title = (row.get("title") or "").strip()
+                classification_title = (row.get("classification_title") or "").strip()
+                point_version_label = row.get("point_version_label") or row.get("label")
+                effective_date = row.get("effective_date")
+                student_points = _normalize_point_rows_for_import(row.get("student_points"))
+                class_points = _normalize_point_rows_for_import(row.get("class_points"))
+
+                if not title:
+                    raise ValueError("Thiếu tiêu đề (title)")
+                if not classification_title:
+                    raise ValueError("Thiếu phân loại (classification_title)")
+
+                classification_name = frappe.db.get_value(
+                    "SIS Discipline Classification",
+                    {"title": classification_title, "campus": campus, "enabled": 1},
+                    "name",
+                )
+                if not classification_name:
+                    raise ValueError(f"Không tìm thấy phân loại: {classification_title}")
+
+                dup = frappe.db.get_value(
+                    "SIS Discipline Violation",
+                    {
+                        "title": title,
+                        "classification": classification_name,
+                        "campus": campus,
+                    },
+                    "name",
+                )
+                if dup:
+                    raise ValueError(
+                        f"Vi phạm đã tồn tại (cùng tiêu đề và phân loại): {title}"
+                    )
+
+                if has_pv_table:
+                    if not effective_date or not str(effective_date).strip():
+                        raise ValueError(
+                            "Thiếu ngày áp dụng (effective_date) — bắt buộc khi dùng phiên bản điểm"
+                        )
+                    effective_date = str(effective_date).strip()[:10]
+                else:
+                    effective_date = (
+                        str(effective_date).strip()[:10] if effective_date else None
+                    )
+
+                label_str = (
+                    str(point_version_label).strip()
+                    if point_version_label
+                    else "Mặc định"
+                )
+
+                doc = frappe.get_doc(
+                    {
+                        "doctype": "SIS Discipline Violation",
+                        "title": title,
+                        "classification": classification_name,
+                        "campus": campus,
+                        "enabled": 1,
+                    }
+                )
+
+                use_point_version = bool(effective_date) and has_pv_table
+
+                if use_point_version:
+                    doc.insert()
+                    pv_doc = frappe.get_doc(
+                        {
+                            "doctype": "SIS Discipline Violation Point Version",
+                            "violation": doc.name,
+                            "label": label_str,
+                            "effective_date": effective_date,
+                        }
+                    )
+                    _fill_violation_point_tables(pv_doc, student_points, class_points)
+                    pv_doc.insert(ignore_permissions=True)
+                else:
+                    for rp in student_points:
+                        doc.append(
+                            "student_points",
+                            {
+                                "violation_count": rp["violation_count"],
+                                "level": rp["level"],
+                                "points": rp["points"],
+                            },
+                        )
+                    for rp in class_points:
+                        doc.append(
+                            "class_points",
+                            {
+                                "violation_count": rp["violation_count"],
+                                "level": rp["level"],
+                                "points": rp["points"],
+                            },
+                        )
+                    doc.insert()
+
+                frappe.db.commit()
+                success_count += 1
+
+            except Exception as ex:
+                frappe.db.rollback()
+                err_msg = str(ex)
+                errors.append(
+                    {
+                        "row": row_num,
+                        "error": err_msg,
+                        "data": row if isinstance(row, dict) else {},
+                    }
+                )
+
+        error_count = len(errors)
+        return success_response(
+            data={
+                "total_count": total_count,
+                "success_count": success_count,
+                "error_count": error_count,
+                "errors": errors,
+            },
+            message=f"Import vi phạm: {success_count}/{total_count} thành công",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"import_discipline_violations: {str(e)}")
+        return error_response(
+            message=f"Lỗi import vi phạm: {str(e)}",
+            code="IMPORT_DISCIPLINE_VIOLATIONS_ERROR",
+        )
+
+
 @frappe.whitelist(allow_guest=False)
 def import_discipline_records():
     """
