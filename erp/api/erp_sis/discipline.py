@@ -1746,6 +1746,7 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                 "severity_level",
                 "form",
                 "penalty_points",
+                "historical_deduction_points",
                 "time_slot",
                 "time_slot_id",
                 "record_time",
@@ -2140,6 +2141,7 @@ def _create_discipline_record_core(
     description,
     proof_images,
     campus,
+    historical_deduction_points=None,
 ):
     """
     Tạo bản ghi kỷ luật từ tham số đã chuẩn hoá (dùng chung API và import Excel).
@@ -2218,26 +2220,27 @@ def _create_discipline_record_core(
 
     # target_student: set khi có đúng 1 học sinh (để thống kê đếm được)
     single_student_id = student_ids[0] if len(student_ids) == 1 else None
-    doc = frappe.get_doc(
-        {
-            "doctype": "SIS Discipline Record",
-            "date": date,
-            "classification": classification,
-            "violation_count": int(violation_count),
-            "target_type": target_type,
-            "target_student": single_student_id
-            if (target_type in ("student", "mixed") and single_student_id)
-            else None,
-            "violation": violation,
-            "form": form,
-            "penalty_points": str(penalty_points),
-            "time_slot": time_slot or "",
-            "time_slot_id": time_slot_id or None,
-            "record_time": record_time or "",
-            "description": description or "",
-            "campus": campus,
-        }
-    )
+    doc_fields = {
+        "doctype": "SIS Discipline Record",
+        "date": date,
+        "classification": classification,
+        "violation_count": int(violation_count),
+        "target_type": target_type,
+        "target_student": single_student_id
+        if (target_type in ("student", "mixed") and single_student_id)
+        else None,
+        "violation": violation,
+        "form": form,
+        "penalty_points": str(penalty_points),
+        "time_slot": time_slot or "",
+        "time_slot_id": time_slot_id or None,
+        "record_time": record_time or "",
+        "description": description or "",
+        "campus": campus,
+    }
+    if historical_deduction_points is not None:
+        doc_fields["historical_deduction_points"] = float(historical_deduction_points)
+    doc = frappe.get_doc(doc_fields)
 
     # Lớp: target_classes (class hoặc mixed)
     if target_type in ("class", "mixed") and target_class_ids:
@@ -2359,6 +2362,31 @@ def _split_csv_codes(raw):
     return [p.strip() for p in s.split(",") if p.strip()]
 
 
+def _parse_optional_historical_deduction(raw):
+    """
+    Điểm trừ lưu trữ (import Excel): số thực hoặc None nếu ô trống.
+    Không ảnh hưởng công thức penalty_points hiện tại.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        s = s.replace(",", ".")
+    elif isinstance(raw, (int, float)):
+        return float(raw)
+    else:
+        s = str(raw).strip()
+        if not s:
+            return None
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except (ValueError, TypeError) as e:
+        raise ValueError("Cột Điểm trừ (lưu trữ) phải là số hoặc để trống") from e
+
+
 def _resolve_sis_class_id_for_import(class_label, school_year_id, campus):
     """
     Tìm name của SIS Class từ nhãn người dùng nhập (Excel).
@@ -2419,7 +2447,8 @@ def import_discipline_records():
             date, classification_title, violation_title, form_title,
             student_codes (chuỗi mã HS phân cách bởi dấu phẩy),
             class_titles (chuỗi tên lớp phân cách bởi dấu phẩy),
-            time_slot_title, record_time, description
+            time_slot_title, record_time, description,
+            historical_deduction_points (tùy chọn, số — lưu trữ khi import, không dùng công thức điểm)
 
     Trả về: total_count, success_count, error_count, errors[{ row, error, data }]
     """
@@ -2491,6 +2520,9 @@ def import_discipline_records():
                 time_slot_title = (row.get("time_slot_title") or "").strip()
                 record_time = (row.get("record_time") or "").strip()
                 description = (row.get("description") or "").strip()
+                historical_deduction_points = _parse_optional_historical_deduction(
+                    row.get("historical_deduction_points")
+                )
 
                 if not date:
                     raise ValueError("Thiếu ngày")
@@ -2592,6 +2624,7 @@ def import_discipline_records():
                     description=description,
                     proof_images=[],
                     campus=campus,
+                    historical_deduction_points=historical_deduction_points,
                 )
 
                 if not result or not result.get("success"):

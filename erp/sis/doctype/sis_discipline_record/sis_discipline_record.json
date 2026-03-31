@@ -21,6 +21,7 @@
   "severity_level",
   "form",
   "penalty_points",
+  "historical_deduction_points",
   "time_slot",
   "time_slot_id",
   "record_time",
@@ -127,6 +128,13 @@
    "hidden": 1,
    "label": "Điểm trừ thi đua (deprecated)",
    "options": "1\n5\n10\n15"
+  },
+  {
+   "fieldname": "historical_deduction_points",
+   "fieldtype": "Float",
+   "hidden": 1,
+   "label": "Điểm trừ (lưu trữ)",
+   "description": "Ghi nhận điểm trừ khi import Excel; không dùng trong công thức tính điểm hiện tại"
   },
   {
    "fieldname": "time_slot",
