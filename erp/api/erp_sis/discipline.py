@@ -1096,6 +1096,7 @@ def _get_violation_point_tables_for_stats(violation_id, reference_date):
             fields=["name"],
             order_by="effective_date desc, modified desc",
             limit_page_length=1,
+            ignore_permissions=True,
         )
         if pv_list:
             pv_doc = frappe.get_doc("SIS Discipline Violation Point Version", pv_list[0].name)
@@ -1140,6 +1141,28 @@ def _get_violation_point_tables_for_stats(violation_id, reference_date):
     return student_rows, class_rows
 
 
+def _point_api_parent_violation_error(violation_id, perm="read"):
+    """
+    Kiểm tra quyền trên vi phạm cha cho API phiên bản điểm.
+    Trả về None nếu hợp lệ, hoặc dict error_response nếu không tìm thấy / không đủ quyền.
+    """
+    if not violation_id or not frappe.db.exists("SIS Discipline Violation", violation_id):
+        return error_response(
+            message="Không tìm thấy vi phạm",
+            code="VIOLATION_NOT_FOUND",
+        )
+    try:
+        frappe.get_doc("SIS Discipline Violation", violation_id).check_permission(perm)
+    except frappe.PermissionError:
+        msg = (
+            "Không có quyền xem vi phạm này"
+            if perm == "read"
+            else "Không có quyền chỉnh sửa vi phạm này"
+        )
+        return error_response(message=msg, code="PERMISSION_DENIED")
+    return None
+
+
 def _match_tier_from_point_rows(rows, count):
     """
     Chọn cấp điểm theo số lần vi phạm (count) và bảng ngưỡng rows (đã chuẩn hóa).
@@ -1167,25 +1190,30 @@ def get_violation_point_versions(violation: str = None):
     """Danh sách phiên bản điểm của một vi phạm (effective_date giảm dần)."""
     try:
         data = _get_request_data()
-        violation = violation or data.get("violation")
+        violation = violation or data.get("violation") or data.get("violation_id")
+        if isinstance(violation, str):
+            violation = violation.strip()
         if not violation:
             return error_response(
                 message="violation là bắt buộc",
                 code="MISSING_REQUIRED_FIELDS",
             )
-        if not frappe.db.exists("SIS Discipline Violation", violation):
-            return error_response(
-                message="Không tìm thấy vi phạm",
-                code="VIOLATION_NOT_FOUND",
-            )
+        parent_err = _point_api_parent_violation_error(violation, "read")
+        if parent_err:
+            return parent_err
         if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
-            return success_response(data={"data": [], "total": 0}, message="OK")
+            return success_response(
+                data={"data": [], "total": 0},
+                message="Chưa có bảng phiên bản điểm — chạy bench migrate",
+            )
 
+        # ignore_permissions: quyền đã kiểm tra qua vi phạm cha; tránh get_all trả rỗng do rule DocType/owner
         rows = frappe.get_all(
             "SIS Discipline Violation Point Version",
             filters={"violation": violation},
             fields=["name", "label", "effective_date", "creation", "modified"],
             order_by="effective_date desc, modified desc",
+            ignore_permissions=True,
         )
         return success_response(
             data={"data": rows, "total": len(rows)},
@@ -1210,9 +1238,20 @@ def get_violation_point_version(name: str = None):
                 message="name là bắt buộc",
                 code="MISSING_REQUIRED_FIELDS",
             )
+        if not frappe.db.exists("SIS Discipline Violation Point Version", name):
+            return error_response(
+                message="Không tìm thấy phiên bản điểm",
+                code="POINT_VERSION_NOT_FOUND",
+            )
+        violation_id = frappe.db.get_value(
+            "SIS Discipline Violation Point Version", name, "violation"
+        )
+        parent_err = _point_api_parent_violation_error(violation_id, "read")
+        if parent_err:
+            return parent_err
         doc = frappe.get_doc("SIS Discipline Violation Point Version", name)
         d = doc.as_dict()
-        return success_response(data=d, message="OK")
+        return success_response(data=d, message="Lấy chi tiết phiên bản điểm thành công")
     except frappe.DoesNotExistError:
         return error_response(
             message="Không tìm thấy phiên bản điểm",
@@ -1259,6 +1298,10 @@ def create_violation_point_version(
                 code="MISSING_REQUIRED_FIELDS",
             )
 
+        parent_err = _point_api_parent_violation_error(violation, "write")
+        if parent_err:
+            return parent_err
+
         doc = frappe.get_doc(
             {
                 "doctype": "SIS Discipline Violation Point Version",
@@ -1268,7 +1311,7 @@ def create_violation_point_version(
             }
         )
         _fill_violation_point_tables(doc, student_points, class_points)
-        doc.insert()
+        doc.insert(ignore_permissions=True)
         frappe.db.commit()
         return success_response(
             data={"name": doc.name, "label": doc.label},
@@ -1300,6 +1343,9 @@ def update_violation_point_version(
                 code="MISSING_REQUIRED_FIELDS",
             )
         doc = frappe.get_doc("SIS Discipline Violation Point Version", name)
+        parent_err = _point_api_parent_violation_error(doc.violation, "write")
+        if parent_err:
+            return parent_err
         if label is not None:
             doc.label = str(label).strip()
         if effective_date is not None:
@@ -1316,7 +1362,7 @@ def update_violation_point_version(
             doc.student_points = []
             doc.class_points = []
             _fill_violation_point_tables(doc, sp, cp)
-        doc.save()
+        doc.save(ignore_permissions=True)
         frappe.db.commit()
         return success_response(
             data={"name": doc.name, "label": doc.label},
@@ -1346,7 +1392,20 @@ def delete_violation_point_version(name: str = None):
                 message="name là bắt buộc",
                 code="MISSING_REQUIRED_FIELDS",
             )
-        frappe.delete_doc("SIS Discipline Violation Point Version", name)
+        if not frappe.db.exists("SIS Discipline Violation Point Version", name):
+            return error_response(
+                message="Không tìm thấy phiên bản điểm",
+                code="POINT_VERSION_NOT_FOUND",
+            )
+        violation_id = frappe.db.get_value(
+            "SIS Discipline Violation Point Version", name, "violation"
+        )
+        parent_err = _point_api_parent_violation_error(violation_id, "write")
+        if parent_err:
+            return parent_err
+        frappe.delete_doc(
+            "SIS Discipline Violation Point Version", name, ignore_permissions=True
+        )
         frappe.db.commit()
         return success_response(data={"name": name}, message="Đã xóa phiên bản điểm")
     except frappe.DoesNotExistError:
@@ -1374,6 +1433,9 @@ def get_applicable_point_version(violation: str = None, date: str = None):
                 message="violation là bắt buộc",
                 code="MISSING_REQUIRED_FIELDS",
             )
+        parent_err = _point_api_parent_violation_error(violation, "read")
+        if parent_err:
+            return parent_err
         ref = _parse_reference_date(date_s) if date_s else _parse_reference_date(None)
         if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
             return success_response(data={"version": None}, message="OK")
@@ -1384,6 +1446,7 @@ def get_applicable_point_version(violation: str = None, date: str = None):
             fields=["name"],
             order_by="effective_date desc, modified desc",
             limit_page_length=1,
+            ignore_permissions=True,
         )
         if not pv_list:
             return success_response(data={"version": None}, message="OK")
