@@ -1073,12 +1073,15 @@ def reject_class_reports():
                         if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
                             data_json["homeroom"]["approval"] = rejection_info.copy()
                         
-                        if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
-                            for subj_id in data_json["intl_scores"]:
-                                if isinstance(data_json["intl_scores"][subj_id], dict):
-                                    for intl_section in ["main_scores", "ielts", "comments"]:
-                                        approval_key = f"{intl_section}_approval"
-                                        data_json["intl_scores"][subj_id][approval_key] = rejection_info.copy()
+                    if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
+                        for subj_id in data_json["intl_scores"]:
+                            subj = data_json["intl_scores"][subj_id]
+                            if isinstance(subj, dict):
+                                for intl_section in ["main_scores", "ielts", "comments"]:
+                                    if intl_section == "ielts" and not subj.get("ielts_scores"):
+                                        continue
+                                    approval_key = f"{intl_section}_approval"
+                                    subj[approval_key] = rejection_info.copy()
                 
                 # ── reject_all_sections (L3/L4 trả về cả lớp) ──
                 # Đồng bộ logic với reject_single_report nhánh "both"
@@ -1131,10 +1134,14 @@ def reject_class_reports():
                                 "rejected_at": str(now)
                             }
                             for subj_id in data_json["intl_scores"]:
-                                if isinstance(data_json["intl_scores"][subj_id], dict):
-                                    existing = data_json["intl_scores"][subj_id].get(approval_key, {})
-                                    if isinstance(existing, dict) and existing.get("status") == "level_2_approved":
-                                        data_json["intl_scores"][subj_id][approval_key] = intl_rej.copy()
+                                subj = data_json["intl_scores"][subj_id]
+                                if not isinstance(subj, dict):
+                                    continue
+                                if intl_section == "ielts" and not subj.get("ielts_scores"):
+                                    continue
+                                existing = subj.get(approval_key, {})
+                                if isinstance(existing, dict) and existing.get("status") == "level_2_approved":
+                                    subj[approval_key] = intl_rej.copy()
                     
                     update_values = {
                         "approval_status": overall_status,
@@ -1177,10 +1184,13 @@ def reject_class_reports():
                     
                     if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
                         for subj_id in data_json["intl_scores"]:
-                            if isinstance(data_json["intl_scores"][subj_id], dict):
+                            subj = data_json["intl_scores"][subj_id]
+                            if isinstance(subj, dict):
                                 for intl_section in ["main_scores", "ielts", "comments"]:
+                                    if intl_section == "ielts" and not subj.get("ielts_scores"):
+                                        continue
                                     approval_key = f"{intl_section}_approval"
-                                    data_json["intl_scores"][subj_id][approval_key] = l4_rej_info.copy()
+                                    subj[approval_key] = l4_rej_info.copy()
                     
                     update_values = {
                         "approval_status": "level_2_approved",
@@ -1842,10 +1852,13 @@ def reject_single_report():
                             "rejected_at": str(now)
                         }
                         for _subj_id, subj_data in data_json["intl_scores"].items():
-                            if isinstance(subj_data, dict):
-                                existing_approval = subj_data.get(approval_key, {})
-                                if isinstance(existing_approval, dict) and existing_approval.get("status") == "level_2_approved":
-                                    subj_data[approval_key] = rejection_info_intl.copy()
+                            if not isinstance(subj_data, dict):
+                                continue
+                            if intl_section == "ielts" and not subj_data.get("ielts_scores"):
+                                continue
+                            existing_approval = subj_data.get(approval_key, {})
+                            if isinstance(existing_approval, dict) and existing_approval.get("status") == "level_2_approved":
+                                subj_data[approval_key] = rejection_info_intl.copy()
 
                     # Template INTL: đồng bộ trạng thái document sau khi rollback toàn bộ INTL
                     if template and getattr(template, "program_type", "vn") == "intl":
