@@ -1,18 +1,15 @@
 {
  "actions": [],
- "allow_rename": 1,
+ "allow_rename": 0,
  "autoname": "hash",
- "creation": "2025-03-11 10:00:00.000000",
+ "creation": "2026-03-31 10:00:00.000000",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "title",
-  "classification",
-  "severity_level",
-  "column_break_1",
-  "campus",
-  "enabled",
+  "violation",
+  "label",
+  "effective_date",
   "section_student_points",
   "student_points",
   "section_class_points",
@@ -20,84 +17,61 @@
  ],
  "fields": [
   {
-   "fieldname": "title",
+   "fieldname": "violation",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Vi phạm",
+   "options": "SIS Discipline Violation",
+   "reqd": 1
+  },
+  {
+   "fieldname": "label",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Tiêu đề",
-   "reqd": 1,
-   "unique": 0
-  },
-  {
-   "fieldname": "classification",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Phân loại",
-   "options": "SIS Discipline Classification",
+   "label": "Tên phiên bản",
+   "description": "Ví dụ: Học kỳ 1, Quý 1",
    "reqd": 1
   },
   {
-   "fieldname": "severity_level",
-   "fieldtype": "Select",
-   "hidden": 1,
-   "label": "Mức độ (deprecated)",
-   "options": "1\n2\n3"
-  },
-  {
-   "fieldname": "column_break_1",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "campus",
-   "fieldtype": "Link",
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
    "in_list_view": 1,
    "in_standard_filter": 1,
-   "label": "Trường học",
-   "options": "SIS Campus",
+   "label": "Ngày áp dụng",
+   "description": "Áp dụng cho mọi bản ghi kỷ luật có ngày >= ngày này; khi có nhiều phiên bản, chọn phiên bản có ngày áp dụng gần nhất không vượt quá ngày thống kê.",
    "reqd": 1
-  },
-  {
-   "default": "1",
-   "fieldname": "enabled",
-   "fieldtype": "Check",
-   "in_list_view": 1,
-   "label": "Kích hoạt"
   },
   {
    "fieldname": "section_student_points",
    "fieldtype": "Section Break",
-   "hidden": 1,
-   "label": "Điểm học sinh (deprecated — dùng phiên bản điểm)"
+   "label": "Điểm học sinh"
   },
   {
    "fieldname": "student_points",
    "fieldtype": "Table",
-   "hidden": 1,
-   "label": "Điểm áp dụng cho học sinh (deprecated)",
+   "label": "Điểm áp dụng cho học sinh",
    "options": "SIS Discipline Violation Student Point"
   },
   {
    "fieldname": "section_class_points",
    "fieldtype": "Section Break",
-   "hidden": 1,
-   "label": "Điểm lớp (deprecated — dùng phiên bản điểm)"
+   "label": "Điểm lớp"
   },
   {
    "fieldname": "class_points",
    "fieldtype": "Table",
-   "hidden": 1,
-   "label": "Điểm áp dụng cho lớp (deprecated)",
+   "label": "Điểm áp dụng cho lớp",
    "options": "SIS Discipline Violation Class Point"
   }
  ],
  "index_web_pages_for_search": 0,
  "istable": 0,
  "links": [],
- "modified": "2025-03-11 10:00:00.000000",
+ "modified": "2026-03-31 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
- "name": "SIS Discipline Violation",
+ "name": "SIS Discipline Violation Point Version",
  "owner": "Administrator",
  "permissions": [
   {
@@ -149,9 +123,9 @@
    "write": 1
   }
  ],
- "sort_field": "modified",
+ "sort_field": "effective_date",
  "sort_order": "DESC",
  "states": [],
- "title_field": "title",
+ "title_field": "label",
  "track_changes": 1
 }

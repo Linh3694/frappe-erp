@@ -751,26 +751,15 @@ def get_discipline_violations(campus: str = None, include_points: str = None):
             order_by="title asc",
         )
 
-        # Thêm student_points, class_points nếu include_points=1
+        # Thêm student_points, class_points nếu include_points=1 (theo phiên bản điểm áp dụng tại hôm nay, hoặc fallback trên vi phạm)
         if include_points == "1":
+            from datetime import date as date_cls
+
+            ref_today = date_cls.today()
             for v in violations:
-                doc = frappe.get_doc("SIS Discipline Violation", v["name"])
-                v["student_points"] = [
-                    {
-                        "violation_count": int(p.get("violation_count", 0)),
-                        "level": p.get("level", "1"),
-                        "points": int(p.get("points", 0)),
-                    }
-                    for p in (getattr(doc, "student_points", []) or [])
-                ]
-                v["class_points"] = [
-                    {
-                        "violation_count": int(p.get("violation_count", 0)),
-                        "level": p.get("level", "1"),
-                        "points": int(p.get("points", 0)),
-                    }
-                    for p in (getattr(doc, "class_points", []) or [])
-                ]
+                student_rows, class_rows = _get_violation_point_tables_for_stats(v["name"], ref_today)
+                v["student_points"] = student_rows
+                v["class_points"] = class_rows
 
         # Thêm classification_title cho mỗi violation
         for v in violations:
@@ -806,19 +795,25 @@ def create_discipline_violation(
     campus: str = None,
     student_points: list = None,
     class_points: list = None,
+    effective_date: str = None,
+    point_version_label: str = None,
 ):
     """
     Tạo mới vi phạm kỷ luật.
     student_points: [{"violation_count": 1, "level": "1", "points": 1}, ...]
     class_points: [{"violation_count": 1, "level": "1", "points": 10}, ...]
+    Nếu có effective_date và bảng phiên bản điểm tồn tại: tạo SIS Discipline Violation Point Version (không ghi vào bảng deprecated trên vi phạm).
+    Nếu không có effective_date nhưng có điểm: ghi vào vi phạm (tương thích ngược).
     """
     try:
         data = _get_request_data()
         title = title or data.get("title")
         classification = classification or data.get("classification")
         campus = campus or data.get("campus")
-        student_points = student_points or data.get("student_points") or []
-        class_points = class_points or data.get("class_points") or []
+        student_points = student_points if student_points is not None else data.get("student_points") or []
+        class_points = class_points if class_points is not None else data.get("class_points") or []
+        effective_date = effective_date if effective_date is not None else data.get("effective_date")
+        point_version_label = point_version_label if point_version_label is not None else data.get("point_version_label") or data.get("label")
 
         if not title or not str(title).strip():
             return error_response(
@@ -848,31 +843,46 @@ def create_discipline_violation(
             }
         )
 
-        # Thêm điểm học sinh
-        for row in student_points:
-            if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
-                doc.append(
-                    "student_points",
-                    {
-                        "violation_count": int(row.get("violation_count", 0)),
-                        "level": str(row.get("level", "1")),
-                        "points": int(row.get("points", 0)),
-                    },
-                )
+        use_point_version = bool(effective_date) and frappe.db.table_exists("tabSIS Discipline Violation Point Version")
 
-        # Thêm điểm lớp
-        for row in class_points:
-            if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
-                doc.append(
-                    "class_points",
-                    {
-                        "violation_count": int(row.get("violation_count", 0)),
-                        "level": str(row.get("level", "1")),
-                        "points": int(row.get("points", 0)),
-                    },
-                )
+        if use_point_version:
+            doc.insert()
+            pv_doc = frappe.get_doc(
+                {
+                    "doctype": "SIS Discipline Violation Point Version",
+                    "violation": doc.name,
+                    "label": (str(point_version_label).strip() if point_version_label else "Mặc định"),
+                    "effective_date": effective_date,
+                }
+            )
+            _fill_violation_point_tables(pv_doc, student_points, class_points)
+            pv_doc.insert()
+        else:
+            # Tương thích ngược: điểm trên chính vi phạm
+            for row in student_points:
+                if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+                    doc.append(
+                        "student_points",
+                        {
+                            "violation_count": int(row.get("violation_count", 0)),
+                            "level": str(row.get("level", "1")),
+                            "points": int(row.get("points", 0)),
+                        },
+                    )
 
-        doc.insert()
+            for row in class_points:
+                if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+                    doc.append(
+                        "class_points",
+                        {
+                            "violation_count": int(row.get("violation_count", 0)),
+                            "level": str(row.get("level", "1")),
+                            "points": int(row.get("points", 0)),
+                        },
+                    )
+
+            doc.insert()
+
         frappe.db.commit()
 
         return success_response(
@@ -1020,6 +1030,368 @@ def delete_discipline_violation(name: str = None):
         )
 
 
+# ==================== PHIÊN BẢN ĐIỂM VI PHẠM (theo ngày áp dụng) ====================
+
+
+def _parse_reference_date(reference_date):
+    """Chuẩn hóa ngày tham chiếu (date) cho chọn phiên bản điểm."""
+    from datetime import date, datetime
+
+    if reference_date is None:
+        return date.today()
+    if isinstance(reference_date, date) and not isinstance(reference_date, datetime):
+        return reference_date
+    if isinstance(reference_date, datetime):
+        return reference_date.date()
+    s = str(reference_date).strip()[:10]
+    return date.fromisoformat(s)
+
+
+def _fill_violation_point_tables(doc, student_points, class_points):
+    """Gán child table student_points / class_points cho doc (Violation hoặc Point Version)."""
+    doc.student_points = []
+    for row in student_points or []:
+        if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+            doc.append(
+                "student_points",
+                {
+                    "violation_count": int(row.get("violation_count", 0)),
+                    "level": str(row.get("level", "1")),
+                    "points": int(row.get("points", 0)),
+                },
+            )
+    doc.class_points = []
+    for row in class_points or []:
+        if isinstance(row, dict) and row.get("violation_count") is not None and row.get("points") is not None:
+            doc.append(
+                "class_points",
+                {
+                    "violation_count": int(row.get("violation_count", 0)),
+                    "level": str(row.get("level", "1")),
+                    "points": int(row.get("points", 0)),
+                },
+            )
+
+
+def _get_violation_point_tables_for_stats(violation_id, reference_date):
+    """
+    Lấy bảng điểm HS và lớp áp dụng cho thống kê tại reference_date:
+    - Ưu tiên phiên bản SIS Discipline Violation Point Version có effective_date <= reference_date (mới nhất).
+    - Nếu không có phiên bản: fallback student_points / class_points trên SIS Discipline Violation (dữ liệu cũ).
+    Trả về (student_rows, class_points_rows) — list dict có violation_count, level, points.
+    """
+    reference_date = _parse_reference_date(reference_date)
+    student_rows = []
+    class_rows = []
+
+    if frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+        pv_list = frappe.get_all(
+            "SIS Discipline Violation Point Version",
+            filters={"violation": violation_id, "effective_date": ["<=", reference_date]},
+            fields=["name"],
+            order_by="effective_date desc, modified desc",
+            limit_page_length=1,
+        )
+        if pv_list:
+            pv_doc = frappe.get_doc("SIS Discipline Violation Point Version", pv_list[0].name)
+            student_rows = [
+                {
+                    "violation_count": int(p.get("violation_count", 0)),
+                    "level": p.get("level", "1"),
+                    "points": int(p.get("points", 0)),
+                }
+                for p in (getattr(pv_doc, "student_points", []) or [])
+            ]
+            class_rows = [
+                {
+                    "violation_count": int(p.get("violation_count", 0)),
+                    "level": p.get("level", "1"),
+                    "points": int(p.get("points", 0)),
+                }
+                for p in (getattr(pv_doc, "class_points", []) or [])
+            ]
+            return student_rows, class_rows
+
+    try:
+        vdoc = frappe.get_doc("SIS Discipline Violation", violation_id)
+    except frappe.DoesNotExistError:
+        return [], []
+    student_rows = [
+        {
+            "violation_count": int(p.get("violation_count", 0)),
+            "level": p.get("level", "1"),
+            "points": int(p.get("points", 0)),
+        }
+        for p in (getattr(vdoc, "student_points", []) or [])
+    ]
+    class_rows = [
+        {
+            "violation_count": int(p.get("violation_count", 0)),
+            "level": p.get("level", "1"),
+            "points": int(p.get("points", 0)),
+        }
+        for p in (getattr(vdoc, "class_points", []) or [])
+    ]
+    return student_rows, class_rows
+
+
+def _match_tier_from_point_rows(rows, count):
+    """
+    Chọn cấp điểm theo số lần vi phạm (count) và bảng ngưỡng rows (đã chuẩn hóa).
+    Trả về dict: level, points, level_label.
+    """
+    sorted_points = sorted(
+        rows,
+        key=lambda x: x["violation_count"],
+        reverse=True,
+    )
+    matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
+    if not matched and sorted_points:
+        matched = min(sorted_points, key=lambda x: x["violation_count"])
+    level = matched.get("level", "1") if matched else "1"
+    points = matched.get("points", 0) if matched else 0
+    return {
+        "level": level,
+        "points": points,
+        "level_label": f"Cấp độ {level}",
+    }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_violation_point_versions(violation: str = None):
+    """Danh sách phiên bản điểm của một vi phạm (effective_date giảm dần)."""
+    try:
+        data = _get_request_data()
+        violation = violation or data.get("violation")
+        if not violation:
+            return error_response(
+                message="violation là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not frappe.db.exists("SIS Discipline Violation", violation):
+            return error_response(
+                message="Không tìm thấy vi phạm",
+                code="VIOLATION_NOT_FOUND",
+            )
+        if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+            return success_response(data={"data": [], "total": 0}, message="OK")
+
+        rows = frappe.get_all(
+            "SIS Discipline Violation Point Version",
+            filters={"violation": violation},
+            fields=["name", "label", "effective_date", "creation", "modified"],
+            order_by="effective_date desc, modified desc",
+        )
+        return success_response(
+            data={"data": rows, "total": len(rows)},
+            message="Lấy danh sách phiên bản điểm thành công",
+        )
+    except Exception as e:
+        frappe.log_error(f"get_violation_point_versions: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            code="GET_VIOLATION_POINT_VERSIONS_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_violation_point_version(name: str = None):
+    """Chi tiết một phiên bản điểm (kèm student_points, class_points)."""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="name là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        doc = frappe.get_doc("SIS Discipline Violation Point Version", name)
+        d = doc.as_dict()
+        return success_response(data=d, message="OK")
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy phiên bản điểm",
+            code="POINT_VERSION_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"get_violation_point_version: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            code="GET_VIOLATION_POINT_VERSION_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def create_violation_point_version(
+    violation: str = None,
+    label: str = None,
+    effective_date: str = None,
+    student_points: list = None,
+    class_points: list = None,
+):
+    """Tạo phiên bản điểm mới cho vi phạm."""
+    try:
+        data = _get_request_data()
+        violation = violation or data.get("violation")
+        label = label or data.get("label")
+        effective_date = effective_date or data.get("effective_date")
+        student_points = student_points if student_points is not None else data.get("student_points") or []
+        class_points = class_points if class_points is not None else data.get("class_points") or []
+
+        if not violation or not frappe.db.exists("SIS Discipline Violation", violation):
+            return error_response(
+                message="violation hợp lệ là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not label or not str(label).strip():
+            return error_response(
+                message="Tên phiên bản là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        if not effective_date:
+            return error_response(
+                message="Ngày áp dụng là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        doc = frappe.get_doc(
+            {
+                "doctype": "SIS Discipline Violation Point Version",
+                "violation": violation,
+                "label": str(label).strip(),
+                "effective_date": effective_date,
+            }
+        )
+        _fill_violation_point_tables(doc, student_points, class_points)
+        doc.insert()
+        frappe.db.commit()
+        return success_response(
+            data={"name": doc.name, "label": doc.label},
+            message="Tạo phiên bản điểm thành công",
+        )
+    except Exception as e:
+        frappe.log_error(f"create_violation_point_version: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            code="CREATE_VIOLATION_POINT_VERSION_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def update_violation_point_version(
+    name: str = None,
+    label: str = None,
+    effective_date: str = None,
+    student_points: list = None,
+    class_points: list = None,
+):
+    """Cập nhật phiên bản điểm."""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="name là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        doc = frappe.get_doc("SIS Discipline Violation Point Version", name)
+        if label is not None:
+            doc.label = str(label).strip()
+        if effective_date is not None:
+            doc.effective_date = effective_date
+        if student_points is not None or class_points is not None:
+            sp = student_points if student_points is not None else [
+                {"violation_count": r.violation_count, "level": r.level, "points": r.points}
+                for r in doc.student_points
+            ]
+            cp = class_points if class_points is not None else [
+                {"violation_count": r.violation_count, "level": r.level, "points": r.points}
+                for r in doc.class_points
+            ]
+            doc.student_points = []
+            doc.class_points = []
+            _fill_violation_point_tables(doc, sp, cp)
+        doc.save()
+        frappe.db.commit()
+        return success_response(
+            data={"name": doc.name, "label": doc.label},
+            message="Cập nhật phiên bản điểm thành công",
+        )
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy phiên bản điểm",
+            code="POINT_VERSION_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"update_violation_point_version: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            code="UPDATE_VIOLATION_POINT_VERSION_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def delete_violation_point_version(name: str = None):
+    """Xóa phiên bản điểm."""
+    try:
+        data = _get_request_data()
+        name = name or data.get("name")
+        if not name:
+            return error_response(
+                message="name là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        frappe.delete_doc("SIS Discipline Violation Point Version", name)
+        frappe.db.commit()
+        return success_response(data={"name": name}, message="Đã xóa phiên bản điểm")
+    except frappe.DoesNotExistError:
+        return error_response(
+            message="Không tìm thấy phiên bản điểm",
+            code="POINT_VERSION_NOT_FOUND",
+        )
+    except Exception as e:
+        frappe.log_error(f"delete_violation_point_version: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            code="DELETE_VIOLATION_POINT_VERSION_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_applicable_point_version(violation: str = None, date: str = None):
+    """Phiên bản điểm áp dụng cho violation tại một ngày (hoặc không có)."""
+    try:
+        data = _get_request_data()
+        violation = violation or data.get("violation")
+        date_s = date or data.get("date")
+        if not violation:
+            return error_response(
+                message="violation là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+        ref = _parse_reference_date(date_s) if date_s else _parse_reference_date(None)
+        if not frappe.db.table_exists("tabSIS Discipline Violation Point Version"):
+            return success_response(data={"version": None}, message="OK")
+
+        pv_list = frappe.get_all(
+            "SIS Discipline Violation Point Version",
+            filters={"violation": violation, "effective_date": ["<=", ref]},
+            fields=["name"],
+            order_by="effective_date desc, modified desc",
+            limit_page_length=1,
+        )
+        if not pv_list:
+            return success_response(data={"version": None}, message="OK")
+        doc = frappe.get_doc("SIS Discipline Violation Point Version", pv_list[0].name)
+        return success_response(data={"version": doc.as_dict()}, message="OK")
+    except Exception as e:
+        frappe.log_error(f"get_applicable_point_version: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            code="GET_APPLICABLE_POINT_VERSION_ERROR",
+        )
+
+
 # ==================== THỐNG KÊ VI PHẠM HỌC SINH ====================
 
 
@@ -1087,30 +1459,15 @@ def get_student_violation_stats(
         )
         count = result[0]["cnt"] if result else 0
 
-        # Lấy student_points từ Violation
-        doc = frappe.get_doc("SIS Discipline Violation", violation_id)
-        student_points = getattr(doc, "student_points", []) or []
-
-        # Sắp xếp theo violation_count giảm dần, tìm dòng có violation_count <= count (cao nhất)
-        sorted_points = sorted(
-            [{"violation_count": int(p.get("violation_count", 0)), "level": p.get("level", "1"), "points": int(p.get("points", 0))} for p in student_points],
-            key=lambda x: x["violation_count"],
-            reverse=True,
-        )
-        matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
-        if not matched and sorted_points:
-            # count < min threshold -> dùng cấp thấp nhất
-            matched = min(sorted_points, key=lambda x: x["violation_count"])
-
-        level = matched.get("level", "1") if matched else "1"
-        points = matched.get("points", 0) if matched else 0
+        student_rows, _ = _get_violation_point_tables_for_stats(violation_id, last_day)
+        tier = _match_tier_from_point_rows(student_rows, count)
 
         return success_response(
             data={
                 "count": count,
-                "level": level,
-                "level_label": f"Cấp độ {level}",
-                "points": points,
+                "level": tier["level"],
+                "level_label": tier["level_label"],
+                "points": tier["points"],
             },
             message="Lấy thống kê thành công",
         )
@@ -1205,28 +1562,15 @@ def get_class_violation_stats(
         )
         count = result[0]["cnt"] if result else 0
 
-        # Lấy class_points từ Violation (bảng điểm áp dụng cho lớp)
-        doc = frappe.get_doc("SIS Discipline Violation", violation_id)
-        class_points = getattr(doc, "class_points", []) or []
-
-        sorted_points = sorted(
-            [{"violation_count": int(p.get("violation_count", 0)), "level": p.get("level", "1"), "points": int(p.get("points", 0))} for p in class_points],
-            key=lambda x: x["violation_count"],
-            reverse=True,
-        )
-        matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
-        if not matched and sorted_points:
-            matched = min(sorted_points, key=lambda x: x["violation_count"])
-
-        level = matched.get("level", "1") if matched else "1"
-        points = matched.get("points", 0) if matched else 0
+        _, class_rows = _get_violation_point_tables_for_stats(violation_id, last_day)
+        tier = _match_tier_from_point_rows(class_rows, count)
 
         return success_response(
             data={
                 "count": count,
-                "level": level,
-                "level_label": f"Cấp độ {level}",
-                "points": points,
+                "level": tier["level"],
+                "level_label": tier["level_label"],
+                "points": tier["points"],
             },
             message="Lấy thống kê thành công",
         )
@@ -1274,33 +1618,13 @@ def _student_violation_stats_internal(student_id, violation_id, first_day, last_
         as_dict=True,
     )
     count = result[0]["cnt"] if result else 0
-    try:
-        doc = frappe.get_doc("SIS Discipline Violation", violation_id)
-    except frappe.DoesNotExistError:
-        return {"count": count, "level": "1", "level_label": "Cấp độ 1", "points": 0}
-    student_points = getattr(doc, "student_points", []) or []
-    sorted_points = sorted(
-        [
-            {
-                "violation_count": int(p.get("violation_count", 0)),
-                "level": p.get("level", "1"),
-                "points": int(p.get("points", 0)),
-            }
-            for p in student_points
-        ],
-        key=lambda x: x["violation_count"],
-        reverse=True,
-    )
-    matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
-    if not matched and sorted_points:
-        matched = min(sorted_points, key=lambda x: x["violation_count"])
-    level = matched.get("level", "1") if matched else "1"
-    points = matched.get("points", 0) if matched else 0
+    student_rows, _ = _get_violation_point_tables_for_stats(violation_id, last_day)
+    tier = _match_tier_from_point_rows(student_rows, count)
     return {
         "count": count,
-        "level": level,
-        "level_label": f"Cấp độ {level}",
-        "points": points,
+        "level": tier["level"],
+        "level_label": tier["level_label"],
+        "points": tier["points"],
     }
 
 
@@ -1347,33 +1671,13 @@ def _class_violation_stats_internal(class_id, violation_id, first_day, last_day)
         as_dict=True,
     )
     count = result[0]["cnt"] if result else 0
-    try:
-        doc = frappe.get_doc("SIS Discipline Violation", violation_id)
-    except frappe.DoesNotExistError:
-        return {"count": count, "level": "1", "level_label": "Cấp độ 1", "points": 0}
-    class_points = getattr(doc, "class_points", []) or []
-    sorted_points = sorted(
-        [
-            {
-                "violation_count": int(p.get("violation_count", 0)),
-                "level": p.get("level", "1"),
-                "points": int(p.get("points", 0)),
-            }
-            for p in class_points
-        ],
-        key=lambda x: x["violation_count"],
-        reverse=True,
-    )
-    matched = next((p for p in sorted_points if p["violation_count"] <= count), None)
-    if not matched and sorted_points:
-        matched = min(sorted_points, key=lambda x: x["violation_count"])
-    level = matched.get("level", "1") if matched else "1"
-    points = matched.get("points", 0) if matched else 0
+    _, class_rows = _get_violation_point_tables_for_stats(violation_id, last_day)
+    tier = _match_tier_from_point_rows(class_rows, count)
     return {
         "count": count,
-        "level": level,
-        "level_label": f"Cấp độ {level}",
-        "points": points,
+        "level": tier["level"],
+        "level_label": tier["level_label"],
+        "points": tier["points"],
     }
 
 
