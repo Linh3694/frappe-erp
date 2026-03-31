@@ -867,9 +867,15 @@ def reject_class_reports():
         user = frappe.session.user
         campus_id = get_current_campus_id()
         
+        # L3/L4 không chỉ định section → reject toàn bộ báo cáo (tất cả sections)
+        reject_all_sections = False
         if section_type:
             is_homeroom = (section_type == "homeroom")
             section = section_type
+        elif pending_level in ["review", "publish"] and not subject_id and not board_type:
+            reject_all_sections = True
+            is_homeroom = False
+            section = "all"
         else:
             is_homeroom = not subject_id
             section = "homeroom" if is_homeroom else "scores"
@@ -1096,8 +1102,17 @@ def reject_class_reports():
                 }
                 
                 if pending_level == "review":
-                    if is_homeroom:
+                    if is_homeroom or reject_all_sections:
                         update_values["homeroom_l2_approved"] = 0
+                        update_values["homeroom_approval_status"] = new_status
+                    if reject_all_sections:
+                        update_values["scores_approval_status"] = new_status
+                        update_values["homeroom_rejection_reason"] = reason
+                        update_values["homeroom_rejected_by"] = user
+                        update_values["homeroom_rejected_at"] = now
+                        update_values["scores_rejection_reason"] = reason
+                        update_values["scores_rejected_by"] = user
+                        update_values["scores_rejected_at"] = now
                     update_values["all_sections_l2_approved"] = 0
                 
                 frappe.db.set_value(
