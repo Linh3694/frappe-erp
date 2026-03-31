@@ -875,7 +875,7 @@ def reject_class_reports():
         elif pending_level in ["review", "publish"] and not subject_id and not board_type:
             reject_all_sections = True
             is_homeroom = False
-            section = "all"
+            section = "both"
         else:
             is_homeroom = not subject_id
             section = "homeroom" if is_homeroom else "scores"
