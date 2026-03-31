@@ -34,3 +34,5 @@ def execute():
 
     frappe.db.commit()
     print(f"Hoàn tất. Đã sửa {len(stuck)} bản ghi.")
+    
+execute()

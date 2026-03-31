@@ -1099,7 +1099,12 @@ def reject_class_reports():
                         homeroom_target_status = 'draft'
                     
                     scores_target_status = 'level_1_approved'
-                    overall_status = homeroom_target_status if homeroom_target_status in ['draft', 'submitted'] else scores_target_status
+                    # INTL-only (không có homeroom): overall = scores_target_status
+                    homeroom_enabled = getattr(template_for_rollback, 'homeroom_enabled', False) if template_for_rollback else False
+                    if not homeroom_enabled:
+                        overall_status = scores_target_status
+                    else:
+                        overall_status = homeroom_target_status if homeroom_target_status in ['draft', 'submitted'] else scores_target_status
                     
                     # data_json: set approval status phù hợp (không phải "rejected")
                     if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
