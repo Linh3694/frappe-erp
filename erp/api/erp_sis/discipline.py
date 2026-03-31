@@ -245,6 +245,11 @@ def _get_request_data():
     form_dict = getattr(frappe.local, "form_dict", None) or getattr(frappe, "form_dict", None)
     if form_dict:
         data.update(dict(form_dict))
+    # Query string (GET) — Frappe đôi khi không gộp đủ vào form_dict cho /api/method/...
+    if hasattr(frappe, "request") and frappe.request and getattr(frappe.request, "args", None):
+        for key in frappe.request.args:
+            if key not in data or data.get(key) in (None, ""):
+                data[key] = frappe.request.args.get(key)
     return data
 
 
