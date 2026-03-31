@@ -265,6 +265,8 @@ def _create_issue_from_feedback(feedback_doc, guardian_name):
     doc.title = (getattr(feedback_doc, "title", None) or "").strip() or "Góp ý từ phụ huynh"
     doc.content = content_html
     doc.issue_module = module_name
+    # Lien ket nguoc ve Feedback de mobile/staff reply phu huynh tu man CRM Issue
+    doc.source_feedback = getattr(feedback_doc, "name", None) or ""
     doc.issue_code = _generate_issue_code(mod.code)
     doc.occurred_at = now()
     doc.lead = ""

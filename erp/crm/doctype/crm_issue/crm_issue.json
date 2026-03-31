@@ -10,6 +10,7 @@
   "issue_code",
   "title",
   "issue_module",
+  "source_feedback",
   "cb_issue_1",
   "lead",
   "student",
@@ -60,6 +61,14 @@
    "label": "Issue Type",
    "options": "CRM Issue Module",
    "reqd": 1
+  },
+  {
+   "description": "Feedback goc khi issue duoc tao tu Gop y phu huynh (module FB)",
+   "fieldname": "source_feedback",
+   "fieldtype": "Link",
+   "label": "Source Feedback",
+   "options": "Feedback",
+   "read_only": 1
   },
   {
    "fieldname": "cb_issue_1",

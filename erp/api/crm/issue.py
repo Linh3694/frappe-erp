@@ -443,6 +443,105 @@ def get_issue():
     return single_item_response(data)
 
 
+def _feedback_replies_and_guardian_for_crm(feedback_name):
+    """
+    Tra ve replies (co enrich ten) + guardian_info toi gian cho man CRM Issue.
+    Logic dong bo voi erp.api.erp_sis.feedback.admin_get (phan replies).
+    """
+    feedback = frappe.get_doc("Feedback", feedback_name)
+    replies_data = []
+    if feedback.replies:
+        for reply in feedback.replies:
+            reply_data = {
+                "content": reply.content,
+                "reply_by": reply.reply_by,
+                "reply_by_type": reply.reply_by_type,
+                "reply_date": reply.reply_date,
+                "is_internal": reply.is_internal,
+                "reply_by_full_name": None,
+            }
+            if reply.reply_by_type == "Staff" and reply.reply_by:
+                try:
+                    reply_user = frappe.get_doc("User", reply.reply_by)
+                    reply_data["reply_by_full_name"] = reply_user.full_name
+                except frappe.DoesNotExistError:
+                    reply_data["reply_by_full_name"] = reply.reply_by
+            elif reply.reply_by_type == "Guardian" and feedback.guardian:
+                try:
+                    guardian_doc = frappe.get_doc("CRM Guardian", feedback.guardian)
+                    reply_data["reply_by_full_name"] = guardian_doc.guardian_name
+                except frappe.DoesNotExistError:
+                    reply_data["reply_by_full_name"] = "Phụ huynh"
+            replies_data.append(reply_data)
+
+    guardian_info = None
+    if feedback.guardian:
+        try:
+            guardian = frappe.get_doc("CRM Guardian", feedback.guardian)
+            guardian_info = {
+                "name": guardian.guardian_name,
+                "phone_number": guardian.phone_number,
+                "email": guardian.email,
+            }
+        except frappe.DoesNotExistError:
+            guardian_info = {
+                "name": feedback.guardian_name or feedback.guardian,
+                "phone_number": None,
+                "email": None,
+            }
+
+    return {
+        "source_feedback": feedback.name,
+        "replies": replies_data,
+        "guardian_info": guardian_info,
+    }
+
+
+@frappe.whitelist()
+def get_linked_feedback_replies():
+    """
+    Lay lich su trao doi Feedback gan voi CRM Issue (khi co source_feedback).
+    Dung cho workspace-mobile tab Qua trinh xu ly.
+    """
+    check_crm_permission()
+
+    issue_name = frappe.request.args.get("issue_name") or frappe.request.args.get("name")
+    if not issue_name:
+        return validation_error_response("Thieu issue_name", {"issue_name": ["Bat buoc"]})
+
+    if not frappe.db.exists("CRM Issue", issue_name):
+        return not_found_response(f"Khong tim thay van de {issue_name}")
+
+    issue_doc = frappe.get_doc("CRM Issue", issue_name)
+    sf = getattr(issue_doc, "source_feedback", None) or ""
+    if not (sf and str(sf).strip()):
+        return success_response(
+            data={
+                "source_feedback": None,
+                "replies": [],
+                "guardian_info": None,
+            }
+        )
+
+    if not frappe.db.exists("Feedback", sf):
+        return success_response(
+            data={
+                "source_feedback": sf,
+                "replies": [],
+                "guardian_info": None,
+            }
+        )
+
+    try:
+        payload = _feedback_replies_and_guardian_for_crm(sf)
+        return success_response(data=payload)
+    except frappe.DoesNotExistError:
+        return not_found_response(f"Khong tim thay feedback {sf}")
+    except Exception as e:
+        frappe.logger().error(f"get_linked_feedback_replies: {e}")
+        return error_response(f"Loi lay feedback lien ket: {str(e)}")
+
+
 @frappe.whitelist(methods=["POST"])
 def create_issue():
     """Tao van de moi"""

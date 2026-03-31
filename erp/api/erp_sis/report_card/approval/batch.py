@@ -1474,10 +1474,32 @@ def reject_single_report():
                             current_status = 'level_2_approved'
                             break
         elif section == 'both':
+            # VN: homeroom / scores / subject_eval; INTL: intl_scores (counter hoặc quét data_json)
             subject_eval_l2_count = getattr(report, 'subject_eval_l2_approved_count', 0) or 0
-            if homeroom_status == 'level_2_approved' or scores_status == 'level_2_approved' or subject_eval_l2_count > 0:
+            intl_l2_count = getattr(report, 'intl_l2_approved_count', 0) or 0
+            if (
+                homeroom_status == 'level_2_approved'
+                or scores_status == 'level_2_approved'
+                or subject_eval_l2_count > 0
+                or intl_l2_count > 0
+            ):
                 can_reject = True
                 current_status = 'level_2_approved'
+            else:
+                # Fallback: INTL có thể chỉ có L2 trong intl_scores mà counter chưa sync
+                intl_scores_data_both = data_json.get("intl_scores", {})
+                for _subj_id, subj_data in intl_scores_data_both.items():
+                    if not isinstance(subj_data, dict):
+                        continue
+                    for intl_section in ["main_scores", "ielts", "comments"]:
+                        approval_key = f"{intl_section}_approval"
+                        approval = subj_data.get(approval_key, {})
+                        if isinstance(approval, dict) and approval.get("status") == "level_2_approved":
+                            can_reject = True
+                            current_status = 'level_2_approved'
+                            break
+                    if can_reject:
+                        break
         
         if not can_reject:
             return error_response(
@@ -1670,7 +1692,29 @@ def reject_single_report():
                                 "rejected_by": user,
                                 "rejected_at": str(now)
                             }
-            
+
+                # INTL: trả toàn bộ các board trong intl_scores (main_scores, ielts, comments)
+                if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
+                    for intl_section in ["main_scores", "ielts", "comments"]:
+                        approval_key = f"{intl_section}_approval"
+                        rejection_info_intl = {
+                            "status": "level_1_approved",
+                            "rejection_reason": reason,
+                            "rejected_from_level": 3,
+                            "rejected_by": user,
+                            "rejected_at": str(now)
+                        }
+                        for _subj_id, subj_data in data_json["intl_scores"].items():
+                            if isinstance(subj_data, dict):
+                                existing_approval = subj_data.get(approval_key, {})
+                                if isinstance(existing_approval, dict) and existing_approval.get("status") == "level_2_approved":
+                                    subj_data[approval_key] = rejection_info_intl.copy()
+
+                    # Template INTL: đồng bộ trạng thái document sau khi rollback toàn bộ INTL
+                    if template and getattr(template, "program_type", "vn") == "intl":
+                        report.approval_status = "level_1_approved"
+                        report.scores_approval_status = "level_1_approved"
+
             report.data_json = json.dumps(data_json, ensure_ascii=False)
             
             if template:
