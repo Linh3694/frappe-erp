@@ -925,11 +925,10 @@ def reject_class_reports():
         if not use_per_subject_filter:
             if pending_level == "review":
                 # Đồng bộ get_pending_approvals L3: báo cáo vẫn hiện ở hàng chờ Phó HT khi chưa đủ L2 toàn phần
-                # (approval_status có thể là submitted / level_1_approved, không chỉ level_2_approved)
                 filters[status_field] = ["not in", ["reviewed", "published"]]
             elif pending_level == "publish":
-                # Đồng bộ danh sách L4 (reviewed + published)
-                filters[status_field] = ["in", ["reviewed", "published"]]
+                # L4 trả về: chỉ reviewed (chưa xuất bản), báo cáo published cần thu hồi trước
+                filters[status_field] = ["in", ["reviewed"]]
             else:
                 filters[status_field] = ["in", current_statuses]
         
@@ -1148,28 +1147,29 @@ def reject_class_reports():
                     
                 elif reject_all_sections and pending_level == "publish":
                     detected_board_type = "both"
+                    l4_rej_info = {
+                        "status": "level_2_approved",
+                        "rejection_reason": reason,
+                        "rejected_from_level": rejected_from_level_value,
+                        "rejected_by": user,
+                        "rejected_at": str(now)
+                    }
                     
-                    # data_json: set tất cả về level_2_approved
                     for section_key in ["scores", "subject_eval"]:
                         if section_key in data_json and isinstance(data_json[section_key], dict):
                             for subj_id in data_json[section_key]:
                                 if isinstance(data_json[section_key][subj_id], dict):
-                                    data_json[section_key][subj_id]["approval"] = {
-                                        "status": "level_2_approved",
-                                        "rejection_reason": reason,
-                                        "rejected_from_level": rejected_from_level_value,
-                                        "rejected_by": user,
-                                        "rejected_at": str(now)
-                                    }
+                                    data_json[section_key][subj_id]["approval"] = l4_rej_info.copy()
                     
                     if "homeroom" in data_json and isinstance(data_json["homeroom"], dict):
-                        data_json["homeroom"]["approval"] = {
-                            "status": "level_2_approved",
-                            "rejection_reason": reason,
-                            "rejected_from_level": rejected_from_level_value,
-                            "rejected_by": user,
-                            "rejected_at": str(now)
-                        }
+                        data_json["homeroom"]["approval"] = l4_rej_info.copy()
+                    
+                    if "intl_scores" in data_json and isinstance(data_json["intl_scores"], dict):
+                        for subj_id in data_json["intl_scores"]:
+                            if isinstance(data_json["intl_scores"][subj_id], dict):
+                                for intl_section in ["main_scores", "ielts", "comments"]:
+                                    approval_key = f"{intl_section}_approval"
+                                    data_json["intl_scores"][subj_id][approval_key] = l4_rej_info.copy()
                     
                     update_values = {
                         "approval_status": "level_2_approved",
