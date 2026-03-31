@@ -917,7 +917,15 @@ def reject_class_reports():
         }
         
         if not use_per_subject_filter:
-            filters[status_field] = ["in", current_statuses]
+            if pending_level == "review":
+                # Đồng bộ get_pending_approvals L3: báo cáo vẫn hiện ở hàng chờ Phó HT khi chưa đủ L2 toàn phần
+                # (approval_status có thể là submitted / level_1_approved, không chỉ level_2_approved)
+                filters[status_field] = ["not in", ["reviewed", "published"]]
+            elif pending_level == "publish":
+                # Đồng bộ danh sách L4 (reviewed + published)
+                filters[status_field] = ["in", ["reviewed", "published"]]
+            else:
+                filters[status_field] = ["in", current_statuses]
         
         reports = frappe.get_all(
             "SIS Student Report Card",
