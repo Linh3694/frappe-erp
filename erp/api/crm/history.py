@@ -200,9 +200,13 @@ def _crm_absolute_file_url(path):
         return ""
     if s.startswith("http://") or s.startswith("https://"):
         return s
-    if s.startswith("/"):
-        return frappe.utils.get_url(s)
-    return frappe.utils.get_url("/files/" + s)
+    # get_url chi nhan path; tach ?t=mtime neu co (anh khám SK dinh ky)
+    path_only, _, query = s.partition("?")
+    if path_only.startswith("/"):
+        base = frappe.utils.get_url(path_only)
+    else:
+        base = frappe.utils.get_url("/files/" + path_only)
+    return base + ("?" + query if query else "")
 
 
 def _crm_report_card_image_urls(report_id):
@@ -324,7 +328,11 @@ def _enrich_page_items_crm_history(page_items):
                         )
 
                         imgs = get_health_checkup_image_urls_for_checkup(ck)
-                        image_urls = [x.get("url") for x in imgs if x.get("url")]
+                        image_urls = [
+                            _crm_absolute_file_url(x.get("url"))
+                            for x in imgs
+                            if x.get("url")
+                        ]
                     except Exception:
                         frappe.logger().error(
                             frappe.get_traceback(), "CRM periodic_health_checkup images"
