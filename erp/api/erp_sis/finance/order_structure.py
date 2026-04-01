@@ -577,12 +577,22 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
                 student['milestone_amounts'] = {}
 
         # Nhật ký thu phí: số lượng + bản ghi mới nhất (badge / xem nhanh)
-        os_ids = [s["name"] for s in students]
-        count_map, latest_map = get_collection_log_stats_for_order_students(os_ids)
-        for student in students:
-            cid = student["name"]
-            student["collection_log_count"] = count_map.get(cid, 0)
-            student["latest_collection_log"] = latest_map.get(cid)
+        # Không để lỗi nhật ký (thiếu bảng / migrate) làm hỏng cả API danh sách HS
+        try:
+            os_ids = [s["name"] for s in students]
+            count_map, latest_map = get_collection_log_stats_for_order_students(os_ids)
+            for student in students:
+                cid = student["name"]
+                student["collection_log_count"] = count_map.get(cid, 0)
+                student["latest_collection_log"] = latest_map.get(cid)
+        except Exception as log_err:
+            frappe.log_error(
+                frappe.get_traceback(),
+                "get_order_students_v2: collection log stats",
+            )
+            for student in students:
+                student["collection_log_count"] = 0
+                student["latest_collection_log"] = None
 
         return success_response(
             data={
