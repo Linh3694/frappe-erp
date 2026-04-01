@@ -364,9 +364,9 @@ def send_contact_log():
         now = frappe.utils.now_datetime()
         user = frappe.session.user
         
-        # ⚡ Batch lấy student_ids (1 query)
+        # ⚡ Batch lấy student_ids + nội dung nhận xét (lưu vào data thông báo để CRM hiện chi tiết khi mở rộng)
         log_data = frappe.db.sql("""
-            SELECT name, student_id 
+            SELECT name, student_id, contact_log_comment
             FROM `tabSIS Class Log Student`
             WHERE name IN %(log_ids)s
         """, {"log_ids": student_log_ids}, as_dict=True)
@@ -376,6 +376,8 @@ def send_contact_log():
         
         student_ids = [d['student_id'] for d in log_data]
         valid_log_ids = [d['name'] for d in log_data]
+        # student_id -> log row (uu tien ban ghi sau cung neu trung student trong batch)
+        student_id_to_log_row = {d['student_id']: d for d in log_data}
         
         # ⚡ Batch update tất cả status cùng lúc (1 query thay vì N get_doc+save)
         frappe.db.sql("""
@@ -393,7 +395,7 @@ def send_contact_log():
         sent_count = len(valid_log_ids)
         
         # ⚡ Gửi notification synchronous (đảm bảo phụ huynh nhận được)
-        notification_result = _send_contact_log_notifications(class_id, student_ids)
+        notification_result = _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row)
         
         return success_response(
             message="Contact logs sent successfully",
@@ -414,7 +416,7 @@ def send_contact_log():
         )
 
 
-def _send_contact_log_notifications(class_id, student_ids):
+def _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row=None):
     """
     Gửi notification cho phụ huynh (synchronous).
     ⚡ Tối ưu so với code cũ:
@@ -422,7 +424,10 @@ def _send_contact_log_notifications(class_id, student_ids):
       → mỗi lần query guardians, tạo notification, gửi push riêng biệt
     - Code mới: 1 batch query guardians + 1 batch query student names
       → chỉ loop 1 lần qua parents để tạo notification + push
+
+    student_id_to_log_row: map student_id -> row dict (name, contact_log_comment) để đính kèm nhận xét chi tiết trong data.
     """
+    student_id_to_log_row = student_id_to_log_row or {}
     from erp.utils.notification_handler import (
         get_guardians_for_students,
         get_parent_emails
@@ -480,7 +485,10 @@ def _send_contact_log_notifications(class_id, student_ids):
             for student_id in matched_students:
                 try:
                     student_name = student_names.get(student_id, student_id)
-                    
+                    log_row = student_id_to_log_row.get(student_id) or {}
+                    class_log_student_id = log_row.get("name") or ""
+                    contact_comment = (log_row.get("contact_log_comment") or "").strip()
+
                     notification_title = {"vi": "Sổ liên lạc", "en": "Contact Log"}
                     notification_body = {
                         "vi": f"Học sinh {student_name} có nhận xét mới về ngày học hôm nay.",
@@ -492,6 +500,8 @@ def _send_contact_log_notifications(class_id, student_ids):
                         "notificationType": "contact_log",
                         "student_id": student_id,
                         "student_name": student_name,
+                        "class_log_student_id": class_log_student_id,
+                        "contact_log_comment": contact_comment,
                         "timestamp": frappe.utils.now()
                     }
                     

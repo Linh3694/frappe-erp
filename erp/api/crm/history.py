@@ -142,6 +142,53 @@ def _parse_bilingual_text(raw):
     return s
 
 
+def _body_text_from_data_dict(data):
+    """Mot so loai thong bao chi dat noi dung trong data (body/message/content)."""
+    if not isinstance(data, dict):
+        return ""
+    for key in ("body", "message", "content", "text", "description"):
+        if key not in data:
+            continue
+        val = data[key]
+        if val is None:
+            continue
+        if isinstance(val, dict):
+            t = (val.get("vi") or val.get("en") or "").strip()
+            if t:
+                return t
+        if isinstance(val, str):
+            t = _parse_bilingual_text(val)
+            if t.strip():
+                return t.strip()
+    return ""
+
+
+def _notification_row_body_text(row, data):
+    """Noi dung tin gui PH: uu tien cot message, khong co thi lay tu data."""
+    m = _parse_bilingual_text(row.get("message"))
+    if m and m.strip():
+        return m.strip()
+    return _body_text_from_data_dict(data)
+
+
+def _notification_expanded_body(row, data, ntype):
+    """
+    Noi dung day du khi mo rong (vd. sổ liên lạc: nhan xet GVCN trong data,
+    khac voi dong tom tat trong cot message).
+    """
+    if ntype == "contact_log" and isinstance(data, dict):
+        c = (data.get("contact_log_comment") or "").strip()
+        if c:
+            return c
+        # Thong bao cu: thu lay tu ban ghi SIS Class Log Student neu co id trong data
+        cls_name = data.get("class_log_student_id")
+        if cls_name and frappe.db.exists("SIS Class Log Student", cls_name):
+            c2 = frappe.db.get_value("SIS Class Log Student", cls_name, "contact_log_comment")
+            if c2 and str(c2).strip():
+                return str(c2).strip()
+    return _notification_row_body_text(row, data)
+
+
 def _recipient_user_ids_from_email(email):
     """User.name co the la email hoac ten dang nhap."""
     if not email or not str(email).strip():
@@ -279,9 +326,11 @@ def get_parent_notification_history():
                 continue
 
         title_vi = _parse_bilingual_text(row.get("title"))
-        msg_raw = _parse_bilingual_text(row.get("message"))
-        msg_preview = (msg_raw[:240] + "…") if len(msg_raw) > 240 else msg_raw
         ntype = row.get("notification_type") or ""
+        # Tom tat (dong duoi tieu de khi thu go) vs noi dung mo rong (co the dai hon, vd. contact_log)
+        msg_short = _notification_row_body_text(row, data)
+        msg_full = _notification_expanded_body(row, data, ntype)
+        msg_preview = (msg_short[:240] + "…") if len(msg_short) > 240 else msg_short
 
         ts = row.get("event_timestamp") or row.get("sent_at") or row.get("creation")
         ts_str = str(ts) if ts else ""
@@ -294,7 +343,8 @@ def get_parent_notification_history():
             blob = " ".join(
                 [
                     title_vi,
-                    msg_raw,
+                    msg_short,
+                    msg_full,
                     ntype,
                     _notif_type_label_vi(ntype),
                 ]
@@ -308,8 +358,8 @@ def get_parent_notification_history():
                 "notification_type": ntype,
                 "title": title_vi or ntype or "Thông báo",
                 "message_preview": msg_preview,
-                # Toan bo noi dung — FE dung khi mo rong (preview van cat 240 ky tu)
-                "message_full": msg_raw,
+                # Noi dung day du khi mo rong (vd. nhan xet chi tiet sổ liên lạc)
+                "message_full": msg_full,
                 "sent_at": ts_str,
                 "recipient_user": row.get("recipient_user") or "",
                 "sender": row.get("sender") or "",
