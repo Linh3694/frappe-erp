@@ -1031,8 +1031,8 @@ def import_health_checkup(school_year_id=None, data=None):
                 code="TABLE_NOT_EXISTS"
             )
         
-        # Các fields được phép import
-        allowed_fields = [
+        # Các fields được phép import — đợt cuối năm chỉ cập nhật tập tối thiểu (khớp mẫu Excel + form EndYear)
+        _import_allowed_beginning = [
             "checkup_date",
             "height", "weight",
             "water_content", "water_range",
@@ -1052,6 +1052,16 @@ def import_health_checkup(school_year_id=None, data=None):
             "disease_condition", "health_classification",
             "doctor_recommendation", "reference_notes"
         ]
+        _import_allowed_end = [
+            "checkup_date",
+            "height", "height_evaluation", "weight", "bmi", "bmi_evaluation",
+            "left_eye_no_glasses", "right_eye_no_glasses",
+            "left_eye_with_glasses", "right_eye_with_glasses",
+            "refractive_error",
+            "disease_condition", "health_classification",
+            "doctor_recommendation", "reference_notes",
+        ]
+        allowed_fields = _import_allowed_end if checkup_phase == "end" else _import_allowed_beginning
         
         success_count = 0
         error_count = 0
