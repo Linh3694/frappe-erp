@@ -1100,6 +1100,19 @@ def get_class_log_dashboard(date=None, campus_id=None):
         
         school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
         
+        if not school_year:
+            frappe.log_error(
+                f"get_class_log_dashboard: school_year not found. campus_id={campus_id}, filters={school_year_filters}",
+                "ClassLogDashboard Debug"
+            )
+            return success_response(
+                data={
+                    "summary": {"total_regular": 0, "completed": 0, "incomplete": 0},
+                    "classes": []
+                },
+                message=f"Không tìm thấy năm học đang hoạt động (campus_id={campus_id})"
+            )
+        
         # Lấy danh sách lớp Regular kèm education_stage_id qua education_grade
         classes = frappe.db.sql("""
             SELECT 
@@ -1129,7 +1142,7 @@ def get_class_log_dashboard(date=None, campus_id=None):
                     },
                     "classes": []
                 },
-                message="Không có lớp Regular nào"
+                message=f"Không có lớp Regular nào (school_year={school_year}, campus_id={campus_id})"
             )
         
         class_ids = [c.name for c in classes]
@@ -1480,6 +1493,19 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
             school_year_filters["campus_id"] = campus_id
         
         school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+        
+        if not school_year:
+            frappe.log_error(
+                f"get_subject_teachers_dashboard: school_year not found. campus_id={campus_id}, date={date}",
+                "SubjectTeacherDashboard Debug"
+            )
+            return success_response(
+                data={
+                    "summary": {"total_teachers": 0, "completed_teachers": 0, "incomplete_teachers": 0},
+                    "teachers": []
+                },
+                message=f"Không tìm thấy năm học đang hoạt động (campus_id={campus_id})"
+            )
         
         # day_of_week format: mon, tue, wed, thu, fri, sat, sun
         day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
