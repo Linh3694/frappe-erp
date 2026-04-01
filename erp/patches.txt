@@ -16,3 +16,6 @@ erp.patches.v1_0.backfill_health_checkup_approval_status
 
 # Kỷ luật: phiên bản điểm vi phạm — copy bảng điểm cũ sang Point Version
 erp.patches.v1_0.migrate_discipline_violation_point_versions
+
+# Điểm danh lớp: dọn bản ghi trùng + thêm UNIQUE INDEX chống race condition
+erp.patches.v1_0.dedup_class_attendance_add_unique_index

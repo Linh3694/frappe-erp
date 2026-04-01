@@ -818,60 +818,34 @@ def save_class_attendance(items=None, overwrite=None):
 		if not valid_items:
 			return error_response(message="No valid attendance items", code="NO_VALID_ITEMS")
 
-		# Batch fetch all existing records in one query
-		student_ids = [item['student_id'] for item in valid_items]
-		class_ids = list(set([item['class_id'] for item in valid_items]))
-		dates = list(set([item['date'] for item in valid_items]))
-		periods = list(set([item['period'] for item in valid_items]))
-
-		existing_records = frappe.get_all(
-			"SIS Class Attendance",
-			filters={
-				"student_id": ["in", student_ids],
-				"class_id": ["in", class_ids],
-				"date": ["in", dates],
-				"period": ["in", periods]
-			},
-			fields=["name", "student_id", "class_id", "date", "period"]
-		)
-
-		# Create a lookup map for existing records
-		existing_map = {}
-		for rec in existing_records:
-			key = f"{rec['student_id']}|{rec['class_id']}|{rec['date']}|{rec['period']}"
-			existing_map[key] = rec['name']
-
-		# Process items with batch operations
+		# Upsert bằng INSERT … ON DUPLICATE KEY UPDATE
+		# Yêu cầu UNIQUE INDEX trên (student_id, class_id, date, period) — xem patch dedup_class_attendance_add_unique_index
+		now_dt = frappe.utils.now()
 		upserts = 0
 		updates = 0
 		for item in valid_items:
-			key = f"{item['student_id']}|{item['class_id']}|{item['date']}|{item['period']}"
-			
-			if key in existing_map:
-				# Update existing record
-				name = existing_map[key]
-				values = {
-					"status": item['status'],
-					"remarks": item['remarks'],
-					"student_code": item['student_code'],
-					"student_name": item['student_name']
-				}
-				if campus_id:
-					values["campus_id"] = campus_id
-				
-				if overwrite:
-					frappe.db.set_value("SIS Class Attendance", name, values, update_modified=True)
-				else:
-					# Partial update
-					frappe.db.set_value("SIS Class Attendance", name, {
-						"status": item['status'],
-						"remarks": item['remarks']
-					}, update_modified=True)
-				updates += 1
-			else:
-				# Create new record
-				doc = frappe.get_doc({
-					"doctype": "SIS Class Attendance",
+			name_val = frappe.generate_hash(length=10)
+			if overwrite:
+				frappe.db.sql("""
+					INSERT INTO `tabSIS Class Attendance`
+						(name, student_id, student_code, student_name, class_id, `date`, period,
+						 status, remarks, campus_id, recorded_by, owner, modified_by,
+						 creation, modified, docstatus)
+					VALUES
+						(%(name)s, %(student_id)s, %(student_code)s, %(student_name)s,
+						 %(class_id)s, %(date)s, %(period)s, %(status)s, %(remarks)s,
+						 %(campus_id)s, %(recorded_by)s, %(owner)s, %(owner)s,
+						 %(now)s, %(now)s, 0)
+					ON DUPLICATE KEY UPDATE
+						status       = VALUES(status),
+						remarks      = VALUES(remarks),
+						student_code = VALUES(student_code),
+						student_name = VALUES(student_name),
+						campus_id    = VALUES(campus_id),
+						modified     = VALUES(modified),
+						modified_by  = VALUES(modified_by)
+				""", {
+					"name": name_val,
 					"student_id": item['student_id'],
 					"student_code": item['student_code'],
 					"student_name": item['student_name'],
@@ -882,9 +856,41 @@ def save_class_attendance(items=None, overwrite=None):
 					"remarks": item['remarks'],
 					"campus_id": campus_id,
 					"recorded_by": user_id,
+					"owner": user_id,
+					"now": now_dt,
 				})
-				doc.insert()
-				upserts += 1
+			else:
+				frappe.db.sql("""
+					INSERT INTO `tabSIS Class Attendance`
+						(name, student_id, student_code, student_name, class_id, `date`, period,
+						 status, remarks, campus_id, recorded_by, owner, modified_by,
+						 creation, modified, docstatus)
+					VALUES
+						(%(name)s, %(student_id)s, %(student_code)s, %(student_name)s,
+						 %(class_id)s, %(date)s, %(period)s, %(status)s, %(remarks)s,
+						 %(campus_id)s, %(recorded_by)s, %(owner)s, %(owner)s,
+						 %(now)s, %(now)s, 0)
+					ON DUPLICATE KEY UPDATE
+						status   = VALUES(status),
+						remarks  = VALUES(remarks),
+						modified = VALUES(modified),
+						modified_by = VALUES(modified_by)
+				""", {
+					"name": name_val,
+					"student_id": item['student_id'],
+					"student_code": item['student_code'],
+					"student_name": item['student_name'],
+					"class_id": item['class_id'],
+					"date": item['date'],
+					"period": item['period'],
+					"status": item['status'],
+					"remarks": item['remarks'],
+					"campus_id": campus_id,
+					"recorded_by": user_id,
+					"owner": user_id,
+					"now": now_dt,
+				})
+			upserts += 1
 
 		frappe.db.commit()
 
