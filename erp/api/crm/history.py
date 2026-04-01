@@ -2,7 +2,9 @@
 CRM History API - Lich su chuyen buoc, thay doi thong tin, thong bao Parent Portal
 """
 
+import glob
 import json
+import os
 
 import frappe
 from frappe import _
@@ -189,6 +191,164 @@ def _notification_expanded_body(row, data, ntype):
     return _notification_row_body_text(row, data)
 
 
+def _crm_absolute_file_url(path):
+    """Chuyen duong dan file Frappe thanh URL day du (dung cho anh bia / attach)."""
+    if not path:
+        return ""
+    s = str(path).strip()
+    if not s:
+        return ""
+    if s.startswith("http://") or s.startswith("https://"):
+        return s
+    if s.startswith("/"):
+        return frappe.utils.get_url(s)
+    return frappe.utils.get_url("/files/" + s)
+
+
+def _crm_report_card_image_urls(report_id):
+    """
+    Lay danh sach URL anh bao cao hoc tap (cung logic thu muc voi parent_portal/report_card).
+    """
+    if not report_id or not frappe.db.exists("SIS Student Report Card", report_id):
+        return []
+    try:
+        report = frappe.get_doc("SIS Student Report Card", report_id, ignore_permissions=True)
+    except Exception:
+        return []
+    try:
+        student = frappe.get_doc("CRM Student", report.student_id, ignore_permissions=True)
+        student_code = student.student_code or report.student_id
+    except Exception:
+        student_code = report.student_id
+    school_year = (
+        getattr(report, "school_year", None)
+        or getattr(report, "academic_year", None)
+        or "unknown"
+    )
+    semester_part = (
+        getattr(report, "semester_part", None)
+        or getattr(report, "semester", None)
+        or "semester_1"
+    )
+    physical_path = frappe.get_site_path(
+        "public", "files", "reportcard", student_code, school_year, semester_part
+    )
+    folder_path = f"/files/reportcard/{student_code}/{school_year}/{semester_part}"
+    if not os.path.exists(physical_path):
+        return []
+    png_files = glob.glob(os.path.join(physical_path, "page_*.png"))
+    png_files.sort()
+    out = []
+    for file_path in png_files:
+        filename = os.path.basename(file_path)
+        rel = f"{folder_path}/{filename}"
+        out.append(frappe.utils.get_url(rel))
+    return out
+
+
+def _crm_health_examination_image_urls(exam_id):
+    """Lay URL anh tu bang con SIS Examination Image."""
+    if not exam_id or not frappe.db.exists("SIS Health Examination", exam_id):
+        return []
+    rows = frappe.get_all(
+        "SIS Examination Image",
+        filters={"parent": exam_id},
+        fields=["image"],
+        order_by="idx asc",
+    )
+    out = []
+    for r in rows:
+        img = (r.get("image") or "").strip()
+        if img:
+            out.append(_crm_absolute_file_url(img))
+    return out
+
+
+def _enrich_page_items_crm_history(page_items):
+    """
+    Bo sung cover_image, image_urls, content_html, reference_id cho tung muc trang hien tai.
+    Chi goi sau khi phan trang — tranh query nang cho toan bo lich su.
+    """
+    enriched = []
+    for item in page_items:
+        data = item.pop("_data", None) or {}
+        if not isinstance(data, dict):
+            data = {}
+        ntype = item.get("notification_type") or ""
+        cover_image = ""
+        image_urls = []
+        content_html = ""
+        reference_id = ""
+
+        try:
+            if ntype == "news" and data.get("article_id"):
+                reference_id = str(data["article_id"]).strip()
+                if reference_id and frappe.db.exists("SIS News Article", reference_id):
+                    art = frappe.db.get_value(
+                        "SIS News Article",
+                        reference_id,
+                        ["cover_image", "content_vn", "content_en"],
+                        as_dict=True,
+                    )
+                    if art:
+                        cover_image = _crm_absolute_file_url(art.get("cover_image"))
+                        content_html = (art.get("content_vn") or art.get("content_en") or "").strip()
+
+            elif ntype == "announcement" and data.get("announcement_id"):
+                reference_id = str(data["announcement_id"]).strip()
+                if reference_id and frappe.db.exists("SIS Announcement", reference_id):
+                    ann = frappe.db.get_value(
+                        "SIS Announcement",
+                        reference_id,
+                        ["content_vn", "content_en"],
+                        as_dict=True,
+                    )
+                    if ann:
+                        content_html = (ann.get("content_vn") or ann.get("content_en") or "").strip()
+
+            elif ntype == "report_card":
+                rid = data.get("report_id")
+                if isinstance(rid, list) and rid:
+                    rid = rid[0]
+                if rid:
+                    reference_id = str(rid).strip()
+                    image_urls = _crm_report_card_image_urls(reference_id)
+
+            elif ntype == "periodic_health_checkup":
+                ck = (data.get("checkup_name") or "").strip()
+                if ck:
+                    reference_id = ck
+                    try:
+                        from erp.api.erp_sis.health_checkup_images import (
+                            get_health_checkup_image_urls_for_checkup,
+                        )
+
+                        imgs = get_health_checkup_image_urls_for_checkup(ck)
+                        image_urls = [x.get("url") for x in imgs if x.get("url")]
+                    except Exception:
+                        frappe.logger().error(
+                            frappe.get_traceback(), "CRM periodic_health_checkup images"
+                        )
+
+            elif ntype == "health_examination":
+                exam_ids = data.get("exam_ids") or []
+                if isinstance(exam_ids, str):
+                    exam_ids = [exam_ids]
+                if exam_ids:
+                    eid = str(exam_ids[0]).strip()
+                    reference_id = eid
+                    image_urls = _crm_health_examination_image_urls(eid)
+        except Exception:
+            frappe.logger().error(frappe.get_traceback(), "CRM enrich notification detail")
+
+        item["cover_image"] = cover_image
+        item["image_urls"] = image_urls
+        item["content_html"] = content_html
+        item["reference_id"] = reference_id
+        enriched.append(item)
+    return enriched
+
+
 def _recipient_user_ids_from_email(email):
     """User.name co the la email hoac ten dang nhap."""
     if not email or not str(email).strip():
@@ -364,6 +524,8 @@ def get_parent_notification_history():
                 "recipient_user": row.get("recipient_user") or "",
                 "sender": row.get("sender") or "",
                 "sender_display": sender_display,
+                # Parse JSON data — dung enrich sau phan trang (khong tra ve client)
+                "_data": data,
             }
         )
 
@@ -374,6 +536,7 @@ def get_parent_notification_history():
 
     start = (page - 1) * page_size
     page_items = out[start : start + page_size]
+    page_items = _enrich_page_items_crm_history(page_items)
 
     return list_response(
         page_items,
