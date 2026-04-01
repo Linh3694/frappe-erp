@@ -1133,70 +1133,119 @@ def get_class_log_dashboard(date=None, campus_id=None):
             )
         
         class_ids = [c.name for c in classes]
-        
-        # Lấy tên GVCN qua User.full_name - OPTIMIZED: 1 query thay vì N queries
+
+        # --- BATCH QUERY OPTIMIZATION: 6 queries thay vì 700+ ---
+
+        # Q1: Tên GVCN
         teacher_ids = [c.homeroom_teacher for c in classes if c.homeroom_teacher]
         teacher_names = {}
         if teacher_ids:
-            teacher_data = frappe.db.sql("""
-                SELECT t.name, u.full_name
-                FROM `tabSIS Teacher` t
+            for td in frappe.db.sql("""
+                SELECT t.name, u.full_name FROM `tabSIS Teacher` t
                 INNER JOIN `tabUser` u ON t.user_id = u.name
-                WHERE t.name IN %(teacher_ids)s
-            """, {"teacher_ids": teacher_ids}, as_dict=True)
-            teacher_names = {t['name']: t['full_name'] for t in teacher_data}
-        
-        # Lấy timetable instance cho tất cả lớp - BATCH QUERY để tối ưu
+                WHERE t.name IN %(ids)s
+            """, {"ids": teacher_ids}, as_dict=True):
+                teacher_names[td['name']] = td['full_name']
+
+        # Q2: Timetable instances
         timetable_instances = frappe.db.sql("""
-            SELECT class_id, name 
-            FROM `tabSIS Timetable Instance`
-            WHERE class_id IN %(class_ids)s
-                AND start_date <= %(date)s
-                AND (end_date >= %(date)s OR end_date IS NULL)
-        """, {
-            "class_ids": class_ids,
-            "date": date_obj
-        }, as_dict=True)
-        
+            SELECT class_id, name FROM `tabSIS Timetable Instance`
+            WHERE class_id IN %(cids)s
+                AND start_date <= %(date)s AND (end_date >= %(date)s OR end_date IS NULL)
+        """, {"cids": class_ids, "date": date_obj}, as_dict=True)
         timetable_map = {ti['class_id']: ti['name'] for ti in timetable_instances}
-        
-        # Build kết quả - sử dụng helper functions để đảm bảo nhất quán với detail API
+        instance_names = [ti['name'] for ti in timetable_instances]
+
+        # day_of_week
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        dow = day_map.get(date_obj.weekday(), 'mon')
+
+        # Q3: Tất cả timetable rows cho tất cả lớp trong ngày (batch)
+        class_period_numbers = {}  # class_id -> set of period_numbers
+        if instance_names:
+            tt_rows = frappe.db.sql("""
+                SELECT ti.class_id, tc.period_name
+                FROM `tabSIS Timetable Instance Row` tr
+                INNER JOIN `tabSIS Timetable Instance` ti ON tr.parent = ti.name
+                INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+                WHERE ti.name IN %(inames)s
+                    AND tr.day_of_week = %(dow)s
+                    AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                    AND (tr.valid_from IS NULL OR tr.valid_from <= %(date)s)
+                    AND (tr.valid_to IS NULL OR tr.valid_to >= %(date)s)
+                GROUP BY ti.class_id, tc.period_name
+            """, {"inames": instance_names, "dow": dow, "date": date_obj}, as_dict=True)
+            for r in tt_rows:
+                pnum = _extract_period_number(r['period_name'])
+                class_period_numbers.setdefault(r['class_id'], set()).add(pnum)
+
+        # Q4: Tất cả class logs (batch) — đếm entered periods
+        entered_periods_map = {}  # class_id -> set of entered period_numbers
+        if class_ids:
+            all_logs = frappe.db.sql("""
+                SELECT cls.class_id, cls.period, cls.general_comment,
+                       cls.modified, cls.creation,
+                       COUNT(clst.name) AS student_log_count
+                FROM `tabSIS Class Log Subject` cls
+                LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                WHERE cls.class_id IN %(cids)s
+                    AND cls.log_date = %(date)s
+                    AND LOWER(cls.period) LIKE '%%tiết%%'
+                GROUP BY cls.name, cls.class_id, cls.period
+            """, {"cids": class_ids, "date": date_obj}, as_dict=True)
+            for lg in all_logs:
+                has_content = lg.get('general_comment') or lg.get('student_log_count', 0) > 0
+                if not has_content:
+                    continue
+                cid = lg['class_id']
+                pnum = _extract_period_number(lg['period'])
+                pnums = class_period_numbers.get(cid, set())
+                if pnum in pnums:
+                    entered_periods_map.setdefault(cid, set()).add(pnum)
+
+        # Q5: Tổng HS mỗi lớp (batch)
+        student_count_map = {}
+        if class_ids:
+            for r in frappe.db.sql("""
+                SELECT class_id, COUNT(*) AS cnt FROM `tabSIS Class Student`
+                WHERE class_id IN %(cids)s GROUP BY class_id
+            """, {"cids": class_ids}, as_dict=True):
+                student_count_map[r['class_id']] = r['cnt']
+
+        # Q6: Đếm distinct student đã gửi contact log (batch)
+        sent_count_map = {}
+        if class_ids:
+            for r in frappe.db.sql("""
+                SELECT cls.class_id, COUNT(DISTINCT clst.student_id) AS sent
+                FROM `tabSIS Class Log Subject` cls
+                INNER JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                WHERE cls.class_id IN %(cids)s
+                    AND cls.log_date = %(date)s
+                    AND clst.contact_log_status = 'Sent'
+                GROUP BY cls.class_id
+            """, {"cids": class_ids, "date": date_obj}, as_dict=True):
+                sent_count_map[r['class_id']] = r['sent']
+
+        # --- Build kết quả từ maps (không cần gọi query từng lớp) ---
         classes_result = []
         completed_count = 0
-        
+
         for cls in classes:
-            class_id = cls.name
-            timetable_instance = timetable_map.get(class_id)
-            
-            # Sử dụng helper để tính số liệu periods (đồng bộ với detail API)
-            periods_stats = _calculate_class_periods_stats(
-                class_id, 
-                date_obj, 
-                timetable_instance
-            )
-            
-            # Sử dụng helper để tính số liệu contact log (đồng bộ với detail API)
-            contact_stats = _calculate_contact_log_stats(class_id, date_obj, include_students_detail=False)
-            
-            total_study = periods_stats["total_periods"]
-            entered_study = periods_stats["entered_periods"]
-            total_students = contact_stats["total_students"]
-            students_sent = contact_stats["sent_count"]
-            
-            # Class log hoàn thành khi tất cả tiết Study đã nhập
+            cid = cls.name
+            total_study = len(class_period_numbers.get(cid, set()))
+            entered_study = len(entered_periods_map.get(cid, set()))
+            total_students = student_count_map.get(cid, 0)
+            students_sent = sent_count_map.get(cid, 0)
+
             class_log_complete = (total_study > 0 and entered_study >= total_study)
-            
-            # Contact log hoàn thành khi 100% học sinh đã được gửi tin nhắn
             contact_log_complete = (total_students > 0 and students_sent >= total_students)
-            
-            # Lớp hoàn thiện khi cả class log và contact log đều hoàn thành
             is_completed = class_log_complete and contact_log_complete
-            
+
             if is_completed:
                 completed_count += 1
-            
+
             classes_result.append({
-                "class_id": class_id,
+                "class_id": cid,
                 "class_title": cls.title,
                 "homeroom_teacher_id": cls.homeroom_teacher,
                 "homeroom_teacher_name": teacher_names.get(cls.homeroom_teacher),
