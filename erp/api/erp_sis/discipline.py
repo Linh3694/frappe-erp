@@ -7,7 +7,7 @@ Chỉ có 1 trường: title (tiêu đề)
 """
 
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 
 import frappe
 from erp.utils.api_response import success_response, error_response, paginated_response
@@ -766,7 +766,32 @@ def get_discipline_violations(campus: str = None, include_points: str = None):
                 v["student_points"] = student_rows
                 v["class_points"] = class_rows
 
-        # Thêm classification_title cho mỗi violation
+        # Phiên bản điểm mới nhất (effective_date giảm dần, rồi modified — khớp get_violation_point_versions)
+        violation_names = [v["name"] for v in violations]
+        latest_labels = {}
+        if violation_names and frappe.db.table_exists("SIS Discipline Violation Point Version"):
+            pvs = frappe.get_all(
+                "SIS Discipline Violation Point Version",
+                filters={"violation": ["in", violation_names]},
+                fields=["violation", "label", "effective_date", "modified"],
+                ignore_permissions=True,
+            )
+            buckets = defaultdict(list)
+            for row in pvs:
+                buckets[row["violation"]].append(row)
+            for vid, rows in buckets.items():
+                if not rows:
+                    continue
+                best = max(
+                    rows,
+                    key=lambda r: (
+                        str(r.get("effective_date") or ""),
+                        str(r.get("modified") or ""),
+                    ),
+                )
+                latest_labels[vid] = (best.get("label") or "").strip()
+
+        # Thêm classification_title + nhãn phiên bản điểm mới nhất cho mỗi violation
         for v in violations:
             if v.get("classification"):
                 try:
@@ -779,6 +804,7 @@ def get_discipline_violations(campus: str = None, include_points: str = None):
                     v["classification_title"] = v["classification"]
             else:
                 v["classification_title"] = ""
+            v["latest_point_version_label"] = latest_labels.get(v["name"]) or ""
 
         return success_response(
             data={"data": violations, "total": len(violations)},
