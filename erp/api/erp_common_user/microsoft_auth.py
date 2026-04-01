@@ -672,46 +672,43 @@ def create_or_update_microsoft_user(user_data):
 
 
 def find_or_create_frappe_user(ms_user, user_data):
-    """Find existing Frappe user or create new one based on Microsoft data"""
+    """Find existing Frappe user or create new one based on Microsoft data.
+
+    Luôn update kể cả user đang disabled để webhook có thể tự động
+    re-enable khi user được thêm vào allowed group trên Azure AD.
+    """
     try:
         local_user = None
         
-        # 1. First try to find by existing mapping
+        # 1. Tìm theo mapping đã lưu
         if hasattr(ms_user, 'mapped_user_id') and ms_user.mapped_user_id:
             try:
                 local_user = frappe.get_doc("User", ms_user.mapped_user_id)
-                if local_user.enabled:
-                    # Update existing user
-                    update_frappe_user(local_user, ms_user, user_data)
-                    return local_user
+                update_frappe_user(local_user, ms_user, user_data)
+                return local_user
             except frappe.DoesNotExistError:
                 pass
         
-        # 2. Try to find by email
+        # 2. Tìm theo email
         email = user_data.get("mail") or user_data.get("userPrincipalName")
         if email:
             existing_user = frappe.db.get_value("User", {"email": email})
             if existing_user:
                 local_user = frappe.get_doc("User", existing_user)
-                if local_user.enabled:
-                    # Update existing user
-                    update_frappe_user(local_user, ms_user, user_data)
-                    return local_user
+                update_frappe_user(local_user, ms_user, user_data)
+                return local_user
         
-        # 3. Try to find by userPrincipalName if different from email
+        # 3. Tìm theo userPrincipalName nếu khác email
         upn = user_data.get("userPrincipalName")
         if upn and upn != email:
             existing_user = frappe.db.get_value("User", {"email": upn})
             if existing_user:
                 local_user = frappe.get_doc("User", existing_user)
-                if local_user.enabled:
-                    # Update existing user
-                    update_frappe_user(local_user, ms_user, user_data)
-                    return local_user
+                update_frappe_user(local_user, ms_user, user_data)
+                return local_user
         
-        # 4. Create new Frappe user if doesn't exist
+        # 4. Tạo mới nếu chưa tồn tại
         if not local_user and email:
-            # Create Frappe user directly - no need to check ERP User Profile
             local_user = create_frappe_user(ms_user, user_data)
             return local_user
             
