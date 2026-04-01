@@ -101,6 +101,28 @@ _PARENT_NOTIFICATION_TYPES = (
     "periodic_health_checkup",
 )
 
+# Nhan loai tieng Viet — dung cho tim kiem
+_NOTIF_TYPE_LABELS_VI = {
+    "news": "tin tức",
+    "announcement": "thông báo",
+    "post": "bài đăng",
+    "info": "thông tin",
+    "reminder": "nhắc nhở",
+    "alert": "cảnh báo",
+    "report_card": "báo cáo học tập",
+    "contact_log": "sổ liên lạc",
+    "leave": "xin nghỉ",
+    "attendance": "điểm danh",
+    "health_examination": "khám sức khỏe",
+    "periodic_health_checkup": "khám sk định kỳ",
+}
+
+
+def _notif_type_label_vi(ntype):
+    if not ntype:
+        return ""
+    return _NOTIF_TYPE_LABELS_VI.get(ntype, str(ntype).replace("_", " "))
+
 
 def _parse_bilingual_text(raw):
     """Lay chuoi tieng Viet (hoac EN) tu title/message dang JSON hoac plain."""
@@ -127,6 +149,13 @@ def _recipient_user_ids_from_email(email):
     email = str(email).strip()
     out = []
     uid = frappe.db.get_value("User", {"email": email}, "name")
+    if not uid:
+        row = frappe.db.sql(
+            "SELECT name FROM `tabUser` WHERE LOWER(email)=LOWER(%s) LIMIT 1",
+            (email,),
+        )
+        if row:
+            uid = row[0][0]
     if uid:
         out.append(uid)
     if frappe.db.exists("User", email):
@@ -139,6 +168,12 @@ def get_parent_notification_history():
     """
     Tom tat thong bao/tin da gui den guardian (User Parent Portal) lien quan ho so CRM.
     Loc theo hoc sinh lien ket (linked_student) neu co — trung khop student_id trong data JSON.
+
+    Query params:
+        lead_name (bat buoc)
+        page: trang bat dau 1 (mac dinh 1)
+        page_size: so muc/trang (mac dinh 10, toi da 50)
+        search: loc theo tieu de, noi dung, loai (khong phan biet hoa thuong)
     """
     check_crm_permission()
 
@@ -169,7 +204,30 @@ def get_parent_notification_history():
             frappe.logger().error(frappe.get_traceback(), "CRM get_parent_notification_history guardians")
 
     if not recipient_set:
-        return list_response([])
+        return list_response(
+            [],
+            meta={
+                "total": 0,
+                "page": 1,
+                "page_size": 10,
+                "total_pages": 1,
+            },
+        )
+
+    try:
+        page = int(frappe.request.args.get("page") or 1)
+    except Exception:
+        page = 1
+    page = max(1, page)
+
+    try:
+        page_size = int(frappe.request.args.get("page_size") or 10)
+    except Exception:
+        page_size = 10
+    page_size = min(max(1, page_size), 50)
+
+    search_raw = (frappe.request.args.get("search") or "").strip()
+    q = search_raw.lower()
 
     rows = frappe.get_all(
         "ERP Notification",
@@ -190,14 +248,13 @@ def get_parent_notification_history():
             "sent_at",
         ],
         order_by="creation desc",
-        limit_page_length=300,
+        limit_page_length=2000,
     )
 
     rows.sort(
         key=lambda r: str(r.get("event_timestamp") or r.get("sent_at") or r.get("creation") or ""),
         reverse=True,
     )
-    rows = rows[:200]
 
     student_keys = set()
     if linked_student:
@@ -224,6 +281,7 @@ def get_parent_notification_history():
         title_vi = _parse_bilingual_text(row.get("title"))
         msg_raw = _parse_bilingual_text(row.get("message"))
         msg_preview = (msg_raw[:240] + "…") if len(msg_raw) > 240 else msg_raw
+        ntype = row.get("notification_type") or ""
 
         ts = row.get("event_timestamp") or row.get("sent_at") or row.get("creation")
         ts_str = str(ts) if ts else ""
@@ -232,11 +290,23 @@ def get_parent_notification_history():
         if row.get("sender"):
             sender_display = frappe.db.get_value("User", row["sender"], "full_name") or row["sender"]
 
+        if q:
+            blob = " ".join(
+                [
+                    title_vi,
+                    msg_raw,
+                    ntype,
+                    _notif_type_label_vi(ntype),
+                ]
+            ).lower()
+            if q not in blob:
+                continue
+
         out.append(
             {
                 "name": row["name"],
-                "notification_type": row.get("notification_type") or "",
-                "title": title_vi or row.get("notification_type") or "Thông báo",
+                "notification_type": ntype,
+                "title": title_vi or ntype or "Thông báo",
                 "message_preview": msg_preview,
                 "sent_at": ts_str,
                 "recipient_user": row.get("recipient_user") or "",
@@ -245,4 +315,20 @@ def get_parent_notification_history():
             }
         )
 
-    return list_response(out)
+    total = len(out)
+    total_pages = max(1, (total + page_size - 1) // page_size) if total else 1
+    if page > total_pages:
+        page = total_pages
+
+    start = (page - 1) * page_size
+    page_items = out[start : start + page_size]
+
+    return list_response(
+        page_items,
+        meta={
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        },
+    )
