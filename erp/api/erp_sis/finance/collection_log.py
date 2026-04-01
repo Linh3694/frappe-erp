@@ -86,7 +86,8 @@ def get_collection_log_stats_for_order_students(order_student_ids):
             GROUP BY order_student_id
         ) t ON cl.order_student_id = t.order_student_id AND cl.creation = t.mc
         """,
-        tuple(order_student_ids) + tuple(order_student_ids),
+        # Chỉ một IN ({placeholders}) trong subquery → đúng N đối số %s (trước đây nhân đôi tuple gây lỗi format)
+        tuple(order_student_ids),
         as_dict=True,
     )
 
