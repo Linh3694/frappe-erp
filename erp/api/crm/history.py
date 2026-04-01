@@ -68,9 +68,12 @@ def get_change_history():
             import json
             version_data = json.loads(v.get("data", "{}"))
             changed_fields = version_data.get("changed", [])
+            owner = v["owner"]
+            full_name = frappe.db.get_value("User", owner, "full_name") if owner else None
             changes.append({
                 "version": v["name"],
-                "changed_by": v["owner"],
+                "changed_by": owner,
+                "changed_by_full_name": full_name or owner,
                 "changed_at": str(v["creation"]),
                 "changes": changed_fields
             })
