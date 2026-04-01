@@ -16,6 +16,7 @@ from erp.utils.api_response import (
 )
 
 from .utils import _check_admin_permission
+from .collection_log import get_collection_log_stats_for_order_students
 
 
 @frappe.whitelist()
@@ -574,7 +575,15 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
                     student['milestone_amounts'] = {}
             else:
                 student['milestone_amounts'] = {}
-        
+
+        # Nhật ký thu phí: số lượng + bản ghi mới nhất (badge / xem nhanh)
+        os_ids = [s["name"] for s in students]
+        count_map, latest_map = get_collection_log_stats_for_order_students(os_ids)
+        for student in students:
+            cid = student["name"]
+            student["collection_log_count"] = count_map.get(cid, 0)
+            student["latest_collection_log"] = latest_map.get(cid)
+
         return success_response(
             data={
                 "items": students,

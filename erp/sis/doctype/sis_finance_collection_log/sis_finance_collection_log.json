@@ -1,0 +1,160 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "format:SIS-FIN-COL-{#####}",
+ "beta": 0,
+ "creation": "2026-04-01 00:00:00.000000",
+ "custom": 0,
+ "description": "Nhật ký thu phí / liên hệ nhắc đóng tiền theo từng học sinh trong đơn hàng",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_basic",
+  "order_student_id",
+  "activity_type",
+  "outcome",
+  "column_break_1",
+  "follow_up_date",
+  "logged_by",
+  "logged_by_name",
+  "section_content",
+  "content"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_basic",
+   "fieldtype": "Section Break",
+   "label": "Thông tin"
+  },
+  {
+   "fieldname": "order_student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh trong đơn",
+   "options": "SIS Finance Order Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "activity_type",
+   "fieldtype": "Select",
+   "label": "Hình thức liên hệ",
+   "options": "phone_call\nemail\nzalo\nin_person\ndebit_note_sent\nother",
+   "default": "other",
+   "reqd": 0,
+   "hidden": 1
+  },
+  {
+   "fieldname": "outcome",
+   "fieldtype": "Select",
+   "label": "Kết quả",
+   "options": "no_answer\nwill_pay\nbank_error\npartial_payment\nrefused\nresolved\nneed_follow_up\nother",
+   "default": "other",
+   "reqd": 0,
+   "hidden": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "follow_up_date",
+   "fieldtype": "Date",
+   "label": "Hẹn liên hệ lại",
+   "hidden": 1
+  },
+  {
+   "fieldname": "logged_by",
+   "fieldtype": "Link",
+   "label": "Người ghi",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "logged_by_name",
+   "fieldtype": "Data",
+   "label": "Tên người ghi",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_content",
+   "fieldtype": "Section Break",
+   "label": "Nội dung"
+  },
+  {
+   "fieldname": "content",
+   "fieldtype": "Small Text",
+   "label": "Nội dung chi tiết",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-04-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Finance Collection Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Registrar",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 0,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

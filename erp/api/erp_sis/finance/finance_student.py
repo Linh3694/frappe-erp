@@ -14,6 +14,7 @@ from erp.utils.api_response import (
 )
 
 from .utils import _check_admin_permission
+from .collection_log import get_collection_log_stats_for_order_students
 
 
 @frappe.whitelist()
@@ -226,7 +227,16 @@ def get_student_orders(finance_student_id=None):
                 "payment_status": payment_status,
                 "is_active": order_doc.is_active
             })
-        
+
+        # Nhật ký thu phí (số lượng + mới nhất) cho từng dòng order
+        if orders:
+            oids = [o["order_student_id"] for o in orders]
+            count_map, latest_map = get_collection_log_stats_for_order_students(oids)
+            for o in orders:
+                cid = o["order_student_id"]
+                o["collection_log_count"] = count_map.get(cid, 0)
+                o["latest_collection_log"] = latest_map.get(cid)
+
         # Tính tổng
         total_amount = sum(o['total_amount'] for o in orders)
         total_paid = sum(o['paid_amount'] for o in orders)

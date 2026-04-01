@@ -100,6 +100,15 @@ from .student_document import (
     bulk_upload_debit_notes
 )
 
+# Nhật ký thu phí (Collection Log)
+from .collection_log import (
+    get_collection_logs,
+    create_collection_log,
+    update_collection_log,
+    delete_collection_log,
+    get_collection_log_count,
+)
+
 # Export tất cả functions để giữ backward compatibility
 __all__ = [
     # Finance Year
@@ -173,4 +182,11 @@ __all__ = [
     'get_student_documents',
     'delete_student_document',
     'bulk_upload_debit_notes',
+
+    # Collection Log (nhật ký thu phí)
+    'get_collection_logs',
+    'create_collection_log',
+    'update_collection_log',
+    'delete_collection_log',
+    'get_collection_log_count',
 ]
