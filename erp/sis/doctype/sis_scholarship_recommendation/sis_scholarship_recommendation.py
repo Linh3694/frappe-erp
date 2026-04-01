@@ -76,7 +76,7 @@ class SISScholarshipRecommendation(Document):
 		
 		self.status = "Submitted"
 		self.submitted_at = now()
-		self.save()
+		self.save(ignore_permissions=True)
 	
 	def deny_recommendation(self, reason):
 		"""
@@ -90,4 +90,4 @@ class SISScholarshipRecommendation(Document):
 		self.status = "Denied"
 		self.denied_reason = reason
 		self.denied_at = now()
-		self.save()
+		self.save(ignore_permissions=True)

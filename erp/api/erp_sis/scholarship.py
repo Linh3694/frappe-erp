@@ -1927,12 +1927,12 @@ def update_recommendation():
             rec.average_rating_score = average_rating_score
         
         # Cập nhật thời gian
-        rec.submitted_at = now()
-        
-        rec.save()
-        frappe.db.commit()
-        
-        logs.append(f"Đã cập nhật thư giới thiệu: {recommendation_id}")
+		rec.submitted_at = now()
+		
+		rec.save(ignore_permissions=True)
+		frappe.db.commit()
+		
+		logs.append(f"Đã cập nhật thư giới thiệu: {recommendation_id}")
         
         return success_response(
             data={"name": rec.name, "status": rec.status},
