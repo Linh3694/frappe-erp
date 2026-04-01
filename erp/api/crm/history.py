@@ -308,6 +308,8 @@ def get_parent_notification_history():
                 "notification_type": ntype,
                 "title": title_vi or ntype or "Thông báo",
                 "message_preview": msg_preview,
+                # Toan bo noi dung — FE dung khi mo rong (preview van cat 240 ky tu)
+                "message_full": msg_raw,
                 "sent_at": ts_str,
                 "recipient_user": row.get("recipient_user") or "",
                 "sender": row.get("sender") or "",
