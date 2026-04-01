@@ -9,14 +9,10 @@ class SISStudentHealthCheckup(Document):
     """
     Doctype lưu kết quả khám sức khoẻ định kỳ của học sinh.
     Mỗi học sinh tối đa 2 record/năm học: đầu năh và cuối năh (unique: student_id + school_year_id + checkup_phase).
+
+    BMI: lưu đúng giá trị nhập (form / Excel / máy InBody); không tự tính từ cao/cân để không ghi đè số user nhập.
     """
-    
-    def before_save(self):
-        # Tự động tính BMI nếu có chiều cao và cân nặng
-        if self.height and self.weight and self.height > 0:
-            height_m = self.height / 100  # Convert cm to m
-            self.bmi = round(self.weight / (height_m ** 2), 2)
-    
+
     def validate(self):
         # Trùng theo (student_id, school_year_id, checkup_phase)
         if not self.checkup_phase:

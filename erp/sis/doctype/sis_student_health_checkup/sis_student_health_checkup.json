@@ -80,6 +80,12 @@
   "notes_section",
   "doctor_recommendation",
   "reference_notes",
+  "end_year_comment_section",
+  "end_comment_height",
+  "end_comment_weight",
+  "column_break_end_nx_1",
+  "end_comment_bmi",
+  "end_comment_eye",
   "workflow_section",
   "approval_status",
   "column_break_wf_1",
@@ -503,6 +509,36 @@
    "fieldname": "reference_notes",
    "fieldtype": "Text",
    "label": "Tham chiếu"
+  },
+  {
+   "fieldname": "end_year_comment_section",
+   "fieldtype": "Section Break",
+   "label": "Nhận xét chung (cuối năm học)"
+  },
+  {
+   "description": "Riêng đợt cuối năm — không dùng chung với Tình trạng bệnh tật (đầu năm)",
+   "fieldname": "end_comment_height",
+   "fieldtype": "Text",
+   "label": "NX chung — Chiều cao"
+  },
+  {
+   "fieldname": "end_comment_weight",
+   "fieldtype": "Text",
+   "label": "NX chung — Cân nặng"
+  },
+  {
+   "fieldname": "column_break_end_nx_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "end_comment_bmi",
+   "fieldtype": "Text",
+   "label": "NX chung — BMI"
+  },
+  {
+   "fieldname": "end_comment_eye",
+   "fieldtype": "Text",
+   "label": "NX chung — Mắt"
   },
   {
    "fieldname": "workflow_section",

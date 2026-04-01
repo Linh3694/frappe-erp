@@ -14,6 +14,9 @@ erp.patches.v1_0.backfill_health_checkup_phase
 # Khám SK định kỳ: phê duyệt — bản ghi cũ coi như đã published
 erp.patches.v1_0.backfill_health_checkup_approval_status
 
+# Khám SK cuối năm: tách 4 field nhận xét chung (end_comment_*)
+erp.patches.v1_0.backfill_end_year_general_comments
+
 # Kỷ luật: phiên bản điểm vi phạm — copy bảng điểm cũ sang Point Version
 erp.patches.v1_0.migrate_discipline_violation_point_versions
 

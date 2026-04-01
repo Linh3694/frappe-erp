@@ -1363,6 +1363,11 @@ def update_violation_point_version(
     try:
         data = _get_request_data()
         name = name or data.get("name")
+        # Gộp từ JSON body — POST /api/method thường không truyền đủ vào tham số hàm whitelist
+        label = label if label is not None else data.get("label")
+        effective_date = effective_date if effective_date is not None else data.get("effective_date")
+        student_points = student_points if student_points is not None else data.get("student_points")
+        class_points = class_points if class_points is not None else data.get("class_points")
         if not name:
             return error_response(
                 message="name là bắt buộc",
@@ -1390,6 +1395,7 @@ def update_violation_point_version(
             _fill_violation_point_tables(doc, sp, cp)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
+        doc.reload()
         return success_response(
             data={"name": doc.name, "label": doc.label},
             message="Cập nhật phiên bản điểm thành công",

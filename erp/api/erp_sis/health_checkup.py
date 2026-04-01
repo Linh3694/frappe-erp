@@ -95,9 +95,33 @@ def _format_date_iso(d):
         return ""
 
 
+def _normalize_end_year_import_row(row):
+    """
+    Import cuối năm: map 4 cột mới end_comment_*; file/API cũ gửi disease_condition…
+    thì copy sang end_comment_* rồi bỏ key cũ để không ghi nhầm vào field đầu năm.
+    """
+    if not row:
+        return
+
+    def _has_text(v):
+        return v is not None and str(v).strip() != ""
+
+    if not _has_text(row.get("end_comment_height")) and _has_text(row.get("disease_condition")):
+        row["end_comment_height"] = row["disease_condition"]
+    if not _has_text(row.get("end_comment_weight")) and _has_text(row.get("health_classification")):
+        row["end_comment_weight"] = row["health_classification"]
+    if not _has_text(row.get("end_comment_bmi")) and _has_text(row.get("doctor_recommendation")):
+        row["end_comment_bmi"] = row["doctor_recommendation"]
+    if not _has_text(row.get("end_comment_eye")) and _has_text(row.get("reference_notes")):
+        row["end_comment_eye"] = row["reference_notes"]
+    for k in ("disease_condition", "health_classification", "doctor_recommendation", "reference_notes"):
+        row.pop(k, None)
+
+
 def _parse_import_checkup_date(val):
     """
     Parse ngày kiểm tra từ import (chuỗi yyyy-mm-dd, hoặc số serial Excel).
+    Serial Excel: dùng openpyxl.from_excel — khớp Excel/SheetJS, tránh lệch 1 ngày.
     Trả date object hoặc None nếu rỗng / không parse được.
     """
     if val is None:
@@ -105,10 +129,13 @@ def _parse_import_checkup_date(val):
     if isinstance(val, str) and not val.strip():
         return None
     if isinstance(val, (int, float)):
-        # Serial Excel (epoch 1899-12-30)
         try:
-            excel_epoch = datetime(1899, 12, 30)
-            return (excel_epoch + timedelta(days=float(val))).date()
+            from openpyxl.utils.datetime import from_excel
+
+            dt = from_excel(float(val))
+            if dt is None:
+                return None
+            return dt.date() if isinstance(dt, datetime) else getdate(dt)
         except Exception:
             return None
     try:
@@ -724,7 +751,12 @@ def save_student_health_checkup(student_id=None, school_year_id=None, data=None)
             "height_evaluation", "bmi_evaluation",
             "disease_condition", "health_classification",
             # Notes
-            "doctor_recommendation", "reference_notes"
+            "doctor_recommendation", "reference_notes",
+            # Nhận xét chung cuối năm (tách biệt với 4 field đầu năm)
+            "end_comment_height",
+            "end_comment_weight",
+            "end_comment_bmi",
+            "end_comment_eye",
         ]
         
         if existing:
@@ -872,7 +904,11 @@ def export_health_checkup(school_year_id=None):
                     shc.disease_condition,
                     shc.health_classification,
                     shc.doctor_recommendation,
-                    shc.reference_notes
+                    shc.reference_notes,
+                    shc.end_comment_height,
+                    shc.end_comment_weight,
+                    shc.end_comment_bmi,
+                    shc.end_comment_eye
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
@@ -935,7 +971,11 @@ def export_health_checkup(school_year_id=None):
                     NULL as disease_condition,
                     NULL as health_classification,
                     NULL as doctor_recommendation,
-                    NULL as reference_notes
+                    NULL as reference_notes,
+                    NULL as end_comment_height,
+                    NULL as end_comment_weight,
+                    NULL as end_comment_bmi,
+                    NULL as end_comment_eye
                 FROM `tabSIS Class Student` cs
                 INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
                 INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
@@ -1058,8 +1098,10 @@ def import_health_checkup(school_year_id=None, data=None):
             "left_eye_no_glasses", "right_eye_no_glasses",
             "left_eye_with_glasses", "right_eye_with_glasses",
             "refractive_error",
-            "disease_condition", "health_classification",
-            "doctor_recommendation", "reference_notes",
+            "end_comment_height",
+            "end_comment_weight",
+            "end_comment_bmi",
+            "end_comment_eye",
         ]
         allowed_fields = _import_allowed_end if checkup_phase == "end" else _import_allowed_beginning
         
@@ -1070,6 +1112,8 @@ def import_health_checkup(school_year_id=None, data=None):
         for idx, row in enumerate(data):
             try:
                 row = dict(row)
+                if checkup_phase == "end":
+                    _normalize_end_year_import_row(row)
                 # Ngày kiểm tra: parse từ Excel (chuỗi hoặc serial)
                 cd_raw = row.pop("checkup_date", None)
                 parsed_cd = None
