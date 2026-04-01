@@ -1631,6 +1631,283 @@ def get_subject_teachers_dashboard(date=None, campus_id=None):
 
 
 @frappe.whitelist(allow_guest=False)
+def export_subject_teacher_report(start_date=None, end_date=None, campus_id=None):
+    """
+    Xuất báo cáo GV bộ môn theo khoảng ngày (batch query tối ưu).
+    Trả về danh sách flat cho FE build Excel: mỗi item = 1 tiết/GV/ngày.
+    """
+    try:
+        if not start_date:
+            start_date = frappe.request.args.get('start_date')
+        if not end_date:
+            end_date = frappe.request.args.get('end_date')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+
+        if not start_date or not end_date:
+            return error_response(message="Thiếu start_date hoặc end_date", code="MISSING_PARAMS")
+
+        start_obj = frappe.utils.getdate(start_date)
+        end_obj = frappe.utils.getdate(end_date)
+
+        if not campus_id:
+            try:
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
+            except Exception:
+                pass
+
+        school_year_filters = {"is_enable": 1}
+        if campus_id:
+            school_year_filters["campus_id"] = campus_id
+        school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+
+        # 1) Batch query: tất cả tiết dạy trong khoảng ngày (chỉ Regular, bỏ tiểu học)
+        #    Bao gồm valid_from/valid_to để lọc chính xác theo từng ngày trong Python
+        scheduled = frappe.db.sql("""
+            SELECT
+                tr.day_of_week,
+                COALESCE(trt.teacher_id, tr.teacher_1_id) AS teacher_id,
+                ti.class_id,
+                c.title AS class_title,
+                eg.education_stage_id,
+                tc.period_name,
+                tr.valid_from,
+                tr.valid_to,
+                MAX(COALESCE(ts.title_vn, sub.title)) AS subject_name
+            FROM `tabSIS Timetable Instance Row` tr
+            INNER JOIN `tabSIS Timetable Instance` ti ON tr.parent = ti.name
+            INNER JOIN `tabSIS Timetable Column` tc ON tr.timetable_column_id = tc.name
+            INNER JOIN `tabSIS Class` c ON ti.class_id = c.name
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+            LEFT JOIN `tabSIS Subject` sub ON tr.subject_id = sub.name
+            LEFT JOIN `tabSIS Timetable Subject` ts ON sub.timetable_subject_id = ts.name
+            LEFT JOIN `tabSIS Timetable Instance Row Teacher` trt ON trt.parent = tr.name
+                AND trt.idx = (SELECT MIN(idx) FROM `tabSIS Timetable Instance Row Teacher` WHERE parent = tr.name)
+            WHERE ti.start_date <= %(end_date)s
+                AND (ti.end_date >= %(start_date)s OR ti.end_date IS NULL)
+                AND LOWER(tc.period_name) LIKE '%%tiết%%'
+                AND c.class_type = 'Regular'
+                AND c.school_year_id = %(school_year)s
+                AND (eg.education_stage_id IS NULL OR eg.education_stage_id != 'EDU-STAGE-00001')
+                AND NOT (c.title REGEXP '^Lớp [1-5][^0-9]' OR c.title REGEXP '^Lớp [1-5]$')
+                {campus_filter}
+            GROUP BY tr.day_of_week, COALESCE(trt.teacher_id, tr.teacher_1_id),
+                     ti.class_id, tc.period_name, c.title, eg.education_stage_id,
+                     tr.valid_from, tr.valid_to
+        """.format(
+            campus_filter="AND c.campus_id = %(campus_id)s" if campus_id else ""
+        ), {
+            "start_date": start_obj, "end_date": end_obj,
+            "school_year": school_year, "campus_id": campus_id
+        }, as_dict=True)
+
+        if not scheduled:
+            return success_response(data={"rows": []}, message="Không có tiết dạy")
+
+        # Tên GV batch
+        teacher_ids = list(set(s['teacher_id'] for s in scheduled if s.get('teacher_id')))
+        teacher_names = {}
+        if teacher_ids:
+            for td in frappe.db.sql("""
+                SELECT t.name, u.full_name FROM `tabSIS Teacher` t
+                INNER JOIN `tabUser` u ON t.user_id = u.name
+                WHERE t.name IN %(ids)s
+            """, {"ids": teacher_ids}, as_dict=True):
+                teacher_names[td['name']] = td['full_name']
+
+        # 2) Batch class logs cho khoảng ngày
+        class_ids = list(set(s['class_id'] for s in scheduled))
+        logs_map = {}
+        if class_ids:
+            logs = frappe.db.sql("""
+                SELECT cls.class_id, cls.log_date, cls.period,
+                       cls.general_comment, cls.modified, cls.creation,
+                       COUNT(clst.name) AS student_log_count
+                FROM `tabSIS Class Log Subject` cls
+                LEFT JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+                WHERE cls.class_id IN %(cids)s
+                    AND cls.log_date BETWEEN %(s)s AND %(e)s
+                    AND LOWER(cls.period) LIKE '%%tiết%%'
+                GROUP BY cls.name, cls.class_id, cls.log_date, cls.period
+            """, {"cids": class_ids, "s": start_obj, "e": end_obj}, as_dict=True)
+            for lg in logs:
+                has_content = lg.get('general_comment') or lg.get('student_log_count', 0) > 0
+                if has_content:
+                    pnum = _extract_period_number(lg['period'])
+                    key = (str(lg['log_date']), lg['class_id'], pnum)
+                    logs_map[key] = lg
+
+        # 3) Sinh kết quả: duyệt từng ngày trong khoảng
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+
+        # Nhóm scheduled theo day_of_week
+        sched_by_dow = {}
+        for s in scheduled:
+            dow = s['day_of_week']
+            sched_by_dow.setdefault(dow, []).append(s)
+
+        rows = []
+        current = start_obj
+        while current <= end_obj:
+            date_str = str(current)
+            dow = day_map.get(current.weekday(), 'mon')
+            day_periods = sched_by_dow.get(dow, [])
+
+            for p in day_periods:
+                tid = p.get('teacher_id')
+                if not tid:
+                    continue
+                # Kiểm tra valid_from / valid_to cho từng ngày cụ thể
+                vf = p.get('valid_from')
+                vt = p.get('valid_to')
+                if vf and frappe.utils.getdate(vf) > current:
+                    continue
+                if vt and frappe.utils.getdate(vt) < current:
+                    continue
+
+                pnum = _extract_period_number(p['period_name'])
+                lg = logs_map.get((date_str, p['class_id'], pnum))
+                if lg:
+                    status = "updated" if lg.get('modified') != lg.get('creation') else "entered"
+                else:
+                    status = "not_entered"
+
+                rows.append({
+                    "date": date_str,
+                    "teacher_id": tid,
+                    "teacher_name": teacher_names.get(tid, ""),
+                    "class_title": p['class_title'],
+                    "period": p['period_name'],
+                    "subject_name": p.get('subject_name') or "",
+                    "status": status,
+                })
+
+            current += timedelta(days=1)
+
+        return success_response(data={"rows": rows}, message="OK")
+
+    except Exception as e:
+        frappe.log_error(f"export_subject_teacher_report error: {str(e)}")
+        return error_response(message=str(e), code="EXPORT_SUBJECT_TEACHER_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def export_homeroom_teacher_report(start_date=None, end_date=None, campus_id=None):
+    """
+    Xuất báo cáo GVCN theo khoảng ngày (batch query tối ưu).
+    Trả về danh sách flat: mỗi item = 1 lớp/ngày (có homeroom_teacher).
+    """
+    try:
+        if not start_date:
+            start_date = frappe.request.args.get('start_date')
+        if not end_date:
+            end_date = frappe.request.args.get('end_date')
+        if not campus_id:
+            campus_id = frappe.request.args.get('campus_id')
+
+        if not start_date or not end_date:
+            return error_response(message="Thiếu start_date hoặc end_date", code="MISSING_PARAMS")
+
+        start_obj = frappe.utils.getdate(start_date)
+        end_obj = frappe.utils.getdate(end_date)
+
+        if not campus_id:
+            try:
+                from erp.sis.utils.campus_permissions import get_current_user_campus
+                campus_id = get_current_user_campus()
+            except Exception:
+                pass
+
+        school_year_filters = {"is_enable": 1}
+        if campus_id:
+            school_year_filters["campus_id"] = campus_id
+        school_year = frappe.db.get_value("SIS School Year", school_year_filters, "name")
+
+        # 1) Lấy tất cả lớp Regular (bỏ tiểu học) + GVCN
+        classes = frappe.db.sql("""
+            SELECT c.name AS class_id, c.title AS class_title,
+                   c.homeroom_teacher, eg.education_stage_id
+            FROM `tabSIS Class` c
+            LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+            WHERE c.school_year_id = %(sy)s AND c.class_type = 'Regular'
+                AND c.homeroom_teacher IS NOT NULL AND c.homeroom_teacher != ''
+                AND (eg.education_stage_id IS NULL OR eg.education_stage_id != 'EDU-STAGE-00001')
+                AND NOT (c.title REGEXP '^Lớp [1-5][^0-9]' OR c.title REGEXP '^Lớp [1-5]$')
+                {campus_filter}
+        """.format(
+            campus_filter="AND c.campus_id = %(campus_id)s" if campus_id else ""
+        ), {"sy": school_year, "campus_id": campus_id}, as_dict=True)
+
+        if not classes:
+            return success_response(data={"rows": []}, message="Không có lớp")
+
+        class_ids = [c['class_id'] for c in classes]
+        teacher_ids = list(set(c['homeroom_teacher'] for c in classes))
+
+        # Tên GV batch
+        teacher_names = {}
+        if teacher_ids:
+            for td in frappe.db.sql("""
+                SELECT t.name, u.full_name FROM `tabSIS Teacher` t
+                INNER JOIN `tabUser` u ON t.user_id = u.name
+                WHERE t.name IN %(ids)s
+            """, {"ids": teacher_ids}, as_dict=True):
+                teacher_names[td['name']] = td['full_name']
+
+        # 2) Batch: tổng HS mỗi lớp
+        student_counts = {}
+        for row in frappe.db.sql("""
+            SELECT class_id, COUNT(*) AS cnt
+            FROM `tabSIS Class Student`
+            WHERE class_id IN %(cids)s
+            GROUP BY class_id
+        """, {"cids": class_ids}, as_dict=True):
+            student_counts[row['class_id']] = row['cnt']
+
+        # 3) Batch: contact log status cho khoảng ngày — đếm distinct student đã gửi theo ngày
+        sent_map = {}
+        sent_data = frappe.db.sql("""
+            SELECT cls.class_id, cls.log_date, COUNT(DISTINCT clst.student_id) AS sent
+            FROM `tabSIS Class Log Subject` cls
+            INNER JOIN `tabSIS Class Log Student` clst ON clst.subject_id = cls.name
+            WHERE cls.class_id IN %(cids)s
+                AND cls.log_date BETWEEN %(s)s AND %(e)s
+                AND clst.contact_log_status = 'Sent'
+            GROUP BY cls.class_id, cls.log_date
+        """, {"cids": class_ids, "s": start_obj, "e": end_obj}, as_dict=True)
+        for r in sent_data:
+            sent_map[(str(r['log_date']), r['class_id'])] = r['sent']
+
+        # 4) Sinh kết quả: mỗi lớp × mỗi ngày
+        rows = []
+        current = start_obj
+        while current <= end_obj:
+            date_str = str(current)
+            for cls in classes:
+                cid = cls['class_id']
+                tid = cls['homeroom_teacher']
+                total_students = student_counts.get(cid, 0)
+                students_sent = sent_map.get((date_str, cid), 0)
+                rows.append({
+                    "date": date_str,
+                    "teacher_id": tid,
+                    "teacher_name": teacher_names.get(tid, ""),
+                    "class_id": cid,
+                    "class_title": cls['class_title'],
+                    "total_students": total_students,
+                    "students_sent": students_sent,
+                })
+            current += timedelta(days=1)
+
+        return success_response(data={"rows": rows}, message="OK")
+
+    except Exception as e:
+        frappe.log_error(f"export_homeroom_teacher_report error: {str(e)}")
+        return error_response(message=str(e), code="EXPORT_HOMEROOM_TEACHER_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
 def get_my_today_tasks(date=None):
     """
     Lấy danh sách công việc hôm nay của giáo viên hiện tại cho trang Home
