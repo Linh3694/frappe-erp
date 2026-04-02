@@ -121,6 +121,29 @@ def is_production_server():
     return site_config.get("is_production", False)
 
 
+def message_no_guardian_by_phone():
+    """
+    Thông báo khi không có hồ sơ CRM Guardian theo SĐT.
+    Staging/dev: nhắc đây là môi trường kiểm thử để tester/app review dễ hiểu.
+    """
+    if is_production_server():
+        return "Không tìm thấy phụ huynh với số điện thoại này"
+    return (
+        "Đây là môi trường kiểm thử ứng dụng, không tìm thấy phụ huynh với SĐT này."
+    )
+
+
+def message_no_guardian_after_otp():
+    """
+    Thông báo khi đã xác thực OTP nhưng không còn tìm thấy bản ghi Guardian (hiếm).
+    """
+    if is_production_server():
+        return "Không tìm thấy thông tin phụ huynh"
+    return (
+        "Đây là môi trường kiểm thử ứng dụng, không tìm thấy phụ huynh với SĐT này."
+    )
+
+
 def send_sms_via_vivas(phone_number, message, otp_code=None):
     """
     Send SMS via VIVAS service
@@ -268,7 +291,7 @@ def request_otp(phone_number):
             logs.append(f"❌ No guardian found with phone: {normalized_phone} or +{normalized_phone}")
             return {
                 "success": False,
-                "message": "Không tìm thấy phụ huynh với số điện thoại này",
+                "message": message_no_guardian_by_phone(),
                 "logs": logs
             }
         
@@ -405,7 +428,7 @@ def verify_otp_and_login(phone_number, otp):
             logs.append(f"❌ Guardian not found after OTP verification")
             return {
                 "success": False,
-                "message": "Không tìm thấy thông tin phụ huynh",
+                "message": message_no_guardian_after_otp(),
                 "logs": logs
             }
         
@@ -569,7 +592,7 @@ def phone_login(phone_number):
         if not guardian_list:
             return {
                 "success": False,
-                "message": "Không tìm thấy phụ huynh với số điện thoại này",
+                "message": message_no_guardian_by_phone(),
                 "logs": logs
             }
 
