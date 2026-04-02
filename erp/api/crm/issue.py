@@ -542,6 +542,40 @@ def get_linked_feedback_replies():
         return error_response(f"Loi lay feedback lien ket: {str(e)}")
 
 
+@frappe.whitelist()
+def get_linked_issue():
+    """
+    Lay CRM Issue co source_feedback = feedback_name (thuong tu dong tao khi phu huynh gui Gop y).
+    Dung cho man chi tiet Feedback (web/mobile) de dieu huong sang Issue.
+    """
+    check_crm_permission()
+
+    feedback_name = frappe.request.args.get("feedback_name") or frappe.request.args.get("name")
+    if not feedback_name:
+        return validation_error_response("Thieu feedback_name", {"feedback_name": ["Bat buoc"]})
+
+    if not frappe.db.exists("Feedback", feedback_name):
+        return not_found_response(f"Khong tim thay feedback {feedback_name}")
+
+    rows = frappe.get_all(
+        "CRM Issue",
+        filters={"source_feedback": feedback_name},
+        fields=[
+            "name",
+            "issue_code",
+            "title",
+            "status",
+            "approval_status",
+            "source_feedback",
+        ],
+        limit=1,
+    )
+    if not rows:
+        return success_response(data=None, message="Khong co van de lien ket")
+
+    return success_response(data=rows[0])
+
+
 @frappe.whitelist(methods=["POST"])
 def create_issue():
     """Tao van de moi"""
