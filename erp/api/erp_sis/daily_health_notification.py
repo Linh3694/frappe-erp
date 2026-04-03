@@ -1,7 +1,7 @@
 """
 Push Notification cho Daily Health Visit
-Gửi notification đến Mobile Medical, Homeroom Teacher, Vice-Homeroom Teacher
-khi có sự kiện y tế (tạo visit, tiếp nhận, checkout, escalation).
+Gửi notification đến Mobile Medical, Mobile Supervisory (giám thị hành lang),
+Homeroom Teacher, Vice-Homeroom Teacher khi có sự kiện y tế (tạo visit, tiếp nhận, checkout, escalation).
 """
 
 import frappe
@@ -13,29 +13,37 @@ from typing import List, Dict, Set
 # Resolve danh sách người nhận notification
 # =====================================================================
 
-def _get_mobile_medical_users() -> List[str]:
-    """Lấy tất cả user có role Mobile Medical và có active device token."""
+def _get_users_by_role_with_mobile_token(role: str) -> List[str]:
+    """Lấy user có role Frappe `role` và có Mobile Device Token đang active."""
     users = frappe.db.sql("""
         SELECT DISTINCT hr.parent
         FROM `tabHas Role` hr
         INNER JOIN `tabUser` u ON u.name = hr.parent
-        WHERE hr.role = 'Mobile Medical'
+        WHERE hr.role = %(role)s
           AND u.enabled = 1
           AND hr.parent != 'Administrator'
-    """, pluck=True)
+    """, {"role": role}, pluck=True)
 
     if not users:
         return []
 
-    # Chỉ lấy user có active device token (đã đăng ký mobile)
-    users_with_token = frappe.get_all(
+    return frappe.get_all(
         "Mobile Device Token",
         filters={"user": ["in", users], "is_active": 1},
         fields=["user"],
         pluck="user",
-        distinct=True
+        distinct=True,
     )
-    return users_with_token
+
+
+def _get_mobile_medical_users() -> List[str]:
+    """Lấy tất cả user có role Mobile Medical và có active device token."""
+    return _get_users_by_role_with_mobile_token("Mobile Medical")
+
+
+def _get_mobile_supervisory_users() -> List[str]:
+    """Lấy user có role Mobile Supervisory (giám thị hành lang) và có active device token."""
+    return _get_users_by_role_with_mobile_token("Mobile Supervisory")
 
 
 def _get_homeroom_teachers(class_id: str) -> List[str]:
@@ -70,18 +78,23 @@ def get_health_notification_recipients(
     class_id: str,
     include_medical: bool = True,
     include_homeroom: bool = True,
-    extra_users: List[str] = None
+    include_supervisory: bool = False,
+    extra_users: List[str] = None,
 ) -> List[str]:
     """
     Trả về danh sách unique user emails cần nhận notification.
     - include_medical: bao gồm tất cả user có role Mobile Medical
     - include_homeroom: bao gồm homeroom + vice-homeroom teacher của lớp
+    - include_supervisory: bao gồm user role Mobile Supervisory (theo dõi lộ trình hành lang khi HS đi/về Y tế)
     - extra_users: danh sách user_email bổ sung (VD: reporter)
     """
     recipients: Set[str] = set()
 
     if include_medical:
         recipients.update(_get_mobile_medical_users())
+
+    if include_supervisory:
+        recipients.update(_get_mobile_supervisory_users())
 
     if include_homeroom:
         recipients.update(_get_homeroom_teachers(class_id))
@@ -119,7 +132,8 @@ def _send_to_recipients(recipients: List[str], title: str, body: str, data: Dict
 def notify_health_visit_created(visit_name: str):
     """
     Gửi notification khi tạo mới Daily Health Visit.
-    Người nhận: Mobile Medical + Homeroom + Vice-homeroom
+    Người nhận: Mobile Medical + Mobile Supervisory + Homeroom + Vice-homeroom.
+    (Giám thị: biết HS được báo xuống Y tế để theo dõi lộ trình hành lang.)
     """
     try:
         frappe.logger().info(f"[health_notification] === BẮT ĐẦU notify_health_visit_created cho visit {visit_name} ===")
@@ -138,10 +152,14 @@ def notify_health_visit_created(visit_name: str):
         homeroom_teachers = _get_homeroom_teachers(visit.class_id)
         frappe.logger().info(f"[health_notification] Homeroom teachers: {homeroom_teachers}")
 
+        supervisory_users = _get_mobile_supervisory_users()
+        frappe.logger().info(f"[health_notification] Mobile Supervisory users: {supervisory_users}")
+
         recipients = get_health_notification_recipients(
             class_id=visit.class_id,
             include_medical=True,
-            include_homeroom=True
+            include_homeroom=True,
+            include_supervisory=True,
         )
 
         frappe.logger().info(f"[health_notification] Tổng recipients: {recipients}")
@@ -177,7 +195,8 @@ def notify_health_visit_created(visit_name: str):
 def notify_health_visit_received(visit_name: str):
     """
     Gửi notification khi Y tế tiếp nhận học sinh (left_class -> at_clinic).
-    Người nhận: Homeroom + Vice-homeroom + Reporter (người báo ban đầu)
+    Người nhận: Mobile Supervisory + Homeroom + Vice-homeroom + Reporter.
+    (Giám thị: HS đã vào phòng Y tế — cập nhật hiện diện trên hành lang.)
     """
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
@@ -191,7 +210,8 @@ def notify_health_visit_received(visit_name: str):
             class_id=visit.class_id,
             include_medical=False,
             include_homeroom=True,
-            extra_users=extra_users
+            include_supervisory=True,
+            extra_users=extra_users,
         )
 
         if not recipients:
@@ -221,7 +241,8 @@ def notify_health_visit_received(visit_name: str):
 def notify_health_visit_cancelled(visit_name: str):
     """
     Gửi notification khi GV hủy đơn báo Y tế (học sinh quay lại lớp / trốn đi chơi).
-    Người nhận: Mobile Medical (để biết không cần tiếp nhận nữa, cập nhật danh sách)
+    Người nhận: Mobile Medical + Mobile Supervisory.
+    (Giám thị: điều chỉnh theo dõi — HS có thể không còn trên tuyến xuống Y tế.)
     """
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
@@ -231,7 +252,8 @@ def notify_health_visit_cancelled(visit_name: str):
         recipients = get_health_notification_recipients(
             class_id=visit.class_id,
             include_medical=True,
-            include_homeroom=False
+            include_homeroom=False,
+            include_supervisory=True,
         )
 
         if not recipients:
@@ -262,7 +284,8 @@ def notify_health_visit_cancelled(visit_name: str):
 def notify_health_visit_rejected(visit_name: str):
     """
     Gửi notification khi Y tế từ chối tiếp nhận học sinh.
-    Người nhận: Homeroom + Vice-homeroom + Reporter (để biết HS đang về lớp)
+    Người nhận: Mobile Supervisory + Homeroom + Vice-homeroom + Reporter.
+    (Giám thị: HS quay lớp qua hành lang — phối hợp an toàn lộ trình.)
     """
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
@@ -277,7 +300,8 @@ def notify_health_visit_rejected(visit_name: str):
             class_id=visit.class_id,
             include_medical=False,
             include_homeroom=True,
-            extra_users=extra_users
+            include_supervisory=True,
+            extra_users=extra_users,
         )
 
         if not recipients:
@@ -308,8 +332,9 @@ def notify_health_visit_rejected(visit_name: str):
 def notify_health_visit_completed(visit_name: str):
     """
     Gửi notification khi Y tế checkout học sinh.
-    Người nhận: Homeroom + Vice-homeroom + Mobile Medical
+    Người nhận: Mobile Medical + Mobile Supervisory + Homeroom + Vice-homeroom.
     Nội dung thay đổi tùy outcome (returned / picked_up / transferred).
+    (Giám thị: biết HS về lớp / ra cổng / chuyển viện để phối hợp khu vực công cộng.)
     """
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
@@ -330,7 +355,8 @@ def notify_health_visit_completed(visit_name: str):
         recipients = get_health_notification_recipients(
             class_id=visit.class_id,
             include_medical=True,
-            include_homeroom=True
+            include_homeroom=True,
+            include_supervisory=True,
         )
 
         if not recipients:
@@ -362,7 +388,8 @@ def notify_health_visit_completed(visit_name: str):
 def check_stale_health_visits():
     """
     Kiểm tra visit quá 15 phút chưa chuyển trạng thái.
-    Gửi escalation notification cho Mobile Medical.
+    Gửi escalation cho Mobile Medical + Mobile Supervisory + Homeroom + Vice-homeroom + Reporter.
+    (Giám thị: HS lâu chưa đến phòng Y tế — hỗ trợ tìm/điều phối trên hành lang.)
     Dùng Redis debounce để tránh gửi lặp cho cùng một visit.
 
     Được gọi bởi:
@@ -403,7 +430,7 @@ def check_stale_health_visits():
             student_name = visit.student_name or visit.student_id
             class_name = visit.class_name or visit.class_id
 
-            # Gửi cho Mobile Medical + Homeroom + Vice-homeroom + Reporter
+            # Gửi cho Mobile Medical + Mobile Supervisory + Homeroom + Vice-homeroom + Reporter
             extra_users = []
             if visit.reported_by:
                 extra_users.append(visit.reported_by)
@@ -412,7 +439,8 @@ def check_stale_health_visits():
                 class_id=visit.class_id,
                 include_medical=True,
                 include_homeroom=True,
-                extra_users=extra_users
+                include_supervisory=True,
+                extra_users=extra_users,
             )
             frappe.logger().info(f"[health_notification] Escalation recipients cho visit {visit.name}: {recipients}")
 
