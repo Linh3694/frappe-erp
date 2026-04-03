@@ -215,15 +215,17 @@ def logout():
                 import traceback
                 frappe.errprint(traceback.format_exc())
         
-        # Update last seen timestamp if custom field exists
+        # Cập nhật last_active (field chuẩn Frappe User) khi đăng xuất
         if frappe.session.user != "Guest":
             try:
-                user_doc = frappe.get_doc("User", frappe.session.user)
-                if hasattr(user_doc, 'last_seen'):
-                    user_doc.last_seen = frappe.utils.now()
-                    user_doc.flags.ignore_permissions = True
-                    user_doc.save()
-            except:
+                frappe.db.set_value(
+                    "User",
+                    frappe.session.user,
+                    "last_active",
+                    frappe.utils.now(),
+                    update_modified=False,
+                )
+            except Exception:
                 pass
         
         # Use Frappe's logout
@@ -411,7 +413,7 @@ def build_user_data_response(user_doc):
     # Add custom fields if they exist
     custom_fields = [
         "username", "employee_code", "job_title", "department", "designation",
-        "provider", "microsoft_id", "apple_id", "last_login", "last_seen"
+        "provider", "microsoft_id", "apple_id", "last_login", "last_active"
     ]
     
     for field in custom_fields:
