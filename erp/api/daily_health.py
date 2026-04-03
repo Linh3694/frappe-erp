@@ -10,6 +10,7 @@ Exposes daily health API at /api/method/erp.api.daily_health.xxx
 from erp.api.erp_sis.daily_health import (
     report_student_to_clinic,
     get_daily_health_visits,
+    get_visit_by_id,
     receive_student_at_clinic,
     cancel_health_visit,
     reject_health_visit,
@@ -32,6 +33,7 @@ from erp.api.erp_sis.daily_health import (
 __all__ = [
     'report_student_to_clinic',
     'get_daily_health_visits',
+    'get_visit_by_id',
     'receive_student_at_clinic',
     'cancel_health_visit',
     'reject_health_visit',

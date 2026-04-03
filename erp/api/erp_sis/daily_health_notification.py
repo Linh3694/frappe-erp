@@ -380,6 +380,47 @@ def notify_health_visit_completed(visit_name: str):
         frappe.logger().error(f"[health_notification] Lỗi notify_health_visit_completed: {str(e)}")
 
 
+def notify_examination_created(visit_name: str, disease_classification: str = ""):
+    """
+    Gửi notification khi NVYT tạo hồ sơ thăm khám mới.
+    Người nhận: Homeroom + Vice-homeroom (GV cần biết kết quả khám).
+    """
+    try:
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
+        student_name = visit.student_name or visit.student_id
+        class_name = visit.class_name or visit.class_id
+
+        title = "Hồ sơ thăm khám"
+        body = f"{student_name} ({class_name}) đã được Y tế thăm khám"
+        if disease_classification:
+            body += f" - {disease_classification}"
+
+        recipients = get_health_notification_recipients(
+            class_id=visit.class_id,
+            include_medical=False,
+            include_homeroom=True,
+        )
+
+        if not recipients:
+            return
+
+        data = {
+            "type": "examination_created",
+            "visit_id": visit.name,
+            "student_id": visit.student_id,
+            "student_name": student_name,
+            "class_id": visit.class_id,
+        }
+
+        _send_to_recipients(recipients, title, body, data)
+        frappe.logger().info(
+            f"[health_notification] Đã gửi examination_created cho {len(recipients)} người - visit {visit.name}"
+        )
+
+    except Exception as e:
+        frappe.logger().error(f"[health_notification] Lỗi notify_examination_created: {str(e)}")
+
+
 # =====================================================================
 # Scheduled job: kiểm tra visit quá 15 phút chưa chuyển trạng thái
 # =====================================================================

@@ -222,6 +222,9 @@ def report_student_to_clinic():
             except Exception as att_err:
                 # Không fail toàn bộ request nếu không thể cập nhật attendance
                 frappe.logger().warning(f"[report_student_to_clinic] Could not update attendance: {str(att_err)}")
+        else:
+            # Không có period (tạo từ ClassHealthExamSubTab / DailyHealthList) → tự tìm tiết hiện tại từ TKB
+            _auto_excused_for_current_period(visit)
         
         frappe.db.commit()
         
@@ -409,6 +412,33 @@ def get_daily_health_visits():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_visit_by_id():
+    """
+    Lấy chi tiết một visit theo ID — thay thế cách quét get_daily_health_visits nhiều ngày trên mobile.
+    Params:
+        - visit_id: ID của visit (required)
+    """
+    try:
+        _check_teacher_permission()
+
+        visit_id = (
+            frappe.local.form_dict.get("visit_id")
+            or (frappe.request.args.get("visit_id") if frappe.request else None)
+        )
+        if not visit_id:
+            return validation_error_response("visit_id là bắt buộc", {"visit_id": ["visit_id là bắt buộc"]})
+
+        visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
+        return success_response(data=visit.as_dict(), message="OK")
+
+    except frappe.DoesNotExistError:
+        return error_response(message="Bản ghi xuống Y tế không tồn tại", code="NOT_FOUND")
+    except Exception as e:
+        frappe.logger().error(f"Error getting visit by id: {str(e)}")
+        return error_response(message=f"Lỗi: {str(e)}", code="GET_VISIT_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
 def receive_student_at_clinic():
     """
     Nhân viên Y tế tiếp nhận học sinh
@@ -444,6 +474,11 @@ def receive_student_at_clinic():
         visit.received_by = received_by_user
         visit.received_by_name = received_by_name
         visit.save()
+        
+        # Nếu visit chưa có attendance_record_id (tạo lúc giờ ra chơi hoặc từ nguồn không có period),
+        # tự tìm tiết hiện tại và cập nhật attendance → excused
+        _auto_excused_for_current_period(visit)
+        
         frappe.db.commit()
         
         # Gửi push notification cho Homeroom + Vice-homeroom + Reporter
@@ -711,7 +746,7 @@ def start_examination():
         - visit_id: ID của visit (required)
     """
     try:
-        _check_teacher_permission()
+        _check_medical_permission()
         
         data = _get_request_data()
         
@@ -892,6 +927,16 @@ def create_health_examination():
             )
         
         frappe.db.commit()
+        
+        # Gửi notification cho Homeroom / Vice-homeroom biết HS đã được khám
+        try:
+            from erp.api.erp_sis.daily_health_notification import notify_examination_created
+            visit_id_for_notif = data.get("visit_id")
+            disease_cls = data.get("disease_classification", "")
+            if visit_id_for_notif:
+                notify_examination_created(visit_name=visit_id_for_notif, disease_classification=disease_cls)
+        except Exception as notif_err:
+            frappe.logger().warning(f"[create_health_examination] Không gửi được notification: {str(notif_err)}")
         
         return success_response(
             data={"name": exam.name},
@@ -1098,6 +1143,7 @@ def update_health_examination():
                     frappe.db.set_value("SIS Health Examination", re.name, "outcome", followup_outcome, update_modified=False)
                     if leave_time:
                         frappe.db.set_value("SIS Health Examination", re.name, "clinic_checkout_time", leave_time, update_modified=False)
+                _invalidate_attendance_cache_for_visit(visit_doc)
             except Exception as e:
                 frappe.logger().error(f"Error updating visit status for followup: {str(e)}")
 
@@ -1118,6 +1164,7 @@ def update_health_examination():
                 for re in related_exams:
                     if leave_time and re.name != exam.name:
                         frappe.db.set_value("SIS Health Examination", re.name, "clinic_checkout_time", leave_time, update_modified=False)
+                _invalidate_attendance_cache_for_visit(visit_doc)
             except Exception as e:
                 frappe.logger().error(f"Error updating visit for initial outcome: {str(e)}")
         
@@ -1577,6 +1624,13 @@ def complete_health_visit():
         # Lấy visit
         visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
         
+        # Chỉ checkout khi HS đang ở phòng Y tế
+        if visit.status not in ("at_clinic", "examining"):
+            return error_response(
+                message="Chỉ có thể checkout khi học sinh đang ở phòng Y tế (đã tiếp nhận hoặc đang khám)",
+                code="INVALID_STATUS"
+            )
+        
         # Cập nhật visit
         visit.status = outcome
         visit.leave_clinic_time = leave_clinic_time
@@ -1618,8 +1672,8 @@ def complete_health_visit():
                 update_modified=False
             )
 
-        # Checkout (returned / picked_up / transferred): giữ điểm danh tiết excused;
-        # giáo viên phải vào điểm danh manual override nếu cần đổi trạng thái.
+        # Checkout: excused tất cả tiết HS vắng (leave_class → leave_clinic) rồi invalidate cache
+        _excused_overlapping_periods(visit)
         _invalidate_attendance_cache_for_visit(visit)
 
         frappe.db.commit()
@@ -1648,6 +1702,247 @@ def complete_health_visit():
             message=f"Lỗi khi hoàn thành lượt xuống Y tế: {str(e)}",
             code="COMPLETE_ERROR"
         )
+
+
+def _find_current_period(class_id, visit_date=None):
+    """
+    Tìm tiết học đang diễn ra dựa trên TKB (Schedule Group → SIS Timetable Column).
+    Dùng khi visit được tạo không có period (Y tế tự tạo, GVCN báo từ ClassHealthExamSubTab).
+    Returns: period_name (str) hoặc None nếu không trong giờ học / không resolve được TKB.
+    """
+    try:
+        visit_date = visit_date or today()
+        now_sec = _time_to_seconds(nowtime())
+        if now_sec is None:
+            return None
+
+        class_doc = frappe.db.get_value("SIS Class", class_id, ["education_stage_id"], as_dict=True)
+        if not class_doc or not class_doc.get("education_stage_id"):
+            return None
+
+        education_stage_id = class_doc.get("education_stage_id")
+
+        schedule_group = frappe.db.sql("""
+            SELECT name FROM `tabSIS Schedule Group`
+            WHERE education_stage_id = %s
+              AND is_active = 1
+              AND start_date <= %s
+              AND end_date >= %s
+            ORDER BY start_date DESC
+            LIMIT 1
+        """, (education_stage_id, visit_date, visit_date), as_dict=True)
+
+        if not schedule_group:
+            return None
+
+        schedule_group_id = schedule_group[0].get("name")
+
+        periods = frappe.get_all(
+            "SIS Timetable Column",
+            filters={"schedule_id": schedule_group_id},
+            fields=["period_name", "start_time", "end_time"],
+            order_by="start_time asc"
+        )
+
+        for p in periods:
+            start_sec = _time_to_seconds(p.get("start_time"))
+            end_sec = _time_to_seconds(p.get("end_time"))
+            if start_sec is not None and end_sec is not None:
+                if start_sec <= now_sec < end_sec:
+                    return p.get("period_name")
+
+        return None
+    except Exception as e:
+        frappe.logger().warning(f"[_find_current_period] Error: {str(e)}")
+        return None
+
+
+def _auto_excused_for_current_period(visit):
+    """
+    Tự động tìm tiết hiện tại từ TKB và cập nhật attendance → excused.
+    Dùng khi visit được tạo/tiếp nhận mà không có period từ LessonLog.
+    Bỏ qua nếu visit đã có attendance_record_id (đã link từ LessonLog).
+    """
+    try:
+        if visit.get("attendance_record_id"):
+            return
+
+        class_id = visit.class_id
+        student_id = visit.student_id
+        visit_date = str(visit.visit_date) if visit.visit_date else today()
+
+        period_name = _find_current_period(class_id, visit_date)
+        if not period_name:
+            frappe.logger().info(
+                f"[_auto_excused_for_current_period] Không tìm được tiết hiện tại "
+                f"cho class {class_id} — có thể đang giờ ra chơi hoặc TKB thiếu"
+            )
+            return
+
+        existing = frappe.db.exists(
+            "SIS Class Attendance",
+            {
+                "student_id": student_id,
+                "class_id": class_id,
+                "date": visit_date,
+                "period": period_name
+            }
+        )
+
+        if existing:
+            current_status = frappe.db.get_value("SIS Class Attendance", existing, "status")
+            if current_status == "excused":
+                visit.db_set("attendance_record_id", existing)
+                if not visit.get("reported_period"):
+                    visit.db_set("reported_period", period_name)
+                return
+            frappe.db.set_value("SIS Class Attendance", existing, "status", "excused")
+            att_id = existing
+        else:
+            student_info = frappe.db.get_value(
+                "SIS Student", student_id,
+                ["student_code", "student_name"],
+                as_dict=True
+            ) or {}
+            class_info = frappe.db.get_value(
+                "SIS Class", class_id,
+                ["campus_id"],
+                as_dict=True
+            ) or {}
+
+            att = frappe.get_doc({
+                "doctype": "SIS Class Attendance",
+                "student_id": student_id,
+                "student_code": student_info.get("student_code"),
+                "student_name": student_info.get("student_name"),
+                "class_id": class_id,
+                "date": visit_date,
+                "period": period_name,
+                "status": "excused",
+                "remarks": f"Xuống Y tế: {visit.reason or ''}",
+                "campus_id": class_info.get("campus_id"),
+                "recorded_by": frappe.session.user
+            })
+            att.insert()
+            att_id = att.name
+
+        visit.db_set("attendance_record_id", att_id)
+        if not visit.get("reported_period"):
+            visit.db_set("reported_period", period_name)
+
+        try:
+            from erp.api.erp_sis.attendance import invalidate_class_attendance_cache
+            invalidate_class_attendance_cache(class_id, visit_date, period_name)
+        except Exception:
+            pass
+
+        frappe.logger().info(
+            f"[_auto_excused_for_current_period] Đã cập nhật attendance '{period_name}' → excused "
+            f"cho student {student_id}, visit {visit.name}"
+        )
+    except Exception as e:
+        frappe.logger().warning(f"[_auto_excused_for_current_period] Error: {str(e)}")
+
+
+def _excused_overlapping_periods(visit):
+    """
+    Tại checkout, excused tất cả tiết HS vắng mặt (từ leave_class_time đến leave_clinic_time).
+    Chỉ excused các tiết CHƯA có excused — không ghi đè bản ghi đã có từ LessonLog hoặc auto-excused lúc tiếp nhận.
+    """
+    try:
+        class_id = visit.class_id
+        student_id = visit.student_id
+        visit_date = str(visit.visit_date) if visit.visit_date else today()
+
+        leave_class_sec = _time_to_seconds(visit.leave_class_time)
+        leave_clinic_sec = _time_to_seconds(visit.leave_clinic_time)
+
+        if leave_class_sec is None or leave_clinic_sec is None:
+            return
+
+        class_doc = frappe.db.get_value("SIS Class", class_id, ["education_stage_id", "campus_id"], as_dict=True)
+        if not class_doc or not class_doc.get("education_stage_id"):
+            return
+
+        schedule_group = frappe.db.sql("""
+            SELECT name FROM `tabSIS Schedule Group`
+            WHERE education_stage_id = %s
+              AND is_active = 1
+              AND start_date <= %s
+              AND end_date >= %s
+            ORDER BY start_date DESC
+            LIMIT 1
+        """, (class_doc.get("education_stage_id"), visit_date, visit_date), as_dict=True)
+
+        if not schedule_group:
+            return
+
+        periods = frappe.get_all(
+            "SIS Timetable Column",
+            filters={"schedule_id": schedule_group[0].get("name")},
+            fields=["period_name", "start_time", "end_time"],
+            order_by="start_time asc"
+        )
+
+        student_info = frappe.db.get_value(
+            "SIS Student", student_id,
+            ["student_code", "student_name"],
+            as_dict=True
+        ) or {}
+
+        updated_periods = []
+        for p in periods:
+            start_sec = _time_to_seconds(p.get("start_time"))
+            end_sec = _time_to_seconds(p.get("end_time"))
+            if start_sec is None or end_sec is None:
+                continue
+            # Tiết overlap nếu: rời lớp trước khi tiết kết thúc VÀ rời Y tế sau khi tiết bắt đầu
+            if leave_class_sec < end_sec and leave_clinic_sec > start_sec:
+                period_name = p.get("period_name")
+                existing = frappe.db.exists(
+                    "SIS Class Attendance",
+                    {
+                        "student_id": student_id,
+                        "class_id": class_id,
+                        "date": visit_date,
+                        "period": period_name
+                    }
+                )
+                if existing:
+                    current_status = frappe.db.get_value("SIS Class Attendance", existing, "status")
+                    if current_status != "excused":
+                        frappe.db.set_value("SIS Class Attendance", existing, "status", "excused")
+                        updated_periods.append(period_name)
+                else:
+                    att = frappe.get_doc({
+                        "doctype": "SIS Class Attendance",
+                        "student_id": student_id,
+                        "student_code": student_info.get("student_code"),
+                        "student_name": student_info.get("student_name"),
+                        "class_id": class_id,
+                        "date": visit_date,
+                        "period": period_name,
+                        "status": "excused",
+                        "remarks": f"Xuống Y tế: {visit.reason or ''}",
+                        "campus_id": class_doc.get("campus_id"),
+                        "recorded_by": frappe.session.user
+                    })
+                    att.insert()
+                    updated_periods.append(period_name)
+
+        if updated_periods:
+            try:
+                from erp.api.erp_sis.attendance import invalidate_class_attendance_cache
+                for pn in updated_periods:
+                    invalidate_class_attendance_cache(class_id, visit_date, pn)
+            except Exception:
+                pass
+            frappe.logger().info(
+                f"[_excused_overlapping_periods] Đã excused {len(updated_periods)} tiết "
+                f"({', '.join(updated_periods)}) cho student {student_id}, visit {visit.name}"
+            )
+    except Exception as e:
+        frappe.logger().warning(f"[_excused_overlapping_periods] Error: {str(e)}")
 
 
 def _get_period_times(class_id, period_name, visit_date):
