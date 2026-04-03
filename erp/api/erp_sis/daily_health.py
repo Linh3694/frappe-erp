@@ -474,7 +474,8 @@ def receive_student_at_clinic():
 
 def _revert_attendance_for_visit(visit):
     """
-    Revert attendance về present khi GV hủy đơn (cancel) hoặc checkout outcome returned (đã về lớp).
+    Revert attendance về present khi GV hủy đơn (cancel) — trước khi Y tế tiếp nhận.
+    Không dùng cho Y tế từ chối / checkout: các luồng đó giữ excused, GV chủ động override sau.
     Ưu tiên dùng attendance_record_id. Nếu null (visit cũ) thì fallback: query theo
     student+class+date+excused+remarks chứa "Xuống Y tế" - chỉ revert khi tìm đúng 1 bản ghi.
     """
@@ -538,7 +539,8 @@ def _invalidate_attendance_cache_for_visit(visit):
 def cancel_health_visit():
     """
     GV hủy đơn báo Y tế (học sinh quay lại lớp / trốn đi chơi / không xuống Y tế)
-    Chỉ cho phép khi status = left_class (chưa Y tế tiếp nhận)
+    Chỉ cho phép khi status = left_class (chưa Y tế tiếp nhận).
+    Revert điểm danh tiết về present (khác Y tế từ chối / checkout — các luồng đó giữ excused).
     Params:
         - visit_id: ID của visit (required)
         - reason: Lý do hủy (optional)
@@ -598,7 +600,7 @@ def reject_health_visit():
     """
     Y tế từ chối tiếp nhận học sinh.
     Chuyển status = rejected (Từ chối) để phân biệt với returned (Đã về lớp sau khi khám).
-    Không revert attendance - học sinh cần thời gian di chuyển về lớp → GV điểm danh lại khi thấy.
+    Giữ điểm danh tiết excused; không revert — GV chủ động override trên màn điểm danh khi cần.
     Params:
         - visit_id: ID của visit (required)
         - reject_reason: Lý do từ chối (optional)
@@ -1536,6 +1538,7 @@ def get_students_at_clinic():
 def complete_health_visit():
     """
     Hoàn thành lượt xuống Y tế (học sinh rời phòng Y tế)
+    Điểm danh tiết (excused) không tự revert — GV chỉnh trên màn điểm danh nếu cần.
     Params:
         - visit_id: ID của visit (required)
         - outcome: Kết quả (required): returned/picked_up/transferred
@@ -1615,9 +1618,8 @@ def complete_health_visit():
                 update_modified=False
             )
 
-        # Đã về lớp: hoàn tác điểm danh excused tự động (đồng bộ LessonLog/ClassLog)
-        if outcome == "returned":
-            _revert_attendance_for_visit(visit)
+        # Checkout (returned / picked_up / transferred): giữ điểm danh tiết excused;
+        # giáo viên phải vào điểm danh manual override nếu cần đổi trạng thái.
         _invalidate_attendance_cache_for_visit(visit)
 
         frappe.db.commit()
