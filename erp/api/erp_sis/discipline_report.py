@@ -24,7 +24,7 @@ from erp.utils.email_service import send_email_via_service
 # Người nhận tạm thời (giai đoạn triển khai)
 DISCIPLINE_REPORT_RECIPIENTS = [
     "linh.nguyenhai@wellspring.edu.vn",
-    "hieu.nguyenduy@wellspring.edu.vn",
+    # "hieu.nguyenduy@wellspring.edu.vn",
 ]
 
 # Link mở báo cáo tương tác trên WIS (tab Tổng quan)
