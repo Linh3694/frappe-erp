@@ -118,6 +118,225 @@ def _get_student_classes(student_id, school_year_id=None):
         }
 
 
+def _enrich_parent_portal_timetable_row(row, class_id, logs):
+    """Chuẩn hoá một dòng TKB cho Parent Portal (môn, GV, phòng)."""
+    row["class_id"] = class_id
+
+    if row.get("subject_id"):
+        try:
+            subject = frappe.get_doc("SIS Subject", row["subject_id"])
+            row["subject_title"] = subject.title
+
+            if subject.get("timetable_subject_id"):
+                try:
+                    tt_subject = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
+                    row["timetable_subject_title"] = tt_subject.title_vn or tt_subject.title_en
+                except Exception:
+                    row["timetable_subject_title"] = ""
+            else:
+                row["timetable_subject_title"] = ""
+
+            try:
+                if subject.get("actual_subject_id"):
+                    actual_subject = frappe.get_doc("SIS Actual Subject", subject.actual_subject_id)
+                    row["curriculum_id"] = actual_subject.curriculum_id or ""
+                else:
+                    row["curriculum_id"] = ""
+            except Exception as curriculum_error:
+                logs.append(f"⚠️ Could not get curriculum from actual subject: {str(curriculum_error)}")
+                row["curriculum_id"] = ""
+        except Exception:
+            row["subject_title"] = ""
+            row["timetable_subject_title"] = ""
+            row["curriculum_id"] = ""
+
+    teacher_names = []
+    teacher_ids = []
+
+    if row.get("subject_id"):
+        try:
+            subject = frappe.get_doc("SIS Subject", row["subject_id"])
+            assignments = frappe.get_all(
+                "SIS Subject Assignment",
+                filters={
+                    "actual_subject_id": subject.actual_subject_id,
+                    "class_id": class_id,
+                },
+                fields=["teacher_id"],
+            )
+
+            for assignment in assignments:
+                if assignment.teacher_id:
+                    teacher_ids.append(assignment.teacher_id)
+                    try:
+                        teacher = frappe.get_doc("SIS Teacher", assignment.teacher_id)
+                        if teacher.user_id:
+                            try:
+                                user = frappe.get_doc("User", teacher.user_id)
+                                teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+                                if teacher_name:
+                                    teacher_names.append(teacher_name)
+                            except Exception as user_e:
+                                logs.append(f"⚠️ Could not get user name for teacher {assignment.teacher_id}: {str(user_e)}")
+                        else:
+                            logs.append(f"⚠️ Teacher {assignment.teacher_id} has no user_id")
+                    except Exception as e:
+                        logs.append(f"⚠️ Could not get teacher {assignment.teacher_id}: {str(e)}")
+        except Exception as e:
+            logs.append(f"⚠️ Could not get subject assignments for subject {row.get('subject_id')}: {str(e)}")
+
+    if not teacher_names:
+        for tid_field in ("teacher_1_id", "teacher_2_id"):
+            tid = row.get(tid_field)
+            if not tid:
+                continue
+            teacher_ids.append(tid)
+            try:
+                teacher = frappe.get_doc("SIS Teacher", tid)
+                if teacher.user_id:
+                    user = frappe.get_doc("User", teacher.user_id)
+                    teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+                    if teacher_name:
+                        teacher_names.append(teacher_name)
+            except Exception as e:
+                logs.append(f"⚠️ Fallback GV từ {tid_field} {tid}: {str(e)}")
+
+    row["teacher_names"] = ", ".join(teacher_names)
+    row["teacher_ids"] = teacher_ids
+
+    try:
+        from erp.api.erp_administrative.room import get_room_for_class_subject
+
+        subject_title_for_room = row.get("timetable_subject_title") or row.get("subject_title") or None
+        room_info = get_room_for_class_subject(class_id, subject_title_for_room)
+        row["room_id"] = room_info.get("room_id")
+        row["room_name"] = room_info.get("room_name")
+        row["room_type"] = room_info.get("room_type")
+        row["room_title"] = room_info.get("room_name") or ""
+    except Exception as room_error:
+        logs.append(f"⚠️ Could not get room info for class {class_id}, subject {row.get('subject_title')}: {str(room_error)}")
+        row["room_id"] = None
+        row["room_name"] = "Chưa có phòng"
+        row["room_type"] = None
+        row["room_title"] = ""
+
+    if "period_name" not in row:
+        row["period_name"] = ""
+    if "start_time" not in row:
+        row["start_time"] = None
+    if "end_time" not in row:
+        row["end_time"] = None
+    if "period_type" not in row:
+        row["period_type"] = "study"
+
+    if not row.get("subject_id"):
+        row["subject_title"] = ""
+        row["timetable_subject_title"] = ""
+        row["curriculum_id"] = ""
+        row["teacher_names"] = ""
+        row["teacher_ids"] = []
+        if not row.get("room_id"):
+            try:
+                from erp.api.erp_administrative.room import get_room_for_class_subject
+
+                room_info = get_room_for_class_subject(class_id, None)
+                row["room_id"] = room_info.get("room_id")
+                row["room_name"] = room_info.get("room_name")
+                row["room_type"] = room_info.get("room_type")
+                row["room_title"] = room_info.get("room_name") or ""
+            except Exception:
+                row["room_id"] = None
+                row["room_name"] = "Chưa có phòng"
+                row["room_type"] = None
+                row["room_title"] = ""
+
+
+def _td_to_hhmm_portal(val):
+    if val is None:
+        return None
+    if hasattr(val, "total_seconds"):
+        ts = int(val.total_seconds())
+        return f"{ts // 3600:02d}:{(ts % 3600) // 60:02d}"
+    if isinstance(val, str):
+        parts = val.split(":")
+        if len(parts) >= 2:
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+    return str(val)
+
+
+def _merge_student_materialized_timetable(student_id, target_date_str, class_entries, logs):
+    """
+    Bổ sung TKB từ tabSIS Student Timetable (materialized) khi instance lớp thiếu môn/GV.
+    Giữ tiết non-study (ăn sáng, nghỉ, ...) từ class_entries; tiết học lấy từ materialized nếu có.
+    """
+    try:
+        mat = frappe.db.sql(
+            """
+            SELECT
+                st.name AS row_name,
+                st.class_id,
+                st.timetable_column_id,
+                st.subject_id,
+                st.teacher_1_id,
+                st.teacher_2_id,
+                st.room_id,
+                st.day_of_week,
+                tc.period_name,
+                tc.start_time,
+                tc.end_time,
+                tc.period_type,
+                tc.period_priority
+            FROM `tabSIS Student Timetable` st
+            INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+            WHERE st.student_id = %(student_id)s
+              AND st.date = %(target_date)s
+            ORDER BY tc.period_priority ASC, tc.start_time ASC
+            """,
+            {"student_id": student_id, "target_date": target_date_str},
+            as_dict=True,
+        )
+    except Exception as e:
+        logs.append(f"⚠️ Lỗi truy vấn SIS Student Timetable: {e}")
+        return class_entries
+
+    if not mat:
+        logs.append("ℹ️ Không có dòng SIS Student Timetable cho ngày này — dùng TKB theo instance lớp")
+        return class_entries
+
+    logs.append(f"📌 SIS Student Timetable: {len(mat)} dòng cho học sinh ngày {target_date_str}")
+
+    mat_rows = []
+    for r in mat:
+        cid = r.get("class_id")
+        if not cid:
+            continue
+        row = {
+            "name": r.get("row_name"),
+            "timetable_column_id": r.get("timetable_column_id"),
+            "subject_id": r.get("subject_id"),
+            "teacher_1_id": r.get("teacher_1_id"),
+            "teacher_2_id": r.get("teacher_2_id"),
+            "room_id": r.get("room_id"),
+            "day_of_week": r.get("day_of_week"),
+            "date": target_date_str,
+            "period_name": r.get("period_name") or "",
+            "start_time": _td_to_hhmm_portal(r.get("start_time")),
+            "end_time": _td_to_hhmm_portal(r.get("end_time")),
+            "period_type": r.get("period_type") or "study",
+            "period_priority": r.get("period_priority") or 0,
+        }
+        _enrich_parent_portal_timetable_row(row, cid, logs)
+        mat_rows.append(row)
+
+    non_study = [e for e in class_entries if e.get("period_type") == "non-study"]
+    merged = non_study + mat_rows
+    merged.sort(key=lambda x: (x.get("start_time") or "", x.get("timetable_column_id") or ""))
+    logs.append(
+        f"✅ Merge TKB: {len(non_study)} tiết ngoài học (instance) + {len(mat_rows)} tiết từ Student Timetable"
+    )
+    return merged
+
+
 def _get_class_timetable_for_date(class_id, target_date):
     """
     Get timetable for a specific class on a specific date
@@ -602,149 +821,7 @@ def _get_class_timetable_for_date(class_id, target_date):
 
         # Enrich with subject titles, teacher names, and room info
         for row in all_columns:
-            row["class_id"] = class_id
-
-            # Get subject title
-            if row.get("subject_id"):
-                try:
-                    subject = frappe.get_doc("SIS Subject", row["subject_id"])
-                    row["subject_title"] = subject.title
-
-                    # Get timetable subject if available
-                    if subject.get("timetable_subject_id"):
-                        try:
-                            tt_subject = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
-                            row["timetable_subject_title"] = tt_subject.title_vn or tt_subject.title_en
-                        except:
-                            row["timetable_subject_title"] = ""
-                    else:
-                        row["timetable_subject_title"] = ""
-
-                    # Get curriculum ID from SIS Actual Subject (correct source)
-                    # Use actual_subject_id from SIS Subject to get curriculum
-                    try:
-                        if subject.get("actual_subject_id"):
-                            actual_subject = frappe.get_doc("SIS Actual Subject", subject.actual_subject_id)
-                            row["curriculum_id"] = actual_subject.curriculum_id or ""
-                        else:
-                            row["curriculum_id"] = ""
-                    except Exception as curriculum_error:
-                        logs.append(f"⚠️ Could not get curriculum from actual subject: {str(curriculum_error)}")
-                        row["curriculum_id"] = ""
-                except:
-                    row["subject_title"] = ""
-                    row["timetable_subject_title"] = ""
-                    row["curriculum_id"] = ""
-
-            # Get teacher names from SIS Subject Assignment (more accurate than timetable row data)
-            teacher_names = []
-            teacher_ids = []
-
-            if row.get("subject_id"):
-                try:
-                    # Query SIS Subject Assignment to find teacher for this subject and class
-                    subject = frappe.get_doc("SIS Subject", row["subject_id"])
-                    assignments = frappe.get_all(
-                        "SIS Subject Assignment",
-                        filters={
-                            "actual_subject_id": subject.actual_subject_id,
-                            "class_id": class_id
-                        },
-                        fields=["teacher_id"]
-                    )
-
-                    for assignment in assignments:
-                        if assignment.teacher_id:
-                            teacher_ids.append(assignment.teacher_id)
-                            try:
-                                teacher = frappe.get_doc("SIS Teacher", assignment.teacher_id)
-                                if teacher.user_id:
-                                    # Get teacher name from User table
-                                    try:
-                                        user = frappe.get_doc("User", teacher.user_id)
-                                        teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
-                                        if teacher_name:
-                                            teacher_names.append(teacher_name)
-                                    except Exception as user_e:
-                                        logs.append(f"⚠️ Could not get user name for teacher {assignment.teacher_id}: {str(user_e)}")
-                                else:
-                                    logs.append(f"⚠️ Teacher {assignment.teacher_id} has no user_id")
-                            except Exception as e:
-                                logs.append(f"⚠️ Could not get teacher {assignment.teacher_id}: {str(e)}")
-                except Exception as e:
-                    logs.append(f"⚠️ Could not get subject assignments for subject {row['subject_id']}: {str(e)}")
-
-            # Fallback: giáo viên ghi trực tiếp trên dòng TKB (khi chưa có Subject Assignment)
-            if not teacher_names:
-                for tid_field in ("teacher_1_id", "teacher_2_id"):
-                    tid = row.get(tid_field)
-                    if not tid:
-                        continue
-                    teacher_ids.append(tid)
-                    try:
-                        teacher = frappe.get_doc("SIS Teacher", tid)
-                        if teacher.user_id:
-                            user = frappe.get_doc("User", teacher.user_id)
-                            teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
-                            if teacher_name:
-                                teacher_names.append(teacher_name)
-                    except Exception as e:
-                        logs.append(f"⚠️ Fallback GV từ {tid_field} {tid}: {str(e)}")
-
-            row["teacher_names"] = ", ".join(teacher_names)
-            row["teacher_ids"] = teacher_ids
-
-            # Get room info using new room assignment logic
-            try:
-                from erp.api.erp_administrative.room import get_room_for_class_subject
-                # Use timetable_subject_title if available, otherwise use subject_title
-                subject_title_for_room = row.get("timetable_subject_title") or row.get("subject_title") or None
-                room_info = get_room_for_class_subject(class_id, subject_title_for_room)
-                row["room_id"] = room_info.get("room_id")
-                row["room_name"] = room_info.get("room_name")
-                row["room_type"] = room_info.get("room_type")
-                # Keep room_title for backward compatibility
-                row["room_title"] = room_info.get("room_name") or ""
-            except Exception as room_error:
-                logs.append(f"⚠️ Could not get room info for class {class_id}, subject {row.get('subject_title')}: {str(room_error)}")
-                row["room_id"] = None
-                row["room_name"] = "Chưa có phòng"
-                row["room_type"] = None
-                row["room_title"] = ""
-
-            # Column info (period_name, start_time, end_time, period_type) is already set
-            # during row creation above, so no need to fetch again
-            # Ensure defaults if not set
-            if "period_name" not in row:
-                row["period_name"] = ""
-            if "start_time" not in row:
-                row["start_time"] = None
-            if "end_time" not in row:
-                row["end_time"] = None
-            if "period_type" not in row:
-                row["period_type"] = "study"
-            
-            # Ensure empty fields for non-study periods
-            if not row.get("subject_id"):
-                row["subject_title"] = ""
-                row["timetable_subject_title"] = ""
-                row["curriculum_id"] = ""
-                row["teacher_names"] = ""
-                row["teacher_ids"] = []
-                # For non-study periods, still try to get homeroom room
-                if not row.get("room_id"):
-                    try:
-                        from erp.api.erp_administrative.room import get_room_for_class_subject
-                        room_info = get_room_for_class_subject(class_id, None)
-                        row["room_id"] = room_info.get("room_id")
-                        row["room_name"] = room_info.get("room_name")
-                        row["room_type"] = room_info.get("room_type")
-                        row["room_title"] = room_info.get("room_name") or ""
-                    except Exception:
-                        row["room_id"] = None
-                        row["room_name"] = "Chưa có phòng"
-                        row["room_type"] = None
-                        row["room_title"] = ""
+            _enrich_parent_portal_timetable_row(row, class_id, logs)
 
         # Check for date-specific overrides (from custom table)
         overrides = []
@@ -1038,11 +1115,14 @@ def get_student_timetable_today(student_id=None):
             if class_result.get("success"):
                 entries = class_result.get("entries", [])
                 all_entries.extend(entries)
-        
+
+        # Ưu tiên dữ liệu từ SIS Student Timetable (materialized) nếu có — thường đủ môn/GV hơn instance lớp
+        all_entries = _merge_student_materialized_timetable(student_id, today_str, all_entries, logs)
+
         # Sort by period time
         all_entries.sort(key=lambda x: (x.get("start_time") or "", x.get("timetable_column_id") or ""))
-        
-        logs.append(f"✅ Combined {len(all_entries)} timetable entries from {len(class_ids)} classes")
+
+        logs.append(f"✅ Combined {len(all_entries)} timetable entries from {len(class_ids)} classes (sau merge Student Timetable)")
         
         return {
             "success": True,
