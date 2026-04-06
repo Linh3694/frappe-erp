@@ -619,6 +619,7 @@ def get_student_activation_stats():
 		- students_without_parent_login: HS chưa có parent nào login
 		- activation_rate: Tỷ lệ %
 		- by_class: Thống kê chi tiết theo từng lớp
+		- by_student: Danh sách từng học sinh (lớp, mã, tên, has_parent_login)
 	"""
 	try:
 		# Lấy school year hiện tại (is_enable = 1, mới nhất theo start_date)
@@ -646,6 +647,7 @@ def get_student_activation_stats():
 				c.title as class_name,
 				cs.student_id,
 				s.student_name,
+				s.student_code,
 				COALESCE(MAX(g.portal_activated), 0) as has_parent_login
 			FROM `tabSIS Class Student` cs
 			INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
@@ -654,7 +656,7 @@ def get_student_activation_stats():
 			LEFT JOIN `tabCRM Guardian` g ON g.name = fr.parent
 			WHERE cs.school_year_id = %s
 			AND (c.class_type = 'regular' OR c.class_type IS NULL OR c.class_type = '')
-			GROUP BY cs.class_id, c.title, cs.student_id, s.student_name
+			GROUP BY cs.class_id, c.title, cs.student_id, s.student_name, s.student_code
 			ORDER BY c.title ASC, s.student_name ASC
 		""", (current_school_year,), as_dict=True)
 		
@@ -694,6 +696,18 @@ def get_student_activation_stats():
 		# Sort theo tên lớp
 		by_class.sort(key=lambda x: x['class_name'])
 		
+		# Chi tiết từng học sinh (phục vụ export / báo cáo)
+		by_student = [
+			{
+				"class_name": s.class_name,
+				"student_id": s.student_id,
+				"student_name": s.student_name,
+				"student_code": s.student_code or "",
+				"has_parent_login": int(s.has_parent_login or 0),
+			}
+			for s in students_data
+		]
+		
 		return {
 			"success": True,
 			"data": {
@@ -701,7 +715,8 @@ def get_student_activation_stats():
 				"students_with_parent_login": students_with_parent,
 				"students_without_parent_login": students_without_parent,
 				"activation_rate": activation_rate,
-				"by_class": by_class
+				"by_class": by_class,
+				"by_student": by_student,
 			}
 		}
 		
