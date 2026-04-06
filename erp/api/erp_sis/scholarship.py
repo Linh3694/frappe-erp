@@ -1361,6 +1361,7 @@ def get_class_applications(class_id=None):
         
         # Lấy các đơn mà GV này được chọn làm người giới thiệu
         # Thêm thông tin period để kiểm tra điều kiện chỉnh sửa
+        # Hỗ trợ cả lớp chính quy (app.class_id) lẫn lớp mixed (qua SIS Class Student)
         query = """
             SELECT 
                 app.name, app.student_id, app.student_name, app.student_code,
@@ -1387,7 +1388,14 @@ def get_class_applications(class_id=None):
             FROM `tabSIS Scholarship Application` app
             LEFT JOIN `tabSIS Scholarship Period` period ON period.name = app.scholarship_period_id
             LEFT JOIN `tabSIS Class` c ON c.name = app.class_id
-            WHERE app.class_id = %(class_id)s
+            WHERE (
+                app.class_id = %(class_id)s
+                OR EXISTS (
+                    SELECT 1 FROM `tabSIS Class Student` cs
+                    WHERE cs.class_id = %(class_id)s
+                      AND cs.student_id = app.student_id
+                )
+            )
               AND (app.main_teacher_id = %(teacher_id)s OR app.second_teacher_id = %(teacher_id)s)
               AND app.status IN ('Submitted', 'WaitingRecommendation', 'RecommendationSubmitted', 'InReview', 'Approved', 'Rejected', 'DeniedByTeacher')
             ORDER BY app.submitted_at DESC
