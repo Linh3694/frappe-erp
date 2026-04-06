@@ -5,7 +5,8 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "student_id"
+  "student_id",
+  "deduction_points"
  ],
  "fields": [
   {
@@ -14,6 +15,15 @@
    "in_list_view": 1,
    "label": "Học sinh",
    "options": "CRM Student",
+   "reqd": 1
+  },
+  {
+   "default": "10",
+   "fieldname": "deduction_points",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Điểm trừ",
+   "options": "1\n5\n10\n15",
    "reqd": 1
   }
  ],

@@ -133,8 +133,8 @@
    "fieldname": "historical_deduction_points",
    "fieldtype": "Float",
    "hidden": 1,
-   "label": "Điểm trừ (lưu trữ)",
-   "description": "Ghi nhận điểm trừ khi import Excel; không dùng trong công thức tính điểm hiện tại"
+   "label": "Điểm trừ (legacy import)",
+   "description": "Chỉ dùng khi import Excel (legacy); điểm chính thức nằm ở từng dòng đối tượng (deduction_points)"
   },
   {
    "fieldname": "time_slot",
@@ -152,7 +152,7 @@
   {
    "fieldname": "record_time",
    "fieldtype": "Data",
-   "in_list_view": 1,
+   "in_list_view": 0,
    "label": "Thời gian",
    "description": "Định dạng HH:MM"
   },

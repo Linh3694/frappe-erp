@@ -17,6 +17,19 @@ from erp.sis.discipline_record_permissions import (
     user_can_write_existing_discipline_record as _can_write_existing_discipline_record,
 )
 
+# Điểm trừ nhập tay trên từng dòng đối tượng (child table)
+_ALLOWED_DEDUCTION_POINTS = frozenset({"1", "5", "10", "15"})
+
+
+def _normalize_deduction_points(raw):
+    """Chuẩn hoá điểm trừ per-target: 1 / 5 / 10 / 15 — mặc định 10."""
+    if raw is None or raw == "":
+        return "10"
+    s = str(raw).strip()
+    if s in _ALLOWED_DEDUCTION_POINTS:
+        return s
+    return "10"
+
 
 def _get_student_display_info(sid):
     """Lấy thông tin hiển thị cho 1 học sinh: name, code, class, photo"""
@@ -1561,13 +1574,16 @@ def get_student_violation_stats(
 
         student_rows, _ = _get_violation_point_tables_for_stats(violation_id, last_day)
         tier = _match_tier_from_point_rows(student_rows, count)
+        points_total = _sum_student_stored_deduction_points(
+            student_id, violation_id, first_day, last_day
+        )
 
         return success_response(
             data={
                 "count": count,
                 "level": tier["level"],
                 "level_label": tier["level_label"],
-                "points": tier["points"],
+                "points": points_total,
             },
             message="Lấy thống kê thành công",
         )
@@ -1664,13 +1680,16 @@ def get_class_violation_stats(
 
         _, class_rows = _get_violation_point_tables_for_stats(violation_id, last_day)
         tier = _match_tier_from_point_rows(class_rows, count)
+        points_total = _sum_class_stored_deduction_points(
+            class_id, violation_id, first_day, last_day
+        )
 
         return success_response(
             data={
                 "count": count,
                 "level": tier["level"],
                 "level_label": tier["level_label"],
-                "points": tier["points"],
+                "points": points_total,
             },
             message="Lấy thống kê thành công",
         )
@@ -1686,6 +1705,54 @@ def get_class_violation_stats(
             message=f"Lỗi khi lấy thống kê: {str(e)}",
             code="GET_CLASS_VIOLATION_STATS_ERROR",
         )
+
+
+def _sum_student_stored_deduction_points(student_id, violation_id, first_day, last_day):
+    """
+    Tổng điểm trừ đã lưu (child table Học sinh) trong khoảng ngày — không dùng bậc thang công thức.
+    """
+    row = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(CAST(IFNULL(se.deduction_points, '10') AS UNSIGNED)), 0) AS total
+        FROM `tabSIS Discipline Record` r
+        INNER JOIN `tabSIS Discipline Record Student Entry` se
+            ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+        WHERE r.violation = %(violation_id)s
+            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+            AND se.student_id = %(student_id)s
+        """,
+        {
+            "violation_id": violation_id,
+            "student_id": student_id,
+            "first_day": first_day,
+            "last_day": last_day,
+        },
+        as_dict=True,
+    )
+    return int(row[0]["total"]) if row else 0
+
+
+def _sum_class_stored_deduction_points(class_id, violation_id, first_day, last_day):
+    """Tổng điểm trừ đã lưu (child table Lớp) trong khoảng ngày."""
+    row = frappe.db.sql(
+        """
+        SELECT COALESCE(SUM(CAST(IFNULL(ce.deduction_points, '10') AS UNSIGNED)), 0) AS total
+        FROM `tabSIS Discipline Record` r
+        INNER JOIN `tabSIS Discipline Record Class Entry` ce
+            ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+        WHERE r.violation = %(violation_id)s
+            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+            AND ce.class_id = %(class_id)s
+        """,
+        {
+            "violation_id": violation_id,
+            "class_id": class_id,
+            "first_day": first_day,
+            "last_day": last_day,
+        },
+        as_dict=True,
+    )
+    return int(row[0]["total"]) if row else 0
 
 
 def _student_violation_stats_internal(student_id, violation_id, first_day, last_day):
@@ -1720,11 +1787,14 @@ def _student_violation_stats_internal(student_id, violation_id, first_day, last_
     count = result[0]["cnt"] if result else 0
     student_rows, _ = _get_violation_point_tables_for_stats(violation_id, last_day)
     tier = _match_tier_from_point_rows(student_rows, count)
+    points_total = _sum_student_stored_deduction_points(
+        student_id, violation_id, first_day, last_day
+    )
     return {
         "count": count,
         "level": tier["level"],
         "level_label": tier["level_label"],
-        "points": tier["points"],
+        "points": points_total,
     }
 
 
@@ -1773,11 +1843,14 @@ def _class_violation_stats_internal(class_id, violation_id, first_day, last_day)
     count = result[0]["cnt"] if result else 0
     _, class_rows = _get_violation_point_tables_for_stats(violation_id, last_day)
     tier = _match_tier_from_point_rows(class_rows, count)
+    points_total = _sum_class_stored_deduction_points(
+        class_id, violation_id, first_day, last_day
+    )
     return {
         "count": count,
         "level": tier["level"],
         "level_label": tier["level_label"],
-        "points": tier["points"],
+        "points": points_total,
     }
 
 
@@ -1985,18 +2058,28 @@ def _enrich_discipline_records_list(records):
             student_ids_to_fetch = [r["target_student"]]
         has_students = (r.get("target_type") in ("student", "mixed")) and student_ids_to_fetch
 
+        dp_by_sid = {
+            x["student_id"]: _normalize_deduction_points(x.get("deduction_points"))
+            for x in (r.get("target_student_entry_rows") or [])
+            if x.get("student_id")
+        }
+        r.pop("target_student_entry_rows", None)
+
         if has_students and len(student_ids_to_fetch) == 1:
             r["target_student"] = student_ids_to_fetch[0]
             st_info = st_batch.get(r["target_student"]) or empty_st(r["target_student"])
+            st_info["deduction_points"] = dp_by_sid.get(r["target_student"], "10")
             r["target_students"] = [st_info]
             r["student_name"] = st_info.get("student_name") or ""
             r["student_code"] = st_info.get("student_code") or ""
             r["student_photo_url"] = st_info.get("student_photo_url")
             r["student_class_title"] = st_info.get("student_class_title") or ""
         elif has_students and len(student_ids_to_fetch) > 1:
-            r["target_students"] = [
-                st_batch.get(sid) or empty_st(sid) for sid in student_ids_to_fetch
-            ]
+            r["target_students"] = []
+            for sid in student_ids_to_fetch:
+                st_row = st_batch.get(sid) or empty_st(sid)
+                st_row["deduction_points"] = dp_by_sid.get(sid, "10")
+                r["target_students"].append(st_row)
             names = [
                 (st["student_name"] or "") + " (" + (st["student_code"] or "") + ")"
                 for st in r["target_students"]
@@ -2178,22 +2261,44 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             class_entries = frappe.get_all(
                 "SIS Discipline Record Class Entry",
                 filters={"parent": ["in", record_ids]},
-                fields=["parent", "class_id"],
+                fields=["parent", "class_id", "deduction_points"],
             )
-            class_map = {}
+            class_map_ids = {}
+            class_map_entries = {}
             for ce in class_entries:
-                class_map.setdefault(ce["parent"], []).append(ce["class_id"])
+                cid = ce.get("class_id")
+                if not cid:
+                    continue
+                pid = ce["parent"]
+                class_map_ids.setdefault(pid, []).append(cid)
+                class_map_entries.setdefault(pid, []).append(
+                    {
+                        "class_id": cid,
+                        "deduction_points": _normalize_deduction_points(ce.get("deduction_points")),
+                    }
+                )
 
             student_entries = frappe.get_all(
                 "SIS Discipline Record Student Entry",
                 filters={"parent": ["in", record_ids]},
-                fields=["parent", "student_id"],
+                fields=["parent", "student_id", "deduction_points"],
             )
-            student_map = {}
+            student_map_ids = {}
+            student_entry_rows = {}
             for se in student_entries:
-                student_map.setdefault(se["parent"], []).append(se["student_id"])
+                sid = se.get("student_id")
+                if not sid:
+                    continue
+                pid = se["parent"]
+                student_map_ids.setdefault(pid, []).append(sid)
+                student_entry_rows.setdefault(pid, []).append(
+                    {
+                        "student_id": sid,
+                        "deduction_points": _normalize_deduction_points(se.get("deduction_points")),
+                    }
+                )
 
-            class_ids = list(set(c for ids in class_map.values() for c in ids))
+            class_ids = list(set(c for ids in class_map_ids.values() for c in ids))
             class_titles = {}
             if class_ids:
                 for c in frappe.get_all(
@@ -2204,13 +2309,19 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                     class_titles[c["name"]] = c.get("title") or c["name"]
 
             for r in records:
-                r["target_class_ids"] = class_map.get(r["name"], [])
+                r["target_class_ids"] = class_map_ids.get(r["name"], [])
+                r["target_class_entries"] = class_map_entries.get(r["name"], [])
                 r["target_class_titles"] = [
                     class_titles.get(cid, cid) for cid in r["target_class_ids"]
                 ]
-                stu_ids = student_map.get(r["name"], [])
+                rows = student_entry_rows.get(r["name"], [])
+                r["target_student_entry_rows"] = rows
+                stu_ids = [x["student_id"] for x in rows]
                 if not stu_ids and r.get("target_student"):
                     stu_ids = [r["target_student"]]
+                    r["target_student_entry_rows"] = [
+                        {"student_id": r["target_student"], "deduction_points": "10"}
+                    ]
                 r["target_student_ids"] = stu_ids
         else:
             for r in records:
@@ -2262,6 +2373,14 @@ def get_discipline_record(name: str = None):
         # Thêm target_class_ids, target_student_ids, target_class_titles từ child tables
         class_ids = [c.get("class_id") for c in (d.get("target_classes") or []) if c.get("class_id")]
         d["target_class_ids"] = class_ids
+        d["target_class_entries"] = [
+            {
+                "class_id": c.get("class_id"),
+                "deduction_points": _normalize_deduction_points(c.get("deduction_points")),
+            }
+            for c in (d.get("target_classes") or [])
+            if c.get("class_id")
+        ]
         if class_ids:
             d["target_class_titles"] = [
                 frappe.db.get_value("SIS Class", cid, "title") or cid for cid in class_ids
@@ -2269,18 +2388,28 @@ def get_discipline_record(name: str = None):
         else:
             d["target_class_titles"] = []
         stu_entries = d.get("target_students") or []
+        dp_by_sid = {
+            s.get("student_id"): _normalize_deduction_points(s.get("deduction_points"))
+            for s in stu_entries
+            if s.get("student_id")
+        }
         d["target_student_ids"] = [s.get("student_id") for s in stu_entries if s.get("student_id")]
         if not d["target_student_ids"] and d.get("target_student"):
             d["target_student_ids"] = [d["target_student"]]
         # target_students với avatar, tên, lớp cho từng học sinh
         if len(d["target_student_ids"]) > 1:
-            d["target_students"] = [_get_student_display_info(sid) for sid in d["target_student_ids"]]
+            d["target_students"] = []
+            for sid in d["target_student_ids"]:
+                st_info = _get_student_display_info(sid)
+                st_info["deduction_points"] = dp_by_sid.get(sid, "10")
+                d["target_students"].append(st_info)
             d["student_name"] = ", ".join(
                 (st["student_name"] or "") + " (" + (st["student_code"] or "") + ")"
                 for st in d["target_students"]
             )
         elif len(d["target_student_ids"]) == 1:
             st_info = _get_student_display_info(d["target_student_ids"][0])
+            st_info["deduction_points"] = dp_by_sid.get(d["target_student_ids"][0], "10")
             d["target_students"] = [st_info]
             if not d.get("student_name"):
                 d["student_name"] = st_info.get("student_name") or ""
@@ -2546,6 +2675,8 @@ def _create_discipline_record_core(
     proof_images,
     campus,
     historical_deduction_points=None,
+    target_student_points=None,
+    target_class_points=None,
 ):
     """
     Tạo bản ghi kỷ luật từ tham số đã chuẩn hoá (dùng chung API và import Excel).
@@ -2635,7 +2766,7 @@ def _create_discipline_record_core(
         else None,
         "violation": violation,
         "form": form,
-        "penalty_points": str(penalty_points),
+        "penalty_points": str(penalty_points or "1"),
         "time_slot": time_slot or "",
         "time_slot_id": time_slot_id or None,
         "record_time": record_time or "",
@@ -2646,13 +2777,17 @@ def _create_discipline_record_core(
         doc_fields["historical_deduction_points"] = float(historical_deduction_points)
     doc = frappe.get_doc(doc_fields)
 
+    tsp = target_student_points if isinstance(target_student_points, dict) else {}
+    tcp = target_class_points if isinstance(target_class_points, dict) else {}
+
     # Lớp: target_classes (class hoặc mixed)
     if target_type in ("class", "mixed") and target_class_ids:
         for cid in target_class_ids:
             if isinstance(cid, dict):
                 cid = cid.get("class_id") or cid.get("name")
             if cid:
-                doc.append("target_classes", {"class_id": cid})
+                dp = _normalize_deduction_points(tcp.get(str(cid)))
+                doc.append("target_classes", {"class_id": cid, "deduction_points": dp})
 
     # Học sinh: target_students (child table) - luôn append để có dữ liệu đầy đủ
     if student_ids:
@@ -2660,7 +2795,8 @@ def _create_discipline_record_core(
             if isinstance(sid, dict):
                 sid = sid.get("student_id") or sid.get("name")
             if sid:
-                doc.append("target_students", {"student_id": sid})
+                dp = _normalize_deduction_points(tsp.get(str(sid)))
+                doc.append("target_students", {"student_id": sid, "deduction_points": dp})
 
     for img in proof_images or []:
         url = img.get("image") if isinstance(img, dict) else img
@@ -2729,6 +2865,13 @@ def create_discipline_record(
         proof_images = proof_images or data.get("proof_images") or []
         campus = campus or data.get("campus") or get_current_campus_from_context()
 
+        tsp = data.get("target_student_points") or {}
+        tcp = data.get("target_class_points") or {}
+        if isinstance(tsp, str):
+            tsp = json.loads(tsp) if tsp else {}
+        if isinstance(tcp, str):
+            tcp = json.loads(tcp) if tcp else {}
+
         return _create_discipline_record_core(
             date=date,
             classification=classification,
@@ -2746,6 +2889,8 @@ def create_discipline_record(
             description=description,
             proof_images=proof_images,
             campus=campus,
+            target_student_points=tsp if isinstance(tsp, dict) else {},
+            target_class_points=tcp if isinstance(tcp, dict) else {},
         )
 
     except Exception as e:
@@ -3332,12 +3477,22 @@ def update_discipline_record(
         doc.target_classes = []
         doc.target_students = []
 
+        tsp = data.get("target_student_points") or {}
+        tcp = data.get("target_class_points") or {}
+        if isinstance(tsp, str):
+            tsp = json.loads(tsp) if tsp else {}
+        if isinstance(tcp, str):
+            tcp = json.loads(tcp) if tcp else {}
+        tsp = tsp if isinstance(tsp, dict) else {}
+        tcp = tcp if isinstance(tcp, dict) else {}
+
         if doc.target_type in ("class", "mixed") and target_class_ids:
             for cid in target_class_ids:
                 if isinstance(cid, dict):
                     cid = cid.get("class_id") or cid.get("name")
                 if cid:
-                    doc.append("target_classes", {"class_id": cid})
+                    dp = _normalize_deduction_points(tcp.get(str(cid)))
+                    doc.append("target_classes", {"class_id": cid, "deduction_points": dp})
 
         # Học sinh: target_student (1 người) + target_students (child table)
         if student_ids:
@@ -3348,7 +3503,8 @@ def update_discipline_record(
                 if isinstance(sid, dict):
                     sid = sid.get("student_id") or sid.get("name")
                 if sid:
-                    doc.append("target_students", {"student_id": sid})
+                    dp = _normalize_deduction_points(tsp.get(str(sid)))
+                    doc.append("target_students", {"student_id": sid, "deduction_points": dp})
         if violation is not None:
             doc.violation = violation
         if form is not None:
