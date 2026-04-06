@@ -251,6 +251,20 @@ def _enrich_parent_portal_timetable_row(row, class_id, logs):
                 row["room_title"] = ""
 
 
+def _time_to_str(t):
+    """Convert timedelta / string / None → "HH:MM" hoặc None."""
+    if t is None:
+        return None
+    if hasattr(t, 'total_seconds'):
+        total_seconds = int(t.total_seconds())
+        return f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
+    if isinstance(t, str):
+        parts = t.split(':')
+        if len(parts) >= 2:
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+    return str(t)
+
+
 def _get_class_timetable_for_date(class_id, target_date):
     """
     Get timetable for a specific class on a specific date
@@ -399,19 +413,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                 }, as_dict=True)
                 logs.append(f"✅ Found {len(non_study_columns)} legacy non-study columns")
             
-            # Helper function to convert time to string
-            def time_to_str(t):
-                if t is None:
-                    return None
-                if hasattr(t, 'total_seconds'):
-                    total_seconds = int(t.total_seconds())
-                    return f"{total_seconds // 3600:02d}:{(total_seconds % 3600) // 60:02d}"
-                if isinstance(t, str):
-                    # Handle "HH:MM:SS" format - strip seconds
-                    parts = t.split(':')
-                    if len(parts) >= 2:
-                        return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
-                return str(t)
+            time_to_str = _time_to_str
             
             if active_schedule:
                 # ⚡ NEW LOGIC: Dùng periods từ schedule MỚI làm base
@@ -630,20 +632,9 @@ def _get_class_timetable_for_date(class_id, target_date):
                     elif col_priority is not None and col_priority in existing_by_priority:
                         existing_row = existing_by_priority[col_priority]
 
-                # Convert timedelta to HH:MM format for start_time and end_time
-                start_time = None
-                if col.get('start_time'):
-                    total_seconds = int(col['start_time'].total_seconds())
-                    hours = total_seconds // 3600
-                    minutes = (total_seconds % 3600) // 60
-                    start_time = f"{hours:02d}:{minutes:02d}"
-                
-                end_time = None
-                if col.get('end_time'):
-                    total_seconds = int(col['end_time'].total_seconds())
-                    hours = total_seconds // 3600
-                    minutes = (total_seconds % 3600) // 60
-                    end_time = f"{hours:02d}:{minutes:02d}"
+                # Convert thời gian (timedelta / string / None) → "HH:MM"
+                start_time = time_to_str(col.get('start_time'))
+                end_time = time_to_str(col.get('end_time'))
 
                 if existing_row:
                     # Use existing row data (study period)
@@ -726,6 +717,25 @@ def _get_class_timetable_for_date(class_id, target_date):
                         target_date_str,
                     )
                 ]
+                # Enrich fallback rows: lookup start_time/end_time từ timetable_column_id
+                for row in all_columns:
+                    col_id = row.get("timetable_column_id")
+                    if col_id and not row.get("start_time"):
+                        try:
+                            col_meta = frappe.db.get_value(
+                                "SIS Timetable Column", col_id,
+                                ["start_time", "end_time", "period_name", "period_type", "period_priority"],
+                                as_dict=True,
+                            )
+                            if col_meta:
+                                row["start_time"] = _time_to_str(col_meta.get("start_time"))
+                                row["end_time"] = _time_to_str(col_meta.get("end_time"))
+                                row["period_name"] = col_meta.get("period_name") or ""
+                                row["period_type"] = col_meta.get("period_type") or "study"
+                                row["period_priority"] = col_meta.get("period_priority") or 0
+                        except Exception:
+                            pass
+
                 logs.append(f"✅ Fallback query found {len(all_columns)} rows")
             except Exception as e2:
                 logs.append(f"❌ Fallback query also failed: {str(e2)}")
