@@ -251,92 +251,6 @@ def _enrich_parent_portal_timetable_row(row, class_id, logs):
                 row["room_title"] = ""
 
 
-def _td_to_hhmm_portal(val):
-    if val is None:
-        return None
-    if hasattr(val, "total_seconds"):
-        ts = int(val.total_seconds())
-        return f"{ts // 3600:02d}:{(ts % 3600) // 60:02d}"
-    if isinstance(val, str):
-        parts = val.split(":")
-        if len(parts) >= 2:
-            return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
-    return str(val)
-
-
-def _merge_student_materialized_timetable(student_id, target_date_str, class_entries, logs):
-    """
-    Bổ sung TKB từ tabSIS Student Timetable (materialized) khi instance lớp thiếu môn/GV.
-    Giữ tiết non-study (ăn sáng, nghỉ, ...) từ class_entries; tiết học lấy từ materialized nếu có.
-    """
-    try:
-        mat = frappe.db.sql(
-            """
-            SELECT
-                st.name AS row_name,
-                st.class_id,
-                st.timetable_column_id,
-                st.subject_id,
-                st.teacher_1_id,
-                st.teacher_2_id,
-                st.room_id,
-                st.day_of_week,
-                tc.period_name,
-                tc.start_time,
-                tc.end_time,
-                tc.period_type,
-                tc.period_priority
-            FROM `tabSIS Student Timetable` st
-            INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
-            WHERE st.student_id = %(student_id)s
-              AND st.date = %(target_date)s
-            ORDER BY tc.period_priority ASC, tc.start_time ASC
-            """,
-            {"student_id": student_id, "target_date": target_date_str},
-            as_dict=True,
-        )
-    except Exception as e:
-        logs.append(f"⚠️ Lỗi truy vấn SIS Student Timetable: {e}")
-        return class_entries
-
-    if not mat:
-        logs.append("ℹ️ Không có dòng SIS Student Timetable cho ngày này — dùng TKB theo instance lớp")
-        return class_entries
-
-    logs.append(f"📌 SIS Student Timetable: {len(mat)} dòng cho học sinh ngày {target_date_str}")
-
-    mat_rows = []
-    for r in mat:
-        cid = r.get("class_id")
-        if not cid:
-            continue
-        row = {
-            "name": r.get("row_name"),
-            "timetable_column_id": r.get("timetable_column_id"),
-            "subject_id": r.get("subject_id"),
-            "teacher_1_id": r.get("teacher_1_id"),
-            "teacher_2_id": r.get("teacher_2_id"),
-            "room_id": r.get("room_id"),
-            "day_of_week": r.get("day_of_week"),
-            "date": target_date_str,
-            "period_name": r.get("period_name") or "",
-            "start_time": _td_to_hhmm_portal(r.get("start_time")),
-            "end_time": _td_to_hhmm_portal(r.get("end_time")),
-            "period_type": r.get("period_type") or "study",
-            "period_priority": r.get("period_priority") or 0,
-        }
-        _enrich_parent_portal_timetable_row(row, cid, logs)
-        mat_rows.append(row)
-
-    non_study = [e for e in class_entries if e.get("period_type") == "non-study"]
-    merged = non_study + mat_rows
-    merged.sort(key=lambda x: (x.get("start_time") or "", x.get("timetable_column_id") or ""))
-    logs.append(
-        f"✅ Merge TKB: {len(non_study)} tiết ngoài học (instance) + {len(mat_rows)} tiết từ Student Timetable"
-    )
-    return merged
-
-
 def _get_class_timetable_for_date(class_id, target_date):
     """
     Get timetable for a specific class on a specific date
@@ -1116,13 +1030,13 @@ def get_student_timetable_today(student_id=None):
                 entries = class_result.get("entries", [])
                 all_entries.extend(entries)
 
-        # Ưu tiên dữ liệu từ SIS Student Timetable (materialized) nếu có — thường đủ môn/GV hơn instance lớp
-        all_entries = _merge_student_materialized_timetable(student_id, today_str, all_entries, logs)
+        # Không merge SIS Student Timetable ở đây — phải khớp logic get_student_timetable_week (Parent Portal dùng week API).
+        # Merge materialized trước đây có thể làm mất tiết học (chỉ còn non-study) khi enrich lỗi.
 
         # Sort by period time
         all_entries.sort(key=lambda x: (x.get("start_time") or "", x.get("timetable_column_id") or ""))
 
-        logs.append(f"✅ Combined {len(all_entries)} timetable entries from {len(class_ids)} classes (sau merge Student Timetable)")
+        logs.append(f"✅ Combined {len(all_entries)} timetable entries from {len(class_ids)} classes")
         
         return {
             "success": True,
