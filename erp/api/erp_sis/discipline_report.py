@@ -214,7 +214,6 @@ def _html_detail_records_table(records: list, limit: int = 25) -> str:
 def _generate_scoped_report_html(
     scope: str,
     school_title_vn: str,
-    school_blurb: str,
     report_date_display: str,
     scoped_records: list,
 ):
@@ -239,15 +238,6 @@ def _generate_scoped_report_html(
     )
 
     accent = "#1565c0" if scope == "thcs" else "#6a1b9a"
-    empty_msg = ""
-    if n == 0:
-        khoi_hint = "khối 6–9" if scope == "thcs" else "khối 10–12"
-        empty_msg = f"""
-        <div style="background: #fff8e1; padding: 16px; border-radius: 8px; border-left: 4px solid #ffc107; margin: 16px 0;">
-            <p style="margin: 0;">Không có bản ghi kỷ luật nào trong ngày được xếp vào <strong>{escape_html(school_title_vn)}</strong>
-            (theo tên lớp thuộc {khoi_hint}).</p>
-        </div>
-        """
 
     dashboard_url = escape_html(DISCIPLINE_DASHBOARD_URL)
 
@@ -256,8 +246,7 @@ def _generate_scoped_report_html(
         <h1 style="color: {accent}; text-align: center; border-bottom: 3px solid {accent}; padding-bottom: 12px; margin-bottom: 8px;">
             Báo cáo kỷ luật — {escape_html(school_title_vn)}
         </h1>
-        <p style="text-align: center; color: #546e7a; margin: 0 0 4px 0;">Ngày {escape_html(report_date_display)}</p>
-        <p style="text-align: center; color: #78909c; font-size: 14px; margin: 0 0 20px 0;">{escape_html(school_blurb)}</p>
+        <p style="text-align: center; color: #546e7a; margin: 0 0 20px 0;">Ngày {escape_html(report_date_display)}</p>
 
         <div style="text-align: center; margin: 24px 0;">
             <a href="{DISCIPLINE_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer"
@@ -272,11 +261,7 @@ def _generate_scoped_report_html(
         <div style="background: #f5f5f5; padding: 20px; border-radius: 10px; margin: 16px 0; border: 1px solid #e0e0e0;">
             <h2 style="color: #263238; margin: 0 0 12px 0; font-size: 18px;">Tổng quan trong ngày</h2>
             <p style="margin: 6px 0; font-size: 15px;"><strong>Số bản ghi thuộc {escape_html(school_title_vn)}:</strong> {n}</p>
-            <p style="margin: 6px 0; font-size: 13px; color: #616161;">
-                Báo cáo này chỉ thống kê bản ghi có lớp/học sinh thuộc khối tương ứng (theo tên lớp). Không gộp dữ liệu của cấp học khác.
-            </p>
         </div>
-        {empty_msg}
     """
 
     if n > 0:
@@ -295,11 +280,6 @@ def _generate_scoped_report_html(
         parts += _html_detail_records_table(detail_list)
 
     parts += f"""
-        <div style="background: #e8f5e9; padding: 14px 16px; border-radius: 8px; margin: 24px 0; font-size: 13px; color: #33691e;">
-            <strong>Ghi chú kỹ thuật:</strong> Phân khối THCS (6–9) / THPT (10–12) dựa trên tên lớp (học sinh hoặc lớp đích),
-            cùng quy tắc với màn Discipline Dashboard trên WIS.
-        </div>
-
         <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 28px 0;">
         <div style="text-align: center; color: #78909c; font-size: 13px;">
             <p style="margin: 4px 0;"><strong>Hệ thống quản lý trường học</strong> — Wellspring</p>
@@ -440,7 +420,6 @@ def _send_discipline_reports_for_date(report_date: str):
     body_thcs = _generate_scoped_report_html(
         "thcs",
         "Trường THCS (Trung học cơ sở)",
-        "Khối lớp 6–9 — báo cáo chỉ gồm bản ghi thuộc phạm vi THCS.",
         report_date_display,
         thcs_records,
     )
@@ -454,7 +433,6 @@ def _send_discipline_reports_for_date(report_date: str):
     body_thpt = _generate_scoped_report_html(
         "thpt",
         "Trường THPT (Trung học phổ thông)",
-        "Khối lớp 10–12 — báo cáo chỉ gồm bản ghi thuộc phạm vi THPT.",
         report_date_display,
         thpt_records,
     )
