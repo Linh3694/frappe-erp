@@ -359,6 +359,27 @@ def daily_discipline_email_report():
         return {"success": False, "message": str(e)}
 
 
+def _coerce_date_string(date_val, req):
+    """
+    Chuẩn hoá ngày YYYY-MM-DD.
+    frappe.call(path, {"date": "..."}) có thể gán cả dict vào tham số date — lấy key date.
+    """
+    if isinstance(date_val, dict):
+        date_val = date_val.get("date")
+
+    def _to_str(v):
+        if v is None:
+            return ""
+        if isinstance(v, dict):
+            return _to_str(v.get("date"))
+        return str(v).strip()
+
+    s = _to_str(date_val)
+    if not s and isinstance(req, dict):
+        s = _to_str(req.get("date"))
+    return s or frappe.utils.nowdate()
+
+
 @frappe.whitelist(allow_guest=False)
 def send_discipline_daily_report(date=None):
     """
@@ -379,7 +400,7 @@ def send_discipline_daily_report(date=None):
             }
 
         req = _get_request_data()
-        report_date = (date or req.get("date") or "").strip() or frappe.utils.nowdate()
+        report_date = _coerce_date_string(date, req)
 
         return _send_discipline_reports_for_date(report_date)
     except Exception as e:
