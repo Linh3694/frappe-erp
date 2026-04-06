@@ -446,25 +446,35 @@ def _get_class_timetable_for_date(class_id, target_date):
 
             logs.append(f"✅ Found {len(existing_rows)} study period rows for {day_of_week}")
 
-            # ⚡ Cần map existing_rows qua period_name/period_priority
-            # vì column_ids từ timetable instances có thể khác với column_ids từ legacy/new schedule
-            # Build mapping: existing_rows theo period_name và period_priority
-            # existing_row.timetable_column_id -> legacy_column_info -> period_name/priority
+            # Map từng dòng instance row có môn → theo cột TKB + period_name/priority
+            # (Luôn đọc tabSIS Timetable Column — không phụ thuộc legacy_column_info vì schedule mới/cũ
+            #  có thể khác ID cột nhưng trùng period_name hoặc trùng hẳn timetable_column_id)
+            existing_by_column_id = {}
             existing_by_period_name = {}
             existing_by_priority = {}
-            
+
             for row in existing_rows:
-                col_id = row.get('timetable_column_id')
-                if col_id and col_id in legacy_column_info:
-                    info = legacy_column_info[col_id]
-                    period_name = info.get('period_name')
-                    period_priority = info.get('period_priority')
-                    
-                    if period_name:
-                        existing_by_period_name[period_name] = row
-                    if period_priority is not None:
-                        existing_by_priority[period_priority] = row
-            
+                col_id = row.get("timetable_column_id")
+                if not col_id:
+                    continue
+                meta = frappe.db.get_value(
+                    "SIS Timetable Column",
+                    col_id,
+                    ["period_name", "period_priority"],
+                    as_dict=True,
+                )
+                if not meta:
+                    logs.append(f"⚠️ Không tìm thấy SIS Timetable Column: {col_id}")
+                    continue
+                period_name = meta.get("period_name")
+                period_priority = meta.get("period_priority")
+                existing_by_column_id[col_id] = row
+                if period_name:
+                    existing_by_period_name[period_name] = row
+                if period_priority is not None:
+                    existing_by_priority[period_priority] = row
+
+            logs.append(f"📋 Mapped subjects by column_id: {len(existing_by_column_id)}")
             logs.append(f"📋 Mapped subjects by period_name: {list(existing_by_period_name.keys())}")
             logs.append(f"📋 Mapped subjects by priority: {list(existing_by_priority.keys())}")
 
@@ -476,11 +486,13 @@ def _get_class_timetable_for_date(class_id, target_date):
                 # ⚡ FIX: Chỉ map subject cho STUDY periods, non-study KHÔNG map
                 existing_row = None
                 if col_period_type == 'study':
-                    # Map qua period_name trước, fallback qua period_priority
+                    # Ưu tiên khớp đúng timetable_column_id, rồi period_name, rồi period_priority
                     col_period_name = col.get('period_name')
                     col_priority = col.get('period_priority')
-                    
-                    if col_period_name and col_period_name in existing_by_period_name:
+
+                    if column_id and column_id in existing_by_column_id:
+                        existing_row = existing_by_column_id[column_id]
+                    elif col_period_name and col_period_name in existing_by_period_name:
                         existing_row = existing_by_period_name[col_period_name]
                     elif col_priority is not None and col_priority in existing_by_priority:
                         existing_row = existing_by_priority[col_priority]
@@ -661,6 +673,23 @@ def _get_class_timetable_for_date(class_id, target_date):
                                 logs.append(f"⚠️ Could not get teacher {assignment.teacher_id}: {str(e)}")
                 except Exception as e:
                     logs.append(f"⚠️ Could not get subject assignments for subject {row['subject_id']}: {str(e)}")
+
+            # Fallback: giáo viên ghi trực tiếp trên dòng TKB (khi chưa có Subject Assignment)
+            if not teacher_names:
+                for tid_field in ("teacher_1_id", "teacher_2_id"):
+                    tid = row.get(tid_field)
+                    if not tid:
+                        continue
+                    teacher_ids.append(tid)
+                    try:
+                        teacher = frappe.get_doc("SIS Teacher", tid)
+                        if teacher.user_id:
+                            user = frappe.get_doc("User", teacher.user_id)
+                            teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+                            if teacher_name:
+                                teacher_names.append(teacher_name)
+                    except Exception as e:
+                        logs.append(f"⚠️ Fallback GV từ {tid_field} {tid}: {str(e)}")
 
             row["teacher_names"] = ", ".join(teacher_names)
             row["teacher_ids"] = teacher_ids
