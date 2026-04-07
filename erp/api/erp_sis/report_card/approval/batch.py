@@ -756,6 +756,12 @@ def approve_class_reports():
                 if pending_level in ["level_1", "level_2"] and not counters_already_set:
                     # Sync data_json trước khi compute để không mất homeroom.approval
                     data_json = sync_data_json_with_db(report_data.name, data_json)
+                    # Ghi lại data_json đã sync vào DB
+                    frappe.db.set_value(
+                        "SIS Student Report Card", report_data.name,
+                        "data_json", json.dumps(data_json, ensure_ascii=False),
+                        update_modified=False
+                    )
                     new_counters = update_report_counters(report_data.name, data_json, template)
                     
                     # Sau khi recompute counters, nếu tất cả sections đã L2 → promote approval_status
@@ -1875,10 +1881,8 @@ def reject_single_report():
                         report.approval_status = "level_1_approved"
                         report.scores_approval_status = "level_1_approved"
 
-            report.data_json = json.dumps(data_json, ensure_ascii=False)
-            
             if template:
-                # ✅ FIX: Sync data_json trước khi compute counters
+                # Sync data_json trước khi serialize để đảm bảo homeroom.approval không bị mất
                 data_json = sync_data_json_with_db(report.name, data_json)
                 counters = compute_approval_counters(data_json, template)
                 report.homeroom_l2_approved = counters.get("homeroom_l2_approved", 0)
@@ -1892,6 +1896,9 @@ def reject_single_report():
                 report.intl_l2_approved_count = counters.get("intl_l2_approved_count", 0)
                 report.intl_total_count = counters.get("intl_total_count", 0)
                 report.all_sections_l2_approved = counters.get("all_sections_l2_approved", 0)
+            
+            # Serialize data_json SAU khi sync
+            report.data_json = json.dumps(data_json, ensure_ascii=False)
         
         add_approval_history(
             report,
