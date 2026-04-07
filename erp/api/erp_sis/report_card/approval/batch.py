@@ -281,9 +281,12 @@ def submit_class_reports():
                             update_values["rejected_section"] = ""
                             update_values["rejected_from_level"] = 0
                 
-                # ✅ FIX: Sync data_json với DB trước khi compute counters
+                # Sync data_json với DB trước khi compute counters
                 # Đảm bảo homeroom approval không bị mất khi submit subject_eval
                 data_json = sync_data_json_with_db(report_data.name, data_json)
+                
+                # Re-serialize data_json SAU khi sync để đảm bảo homeroom.approval được lưu
+                update_values["data_json"] = json.dumps(data_json, ensure_ascii=False)
                 
                 # Compute counters
                 counters = compute_approval_counters(data_json, template)
@@ -749,8 +752,10 @@ def approve_class_reports():
                     update_modified=True
                 )
                 
-                # ✅ FIX: Chỉ gọi update_report_counters nếu chưa set counters ở trên
+                # Chỉ gọi update_report_counters nếu chưa set counters ở trên
                 if pending_level in ["level_1", "level_2"] and not counters_already_set:
+                    # Sync data_json trước khi compute để không mất homeroom.approval
+                    data_json = sync_data_json_with_db(report_data.name, data_json)
                     new_counters = update_report_counters(report_data.name, data_json, template)
                     
                     # Sau khi recompute counters, nếu tất cả sections đã L2 → promote approval_status
