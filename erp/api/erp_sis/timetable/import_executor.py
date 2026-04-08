@@ -1197,20 +1197,12 @@ class TimetableImportExecutor:
 			if not actual_subject_id:
 				continue
 			
-			# Lớp mixed: chỉ lấy HS được assign vào lớp này (class_type = mixed)
-			class_type = frappe.db.get_value("SIS Class", class_id, "class_type")
-			if class_type == "mixed":
-				students = frappe.get_all(
-					"SIS Class Student",
-					filters={"class_id": class_id, "class_type": "mixed"},
-					pluck="student_id"
-				)
-			else:
-				students = frappe.get_all(
-					"SIS Class Student",
-					filters={"class_id": class_id},
-					pluck="student_id"
-				)
+			# Get students in class
+			students = frappe.get_all(
+				"SIS Class Student",
+				filters={"class_id": class_id},
+				pluck="student_id"
+			)
 			
 			if not students:
 				continue

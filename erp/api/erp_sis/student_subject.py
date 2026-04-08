@@ -836,15 +836,6 @@ def create_student_reports_for_template():
         # Phòng trường hợp assign HS vào lớp nhưng quên đồng bộ thời khoá biểu
         auto_sync_logs = []
         for class_id, students in students_by_class.items():
-            # Lớp mixed: bỏ qua auto-sync (không biết HS nào học môn nào)
-            class_type = frappe.db.get_value("SIS Class", class_id, "class_type")
-            if class_type == "mixed":
-                auto_sync_logs.append(
-                    f"Class {class_id}: Lớp chạy (mixed) — bỏ qua auto-sync, "
-                    f"cần đồng bộ thủ công hoặc qua TKB import."
-                )
-                continue
-
             student_ids_in_class = [s["student_id"] for s in students]
             
             students_with_subjects = frappe.get_all(
