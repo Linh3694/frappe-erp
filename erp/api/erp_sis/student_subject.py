@@ -836,6 +836,15 @@ def create_student_reports_for_template():
         # Phòng trường hợp assign HS vào lớp nhưng quên đồng bộ thời khoá biểu
         auto_sync_logs = []
         for class_id, students in students_by_class.items():
+            # Lớp mixed: bỏ qua auto-sync (không biết HS nào học môn nào)
+            class_type = frappe.db.get_value("SIS Class", class_id, "class_type")
+            if class_type == "mixed":
+                auto_sync_logs.append(
+                    f"Class {class_id}: Lớp chạy (mixed) — bỏ qua auto-sync, "
+                    f"cần đồng bộ thủ công hoặc qua TKB import."
+                )
+                continue
+
             student_ids_in_class = [s["student_id"] for s in students]
             
             students_with_subjects = frappe.get_all(
@@ -930,6 +939,27 @@ def create_student_reports_for_template():
         
         if auto_sync_logs:
             frappe.logger().info(f"[AUTO-SYNC] Report card creation pre-sync: {auto_sync_logs}")
+
+        # Cảnh báo lớp có enrollment rỗng (HS sẽ nhận tất cả môn template)
+        enrollment_warnings = []
+        for class_id, class_students in students_by_class.items():
+            sample_id = class_students[0]["student_id"]
+            has_any = frappe.db.count(
+                "SIS Student Subject",
+                {"student_id": sample_id, "campus_id": campus_id},
+            )
+            if has_any == 0:
+                class_title = (
+                    frappe.db.get_value("SIS Class", class_id, "title") or class_id
+                )
+                enrollment_warnings.append(
+                    f"Lớp {class_title}: HS chưa có đăng ký môn (SIS Student Subject rỗng). "
+                    f"Báo cáo sẽ chứa TẤT CẢ môn từ template."
+                )
+        if enrollment_warnings:
+            frappe.logger().warning(
+                f"[ENROLLMENT_WARNING] {enrollment_warnings}"
+            )
         
         created_reports = []
         failed_students = []
@@ -1019,18 +1049,24 @@ def create_student_reports_for_template():
         
         frappe.db.commit()
         
-        return success_response(
-            data={
-                "created": created_reports,
-                "failed": failed_students,
-                "skipped": skipped_students,
-                "summary": {
-                    "total_students": sum(len(students) for students in students_by_class.values()),
-                    "created_count": len(created_reports),
-                    "failed_count": len(failed_students),
-                    "skipped_count": len(skipped_students)
-                }
+        response_data = {
+            "created": created_reports,
+            "failed": failed_students,
+            "skipped": skipped_students,
+            "summary": {
+                "total_students": sum(len(students) for students in students_by_class.values()),
+                "created_count": len(created_reports),
+                "failed_count": len(failed_students),
+                "skipped_count": len(skipped_students),
             },
+        }
+        if enrollment_warnings:
+            response_data["enrollment_warnings"] = enrollment_warnings
+        if auto_sync_logs:
+            response_data["auto_sync_logs"] = auto_sync_logs
+
+        return success_response(
+            data=response_data,
             message=f"Created {len(created_reports)} student report cards. {len(skipped_students)} skipped (duplicates), {len(failed_students)} failed."
         )
         
