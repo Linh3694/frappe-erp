@@ -125,6 +125,66 @@ def get_subjects_by_classes():
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_student_subject_map(class_id=None):
+    """
+    Mapping student_id -> [actual_subject_id, ...] từ SIS Student Subject cho một lớp.
+    Dùng để lọc đúng HS theo môn trên màn nhập báo cáo (không suy từ data_json).
+    """
+    try:
+        if not class_id:
+            class_id = frappe.form_dict.get("class_id")
+        if not class_id and hasattr(frappe.request, "args"):
+            class_id = frappe.request.args.get("class_id")
+        if not class_id and frappe.request.data:
+            try:
+                raw = frappe.request.data.decode("utf-8") if isinstance(frappe.request.data, bytes) else frappe.request.data
+                json_data = json.loads(raw)
+                class_id = json_data.get("class_id")
+            except (json.JSONDecodeError, TypeError, AttributeError, UnicodeDecodeError):
+                pass
+
+        if not class_id:
+            return validation_error_response(
+                "Validation failed",
+                {"class_id": ["class_id is required"]},
+            )
+
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            campus_id = get_campus_id_from_user_roles()
+        if not campus_id:
+            campus_id = "campus-1"
+            frappe.logger().warning(
+                f"[get_student_subject_map] No campus for user {frappe.session.user}, using {campus_id}"
+            )
+
+        rows = frappe.get_all(
+            "SIS Student Subject",
+            filters={"class_id": class_id, "campus_id": campus_id},
+            fields=["student_id", "actual_subject_id"],
+        )
+
+        result = {}
+        for r in rows:
+            sid = r.get("student_id")
+            aid = r.get("actual_subject_id")
+            if not sid or not aid:
+                continue
+            if sid not in result:
+                result[sid] = []
+            if aid not in result[sid]:
+                result[sid].append(aid)
+
+        return success_response(
+            data={"class_id": class_id, "map": result},
+            message=f"Đã lấy mapping cho {len(result)} học sinh",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error in get_student_subject_map: {str(e)}")
+        return error_response(f"Lỗi khi lấy mapping môn-học sinh: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_students_by_classes():
     """
     Get unique students from SIS Student Subject based on selected classes/grades

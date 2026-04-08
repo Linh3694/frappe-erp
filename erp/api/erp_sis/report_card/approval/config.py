@@ -29,6 +29,66 @@ from erp.utils.api_response import (
 from ..utils import get_request_payload, get_current_campus_id
 
 
+def _taught_subjects_for_class(class_id: str, campus_id: str):
+    """Gom distinct actual_subject_id từ phân công giảng dạy lớp; fallback từ SIS Student Subject."""
+    seen = set()
+    out = []
+    assignments = frappe.get_all(
+        "SIS Subject Assignment",
+        filters={"class_id": class_id, "campus_id": campus_id},
+        fields=["actual_subject_id"],
+    )
+    for a in assignments:
+        aid = a.get("actual_subject_id")
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        subject_info = frappe.db.get_value(
+            "SIS Actual Subject",
+            aid,
+            ["name", "title_vn", "title_en"],
+            as_dict=True,
+        )
+        if subject_info:
+            out.append(
+                {
+                    "subject_id": subject_info.name,
+                    "subject_title": subject_info.title_vn
+                    or subject_info.title_en
+                    or subject_info.name,
+                }
+            )
+    if out:
+        return out
+    # Fallback: môn HS đăng ký trong lớp (khi chưa có phân công TKB)
+    enroll_rows = frappe.get_all(
+        "SIS Student Subject",
+        filters={"class_id": class_id, "campus_id": campus_id},
+        fields=["actual_subject_id"],
+    )
+    for r in enroll_rows:
+        aid = r.get("actual_subject_id")
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        subject_info = frappe.db.get_value(
+            "SIS Actual Subject",
+            aid,
+            ["name", "title_vn", "title_en"],
+            as_dict=True,
+        )
+        if subject_info:
+            out.append(
+                {
+                    "subject_id": subject_info.name,
+                    "subject_title": subject_info.title_vn
+                    or subject_info.title_en
+                    or subject_info.name,
+                }
+            )
+    return out
+
+
 # =============================================================================
 # APPROVAL CONFIG APIs (L3/L4)
 # =============================================================================
@@ -361,7 +421,8 @@ def get_teacher_class_permissions(class_id: Optional[str] = None):
     - taught_subjects: danh sách subject_id mà GV dạy lớp này
     - is_homeroom_teacher: có phải GVCN không
     - is_vice_homeroom_teacher: có phải Phó CN không
-    
+    - is_sis_manager: role SIS Manager — xem/điền mọi board như full quyền trên lớp
+
     Args:
         class_id: ID của lớp
     """
@@ -380,7 +441,31 @@ def get_teacher_class_permissions(class_id: Optional[str] = None):
         
         user = frappe.session.user
         campus_id = get_current_campus_id()
-        
+        user_roles = frappe.get_roles(user)
+        is_sis_manager = "SIS Manager" in user_roles
+
+        # SIS Manager: toàn quyền nhập/xem mọi bảng báo cáo trên mọi lớp (theo campus)
+        if is_sis_manager:
+            taught_all = _taught_subjects_for_class(class_id, campus_id)
+            teacher = frappe.get_all(
+                "SIS Teacher",
+                filters={"user_id": user, "campus_id": campus_id},
+                fields=["name"],
+                limit=1,
+            )
+            teacher_id = teacher[0].name if teacher else None
+            return success_response(
+                data={
+                    "teacher_id": teacher_id,
+                    "class_id": class_id,
+                    "taught_subjects": taught_all,
+                    "is_homeroom_teacher": True,
+                    "is_vice_homeroom_teacher": False,
+                    "is_sis_manager": True,
+                },
+                message="SIS Manager — quyền đầy đủ trên lớp",
+            )
+
         # Lấy teacher của user
         teacher = frappe.get_all(
             "SIS Teacher",
@@ -394,7 +479,8 @@ def get_teacher_class_permissions(class_id: Optional[str] = None):
                 data={
                     "taught_subjects": [],
                     "is_homeroom_teacher": False,
-                    "is_vice_homeroom_teacher": False
+                    "is_vice_homeroom_teacher": False,
+                    "is_sis_manager": False,
                 },
                 message="Không tìm thấy thông tin giáo viên"
             )
@@ -443,7 +529,8 @@ def get_teacher_class_permissions(class_id: Optional[str] = None):
                 "class_id": class_id,
                 "taught_subjects": taught_subjects,
                 "is_homeroom_teacher": is_homeroom,
-                "is_vice_homeroom_teacher": is_vice_homeroom
+                "is_vice_homeroom_teacher": is_vice_homeroom,
+                "is_sis_manager": False,
             },
             message="Lấy thông tin quyền thành công"
         )

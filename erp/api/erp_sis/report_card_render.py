@@ -497,6 +497,30 @@ def _standardize_report_data(data: Dict[str, Any], report, form, l2_approved_sub
                     subjects_to_process.append(subject_info)
                     frappe.logger().info(f"[STANDARDIZE_SUBJECTS] Added from subjects[idx={cfg_idx}]: {subject_id}")
     
+    # Chỉ giữ môn có trong data_json của HS (tránh liệt kê cả môn không học)
+    if template_doc:
+
+        def _is_actual_subject_key(k):
+            if not isinstance(k, str):
+                return False
+            return k.startswith("SIS_ACTUAL_SUBJECT-") or k.startswith("SIS-ACTUAL-SUBJECT-")
+
+        student_data_subject_ids = set()
+        if isinstance(scores_data, dict):
+            student_data_subject_ids.update(k for k in scores_data.keys() if _is_actual_subject_key(k))
+        if isinstance(intl_scores_data, dict):
+            student_data_subject_ids.update(k for k in intl_scores_data.keys() if _is_actual_subject_key(k))
+        if isinstance(subject_eval_data_raw, dict):
+            student_data_subject_ids.update(k for k in subject_eval_data_raw.keys() if _is_actual_subject_key(k))
+        if student_data_subject_ids:
+            before_ct = len(subjects_to_process)
+            subjects_to_process = [
+                s for s in subjects_to_process if s.get("subject_id") in student_data_subject_ids
+            ]
+            frappe.logger().info(
+                f"[STANDARDIZE_SUBJECTS] Filtered by student data: {before_ct} -> {len(subjects_to_process)}"
+            )
+
     # ✨ FALLBACK: CHỈ load từ data nếu KHÔNG CÓ TEMPLATE (backward compatibility)
     # KHÔNG fallback nếu có template dù subjects_to_process rỗng (tránh hiển thị subjects đã xóa)
     frappe.logger().info(f"[TEMPLATE_DEBUG] Template doc exists: {template_doc is not None}")
