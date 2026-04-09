@@ -127,8 +127,14 @@ def get_subjects_by_classes():
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_student_subject_map(class_id=None):
     """
-    Mapping student_id -> [actual_subject_id, ...] từ SIS Student Subject cho một lớp.
-    Dùng để lọc đúng HS theo môn trên màn nhập báo cáo (không suy từ data_json).
+    Mapping student_id -> [actual_subject_id, ...] cho tất cả HS trong một lớp (homeroom).
+
+    Luồng xử lý:
+    1. Lấy danh sách HS từ SIS Class Student (nguồn chính xác cho homeroom class)
+    2. Lấy TẤT CẢ môn học của các HS đó từ SIS Student Subject (bao gồm mixed classes)
+
+    Điều này đảm bảo khi HS 11AB3 học Vật lý ở lớp mixed 11TN1,
+    môn Vật lý vẫn được mapping đúng cho HS đó khi xem entry lớp 11AB3.
     """
     try:
         if not class_id:
@@ -158,9 +164,28 @@ def get_student_subject_map(class_id=None):
                 f"[get_student_subject_map] No campus for user {frappe.session.user}, using {campus_id}"
             )
 
+        # Bước 1: Lấy HS từ SIS Class Student (authoritative cho homeroom class)
+        class_students = frappe.get_all(
+            "SIS Class Student",
+            filters={"class_id": class_id, "campus_id": campus_id},
+            fields=["student_id"],
+        )
+
+        if not class_students:
+            return success_response(
+                data={"class_id": class_id, "map": {}},
+                message="Không có học sinh trong lớp",
+            )
+
+        student_ids = list(set(
+            s["student_id"] for s in class_students if s.get("student_id")
+        ))
+
+        # Bước 2: Lấy TẤT CẢ môn học của các HS (không giới hạn class_id)
+        # Bao gồm môn từ mixed classes (VD: HS 11AB3 học Vật lý ở lớp 11TN1)
         rows = frappe.get_all(
             "SIS Student Subject",
-            filters={"class_id": class_id, "campus_id": campus_id},
+            filters={"student_id": ["in", student_ids], "campus_id": campus_id},
             fields=["student_id", "actual_subject_id"],
         )
 
@@ -177,7 +202,7 @@ def get_student_subject_map(class_id=None):
 
         return success_response(
             data={"class_id": class_id, "map": result},
-            message=f"Đã lấy mapping cho {len(result)} học sinh",
+            message=f"Đã lấy mapping cho {len(result)} học sinh ({len(student_ids)} HS trong lớp)",
         )
     except Exception as e:
         frappe.log_error(f"Error in get_student_subject_map: {str(e)}")
