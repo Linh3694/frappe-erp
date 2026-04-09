@@ -181,11 +181,30 @@ def get_student_subject_map(class_id=None):
             s["student_id"] for s in class_students if s.get("student_id")
         ))
 
-        # Bước 2: Lấy TẤT CẢ môn học của các HS (không giới hạn class_id)
-        # Bao gồm môn từ mixed classes (VD: HS 11AB3 học Vật lý ở lớp 11TN1)
+        # Lấy school_year từ class để filter đúng năm học
+        # (SIS Student Subject không có field school_year, filter qua class_id)
+        school_year = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+        year_class_ids = None
+        if school_year:
+            year_classes = frappe.get_all(
+                "SIS Class",
+                filters={"school_year_id": school_year, "campus_id": campus_id},
+                fields=["name"],
+                limit=0
+            )
+            year_class_ids = [c["name"] for c in year_classes]
+
+        # Bước 2: Lấy môn học của HS TRONG NĂM HỌC NÀY (bao gồm mixed classes)
+        ss_filters = {
+            "student_id": ["in", student_ids],
+            "campus_id": campus_id,
+        }
+        if year_class_ids:
+            ss_filters["class_id"] = ["in", year_class_ids]
+
         rows = frappe.get_all(
             "SIS Student Subject",
-            filters={"student_id": ["in", student_ids], "campus_id": campus_id},
+            filters=ss_filters,
             fields=["student_id", "actual_subject_id"],
         )
 
@@ -500,21 +519,36 @@ def _initialize_report_data_from_template(template, student_id: str, class_id: s
     data = {}
     
     try:
-        # Get all actual subjects for this student from SIS Student Subject
-        # IMPORTANT: Get subjects from ALL classes this student is enrolled in, including mixed classes
-        # This ensures mixed class subjects are included in the report card
         campus_id = template.campus_id
+        school_year = getattr(template, 'school_year', None)
+
+        # Lấy danh sách class_ids cùng năm học để chỉ lấy môn của năm hiện tại
+        # (SIS Student Subject không có field school_year, phải filter qua class_id)
+        year_class_ids = None
+        if school_year:
+            year_classes = frappe.get_all(
+                "SIS Class",
+                filters={"school_year_id": school_year, "campus_id": campus_id},
+                fields=["name"],
+                limit=0
+            )
+            year_class_ids = [c["name"] for c in year_classes]
+
+        # Lấy môn HS thực sự học TRONG NĂM HỌC NÀY (bao gồm mixed classes)
+        ss_filters = {
+            "campus_id": campus_id,
+            "student_id": student_id,
+        }
+        if year_class_ids:
+            ss_filters["class_id"] = ["in", year_class_ids]
+
         student_subjects = frappe.get_all(
             "SIS Student Subject",
             fields=["actual_subject_id"],
-            filters={
-                "campus_id": campus_id,
-                "student_id": student_id  # Get ALL subjects for this student across all classes
-            },
+            filters=ss_filters,
             distinct=True
         )
         
-        # Get actual subject details - these are subjects the student ACTUALLY studies
         actual_subject_ids = [s["actual_subject_id"] for s in student_subjects if s.get("actual_subject_id")]
 
         # FALLBACK: Nếu SIS Student Subject rỗng, dùng tất cả subjects từ template
