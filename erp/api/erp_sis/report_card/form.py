@@ -267,6 +267,9 @@ def ensure_default_forms():
     - SEC_VN_MID: Trung Học - Giữa kỳ
     - SEC_VN_END1: Trung Học - HK1
     - SEC_VN_END2: Trung Học - HK2
+    - HIGH_VN_MID: THPT - Giữa kỳ
+    - HIGH_VN_END1: THPT - HK1
+    - HIGH_VN_END2: THPT - HK2
     """
     try:
         campus_id = get_current_campus_id()
@@ -275,6 +278,9 @@ def ensure_default_forms():
             {"code": "SEC_VN_MID", "title": "Trung Học - Giữa kỳ"},
             {"code": "SEC_VN_END1", "title": "Trung Học - HK1"},
             {"code": "SEC_VN_END2", "title": "Trung Học - HK2"},
+            {"code": "HIGH_VN_MID", "title": "THPT - Giữa kỳ"},
+            {"code": "HIGH_VN_END1", "title": "THPT - HK1"},
+            {"code": "HIGH_VN_END2", "title": "THPT - HK2"},
         ]
         created = []
         for d in defaults:

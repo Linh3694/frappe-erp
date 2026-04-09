@@ -186,13 +186,20 @@ def doc_to_template_dict(doc) -> Dict[str, Any]:
     
     # Parse homeroom_comment_options snapshot
     homeroom_comment_options = parse_json_field(getattr(doc, "homeroom_comment_options", None))
-    
+
+    # Mã biểu mẫu (PRIM_VN, SEC_VN_*, HIGH_VN_*) — dùng FE để giới hạn ký tự nhận xét theo cấp
+    form_id = getattr(doc, "form_id", None)
+    form_code = None
+    if form_id:
+        form_code = frappe.db.get_value("SIS Report Card Form", form_id, "code")
+
     return {
         "name": doc.name,
         "title": getattr(doc, "title", None),
         "is_published": 1 if getattr(doc, "is_published", 0) else 0,
         "program_type": getattr(doc, "program_type", None),
-        "form_id": getattr(doc, "form_id", None),
+        "form_id": form_id,
+        "form_code": form_code,
         "curriculum": getattr(doc, "curriculum", None),
         "education_stage": getattr(doc, "education_stage", None),
         "school_year": getattr(doc, "school_year", None),
