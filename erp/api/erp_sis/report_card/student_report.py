@@ -29,7 +29,6 @@ from .utils import (
 )
 from .serializers import (
     normalize_intl_scores,
-    initialize_report_data_from_template,
 )
 
 
@@ -388,12 +387,11 @@ def create_reports_for_class(template_id: Optional[str] = None, class_id: Option
                 )
                 continue
 
-            # Initialize data from template
-            try:
-                from erp.api.erp_sis.student_subject import _initialize_report_data_from_template as init_with_student_filter
-                initial_data = init_with_student_filter(template, resolved_student_id, class_id)
-            except ImportError:
-                initial_data = initialize_report_data_from_template(template, class_id)
+            # Initialize data từ template, filter môn theo SIS Student Subject của HS
+            # QUAN TRỌNG: Luôn dùng hàm có filter per-student để tránh tạo report
+            # với tất cả môn template cho mọi HS (gây sai cho lớp mixed)
+            from erp.api.erp_sis.student_subject import _initialize_report_data_from_template as init_with_student_filter
+            initial_data = init_with_student_filter(template, resolved_student_id, class_id)
             
             # Create report
             doc = frappe.get_doc({
@@ -1535,13 +1533,10 @@ def repair_student_report_data():
                         repaired_count += 1
                         continue
                     
-                    try:
-                        from erp.api.erp_sis.student_subject import (
-                            _initialize_report_data_from_template as init_with_filter,
-                        )
-                        new_data = init_with_filter(template, report["student_id"], repair_class_id)
-                    except ImportError:
-                        new_data = initialize_report_data_from_template(template, repair_class_id)
+                    from erp.api.erp_sis.student_subject import (
+                        _initialize_report_data_from_template as init_with_filter,
+                    )
+                    new_data = init_with_filter(template, report["student_id"], repair_class_id)
                     
                     merged_data = _merge_report_data(current_data, new_data)
                     
