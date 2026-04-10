@@ -11,6 +11,11 @@
   "status",
   "priority",
   "category",
+  "is_event_facility",
+  "event_building_id",
+  "event_room_id",
+  "event_start_time",
+  "event_end_time",
   "area_title",
   "description",
   "attachment",
@@ -52,7 +57,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Tr\u1ea1ng th\u00e1i",
-   "options": "Open\nAssigned\nIn Progress\nResolved\nClosed\nCancelled",
+   "options": "Open\nAssigned\nIn Progress\nDone\nResolved\nClosed\nCancelled",
    "reqd": 1
   },
   {
@@ -70,6 +75,34 @@
    "label": "Danh m\u1ee5c",
    "options": "ERP Administrative Support Category",
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_event_facility",
+   "fieldtype": "Check",
+   "label": "Y\u00eau c\u1ea7u CSVC cho s\u1ef1 ki\u1ec7n"
+  },
+  {
+   "fieldname": "event_building_id",
+   "fieldtype": "Link",
+   "label": "T\u00f2a nh\u00e0 (s\u1ef1 ki\u1ec7n)",
+   "options": "ERP Administrative Building"
+  },
+  {
+   "fieldname": "event_room_id",
+   "fieldtype": "Link",
+   "label": "Ph\u00f2ng (s\u1ef1 ki\u1ec7n)",
+   "options": "ERP Administrative Room"
+  },
+  {
+   "fieldname": "event_start_time",
+   "fieldtype": "Datetime",
+   "label": "B\u1eaft \u0111\u1ea7u s\u1ef1 ki\u1ec7n"
+  },
+  {
+   "fieldname": "event_end_time",
+   "fieldtype": "Datetime",
+   "label": "K\u1ebft th\u00fac s\u1ef1 ki\u1ec7n"
   },
   {
    "fieldname": "area_title",

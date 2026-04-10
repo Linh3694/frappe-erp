@@ -5,7 +5,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, now_datetime
+from frappe.utils import cint, get_datetime, now_datetime
 
 from erp.utils.api_response import (
     error_response,
@@ -23,6 +23,33 @@ SUBTASK_DOCTYPE = "ERP Administrative Ticket Sub Task"
 HISTORY_DOCTYPE = "ERP Administrative Ticket History"
 
 _STAFF_ROLES = ("System Manager", "SIS Administrative", "SIS BOD")
+
+# Danh mục cố định — tên Doc ERP Administrative Support Category (đồng bộ frontend)
+EVENT_FACILITY_CATEGORY_NAME = "__event_facility__"
+
+
+def _ensure_event_facility_support_category():
+    """Tạo danh mục CSVC sự kiện (name cố định) nếu chưa có — dùng rename sau insert vì autoname series."""
+    if frappe.db.exists("ERP Administrative Support Category", EVENT_FACILITY_CATEGORY_NAME):
+        return EVENT_FACILITY_CATEGORY_NAME
+    doc = frappe.get_doc(
+        {
+            "doctype": "ERP Administrative Support Category",
+            "title": "Yêu cầu cơ sở vật chất cho sự kiện",
+            "ticket_code_prefix": "EVT",
+        }
+    )
+    doc.insert(ignore_permissions=True)
+    if doc.name != EVENT_FACILITY_CATEGORY_NAME:
+        frappe.rename_doc(
+            "ERP Administrative Support Category",
+            doc.name,
+            EVENT_FACILITY_CATEGORY_NAME,
+            force=True,
+            merge=False,
+        )
+    frappe.db.commit()
+    return EVENT_FACILITY_CATEGORY_NAME
 
 
 def _parse_json_body():
@@ -116,6 +143,17 @@ def _ticket_to_dict(doc, include_feedback=True):
 
     attachment_url = doc.attachment or ""
 
+    event_building_label = ""
+    event_room_label = ""
+    if getattr(doc, "event_building_id", None):
+        event_building_label = frappe.db.get_value(
+            "ERP Administrative Building", doc.event_building_id, "title_vn"
+        ) or doc.event_building_id
+    if getattr(doc, "event_room_id", None):
+        event_room_label = frappe.db.get_value(
+            "ERP Administrative Room", doc.event_room_id, "title_vn"
+        ) or doc.event_room_id
+
     return {
         "_id": doc.name,
         "name": doc.name,
@@ -138,6 +176,13 @@ def _ticket_to_dict(doc, include_feedback=True):
         "acceptedAt": doc.accepted_at,
         "area_title": doc.area_title or "",
         "attachment": attachment_url,
+        "is_event_facility": bool(cint(getattr(doc, "is_event_facility", 0))),
+        "event_building_id": getattr(doc, "event_building_id", None) or "",
+        "event_building_label": event_building_label,
+        "event_room_id": getattr(doc, "event_room_id", None) or "",
+        "event_room_label": event_room_label,
+        "event_start_time": getattr(doc, "event_start_time", None),
+        "event_end_time": getattr(doc, "event_end_time", None),
     }
 
 
@@ -197,6 +242,7 @@ def _resolve_pic_from_assignment(category, area_title):
 def get_ticket_categories():
     """Danh sách danh mục (Support Category) cho dropdown ticket."""
     try:
+        _ensure_event_facility_support_category()
         rows = frappe.get_all(
             "ERP Administrative Support Category",
             fields=["name", "title", "ticket_code_prefix"],
@@ -278,6 +324,29 @@ def get_ticket(ticket_id=None):
 
 
 @frappe.whitelist(allow_guest=False)
+def get_rooms_by_building(building_id=None):
+    """Danh sách phòng theo tòa nhà (ERP Administrative Room)."""
+    try:
+        data = _parse_json_body()
+        building_id = building_id or data.get("building_id")
+        building_id = (building_id or "").strip()
+        if not building_id:
+            return validation_error_response(_("Thiếu building_id"), {"building_id": ["required"]})
+        if not frappe.db.exists("ERP Administrative Building", building_id):
+            return validation_error_response(_("Tòa nhà không tồn tại"), {"building_id": ["invalid"]})
+        rooms = frappe.get_all(
+            "ERP Administrative Room",
+            filters={"building_id": building_id},
+            fields=["name", "title_vn", "title_en", "short_title", "room_type", "capacity"],
+            order_by="title_vn asc",
+        )
+        return success_response({"rooms": rooms}, "OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_rooms_by_building")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def create_ticket():
     """Tạo ticket mới."""
     try:
@@ -285,6 +354,13 @@ def create_ticket():
         title = (data.get("title") or "").strip()
         description = (data.get("description") or "").strip()
         category = (data.get("category") or "").strip()
+        is_event_facility = cint(data.get("is_event_facility"))
+
+        if category == EVENT_FACILITY_CATEGORY_NAME or is_event_facility:
+            _ensure_event_facility_support_category()
+            category = EVENT_FACILITY_CATEGORY_NAME
+            is_event_facility = 1
+
         if not title or not description or not category:
             return validation_error_response(
                 _("Thiếu title, description hoặc category"),
@@ -298,6 +374,47 @@ def create_ticket():
         area_title = (data.get("area_title") or "").strip()
         attachment = (data.get("attachment") or "").strip()
 
+        event_building_id = (data.get("event_building_id") or "").strip()
+        event_room_id = (data.get("event_room_id") or "").strip()
+        event_start_raw = data.get("event_start_time")
+        event_end_raw = data.get("event_end_time")
+
+        if is_event_facility:
+            if not event_building_id or not frappe.db.exists("ERP Administrative Building", event_building_id):
+                return validation_error_response(
+                    _("Thiếu hoặc sai tòa nhà (sự kiện)"),
+                    {"event_building_id": ["required"]},
+                )
+            if not event_room_id or not frappe.db.exists("ERP Administrative Room", event_room_id):
+                return validation_error_response(
+                    _("Thiếu hoặc sai phòng (sự kiện)"),
+                    {"event_room_id": ["required"]},
+                )
+            rb = frappe.db.get_value("ERP Administrative Room", event_room_id, "building_id")
+            if (rb or "").strip() != event_building_id:
+                return validation_error_response(
+                    _("Phòng không thuộc tòa nhà đã chọn"),
+                    {"event_room_id": ["invalid"]},
+                )
+            if not event_start_raw or not event_end_raw:
+                return validation_error_response(
+                    _("Thiếu thời gian bắt đầu / kết thúc sự kiện"),
+                    {"event_start_time": ["required"], "event_end_time": ["required"]},
+                )
+            try:
+                event_start_time = get_datetime(event_start_raw)
+                event_end_time = get_datetime(event_end_raw)
+            except Exception:
+                return validation_error_response(
+                    _("Định dạng thời gian sự kiện không hợp lệ"),
+                    {"event_start_time": ["invalid"], "event_end_time": ["invalid"]},
+                )
+            if not event_start_time or not event_end_time or event_end_time <= event_start_time:
+                return validation_error_response(
+                    _("Thời gian kết thúc phải sau thời gian bắt đầu"),
+                    {"event_end_time": ["invalid"]},
+                )
+
         email = _session_email()
         ufn = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
         uimg = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
@@ -305,23 +422,29 @@ def create_ticket():
 
         pic = _resolve_pic_from_assignment(category, area_title)
 
-        doc = frappe.get_doc(
-            {
-                "doctype": DOCTYPE,
-                "title": title,
-                "description": description,
-                "category": category,
-                "priority": priority,
-                "notes": notes,
-                "area_title": area_title or None,
-                "attachment": attachment or None,
-                "status": "Open",
-                "creator_email": email,
-                "creator_fullname": ufn,
-                "creator_avatar": uimg,
-                "creator_department": udept,
-            }
-        )
+        ticket_row = {
+            "doctype": DOCTYPE,
+            "title": title,
+            "description": description,
+            "category": category,
+            "priority": priority,
+            "notes": notes,
+            "area_title": area_title or None,
+            "attachment": attachment or None,
+            "status": "Open",
+            "creator_email": email,
+            "creator_fullname": ufn,
+            "creator_avatar": uimg,
+            "creator_department": udept,
+            "is_event_facility": 1 if is_event_facility else 0,
+        }
+        if is_event_facility:
+            ticket_row["event_building_id"] = event_building_id
+            ticket_row["event_room_id"] = event_room_id
+            ticket_row["event_start_time"] = event_start_time
+            ticket_row["event_end_time"] = event_end_time
+
+        doc = frappe.get_doc(ticket_row)
         if pic:
             doc.assigned_to = pic
             pfn = frappe.db.get_value("User", pic, "full_name") or pic
@@ -371,6 +494,8 @@ def update_ticket():
             doc.description = str(data["description"] or "")
         if "category" in data and data["category"]:
             cat = str(data["category"]).strip()
+            if cat == EVENT_FACILITY_CATEGORY_NAME:
+                _ensure_event_facility_support_category()
             if frappe.db.exists("ERP Administrative Support Category", cat):
                 doc.category = cat
         if "priority" in data and data["priority"]:
@@ -381,6 +506,63 @@ def update_ticket():
             doc.area_title = str(data["area_title"] or "").strip() or None
         if "attachment" in data:
             doc.attachment = str(data["attachment"] or "").strip() or None
+
+        if "is_event_facility" in data:
+            doc.is_event_facility = cint(data.get("is_event_facility"))
+        if "event_building_id" in data:
+            eb = str(data.get("event_building_id") or "").strip()
+            doc.event_building_id = eb or None
+        if "event_room_id" in data:
+            er = str(data.get("event_room_id") or "").strip()
+            doc.event_room_id = er or None
+        if "event_start_time" in data:
+            evs = data.get("event_start_time")
+            if evs in (None, ""):
+                doc.event_start_time = None
+            else:
+                try:
+                    doc.event_start_time = get_datetime(evs)
+                except Exception:
+                    return validation_error_response(
+                        _("Định dạng thời gian bắt đầu sự kiện không hợp lệ"),
+                        {"event_start_time": ["invalid"]},
+                    )
+        if "event_end_time" in data:
+            eve = data.get("event_end_time")
+            if eve in (None, ""):
+                doc.event_end_time = None
+            else:
+                try:
+                    doc.event_end_time = get_datetime(eve)
+                except Exception:
+                    return validation_error_response(
+                        _("Định dạng thời gian kết thúc sự kiện không hợp lệ"),
+                        {"event_end_time": ["invalid"]},
+                    )
+
+        if cint(getattr(doc, "is_event_facility", 0)):
+            eb = (getattr(doc, "event_building_id", None) or "").strip()
+            er = (getattr(doc, "event_room_id", None) or "").strip()
+            if not eb or not frappe.db.exists("ERP Administrative Building", eb):
+                return validation_error_response(_("Thiếu tòa nhà (sự kiện)"), {"event_building_id": ["required"]})
+            if not er or not frappe.db.exists("ERP Administrative Room", er):
+                return validation_error_response(_("Thiếu phòng (sự kiện)"), {"event_room_id": ["required"]})
+            rb = frappe.db.get_value("ERP Administrative Room", er, "building_id")
+            if (rb or "").strip() != eb:
+                return validation_error_response(_("Phòng không thuộc tòa nhà đã chọn"), {"event_room_id": ["invalid"]})
+            est = getattr(doc, "event_start_time", None)
+            eet = getattr(doc, "event_end_time", None)
+            if not est or not eet:
+                return validation_error_response(
+                    _("Thiếu thời gian sự kiện"),
+                    {"event_start_time": ["required"], "event_end_time": ["required"]},
+                )
+            if eet <= est:
+                return validation_error_response(
+                    _("Thời gian kết thúc phải sau thời gian bắt đầu"),
+                    {"event_end_time": ["invalid"]},
+                )
+
         if staff and "status" in data and data["status"]:
             doc.status = str(data["status"]).strip()
         if staff and "assigned_to" in data:
