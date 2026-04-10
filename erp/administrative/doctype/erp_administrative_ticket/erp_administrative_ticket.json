@@ -5,7 +5,7 @@
  "creation": "2026-04-10 12:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
- "field_order": [
+  "field_order": [
   "title",
   "ticket_code",
   "status",
@@ -17,6 +17,9 @@
   "event_start_time",
   "event_end_time",
   "area_title",
+  "room_id",
+  "related_equipment_id",
+  "related_student_ids",
   "description",
   "attachment",
   "creator_section",
@@ -108,6 +111,23 @@
    "fieldname": "area_title",
    "fieldtype": "Data",
    "label": "Khu v\u1ef1c (\u0111\u1ec3 ph\u00e2n c\u00f4ng PIC)"
+  },
+  {
+   "fieldname": "room_id",
+   "fieldtype": "Link",
+   "label": "Ph\u00f2ng (kh\u00f4ng ph\u1ea3i s\u1ef1 ki\u1ec7n)",
+   "options": "ERP Administrative Room"
+  },
+  {
+   "fieldname": "related_equipment_id",
+   "fieldtype": "Link",
+   "label": "Thi\u1ebft b\u1ecb li\u00ean quan (d\u00f2ng CSVC ph\u00f2ng)",
+   "options": "ERP Administrative Room Facility Equipment"
+  },
+  {
+   "fieldname": "related_student_ids",
+   "fieldtype": "JSON",
+   "label": "H\u1ecdc sinh li\u00ean quan (m\u1ea3ng student_id)"
   },
   {
    "fieldname": "description",

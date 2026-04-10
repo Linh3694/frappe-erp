@@ -16,6 +16,7 @@ from erp.utils.api_response import (
     success_response,
     validation_error_response,
 )
+from erp.utils.campus_utils import get_current_campus_from_context
 
 DOCTYPE = "ERP Administrative Ticket"
 COMMENT_DOCTYPE = "ERP Administrative Ticket Comment"
@@ -26,6 +27,51 @@ _STAFF_ROLES = ("System Manager", "SIS Administrative", "SIS BOD")
 
 # Danh mục cố định — tên Doc ERP Administrative Support Category (đồng bộ frontend)
 EVENT_FACILITY_CATEGORY_NAME = "__event_facility__"
+
+
+def _normalize_related_student_ids(raw):
+    """Chuẩn hoá danh sách student_id từ JSON / list."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(raw, list):
+        return []
+    return [str(x).strip() for x in raw if x]
+
+
+def _validate_related_equipment_belongs_to_room(equipment_line_id, room_ref):
+    """Đảm bảo dòng thiết bị CSVC thuộc đúng phòng (ERP Administrative Room name)."""
+    if not equipment_line_id or not room_ref:
+        return True
+    r = frappe.db.get_value(
+        "ERP Administrative Room Facility Equipment", equipment_line_id, "room"
+    )
+    return (r or "").strip() == (room_ref or "").strip()
+
+
+def _active_school_year_id_api(explicit=None):
+    """Năm học đang bật (is_enable) hoặc giá trị truyền vào."""
+    sy = (explicit or "").strip()
+    if sy and frappe.db.exists("SIS School Year", sy):
+        return sy
+    return frappe.db.get_value(
+        "SIS School Year",
+        {"is_enable": 1},
+        "name",
+        order_by="start_date desc",
+    )
+
+
+def _resolve_campus_id_api(explicit=None):
+    """Campus từ tham số hoặc ngữ cảnh user."""
+    cid = (explicit or "").strip()
+    if cid and frappe.db.exists("SIS Campus", cid):
+        return cid
+    return get_current_campus_from_context()
 
 
 def _ensure_event_facility_support_category():
@@ -154,6 +200,93 @@ def _ticket_to_dict(doc, include_feedback=True):
             "ERP Administrative Room", doc.event_room_id, "title_vn"
         ) or doc.event_room_id
 
+    # Phòng (ticket thường), thiết bị & học sinh liên quan
+    room_id_val = getattr(doc, "room_id", None) or ""
+    room_label_nf = ""
+    if room_id_val:
+        room_label_nf = frappe.db.get_value(
+            "ERP Administrative Room", room_id_val, "title_vn"
+        ) or room_id_val
+
+    related_equipment_label = ""
+    rel_eq = getattr(doc, "related_equipment_id", None) or ""
+    if rel_eq:
+        cat = frappe.db.get_value(
+            "ERP Administrative Room Facility Equipment", rel_eq, "category"
+        )
+        related_equipment_label = (
+            frappe.db.get_value(
+                "ERP Administrative Facility Equipment Category", cat, "title"
+            )
+            or rel_eq
+        )
+
+    related_student_ids = getattr(doc, "related_student_ids", None)
+    if isinstance(related_student_ids, str):
+        try:
+            related_student_ids = json.loads(related_student_ids)
+        except Exception:
+            related_student_ids = []
+    if not isinstance(related_student_ids, list):
+        related_student_ids = []
+
+    related_students_detail = []
+    photo_map_rs = {}
+    if related_student_ids:
+        sids = [str(x).strip() for x in related_student_ids if x]
+        for sid in sids:
+            st = frappe.db.get_value(
+                "CRM Student",
+                sid,
+                ["student_name", "student_code"],
+                as_dict=True,
+            )
+            if st:
+                related_students_detail.append(
+                    {
+                        "student_id": sid,
+                        "student_name": st.get("student_name") or "",
+                        "student_code": st.get("student_code") or "",
+                        "avatar_url": "",
+                    }
+                )
+        if sids:
+            sy_for_photo = frappe.db.get_value(
+                "SIS School Year",
+                {"is_enable": 1},
+                "name",
+                order_by="start_date desc",
+            )
+            photos = frappe.db.sql(
+                """
+                SELECT student_id, photo, school_year_id, upload_date, creation
+                FROM `tabSIS Photo`
+                WHERE student_id IN %(sids)s
+                  AND type = 'student'
+                  AND status = 'Active'
+                ORDER BY student_id,
+                    CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                    upload_date DESC,
+                    creation DESC
+                """,
+                {"sids": tuple(sids), "sy": sy_for_photo or ""},
+                as_dict=True,
+            )
+            for p in photos:
+                sid = p.get("student_id")
+                if sid and sid not in photo_map_rs and p.get("photo"):
+                    url = p.get("photo")
+                    if url and not str(url).startswith("http"):
+                        if str(url).startswith("/files/"):
+                            url = frappe.utils.get_url(url)
+                        else:
+                            url = frappe.utils.get_url("/files/" + str(url))
+                    photo_map_rs[sid] = url or ""
+            for row in related_students_detail:
+                sid = row.get("student_id")
+                if sid and sid in photo_map_rs:
+                    row["avatar_url"] = photo_map_rs[sid]
+
     return {
         "_id": doc.name,
         "name": doc.name,
@@ -183,6 +316,12 @@ def _ticket_to_dict(doc, include_feedback=True):
         "event_room_label": event_room_label,
         "event_start_time": getattr(doc, "event_start_time", None),
         "event_end_time": getattr(doc, "event_end_time", None),
+        "room_id": room_id_val,
+        "room_label": room_label_nf,
+        "related_equipment_id": rel_eq,
+        "related_equipment_label": related_equipment_label,
+        "related_student_ids": related_student_ids,
+        "related_students": related_students_detail,
     }
 
 
@@ -347,6 +486,175 @@ def get_rooms_by_building(building_id=None):
 
 
 @frappe.whitelist(allow_guest=False)
+def get_room_equipment_for_ticket(room_id=None):
+    """Danh sách thiết bị CSVC theo phòng — dùng form ticket."""
+    try:
+        data = _parse_json_body()
+        room_id = room_id or data.get("room_id")
+        room_id = (room_id or "").strip()
+        if not room_id:
+            return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response(_("Không tìm thấy phòng"))
+
+        rows = frappe.get_all(
+            "ERP Administrative Room Facility Equipment",
+            filters={"room": room_id},
+            fields=["name"],
+            order_by="creation asc",
+        )
+        out = []
+        for r in rows:
+            doc = frappe.get_doc("ERP Administrative Room Facility Equipment", r.name)
+            cat_title = frappe.db.get_value(
+                "ERP Administrative Facility Equipment Category", doc.category, "title"
+            )
+            cat_type = frappe.db.get_value(
+                "ERP Administrative Facility Equipment Category", doc.category, "equipment_type"
+            )
+            out.append(
+                {
+                    "name": doc.name,
+                    "room": doc.room,
+                    "category": doc.category,
+                    "category_title": cat_title,
+                    "equipment_type": cat_type,
+                    "quantity": doc.quantity,
+                    "condition": doc.condition or "",
+                }
+            )
+        return success_response({"equipment": out}, "OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_room_equipment_for_ticket")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def get_students_by_room(room_id=None, school_year_id=None, campus_id=None):
+    """Học sinh theo phòng: phòng → lớp gắn phòng → SIS Class Student (lọc năm học + campus)."""
+    try:
+        data = _parse_json_body()
+        room_id = room_id or data.get("room_id")
+        room_id = (room_id or "").strip()
+        school_year_id = (school_year_id or data.get("school_year_id") or "").strip() or None
+        campus_id = (campus_id or data.get("campus_id") or "").strip() or None
+
+        if not room_id:
+            return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response(_("Không tìm thấy phòng"))
+
+        school_year_id = _active_school_year_id_api(school_year_id)
+        if not school_year_id:
+            return validation_error_response(
+                _("Không xác định được năm học hiện tại"),
+                {"school_year_id": ["required"]},
+            )
+
+        campus_id = _resolve_campus_id_api(campus_id)
+        if not campus_id:
+            return validation_error_response(
+                _("Không xác định được campus"),
+                {"campus_id": ["required"]},
+            )
+
+        students = frappe.db.sql(
+            """
+            SELECT DISTINCT
+                cs.student_id,
+                cs.class_id,
+                c.title AS class_title
+            FROM `tabERP Administrative Room Class` rc
+            INNER JOIN `tabSIS Class` c
+                ON c.name = rc.class_id
+                AND c.school_year_id = %(sy)s
+                AND c.campus_id = %(campus)s
+            INNER JOIN `tabSIS Class Student` cs
+                ON cs.class_id = c.name
+                AND cs.school_year_id = %(sy)s
+                AND cs.campus_id = %(campus)s
+            WHERE rc.parent = %(room)s
+                AND rc.parenttype = 'ERP Administrative Room'
+            ORDER BY class_title ASC, cs.student_id ASC
+            """,
+            {"room": room_id, "sy": school_year_id, "campus": campus_id},
+            as_dict=True,
+        )
+
+        if not students:
+            return success_response({"students": []}, "OK")
+
+        seen = {}
+        ordered_ids = []
+        for row in students:
+            sid = row.get("student_id")
+            if not sid or sid in seen:
+                continue
+            seen[sid] = {
+                "student_id": sid,
+                "class_id": row.get("class_id"),
+                "class_title": row.get("class_title") or "",
+            }
+            ordered_ids.append(sid)
+
+        stu_rows = frappe.get_all(
+            "CRM Student",
+            filters={"name": ["in", ordered_ids]},
+            fields=["name", "student_name", "student_code"],
+        )
+        stu_map = {s.name: s for s in stu_rows}
+
+        photo_map = {}
+        if ordered_ids:
+            photos = frappe.db.sql(
+                """
+                SELECT student_id, photo, school_year_id, upload_date, creation
+                FROM `tabSIS Photo`
+                WHERE student_id IN %(sids)s
+                  AND type = 'student'
+                  AND status = 'Active'
+                ORDER BY student_id,
+                    CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                    upload_date DESC,
+                    creation DESC
+                """,
+                {"sids": tuple(ordered_ids), "sy": school_year_id},
+                as_dict=True,
+            )
+            for p in photos:
+                sid = p.get("student_id")
+                if sid and sid not in photo_map and p.get("photo"):
+                    url = p.get("photo")
+                    if url and not str(url).startswith("http"):
+                        if str(url).startswith("/files/"):
+                            url = frappe.utils.get_url(url)
+                        else:
+                            url = frappe.utils.get_url("/files/" + str(url))
+                    photo_map[sid] = url or ""
+
+        out = []
+        for sid in ordered_ids:
+            meta = seen.get(sid) or {}
+            st = stu_map.get(sid)
+            if not st:
+                continue
+            out.append(
+                {
+                    "student_id": sid,
+                    "student_name": st.get("student_name") or "",
+                    "student_code": st.get("student_code") or "",
+                    "avatar_url": photo_map.get(sid) or "",
+                    "class_title": meta.get("class_title") or "",
+                }
+            )
+
+        return success_response({"students": out}, "OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_students_by_room")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def create_ticket():
     """Tạo ticket mới."""
     try:
@@ -415,6 +723,47 @@ def create_ticket():
                     {"event_end_time": ["invalid"]},
                 )
 
+        room_id_nf = (data.get("room_id") or "").strip()
+        related_equipment_id = (data.get("related_equipment_id") or "").strip()
+        related_student_ids_list = _normalize_related_student_ids(data.get("related_student_ids"))
+
+        if is_event_facility:
+            room_id_nf = ""
+        elif room_id_nf:
+            if not frappe.db.exists("ERP Administrative Room", room_id_nf):
+                return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
+            rb = frappe.db.get_value("ERP Administrative Room", room_id_nf, "building_id")
+            if area_title and (rb or "").strip() != area_title.strip():
+                return validation_error_response(
+                    _("Phòng không thuộc khu vực đã chọn"),
+                    {"room_id": ["invalid"]},
+                )
+
+        effective_room_for_eq = event_room_id if is_event_facility else room_id_nf
+
+        if related_equipment_id:
+            if not frappe.db.exists(
+                "ERP Administrative Room Facility Equipment", related_equipment_id
+            ):
+                return validation_error_response(
+                    _("Thiết bị không hợp lệ"),
+                    {"related_equipment_id": ["invalid"]},
+                )
+            if effective_room_for_eq and not _validate_related_equipment_belongs_to_room(
+                related_equipment_id, effective_room_for_eq
+            ):
+                return validation_error_response(
+                    _("Thiết bị không thuộc phòng đã chọn"),
+                    {"related_equipment_id": ["invalid"]},
+                )
+
+        for sid in related_student_ids_list:
+            if not frappe.db.exists("CRM Student", sid):
+                return validation_error_response(
+                    _("Học sinh không hợp lệ"),
+                    {"related_student_ids": ["invalid"]},
+                )
+
         email = _session_email()
         ufn = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
         uimg = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
@@ -443,6 +792,13 @@ def create_ticket():
             ticket_row["event_room_id"] = event_room_id
             ticket_row["event_start_time"] = event_start_time
             ticket_row["event_end_time"] = event_end_time
+            ticket_row["room_id"] = None
+        else:
+            ticket_row["room_id"] = room_id_nf or None
+        ticket_row["related_equipment_id"] = related_equipment_id or None
+        ticket_row["related_student_ids"] = (
+            json.dumps(related_student_ids_list) if related_student_ids_list else None
+        )
 
         doc = frappe.get_doc(ticket_row)
         if pic:
@@ -540,6 +896,16 @@ def update_ticket():
                         {"event_end_time": ["invalid"]},
                     )
 
+        if "room_id" in data:
+            rid = str(data.get("room_id") or "").strip()
+            doc.room_id = rid or None
+        if "related_equipment_id" in data:
+            req = str(data.get("related_equipment_id") or "").strip()
+            doc.related_equipment_id = req or None
+        if "related_student_ids" in data:
+            rlist = _normalize_related_student_ids(data.get("related_student_ids"))
+            doc.related_student_ids = json.dumps(rlist) if rlist else None
+
         if cint(getattr(doc, "is_event_facility", 0)):
             eb = (getattr(doc, "event_building_id", None) or "").strip()
             er = (getattr(doc, "event_room_id", None) or "").strip()
@@ -561,6 +927,50 @@ def update_ticket():
                 return validation_error_response(
                     _("Thời gian kết thúc phải sau thời gian bắt đầu"),
                     {"event_end_time": ["invalid"]},
+                )
+
+        # Ticket thường: không lưu room_id (dùng event_room_id cho CSVC sự kiện)
+        if cint(getattr(doc, "is_event_facility", 0)):
+            doc.room_id = None
+
+        area_title_cur = (doc.area_title or "").strip()
+        room_id_nf = (getattr(doc, "room_id", None) or "").strip()
+        if not cint(getattr(doc, "is_event_facility", 0)) and room_id_nf:
+            if not frappe.db.exists("ERP Administrative Room", room_id_nf):
+                return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
+            rb = frappe.db.get_value("ERP Administrative Room", room_id_nf, "building_id")
+            if area_title_cur and (rb or "").strip() != area_title_cur.strip():
+                return validation_error_response(
+                    _("Phòng không thuộc khu vực đã chọn"),
+                    {"room_id": ["invalid"]},
+                )
+
+        effective_room_for_eq = (
+            (getattr(doc, "event_room_id", None) or "").strip()
+            if cint(getattr(doc, "is_event_facility", 0))
+            else room_id_nf
+        )
+        rel_eq = (getattr(doc, "related_equipment_id", None) or "").strip()
+        if rel_eq:
+            if not frappe.db.exists("ERP Administrative Room Facility Equipment", rel_eq):
+                return validation_error_response(
+                    _("Thiết bị không hợp lệ"),
+                    {"related_equipment_id": ["invalid"]},
+                )
+            if effective_room_for_eq and not _validate_related_equipment_belongs_to_room(
+                rel_eq, effective_room_for_eq
+            ):
+                return validation_error_response(
+                    _("Thiết bị không thuộc phòng đã chọn"),
+                    {"related_equipment_id": ["invalid"]},
+                )
+
+        related_student_ids_list = _normalize_related_student_ids(getattr(doc, "related_student_ids", None))
+        for sid in related_student_ids_list:
+            if not frappe.db.exists("CRM Student", sid):
+                return validation_error_response(
+                    _("Học sinh không hợp lệ"),
+                    {"related_student_ids": ["invalid"]},
                 )
 
         if staff and "status" in data and data["status"]:
