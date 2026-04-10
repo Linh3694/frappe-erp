@@ -18,6 +18,12 @@ from erp.utils.api_response import (
     validation_error_response,
 )
 
+# Đồng bộ danh mục CSVC sự kiện (name cố định) — cùng logic ticket
+from erp.api.erp_administrative.administrative_ticket import (
+    EVENT_FACILITY_CATEGORY_NAME,
+    _ensure_event_facility_support_category,
+)
+
 
 def _parse_json_body():
     """Đọc JSON từ request body."""
@@ -123,6 +129,8 @@ def _resolve_user_from_cell(raw):
 def get_all_support_categories():
     """Danh sách danh mục hỗ trợ."""
     try:
+        # Luôn có bản ghi CSVC sự kiện (name cố định) nếu chưa tạo
+        _ensure_event_facility_support_category()
         rows = frappe.get_all(
             "ERP Administrative Support Category",
             fields=["name", "title", "ticket_code_prefix"],
@@ -392,6 +400,9 @@ def create_assignment():
             return validation_error_response(_("Thiếu danh mục"), {"support_category": ["required"]})
         if not pic:
             return validation_error_response(_("Thiếu PIC"), {"pic": ["required"]})
+        # Tạo danh mục CSVC sự kiện nếu chưa có (tránh báo "không tồn tại" khi phân công)
+        if support_category == EVENT_FACILITY_CATEGORY_NAME:
+            _ensure_event_facility_support_category()
         if not frappe.db.exists("ERP Administrative Support Category", support_category):
             return validation_error_response(_("Danh mục không tồn tại"), {"support_category": ["invalid"]})
         if not frappe.db.exists("User", pic):
@@ -439,6 +450,8 @@ def bulk_create_assignments():
         if not pics:
             return validation_error_response(_("Thiếu ít nhất một PIC"), {"pics": ["required"]})
 
+        if support_category == EVENT_FACILITY_CATEGORY_NAME:
+            _ensure_event_facility_support_category()
         if not frappe.db.exists("ERP Administrative Support Category", support_category):
             return validation_error_response(_("Danh mục không tồn tại"), {"support_category": ["invalid"]})
 
@@ -499,6 +512,8 @@ def update_assignment():
             doc.area_title = str(data["area_title"] or "").strip()
         if "support_category" in data and data["support_category"]:
             sc = str(data["support_category"]).strip()
+            if sc == EVENT_FACILITY_CATEGORY_NAME:
+                _ensure_event_facility_support_category()
             if not frappe.db.exists("ERP Administrative Support Category", sc):
                 return validation_error_response(_("Danh mục không tồn tại"), {"support_category": ["invalid"]})
             doc.support_category = sc
