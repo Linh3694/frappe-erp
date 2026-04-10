@@ -273,6 +273,8 @@ def ensure_default_forms():
     """
     try:
         campus_id = get_current_campus_id()
+        # THPT (HIGH_VN_MID, HIGH_VN_END1) không có đánh giá môn học (subject_eval)
+        NO_SUBJECT_EVAL_CODES = {"HIGH_VN_MID", "HIGH_VN_END1"}
         defaults = [
             {"code": "PRIM_VN", "title": "Tiểu học"},
             {"code": "SEC_VN_MID", "title": "Trung Học - Giữa kỳ"},
@@ -284,8 +286,11 @@ def ensure_default_forms():
         ]
         created = []
         for d in defaults:
-            exists = frappe.db.exists("SIS Report Card Form", {"code": d["code"], "campus_id": campus_id})
-            if exists:
+            existing = frappe.db.exists("SIS Report Card Form", {"code": d["code"], "campus_id": campus_id})
+            if existing:
+                # Migration: tắt subject_eval cho THPT Mid/End1 nếu đang bật
+                if d["code"] in NO_SUBJECT_EVAL_CODES:
+                    frappe.db.set_value("SIS Report Card Form", existing, "subject_eval_enabled", 0)
                 continue
             doc = frappe.get_doc({
                 "doctype": "SIS Report Card Form",
@@ -294,7 +299,7 @@ def ensure_default_forms():
                 "program_type": "vn",
                 "scores_enabled": 1,
                 "homeroom_enabled": 1,
-                "subject_eval_enabled": 1,
+                "subject_eval_enabled": 0 if d["code"] in NO_SUBJECT_EVAL_CODES else 1,
                 "intl_scoreboard_enabled": 0,
                 "campus_id": campus_id,
             })
