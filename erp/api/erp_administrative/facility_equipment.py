@@ -2,6 +2,8 @@
 # API: Danh mục thiết bị CSVC, thiết bị theo phòng, bàn giao cho giáo viên
 
 import json
+import os
+import uuid
 
 import frappe
 from frappe import _
@@ -41,6 +43,51 @@ def _category_to_dict(doc):
         "equipment_type_display": _("Rời") if doc.equipment_type == "mobile" else _("Cố định"),
         "note": doc.note or "",
     }
+
+
+def _save_uploaded_excel_temp(file_data, filename):
+    """Lưu file upload tạm để pandas đọc (giống pattern import phòng)."""
+    temp_dir = "/tmp/frappe_uploads"
+    os.makedirs(temp_dir, exist_ok=True)
+    unique_filename = f"{uuid.uuid4()}_{filename}"
+    path = os.path.join(temp_dir, unique_filename)
+    with open(path, "wb") as f:
+        if hasattr(file_data, "read"):
+            f.write(file_data.read())
+        else:
+            f.write(file_data)
+    return path
+
+
+def _normalize_category_import_columns(df):
+    """Chuẩn hoá tên cột Excel (VN/EN) -> title, equipment_type, note."""
+    rename = {}
+    for col in df.columns:
+        key = str(col).strip().lower()
+        if key in ("tên thiết bị", "ten thiet bi", "title", "tên", "name"):
+            rename[col] = "title"
+        elif key in ("loại", "loai", "equipment_type", "type", "loại thiết bị"):
+            rename[col] = "equipment_type"
+        elif key in ("ghi chú", "ghi chu", "note", "mô tả", "mo ta"):
+            rename[col] = "note"
+    return df.rename(columns=rename)
+
+
+def _parse_equipment_type_cell(raw):
+    """Chuyển ô Excel thành mobile | fixed hoặc None nếu không hợp lệ."""
+    if raw is None:
+        return None
+    try:
+        if isinstance(raw, float) and str(raw) == "nan":
+            return None
+    except Exception:
+        pass
+    s = str(raw).strip().lower()
+    if s in ("mobile", "rời", "roi", "m", "di động", "di dong"):
+        return "mobile"
+    if s in ("fixed", "cố định", "co dinh", "c"):
+        return "fixed"
+    return None
 
 
 def _room_line_to_dict(doc):
@@ -187,6 +234,133 @@ def delete_category():
         return success_response(message=_("Đã xóa"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "facility_equipment.delete_category")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def import_categories_excel():
+    """Import hàng loạt danh mục thiết bị từ Excel (cột: Tên thiết bị, Loại, Ghi chú)."""
+    try:
+        try:
+            import pandas as pd
+        except ImportError:
+            return error_response(_("Thiếu pandas/openpyxl để đọc Excel"))
+
+        files = frappe.request.files
+        if not files or "file" not in files:
+            return validation_error_response(_("Không có file"), {"file": ["required"]})
+
+        file_data = files["file"]
+        if not file_data:
+            return validation_error_response(_("File rỗng"), {"file": ["empty"]})
+
+        file_path = _save_uploaded_excel_temp(file_data, "equipment_categories_import.xlsx")
+        try:
+            df = pd.read_excel(file_path, engine="openpyxl")
+        except Exception as read_err:
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+            return validation_error_response(
+                _("Không đọc được file Excel: {0}").format(str(read_err)),
+                {"file": ["invalid"]},
+            )
+
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+
+        df = _normalize_category_import_columns(df)
+        if "title" not in df.columns or "equipment_type" not in df.columns:
+            return validation_error_response(
+                _("File phải có cột: Tên thiết bị, Loại (và tuỳ chọn Ghi chú)"),
+                {"columns": ["missing title or equipment_type"]},
+            )
+
+        errors = []
+        created = 0
+        total_data_rows = 0
+        seen_titles = set()
+
+        for idx, row in df.iterrows():
+            excel_row = int(idx) + 2
+            title = row.get("title")
+            if title is None or (isinstance(title, float) and str(title) == "nan"):
+                continue
+            title = str(title).strip()
+            if not title:
+                continue
+
+            total_data_rows += 1
+            eq_type = _parse_equipment_type_cell(row.get("equipment_type"))
+            if not eq_type:
+                errors.append(
+                    _("Dòng {0}: Loại không hợp lệ (dùng: mobile/fixed hoặc Rời/Cố định)").format(excel_row)
+                )
+                continue
+
+            note_val = row.get("note")
+            note = ""
+            if note_val is not None and str(note_val).strip() and str(note_val) != "nan":
+                note = str(note_val).strip()
+
+            if title in seen_titles:
+                errors.append(_("Dòng {0}: Trùng tên trong file với dòng trước").format(excel_row))
+                continue
+            seen_titles.add(title)
+
+            dup = frappe.db.exists("ERP Administrative Facility Equipment Category", {"title": title})
+            if dup:
+                errors.append(_("Dòng {0}: Đã tồn tại danh mục «{1}»").format(excel_row, title))
+                continue
+
+            try:
+                doc = frappe.get_doc(
+                    {
+                        "doctype": "ERP Administrative Facility Equipment Category",
+                        "title": title,
+                        "equipment_type": eq_type,
+                        "note": note,
+                    }
+                )
+                doc.insert(ignore_permissions=False)
+                frappe.db.commit()
+                created += 1
+            except Exception as row_err:
+                frappe.db.rollback()
+                errors.append(_("Dòng {0}: {1}").format(excel_row, str(row_err)))
+
+        msg = _("Đã tạo {0} / {1} danh mục").format(created, total_data_rows)
+        if not total_data_rows:
+            return {
+                "success": False,
+                "message": _("Không có dòng dữ liệu hợp lệ"),
+                "total_rows": 0,
+                "created_count": 0,
+                "errors": errors,
+            }
+
+        ok = created > 0 and len(errors) == 0
+        if not ok and created == 0:
+            return {
+                "success": False,
+                "message": msg,
+                "total_rows": total_data_rows,
+                "created_count": 0,
+                "errors": errors,
+            }
+
+        return {
+            "success": True,
+            "message": msg,
+            "total_rows": total_data_rows,
+            "created_count": created,
+            "errors": errors,
+        }
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "facility_equipment.import_categories_excel")
         return error_response(str(e))
 
 
