@@ -1,0 +1,237 @@
+{
+ "actions": [],
+ "allow_import": 0,
+ "autoname": "format:HC-TKT-{#####}",
+ "creation": "2026-04-10 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "ticket_code",
+  "status",
+  "priority",
+  "category",
+  "area_title",
+  "description",
+  "attachment",
+  "creator_section",
+  "creator_email",
+  "creator_fullname",
+  "creator_avatar",
+  "creator_department",
+  "assignment_section",
+  "assigned_to",
+  "assigned_to_fullname",
+  "notes",
+  "cancellation_reason",
+  "feedback_section",
+  "feedback_rating",
+  "feedback_comment",
+  "feedback_badges",
+  "closed_at",
+  "accepted_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Ti\u00eau \u0111\u1ec1",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ticket_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "M\u00e3 ticket",
+   "read_only": 1
+  },
+  {
+   "default": "Open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Tr\u1ea1ng th\u00e1i",
+   "options": "Open\nAssigned\nIn Progress\nResolved\nClosed\nCancelled",
+   "reqd": 1
+  },
+  {
+   "default": "Medium",
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "\u0110\u1ed9 \u01b0u ti\u00ean",
+   "options": "Low\nMedium\nHigh\nCritical"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Danh m\u1ee5c",
+   "options": "ERP Administrative Support Category",
+   "reqd": 1
+  },
+  {
+   "fieldname": "area_title",
+   "fieldtype": "Data",
+   "label": "Khu v\u1ef1c (\u0111\u1ec3 ph\u00e2n c\u00f4ng PIC)"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "M\u00f4 t\u1ea3",
+   "reqd": 1
+  },
+  {
+   "fieldname": "attachment",
+   "fieldtype": "Attach",
+   "label": "\u0110\u00ednh k\u00e8m"
+  },
+  {
+   "fieldname": "creator_section",
+   "fieldtype": "Section Break",
+   "label": "Ng\u01b0\u1eddi t\u1ea1o"
+  },
+  {
+   "fieldname": "creator_email",
+   "fieldtype": "Data",
+   "label": "Email ng\u01b0\u1eddi t\u1ea1o",
+   "read_only": 1
+  },
+  {
+   "fieldname": "creator_fullname",
+   "fieldtype": "Data",
+   "label": "H\u1ecd t\u00ean ng\u01b0\u1eddi t\u1ea1o",
+   "read_only": 1
+  },
+  {
+   "fieldname": "creator_avatar",
+   "fieldtype": "Data",
+   "label": "Avatar URL"
+  },
+  {
+   "fieldname": "creator_department",
+   "fieldtype": "Data",
+   "label": "Ph\u00f2ng ban"
+  },
+  {
+   "fieldname": "assignment_section",
+   "fieldtype": "Section Break",
+   "label": "Ph\u00e2n c\u00f4ng"
+  },
+  {
+   "fieldname": "assigned_to",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ng\u01b0\u1eddi x\u1eed l\u00fd",
+   "options": "User"
+  },
+  {
+   "fieldname": "assigned_to_fullname",
+   "fieldtype": "Data",
+   "label": "T\u00ean ng\u01b0\u1eddi x\u1eed l\u00fd"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi ch\u00fa n\u1ed9i b\u1ed9"
+  },
+  {
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Small Text",
+   "label": "L\u00fd do \u0111\u00f3ng"
+  },
+  {
+   "fieldname": "feedback_section",
+   "fieldtype": "Section Break",
+   "label": "\u0110\u00e1nh gi\u00e1"
+  },
+  {
+   "default": "0",
+   "fieldname": "feedback_rating",
+   "fieldtype": "Int",
+   "label": "\u0110i\u1ec3m \u0111\u00e1nh gi\u00e1 (0-5)"
+  },
+  {
+   "fieldname": "feedback_comment",
+   "fieldtype": "Small Text",
+   "label": "Nh\u1eadn x\u00e9t \u0111\u00e1nh gi\u00e1"
+  },
+  {
+   "fieldname": "feedback_badges",
+   "fieldtype": "JSON",
+   "label": "Badge \u0111\u00e1nh gi\u00e1"
+  },
+  {
+   "fieldname": "closed_at",
+   "fieldtype": "Datetime",
+   "label": "Th\u1eddi \u0111i\u1ec3m \u0111\u00f3ng"
+  },
+  {
+   "fieldname": "accepted_at",
+   "fieldtype": "Datetime",
+   "label": "Th\u1eddi \u0111i\u1ec3m ch\u1ea5p nh\u1eadn x\u1eed l\u00fd"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-10 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Administrative",
+ "name": "ERP Administrative Ticket",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS User",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}
