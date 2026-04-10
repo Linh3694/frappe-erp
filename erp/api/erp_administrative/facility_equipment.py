@@ -754,8 +754,23 @@ def get_class_facility_context():
 
         room_id = frappe.db.get_value("SIS Class", class_id, "room")
         room_title = None
+        room_name = None
+        building_title = None
         if room_id:
-            room_title = frappe.db.get_value("ERP Administrative Room", room_id, "title_vn")
+            rv = frappe.db.get_value(
+                "ERP Administrative Room",
+                room_id,
+                ["title_vn", "name", "building_id"],
+                as_dict=True,
+            )
+            if rv:
+                room_title = rv.get("title_vn")
+                room_name = rv.get("name")
+                bid = rv.get("building_id")
+                if bid:
+                    building_title = frappe.db.get_value(
+                        "ERP Administrative Building", bid, "title_vn"
+                    )
 
         inner = _handover_payload_for_class(class_id)
         return single_item_response(
@@ -763,6 +778,8 @@ def get_class_facility_context():
                 "class_id": class_id,
                 "room_id": room_id,
                 "room_title": room_title,
+                "room_name": room_name,
+                "building_title": building_title,
                 **inner,
             },
             "OK",
