@@ -1,0 +1,127 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "autoname": "format:FE-HO-{#####}",
+ "creation": "2026-04-09 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "room",
+  "class_id",
+  "status",
+  "facility_snapshot",
+  "it_snapshot",
+  "sent_by",
+  "sent_on",
+  "confirmed_by",
+  "confirmed_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ph\u00f2ng",
+   "options": "ERP Administrative Room",
+   "reqd": 1
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "L\u1edbp",
+   "options": "SIS Class",
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Tr\u1ea1ng th\u00e1i",
+   "options": "Pending\nConfirmed",
+   "reqd": 1
+  },
+  {
+   "fieldname": "facility_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Snapshot thi\u1ebft b\u1ecb CSVC (JSON)"
+  },
+  {
+   "fieldname": "it_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Snapshot thi\u1ebft b\u1ecb IT (JSON)"
+  },
+  {
+   "fieldname": "sent_by",
+   "fieldtype": "Link",
+   "label": "Ng\u01b0\u1eddi g\u1eedi",
+   "options": "User"
+  },
+  {
+   "fieldname": "sent_on",
+   "fieldtype": "Datetime",
+   "label": "Th\u1eddi gian g\u1eedi"
+  },
+  {
+   "fieldname": "confirmed_by",
+   "fieldtype": "Link",
+   "label": "Ng\u01b0\u1eddi x\u00e1c nh\u1eadn",
+   "options": "User"
+  },
+  {
+   "fieldname": "confirmed_on",
+   "fieldtype": "Datetime",
+   "label": "Th\u1eddi gian x\u00e1c nh\u1eadn"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-09 10:00:00.000000",
+ "module": "Administrative",
+ "name": "ERP Administrative Facility Handover",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
