@@ -463,6 +463,10 @@ def update_room_equipment():
         if not line_id or not frappe.db.exists("ERP Administrative Room Facility Equipment", line_id):
             return not_found_response(_("Không tìm thấy dòng thiết bị"))
         doc = frappe.get_doc("ERP Administrative Room Facility Equipment", line_id)
+        if "category_id" in data and data.get("category_id"):
+            cid = data.get("category_id")
+            if frappe.db.exists("ERP Administrative Facility Equipment Category", cid):
+                doc.category = cid
         if "quantity" in data:
             doc.quantity = int(data.get("quantity") or 0)
         if "condition" in data:
