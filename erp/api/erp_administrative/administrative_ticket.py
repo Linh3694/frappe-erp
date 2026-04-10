@@ -497,6 +497,8 @@ def accept_feedback():
         rating = int(data.get("rating") or 0)
         comment = (data.get("comment") or "").strip()
         badges = data.get("badges") or []
+        if not isinstance(badges, list):
+            badges = []
         if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
             return not_found_response(_("Không tìm thấy ticket"))
         if rating < 1 or rating > 5:
@@ -507,7 +509,10 @@ def accept_feedback():
             return forbidden_response(_("Chỉ người tạo mới đánh giá"))
         doc.feedback_rating = rating
         doc.feedback_comment = comment
-        doc.feedback_badges = badges or None
+        # JSON field không cho gán list trực tiếp (Frappe chỉ tự stringify dict)
+        doc.feedback_badges = (
+            json.dumps(badges, separators=(",", ":")) if badges else None
+        )
         doc.status = "Closed"
         doc.closed_at = now_datetime()
         doc.save(ignore_permissions=True)
