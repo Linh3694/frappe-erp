@@ -694,6 +694,176 @@ def get_handover_status():
         return error_response(str(e))
 
 
+def _safe_json_facility_it(raw):
+    """Parse facility_snapshot / it_snapshot thành list."""
+    if not raw:
+        return []
+    try:
+        if isinstance(raw, str):
+            return json.loads(raw)
+        return list(raw) if isinstance(raw, (list, tuple)) else []
+    except Exception:
+        return []
+
+
+def _diff_facility_snapshots(old_list, new_list):
+    """So sánh CSVC: key ổn định theo category_id."""
+
+    def _idx(lst):
+        out = {}
+        for x in lst or []:
+            if not isinstance(x, dict):
+                continue
+            cid = x.get("category_id") or x.get("category")
+            if not cid:
+                continue
+            out[cid] = {
+                "title": (x.get("category_title") or "").strip(),
+                "q": int(x.get("quantity") or 0),
+                "cond": str(x.get("condition") or "").strip(),
+            }
+        return out
+
+    o = _idx(old_list)
+    n = _idx(new_list)
+    added = []
+    removed = []
+    changed = []
+    for cid, nv in n.items():
+        if cid not in o:
+            added.append(
+                {
+                    "category_id": cid,
+                    "category_title": nv["title"],
+                    "quantity": nv["q"],
+                    "condition": nv["cond"],
+                }
+            )
+        else:
+            ov = o[cid]
+            if ov["q"] != nv["q"] or ov["cond"] != nv["cond"]:
+                changed.append(
+                    {
+                        "category_id": cid,
+                        "category_title": nv["title"] or ov["title"],
+                        "before": {"quantity": ov["q"], "condition": ov["cond"]},
+                        "after": {"quantity": nv["q"], "condition": nv["cond"]},
+                    }
+                )
+    for cid, ov in o.items():
+        if cid not in n:
+            removed.append(
+                {
+                    "category_id": cid,
+                    "category_title": ov["title"],
+                    "quantity": ov["q"],
+                    "condition": ov["cond"],
+                }
+            )
+    return {"added": added, "removed": removed, "changed": changed}
+
+
+def _it_row_key(x):
+    if not isinstance(x, dict):
+        return None
+    oid = str(x.get("_id") or "").strip()
+    if oid:
+        return "id:" + oid
+    ser = str(x.get("serial") or "").strip()
+    if ser:
+        return "s:" + ser
+    return None
+
+
+def _it_row_public(x):
+    if not isinstance(x, dict):
+        return {}
+    return {
+        "name": str(x.get("name") or ""),
+        "type": str(x.get("type") or ""),
+        "serial": str(x.get("serial") or ""),
+        "status": str(x.get("status") or ""),
+        "assigned_name": str(x.get("assigned_name") or ""),
+    }
+
+
+def _diff_it_snapshots(old_list, new_list):
+    """So sánh thiết bị IT theo _id hoặc serial."""
+
+    def _idx(lst):
+        out = {}
+        for x in lst or []:
+            if not isinstance(x, dict):
+                continue
+            k = _it_row_key(x)
+            if not k:
+                continue
+            out[k] = _it_row_public(x)
+        return out
+
+    o = _idx(old_list)
+    n = _idx(new_list)
+    added = []
+    removed = []
+    changed = []
+    for k, nv in n.items():
+        if k not in o:
+            added.append(nv)
+        else:
+            ov = o[k]
+            if ov != nv:
+                changed.append({"before": ov, "after": nv})
+    for k, ov in o.items():
+        if k not in n:
+            removed.append(ov)
+    return {"added": added, "removed": removed, "changed": changed}
+
+
+def _handover_diff_pending_vs_last_confirmed(class_id, room_id, current_fac, current_it):
+    """
+    GV tab CSVC: so sánh bản giao Pending hiện tại với bản Confirmed gần nhất (cùng lớp + phòng).
+    """
+    if not class_id or not room_id:
+        return None
+
+    prev_rows = frappe.get_all(
+        "ERP Administrative Facility Handover",
+        filters={"class_id": class_id, "status": "Confirmed", "room": room_id},
+        fields=["facility_snapshot", "it_snapshot", "confirmed_on"],
+        order_by="confirmed_on desc",
+        limit=1,
+    )
+    if not prev_rows:
+        return {
+            "has_previous_confirmed": False,
+            "has_changes": False,
+            "facility": {"added": [], "removed": [], "changed": []},
+            "it": {"added": [], "removed": [], "changed": []},
+        }
+
+    pr = prev_rows[0]
+    old_fac = _safe_json_facility_it(pr.facility_snapshot)
+    old_it = _safe_json_facility_it(pr.it_snapshot)
+
+    fd = _diff_facility_snapshots(old_fac, current_fac or [])
+    idiff = _diff_it_snapshots(old_it, current_it or [])
+
+    has_any = (
+        fd["added"]
+        or fd["removed"]
+        or fd["changed"]
+        or idiff["added"]
+        or idiff["removed"]
+        or idiff["changed"]
+    )
+    return {
+        "has_previous_confirmed": True,
+        "has_changes": bool(has_any),
+        "facility": fd,
+        "it": idiff,
+    }
+
+
 def _handover_payload_for_class(class_id):
     """Trả về dict { has_handover, handover } cho một lớp."""
     rows = frappe.get_all(
@@ -794,20 +964,31 @@ def get_class_facility_context():
                     )
 
         inner = _handover_payload_for_class(class_id)
-        return single_item_response(
-            {
-                "class_id": class_id,
-                "room_id": room_id,
-                "room_title": room_title,
-                "room_name": room_name,
-                "room_short_title": room_short_title,
-                "room_type": room_type,
-                "room_capacity": room_capacity,
-                "building_title": building_title,
-                **inner,
-            },
-            "OK",
-        )
+        handover_diff = None
+        h = inner.get("handover")
+        if h and h.get("status") == "Pending" and room_id:
+            handover_diff = _handover_diff_pending_vs_last_confirmed(
+                class_id,
+                room_id,
+                h.get("facility_equipment") or [],
+                h.get("it_equipment") or [],
+            )
+
+        payload = {
+            "class_id": class_id,
+            "room_id": room_id,
+            "room_title": room_title,
+            "room_name": room_name,
+            "room_short_title": room_short_title,
+            "room_type": room_type,
+            "room_capacity": room_capacity,
+            "building_title": building_title,
+            **inner,
+        }
+        if handover_diff is not None:
+            payload["handover_diff"] = handover_diff
+
+        return single_item_response(payload, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "facility_equipment.get_class_facility_context")
         return error_response(str(e))
