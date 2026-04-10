@@ -688,7 +688,7 @@ def get_comments():
 
 @frappe.whitelist(allow_guest=False)
 def send_comment():
-    """Gửi tin nhắn."""
+    """Gửi tin nhắn — text và/hoặc danh sách URL ảnh/video (FE upload qua upload_file trước, giống luồng IT)."""
     try:
         data = _parse_json_body()
         ticket_id = data.get("ticket_id") or data.get("name")
@@ -698,20 +698,38 @@ def send_comment():
         doc = frappe.get_doc(DOCTYPE, ticket_id)
         if not _can_read_ticket(doc):
             return forbidden_response(_("Không có quyền"))
+
+        raw_images = data.get("images") or []
+        if isinstance(raw_images, str):
+            raw_images = [raw_images] if raw_images.strip() else []
+        if not isinstance(raw_images, list):
+            raw_images = []
+        images = [str(u).strip() for u in raw_images if u]
+
+        if not text and not images:
+            return validation_error_response(_("Vui lòng nhập nội dung hoặc đính kèm ảnh/video"))
+
         email = _session_email()
         ufn = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
         uimg = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
-        c = frappe.get_doc(
-            {
-                "doctype": COMMENT_DOCTYPE,
-                "ticket": ticket_id,
-                "sender_email": email,
-                "sender_fullname": ufn,
-                "sender_avatar": uimg,
-                "text": text,
-                "message_type": "text",
-            }
-        )
+
+        if images and not text:
+            msg_type = "image"
+        else:
+            msg_type = "text"
+
+        row = {
+            "doctype": COMMENT_DOCTYPE,
+            "ticket": ticket_id,
+            "sender_email": email,
+            "sender_fullname": ufn,
+            "sender_avatar": uimg,
+            "text": text,
+            "message_type": msg_type,
+        }
+        if images:
+            row["images_json"] = images
+        c = frappe.get_doc(row)
         c.insert(ignore_permissions=True)
         _append_history(ticket_id, _("Trao đổi"))
         frappe.db.commit()
@@ -728,7 +746,8 @@ def send_comment():
                     },
                     "text": text,
                     "timestamp": c.creation,
-                    "type": "text",
+                    "type": msg_type,
+                    "images": images,
                 },
             },
             "OK",
