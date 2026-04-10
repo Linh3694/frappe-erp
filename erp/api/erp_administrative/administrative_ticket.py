@@ -421,8 +421,12 @@ def assign_ticket():
         uid = frappe.session.user
         doc.assigned_to = uid
         doc.assigned_to_fullname = frappe.db.get_value("User", uid, "full_name") or uid
+        # Open → Assigned: lần nhận đầu (ticket chưa gán PIC).
+        # Assigned → In Progress: ticket đã gán PIC / auto-Assigned — nhân viên nhấn "Nhận ticket" = bắt đầu xử lý thực sự.
         if doc.status == "Open":
             doc.status = "Assigned"
+        elif doc.status == "Assigned":
+            doc.status = "In Progress"
         doc.accepted_at = now_datetime()
         doc.save(ignore_permissions=True)
         _append_history(doc.name, _("Nhận xử lý ticket"))
