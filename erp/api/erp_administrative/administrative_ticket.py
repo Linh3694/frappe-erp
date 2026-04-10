@@ -199,10 +199,17 @@ def get_ticket_categories():
     try:
         rows = frappe.get_all(
             "ERP Administrative Support Category",
-            fields=["name", "title"],
+            fields=["name", "title", "ticket_code_prefix"],
             order_by="title asc",
         )
-        out = [{"value": r.name, "label": r.title} for r in rows]
+        out = [
+            {
+                "value": r.name,
+                "label": r.title,
+                "ticket_code_prefix": (r.ticket_code_prefix or "").strip(),
+            }
+            for r in rows
+        ]
         return success_response({"categories": out}, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_ticket_categories")

@@ -40,6 +40,7 @@ def _support_category_to_dict(doc):
     return {
         "name": doc.name,
         "title": doc.title,
+        "ticket_code_prefix": (doc.ticket_code_prefix or "").strip(),
     }
 
 
@@ -124,10 +125,17 @@ def get_all_support_categories():
     try:
         rows = frappe.get_all(
             "ERP Administrative Support Category",
-            fields=["name", "title"],
+            fields=["name", "title", "ticket_code_prefix"],
             order_by="title asc",
         )
-        out = [{"name": r.name, "title": r.title} for r in rows]
+        out = [
+            {
+                "name": r.name,
+                "title": r.title,
+                "ticket_code_prefix": (r.ticket_code_prefix or "").strip(),
+            }
+            for r in rows
+        ]
         return list_response(out, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_support.get_all_support_categories")
@@ -155,6 +163,7 @@ def create_support_category():
     try:
         data = _parse_json_body()
         title = (data.get("title") or "").strip()
+        prefix = (data.get("ticket_code_prefix") or data.get("ticketCodePrefix") or "").strip()
         if not title:
             return validation_error_response(_("Thiếu tên danh mục"), {"title": ["required"]})
         if frappe.db.exists("ERP Administrative Support Category", {"title": title}):
@@ -163,6 +172,7 @@ def create_support_category():
             {
                 "doctype": "ERP Administrative Support Category",
                 "title": title,
+                "ticket_code_prefix": prefix or None,
             }
         )
         doc.insert(ignore_permissions=False)
@@ -189,6 +199,9 @@ def update_support_category():
                 if frappe.db.exists("ERP Administrative Support Category", {"title": new_title}):
                     return validation_error_response(_("Tên danh mục đã tồn tại"), {"title": ["duplicate"]})
             doc.title = new_title
+        if "ticket_code_prefix" in data or "ticketCodePrefix" in data:
+            p = (data.get("ticket_code_prefix") or data.get("ticketCodePrefix") or "").strip()
+            doc.ticket_code_prefix = p or None
         doc.save(ignore_permissions=False)
         frappe.db.commit()
         return single_item_response(_support_category_to_dict(doc), _("Đã cập nhật"))
