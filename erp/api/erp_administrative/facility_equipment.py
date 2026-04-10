@@ -7,6 +7,7 @@ import uuid
 
 import frappe
 from frappe import _
+from frappe.utils import get_fullname
 
 from erp.utils.api_response import (
     error_response,
@@ -727,6 +728,12 @@ def _handover_payload_for_class(class_id):
             itl = json.loads(r.it_snapshot)
     except Exception:
         itl = []
+    confirmed_by_name = None
+    if r.confirmed_by:
+        try:
+            confirmed_by_name = get_fullname(r.confirmed_by) or r.confirmed_by
+        except Exception:
+            confirmed_by_name = r.confirmed_by
     return {
         "has_handover": True,
         "handover": {
@@ -739,6 +746,7 @@ def _handover_payload_for_class(class_id):
             "sent_on": r.sent_on,
             "confirmed_on": r.confirmed_on,
             "confirmed_by": r.confirmed_by,
+            "confirmed_by_name": confirmed_by_name,
         },
     }
 
