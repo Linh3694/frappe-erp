@@ -152,16 +152,19 @@ def _can_read_ticket(doc):
     return False
 
 
-def _append_history(ticket_id, action, user=None):
+def _append_history(ticket_id, action, user=None, detail=None):
+    """Ghi lịch sử; detail = nội dung phụ (trao đổi, tiêu đề CV con, lý do hủy...)."""
     user = user or frappe.session.user
     uemail = _session_email()
     ufn = frappe.db.get_value("User", user, "full_name") or user
     uav = frappe.db.get_value("User", user, "user_image") or ""
+    detail_clean = (detail or "").strip()
     row = frappe.get_doc(
         {
             "doctype": HISTORY_DOCTYPE,
             "ticket": ticket_id,
             "action": action,
+            "detail": detail_clean or None,
             "user_email": uemail,
             "user_fullname": ufn,
             "user_avatar": uav,
@@ -353,6 +356,8 @@ def update_ticket():
         if not staff and doc.status in ("Closed", "Cancelled", "Resolved"):
             return validation_error_response(_("Không thể sửa ticket đã đóng"), {"status": ["locked"]})
 
+        old_status = doc.status
+
         if "title" in data and data["title"]:
             doc.title = str(data["title"]).strip()
         if "description" in data:
@@ -381,7 +386,10 @@ def update_ticket():
                 doc.assigned_to_fullname = None
 
         doc.save(ignore_permissions=True)
-        _append_history(doc.name, _("Cập nhật ticket"))
+        hist_detail = None
+        if staff and "status" in data and data.get("status") and old_status != doc.status:
+            hist_detail = _("Trạng thái: {0} → {1}").format(old_status, doc.status)
+        _append_history(doc.name, _("Cập nhật ticket"), detail=hist_detail)
         frappe.db.commit()
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except Exception as e:
@@ -455,7 +463,7 @@ def cancel_ticket():
         doc.status = "Cancelled"
         doc.cancellation_reason = reason
         doc.save(ignore_permissions=True)
-        _append_history(doc.name, _("Hủy ticket"))
+        _append_history(doc.name, _("Hủy ticket"), detail=reason[:500])
         frappe.db.commit()
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except Exception as e:
@@ -592,7 +600,7 @@ def create_subtask():
             }
         )
         st.insert(ignore_permissions=True)
-        _append_history(ticket_id, _("Thêm công việc con"))
+        _append_history(ticket_id, _("Thêm công việc con"), detail=title[:500])
         frappe.db.commit()
         return success_response({"ticket": _ticket_to_dict(frappe.get_doc(DOCTYPE, ticket_id))}, "OK")
     except Exception as e:
@@ -740,7 +748,15 @@ def send_comment():
             row["images_json"] = images
         c = frappe.get_doc(row)
         c.insert(ignore_permissions=True)
-        _append_history(ticket_id, _("Trao đổi"))
+        if text:
+            excerpt = text[:500] + ("…" if len(text) > 500 else "")
+            if images:
+                excerpt += _(" (+{0} ảnh/video)").format(len(images))
+        elif images:
+            excerpt = _("Gửi {0} ảnh/video").format(len(images))
+        else:
+            excerpt = ""
+        _append_history(ticket_id, _("Trao đổi"), detail=excerpt or None)
         frappe.db.commit()
         return success_response(
             {
@@ -780,7 +796,15 @@ def get_history():
         rows = frappe.get_all(
             HISTORY_DOCTYPE,
             filters={"ticket": ticket_id},
-            fields=["name", "creation", "action", "user_email", "user_fullname", "user_avatar"],
+            fields=[
+                "name",
+                "creation",
+                "action",
+                "detail",
+                "user_email",
+                "user_fullname",
+                "user_avatar",
+            ],
             order_by="creation asc",
         )
         out = []
@@ -790,6 +814,7 @@ def get_history():
                     "_id": r.name,
                     "timestamp": r.creation,
                     "action": r.action,
+                    "detail": r.get("detail") or "",
                     "user": {
                         "_id": r.user_email or "",
                         "fullname": r.user_fullname or "",

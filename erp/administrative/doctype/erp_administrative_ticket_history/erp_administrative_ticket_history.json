@@ -7,6 +7,7 @@
  "field_order": [
   "ticket",
   "action",
+  "detail",
   "user_email",
   "user_fullname",
   "user_avatar"
@@ -26,6 +27,11 @@
    "in_list_view": 1,
    "label": "H\u00e0nh \u0111\u1ed9ng",
    "reqd": 1
+  },
+  {
+   "fieldname": "detail",
+   "fieldtype": "Text",
+   "label": "Chi ti\u1ebft (n\u1ed9i dung trao \u0111\u1ed5i, ti\u00eau \u0111\u1ec3 CV con...)"
   },
   {
    "fieldname": "user_email",
