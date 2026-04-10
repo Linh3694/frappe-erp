@@ -756,18 +756,29 @@ def get_class_facility_context():
         room_title = None
         room_name = None
         room_short_title = None
+        room_type = None
+        room_capacity = None
         building_title = None
         if room_id:
             rv = frappe.db.get_value(
                 "ERP Administrative Room",
                 room_id,
-                ["title_vn", "name", "short_title", "building_id"],
+                [
+                    "title_vn",
+                    "name",
+                    "short_title",
+                    "building_id",
+                    "room_type",
+                    "capacity",
+                ],
                 as_dict=True,
             )
             if rv:
                 room_title = rv.get("title_vn")
                 room_name = rv.get("name")
                 room_short_title = rv.get("short_title")
+                room_type = rv.get("room_type")
+                room_capacity = rv.get("capacity")
                 bid = rv.get("building_id")
                 if bid:
                     building_title = frappe.db.get_value(
@@ -782,6 +793,8 @@ def get_class_facility_context():
                 "room_title": room_title,
                 "room_name": room_name,
                 "room_short_title": room_short_title,
+                "room_type": room_type,
+                "room_capacity": room_capacity,
                 "building_title": building_title,
                 **inner,
             },
