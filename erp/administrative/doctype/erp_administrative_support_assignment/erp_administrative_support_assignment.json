@@ -1,0 +1,88 @@
+{
+ "actions": [],
+ "allow_copy": 1,
+ "allow_import": 1,
+ "autoname": "format:SUP-ASG-{#####}",
+ "creation": "2026-04-10 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "area_title",
+  "support_category",
+  "pic"
+ ],
+ "fields": [
+  {
+   "fieldname": "area_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "T\u00ean khu v\u1ef1c",
+   "reqd": 1
+  },
+  {
+   "fieldname": "support_category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Danh m\u1ee5c h\u1ed7 tr\u1ee3",
+   "options": "ERP Administrative Support Category",
+   "reqd": 1
+  },
+  {
+   "fieldname": "pic",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "PIC",
+   "options": "User",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-10 10:00:00.000000",
+ "module": "Administrative",
+ "name": "ERP Administrative Support Assignment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
