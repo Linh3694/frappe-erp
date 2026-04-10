@@ -55,7 +55,14 @@ def _assignment_to_dict(doc):
         "ERP Administrative Support Category", doc.support_category, "title"
     )
     pic_fullname = get_fullname(doc.pic) if doc.pic else ""
-    pic_email = frappe.db.get_value("User", doc.pic, "email") if doc.pic else ""
+    # Ảnh đại diện User (Frappe) — frontend Avatar
+    pic_user_image = ""
+    pic_email = ""
+    if doc.pic:
+        u = frappe.db.get_value("User", doc.pic, ["email", "user_image"], as_dict=True)
+        if u:
+            pic_email = (u.get("email") or "").strip()
+            pic_user_image = (u.get("user_image") or "").strip()
     return {
         "name": doc.name,
         "area_title": doc.area_title,
@@ -64,6 +71,7 @@ def _assignment_to_dict(doc):
         "pic": doc.pic,
         "pic_fullname": pic_fullname or doc.pic or "",
         "pic_email": pic_email or "",
+        "pic_user_image": pic_user_image or "",
     }
 
 
