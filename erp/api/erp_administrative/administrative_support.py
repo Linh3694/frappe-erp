@@ -403,6 +403,76 @@ def create_assignment():
 
 
 @frappe.whitelist(allow_guest=False)
+def bulk_create_assignments():
+    """Tạo nhiều phân công cùng lúc: cùng khu vực + danh mục, nhiều PIC (mỗi PIC một bản ghi)."""
+    try:
+        data = _parse_json_body()
+        area_title = (data.get("area_title") or "").strip()
+        support_category = (data.get("support_category") or "").strip()
+        pics_raw = data.get("pics") or []
+
+        if not area_title:
+            return validation_error_response(_("Thiếu tên khu vực"), {"area_title": ["required"]})
+        if not support_category:
+            return validation_error_response(_("Thiếu danh mục"), {"support_category": ["required"]})
+        if not isinstance(pics_raw, list):
+            return validation_error_response(_("Danh sách PIC không hợp lệ"), {"pics": ["invalid"]})
+
+        pics = []
+        for p in pics_raw:
+            s = str(p or "").strip()
+            if s and s not in pics:
+                pics.append(s)
+        if not pics:
+            return validation_error_response(_("Thiếu ít nhất một PIC"), {"pics": ["required"]})
+
+        if not frappe.db.exists("ERP Administrative Support Category", support_category):
+            return validation_error_response(_("Danh mục không tồn tại"), {"support_category": ["invalid"]})
+
+        for pic in pics:
+            if not frappe.db.exists("User", pic):
+                return validation_error_response(
+                    _("Người dùng không tồn tại: {0}").format(pic), {"pic": [pic]}
+                )
+            dup = frappe.db.exists(
+                "ERP Administrative Support Assignment",
+                {
+                    "area_title": area_title,
+                    "support_category": support_category,
+                    "pic": pic,
+                },
+            )
+            if dup:
+                return validation_error_response(
+                    _("Đã có phân công cho PIC {0} trong khu vực và danh mục này").format(pic),
+                    {"pic": [pic]},
+                )
+
+        created = []
+        for pic in pics:
+            doc = frappe.get_doc(
+                {
+                    "doctype": "ERP Administrative Support Assignment",
+                    "area_title": area_title,
+                    "support_category": support_category,
+                    "pic": pic,
+                }
+            )
+            doc.insert(ignore_permissions=False)
+            created.append(_assignment_to_dict(doc))
+
+        frappe.db.commit()
+        return list_response(created, _("Đã tạo {0} phân công").format(len(created)))
+    except frappe.exceptions.ValidationError as e:
+        frappe.db.rollback()
+        return validation_error_response(str(e), {"error": [str(e)]})
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "administrative_support.bulk_create_assignments")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def update_assignment():
     try:
         data = _parse_json_body()
