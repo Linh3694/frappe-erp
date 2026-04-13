@@ -32,6 +32,35 @@ VALID_ENTRANCE_STATUSES = frozenset(
 )
 VALID_EXAM_RESULTS = frozenset({"", "pass", "conditional_pass", "retake", "fail"})
 
+# Nhãn hiển thị Excel nhập liệu — đồng bộ FE (entranceExamLabels)
+_ENTRANCE_STATUS_LABEL_VN = {
+    "new": "Đã đăng ký",
+    "schedule_notified": "Thông báo lịch thi",
+    "not_attending": "Không thi",
+    "exam_taken": "Đã thi",
+    "completed": "Hoàn thành",
+}
+_ENTRANCE_RESULT_LABEL_VN = {
+    "": "—",
+    "pass": "Đạt",
+    "conditional_pass": "Đạt có điều kiện",
+    "retake": "Thi lại",
+    "fail": "Không đạt",
+}
+
+
+def _export_status_cell(status):
+    return _ENTRANCE_STATUS_LABEL_VN.get(status or "new", status or "Đã đăng ký")
+
+
+def _export_exam_result_cell(exam_result):
+    er = exam_result or ""
+    return _ENTRANCE_RESULT_LABEL_VN.get(er, er or "—")
+
+
+def _export_ksdv_cell(ksdv_fee_paid):
+    return "Đã đóng" if ksdv_fee_paid else "Chưa đóng"
+
 
 def _get_lead_primary_phone(parent_lead_id):
     """SĐT phụ huynh: ưu tiên CRM Lead Phone có is_primary, không thì dòng đầu."""
@@ -613,7 +642,7 @@ def update_entrance_exam_scores():
 
 
 def _entrance_exam_excel_header_and_data_start(rows):
-    """File từ FE có 2 dòng tiêu đề (tiếng Việt + mã cột) — ưu tiên dòng chứa name/crm_lead_id."""
+    """File từ FE: 2 dòng tiêu đề (tiếng Việt + mã cột crm_code, status, …)."""
     if not rows:
         return None, 1
     r0 = [str(c).strip().lower() if c is not None else "" for c in rows[0]]
@@ -624,7 +653,16 @@ def _entrance_exam_excel_header_and_data_start(rows):
     )
 
     def key_hits(row):
-        keys = ("name", "crm_lead_id", "status", "exam_result", "result_link", "ksdv_fee_paid")
+        keys = (
+            "name",
+            "crm_lead_id",
+            "crm_code",
+            "student_name",
+            "status",
+            "exam_result",
+            "result_link",
+            "ksdv_fee_paid",
+        )
         return sum(1 for k in keys if k in row)
 
     if r1 and key_hits(r1) >= key_hits(r0) and key_hits(r1) >= 1:
@@ -656,10 +694,13 @@ def _norm_entrance_status_import(val):
 
 
 def _norm_entrance_exam_result_import(val):
-    """Chuẩn hoá kết quả thi (mã API hoặc nhãn tiếng Việt)."""
-    if val is None or str(val).strip() in ("", "-", "—", "none"):
+    """Chuẩn hoá kết quả thi (mã API hoặc nhãn tiếng Việt như FE)."""
+    if val is None:
         return ""
-    s = str(val).strip().lower()
+    raw = str(val).strip()
+    if raw in ("", "-", "—", "none"):
+        return ""
+    s = raw.lower()
     vn = {
         "đạt": "pass",
         "đạt có điều kiện": "conditional_pass",
@@ -675,13 +716,13 @@ def _norm_entrance_exam_result_import(val):
 
 
 def _norm_ksdv_fee_import(val):
-    """0/1 từ ô Excel."""
+    """Đã đóng / Chưa đóng (như FE) hoặc 0/1."""
     if val is None or str(val).strip() == "":
         return None
     s = str(val).strip().lower()
     if s in ("1", "true", "yes", "có", "y", "x", "đã đóng", "da dong"):
         return 1
-    if s in ("0", "false", "no", "không", "chưa đóng"):
+    if s in ("0", "false", "no", "không", "chưa đóng", "chua dong"):
         return 0
     try:
         return 1 if int(float(s)) != 0 else 0
@@ -692,8 +733,7 @@ def _norm_ksdv_fee_import(val):
 @frappe.whitelist()
 def export_entrance_exam_students_template():
     """
-    Xuất template nhập liệu: danh sách học sinh hiện tại trong kỳ,
-    cột chỉnh sửa: status, exam_result, result_link, ksdv_fee_paid (mã API như dialog cập nhật).
+    Xuất template nhập liệu: Mã CRM, họ tên; trạng thái / kết quả / phí KSĐV hiển thị nhãn tiếng Việt (đồng bộ FE).
     """
     check_crm_permission()
     exam_id = frappe.request.args.get("exam_id")
@@ -730,8 +770,6 @@ def export_entrance_exam_students_template():
             item["student_name"] = ""
 
     headers = [
-        "name",
-        "crm_lead_id",
         "crm_code",
         "student_name",
         "status",
@@ -740,28 +778,26 @@ def export_entrance_exam_students_template():
         "ksdv_fee_paid",
     ]
     header_labels = [
-        "Mã bản ghi (không sửa)",
-        "CRM Lead ID",
         "Mã CRM",
         "Họ tên học sinh",
-        "Trạng thái (mã)",
-        "Kết quả thi (mã)",
+        "Trạng thái",
+        "Kết quả thi",
         "Link kết quả",
-        "Phí KSĐV đã đóng (0/1)",
+        "Phí KSĐV",
     ]
 
     rows = []
     for r in items:
+        st = r.get("status") or "new"
+        er = r.get("exam_result") or ""
         rows.append(
             {
-                "name": r.get("name"),
-                "crm_lead_id": r.get("crm_lead_id"),
                 "crm_code": r.get("crm_code", ""),
                 "student_name": r.get("student_name", ""),
-                "status": r.get("status") or "new",
-                "exam_result": r.get("exam_result") or "",
+                "status": _export_status_cell(st),
+                "exam_result": _export_exam_result_cell(er),
                 "result_link": r.get("result_link") or "",
-                "ksdv_fee_paid": 1 if r.get("ksdv_fee_paid") else 0,
+                "ksdv_fee_paid": _export_ksdv_cell(r.get("ksdv_fee_paid")),
             }
         )
 
@@ -774,8 +810,7 @@ def export_entrance_exam_students_template():
 @frappe.whitelist(methods=["POST"])
 def import_entrance_exam_students_meta():
     """
-    Nhập liệu hàng loạt: upload Excel từ template export — cập nhật status, exam_result, result_link, ksdv_fee_paid.
-    Khớp dòng theo cột name (ưu tiên) hoặc crm_lead_id / mã CRM trong kỳ.
+    Nhập liệu hàng loạt: khớp dòng theo Mã CRM; ô Trạng thái / Kết quả / Phí KSĐV dùng nhãn tiếng Việt (hoặc mã API).
     """
     check_crm_permission()
     import io
@@ -823,9 +858,9 @@ def import_entrance_exam_students_meta():
     idx_link = col("result_link")
     idx_ksdv = col("ksdv_fee_paid")
 
-    if idx_name is None and idx_lead is None and idx_code is None:
+    if idx_code is None:
         return error_response(
-            "Không tìm thấy cột name, crm_lead_id hoặc crm_code. Tải lại template từ nút Nhập liệu."
+            "Không tìm thấy cột crm_code (Mã CRM). Tải lại template từ nút Nhập liệu."
         )
 
     success_count = 0
@@ -838,17 +873,27 @@ def import_entrance_exam_students_meta():
         name_val = row[idx_name] if idx_name is not None and idx_name < len(row) else None
         lead_val = row[idx_lead] if idx_lead is not None and idx_lead < len(row) else None
         code_val = row[idx_code] if idx_code is not None and idx_code < len(row) else None
-        if not name_val and not lead_val and not code_val:
+        if not code_val and not name_val and not lead_val:
             continue
         if (
-            not str(name_val or "").strip()
+            not str(code_val or "").strip()
+            and not str(name_val or "").strip()
             and not str(lead_val or "").strip()
-            and not str(code_val or "").strip()
         ):
             continue
 
         rec_name = None
-        if name_val and str(name_val).strip():
+        # Ưu tiên Mã CRM (template mới)
+        if code_val and str(code_val).strip():
+            lid = frappe.db.get_value("CRM Lead", {"crm_code": str(code_val).strip()}, "name")
+            if lid:
+                rec_name = frappe.db.get_value(
+                    "CRM Admission Entrance Exam Student",
+                    {"entrance_exam_id": exam_id, "crm_lead_id": lid},
+                    "name",
+                )
+
+        if not rec_name and name_val and str(name_val).strip():
             cand = str(name_val).strip()
             if frappe.db.exists("CRM Admission Entrance Exam Student", cand):
                 eid = frappe.db.get_value(
@@ -869,18 +914,11 @@ def import_entrance_exam_students_meta():
                     "name",
                 )
 
-        if not rec_name and code_val and str(code_val).strip():
-            lid = frappe.db.get_value("CRM Lead", {"crm_code": str(code_val).strip()}, "name")
-            if lid:
-                rec_name = frappe.db.get_value(
-                    "CRM Admission Entrance Exam Student",
-                    {"entrance_exam_id": exam_id, "crm_lead_id": lid},
-                    "name",
-                )
-
         if not rec_name:
             error_count += 1
-            errors.append(f"Dòng {row_idx}: Không tìm thấy bản ghi trong kỳ (name / CRM)")
+            errors.append(
+                f"Dòng {row_idx}: Không tìm thấy học sinh trong kỳ (kiểm tra Mã CRM)"
+            )
             continue
 
         try:
