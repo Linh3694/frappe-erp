@@ -675,9 +675,32 @@ def import_event_students_status():
     )
 
 
+def _promo_export_column_labels(promo_meta):
+    """
+    (header Excel, promotion_id) — tiêu đề cột theo tên ưu đãi + phân loại + %;
+    trùng tên thì thêm [promotion_id].
+    """
+    used_labels = set()
+    out = []
+    for p in promo_meta:
+        pid = p.get("promotion_id") or ""
+        name = (p.get("promotion_name") or pid or "").strip()
+        parts = [name]
+        if p.get("category"):
+            parts.append(str(p["category"]))
+        if p.get("value") is not None:
+            parts.append(f"{p['value']}%")
+        label = " — ".join(parts)
+        if label in used_labels:
+            label = f"{label} [{pid}]"
+        used_labels.add(label)
+        out.append((label, pid))
+    return out
+
+
 @frappe.whitelist()
 def export_event_report():
-    """Xuất báo cáo sự kiện - danh sách học sinh kèm trạng thái"""
+    """Xuất báo cáo sự kiện - danh sách học sinh kèm trạng thái và cột ưu đãi (CRM Promotion)"""
     check_crm_permission()
     event_id = frappe.request.args.get("event_id")
     if not event_id:
@@ -685,12 +708,28 @@ def export_event_report():
     if not frappe.db.exists("CRM Admission Event", event_id):
         return not_found_response("Không tìm thấy sự kiện")
 
+    promo_meta = _event_promotions_meta(event_id)
+    promo_cols = _promo_export_column_labels(promo_meta)
+
     items = frappe.get_all(
         "CRM Admission Event Student",
         filters={"event_id": event_id},
         fields=["name", "crm_lead_id", "status", "modified", "modified_by"],
         order_by="modified desc",
     )
+
+    flags_by_student = defaultdict(dict)
+    if items:
+        names = [i["name"] for i in items]
+        for pr in frappe.get_all(
+            "CRM Admission Event Student Promotion",
+            filters={"parent": ["in", names]},
+            fields=["parent", "promotion", "selected"],
+        ):
+            pid = pr.get("promotion")
+            if pid:
+                flags_by_student[pr.parent][pid] = bool(pr.selected)
+
     for item in items:
         lead = frappe.db.get_value(
             "CRM Lead",
@@ -710,10 +749,26 @@ def export_event_report():
         if item.get("modified_by"):
             item["modified_by_name"] = frappe.db.get_value("User", item["modified_by"], "full_name") or item["modified_by"]
 
+        fl = flags_by_student.get(item["name"], {})
+        for label, pid in promo_cols:
+            item[label] = "Có" if fl.get(pid) else "Không"
+
+    base_headers = [
+        "crm_lead_id",
+        "crm_code",
+        "student_name",
+        "student_dob",
+        "status",
+        "status_label",
+        "modified",
+        "modified_by_name",
+    ]
+    headers = base_headers + [c[0] for c in promo_cols]
+
     return success_response(
         message="OK",
         data={
-            "headers": ["crm_lead_id", "crm_code", "student_name", "student_dob", "status", "status_label", "modified", "modified_by_name"],
+            "headers": headers,
             "rows": items,
         },
     )
