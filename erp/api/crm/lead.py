@@ -353,6 +353,7 @@ def clone_lead_for_sibling():
     source_lead_name = data.get("source_lead_name") or data.get("name")
     student_name = (data.get("student_name") or "").strip()
     student_dob = data.get("student_dob") or None
+    # Truong hoc nhap tay (giong lead_siblings.school); neu trung docname CRM School thi gan Link tren lead moi
     current_school = (data.get("current_school") or "").strip() or None
 
     if not source_lead_name:
@@ -388,7 +389,7 @@ def clone_lead_for_sibling():
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note", "guardian_dob",
             "target_academic_year", "target_semester", "referrer",
-            "target_grade", "current_grade", "student_gender",
+            "target_grade", "current_grade",
         ]:
             val = getattr(src, field, None)
             if val is not None and val != "":
@@ -442,12 +443,13 @@ def clone_lead_for_sibling():
 
         frappe.db.commit()
 
-        # ACE tren ho so goc: ten hien thi truong (Data) neu co Link CRM School
+        # ACE: school la Data — luu dung chuoi nhap; neu nhap trung docname CRM School thi hien thi school_name
         school_ace = ""
-        if current_school and frappe.db.exists("CRM School", current_school):
-            school_ace = frappe.db.get_value("CRM School", current_school, "school_name") or current_school
-        elif current_school:
-            school_ace = current_school
+        if current_school:
+            if frappe.db.exists("CRM School", current_school):
+                school_ace = frappe.db.get_value("CRM School", current_school, "school_name") or current_school
+            else:
+                school_ace = current_school
 
         src_reload = frappe.get_doc("CRM Lead", source_lead_name)
         src_reload.append("lead_siblings", {
