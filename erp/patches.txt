@@ -22,3 +22,6 @@ erp.patches.v1_0.migrate_discipline_violation_point_versions
 
 # Điểm danh lớp: dọn bản ghi trùng + thêm UNIQUE INDEX chống race condition
 erp.patches.v1_0.dedup_class_attendance_add_unique_index
+
+# CRM: gop buoc Test/Deal vao QLead (test_status, deal_status)
+erp.patches.v1_0.crm_migrate_test_deal_to_qlead

@@ -101,9 +101,9 @@ def create_enrollment_records():
     if lead_doc.linked_student:
         return error_response("Ho so nay da duoc lien ket voi CRM Student")
 
-    if lead_doc.step not in ("Enrolled", "Deal"):
+    if lead_doc.step not in ("Enrolled", "QLead"):
         return error_response(
-            f"Chi co the tao enrollment records tu buoc Deal hoac Enrolled. "
+            f"Chi co the tao enrollment records tu buoc QLead hoac Enrolled. "
             f"Hien tai: {lead_doc.step}"
         )
 

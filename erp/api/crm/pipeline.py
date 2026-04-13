@@ -11,7 +11,8 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data, validate_step_transition,
-    get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES
+    get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES,
+    QLEAD_TEST_STATUSES, QLEAD_DEAL_STATUSES,
 )
 
 
@@ -78,26 +79,25 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
 
     validate_step_transition(old_step, target_step)
 
-    if old_step == "QLead" and target_step == "Test":
+    # QLead -> Enrolled: sinh ma HS (hoc sinh moi) + kiem tra trung Enrolled
+    if old_step == "QLead" and target_step == "Enrolled":
         student_type = extra_data.get("student_type", "new")
         if student_type == "new":
             from erp.api.crm.student_code import _generate_code_internal
 
-            code = _generate_code_internal(
-                extra_data.get("campus_code", "WS1"),
-                extra_data.get("academic_year", ""),
-                extra_data.get("grade", doc.target_grade or "01"),
-            )
-            doc.student_code = code
+            if not doc.student_code:
+                code = _generate_code_internal(
+                    extra_data.get("campus_code", "WS1"),
+                    extra_data.get("academic_year", ""),
+                    extra_data.get("grade", doc.target_grade or "01"),
+                )
+                doc.student_code = code
         elif student_type == "existing":
-            doc.student_code = extra_data.get("student_code", "")
-            doc.linked_student = extra_data.get("linked_student", "")
+            if extra_data.get("student_code"):
+                doc.student_code = extra_data.get("student_code", "")
+            if extra_data.get("linked_student"):
+                doc.linked_student = extra_data.get("linked_student", "")
 
-    if old_step == "Deal" and target_step == "Enrolled":
-        if doc.status not in ["Paid", "Deposit"]:
-            return None, error_response(
-                "Chi co the nhap hoc ho so co trang thai Paid hoac Deposit"
-            )
         if doc.linked_student:
             existing = frappe.db.exists(
                 "CRM Lead",
@@ -116,9 +116,7 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
     default_statuses = {
         "Verify": "Can kiem tra",
         "Lead": "Moi",
-        "QLead": "Follow Up",
-        "Test": "Pre-test",
-        "Deal": "Booked",
+        "QLead": "Dang cham soc",
         "Enrolled": "Dang hoc",
         "Re-Enroll": "Unpaid",
         "Withdraw": "Chuyen truong",
@@ -159,7 +157,10 @@ def _log_step_change(lead_name, old_step, new_step, old_status, new_status,
             "changed_by": frappe.session.user,
             "changed_at": now()
         }
-        if new_status == "Lost":
+        # Lost (trang thai chinh) hoac Tu choi o test_status/deal_status (ghi trong new_status dang field:val)
+        if new_status == "Lost" or (
+            reject_reason and new_status and "Tu choi" in str(new_status)
+        ):
             if reject_reason is not None:
                 doc_data["reject_reason"] = reject_reason
             if reject_detail is not None:
@@ -225,6 +226,78 @@ def change_status():
 
 
 @frappe.whitelist(methods=["POST"])
+def change_sub_status():
+    """Doi test_status hoac deal_status khi buoc QLead. Tu choi: luu reject_reason/reject_detail."""
+    check_crm_permission()
+    data = get_request_data()
+
+    name = data.get("name")
+    field = data.get("field")
+    new_status = data.get("new_status")
+    reject_reason = data.get("reject_reason", "")
+    reject_detail = data.get("reject_detail", "")
+
+    if not name or not field or new_status is None or new_status == "":
+        return validation_error_response(
+            "Thieu tham so",
+            {
+                "name": ["Bat buoc"] if not name else [],
+                "field": ["Bat buoc"] if not field else [],
+                "new_status": ["Bat buoc"] if not new_status else [],
+            },
+        )
+
+    if field not in ("test_status", "deal_status"):
+        return error_response("field phai la test_status hoac deal_status")
+
+    valid = QLEAD_TEST_STATUSES if field == "test_status" else QLEAD_DEAL_STATUSES
+    if new_status not in valid:
+        return error_response(
+            f"Trang thai '{new_status}' khong hop le. Cac gia tri hop le: {', '.join(valid)}"
+        )
+
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = None
+    old_val = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", name)
+        if doc.step != "QLead":
+            return error_response(
+                f"Chi co the doi sub-status khi buoc QLead. Hien tai: {doc.step}"
+            )
+
+        old_val = getattr(doc, field) or ""
+        setattr(doc, field, new_status)
+        if new_status == "Tu choi":
+            doc.reject_reason = reject_reason
+            doc.reject_detail = reject_detail
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                return error_response(
+                    "Ho so da duoc cap nhat dong thoi. Vui long lam moi va thu lai."
+                )
+
+    frappe.db.commit()
+
+    _log_step_change(
+        name,
+        doc.step,
+        doc.step,
+        f"{field}:{old_val}",
+        f"{field}:{new_status}",
+        reject_reason=reject_reason if new_status == "Tu choi" else None,
+        reject_detail=reject_detail if new_status == "Tu choi" else None,
+    )
+
+    return single_item_response(doc.as_dict(), f"Da cap nhat {field}")
+
+
+@frappe.whitelist(methods=["POST"])
 def advance_step():
     """Chuyen buoc don le"""
     check_crm_permission()
@@ -264,18 +337,16 @@ def advance_step():
 
     _log_step_change(name, old_step, doc.step, old_status, doc.status)
     
-    # Tao CRM Family tu lead_guardians khi chuyen Deal -> Enrolled (co linked_student)
-    if old_step == "Deal" and doc.step == "Enrolled":
+    # QLead -> Enrolled: dong bo CRM Family + tao CRM Student / enrollment
+    if old_step == "QLead" and doc.step == "Enrolled":
         _sync_lead_guardians_to_family_if_needed(doc)
-    
-    # Tu dong tao enrollment records khi chuyen Deal -> Enrolled
-    if old_step == "Deal" and doc.step == "Enrolled" and not doc.linked_student:
-        try:
-            from erp.api.crm.enrollment import create_enrollment_records
-            frappe.form_dict.update({"lead_name": name})
-            create_enrollment_records()
-        except Exception as e:
-            frappe.log_error(f"Loi tu dong tao enrollment records: {str(e)}")
+        if not doc.linked_student:
+            try:
+                from erp.api.crm.enrollment import create_enrollment_records
+                frappe.form_dict.update({"lead_name": name})
+                create_enrollment_records()
+            except Exception as e:
+                frappe.log_error(f"Loi tu dong tao enrollment records: {str(e)}")
     
     return single_item_response(doc.as_dict(), f"Da chuyen ho so sang buoc {doc.step}")
 
@@ -324,6 +395,18 @@ def bulk_advance_step():
                 continue
 
             _log_step_change(lead_name, old_step, doc.step, old_status, doc.status)
+            # QLead -> Enrolled: enrollment (giong advance_step)
+            if old_step == "QLead" and doc.step == "Enrolled":
+                _sync_lead_guardians_to_family_if_needed(doc)
+                if not doc.linked_student:
+                    try:
+                        from erp.api.crm.enrollment import create_enrollment_records
+                        frappe.form_dict.update({"lead_name": lead_name})
+                        create_enrollment_records()
+                    except Exception as e:
+                        frappe.log_error(
+                            f"Loi tu dong tao enrollment (bulk_advance): {str(e)}"
+                        )
             results["success"].append(lead_name)
 
         except Exception as e:
@@ -353,13 +436,9 @@ def enroll_lead():
     for attempt in range(2):
         doc = frappe.get_doc("CRM Lead", name)
 
-        if doc.step != "Deal":
+        if doc.step != "QLead":
             return error_response(
-                f"Chi co the nhap hoc tu buoc Deal. Ho so hien tai o buoc {doc.step}"
-            )
-        if doc.status not in ["Paid", "Deposit"]:
-            return error_response(
-                "Chi co the nhap hoc ho so co trang thai Paid hoac Deposit"
+                f"Chi co the nhap hoc tu buoc QLead. Ho so hien tai o buoc {doc.step}"
             )
 
         old_step = doc.step
@@ -380,7 +459,16 @@ def enroll_lead():
     _log_step_change(name, old_step, "Enrolled", old_status, "Dang hoc")
     
     _sync_lead_guardians_to_family_if_needed(doc)
-    
+
+    if not doc.linked_student:
+        try:
+            from erp.api.crm.enrollment import create_enrollment_records
+            frappe.form_dict.update({"lead_name": name})
+            create_enrollment_records()
+        except Exception as e:
+            frappe.log_error(f"Loi tao enrollment records (enroll_lead): {str(e)}")
+
+    doc = frappe.get_doc("CRM Lead", name)
     return single_item_response(doc.as_dict(), "Da nhap hoc thanh cong")
 
 
@@ -513,15 +601,16 @@ def move_back_to_reenroll():
 
 @frappe.whitelist(methods=["POST"])
 def auto_enroll_paid_leads():
-    """Scheduler: Tu dong chuyen Paid/Deposit sang Enrolled"""
+    """Scheduler: Tu dong chuyen QLead (Dong phi / Dat coc) sang Enrolled"""
     check_crm_permission(["System Manager", "SIS Manager"])
     data = get_request_data()
     
     academic_year = data.get("academic_year")
     
+    # Buoc QLead: thoa thuan da dong phi / dat coc
     filters = {
-        "step": "Deal",
-        "status": ["in", ["Paid", "Deposit"]]
+        "step": "QLead",
+        "deal_status": ["in", ["Dong phi", "Dat coc"]],
     }
     if academic_year:
         filters["target_academic_year"] = academic_year
@@ -550,7 +639,7 @@ def auto_enroll_paid_leads():
                     if existing:
                         skipped = True
                         break
-                if doc.step != "Deal" or doc.status not in ["Paid", "Deposit"]:
+                if doc.step != "QLead" or (doc.deal_status or "") not in ("Dong phi", "Dat coc"):
                     skipped = True
                     break
                 old_step = doc.step
@@ -567,6 +656,13 @@ def auto_enroll_paid_leads():
                 continue
             _log_step_change(doc.name, old_step, "Enrolled", old_status, "Dang hoc")
             _sync_lead_guardians_to_family_if_needed(doc)
+            if not doc.linked_student:
+                try:
+                    from erp.api.crm.enrollment import create_enrollment_records
+                    frappe.form_dict.update({"lead_name": doc.name})
+                    create_enrollment_records()
+                except Exception as e:
+                    frappe.log_error(f"Loi tao enrollment (auto_enroll): {str(e)}")
             enrolled_count += 1
         except Exception as e:
             errors.append({"name": lead["name"], "error": str(e)})

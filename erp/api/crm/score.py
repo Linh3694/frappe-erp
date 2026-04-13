@@ -110,16 +110,19 @@ def import_scores():
                 exam_doc.save(ignore_permissions=True)
                 
                 # Cap nhat trang thai lead theo ket qua
-                result_status_map = {
-                    "Dat": "Offered",
-                    "Dat co dieu kien": "Retake",
-                    "Khong dat": "Fail"
+                # Cap nhat test_status (buoc QLead) theo ket qua thi
+                result_test_status_map = {
+                    "Dat": "De xuat",
+                    "Dat co dieu kien": "Thi lai",
+                    "Khong dat": "Tu choi",
                 }
-                new_status = result_status_map.get(result)
-                if new_status:
+                new_test_status = result_test_status_map.get(result)
+                if new_test_status:
                     lead_step = frappe.db.get_value("CRM Lead", lead_name, "step")
-                    if lead_step == "Test":
-                        frappe.db.set_value("CRM Lead", lead_name, "status", new_status)
+                    if lead_step == "QLead":
+                        frappe.db.set_value(
+                            "CRM Lead", lead_name, "test_status", new_test_status
+                        )
         
         except Exception as e:
             results["errors"].append({"lead": lead_name, "error": str(e)})

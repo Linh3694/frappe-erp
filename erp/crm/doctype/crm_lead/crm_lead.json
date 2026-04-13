@@ -19,6 +19,8 @@
   "general_info_section",
   "step",
   "status",
+  "test_status",
+  "deal_status",
   "crm_code",
   "cb_general_1",
   "data_source",
@@ -120,7 +122,7 @@
    "fieldname": "step",
    "fieldtype": "Select",
    "label": "Step",
-   "options": "Draft\nVerify\nLead\nQLead\nTest\nDeal\nEnrolled\nRe-Enroll\nWithdraw\nGraduated",
+   "options": "Draft\nVerify\nLead\nQLead\nEnrolled\nRe-Enroll\nWithdraw\nGraduated",
    "reqd": 1,
    "default": "Draft",
    "in_list_view": 1
@@ -129,8 +131,22 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "\nCan kiem tra\nTrung\nDa kiem tra - Gop ho so\nDa kiem tra - Bao trung\nDa kiem tra - Trung hoc sinh\nMoi\nKhong nghe may\nHen gap lai\nKhong nghe may nhieu lan\nKhong co nhu cau\nSau thong tin\nTrung Lead\nLost\nFollow Up\nPre-Event\nEvent\nPre-school Tour/ School Tour\nPre-test\nTest\nOffered\nFailed\nRetake\nBooked\nDeposit\nRefund\nReserved\nPaid\nUnpaid\nConsidering\nDang hoc\nChuyen truong\nBao luu\nTot nghiep",
+   "options": "\nCan kiem tra\nTrung\nDa kiem tra - Gop ho so\nDa kiem tra - Bao trung\nDa kiem tra - Trung hoc sinh\nMoi\nKhong nghe may\nHen gap lai\nKhong nghe may nhieu lan\nKhong co nhu cau\nSau thong tin\nTrung Lead\nLost\nFollow Up\nPre-Event\nEvent\nPre-school Tour/ School Tour\nDang cham soc\nDat lich hen\nThoa thuan\nPre-test\nTest\nOffered\nFailed\nRetake\nBooked\nDeposit\nRefund\nReserved\nPaid\nUnpaid\nConsidering\nDang hoc\nChuyen truong\nBao luu\nTot nghiep",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "test_status",
+   "fieldtype": "Select",
+   "label": "Khao sat dau vao",
+   "options": "\nDat lich\nTham gia\nDe xuat\nThi lai\nTu choi",
+   "description": "Trang thai khao sat dau vao (buoc QLead)"
+  },
+  {
+   "fieldname": "deal_status",
+   "fieldtype": "Select",
+   "label": "Thoa thuan",
+   "options": "\nDat cho\nDat coc\nDong phi\nHoan phi\nBao luu/Chuyen\nTu choi",
+   "description": "Trang thai thoa thuan (buoc QLead)"
   },
   {
    "fieldname": "crm_code",

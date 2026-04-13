@@ -8,8 +8,8 @@ from typing import List, Optional, Dict
 
 
 CRM_STEPS = [
-    "Draft", "Verify", "Lead", "QLead", "Test",
-    "Deal", "Enrolled", "Re-Enroll", "Withdraw", "Graduated"
+    "Draft", "Verify", "Lead", "QLead",
+    "Enrolled", "Re-Enroll", "Withdraw", "Graduated",
 ]
 
 STEP_STATUSES: Dict[str, List[str]] = {
@@ -22,22 +22,23 @@ STEP_STATUSES: Dict[str, List[str]] = {
         "Da kiem tra - Trung hoc sinh",
     ],
     "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Lost"],
-    "QLead": ["Follow Up", "Pre-Event", "Event", "Pre-school Tour/ School Tour", "Lost"],
-    "Test": ["Pre-test", "Test", "Offered", "Failed", "Retake", "Lost"],
-    "Deal": ["Booked", "Deposit", "Lost", "Refund", "Reserved", "Paid"],
+    # Trang thai chinh buoc QLead (dong bo frontend STEP_STATUSES)
+    "QLead": ["Dang cham soc", "Dat lich hen", "Thoa thuan", "Lost"],
     "Enrolled": ["Dang hoc"],
     "Re-Enroll": ["Unpaid", "Considering", "Paid"],
     "Withdraw": ["Chuyen truong", "Bao luu"],
     "Graduated": ["Tot nghiep"],
 }
 
+# Sub-status QLead: khao sat dau vao / thoa thuan (truong test_status, deal_status)
+QLEAD_TEST_STATUSES = ["Dat lich", "Tham gia", "De xuat", "Thi lai", "Tu choi"]
+QLEAD_DEAL_STATUSES = ["Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Tu choi"]
+
 VALID_STEP_TRANSITIONS = {
     "Draft": ["Lead", "Verify"],
     "Verify": ["Lead"],
     "Lead": ["QLead", "Verify"],
-    "QLead": ["Test"],
-    "Test": ["Deal"],
-    "Deal": ["Enrolled"],
+    "QLead": ["Enrolled"],
     "Enrolled": ["Re-Enroll", "Withdraw", "Graduated"],
     "Re-Enroll": ["Enrolled"],
     "Graduated": ["Re-Enroll"],

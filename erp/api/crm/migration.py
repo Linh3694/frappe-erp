@@ -301,7 +301,7 @@ def fix_migrated_statuses():
         "Follow up": {"QLead": "Follow Up"},
         "Pre-school tour": {"QLead": "Pre-school Tour/ School Tour"},
         "School tour": {"QLead": "Pre-school Tour/ School Tour"},
-        "Fail": {"Test": "Failed"},
+        "Fail": {"QLead": "Lost"},
     }
 
     results = {"updated": 0, "details": []}

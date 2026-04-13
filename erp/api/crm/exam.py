@@ -144,7 +144,7 @@ def delete_exam():
 
 @frappe.whitelist(methods=["POST"])
 def add_students_to_exam():
-    """Them HS vao ky thi (validate: chi step=Test, status=Test)"""
+    """Them HS vao ky thi (validate: buoc QLead)"""
     check_crm_permission()
     data = get_request_data()
     
@@ -176,8 +176,8 @@ def add_students_to_exam():
             errors.append({"name": lead_name, "error": "Khong tim thay"})
             continue
         
-        if lead.step != "Test":
-            errors.append({"name": lead_name, "error": f"Ho so o buoc {lead.step}, can buoc Test"})
+        if lead.step != "QLead":
+            errors.append({"name": lead_name, "error": f"Ho so o buoc {lead.step}, can buoc QLead"})
             continue
         
         doc.append("students", {
