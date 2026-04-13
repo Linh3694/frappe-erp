@@ -258,9 +258,16 @@ def create_lead():
                 "is_primary": phone_item.get("is_primary", 0)
             })
         
-        # Set sources
+        # Set sources (nguồn chính + nguồn phụ + ghi chú)
         for source_item in data.get("sources", []):
-            doc.append("source", {"source": source_item.get("source", "")})
+            doc.append(
+                "source",
+                {
+                    "source": source_item.get("source", ""),
+                    "sub_source": (source_item.get("sub_source") or "").strip(),
+                    "source_note": (source_item.get("source_note") or "").strip(),
+                },
+            )
         
         # Set events
         for event_item in data.get("events", []):
@@ -374,11 +381,18 @@ def update_lead():
                     "is_primary": phone_item.get("is_primary", 0)
                 })
         
-        # Cap nhat sources
+        # Cap nhat sources (nguồn chính + nguồn phụ + ghi chú)
         if "sources" in data:
             doc.set("source", [])
             for s in data["sources"]:
-                doc.append("source", {"source": s.get("source", "")})
+                doc.append(
+                    "source",
+                    {
+                        "source": s.get("source", ""),
+                        "sub_source": (s.get("sub_source") or "").strip(),
+                        "source_note": (s.get("source_note") or "").strip(),
+                    },
+                )
         
         # Cap nhat documents
         if "enrollment_documents" in data:

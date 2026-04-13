@@ -8,7 +8,8 @@
  "field_order": [
   "promotion_name",
   "category",
-  "value"
+  "value",
+  "description"
  ],
  "fields": [
   {

@@ -14,7 +14,9 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "source"
+  "source",
+  "sub_source",
+  "source_note"
  ],
  "fields": [
   {
@@ -24,6 +26,19 @@
    "options": "CRM Source",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "description": "Ngu\u1ed3n ph\u1ee5 theo c\u1ea5u h\u00ecnh CRM Source (t\u00ean ngu\u1ed3n ph\u1ee5)",
+   "fieldname": "sub_source",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Ngu\u1ed3n ph\u1ee5"
+  },
+  {
+   "description": "Ghi ch\u00fa t\u1ef1 do b\u1ed5 sung (Ngu\u1ed3n 3)",
+   "fieldname": "source_note",
+   "fieldtype": "Small Text",
+   "label": "Ghi ch\u00fa ngu\u1ed3n"
   }
  ],
  "index_web_pages_for_search": 0,
