@@ -286,31 +286,18 @@ def create_lead():
         skip_verify = bool(data.get("skip_verify"))
 
         if not skip_verify:
-            # Tu dong kiem tra trung lap SĐT voi ho so trong he thong (khong check voi ban ghi Verify)
-            from erp.api.crm.duplicate import _find_matching_leads
+            # Khong trung SDT voi ho so nao (tru Draft/Verify) -> Lead (Moi); trung -> Verify + status theo rule
+            from erp.api.crm.duplicate import resolve_draft_promotion
 
-            raw_phones = [p.get("phone_number", "") for p in phone_numbers]
-            matches = _find_matching_leads(
-                raw_phones,
-                doc.student_name,
-                doc.guardian_name,
-                exclude_draft=True,
-                exclude_verify=True
-            )
-            # Loai bo chinh no
-            matches = [m for m in matches if m["name"] != doc.name]
-
-            doc.step = "Verify"
-            # Mac dinh gan ma CRM cho ho so tao tu Lead, bat ke trung hay khong
+            eff_step, eff_status = resolve_draft_promotion(doc)
+            doc.step = eff_step
+            doc.status = eff_status if eff_step == "Verify" else "Moi"
             if not doc.crm_code:
                 doc.crm_code = generate_crm_code()
 
-            # Mac dinh trang thai Can kiem tra - user se xac nhan hanh dong tiep theo trong VerifyTab
-            doc.status = "Can kiem tra"
-
             doc.save(ignore_permissions=True)
 
-        # PIC mac dinh (SIS Sales, can bang tai) khi dua vao Verify — giu nguyen khi sau nay chuyen Lead
+        # PIC mac dinh (SIS Sales, can bang tai) khi dua vao Verify hoac Lead (tao moi)
         if not skip_verify and not doc.pic:
             from erp.api.crm.assignment import assign_pic_sales_weight_balance
 
@@ -319,7 +306,12 @@ def create_lead():
         frappe.db.commit()
 
         doc = frappe.get_doc("CRM Lead", doc.name)
-        msg = "Tao ho so Draft thanh cong" if skip_verify else "Tao ho so thanh cong"
+        if skip_verify:
+            msg = "Tao ho so Draft thanh cong"
+        elif doc.step == "Lead":
+            msg = "Tao ho so thanh cong (buoc Lead - khong trung SDT)"
+        else:
+            msg = "Tao ho so thanh cong (buoc Verify - can kiem tra trung)"
         return single_item_response(doc.as_dict(), msg)
     
     except Exception as e:

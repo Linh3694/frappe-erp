@@ -66,6 +66,16 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
     old_step = doc.step
     old_status = doc.status
 
+    # Tu Draft: khong trung SDT voi ho so he thong -> Lead; trung -> Verify (status theo rule)
+    verify_status_from_duplicate = None
+    if old_step == "Draft" and target_step in ("Verify", "Lead"):
+        from erp.api.crm.duplicate import resolve_draft_promotion
+
+        effective_target, eff_status = resolve_draft_promotion(doc)
+        target_step = effective_target
+        if effective_target == "Verify":
+            verify_status_from_duplicate = eff_status
+
     validate_step_transition(old_step, target_step)
 
     if old_step == "QLead" and target_step == "Test":
@@ -115,6 +125,8 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
         "Graduated": "Tot nghiep",
     }
     doc.status = default_statuses.get(target_step, "")
+    if verify_status_from_duplicate:
+        doc.status = verify_status_from_duplicate
     if target_step == "Verify" and old_step == "Lead":
         doc.status = "Da kiem tra - Trung hoc sinh"
 
@@ -250,14 +262,14 @@ def advance_step():
 
     frappe.db.commit()
 
-    _log_step_change(name, old_step, target_step, old_status, doc.status)
+    _log_step_change(name, old_step, doc.step, old_status, doc.status)
     
     # Tao CRM Family tu lead_guardians khi chuyen Deal -> Enrolled (co linked_student)
-    if old_step == "Deal" and target_step == "Enrolled":
+    if old_step == "Deal" and doc.step == "Enrolled":
         _sync_lead_guardians_to_family_if_needed(doc)
     
     # Tu dong tao enrollment records khi chuyen Deal -> Enrolled
-    if old_step == "Deal" and target_step == "Enrolled" and not doc.linked_student:
+    if old_step == "Deal" and doc.step == "Enrolled" and not doc.linked_student:
         try:
             from erp.api.crm.enrollment import create_enrollment_records
             frappe.form_dict.update({"lead_name": name})
@@ -265,7 +277,7 @@ def advance_step():
         except Exception as e:
             frappe.log_error(f"Loi tu dong tao enrollment records: {str(e)}")
     
-    return single_item_response(doc.as_dict(), f"Da chuyen ho so sang buoc {target_step}")
+    return single_item_response(doc.as_dict(), f"Da chuyen ho so sang buoc {doc.step}")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -287,44 +299,20 @@ def bulk_advance_step():
             if not frappe.db.exists("CRM Lead", lead_name):
                 results["errors"].append({"name": lead_name, "error": "Khong tim thay"})
                 continue
-            
+
+            doc = None
             old_step = None
             old_status = None
             for attempt in range(2):
-                doc = frappe.get_doc("CRM Lead", lead_name)
-                old_step = doc.step
-                old_status = doc.status
-
-                validate_step_transition(old_step, target_step)
-
-                doc.step = target_step
-                default_statuses = {
-                    "Verify": "Can kiem tra",
-                    "Lead": "Moi",
-                    "QLead": "Follow Up",
-                    "Test": "Pre-test",
-                    "Deal": "Booked",
-                    "Enrolled": "Dang hoc",
-                    "Re-Enroll": "Unpaid",
-                    "Withdraw": "Chuyen truong",
-                    "Graduated": "Tot nghiep",
-                }
-                doc.status = default_statuses.get(target_step, "")
-                if target_step == "Verify" and old_step == "Lead":
-                    doc.status = "Da kiem tra - Trung hoc sinh"
-
-                if target_step == "Lead" and not doc.crm_code:
-                    doc.crm_code = generate_crm_code()
-                if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
-                    doc.crm_code = generate_crm_code()
-
-                if target_step in ("Verify", "Lead") and not doc.pic:
-                    from erp.api.crm.assignment import assign_pic_sales_weight_balance
-
-                    pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
-                    if pic:
-                        doc.pic = pic
-
+                prepared, prep_err = _prepare_advance_step_doc(lead_name, target_step, {})
+                if prep_err is not None:
+                    results["errors"].append({
+                        "name": lead_name,
+                        "error": prep_err.get("message", "Loi chuyen buoc"),
+                    })
+                    doc = None
+                    break
+                doc, old_step, old_status = prepared
                 try:
                     doc.save(ignore_permissions=True)
                     break
@@ -332,9 +320,12 @@ def bulk_advance_step():
                     if attempt == 1:
                         raise
 
-            _log_step_change(lead_name, old_step, target_step, old_status, doc.status)
+            if doc is None:
+                continue
+
+            _log_step_change(lead_name, old_step, doc.step, old_status, doc.status)
             results["success"].append(lead_name)
-        
+
         except Exception as e:
             results["errors"].append({"name": lead_name, "error": str(e)})
     

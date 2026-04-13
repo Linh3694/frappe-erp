@@ -206,6 +206,32 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
     }
 
 
+def resolve_draft_promotion(doc):
+    """
+    Tao lead tu Draft / create_lead (khong skip_verify):
+    - Khong trung SDT voi ho so nao trong he thong (tru Draft, tru Verify) -> Lead + Moi
+    - Co trung -> Verify + status theo rule trung lap (ten HS/PH, thoi gian, buoc ho so cu...)
+    """
+    raw_phones = [
+        row.phone_number
+        for row in (doc.phone_numbers or [])
+        if getattr(row, "phone_number", None)
+    ]
+    matches = _find_matching_leads(
+        raw_phones,
+        getattr(doc, "student_name", None),
+        getattr(doc, "guardian_name", None),
+        exclude_draft=True,
+        exclude_verify=True,
+    )
+    matches = [m for m in matches if m["name"] != doc.name]
+    if not matches:
+        return "Lead", "Moi"
+    matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
+    ev = _evaluate_duplicate_rules(matches[0])
+    return "Verify", ev.get("recommended_status") or "Can kiem tra"
+
+
 @frappe.whitelist(methods=["POST"])
 def check_duplicate():
     """Kiem tra trung lap toan he thong (tru Draft)"""
