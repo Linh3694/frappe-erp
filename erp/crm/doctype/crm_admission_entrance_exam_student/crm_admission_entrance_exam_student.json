@@ -10,6 +10,7 @@
   "crm_lead_id",
   "status",
   "exam_result",
+  "ksdv_fee_paid",
   "result_link",
   "scores"
  ],
@@ -44,6 +45,14 @@
    "in_list_view": 1,
    "label": "Kết quả thi",
    "options": "\npass\nconditional_pass\nretake\nfail"
+  },
+  {
+   "default": "0",
+   "description": "Phí khảo sát đầu vào (KSĐV)",
+   "fieldname": "ksdv_fee_paid",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Phí KSĐV đã đóng"
   },
   {
    "fieldname": "result_link",

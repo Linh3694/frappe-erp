@@ -33,6 +33,62 @@ VALID_ENTRANCE_STATUSES = frozenset(
 VALID_EXAM_RESULTS = frozenset({"", "pass", "conditional_pass", "retake", "fail"})
 
 
+def _get_lead_primary_phone(parent_lead_id):
+    """SĐT phụ huynh: ưu tiên CRM Lead Phone có is_primary, không thì dòng đầu."""
+    if not parent_lead_id:
+        return None
+    rows = frappe.get_all(
+        "CRM Lead Phone",
+        filters={"parent": parent_lead_id, "parenttype": "CRM Lead"},
+        fields=["phone_number", "is_primary"],
+        order_by="is_primary desc, idx asc",
+        limit_page_length=1,
+    )
+    if rows:
+        return rows[0].phone_number
+    return None
+
+
+def _enrich_lead_flat_fields(data, crm_lead_id):
+    """Gắn thông tin từ CRM Lead: mã HS, phụ huynh chính, SĐT, PIC (hiển thị full_name)."""
+    lead = frappe.db.get_value(
+        "CRM Lead",
+        crm_lead_id,
+        [
+            "crm_code",
+            "student_name",
+            "student_dob",
+            "target_grade",
+            "student_code",
+            "guardian_name",
+            "pic",
+        ],
+        as_dict=True,
+    )
+    if lead:
+        data["crm_code"] = lead.get("crm_code") or crm_lead_id
+        data["student_name"] = lead.get("student_name") or "-"
+        data["student_dob"] = lead.get("student_dob")
+        data["target_grade"] = lead.get("target_grade") or ""
+        data["student_code"] = lead.get("student_code") or ""
+        data["guardian_name"] = lead.get("guardian_name") or ""
+        pic = lead.get("pic")
+        data["pic_full_name"] = (
+            frappe.db.get_value("User", pic, "full_name") if pic else None
+        ) or (pic or "")
+        data["primary_phone"] = _get_lead_primary_phone(crm_lead_id) or ""
+    else:
+        data["crm_code"] = crm_lead_id
+        data["student_name"] = "-"
+        data["student_dob"] = None
+        data["target_grade"] = ""
+        data["student_code"] = ""
+        data["guardian_name"] = ""
+        data["pic_full_name"] = ""
+        data["primary_phone"] = ""
+    return data
+
+
 def _resolve_crm_lead_name(ref):
     """
     Chuẩn hóa tham chiếu CRM Lead: docname (name) hoặc mã crm_code.
@@ -214,23 +270,8 @@ def _get_entrance_exam_student_summary(exam_id):
 
 
 def _enrich_entrance_student_row(item):
-    """Gắn thông tin lead: mã, tên, khối dự tuyển"""
-    lead = frappe.db.get_value(
-        "CRM Lead",
-        item["crm_lead_id"],
-        ["crm_code", "student_name", "student_dob", "target_grade"],
-        as_dict=True,
-    )
-    if lead:
-        item["crm_code"] = lead.get("crm_code") or item["crm_lead_id"]
-        item["student_name"] = lead.get("student_name") or "-"
-        item["student_dob"] = lead.get("student_dob")
-        item["target_grade"] = lead.get("target_grade") or ""
-    else:
-        item["crm_code"] = item["crm_lead_id"]
-        item["student_name"] = "-"
-        item["student_dob"] = None
-        item["target_grade"] = ""
+    """Gắn thông tin lead (mã CRM, HS, PH, SĐT, PIC) + modified_by_name."""
+    _enrich_lead_flat_fields(item, item["crm_lead_id"])
     if item.get("modified_by"):
         item["modified_by_name"] = (
             frappe.db.get_value("User", item["modified_by"], "full_name") or item["modified_by"]
@@ -245,12 +286,6 @@ def _serialize_entrance_exam_student_detail(record_id):
     if not record_id or not frappe.db.exists("CRM Admission Entrance Exam Student", record_id):
         return None
     doc = frappe.get_doc("CRM Admission Entrance Exam Student", record_id, ignore_permissions=True)
-    lead = frappe.db.get_value(
-        "CRM Lead",
-        doc.crm_lead_id,
-        ["crm_code", "student_name", "student_dob", "target_grade"],
-        as_dict=True,
-    )
     exam = frappe.db.get_value(
         "CRM Admission Entrance Exam",
         doc.entrance_exam_id,
@@ -264,10 +299,7 @@ def _serialize_entrance_exam_student_detail(record_id):
         )
     else:
         data["modified_by_name"] = None
-    data["crm_code"] = (lead or {}).get("crm_code") or doc.crm_lead_id
-    data["student_name"] = (lead or {}).get("student_name") or "-"
-    data["student_dob"] = (lead or {}).get("student_dob")
-    data["target_grade"] = (lead or {}).get("target_grade") or ""
+    _enrich_lead_flat_fields(data, doc.crm_lead_id)
     data["exam_name"] = (exam or {}).get("exam_name")
     data["exam_date"] = (exam or {}).get("exam_date")
     data["exam_time"] = (exam or {}).get("exam_time")
@@ -324,6 +356,7 @@ def get_entrance_exam_students():
             "crm_lead_id",
             "status",
             "exam_result",
+            "ksdv_fee_paid",
             "result_link",
             "modified",
             "modified_by",
@@ -466,6 +499,9 @@ def update_entrance_exam_student_meta():
             doc.exam_result = exam_result or None
         if "result_link" in data:
             doc.result_link = (data.get("result_link") or "").strip()
+        if "ksdv_fee_paid" in data:
+            # Phí KSĐV đã đóng (checkbox)
+            doc.ksdv_fee_paid = 1 if data.get("ksdv_fee_paid") else 0
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         row = doc.as_dict()
