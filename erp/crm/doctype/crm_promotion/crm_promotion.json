@@ -32,6 +32,11 @@
    "fieldtype": "Percent",
    "in_list_view": 1,
    "label": "Giá trị (%)"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Mô tả"
   }
  ],
  "index_web_pages_for_search": 1,
