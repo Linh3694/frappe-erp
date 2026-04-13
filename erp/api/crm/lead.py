@@ -341,6 +341,139 @@ def create_lead():
 
 
 @frappe.whitelist(methods=["POST"])
+def clone_lead_for_sibling():
+    """
+    Tao ho so moi: clone thong tin gia dinh tu ho so goc (buoc Lead).
+    Chi nhap ten HS, ngay sinh, truong cho ho so moi.
+    Ho so moi: resolve_draft_promotion -> thuong vao Verify do trung SDT.
+    Them dong anh/chi/em (ACE) tren ho so goc voi thong tin HS moi.
+    """
+    check_crm_permission()
+    data = get_request_data()
+    source_lead_name = data.get("source_lead_name") or data.get("name")
+    student_name = (data.get("student_name") or "").strip()
+    student_dob = data.get("student_dob") or None
+    current_school = (data.get("current_school") or "").strip() or None
+
+    if not source_lead_name:
+        return validation_error_response("Thieu tham so source_lead_name", {"source_lead_name": ["Bat buoc"]})
+    if not student_name:
+        return validation_error_response("Thieu tham so student_name", {"student_name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", source_lead_name):
+        return not_found_response(f"Khong tim thay ho so {source_lead_name}")
+
+    src = frappe.get_doc("CRM Lead", source_lead_name)
+    if getattr(src, "step", None) != "Lead":
+        return validation_error_response(
+            "Chi tao hop le khi ho so goc o buoc Lead",
+            {"step": ["Phai la Lead"]},
+        )
+
+    phone_rows = getattr(src, "phone_numbers", None) or []
+    if not phone_rows:
+        return validation_error_response(
+            "Ho so goc khong co so dien thoai de clone",
+            {"phone_numbers": ["Bat buoc"]},
+        )
+
+    try:
+        doc = frappe.new_doc("CRM Lead")
+        doc.step = "Draft"
+        doc.status = ""
+
+        # Copy thong tin PH / lien he (flat)
+        for field in [
+            "data_source", "staff_code", "pic", "campus_id",
+            "guardian_name", "relationship", "guardian_email", "guardian_id_number",
+            "guardian_occupation", "guardian_position", "guardian_workplace",
+            "guardian_address", "guardian_nationality", "guardian_note", "guardian_dob",
+            "target_academic_year", "target_semester", "referrer",
+            "target_grade", "current_grade", "student_gender",
+        ]:
+            val = getattr(src, field, None)
+            if val is not None and val != "":
+                doc.set(field, val)
+
+        # HS moi (tu form)
+        doc.student_name = student_name
+        if student_dob:
+            doc.student_dob = student_dob
+        if current_school and frappe.db.exists("CRM School", current_school):
+            doc.current_school = current_school
+
+        # SDT
+        for p in phone_rows:
+            doc.append("phone_numbers", {
+                "phone_number": normalize_phone_number(p.get("phone_number") or ""),
+                "is_primary": int(p.get("is_primary") or 0),
+            })
+
+        # Nguon
+        for s in getattr(src, "source", None) or []:
+            doc.append("source", {
+                "source": s.get("source") or "",
+                "sub_source": (s.get("sub_source") or "").strip(),
+                "source_note": (s.get("source_note") or "").strip(),
+            })
+
+        # Phu huynh (cung CRM Guardian)
+        for lg in getattr(src, "lead_guardians", None) or []:
+            doc.append("lead_guardians", {
+                "guardian": lg.guardian,
+                "relationship_type": lg.get("relationship_type") or "",
+                "is_primary_contact": int(lg.get("is_primary_contact") or 0),
+            })
+
+        doc.insert(ignore_permissions=True)
+
+        from erp.api.crm.duplicate import resolve_draft_promotion
+
+        eff_step, eff_status = resolve_draft_promotion(doc)
+        doc.step = eff_step
+        doc.status = eff_status if eff_step == "Verify" else "Moi"
+        if not doc.crm_code:
+            doc.crm_code = generate_crm_code()
+        doc.save(ignore_permissions=True)
+
+        if not doc.pic:
+            from erp.api.crm.assignment import assign_pic_sales_weight_balance
+
+            assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+
+        frappe.db.commit()
+
+        # ACE tren ho so goc: ten hien thi truong (Data) neu co Link CRM School
+        school_ace = ""
+        if current_school and frappe.db.exists("CRM School", current_school):
+            school_ace = frappe.db.get_value("CRM School", current_school, "school_name") or current_school
+        elif current_school:
+            school_ace = current_school
+
+        src_reload = frappe.get_doc("CRM Lead", source_lead_name)
+        src_reload.append("lead_siblings", {
+            "sibling_name": student_name,
+            "student_code": "",
+            "relationship_type": (data.get("relationship_type") or "").strip(),
+            "dob": student_dob,
+            "school": school_ace,
+        })
+        src_reload.flags.ignore_validate = True
+        src_reload.save(ignore_permissions=True)
+
+        frappe.db.commit()
+
+        doc = frappe.get_doc("CRM Lead", doc.name)
+        lead_payload = doc.as_dict()
+        enrich_lead_dict_with_pic_info(lead_payload)
+        return single_item_response(lead_payload, "Da tao ho so nhanh va cap nhat ACE tren ho so goc")
+
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(f"Loi clone_lead_for_sibling: {str(e)}")
+        return error_response(f"Loi tao ho so nhanh: {str(e)}")
+
+
+@frappe.whitelist(methods=["POST"])
 def update_lead():
     """Cap nhat thong tin lead"""
     check_crm_permission()
