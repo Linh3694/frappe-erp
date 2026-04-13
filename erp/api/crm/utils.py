@@ -23,7 +23,13 @@ STEP_STATUSES: Dict[str, List[str]] = {
     ],
     "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Lost"],
     # Trang thai chinh buoc QLead (dong bo frontend STEP_STATUSES)
-    "QLead": ["Dang cham soc", "Dat lich hen", "Thoa thuan", "Lost"],
+    "QLead": [
+        "Dang cham soc",
+        "Dat lich hen",
+        "Thoa thuan",
+        "Khao sat dau vao",
+        "Lost",
+    ],
     "Enrolled": ["Dang hoc"],
     "Re-Enroll": ["Unpaid", "Considering", "Paid"],
     "Withdraw": ["Chuyen truong", "Bao luu"],

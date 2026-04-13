@@ -68,6 +68,43 @@ def _get_full_image_url(user_image):
     return frappe.utils.get_url(path)
 
 
+def enrich_lead_dict_with_pic_info(lead_dict):
+    """
+    Bo sung pic_info tu User.pic: full_name, user_image, job_title (neu co cot tren User).
+    Dung cho get_lead va moi response sau save (pipeline) de FE khong mat avatar.
+    """
+    pic = lead_dict.get("pic")
+    if not pic:
+        lead_dict.pop("pic_info", None)
+        return lead_dict
+
+    fields = ["full_name", "user_image"]
+    title_field = None
+    if frappe.db.has_column("User", "job_title"):
+        fields.append("job_title")
+        title_field = "job_title"
+    elif frappe.db.has_column("User", "designation"):
+        fields.append("designation")
+        title_field = "designation"
+
+    pic_user = frappe.db.get_value("User", pic, fields, as_dict=True)
+    if not pic_user:
+        return lead_dict
+
+    full_name = (pic_user.get("full_name") or "").strip() or pic
+    info = {
+        "full_name": full_name,
+        "user_image": _get_full_image_url(pic_user.get("user_image")),
+    }
+    if title_field:
+        jt = (pic_user.get(title_field) or "").strip()
+        if jt:
+            info["job_title"] = jt
+
+    lead_dict["pic_info"] = info
+    return lead_dict
+
+
 @frappe.whitelist()
 def get_leads():
     """Lay danh sach leads voi filter + pagination"""
@@ -140,16 +177,7 @@ def get_leads():
     
     # Lay phone number chinh cho moi lead
     for lead in leads:
-        # Bo sung pic_info (full_name, user_image) de hien thi ten + avatar
-        if lead.get("pic"):
-            pic_user = frappe.db.get_value(
-                "User", lead["pic"], ["full_name", "user_image"], as_dict=True
-            )
-            if pic_user:
-                lead["pic_info"] = {
-                    "full_name": pic_user.get("full_name") or lead["pic"],
-                    "user_image": _get_full_image_url(pic_user.get("user_image")),
-                }
+        enrich_lead_dict_with_pic_info(lead)
         phone = frappe.db.get_value(
             "CRM Lead Phone",
             {"parent": lead["name"], "is_primary": 1},
@@ -183,18 +211,8 @@ def get_lead():
     
     doc = frappe.get_doc("CRM Lead", name)
     lead_data = doc.as_dict()
-    
-    # Bo sung pic_info (full_name, user_image) de hien thi ten + avatar
-    if doc.pic:
-        pic_user = frappe.db.get_value(
-            "User", doc.pic, ["full_name", "user_image"], as_dict=True
-        )
-        if pic_user:
-            lead_data["pic_info"] = {
-                "full_name": pic_user.get("full_name") or doc.pic,
-                "user_image": _get_full_image_url(pic_user.get("user_image")),
-            }
-    
+    enrich_lead_dict_with_pic_info(lead_data)
+
     # Lay ghi chu
     notes = frappe.get_all(
         "CRM Lead Note",
@@ -312,7 +330,9 @@ def create_lead():
             msg = "Tao ho so thanh cong (buoc Lead - khong trung SDT)"
         else:
             msg = "Tao ho so thanh cong (buoc Verify - can kiem tra trung)"
-        return single_item_response(doc.as_dict(), msg)
+        lead_payload = doc.as_dict()
+        enrich_lead_dict_with_pic_info(lead_payload)
+        return single_item_response(lead_payload, msg)
     
     except Exception as e:
         frappe.db.rollback()
@@ -401,8 +421,10 @@ def update_lead():
         
         doc.save(ignore_permissions=True)
         frappe.db.commit()
-        
-        return single_item_response(doc.as_dict(), "Cap nhat ho so thanh cong")
+
+        lead_payload = doc.as_dict()
+        enrich_lead_dict_with_pic_info(lead_payload)
+        return single_item_response(lead_payload, "Cap nhat ho so thanh cong")
     
     except Exception as e:
         frappe.db.rollback()

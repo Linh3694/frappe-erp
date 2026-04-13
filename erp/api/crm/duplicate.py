@@ -59,7 +59,7 @@ def _find_matching_leads_by_names(student_name, guardian_name, exclude_draft=Fal
 def _find_matching_leads(phone_numbers, student_name=None, guardian_name=None, exclude_draft=False, exclude_verify=False):
     """
     Tim ho so trung dua tren SDT, ten HS, ten PH.
-    exclude_verify=True: chi check voi ho so trong he thong (Lead, QLead, Test...), khong check voi ban ghi Verify.
+    exclude_verify=True: chi check voi ho so trong he thong (Lead, QLead...), khong check voi ban ghi Verify.
     """
     matches = []
     

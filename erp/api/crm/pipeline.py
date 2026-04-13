@@ -14,6 +14,14 @@ from erp.api.crm.utils import (
     get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES,
     QLEAD_TEST_STATUSES, QLEAD_DEAL_STATUSES,
 )
+from erp.api.crm.lead import enrich_lead_dict_with_pic_info
+
+
+def _lead_payload(doc):
+    """Tra ve dict lead kem pic_info (avatar, ten, job_title) cho FE."""
+    d = doc.as_dict()
+    enrich_lead_dict_with_pic_info(d)
+    return d
 
 
 def _sync_lead_guardians_to_family_if_needed(doc):
@@ -222,7 +230,7 @@ def change_status():
                      reject_reason=reject_reason if new_status == "Lost" else None,
                      reject_detail=reject_detail if new_status == "Lost" else None)
     
-    return single_item_response(doc.as_dict(), f"Da chuyen trang thai sang {new_status}")
+    return single_item_response(_lead_payload(doc), f"Da chuyen trang thai sang {new_status}")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -294,7 +302,7 @@ def change_sub_status():
         reject_detail=reject_detail if new_status == "Tu choi" else None,
     )
 
-    return single_item_response(doc.as_dict(), f"Da cap nhat {field}")
+    return single_item_response(_lead_payload(doc), f"Da cap nhat {field}")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -348,7 +356,7 @@ def advance_step():
             except Exception as e:
                 frappe.log_error(f"Loi tu dong tao enrollment records: {str(e)}")
     
-    return single_item_response(doc.as_dict(), f"Da chuyen ho so sang buoc {doc.step}")
+    return single_item_response(_lead_payload(doc), f"Da chuyen ho so sang buoc {doc.step}")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -445,6 +453,15 @@ def enroll_lead():
         old_status = doc.status
         doc.step = "Enrolled"
         doc.status = "Dang hoc"
+        # Sinh ma HS neu chua co (dong bo logic QLead -> Enrolled trong advance_step)
+        if not doc.student_code and not doc.linked_student:
+            from erp.api.crm.student_code import _generate_code_internal
+
+            doc.student_code = _generate_code_internal(
+                "WS1",
+                doc.target_academic_year or "",
+                doc.target_grade or "01",
+            )
         try:
             doc.save(ignore_permissions=True)
             break
@@ -469,7 +486,7 @@ def enroll_lead():
             frappe.log_error(f"Loi tao enrollment records (enroll_lead): {str(e)}")
 
     doc = frappe.get_doc("CRM Lead", name)
-    return single_item_response(doc.as_dict(), "Da nhap hoc thanh cong")
+    return single_item_response(_lead_payload(doc), "Da nhap hoc thanh cong")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -514,7 +531,7 @@ def transfer_to_withdraw():
     
     _log_step_change(name, old_step, "Withdraw", old_status, "Chuyen truong")
     
-    return single_item_response(doc.as_dict(), "Da chuyen sang Withdraw")
+    return single_item_response(_lead_payload(doc), "Da chuyen sang Withdraw")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -555,7 +572,7 @@ def reserve_enrollment():
     
     _log_step_change(name, old_step, "Re-Enroll", old_status, "Unpaid")
     
-    return single_item_response(doc.as_dict(), "Da bao luu thanh cong")
+    return single_item_response(_lead_payload(doc), "Da bao luu thanh cong")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -596,7 +613,7 @@ def move_back_to_reenroll():
     
     _log_step_change(name, old_step, "Re-Enroll", old_status, "Unpaid")
     
-    return single_item_response(doc.as_dict(), "Da chuyen ve Re-Enroll")
+    return single_item_response(_lead_payload(doc), "Da chuyen ve Re-Enroll")
 
 
 @frappe.whitelist(methods=["POST"])
