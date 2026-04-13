@@ -25,3 +25,9 @@ erp.patches.v1_0.dedup_class_attendance_add_unique_index
 
 # CRM: gop buoc Test/Deal vao QLead (test_status, deal_status)
 erp.patches.v1_0.crm_migrate_test_deal_to_qlead
+
+# CRM: gop Withdraw + Graduated thanh Nghi hoc
+erp.patches.v1_0.crm_merge_withdraw_graduated_to_nghi_hoc
+
+# CRM: bo buoc Re-Enroll — dua du lieu ve Enrolled
+erp.patches.v1_0.crm_remove_re_enroll_step

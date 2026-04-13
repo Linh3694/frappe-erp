@@ -177,8 +177,8 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                     "reason": f"Trung SDT, ho so cu o QLead <= 2 nam"
                 }
         
-        # TH3.3: Enrolled, Re-enrolled, Withdraw, Graduated (sau QLead)
-        if old_step in ["Enrolled", "Re-Enroll", "Withdraw", "Graduated"]:
+        # TH3.3: Enrolled, Re-enrolled, Nghi hoc (sau QLead)
+        if old_step in ["Enrolled", "Nghi hoc"]:
             if days_since_update > one_year_days:
                 return {
                     "is_duplicate": False,

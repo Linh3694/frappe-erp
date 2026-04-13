@@ -276,20 +276,12 @@ def fix_migrated_statuses():
     """
     check_crm_permission(["System Manager", "SIS Manager"])
 
-    STATUS_FIXES = {
-        "Enrolled": {
-            "old_status": "Enrolled",
-            "new_status": "Dang hoc",
-        },
-        "Withdraw": {
-            "old_status": "Withdraw",
-            "new_status": "Chuyen truong",
-        },
-        "Graduated": {
-            "old_status": "Graduated",
-            "new_status": "Tot nghiep",
-        },
-    }
+    # (step, old_status, new_status) — Nghi hoc co 2 mapping legacy Withdraw/Graduated
+    STATUS_FIXES = [
+        ("Enrolled", "Enrolled", "Dang hoc"),
+        ("Nghi hoc", "Withdraw", "Chuyen truong"),
+        ("Nghi hoc", "Graduated", "Tot nghiep"),
+    ]
 
     OLD_STATUS_MAP = {
         "New": {"Verify": "Can kiem tra"},
@@ -307,15 +299,15 @@ def fix_migrated_statuses():
     results = {"updated": 0, "details": []}
 
     # Fix step-specific status renames
-    for step, fix in STATUS_FIXES.items():
-        count = frappe.db.sql(
+    for step, old_status, new_status in STATUS_FIXES:
+        frappe.db.sql(
             "UPDATE `tabCRM Lead` SET status = %(new)s WHERE step = %(step)s AND status = %(old)s",
-            {"new": fix["new_status"], "step": step, "old": fix["old_status"]}
+            {"new": new_status, "step": step, "old": old_status},
         )
         affected = frappe.db.sql("SELECT ROW_COUNT()")[0][0]
         if affected:
             results["updated"] += affected
-            results["details"].append(f"{step}: {fix['old_status']} -> {fix['new_status']} ({affected} records)")
+            results["details"].append(f"{step}: {old_status} -> {new_status} ({affected} records)")
 
     # Fix old status names
     for old_status, step_map in OLD_STATUS_MAP.items():

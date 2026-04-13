@@ -9,7 +9,7 @@ from typing import List, Optional, Dict
 
 CRM_STEPS = [
     "Draft", "Verify", "Lead", "QLead",
-    "Enrolled", "Re-Enroll", "Withdraw", "Graduated",
+    "Enrolled", "Nghi hoc",
 ]
 
 STEP_STATUSES: Dict[str, List[str]] = {
@@ -31,9 +31,8 @@ STEP_STATUSES: Dict[str, List[str]] = {
         "Lost",
     ],
     "Enrolled": ["Dang hoc"],
-    "Re-Enroll": ["Unpaid", "Considering", "Paid"],
-    "Withdraw": ["Chuyen truong", "Bao luu"],
-    "Graduated": ["Tot nghiep"],
+    # Gop Withdraw + Graduated: Tốt nghiệp, Bảo lưu, Chuyển trường
+    "Nghi hoc": ["Tot nghiep", "Bao luu", "Chuyen truong"],
 }
 
 # Sub-status QLead: khao sat dau vao / thoa thuan (truong test_status, deal_status)
@@ -45,9 +44,8 @@ VALID_STEP_TRANSITIONS = {
     "Verify": ["Lead"],
     "Lead": ["QLead", "Verify"],
     "QLead": ["Enrolled"],
-    "Enrolled": ["Re-Enroll", "Withdraw", "Graduated"],
-    "Re-Enroll": ["Enrolled"],
-    "Graduated": ["Re-Enroll"],
+    "Enrolled": ["Nghi hoc"],
+    "Nghi hoc": ["Enrolled"],
 }
 
 ALLOWED_ROLES = [

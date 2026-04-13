@@ -126,11 +126,13 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
         "Lead": "Moi",
         "QLead": "Dang cham soc",
         "Enrolled": "Dang hoc",
-        "Re-Enroll": "Unpaid",
-        "Withdraw": "Chuyen truong",
-        "Graduated": "Tot nghiep",
+        "Nghi hoc": extra_data.get("initial_status") or "Chuyen truong",
     }
     doc.status = default_statuses.get(target_step, "")
+    if target_step == "Nghi hoc":
+        valid_nghi = get_valid_statuses_for_step("Nghi hoc")
+        if doc.status not in valid_nghi:
+            doc.status = valid_nghi[0] if valid_nghi else "Chuyen truong"
     if verify_status_from_duplicate:
         doc.status = verify_status_from_duplicate
     if target_step == "Verify" and old_step == "Lead":
@@ -491,7 +493,7 @@ def enroll_lead():
 
 @frappe.whitelist(methods=["POST"])
 def transfer_to_withdraw():
-    """Chuyen truong - tu Enrolled sang Withdraw"""
+    """Chuyen truong - tu Enrolled sang Nghi hoc (legacy API ten transfer_to_withdraw)"""
     check_crm_permission()
     data = get_request_data()
     
@@ -514,7 +516,7 @@ def transfer_to_withdraw():
 
         old_step = doc.step
         old_status = doc.status
-        doc.step = "Withdraw"
+        doc.step = "Nghi hoc"
         doc.status = "Chuyen truong"
         if reason:
             doc.reject_reason = reason
@@ -529,14 +531,14 @@ def transfer_to_withdraw():
 
     frappe.db.commit()
     
-    _log_step_change(name, old_step, "Withdraw", old_status, "Chuyen truong")
+    _log_step_change(name, old_step, "Nghi hoc", old_status, "Chuyen truong")
     
-    return single_item_response(_lead_payload(doc), "Da chuyen sang Withdraw")
+    return single_item_response(_lead_payload(doc), "Da chuyen sang Nghi hoc")
 
 
 @frappe.whitelist(methods=["POST"])
 def reserve_enrollment():
-    """Bao luu -> Re-Enroll"""
+    """Bao luu: giu o buoc Enrolled (khong con buoc Re-Enroll trong pipeline)"""
     check_crm_permission()
     data = get_request_data()
     
@@ -557,8 +559,8 @@ def reserve_enrollment():
 
         old_step = doc.step
         old_status = doc.status
-        doc.step = "Re-Enroll"
-        doc.status = "Unpaid"
+        doc.step = "Enrolled"
+        doc.status = "Dang hoc"
         try:
             doc.save(ignore_permissions=True)
             break
@@ -569,15 +571,17 @@ def reserve_enrollment():
                 )
 
     frappe.db.commit()
-    
-    _log_step_change(name, old_step, "Re-Enroll", old_status, "Unpaid")
-    
+
+    # Chi ghi log khi co thay doi (tranh Enrolled -> Enrolled giong het)
+    if old_step != doc.step or (old_status or "") != (doc.status or ""):
+        _log_step_change(name, old_step, doc.step, old_status, doc.status)
+
     return single_item_response(_lead_payload(doc), "Da bao luu thanh cong")
 
 
 @frappe.whitelist(methods=["POST"])
 def move_back_to_reenroll():
-    """Lop 12 khong dat -> quay lai Re-Enroll"""
+    """Tu Nghi hoc (Tot nghiep) -> Enrolled (API ten legacy move_back_to_reenroll)"""
     check_crm_permission()
     data = get_request_data()
     
@@ -593,13 +597,13 @@ def move_back_to_reenroll():
     old_status = None
     for attempt in range(2):
         doc = frappe.get_doc("CRM Lead", name)
-        if doc.step != "Graduated":
-            return error_response("Chi co the chuyen tu Graduated ve Re-Enroll")
+        if doc.step != "Nghi hoc" or doc.status != "Tot nghiep":
+            return error_response("Chi co the chuyen tu Nghi hoc (Tot nghiep) ve Enrolled")
 
         old_step = doc.step
         old_status = doc.status
-        doc.step = "Re-Enroll"
-        doc.status = "Unpaid"
+        doc.step = "Enrolled"
+        doc.status = "Dang hoc"
         try:
             doc.save(ignore_permissions=True)
             break
@@ -611,9 +615,9 @@ def move_back_to_reenroll():
 
     frappe.db.commit()
     
-    _log_step_change(name, old_step, "Re-Enroll", old_status, "Unpaid")
+    _log_step_change(name, old_step, "Enrolled", old_status, "Dang hoc")
     
-    return single_item_response(_lead_payload(doc), "Da chuyen ve Re-Enroll")
+    return single_item_response(_lead_payload(doc), "Da chuyen ve Nhap hoc")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -718,12 +722,12 @@ def end_of_year_transition():
                 old_status = doc.status
 
                 if doc.target_grade == "12":
-                    doc.step = "Graduated"
+                    doc.step = "Nghi hoc"
                     doc.status = "Tot nghiep"
                     bump = "graduated"
                 else:
-                    doc.step = "Re-Enroll"
-                    doc.status = "Unpaid"
+                    doc.step = "Enrolled"
+                    doc.status = "Dang hoc"
                     bump = "re_enroll"
                 try:
                     doc.save(ignore_permissions=True)
