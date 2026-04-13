@@ -612,6 +612,319 @@ def update_entrance_exam_scores():
         return error_response(f"Lỗi lưu điểm: {str(e)}")
 
 
+def _entrance_exam_excel_header_and_data_start(rows):
+    """File từ FE có 2 dòng tiêu đề (tiếng Việt + mã cột) — ưu tiên dòng chứa name/crm_lead_id."""
+    if not rows:
+        return None, 1
+    r0 = [str(c).strip().lower() if c is not None else "" for c in rows[0]]
+    r1 = (
+        [str(c).strip().lower() if c is not None else "" for c in rows[1]]
+        if len(rows) > 1
+        else []
+    )
+
+    def key_hits(row):
+        keys = ("name", "crm_lead_id", "status", "exam_result", "result_link", "ksdv_fee_paid")
+        return sum(1 for k in keys if k in row)
+
+    if r1 and key_hits(r1) >= key_hits(r0) and key_hits(r1) >= 1:
+        return r1, 2
+    if key_hits(r0) >= 1:
+        return r0, 1
+    if r1:
+        return r1, 2
+    return r0, 1
+
+
+def _norm_entrance_status_import(val):
+    """Chuẩn hoá trạng thái kỳ (mã API hoặc nhãn tiếng Việt)."""
+    if val is None or str(val).strip() == "":
+        return None
+    s = str(val).strip().lower()
+    vn = {
+        "đã đăng ký": "new",
+        "thông báo lịch thi": "schedule_notified",
+        "không thi": "not_attending",
+        "đã thi": "exam_taken",
+        "hoàn thành": "completed",
+    }
+    if s in vn:
+        return vn[s]
+    if s in VALID_ENTRANCE_STATUSES:
+        return s
+    return None
+
+
+def _norm_entrance_exam_result_import(val):
+    """Chuẩn hoá kết quả thi (mã API hoặc nhãn tiếng Việt)."""
+    if val is None or str(val).strip() in ("", "-", "—", "none"):
+        return ""
+    s = str(val).strip().lower()
+    vn = {
+        "đạt": "pass",
+        "đạt có điều kiện": "conditional_pass",
+        "thi lại": "retake",
+        "không đạt": "fail",
+        "chưa có": "",
+    }
+    if s in vn:
+        return vn[s]
+    if s in VALID_EXAM_RESULTS:
+        return s
+    return None
+
+
+def _norm_ksdv_fee_import(val):
+    """0/1 từ ô Excel."""
+    if val is None or str(val).strip() == "":
+        return None
+    s = str(val).strip().lower()
+    if s in ("1", "true", "yes", "có", "y", "x", "đã đóng", "da dong"):
+        return 1
+    if s in ("0", "false", "no", "không", "chưa đóng"):
+        return 0
+    try:
+        return 1 if int(float(s)) != 0 else 0
+    except Exception:
+        return None
+
+
+@frappe.whitelist()
+def export_entrance_exam_students_template():
+    """
+    Xuất template nhập liệu: danh sách học sinh hiện tại trong kỳ,
+    cột chỉnh sửa: status, exam_result, result_link, ksdv_fee_paid (mã API như dialog cập nhật).
+    """
+    check_crm_permission()
+    exam_id = frappe.request.args.get("exam_id")
+    if not exam_id:
+        return validation_error_response("Thiếu exam_id", {"exam_id": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Admission Entrance Exam", exam_id):
+        return not_found_response("Không tìm thấy kỳ khảo sát")
+
+    items = frappe.get_all(
+        "CRM Admission Entrance Exam Student",
+        filters={"entrance_exam_id": exam_id},
+        fields=[
+            "name",
+            "crm_lead_id",
+            "status",
+            "exam_result",
+            "result_link",
+            "ksdv_fee_paid",
+        ],
+        order_by="modified desc",
+    )
+    for item in items:
+        lead = frappe.db.get_value(
+            "CRM Lead",
+            item["crm_lead_id"],
+            ["crm_code", "student_name"],
+            as_dict=True,
+        )
+        if lead:
+            item["crm_code"] = lead.get("crm_code") or item["crm_lead_id"]
+            item["student_name"] = lead.get("student_name") or ""
+        else:
+            item["crm_code"] = item["crm_lead_id"]
+            item["student_name"] = ""
+
+    headers = [
+        "name",
+        "crm_lead_id",
+        "crm_code",
+        "student_name",
+        "status",
+        "exam_result",
+        "result_link",
+        "ksdv_fee_paid",
+    ]
+    header_labels = [
+        "Mã bản ghi (không sửa)",
+        "CRM Lead ID",
+        "Mã CRM",
+        "Họ tên học sinh",
+        "Trạng thái (mã)",
+        "Kết quả thi (mã)",
+        "Link kết quả",
+        "Phí KSĐV đã đóng (0/1)",
+    ]
+
+    rows = []
+    for r in items:
+        rows.append(
+            {
+                "name": r.get("name"),
+                "crm_lead_id": r.get("crm_lead_id"),
+                "crm_code": r.get("crm_code", ""),
+                "student_name": r.get("student_name", ""),
+                "status": r.get("status") or "new",
+                "exam_result": r.get("exam_result") or "",
+                "result_link": r.get("result_link") or "",
+                "ksdv_fee_paid": 1 if r.get("ksdv_fee_paid") else 0,
+            }
+        )
+
+    return success_response(
+        message="OK",
+        data={"headers": headers, "header_labels": header_labels, "rows": rows},
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def import_entrance_exam_students_meta():
+    """
+    Nhập liệu hàng loạt: upload Excel từ template export — cập nhật status, exam_result, result_link, ksdv_fee_paid.
+    Khớp dòng theo cột name (ưu tiên) hoặc crm_lead_id / mã CRM trong kỳ.
+    """
+    check_crm_permission()
+    import io
+
+    import openpyxl
+
+    exam_id = frappe.form_dict.get("exam_id") or frappe.form_dict.get("entrance_exam_id")
+    if not exam_id:
+        return validation_error_response("Thiếu exam_id", {"exam_id": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Admission Entrance Exam", exam_id):
+        return not_found_response("Không tìm thấy kỳ khảo sát")
+
+    file = frappe.request.files.get("file")
+    if not file:
+        return validation_error_response("Thiếu file", {"file": ["Bắt buộc"]})
+
+    try:
+        content = file.read()
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=1, values_only=True))
+        wb.close()
+    except Exception as e:
+        return error_response(f"Lỗi đọc file Excel: {str(e)}")
+
+    if not rows or len(rows) < 2:
+        return error_response("File Excel trống hoặc không đủ dòng tiêu đề")
+
+    headers, data_start_idx = _entrance_exam_excel_header_and_data_start(rows)
+    if not headers:
+        return error_response("Không đọc được dòng tiêu đề")
+
+    def col(*names):
+        for n in names:
+            for i, h in enumerate(headers):
+                if h == n:
+                    return i
+        return None
+
+    idx_name = col("name")
+    idx_lead = col("crm_lead_id", "crm_lead")
+    idx_code = col("crm_code")
+    idx_status = col("status")
+    idx_result = col("exam_result")
+    idx_link = col("result_link")
+    idx_ksdv = col("ksdv_fee_paid")
+
+    if idx_name is None and idx_lead is None and idx_code is None:
+        return error_response(
+            "Không tìm thấy cột name, crm_lead_id hoặc crm_code. Tải lại template từ nút Nhập liệu."
+        )
+
+    success_count = 0
+    error_count = 0
+    errors = []
+
+    for row_idx, row in enumerate(rows[data_start_idx:], start=data_start_idx + 1):
+        if not row:
+            continue
+        name_val = row[idx_name] if idx_name is not None and idx_name < len(row) else None
+        lead_val = row[idx_lead] if idx_lead is not None and idx_lead < len(row) else None
+        code_val = row[idx_code] if idx_code is not None and idx_code < len(row) else None
+        if not name_val and not lead_val and not code_val:
+            continue
+        if (
+            not str(name_val or "").strip()
+            and not str(lead_val or "").strip()
+            and not str(code_val or "").strip()
+        ):
+            continue
+
+        rec_name = None
+        if name_val and str(name_val).strip():
+            cand = str(name_val).strip()
+            if frappe.db.exists("CRM Admission Entrance Exam Student", cand):
+                eid = frappe.db.get_value(
+                    "CRM Admission Entrance Exam Student", cand, "entrance_exam_id"
+                )
+                if eid == exam_id:
+                    rec_name = cand
+
+        if not rec_name and lead_val:
+            raw = str(lead_val).strip()
+            lid = frappe.db.get_value("CRM Lead", raw, "name")
+            if not lid:
+                lid = frappe.db.get_value("CRM Lead", {"crm_code": raw}, "name")
+            if lid:
+                rec_name = frappe.db.get_value(
+                    "CRM Admission Entrance Exam Student",
+                    {"entrance_exam_id": exam_id, "crm_lead_id": lid},
+                    "name",
+                )
+
+        if not rec_name and code_val and str(code_val).strip():
+            lid = frappe.db.get_value("CRM Lead", {"crm_code": str(code_val).strip()}, "name")
+            if lid:
+                rec_name = frappe.db.get_value(
+                    "CRM Admission Entrance Exam Student",
+                    {"entrance_exam_id": exam_id, "crm_lead_id": lid},
+                    "name",
+                )
+
+        if not rec_name:
+            error_count += 1
+            errors.append(f"Dòng {row_idx}: Không tìm thấy bản ghi trong kỳ (name / CRM)")
+            continue
+
+        try:
+            doc = frappe.get_doc("CRM Admission Entrance Exam Student", rec_name)
+            if idx_status is not None and idx_status < len(row):
+                cell_st = row[idx_status]
+                if cell_st is not None and str(cell_st).strip() != "":
+                    st = _norm_entrance_status_import(cell_st)
+                    if st is None:
+                        error_count += 1
+                        errors.append(f"Dòng {row_idx}: Trạng thái không hợp lệ")
+                        continue
+                    doc.status = st
+            if idx_result is not None and idx_result < len(row):
+                cell_er = row[idx_result]
+                if cell_er is None or str(cell_er).strip() == "":
+                    doc.exam_result = None
+                else:
+                    er = _norm_entrance_exam_result_import(cell_er)
+                    if er is None:
+                        error_count += 1
+                        errors.append(f"Dòng {row_idx}: Kết quả không hợp lệ")
+                        continue
+                    doc.exam_result = er or None
+            if idx_link is not None and idx_link < len(row):
+                v = row[idx_link]
+                doc.result_link = (str(v).strip() if v is not None else "") or ""
+            if idx_ksdv is not None and idx_ksdv < len(row):
+                kv = _norm_ksdv_fee_import(row[idx_ksdv])
+                if kv is not None:
+                    doc.ksdv_fee_paid = kv
+            doc.save(ignore_permissions=True)
+            success_count += 1
+        except Exception as ex:
+            error_count += 1
+            errors.append(f"Dòng {row_idx}: Lỗi cập nhật — {str(ex)[:80]}")
+
+    frappe.db.commit()
+    return success_response(
+        message=f"Nhập liệu: {success_count} thành công, {error_count} lỗi",
+        data={"success_count": success_count, "error_count": error_count, "errors": errors[:50]},
+    )
+
+
 @frappe.whitelist(methods=["POST"])
 def add_entrance_exam_students_excel():
     """Import Excel: cột CRM Lead / crm_code — thêm học sinh vào kỳ"""
