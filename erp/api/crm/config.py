@@ -11,6 +11,31 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import check_crm_permission, get_request_data
 
 
+def _normalize_crm_source_sub_rows(rows):
+    """Chuẩn hóa dòng bảng con CRM Source Sub từ request JSON."""
+    if not rows:
+        return []
+    if not isinstance(rows, (list, tuple)):
+        return []
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        sub_name = (r.get("sub_source_name") or "").strip()
+        if not sub_name:
+            continue
+        row = {"sub_source_name": sub_name}
+        notes_val = r.get("notes")
+        if notes_val is not None and str(notes_val).strip():
+            row["notes"] = str(notes_val).strip()
+        # Giữ name của dòng cũ khi cập nhật (Frappe merge/replace child table)
+        row_id = r.get("name")
+        if row_id:
+            row["name"] = row_id
+        out.append(row)
+    return out
+
+
 def _crud_list(doctype):
     """Helper: lay danh sach"""
     check_crm_permission()
@@ -79,16 +104,63 @@ def _crud_delete(doctype, name):
 # --- CRM Source ---
 @frappe.whitelist()
 def get_sources():
-    return _crud_list("CRM Source")
+    """Danh sách nguồn cha kèm bảng con sub_sources (get_all không trả child table)."""
+    check_crm_permission()
+    names = frappe.get_all("CRM Source", pluck="name", order_by="creation desc")
+    items = []
+    for n in names:
+        doc = frappe.get_doc("CRM Source", n)
+        items.append(doc.as_dict())
+    return list_response(items)
+
 
 @frappe.whitelist(methods=["POST"])
 def create_source():
-    return _crud_create("CRM Source", get_request_data(), "source_name")
+    check_crm_permission()
+    data = get_request_data()
+    if not data.get("source_name"):
+        return validation_error_response("Thieu source_name", {"source_name": ["Bat buoc"]})
+    sub_rows = _normalize_crm_source_sub_rows(data.get("sub_sources"))
+    try:
+        doc = frappe.get_doc(
+            {
+                "doctype": "CRM Source",
+                "source_name": (data.get("source_name") or "").strip(),
+                "notes": data.get("notes"),
+                "sub_sources": sub_rows,
+            }
+        )
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        return single_item_response(doc.as_dict(), "Tao thanh cong")
+    except frappe.DuplicateEntryError:
+        return error_response(f"{data.get('source_name')} da ton tai")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Loi tao: {str(e)}")
+
 
 @frappe.whitelist(methods=["POST"])
 def update_source():
+    check_crm_permission()
     data = get_request_data()
-    return _crud_update("CRM Source", data.get("name"), data)
+    name = data.get("name")
+    if not frappe.db.exists("CRM Source", name):
+        return not_found_response(f"Khong tim thay {name}")
+    try:
+        doc = frappe.get_doc("CRM Source", name)
+        if "source_name" in data and data.get("source_name"):
+            doc.source_name = (data.get("source_name") or "").strip()
+        if "notes" in data:
+            doc.notes = data.get("notes")
+        if "sub_sources" in data:
+            doc.set("sub_sources", _normalize_crm_source_sub_rows(data.get("sub_sources")))
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return single_item_response(doc.as_dict(), "Cap nhat thanh cong")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Loi cap nhat: {str(e)}")
 
 @frappe.whitelist(methods=["POST"])
 def delete_source():

@@ -7,7 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "source_name",
-  "notes"
+  "notes",
+  "sub_sources"
  ],
  "fields": [
   {
@@ -23,6 +24,13 @@
    "fieldtype": "Text",
    "label": "Ghi chú",
    "in_list_view": 0
+  },
+  {
+   "description": "Các nguồn con (chi tiết) thuộc nguồn cha",
+   "fieldname": "sub_sources",
+   "fieldtype": "Table",
+   "label": "Nguồn con",
+   "options": "CRM Source Sub"
   }
  ],
  "index_web_pages_for_search": 1,
