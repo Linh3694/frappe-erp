@@ -1047,3 +1047,138 @@ def add_entrance_exam_students_excel():
         message=f"Import: {success_count} thành công, {error_count} lỗi",
         data={"success_count": success_count, "error_count": error_count, "errors": errors[:50]},
     )
+
+
+def _format_mail_merge_date(value):
+    """Định dạng ngày cho mail merge (theo cấu hình user Frappe)."""
+    if not value:
+        return ""
+    try:
+        from frappe.utils import format_date
+
+        return format_date(value) or ""
+    except Exception:
+        return str(value)
+
+
+@frappe.whitelist(methods=["POST"])
+def send_entrance_exam_notification():
+    """
+    Gửi email thông báo kỳ khảo sát đầu vào cho phụ huynh (mail merge {{tags}}).
+    notification_type: exam_schedule | exam_result
+    """
+    check_crm_permission()
+    data = get_request_data()
+
+    exam_id = data.get("exam_id")
+    notification_type = (data.get("notification_type") or "").strip()
+    subject_template = (data.get("subject") or "").strip()
+    content_template = (data.get("content") or "").strip()
+    student_record_ids = data.get("student_record_ids") or []
+
+    if not exam_id:
+        return validation_error_response("Thiếu exam_id", {"exam_id": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Admission Entrance Exam", exam_id):
+        return not_found_response("Không tìm thấy kỳ khảo sát")
+    if notification_type not in ("exam_schedule", "exam_result"):
+        return validation_error_response(
+            "Loại thông báo không hợp lệ",
+            {"notification_type": ['Chọn "exam_schedule" hoặc "exam_result"']},
+        )
+    if not subject_template or not content_template:
+        return validation_error_response(
+            "Thiếu tiêu đề hoặc nội dung",
+            {"subject": ["Bắt buộc"], "content": ["Bắt buộc"]},
+        )
+    if not isinstance(student_record_ids, list) or len(student_record_ids) == 0:
+        return validation_error_response(
+            "Chọn ít nhất một học sinh",
+            {"student_record_ids": ["Bắt buộc"]},
+        )
+
+    from frappe.utils import md_to_html
+
+    from erp.utils.email_service import send_email_via_service
+
+    exam = frappe.get_doc("CRM Admission Entrance Exam", exam_id)
+    sender = frappe.conf.get("admission_sender_email") or "tuyensinh@wellspring.edu.vn"
+
+    sent = 0
+    errors = []
+
+    for record_id in student_record_ids:
+        if not record_id or not frappe.db.exists(
+            "CRM Admission Entrance Exam Student", record_id
+        ):
+            errors.append({"record": record_id, "error": "Không tìm thấy bản ghi học sinh"})
+            continue
+
+        rec = frappe.get_doc("CRM Admission Entrance Exam Student", record_id)
+        if rec.entrance_exam_id != exam_id:
+            errors.append({"record": record_id, "error": "Học sinh không thuộc kỳ này"})
+            continue
+
+        lead = frappe.db.get_value(
+            "CRM Lead",
+            rec.crm_lead_id,
+            [
+                "guardian_email",
+                "crm_code",
+                "student_name",
+                "student_dob",
+                "guardian_name",
+            ],
+            as_dict=True,
+        )
+        if not lead:
+            errors.append({"record": record_id, "error": "Không tìm thấy CRM Lead"})
+            continue
+
+        guardian_email = (lead.get("guardian_email") or "").strip()
+        if not guardian_email:
+            errors.append({"record": record_id, "error": "Không có email phụ huynh"})
+            continue
+
+        context = {
+            "student_name": lead.get("student_name") or "",
+            "crm_code": lead.get("crm_code") or rec.crm_lead_id,
+            "student_dob": _format_mail_merge_date(lead.get("student_dob")),
+            "guardian_name": lead.get("guardian_name") or "",
+            "exam_date": _format_mail_merge_date(exam.exam_date),
+            "exam_time": exam.exam_time or "",
+        }
+        if notification_type == "exam_result":
+            context["status"] = _ENTRANCE_STATUS_LABEL_VN.get(
+                rec.status or "new", rec.status or ""
+            )
+            er = rec.exam_result or ""
+            context["exam_result"] = _ENTRANCE_RESULT_LABEL_VN.get(er, er or "—")
+
+        final_subject = subject_template
+        final_content = content_template
+        for key, val in context.items():
+            final_subject = final_subject.replace(f"{{{{{key}}}}}", str(val))
+            final_content = final_content.replace(f"{{{{{key}}}}}", str(val))
+
+        html_body = str(md_to_html(final_content) or final_content)
+
+        result = send_email_via_service(
+            to_list=[guardian_email],
+            subject=final_subject,
+            body=html_body,
+            from_email=sender,
+        )
+        if result.get("success"):
+            sent += 1
+        else:
+            errors.append(
+                {
+                    "record": record_id,
+                    "error": result.get("message", "Gửi email thất bại"),
+                }
+            )
+
+    return success_response(
+        {"sent": sent, "errors": errors},
+        message=f"Đã gửi {sent} email",
+    )
