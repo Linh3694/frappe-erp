@@ -10,7 +10,9 @@
   "event_date",
   "student_count",
   "is_active",
-  "school_year_id"
+  "school_year_id",
+  "section_promotions",
+  "promotions"
  ],
  "fields": [
   {
@@ -48,6 +50,17 @@
    "in_list_view": 1,
    "label": "Năm học",
    "options": "SIS School Year"
+  },
+  {
+   "fieldname": "section_promotions",
+   "fieldtype": "Section Break",
+   "label": "Chương trình ưu đãi"
+  },
+  {
+   "fieldname": "promotions",
+   "fieldtype": "Table",
+   "label": "Danh sách ưu đãi",
+   "options": "CRM Admission Event Promotion"
   }
  ],
  "index_web_pages_for_search": 1,

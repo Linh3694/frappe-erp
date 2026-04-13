@@ -8,7 +8,8 @@
  "field_order": [
   "event_id",
   "crm_lead_id",
-  "status"
+  "status",
+  "promotion_selections"
  ],
  "fields": [
   {
@@ -34,6 +35,12 @@
    "in_list_view": 1,
    "label": "Trạng thái",
    "options": "registered\nattended\nnot_attended"
+  },
+  {
+   "fieldname": "promotion_selections",
+   "fieldtype": "Table",
+   "label": "Ưu đãi áp dụng",
+   "options": "CRM Admission Event Student Promotion"
   }
  ],
  "index_web_pages_for_search": 0,

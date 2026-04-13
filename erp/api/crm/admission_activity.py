@@ -2,6 +2,8 @@
 CRM Admission Activity API - CRUD Sự kiện và Khoá học tuyển sinh
 """
 
+from collections import defaultdict
+
 import frappe
 from erp.utils.api_response import (
     success_response,
@@ -30,6 +32,51 @@ def _resolve_crm_lead_name(ref):
 
 
 # ========== SỰ KIỆN (CRM Admission Event) ==========
+
+
+def _append_event_promotions_from_payload(doc, promotions_payload):
+    """Gán bảng con promotions — mỗi dòng Link tới CRM Promotion (danh mục có sẵn)"""
+    if promotions_payload is None:
+        return
+    doc.set("promotions", [])
+    seen = set()
+    for row in promotions_payload or []:
+        if not isinstance(row, dict):
+            continue
+        prom = (row.get("promotion") or "").strip()
+        if not prom or prom in seen:
+            continue
+        if not frappe.db.exists("CRM Promotion", prom):
+            continue
+        seen.add(prom)
+        doc.append("promotions", {"promotion": prom})
+
+
+def _event_promotions_meta(event_id):
+    """Danh sách ưu đãi trên sự kiện — đọc tên/phân loại/% từ CRM Promotion"""
+    doc = frappe.get_doc("CRM Admission Event", event_id)
+    out = []
+    for r in doc.promotions:
+        pid = r.promotion
+        if not pid:
+            continue
+        p = frappe.db.get_value(
+            "CRM Promotion",
+            pid,
+            ["promotion_name", "category", "value"],
+            as_dict=True,
+        )
+        if not p:
+            continue
+        out.append(
+            {
+                "promotion_id": pid,
+                "promotion_name": p.get("promotion_name") or pid,
+                "category": p.get("category") or "",
+                "value": p.get("value"),
+            }
+        )
+    return out
 
 
 def _enrich_modified_by_name(items, modified_by_field="modified_by"):
@@ -75,6 +122,8 @@ def get_event(event_id=None):
     data = doc.as_dict()
     if doc.modified_by:
         data["modified_by_name"] = frappe.db.get_value("User", doc.modified_by, "full_name") or doc.modified_by
+    # FE chi tiết bảng: tên / phân loại / % từ danh mục CRM Promotion
+    data["promotions_catalog"] = _event_promotions_meta(event_id)
     return single_item_response(data, "Thành công")
 
 
@@ -92,6 +141,8 @@ def create_event():
         doc.student_count = data.get("student_count", 0) or 0
         doc.is_active = 1 if data.get("is_active", True) else 0
         doc.school_year_id = data.get("school_year_id") or None
+        if "promotions" in data:
+            _append_event_promotions_from_payload(doc, data.get("promotions"))
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Tạo sự kiện thành công")
@@ -122,6 +173,8 @@ def update_event():
             doc.is_active = 1 if data["is_active"] else 0
         if "school_year_id" in data:
             doc.school_year_id = data["school_year_id"] or None
+        if "promotions" in data:
+            _append_event_promotions_from_payload(doc, data.get("promotions"))
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Cập nhật sự kiện thành công")
@@ -301,7 +354,14 @@ def get_event_students():
         """, {"s": f"%{search.strip()}%"}, as_dict=True)
         lead_names = [r["name"] for r in lead_ids]
         if not lead_names:
-            return list_response([], "Thành công", meta={"summary": _get_event_student_summary(event_id)})
+            return list_response(
+                [],
+                "Thành công",
+                meta={
+                    "summary": _get_event_student_summary(event_id),
+                    "event_promotions": _event_promotions_meta(event_id),
+                },
+            )
         or_filters = {"crm_lead_id": ["in", lead_names]}
 
     items = frappe.get_all(
@@ -311,6 +371,18 @@ def get_event_students():
         fields=["name", "event_id", "crm_lead_id", "status", "modified", "modified_by"],
         order_by="modified desc",
     )
+
+    flags_by_student = defaultdict(dict)
+    if items:
+        names = [i["name"] for i in items]
+        for pr in frappe.get_all(
+            "CRM Admission Event Student Promotion",
+            filters={"parent": ["in", names]},
+            fields=["parent", "promotion", "selected"],
+        ):
+            pid = pr.get("promotion")
+            if pid:
+                flags_by_student[pr.parent][pid] = bool(pr.selected)
 
     for item in items:
         lead = frappe.db.get_value(
@@ -332,10 +404,15 @@ def get_event_students():
         else:
             item["modified_by_name"] = None
 
+        item["promotion_flags"] = dict(flags_by_student.get(item["name"], {}))
+
     return list_response(
         items,
         "Thành công",
-        meta={"summary": _get_event_student_summary(event_id)},
+        meta={
+            "summary": _get_event_student_summary(event_id),
+            "event_promotions": _event_promotions_meta(event_id),
+        },
     )
 
 
@@ -662,6 +739,50 @@ def update_event_student_status():
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Cập nhật trạng thái thành công")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Lỗi cập nhật: {str(e)}")
+
+
+@frappe.whitelist(methods=["POST"])
+def set_event_student_promotion():
+    """Bật/tắt ưu đãi cho 1 học sinh trong sự kiện (checkbox cột động) — promotion = name CRM Promotion"""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name")
+    promotion = (data.get("promotion") or data.get("promotion_uid") or "").strip()
+    selected = bool(data.get("selected"))
+    if not name:
+        return validation_error_response("Thiếu name", {"name": ["Bắt buộc"]})
+    if not promotion:
+        return validation_error_response("Thiếu promotion", {"promotion": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Admission Event Student", name):
+        return not_found_response("Không tìm thấy bản ghi")
+
+    try:
+        doc = frappe.get_doc("CRM Admission Event Student", name)
+        ev = frappe.get_doc("CRM Admission Event", doc.event_id)
+        valid_ids = {r.promotion for r in ev.promotions if r.promotion}
+        if promotion not in valid_ids:
+            return validation_error_response(
+                "Chương trình ưu đãi không thuộc sự kiện này",
+                {"promotion": ["Không hợp lệ"]},
+            )
+
+        found = False
+        for row in doc.promotion_selections:
+            if row.promotion == promotion:
+                row.selected = 1 if selected else 0
+                found = True
+                break
+        if not found:
+            doc.append(
+                "promotion_selections",
+                {"promotion": promotion, "selected": 1 if selected else 0},
+            )
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return single_item_response(doc.as_dict(), "Cập nhật ưu đãi thành công")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Lỗi cập nhật: {str(e)}")
