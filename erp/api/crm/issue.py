@@ -530,6 +530,7 @@ def get_issues():
     issue_module = frappe.request.args.get("issue_module")
     approval_status = frappe.request.args.get("approval_status")
     department = frappe.request.args.get("department")
+    only_my_departments = frappe.request.args.get("only_my_departments")
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 20))
 
@@ -544,11 +545,28 @@ def get_issues():
         filters["issue_module"] = issue_module
     if approval_status:
         filters["approval_status"] = approval_status
+
+    name_constraint_sets = []
     if department:
         dept_names = _issue_names_matching_department(department)
         if not dept_names:
             return paginated_response([], page, 0, per_page)
-        filters["name"] = ["in", dept_names]
+        name_constraint_sets.append(set(dept_names))
+    if only_my_departments and str(only_my_departments).lower() in ("1", "true", "yes"):
+        user = frappe.session.user
+        my_depts = _get_user_crm_issue_department_names(user)
+        if not my_depts:
+            return paginated_response([], page, 0, per_page)
+        visible = _issue_names_visible_to_department_members(my_depts)
+        if not visible:
+            return paginated_response([], page, 0, per_page)
+        name_constraint_sets.append(set(visible))
+    if name_constraint_sets:
+        inter = set.intersection(*name_constraint_sets)
+        names_list = list(inter)
+        if not names_list:
+            return paginated_response([], page, 0, per_page)
+        filters["name"] = ["in", names_list]
 
     total = frappe.db.count("CRM Issue", filters=filters)
     offset = (page - 1) * per_page
