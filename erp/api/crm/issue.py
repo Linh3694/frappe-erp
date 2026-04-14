@@ -107,8 +107,27 @@ def _compute_log_accent(logged_by: str, issue_doc) -> str:
     return "neutral"
 
 
+def _compute_log_source_label(logged_by: str, issue_doc) -> str:
+    """
+    Nhan hien thi canh ten nguoi ghi log (tab Qua trinh xu ly).
+    Uu tien: SIS BOD -> Ban lanh dao; Sales/SM -> Phong tuyen sinh; thanh vien phong ban issue -> department_name.
+    """
+    if not logged_by:
+        return ""
+    roles = set(frappe.get_roles(logged_by))
+    if "SIS BOD" in roles:
+        return "Ban lãnh đạo"
+    if LOG_ACCENT_SALES_ROLES & roles:
+        return "Phòng tuyển sinh"
+    for dn in _issue_department_docnames(issue_doc):
+        if dn and logged_by in _department_member_emails(dn):
+            dn_name = frappe.db.get_value("CRM Issue Department", dn, "department_name")
+            return ((dn_name or "").strip() or dn)
+    return ""
+
+
 def _enrich_process_logs_accent(data: dict, issue_doc):
-    """Gan log_accent cho moi dong process_logs (API get_issue / update)."""
+    """Gan log_accent + log_source_label cho moi dong process_logs (API get_issue / update)."""
     if not isinstance(data, dict):
         return
     logs = data.get("process_logs") or []
@@ -117,6 +136,7 @@ def _enrich_process_logs_accent(data: dict, issue_doc):
             continue
         lb = (row.get("logged_by") or "").strip()
         row["log_accent"] = _compute_log_accent(lb, issue_doc)
+        row["log_source_label"] = _compute_log_source_label(lb, issue_doc)
 
 
 def _finalize_issue_api_dict(doc):
