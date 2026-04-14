@@ -1115,24 +1115,60 @@ def delete_course():
 
 # ========== HỌC SINH KHOÁ HỌC (CRM Admission Course Student) ==========
 
-# Trạng thái: registered (Đã đăng ký), attended (Đã tham gia), not_attended (Không tham gia), paid (Đã đóng tiền)
+# Trạng thái học sinh khoá học (mã Select trên CRM Admission Course Student)
+COURSE_STUDENT_STATUSES = (
+    "registered_interest",
+    "trial",
+    "paid",
+    "attended",
+    "transferred",
+    "refunded",
+)
+
 STATUS_MAP = {
-    "registered": "Đã đăng ký",
-    "attended": "Đã tham gia",
-    "not_attended": "Không tham gia",
+    "registered_interest": "Đã đăng ký/Quan tâm",
+    "trial": "Học thử",
     "paid": "Đã đóng tiền",
+    "attended": "Đã tham gia",
+    "transferred": "Chuyển nhượng",
+    "refunded": "Hoàn phí",
 }
 
 
+def _coerce_course_student_status(val):
+    """Chuẩn hoá mã trạng thái từ API/Excel (mã snake_case, nhãn tiếng Việt, giá trị cũ)."""
+    if val is None:
+        return "registered_interest"
+    s = str(val).strip()
+    if not s:
+        return "registered_interest"
+    sl = s.lower()
+    for st in COURSE_STUDENT_STATUSES:
+        if sl == st:
+            return st
+    legacy = {"registered": "registered_interest", "not_attended": "registered_interest"}
+    if sl in legacy:
+        return legacy[sl]
+    for st, label in STATUS_MAP.items():
+        if s.lower() == (label or "").lower():
+            return st
+    extras = {
+        "đã đăng ký": "registered_interest",
+        "không tham gia": "refunded",
+    }
+    if s.lower() in extras:
+        return extras[s.lower()]
+    return "registered_interest"
+
+
 def _get_course_student_summary(course_id):
-    """Tính tổng, đã đăng ký, đã tham gia, không tham gia, đã đóng tiền"""
+    """Đếm theo từng trạng thái khoá học + tổng."""
     filters = {"course_id": course_id}
     total = frappe.db.count("CRM Admission Course Student", filters=filters)
-    registered = frappe.db.count("CRM Admission Course Student", filters={**filters, "status": "registered"})
-    attended = frappe.db.count("CRM Admission Course Student", filters={**filters, "status": "attended"})
-    not_attended = frappe.db.count("CRM Admission Course Student", filters={**filters, "status": "not_attended"})
-    paid = frappe.db.count("CRM Admission Course Student", filters={**filters, "status": "paid"})
-    return {"total": total, "registered": registered, "attended": attended, "not_attended": not_attended, "paid": paid}
+    out = {"total": total}
+    for st in COURSE_STUDENT_STATUSES:
+        out[st] = frappe.db.count("CRM Admission Course Student", filters={**filters, "status": st})
+    return out
 
 
 @frappe.whitelist()
@@ -1149,7 +1185,7 @@ def get_course_students():
     status_filter = frappe.request.args.get("status")
 
     filters = {"course_id": course_id}
-    if status_filter and status_filter in ("registered", "attended", "not_attended", "paid"):
+    if status_filter and status_filter in COURSE_STUDENT_STATUSES:
         filters["status"] = status_filter
 
     or_filters = None
@@ -1230,7 +1266,7 @@ def add_course_student():
         doc = frappe.new_doc("CRM Admission Course Student")
         doc.course_id = course_id
         doc.crm_lead_id = crm_lead_id
-        doc.status = data.get("status", "registered")
+        doc.status = _coerce_course_student_status(data.get("status", "registered_interest"))
         regular_class = (data.get("regular_class") or "").strip() or None
         running_class_ids = data.get("running_class_ids") or []
         if not isinstance(running_class_ids, list):
@@ -1350,7 +1386,7 @@ def add_course_students_excel():
             doc = frappe.new_doc("CRM Admission Course Student")
             doc.course_id = course_id
             doc.crm_lead_id = lead
-            doc.status = "registered"
+            doc.status = "registered_interest"
             doc.insert(ignore_permissions=True)
             success_count += 1
         except Exception:
@@ -1408,7 +1444,7 @@ def export_course_students_template():
                     "crm_code": r.get("crm_code", ""),
                     "student_name": r.get("student_name", ""),
                     "student_dob": str(r["student_dob"]) if r.get("student_dob") else "",
-                    "status": r.get("status", "registered"),
+                    "status": r.get("status", "registered_interest"),
                     "class_summary": r.get("class_summary") or "",
                 }
                 for r in items
@@ -1453,7 +1489,6 @@ def import_course_students_status():
     if crm_col is None or status_col is None:
         return error_response("Không tìm thấy cột CRM Lead ID và Status. Cần tải template từ nút Nhập liệu.")
 
-    valid_statuses = {"registered", "attended", "not_attended", "paid"}
     success_count = 0
     error_count = 0
     errors = []
@@ -1464,14 +1499,7 @@ def import_course_students_status():
         if not crm_val or not str(crm_val).strip():
             continue
         lead_id = str(crm_val).strip()
-        status = str(status_val).strip().lower() if status_val else ""
-        if status not in valid_statuses:
-            status_map_vn = {"registered": "đã đăng ký", "attended": "đã tham gia", "not_attended": "không tham gia", "paid": "đã đóng tiền"}
-            if status in status_map_vn.values():
-                rev = {v: k for k, v in status_map_vn.items()}
-                status = rev.get(status, "registered")
-            else:
-                status = "registered"
+        status = _coerce_course_student_status(status_val)
 
         rec = frappe.db.get_value(
             "CRM Admission Course Student",
@@ -1571,8 +1599,11 @@ def update_course_student_status():
     status = data.get("status")
     if not name:
         return validation_error_response("Thiếu name", {"name": ["Bắt buộc"]})
-    if status not in ("registered", "attended", "not_attended", "paid"):
-        return validation_error_response("Trạng thái không hợp lệ", {"status": ["Phải là registered, attended, not_attended hoặc paid"]})
+    if status not in COURSE_STUDENT_STATUSES:
+        return validation_error_response(
+            "Trạng thái không hợp lệ",
+            {"status": [f"Phải là một trong: {', '.join(COURSE_STUDENT_STATUSES)}"]},
+        )
     if not frappe.db.exists("CRM Admission Course Student", name):
         return not_found_response("Không tìm thấy bản ghi")
 

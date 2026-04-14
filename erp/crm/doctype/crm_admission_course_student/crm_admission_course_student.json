@@ -30,12 +30,12 @@
    "reqd": 1
   },
   {
-   "default": "registered",
+   "default": "registered_interest",
    "fieldname": "status",
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Trạng thái",
-   "options": "registered\nattended\nnot_attended\npaid"
+   "options": "registered_interest\ntrial\npaid\nattended\ntransferred\nrefunded"
   },
   {
    "fieldname": "regular_class",

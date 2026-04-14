@@ -31,3 +31,6 @@ erp.patches.v1_0.crm_merge_withdraw_graduated_to_nghi_hoc
 
 # CRM: bo buoc Re-Enroll — dua du lieu ve Enrolled
 erp.patches.v1_0.crm_remove_re_enroll_step
+
+# CRM: chuan hoa trang thai hoc sinh khoa hoc (6 trang thai)
+erp.patches.v1_0.migrate_crm_course_student_status_v2
