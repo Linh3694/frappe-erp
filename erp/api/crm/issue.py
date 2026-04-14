@@ -34,6 +34,88 @@ APPROVER_ROLES = frozenset(
     }
 )
 
+# Role duoc ghi / xu ly van de (dong bo frontend canWriteIssue; SM tuong duong Sales Admin trong module)
+ISSUE_WRITE_ROLES = frozenset(
+    {
+        "SIS Sales",
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+        "SIS Sales Admin",
+        "SIS BOD",
+        "System Manager",
+    }
+)
+
+
+def _can_write_issue_ops(user: str, issue_doc) -> bool:
+    """User duoc chinh sua van de (sau check_crm_permission)."""
+    if not user or user == "Guest":
+        return False
+    roles = set(frappe.get_roles(user))
+    if ISSUE_WRITE_ROLES & roles:
+        return True
+    dept = getattr(issue_doc, "department", None) or ""
+    if dept and user in _department_member_emails(dept):
+        return True
+    return False
+
+
+def _get_user_crm_issue_department_names(user: str):
+    """Docname CRM Issue Department ma user la thanh vien."""
+    if not user or user == "Guest":
+        return []
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT parent FROM `tabCRM Issue Dept Member`
+        WHERE user = %(u)s
+        """,
+        {"u": user},
+    )
+    return [r[0] for r in rows] if rows else []
+
+
+def _can_see_pending_issues_queue(user: str) -> bool:
+    """Xem hang cho duyet: co role ghi hoac thuoc it nhat mot phong ban."""
+    if ISSUE_WRITE_ROLES & set(frappe.get_roles(user)):
+        return True
+    return bool(_get_user_crm_issue_department_names(user))
+
+
+def _compute_log_accent(logged_by: str, issue_doc) -> str:
+    """bod > sales > dept > neutral — dong bo IssueDetail border."""
+    if not logged_by:
+        return "neutral"
+    roles = set(frappe.get_roles(logged_by))
+    if "SIS BOD" in roles:
+        return "bod"
+    if ISSUE_WRITE_ROLES & roles:
+        return "sales"
+    dept = getattr(issue_doc, "department", None) or ""
+    if dept and logged_by in _department_member_emails(dept):
+        return "dept"
+    return "neutral"
+
+
+def _enrich_process_logs_accent(data: dict, issue_doc):
+    """Gan log_accent cho moi dong process_logs trong dict API."""
+    if not isinstance(data, dict):
+        return
+    logs = data.get("process_logs") or []
+    for row in logs:
+        if not isinstance(row, dict):
+            continue
+        lb = (row.get("logged_by") or "").strip()
+        row["log_accent"] = _compute_log_accent(lb, issue_doc)
+
+
+def _finalize_issue_api_dict(doc):
+    """as_dict + enrich user + issue_students display + log_accent."""
+    data = doc.as_dict()
+    _enrich_user_info([data])
+    _enrich_issue_students_display(data)
+    _enrich_process_logs_accent(data, doc)
+    return data
+
 
 def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_user=None):
     """Gui push notification Expo cho user (workspace-mobile)."""
@@ -93,20 +175,6 @@ def _can_create_directly():
 
 def _can_approve():
     return bool(APPROVER_ROLES & _user_roles())
-
-
-def _can_edit_issue(doc) -> bool:
-    """Chi SIS Sales Care Admin, PIC, hoac nguoi tao (created_by_user) duoc sua van de."""
-    user = frappe.session.user
-    if not user or user == "Guest":
-        return False
-    if "SIS Sales Care Admin" in frappe.get_roles(user):
-        return True
-    if getattr(doc, "pic", None) and doc.pic == user:
-        return True
-    if getattr(doc, "created_by_user", None) and doc.created_by_user == user:
-        return True
-    return False
 
 
 def _generate_issue_code(prefix: str) -> str:
@@ -385,12 +453,17 @@ def get_issues():
 def get_pending_issues():
     """Danh sach van de cho duyet (admin)"""
     check_crm_permission()
-    if not _can_approve():
+    user = frappe.session.user
+    if not _can_see_pending_issues_queue(user):
         frappe.throw("Khong co quyen xem hang cho duyet", frappe.PermissionError)
 
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 50))
     filters = {"approval_status": "Cho duyet"}
+    if not (ISSUE_WRITE_ROLES & set(frappe.get_roles(user))):
+        depts = _get_user_crm_issue_department_names(user)
+        if depts:
+            filters["department"] = ["in", depts]
     total = frappe.db.count("CRM Issue", filters=filters)
     offset = (page - 1) * per_page
 
@@ -437,9 +510,7 @@ def get_issue():
         return not_found_response(f"Khong tim thay van de {name}")
 
     doc = frappe.get_doc("CRM Issue", name)
-    data = doc.as_dict()
-    _enrich_user_info([data])
-    _enrich_issue_students_display(data)
+    data = _finalize_issue_api_dict(doc)
     return single_item_response(data)
 
 
@@ -651,7 +722,7 @@ def create_issue():
         except Exception as e:
             frappe.logger().error(f"CRM Issue notify create: {e}")
 
-        return single_item_response(doc.as_dict(), "Tao van de thanh cong")
+        return single_item_response(_finalize_issue_api_dict(doc), "Tao van de thanh cong")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Loi tao van de: {str(e)}")
@@ -661,8 +732,6 @@ def create_issue():
 def approve_issue():
     """Duyet van de trong hang cho"""
     check_crm_permission()
-    if not _can_approve():
-        frappe.throw("Khong co quyen duyet", frappe.PermissionError)
 
     data = get_request_data()
     name = data.get("name")
@@ -670,6 +739,8 @@ def approve_issue():
         return not_found_response("Khong tim thay van de")
 
     doc = frappe.get_doc("CRM Issue", name)
+    if not _can_write_issue_ops(frappe.session.user, doc):
+        frappe.throw("Khong co quyen duyet", frappe.PermissionError)
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
@@ -695,15 +766,13 @@ def approve_issue():
     except Exception as e:
         frappe.logger().error(f"CRM Issue notify approve: {e}")
 
-    return single_item_response(doc.as_dict(), "Da duyet van de")
+    return single_item_response(_finalize_issue_api_dict(doc), "Da duyet van de")
 
 
 @frappe.whitelist(methods=["POST"])
 def reject_issue():
     """Tu choi van de trong hang cho"""
     check_crm_permission()
-    if not _can_approve():
-        frappe.throw("Khong co quyen tu choi", frappe.PermissionError)
 
     data = get_request_data()
     name = data.get("name")
@@ -712,6 +781,8 @@ def reject_issue():
         return not_found_response("Khong tim thay van de")
 
     doc = frappe.get_doc("CRM Issue", name)
+    if not _can_write_issue_ops(frappe.session.user, doc):
+        frappe.throw("Khong co quyen tu choi", frappe.PermissionError)
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
@@ -734,7 +805,7 @@ def reject_issue():
     except Exception as e:
         frappe.logger().error(f"CRM Issue notify reject: {e}")
 
-    return single_item_response(doc.as_dict(), "Da tu choi")
+    return single_item_response(_finalize_issue_api_dict(doc), "Da tu choi")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -752,7 +823,7 @@ def update_issue():
 
     try:
         doc = frappe.get_doc("CRM Issue", name)
-        if not _can_edit_issue(doc):
+        if not _can_write_issue_ops(frappe.session.user, doc):
             return error_response("Khong co quyen sua van de nay")
 
         old_pic = doc.pic
@@ -799,7 +870,7 @@ def update_issue():
         except Exception as e:
             frappe.logger().error(f"CRM Issue notify pic change: {e}")
 
-        return single_item_response(doc.as_dict(), "Cap nhat van de thanh cong")
+        return single_item_response(_finalize_issue_api_dict(doc), "Cap nhat van de thanh cong")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Loi cap nhat: {str(e)}")
@@ -832,6 +903,8 @@ def change_issue_status():
         return not_found_response(f"Khong tim thay van de {name}")
 
     doc = frappe.get_doc("CRM Issue", name)
+    if not _can_write_issue_ops(frappe.session.user, doc):
+        return error_response("Khong co quyen cap nhat trang thai van de")
     if doc.approval_status != "Da duyet" and status != "Cho duyet":
         return error_response("Van de chua duoc duyet, khong doi trang thai xu ly")
 
@@ -859,7 +932,7 @@ def change_issue_status():
     except Exception as e:
         frappe.logger().error(f"CRM Issue notify status: {e}")
 
-    return single_item_response(doc.as_dict(), f"Da chuyen trang thai sang {status}")
+    return single_item_response(_finalize_issue_api_dict(doc), f"Da chuyen trang thai sang {status}")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -886,6 +959,10 @@ def add_process_log():
     try:
         doc = frappe.get_doc("CRM Issue", issue_name)
         current_user = frappe.session.user
+        if doc.approval_status != "Da duyet":
+            return error_response("Van de chua duoc duyet, khong them log")
+        if not _can_write_issue_ops(current_user, doc):
+            return error_response("Khong co quyen them log")
         user_full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
         doc.append(
             "process_logs",
@@ -920,7 +997,7 @@ def add_process_log():
         except Exception as e:
             frappe.logger().error(f"CRM Issue notify log: {e}")
 
-        return single_item_response(doc.as_dict(), "Them log xu ly thanh cong")
+        return single_item_response(_finalize_issue_api_dict(doc), "Them log xu ly thanh cong")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Loi them log: {str(e)}")
@@ -933,6 +1010,7 @@ def update_process_log():
     data = get_request_data()
 
     issue_name = data.get("issue_name")
+    log_name = (data.get("log_name") or "").strip()
     log_idx = data.get("log_idx")
 
     if not issue_name:
@@ -943,18 +1021,37 @@ def update_process_log():
 
     try:
         doc = frappe.get_doc("CRM Issue", issue_name)
+        if doc.approval_status != "Da duyet":
+            return error_response("Van de chua duoc duyet, khong sua log")
+        if not _can_write_issue_ops(frappe.session.user, doc):
+            return error_response("Khong co quyen sua log")
 
-        if log_idx is not None and 0 <= int(log_idx) < len(doc.process_logs):
-            log = doc.process_logs[int(log_idx)]
-            for field in ["title", "content", "assignees", "attachment"]:
-                if field in data:
-                    setattr(log, field, data[field])
+        idx = None
+        if log_name:
+            for i, row in enumerate(doc.process_logs):
+                if row.name == log_name:
+                    idx = i
+                    break
+            if idx is None:
+                return error_response("Khong tim thay log")
+        else:
+            if log_idx is None:
+                return validation_error_response(
+                    "Thieu log_name hoac log_idx",
+                    {"log_name": ["Bat buoc"], "log_idx": ["Bat buoc"]},
+                )
+            idx = int(log_idx)
+            if not (0 <= idx < len(doc.process_logs)):
+                return error_response("Khong tim thay log voi index da cho")
 
-            doc.save(ignore_permissions=True)
-            frappe.db.commit()
-            return single_item_response(doc.as_dict(), "Cap nhat log thanh cong")
+        log = doc.process_logs[idx]
+        for field in ["title", "content", "assignees", "attachment"]:
+            if field in data:
+                setattr(log, field, data[field])
 
-        return error_response("Khong tim thay log voi index da cho")
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return single_item_response(_finalize_issue_api_dict(doc), "Cap nhat log thanh cong")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Loi cap nhat log: {str(e)}")
