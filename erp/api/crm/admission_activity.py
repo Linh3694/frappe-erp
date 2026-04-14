@@ -31,6 +31,117 @@ def _resolve_crm_lead_name(ref):
     return frappe.db.get_value("CRM Lead", {"crm_code": ref}, "name")
 
 
+# ========== KHOÁ HỌC — helper bảng lớp ==========
+
+COURSE_CLASS_TYPE_LABELS = {"regular": "Lớp chính quy", "running": "Lớp chạy"}
+
+
+def _append_course_classes_from_payload(doc, payload):
+    """Gán bảng con course_classes — mỗi dòng: class_name, class_type (regular|running)"""
+    if payload is None:
+        return
+    doc.set("course_classes", [])
+    for row in payload or []:
+        if not isinstance(row, dict):
+            continue
+        cn = (row.get("class_name") or "").strip()
+        ct = (row.get("class_type") or "").strip()
+        if not cn or ct not in ("regular", "running"):
+            continue
+        doc.append("course_classes", {"class_name": cn, "class_type": ct})
+
+
+def _course_classes_catalog(course_id):
+    """Danh sách lớp trên khoá — id, tên, loại (cho FE)"""
+    if not course_id or not frappe.db.exists("CRM Admission Course", course_id):
+        return []
+    doc = frappe.get_doc("CRM Admission Course", course_id)
+    out = []
+    for r in doc.course_classes:
+        ct = r.class_type or ""
+        out.append(
+            {
+                "name": r.name,
+                "class_name": r.class_name or "",
+                "class_type": ct,
+                "class_type_label": COURSE_CLASS_TYPE_LABELS.get(ct, ct),
+            }
+        )
+    return out
+
+
+def _enrich_course_students_with_classes(items):
+    """Bổ sung regular_class_name, running_class_ids, running_class_names, class_summary"""
+    if not items:
+        return items
+    ids = [i["name"] for i in items]
+    rc_rows = frappe.get_all(
+        "CRM Admission Course Student Running",
+        filters={"parent": ["in", ids]},
+        fields=["parent", "course_class"],
+    )
+    by_parent = defaultdict(list)
+    for r in rc_rows:
+        by_parent[r.parent].append(r.course_class)
+
+    all_cc_ids = set()
+    for i in items:
+        if i.get("regular_class"):
+            all_cc_ids.add(i["regular_class"])
+    for ccs in by_parent.values():
+        for cc in ccs:
+            all_cc_ids.add(cc)
+
+    cc_names = {}
+    if all_cc_ids:
+        for row in frappe.get_all(
+            "CRM Admission Course Class",
+            filters={"name": ["in", list(all_cc_ids)]},
+            fields=["name", "class_name"],
+        ):
+            cc_names[row.name] = row.class_name or row.name
+
+    for i in items:
+        rc = i.get("regular_class")
+        i["regular_class_name"] = cc_names.get(rc) if rc else None
+        runs = by_parent.get(i["name"], [])
+        i["running_class_ids"] = runs
+        i["running_class_names"] = [cc_names.get(x, x) for x in runs]
+        parts = []
+        if i["regular_class_name"]:
+            parts.append(f"Lớp CQ: {i['regular_class_name']}")
+        if i["running_class_names"]:
+            parts.append("Lớp chạy: " + ", ".join(i["running_class_names"]))
+        i["class_summary"] = " | ".join(parts) if parts else ""
+    return items
+
+
+def _set_course_student_class_fields(doc, regular_class=None, running_class_ids=None):
+    """Gán regular_class và các dòng running_classes trước insert/save"""
+    doc.regular_class = regular_class or None
+    doc.set("running_classes", [])
+    seen = set()
+    for rid in running_class_ids or []:
+        if not rid or rid in seen:
+            continue
+        seen.add(rid)
+        doc.append("running_classes", {"course_class": rid})
+
+
+def _course_has_regular_classes(course_id):
+    return (
+        frappe.db.count(
+            "CRM Admission Course Class",
+            filters={
+                "parent": course_id,
+                "parenttype": "CRM Admission Course",
+                "class_type": "regular",
+            },
+        )
+        > 0
+    )
+
+
 # ========== SỰ KIỆN (CRM Admission Event) ==========
 
 
@@ -289,11 +400,13 @@ def get_lead_courses():
     course_students = frappe.get_all(
         "CRM Admission Course Student",
         filters={"crm_lead_id": crm_lead_id},
-        fields=["name", "course_id", "status", "modified"],
+        fields=["name", "course_id", "status", "modified", "regular_class"],
         order_by="modified desc",
     )
     if not course_students:
         return list_response([], "Thành công")
+
+    _enrich_course_students_with_classes(course_students)
 
     course_ids = list({r["course_id"] for r in course_students})
     courses = frappe.get_all(
@@ -315,6 +428,7 @@ def get_lead_courses():
                 "status": st,
                 "status_label": STATUS_MAP.get(st, st),
                 "modified": cs["modified"],
+                "class_summary": cs.get("class_summary") or "",
             })
     return list_response(result, "Thành công")
 
@@ -895,6 +1009,7 @@ def get_course(course_id=None):
     data = doc.as_dict()
     if doc.modified_by:
         data["modified_by_name"] = frappe.db.get_value("User", doc.modified_by, "full_name") or doc.modified_by
+    data["classes_catalog"] = _course_classes_catalog(course_id)
     return single_item_response(data, "Thành công")
 
 
@@ -912,9 +1027,13 @@ def create_course():
         doc.student_count = data.get("student_count", 0) or 0
         doc.is_active = 1 if data.get("is_active", True) else 0
         doc.school_year_id = data.get("school_year_id") or None
+        if "course_classes" in data:
+            _append_course_classes_from_payload(doc, data.get("course_classes"))
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
-        return single_item_response(doc.as_dict(), "Tạo khoá học thành công")
+        out = doc.as_dict()
+        out["classes_catalog"] = _course_classes_catalog(doc.name)
+        return single_item_response(out, "Tạo khoá học thành công")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Lỗi tạo khoá học: {str(e)}")
@@ -942,9 +1061,13 @@ def update_course():
             doc.is_active = 1 if data["is_active"] else 0
         if "school_year_id" in data:
             doc.school_year_id = data["school_year_id"] or None
+        if "course_classes" in data:
+            _append_course_classes_from_payload(doc, data.get("course_classes"))
         doc.save(ignore_permissions=True)
         frappe.db.commit()
-        return single_item_response(doc.as_dict(), "Cập nhật khoá học thành công")
+        out = doc.as_dict()
+        out["classes_catalog"] = _course_classes_catalog(name)
+        return single_item_response(out, "Cập nhật khoá học thành công")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Lỗi cập nhật khoá học: {str(e)}")
@@ -1045,9 +1168,11 @@ def get_course_students():
         "CRM Admission Course Student",
         filters=filters,
         or_filters=or_filters,
-        fields=["name", "course_id", "crm_lead_id", "status", "modified", "modified_by"],
+        fields=["name", "course_id", "crm_lead_id", "status", "regular_class", "modified", "modified_by"],
         order_by="modified desc",
     )
+
+    _enrich_course_students_with_classes(items)
 
     # Bổ sung thông tin từ CRM Lead: student_name, student_dob (student_dob trong CRM Lead)
     for item in items:
@@ -1106,12 +1231,47 @@ def add_course_student():
         doc.course_id = course_id
         doc.crm_lead_id = crm_lead_id
         doc.status = data.get("status", "registered")
+        regular_class = (data.get("regular_class") or "").strip() or None
+        running_class_ids = data.get("running_class_ids") or []
+        if not isinstance(running_class_ids, list):
+            running_class_ids = []
+        _set_course_student_class_fields(doc, regular_class, running_class_ids)
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Thêm học sinh thành công")
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Lỗi thêm học sinh: {str(e)}")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_course_student_classes():
+    """Cập nhật lớp chính quy / các lớp chạy cho học sinh trong khoá"""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name")
+    if not name:
+        return validation_error_response("Thiếu name", {"name": ["Bắt buộc"]})
+    if not frappe.db.exists("CRM Admission Course Student", name):
+        return not_found_response("Không tìm thấy bản ghi")
+    try:
+        doc = frappe.get_doc("CRM Admission Course Student", name)
+        if "regular_class" in data:
+            doc.regular_class = data.get("regular_class") or None
+        if "running_class_ids" in data:
+            doc.set("running_classes", [])
+            seen = set()
+            for rid in data.get("running_class_ids") or []:
+                if not rid or rid in seen:
+                    continue
+                seen.add(rid)
+                doc.append("running_classes", {"course_class": rid})
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return single_item_response(doc.as_dict(), "Cập nhật lớp thành công")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Lỗi cập nhật lớp: {str(e)}")
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1126,6 +1286,11 @@ def add_course_students_excel():
         return validation_error_response("Thiếu course_id", {"course_id": ["Bắt buộc"]})
     if not frappe.db.exists("CRM Admission Course", course_id):
         return not_found_response("Không tìm thấy khoá học")
+
+    if _course_has_regular_classes(course_id):
+        return error_response(
+            "Khoá học có lớp chính quy — không thể import hàng loạt. Vui lòng thêm học sinh từ giao diện và gán lớp."
+        )
 
     file = frappe.request.files.get("file")
     if not file:
@@ -1212,9 +1377,10 @@ def export_course_students_template():
     items = frappe.get_all(
         "CRM Admission Course Student",
         filters={"course_id": course_id},
-        fields=["name", "crm_lead_id", "status"],
+        fields=["name", "crm_lead_id", "status", "regular_class"],
         order_by="modified desc",
     )
+    _enrich_course_students_with_classes(items)
     for item in items:
         lead = frappe.db.get_value(
             "CRM Lead",
@@ -1234,8 +1400,8 @@ def export_course_students_template():
     return success_response(
         message="OK",
         data={
-            "headers": ["crm_lead_id", "crm_code", "student_name", "student_dob", "status"],
-            "header_labels": ["CRM Lead ID", "Mã CRM", "Tên học sinh", "Ngày sinh", "Trạng thái"],
+            "headers": ["crm_lead_id", "crm_code", "student_name", "student_dob", "status", "class_summary"],
+            "header_labels": ["CRM Lead ID", "Mã CRM", "Tên học sinh", "Ngày sinh", "Trạng thái", "Lớp (tham khảo)"],
             "rows": [
                 {
                     "crm_lead_id": r["crm_lead_id"],
@@ -1243,6 +1409,7 @@ def export_course_students_template():
                     "student_name": r.get("student_name", ""),
                     "student_dob": str(r["student_dob"]) if r.get("student_dob") else "",
                     "status": r.get("status", "registered"),
+                    "class_summary": r.get("class_summary") or "",
                 }
                 for r in items
             ],
@@ -1353,9 +1520,10 @@ def export_course_report():
     items = frappe.get_all(
         "CRM Admission Course Student",
         filters={"course_id": course_id},
-        fields=["name", "crm_lead_id", "status", "modified", "modified_by"],
+        fields=["name", "crm_lead_id", "status", "regular_class", "modified", "modified_by"],
         order_by="modified desc",
     )
+    _enrich_course_students_with_classes(items)
     for item in items:
         lead = frappe.db.get_value(
             "CRM Lead",
@@ -1378,7 +1546,17 @@ def export_course_report():
     return success_response(
         message="OK",
         data={
-            "headers": ["crm_lead_id", "crm_code", "student_name", "student_dob", "status", "status_label", "modified", "modified_by_name"],
+            "headers": [
+                "crm_lead_id",
+                "crm_code",
+                "student_name",
+                "student_dob",
+                "status",
+                "status_label",
+                "class_summary",
+                "modified",
+                "modified_by_name",
+            ],
             "rows": items,
         },
     )

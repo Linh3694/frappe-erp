@@ -8,7 +8,9 @@
  "field_order": [
   "course_id",
   "crm_lead_id",
-  "status"
+  "status",
+  "regular_class",
+  "running_classes"
  ],
  "fields": [
   {
@@ -34,6 +36,19 @@
    "in_list_view": 1,
    "label": "Trạng thái",
    "options": "registered\nattended\nnot_attended\npaid"
+  },
+  {
+   "fieldname": "regular_class",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Lớp chính quy",
+   "options": "CRM Admission Course Class"
+  },
+  {
+   "fieldname": "running_classes",
+   "fieldtype": "Table",
+   "label": "Lớp chạy",
+   "options": "CRM Admission Course Student Running"
   }
  ],
  "index_web_pages_for_search": 0,

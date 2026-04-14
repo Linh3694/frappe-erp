@@ -37,6 +37,9 @@ def _resolve_subject_titles_for_student_classlog_summary(subject_logs, instance_
     Gán môn học đúng cho từng dòng SIS Class Log Subject (theo class_id + tiết),
     đồng bộ với batch_get_homeroom_class_logs / tab Tổng quan (teacher timetable → TKB → override).
 
+    CHỈ được gọi từ get_student_classlog_summary (AI nhận xét). KHÔNG gọi từ batch_get_homeroom_class_logs —
+    tab Tổng quan vẫn lấy dữ liệu qua API batch đó, không đi qua hàm này.
+
     Trả về: (timetable_subject_map, period_number_to_combined)
     timetable_subject_map: (class_id, period_name) -> subject_title
     """
