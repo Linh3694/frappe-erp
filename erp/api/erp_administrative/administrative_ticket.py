@@ -1344,7 +1344,8 @@ def send_comment():
             "message_type": msg_type,
         }
         if images:
-            row["images_json"] = images
+            # Field JSON trên Frappe không chấp nhận gán list trực tiếp (chỉ dict được tự dumps)
+            row["images_json"] = json.dumps(images, separators=(",", ":"))
         c = frappe.get_doc(row)
         c.insert(ignore_permissions=True)
         if text:
