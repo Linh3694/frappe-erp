@@ -402,6 +402,76 @@ def get_student_data():
         )
 
 
+def _enrich_students_current_class_for_batch(students, campus_id=None):
+    """
+    Gán current_class_id / current_class_title (năm học đang active, ưu tiên lớp regular).
+    Đồng bộ logic với search_students — batch_get_students trước đây không enrich nên FE không có lớp.
+    """
+    if not students:
+        return
+    student_ids = [s.get("name") for s in students if s.get("name")]
+    if not student_ids:
+        return
+    try:
+        current_school_year = None
+        if campus_id:
+            current_school_year = frappe.db.get_value(
+                "SIS School Year",
+                {"is_enable": 1, "campus_id": campus_id},
+                "name",
+                order_by="start_date desc",
+            )
+        if not current_school_year:
+            current_school_year = frappe.db.get_value(
+                "SIS School Year",
+                {"is_enable": 1},
+                "name",
+                order_by="start_date desc",
+            )
+        if not current_school_year:
+            return
+
+        class_rows = frappe.db.sql(
+            """
+            SELECT
+                cs.student_id,
+                c.name AS class_id,
+                c.title AS class_title
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+            WHERE cs.student_id IN %(ids)s
+              AND cs.school_year_id = %(year)s
+              AND c.school_year_id = %(year)s
+            ORDER BY
+                cs.student_id,
+                CASE
+                    WHEN IFNULL(cs.class_type, '') IN ('', 'regular') THEN 0
+                    ELSE 1
+                END,
+                cs.creation ASC
+            """,
+            {"ids": tuple(student_ids), "year": current_school_year},
+            as_dict=True,
+        )
+
+        class_mapping = {}
+        for r in class_rows or []:
+            sid = r.get("student_id")
+            if sid and sid not in class_mapping:
+                class_mapping[sid] = {
+                    "class_id": r.get("class_id"),
+                    "class_title": r.get("class_title"),
+                }
+
+        for s in students:
+            sid = s.get("name")
+            if sid in class_mapping:
+                s["current_class_id"] = class_mapping[sid]["class_id"]
+                s["current_class_title"] = class_mapping[sid]["class_title"]
+    except Exception as e:
+        frappe.logger().warning(f"_enrich_students_current_class_for_batch: {e}")
+
+
 @frappe.whitelist(allow_guest=False, methods=['POST'])
 def batch_get_students():
     """Get multiple students by IDs in a single request
@@ -454,7 +524,9 @@ def batch_get_students():
                 data=[],
                 message="No students requested"
             )
-        
+
+        campus_id = get_current_campus_from_context()
+
         # ⚡ CACHE: Try to get from individual student caches first (15 min TTL - master data)
         cached_students = {}
         missing_ids = []
@@ -476,17 +548,16 @@ def batch_get_students():
             missing_ids = student_ids  # Fetch all if cache fails
         
         if not missing_ids:
-            # All students from cache
+            # All students from cache — vẫn enrich lớp (cache không lưu current_class_title)
+            all_cached = list(cached_students.values())
+            _enrich_students_current_class_for_batch(all_cached, campus_id)
             return success_response(
-                data=list(cached_students.values()),
-                message=f"Successfully fetched {len(cached_students)} students (all from cache)"
+                data=all_cached,
+                message=f"Successfully fetched {len(all_cached)} students (all from cache)",
             )
-        
+
         frappe.logger().info(f"❌ Cache MISS for {len(missing_ids)} students - fetching from DB")
         frappe.logger().info(f"🔍 [Backend] batch_get_students: Fetching {len(missing_ids)} students from DB")
-        
-        # Get current user's campus (for permission check)
-        campus_id = get_current_campus_from_context()
         
         # Batch query only missing students by IDs
         students = frappe.get_all(
@@ -576,7 +647,8 @@ def batch_get_students():
         
         # Combine cached and freshly fetched students
         all_students = list(cached_students.values()) + students
-        
+        _enrich_students_current_class_for_batch(all_students, campus_id)
+
         return success_response(
             data=all_students,
             message=f"Successfully fetched {len(all_students)} students ({len(cached_students)} from cache, {len(students)} from DB)"
