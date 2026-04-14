@@ -98,6 +98,34 @@ def _ensure_event_facility_support_category():
     return EVENT_FACILITY_CATEGORY_NAME
 
 
+def _ensure_administrative_ticket_upload_folder():
+    """
+    Tạo File folder Home/AdministrativeTicket nếu chưa có.
+    upload_file (mobile/web) ghi folder này — thiếu folder gây LinkValidationError khi gửi ảnh trong chat.
+    """
+    try:
+        if frappe.db.exists(
+            "File",
+            {"is_folder": 1, "file_name": "AdministrativeTicket", "folder": "Home"},
+        ):
+            return
+        frappe.get_doc(
+            {
+                "doctype": "File",
+                "file_name": "AdministrativeTicket",
+                "is_folder": 1,
+                "folder": "Home",
+            }
+        ).insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+        frappe.log_error(
+            frappe.get_traceback(),
+            "administrative_ticket._ensure_administrative_ticket_upload_folder",
+        )
+
+
 def _parse_json_body():
     """Đọc JSON từ request body."""
     data = {}
@@ -439,6 +467,7 @@ def _notify_new_admin_ticket_mobile(doc):
 def get_ticket_categories():
     """Danh sách danh mục (Support Category) cho dropdown ticket."""
     try:
+        _ensure_administrative_ticket_upload_folder()
         _ensure_event_facility_support_category()
         rows = frappe.get_all(
             "ERP Administrative Support Category",
@@ -463,6 +492,7 @@ def get_ticket_categories():
 def get_my_tickets():
     """Ticket do user hiện tại tạo."""
     try:
+        _ensure_administrative_ticket_upload_folder()
         email = _session_email()
         if not email:
             return validation_error_response(_("Chưa đăng nhập"), {"user": ["required"]})
@@ -488,6 +518,7 @@ def get_all_tickets():
     try:
         if not _is_staff():
             return forbidden_response(_("Không có quyền xem tất cả ticket"))
+        _ensure_administrative_ticket_upload_folder()
         rows = frappe.get_all(
             DOCTYPE,
             fields=["name"],
@@ -507,6 +538,7 @@ def get_all_tickets():
 def get_ticket(ticket_id=None):
     """Chi tiết một ticket."""
     try:
+        _ensure_administrative_ticket_upload_folder()
         data = _parse_json_body()
         ticket_id = ticket_id or data.get("ticket_id") or data.get("name")
         if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
@@ -854,9 +886,8 @@ def create_ticket():
         else:
             ticket_row["room_id"] = room_id_nf or None
         ticket_row["related_equipment_id"] = related_equipment_id or None
-        ticket_row["related_student_ids"] = (
-            json.dumps(related_student_ids_list) if related_student_ids_list else None
-        )
+        # Trường JSON: truyền list — Frappe tự serialize; json.dumps(list) gây double-encode → ValidationError 417
+        ticket_row["related_student_ids"] = related_student_ids_list if related_student_ids_list else None
 
         doc = frappe.get_doc(ticket_row)
         if pic:
@@ -967,7 +998,7 @@ def update_ticket():
             doc.related_equipment_id = req or None
         if "related_student_ids" in data:
             rlist = _normalize_related_student_ids(data.get("related_student_ids"))
-            doc.related_student_ids = json.dumps(rlist) if rlist else None
+            doc.related_student_ids = rlist if rlist else None
 
         if cint(getattr(doc, "is_event_facility", 0)):
             eb = (getattr(doc, "event_building_id", None) or "").strip()
