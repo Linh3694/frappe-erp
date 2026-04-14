@@ -599,7 +599,7 @@ def send_mobile_notification(user_email, title, body, data=None):
                 sound_name = "default"
             elif notification_type == "ticket":
                 channel_id = "ticket"
-                # Use custom sound ONLY for new ticket notifications from IT
+                # Custom sound: Ticket IT (microservice) & Ticket Hành chính Frappe (ticket_kind=administrative) dùng chung action
                 if action in ["new_ticket_admin", "ticket_assigned"]:
                     sound_name = "ticket_create.wav"  # Custom sound file
                 else:

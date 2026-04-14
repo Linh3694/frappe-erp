@@ -377,6 +377,64 @@ def _resolve_pic_from_assignment(category, area_title):
     return rows[0].pic
 
 
+def _team_leader_emails_for_category(category_name):
+    """Email (User) của team leader danh mục CSVC — dùng khi chưa auto-gán PIC."""
+    if not category_name or not frappe.db.exists("ERP Administrative Support Category", category_name):
+        return []
+    cat = frappe.get_doc("ERP Administrative Support Category", category_name)
+    out = []
+    for row in cat.get("team_leaders") or []:
+        u = (getattr(row, "user", None) or "").strip()
+        if u and u not in out:
+            out.append(u)
+    return out
+
+
+def _notify_new_admin_ticket_mobile(doc):
+    """
+    Push Expo cho PIC / team leader khi có ticket HC mới.
+    Payload khớp mobile: type=ticket + action=new_ticket_admin → kênh ticket + sound ticket_create.wav (như Ticket IT).
+    """
+    try:
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+    except Exception as e:
+        frappe.logger().warning(f"administrative_ticket: không import send_mobile_notification: {e}")
+        return
+
+    creator = (doc.creator_email or "").strip()
+    recipients = []
+    if getattr(doc, "assigned_to", None):
+        recipients.append(doc.assigned_to)
+    else:
+        recipients.extend(_team_leader_emails_for_category(doc.category))
+
+    title = _("Ticket hành chính mới")
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+    body = _("{0}: {1}").format(code, t)
+
+    data = {
+        "type": "ticket",
+        "action": "new_ticket_admin",
+        "ticket_kind": "administrative",
+        "ticketId": doc.name,
+        "ticket_id": doc.name,
+        "ticketCode": code,
+    }
+
+    seen = set()
+    for user_email in recipients:
+        if not user_email or user_email in seen:
+            continue
+        if user_email == creator:
+            continue
+        seen.add(user_email)
+        try:
+            send_mobile_notification(user_email, title, body, data)
+        except Exception as ex:
+            frappe.logger().error(f"administrative_ticket: push failed {user_email}: {ex}")
+
+
 @frappe.whitelist(allow_guest=False)
 def get_ticket_categories():
     """Danh sách danh mục (Support Category) cho dropdown ticket."""
@@ -812,6 +870,11 @@ def create_ticket():
 
         _append_history(doc.name, _("Tạo yêu cầu"))
         frappe.db.commit()
+
+        try:
+            _notify_new_admin_ticket_mobile(frappe.get_doc(DOCTYPE, doc.name))
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket._notify_new_admin_ticket_mobile")
 
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except frappe.exceptions.ValidationError as e:
