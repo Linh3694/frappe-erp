@@ -464,21 +464,14 @@ def _hc_ticket_url_for_recipient(doc, recipient_email):
 def _hc_administrative_ticket_email_enabled():
     """
     Có gửi email ticket HC qua email-service hay không.
-    - Trên production (site_config is_production / is_production_server): mặc định tắt gửi mail.
-    - Bật lại trên prod: site_config administrative_ticket_email_enabled = true
-    - Tắt hẳn mọi môi trường: administrative_ticket_email_enabled = false
+    - Mặc định: bật trên mọi môi trường (kể cả production).
+    - Tắt khi cần: site_config administrative_ticket_email_enabled = false
     """
     site = frappe.get_site_config()
     forced = site.get("administrative_ticket_email_enabled")
-    if forced is True:
-        return True
     if forced is False:
         return False
-    try:
-        from erp.common.role_events import is_production_server
-    except Exception:
-        is_production_server = lambda: bool(site.get("is_production", False))
-    return not is_production_server()
+    return True
 
 
 def _hc_post_ticket_email(payload):
