@@ -46,6 +46,16 @@ ISSUE_WRITE_ROLES = frozenset(
     }
 )
 
+# Chi nhom Sales doi trang thai / ket qua xu ly (sidebar Issue Detail — dong bo frontend)
+ISSUE_STATUS_SALES_ROLES = frozenset(
+    {
+        "SIS Sales",
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+        "SIS Sales Admin",
+    }
+)
+
 # Viền log (sales): khong gom SIS BOD — user vua BOD vua Sales hoac vua phong ban luon dung accent bod
 LOG_ACCENT_SALES_ROLES = frozenset(
     {
@@ -69,6 +79,13 @@ def _can_write_issue_ops(user: str, issue_doc) -> bool:
         if dn and user in _department_member_emails(dn):
             return True
     return False
+
+
+def _can_change_issue_status_sales(user: str) -> bool:
+    """Chi role Sales (4 role) moi doi status/result xu ly — khong BOD/SM/phong ban."""
+    if not user or user == "Guest":
+        return False
+    return bool(ISSUE_STATUS_SALES_ROLES & set(frappe.get_roles(user)))
 
 
 def _get_user_crm_issue_department_names(user: str):
@@ -1080,7 +1097,7 @@ def change_issue_status():
         return not_found_response(f"Khong tim thay van de {name}")
 
     doc = frappe.get_doc("CRM Issue", name)
-    if not _can_write_issue_ops(frappe.session.user, doc):
+    if not _can_change_issue_status_sales(frappe.session.user):
         return error_response("Khong co quyen cap nhat trang thai van de")
     if doc.approval_status != "Da duyet" and status != "Cho duyet":
         return error_response("Van de chua duoc duyet, khong doi trang thai xu ly")
