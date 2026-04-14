@@ -1016,15 +1016,12 @@ def update_lead_guardian():
         "position", "workplace", "address", "nationality", "note", "dob"
     )
     g_doc = frappe.get_doc("CRM Guardian", guardian_name)
+    # Email: khong gan qua doc trong vong lap — save() cua fieldtype Email co the khong ghi DB
+    email_from_request = str(updates.get("email") or "").strip() if "email" in updates else None
     for k in guardian_fields:
-        if k not in updates:
+        if k not in updates or k == "email":
             continue
-        val = updates[k]
-        if k == "email":
-            # Fieldtype Email: doc.set doi khi khong ghi DB; gan thuoc tinh truc tiep
-            g_doc.email = str(val or "").strip()
-        else:
-            g_doc.set(k, val)
+        g_doc.set(k, updates[k])
     # Cap nhat phone_numbers neu co (danh sach {phone_number, is_primary})
     if "phone_numbers" in updates:
         phone_list = updates.get("phone_numbers") or []
@@ -1053,6 +1050,10 @@ def update_lead_guardian():
                         r.is_primary = 1 if i == 0 else 0
     g_doc.flags.ignore_validate = True
     g_doc.save(ignore_permissions=True)
+
+    # Ghi email bang DB (tranh fieldtype Email bi bo qua / reset sau save)
+    if email_from_request is not None:
+        frappe.db.set_value("CRM Guardian", guardian_name, "email", email_from_request)
 
     # Cap nhat relationship_type trong lead_guardians neu co
     doc = frappe.get_doc("CRM Lead", name)
