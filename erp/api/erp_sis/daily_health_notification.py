@@ -112,16 +112,20 @@ def get_health_notification_recipients(
 # =====================================================================
 
 def _send_to_recipients(recipients: List[str], title: str, body: str, data: Dict):
-    """Gửi mobile push notification đến danh sách recipients."""
-    from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+    """Gửi ERP Notification + mobile push Expo đến danh sách recipients."""
+    from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
 
+    visit_ref = (data or {}).get("visit_id") or (data or {}).get("visitId")
     for user_email in recipients:
         try:
-            send_mobile_notification(
+            send_mobile_notification_persisted(
                 user_email=user_email,
                 title=title,
                 body=body,
-                data=data
+                data=data,
+                erp_notification_type="health_examination",
+                reference_doctype="SIS Daily Health Visit" if visit_ref else None,
+                reference_name=visit_ref,
             )
         except Exception as e:
             frappe.logger().warning(
@@ -342,8 +346,8 @@ def notify_health_visit_completed(visit_name: str):
         outcome = visit.status
 
         outcome_messages = {
-            "returned": ("HS đã về lớp", f"{student_name} đã được Y tế cho về lớp"),
-            "picked_up": ("PH đã đón HS", f"{student_name} đã được phụ huynh đón về"),
+            "returned": ("Học sinh đã về lớp", f"{student_name} đã được Y tế cho về lớp"),
+            "picked_up": ("Phụ huynh đã đón học sinh", f"{student_name} đã được phụ huynh đón về"),
             "transferred": ("Chuyển viện", f"{student_name} đã được chuyển viện"),
         }
 

@@ -72,6 +72,7 @@ def send_new_feedback_notification(feedback_doc):
             "type": "feedback_new",
             "action": "new_feedback",
             "feedbackId": feedback_doc.name,
+            "feedback_id": feedback_doc.name,
             "feedbackCode": feedback_doc.name,
             "feedbackType": feedback_doc.feedback_type,
             "guardianName": guardian_name,
@@ -89,18 +90,20 @@ def send_new_feedback_notification(feedback_doc):
             frappe.logger().warning("📱 [Feedback Notification] No mobile staff users found to notify")
             return
 
-        # Import send_mobile_notification
-        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
 
         # Send notification to each user
         success_count = 0
         for user in staff_users:
             try:
-                result = send_mobile_notification(
+                result = send_mobile_notification_persisted(
                     user_email=user.get("email"),
                     title=title,
                     body=body,
-                    data=data
+                    data=data,
+                    erp_notification_type="system",
+                    reference_doctype="Feedback",
+                    reference_name=feedback_doc.name,
                 )
                 
                 if result.get("success"):
@@ -170,6 +173,7 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
             "type": "feedback_reply",
             "action": "guardian_reply",
             "feedbackId": feedback_doc.name,
+            "feedback_id": feedback_doc.name,
             "feedbackCode": feedback_doc.name,
             "feedbackType": feedback_doc.feedback_type,
             "guardianName": guardian_name,
@@ -177,7 +181,7 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
             "timestamp": now_datetime().isoformat()
         }
 
-        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
         
         success_count = 0
         total_count = 0
@@ -186,11 +190,14 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
         if feedback_doc.assigned_to:
             total_count += 1
             try:
-                result = send_mobile_notification(
+                result = send_mobile_notification_persisted(
                     user_email=feedback_doc.assigned_to,
                     title=title,
                     body=body,
-                    data=data
+                    data=data,
+                    erp_notification_type="system",
+                    reference_doctype="Feedback",
+                    reference_name=feedback_doc.name,
                 )
                 
                 if result.get("success"):
@@ -213,11 +220,14 @@ def send_feedback_reply_notification(feedback_doc, reply_type="Guardian"):
                     
                 total_count += 1
                 try:
-                    result = send_mobile_notification(
+                    result = send_mobile_notification_persisted(
                         user_email=user.get("email"),
                         title=title,
                         body=body,
-                        data=data
+                        data=data,
+                        erp_notification_type="system",
+                        reference_doctype="Feedback",
+                        reference_name=feedback_doc.name,
                     )
                     if result.get("success"):
                         success_count += 1
@@ -340,6 +350,7 @@ def send_feedback_assigned_notification(feedback_doc, assigned_by=None):
             "type": "feedback_assigned",
             "action": "feedback_assigned",
             "feedbackId": feedback_doc.name,
+            "feedback_id": feedback_doc.name,
             "feedbackCode": feedback_doc.name,
             "guardianName": guardian_name,
             "assignedBy": assigned_by or "",
@@ -347,14 +358,17 @@ def send_feedback_assigned_notification(feedback_doc, assigned_by=None):
             "timestamp": now_datetime().isoformat()
         }
 
-        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
 
         try:
-            result = send_mobile_notification(
+            result = send_mobile_notification_persisted(
                 user_email=feedback_doc.assigned_to,
                 title=title,
                 body=body,
-                data=data
+                data=data,
+                erp_notification_type="system",
+                reference_doctype="Feedback",
+                reference_name=feedback_doc.name,
             )
             
             if result.get("success"):

@@ -3,8 +3,9 @@ Mobile Push Notification API for React Native Apps
 Handles Expo push notifications for iOS/Android devices
 """
 
-import frappe
 import json
+
+import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
 
@@ -550,6 +551,55 @@ def test_send_push(user_email, title="Test Notification", body="This is a test p
         return success_response(result, "Push notification sent")
     except Exception as e:
         return error_response(f"Error: {str(e)}")
+
+def send_mobile_notification_persisted(
+    user_email,
+    title,
+    body,
+    data=None,
+    *,
+    erp_notification_type="system",
+    priority="medium",
+    reference_doctype=None,
+    reference_name=None,
+):
+    """
+    Tạo bản ghi ERP Notification (trung tâm thông báo in-app / notification_center) rồi gửi Expo push.
+    Hook after_insert của ERP Notification chỉ bắn realtime + unread, không gửi push trùng.
+    """
+    from frappe import get_doc
+
+    data = data if data is not None else {}
+    try:
+        doc_dict = {
+            "doctype": "ERP Notification",
+            "title": title,
+            "message": body,
+            "recipient_user": user_email,
+            "recipients": json.dumps([user_email]),
+            "notification_type": erp_notification_type,
+            "priority": priority,
+            "data": json.dumps(data),
+            "channel": "push",
+            "status": "sent",
+            "delivery_status": "pending",
+            "sent_at": frappe.utils.now(),
+            "event_timestamp": frappe.utils.now(),
+        }
+        if reference_doctype:
+            doc_dict["reference_doctype"] = reference_doctype
+        if reference_name:
+            doc_dict["reference_name"] = reference_name
+        notif_doc = get_doc(doc_dict)
+        notif_doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception as e:
+        frappe.logger().error(
+            f"[send_mobile_notification_persisted] ERP Notification failed for {user_email}: {e}"
+        )
+
+    return send_mobile_notification(user_email, title, body, data)
+
 
 @frappe.whitelist()
 def send_mobile_notification(user_email, title, body, data=None):

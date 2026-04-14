@@ -183,7 +183,7 @@ def _send_leave_notification_to_teachers(student_id, student_name, parent_name, 
 		end_date: Leave end date (YYYY-MM-DD)
 	"""
 	try:
-		from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+		from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
 		
 		# Get homeroom teachers for this student
 		teachers = _get_homeroom_teachers_for_student(student_id)
@@ -235,11 +235,14 @@ def _send_leave_notification_to_teachers(student_id, student_name, parent_name, 
 		success_count = 0
 		for teacher in teachers:
 			try:
-				result = send_mobile_notification(
+				result = send_mobile_notification_persisted(
 					user_email=teacher["user_id"],
 					title=notification_title,
 					body=notification_body,
-					data=notification_data
+					data=notification_data,
+					erp_notification_type="leave",
+					reference_doctype="SIS Student Leave Request",
+					reference_name=leave_request_id,
 				)
 				
 				if result.get("success"):

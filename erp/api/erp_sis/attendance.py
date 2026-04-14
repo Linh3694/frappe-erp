@@ -1715,7 +1715,7 @@ def remind_homeroom_attendance():
 			# Send notification if there are unattended classes
 			if unattended_classes:
 				try:
-					from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+					from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
 					
 					class_list = ", ".join(unattended_classes)
 					title = "📋 Nhắc điểm danh"
@@ -1730,11 +1730,12 @@ def remind_homeroom_attendance():
 						"classes": unattended_classes
 					}
 					
-					result = send_mobile_notification(
+					result = send_mobile_notification_persisted(
 						user_email=teacher_email,
 						title=title,
 						body=body,
-						data=notification_data
+						data=notification_data,
+						erp_notification_type="reminder",
 					)
 					
 					if result.get("success"):

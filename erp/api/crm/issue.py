@@ -166,12 +166,23 @@ def _finalize_issue_api_dict(doc):
 
 
 def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_user=None):
-    """Gui push notification Expo cho user (workspace-mobile)."""
+    """
+    Push Expo + ERP Notification (trung tam thong bao mobile / notification_center).
+    Dong bo payload voi workspace-mobile (issueId / issue_id, type crm_issue_*).
+    """
     try:
-        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
     except Exception as e:
-        frappe.logger().warning(f"CRM Issue: khong import send_mobile_notification: {e}")
+        frappe.logger().warning(f"CRM Issue: khong import send_mobile_notification_persisted: {e}")
         return
+
+    payload = {
+        "type": notif_type,
+        "issueId": issue_doc.name,
+        "issue_id": issue_doc.name,
+        "issueCode": (issue_doc.issue_code or ""),
+    }
+
     seen = set()
     for email in users or []:
         if not email or email in ("Guest",) or email == exclude_user:
@@ -180,15 +191,14 @@ def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_
             continue
         seen.add(email)
         try:
-            send_mobile_notification(
+            send_mobile_notification_persisted(
                 user_email=email,
                 title=title,
                 body=body,
-                data={
-                    "type": notif_type,
-                    "issueId": issue_doc.name,
-                    "issueCode": (issue_doc.issue_code or ""),
-                },
+                data=payload,
+                erp_notification_type="system",
+                reference_doctype="CRM Issue",
+                reference_name=issue_doc.name,
             )
         except Exception as ex:
             frappe.logger().error(f"CRM Issue push notify failed for {email}: {ex}")
@@ -1055,7 +1065,7 @@ def update_issue():
             if new_pic and new_pic != old_pic_s:
                 _notify_crm_issue_mobile(
                     [new_pic],
-                    "Bạn được giao PIC vấn đề",
+                    "Bạn được giao vấn đề mới",
                     f"{doc.issue_code}: {doc.title}",
                     doc,
                     "crm_issue_pic_changed",

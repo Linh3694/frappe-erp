@@ -424,9 +424,9 @@ def _notify_new_admin_ticket_mobile(doc):
     Payload khớp mobile: type=ticket + action=new_ticket_admin → kênh ticket + sound ticket_create.wav (như Ticket IT).
     """
     try:
-        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
     except Exception as e:
-        frappe.logger().warning(f"administrative_ticket: không import send_mobile_notification: {e}")
+        frappe.logger().warning(f"administrative_ticket: không import send_mobile_notification_persisted: {e}")
         return
 
     creator = (doc.creator_email or "").strip()
@@ -458,7 +458,15 @@ def _notify_new_admin_ticket_mobile(doc):
             continue
         seen.add(user_email)
         try:
-            send_mobile_notification(user_email, title, body, data)
+            send_mobile_notification_persisted(
+                user_email,
+                title,
+                body,
+                data,
+                erp_notification_type="ticket",
+                reference_doctype=DOCTYPE,
+                reference_name=doc.name,
+            )
         except Exception as ex:
             frappe.logger().error(f"administrative_ticket: push failed {user_email}: {ex}")
 
