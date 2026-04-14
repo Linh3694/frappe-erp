@@ -111,48 +111,16 @@ def get_announcements():
                     meta={
                         "pagination": {
                             "page": 1,
-                            "limit": int(data.get("limit", 10)),
+                            "limit": max(1, int(data.get("limit", 10))),
                             "total": 0,
                             "pages": 0
                         }
                     }
                 )
 
-        # Get pagination parameters
-        page = int(data.get("page", 1))
-        limit = int(data.get("limit", 10))
-
-        # Calculate offset
-        offset = (page - 1) * limit
-
-        # Get total count first
-        total_count = frappe.db.count("SIS Announcement", filters=filters)
-
-        # Get announcements with pagination
-        announcements = frappe.get_all(
-            "SIS Announcement",
-            filters=filters,
-            fields=[
-                "name",
-                "campus_id",
-                "title_en",
-                "title_vn",
-                "content_en",
-                "content_vn",
-                "status",
-                "sent_at",
-                "sent_by",
-                "recipients",
-                "recipient_type",
-                "created_at",
-                "created_by",
-                "updated_at",
-                "updated_by"
-            ],
-            order_by="sent_at desc",  # Most recent first
-            limit=limit,
-            start=offset
-        )
+        # Phân trang áp dụng SAU khi lọc theo phụ huynh/học sinh (không paginate ở DB trước khi lọc)
+        page = max(1, int(data.get("page", 1)))
+        limit = max(1, int(data.get("limit", 10)))
 
         # Lấy tất cả students của phụ huynh đang login
         # Thay vì filter theo 1 student cụ thể, ta sẽ check với tất cả students
@@ -222,8 +190,32 @@ def get_announcements():
         # ⭐ DEBUG LOG
         frappe.logger().info(f"Parent portal - all_student_ids={all_student_ids}, all_student_info={all_student_info}")
 
+        # Lấy toàn bộ bản ghi khớp filter (đã search/campus), sắp mới → cũ; lọc recipient rồi mới phân trang
+        announcements = frappe.get_all(
+            "SIS Announcement",
+            filters=filters,
+            fields=[
+                "name",
+                "campus_id",
+                "title_en",
+                "title_vn",
+                "content_en",
+                "content_vn",
+                "status",
+                "sent_at",
+                "sent_by",
+                "recipients",
+                "recipient_type",
+                "created_at",
+                "created_by",
+                "updated_at",
+                "updated_by"
+            ],
+            order_by="sent_at desc",
+        )
+
         # Process announcements to add additional information
-        processed_announcements = []
+        processed_all_filtered = []
         for announcement in announcements:
             # Get campus information
             campus_info = None
@@ -393,30 +385,27 @@ def get_announcements():
                 "published_at": announcement.sent_at  # Use sent_at as published_at for consistency with frontend
             }
 
-            processed_announcements.append(processed_announcement)
+            processed_all_filtered.append(processed_announcement)
 
-        # Calculate total pages
-        total_pages = (total_count + limit - 1) // limit  # Ceiling division
+        total_filtered = len(processed_all_filtered)
+        offset = (page - 1) * limit
+        processed_announcements = processed_all_filtered[offset : offset + limit]
+        total_pages = (total_filtered + limit - 1) // limit if limit else 0
 
-        frappe.logger().info(f"Parent portal - Retrieved {len(processed_announcements)} announcements out of {total_count} total")
+        frappe.logger().info(
+            f"Parent portal - Retrieved page {page}: {len(processed_announcements)} announcements "
+            f"(total after filter: {total_filtered}, raw rows: {len(announcements)})"
+        )
 
-        # ⭐ Build debug info for all announcements
+        # ⭐ Build debug info theo đúng trang trả về (dựa trên recipient_tags đã xử lý)
         announcements_debug = []
-        for a in announcements:
-            tags = []
-            if a.recipients:
-                try:
-                    if isinstance(a.recipients, str):
-                        recipients = json.loads(a.recipients)
-                    else:
-                        recipients = a.recipients
-                    tags = [f"{r.get('type')}:{r.get('display_name')}" for r in recipients if isinstance(r, dict)]
-                except:
-                    pass
+        for item in processed_announcements:
+            rt = item.get("recipient_tags") or []
+            tags = [f"{t.get('type')}:{t.get('display_name')}" for t in rt if isinstance(t, dict)]
             announcements_debug.append({
-                "name": a.name,
+                "name": item["name"],
                 "recipients_raw": tags,
-                "recipients_full": recipients if isinstance(recipients, list) else []
+                "recipients_full": rt,
             })
 
         return list_response(
@@ -425,13 +414,14 @@ def get_announcements():
                 "pagination": {
                     "page": page,
                     "limit": limit,
-                    "total": total_count,
+                    "total": total_filtered,
                     "pages": total_pages
                 },
                 "debug": {
                     "user_email": user_email,
                     "all_student_ids": all_student_ids,
                     "processed_count": len(processed_announcements),
+                    "total_after_filter": total_filtered,
                     "all_announcements": announcements_debug
                 }
             }
