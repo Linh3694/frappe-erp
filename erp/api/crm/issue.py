@@ -46,9 +46,20 @@ ISSUE_WRITE_ROLES = frozenset(
     }
 )
 
+# Viền log (sales): khong gom SIS BOD — user vua BOD vua Sales hoac vua phong ban luon dung accent bod
+LOG_ACCENT_SALES_ROLES = frozenset(
+    {
+        "SIS Sales",
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+        "SIS Sales Admin",
+        "System Manager",
+    }
+)
+
 
 def _can_write_issue_ops(user: str, issue_doc) -> bool:
-    """User duoc chinh sua van de (sau check_crm_permission)."""
+    """User duoc chinh sua van de (sau check_crm_permission): role ISSUE_WRITE_ROLES hoac thanh vien phong ban issue."""
     if not user or user == "Guest":
         return False
     roles = set(frappe.get_roles(user))
@@ -82,13 +93,13 @@ def _can_see_pending_issues_queue(user: str) -> bool:
 
 
 def _compute_log_accent(logged_by: str, issue_doc) -> str:
-    """bod > sales > dept > neutral — dong bo IssueDetail border."""
+    """Mau viền log: luon uu tien SIS BOD neu co (ke ca dong thoi Sales hoac thanh vien phong ban), roi sales/SM, roi dept."""
     if not logged_by:
         return "neutral"
     roles = set(frappe.get_roles(logged_by))
     if "SIS BOD" in roles:
         return "bod"
-    if ISSUE_WRITE_ROLES & roles:
+    if LOG_ACCENT_SALES_ROLES & roles:
         return "sales"
     dept = getattr(issue_doc, "department", None) or ""
     if dept and logged_by in _department_member_emails(dept):
@@ -97,7 +108,7 @@ def _compute_log_accent(logged_by: str, issue_doc) -> str:
 
 
 def _enrich_process_logs_accent(data: dict, issue_doc):
-    """Gan log_accent cho moi dong process_logs trong dict API."""
+    """Gan log_accent cho moi dong process_logs (API get_issue / update)."""
     if not isinstance(data, dict):
         return
     logs = data.get("process_logs") or []
@@ -109,7 +120,7 @@ def _enrich_process_logs_accent(data: dict, issue_doc):
 
 
 def _finalize_issue_api_dict(doc):
-    """as_dict + enrich user + issue_students display + log_accent."""
+    """as_dict + enrich user + issue_students + log_accent (tra ve client)."""
     data = doc.as_dict()
     _enrich_user_info([data])
     _enrich_issue_students_display(data)
