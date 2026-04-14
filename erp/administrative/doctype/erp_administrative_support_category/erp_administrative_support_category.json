@@ -9,7 +9,8 @@
  "engine": "InnoDB",
  "field_order": [
   "title",
-  "ticket_code_prefix"
+  "ticket_code_prefix",
+  "team_leaders"
  ],
  "fields": [
   {
@@ -26,6 +27,13 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Prefix m\u00e3 ticket"
+  },
+  {
+   "description": "Ng\u01b0\u1eddi ph\u1ee5 tr\u00e1ch nh\u00f3m (role SIS Administrative). C\u00f3 th\u1ec3 nhi\u1ec1u ng\u01b0\u1eddi.",
+   "fieldname": "team_leaders",
+   "fieldtype": "Table",
+   "label": "Team Leader",
+   "options": "ERP Administrative Support Category Team Leader"
   }
  ],
  "index_web_pages_for_search": 1,

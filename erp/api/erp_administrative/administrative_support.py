@@ -42,12 +42,77 @@ def _parse_json_body():
     return data
 
 
+def _team_leader_row_from_user(uid):
+    u = frappe.db.get_value("User", uid, ["email", "full_name", "user_image"], as_dict=True)
+    if not u:
+        return {"user": uid, "email": "", "full_name": "", "user_image": ""}
+    return {
+        "user": uid,
+        "email": (u.get("email") or "").strip(),
+        "full_name": (u.get("full_name") or "").strip(),
+        "user_image": (u.get("user_image") or "").strip(),
+    }
+
+
 def _support_category_to_dict(doc):
+    leaders = []
+    for row in doc.get("team_leaders") or []:
+        uid = getattr(row, "user", None) or (row or {}).get("user")
+        if not uid:
+            continue
+        leaders.append(_team_leader_row_from_user(uid))
     return {
         "name": doc.name,
         "title": doc.title,
         "ticket_code_prefix": (doc.ticket_code_prefix or "").strip(),
+        "team_leaders": leaders,
     }
+
+
+def _normalize_team_leader_user_ids(raw_list):
+    """Chuẩn hóa team_leaders từ request (email hoặc User.name) → danh sách User.name không trùng."""
+    if raw_list is None:
+        return None
+    if not isinstance(raw_list, list):
+        frappe.throw(_("team_leaders phải là mảng"))
+    out = []
+    seen = set()
+    for item in raw_list:
+        s = str(item or "").strip()
+        if not s:
+            continue
+        uid = _resolve_user_from_cell(s)
+        if not uid:
+            frappe.throw(_("Không tìm thấy user: {0}").format(s))
+        if uid not in seen:
+            seen.add(uid)
+            out.append(uid)
+    return out
+
+
+def _attach_team_leaders_to_category_rows(items):
+    """Gắn team_leaders (đã enrich email/full_name) cho danh sách dict có key name."""
+    if not items:
+        return
+    names = [x["name"] for x in items]
+    from collections import defaultdict
+
+    by_parent = defaultdict(list)
+    ch = frappe.get_all(
+        "ERP Administrative Support Category Team Leader",
+        filters={"parent": ["in", names]},
+        fields=["parent", "user", "idx"],
+        order_by="parent asc, idx asc",
+    )
+    for c in ch:
+        by_parent[c.parent].append(c.user)
+    all_uids = list({c.user for c in ch})
+    meta = {}
+    for uid in all_uids:
+        meta[uid] = _team_leader_row_from_user(uid)
+    for row in items:
+        uids = by_parent.get(row["name"], [])
+        row["team_leaders"] = [meta[uid] for uid in uids if uid in meta]
 
 
 def _assignment_to_dict(doc):
@@ -149,9 +214,11 @@ def get_all_support_categories():
                 "name": r.name,
                 "title": r.title,
                 "ticket_code_prefix": (r.ticket_code_prefix or "").strip(),
+                "team_leaders": [],
             }
             for r in rows
         ]
+        _attach_team_leaders_to_category_rows(out)
         return list_response(out, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_support.get_all_support_categories")
@@ -184,11 +251,13 @@ def create_support_category():
             return validation_error_response(_("Thiếu tên danh mục"), {"title": ["required"]})
         if frappe.db.exists("ERP Administrative Support Category", {"title": title}):
             return validation_error_response(_("Tên danh mục đã tồn tại"), {"title": ["duplicate"]})
+        team_ids = _normalize_team_leader_user_ids(data.get("team_leaders") or [])
         doc = frappe.get_doc(
             {
                 "doctype": "ERP Administrative Support Category",
                 "title": title,
                 "ticket_code_prefix": prefix or None,
+                "team_leaders": [{"user": u} for u in team_ids],
             }
         )
         doc.insert(ignore_permissions=False)
@@ -218,6 +287,11 @@ def update_support_category():
         if "ticket_code_prefix" in data or "ticketCodePrefix" in data:
             p = (data.get("ticket_code_prefix") or data.get("ticketCodePrefix") or "").strip()
             doc.ticket_code_prefix = p or None
+        if "team_leaders" in data:
+            team_ids = _normalize_team_leader_user_ids(data.get("team_leaders") or [])
+            doc.team_leaders = []
+            for uid in team_ids:
+                doc.append("team_leaders", {"user": uid})
         doc.save(ignore_permissions=False)
         frappe.db.commit()
         return single_item_response(_support_category_to_dict(doc), _("Đã cập nhật"))
