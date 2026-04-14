@@ -343,6 +343,38 @@ EVENT_STATUS_MAP = {
 }
 
 
+def _enrich_lead_event_promotion_summary(event_student_rows):
+    """Gắn promotion_summary: tên CRM Promotion đã tick (selected=1) trên từng CRM Admission Event Student."""
+    if not event_student_rows:
+        return
+    parents = [r["name"] for r in event_student_rows]
+    promo_rows = frappe.get_all(
+        "CRM Admission Event Student Promotion",
+        filters={"parent": ["in", parents], "selected": 1},
+        fields=["parent", "promotion"],
+    )
+    promo_ids = list({p["promotion"] for p in promo_rows if p.get("promotion")})
+    names_map = {}
+    if promo_ids:
+        for row in frappe.get_all(
+            "CRM Promotion",
+            filters={"name": ["in", promo_ids]},
+            fields=["name", "promotion_name"],
+        ):
+            names_map[row.name] = row.get("promotion_name") or row.name
+
+    by_parent = defaultdict(list)
+    for pr in promo_rows:
+        pid = pr.get("promotion")
+        if not pid:
+            continue
+        by_parent[pr.parent].append(names_map.get(pid, pid))
+
+    for r in event_student_rows:
+        parts = by_parent.get(r["name"], [])
+        r["promotion_summary"] = ", ".join(parts) if parts else ""
+
+
 @frappe.whitelist()
 def get_lead_events():
     """Lấy mọi sự kiện đã gắn lead (mọi trạng thái: registered / attended / not_attended) — DealSection CRM."""
@@ -363,6 +395,8 @@ def get_lead_events():
     if not event_students:
         return list_response([], "Thành công")
 
+    _enrich_lead_event_promotion_summary(event_students)
+
     event_ids = list({r["event_id"] for r in event_students})
     events = frappe.get_all(
         "CRM Admission Event",
@@ -382,6 +416,7 @@ def get_lead_events():
                 "status": es["status"],
                 "status_label": EVENT_STATUS_MAP.get(es["status"], es["status"]),
                 "modified": es["modified"],
+                "promotion_summary": es.get("promotion_summary") or "",
             })
     return list_response(result, "Thành công")
 
