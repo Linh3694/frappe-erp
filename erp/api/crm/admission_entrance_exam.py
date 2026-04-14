@@ -1182,3 +1182,121 @@ def send_entrance_exam_notification():
         {"sent": sent, "errors": errors},
         message=f"Đã gửi {sent} email",
     )
+
+
+# --- Mẫu email gửi thông báo kỳ KSĐV (DocType CRM Admission Entrance Exam Email Template) ---
+
+_ENTRANCE_EXAM_EMAIL_TEMPLATE = "CRM Admission Entrance Exam Email Template"
+
+
+@frappe.whitelist()
+def get_entrance_exam_email_templates():
+    """Danh sách mẫu email (lưu trong DB, dùng chung toàn trường)."""
+    check_crm_permission()
+    rows = frappe.get_all(
+        _ENTRANCE_EXAM_EMAIL_TEMPLATE,
+        fields=["name", "template_name", "notification_type", "subject", "body", "modified"],
+        order_by="modified desc",
+    )
+    return list_response(rows)
+
+
+@frappe.whitelist(methods=["POST"])
+def create_entrance_exam_email_template():
+    """Tạo mẫu email mới."""
+    check_crm_permission()
+    data = get_request_data()
+    template_name = (data.get("template_name") or "").strip()
+    notification_type = (data.get("notification_type") or "").strip()
+    subject = (data.get("subject") or "").strip()
+    body = data.get("body")
+    if body is not None:
+        body = str(body)
+    else:
+        body = ""
+
+    if not template_name:
+        return validation_error_response("Thiếu tên mẫu", {"template_name": ["Bắt buộc"]})
+    if notification_type not in ("exam_schedule", "exam_result"):
+        return validation_error_response(
+            "Loại thông báo không hợp lệ",
+            {"notification_type": ['Chọn "exam_schedule" hoặc "exam_result"']},
+        )
+    if not subject:
+        return validation_error_response("Thiếu tiêu đề", {"subject": ["Bắt buộc"]})
+    if not body.strip():
+        return validation_error_response("Thiếu nội dung", {"body": ["Bắt buộc"]})
+
+    try:
+        doc = frappe.new_doc(_ENTRANCE_EXAM_EMAIL_TEMPLATE)
+        doc.template_name = template_name
+        doc.notification_type = notification_type
+        doc.subject = subject
+        doc.body = body
+        doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+        return single_item_response(doc.as_dict(), "Đã tạo mẫu")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Lỗi tạo mẫu: {str(e)}")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_entrance_exam_email_template():
+    """Cập nhật mẫu email (theo `name` = ID bản ghi)."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name")
+    if not name or not frappe.db.exists(_ENTRANCE_EXAM_EMAIL_TEMPLATE, name):
+        return not_found_response("Không tìm thấy mẫu")
+
+    template_name = (data.get("template_name") or "").strip()
+    notification_type = (data.get("notification_type") or "").strip()
+    subject = (data.get("subject") or "").strip()
+    body = data.get("body")
+    if body is not None:
+        body = str(body)
+    else:
+        body = ""
+
+    if not template_name:
+        return validation_error_response("Thiếu tên mẫu", {"template_name": ["Bắt buộc"]})
+    if notification_type not in ("exam_schedule", "exam_result"):
+        return validation_error_response(
+            "Loại thông báo không hợp lệ",
+            {"notification_type": ['Chọn "exam_schedule" hoặc "exam_result"']},
+        )
+    if not subject:
+        return validation_error_response("Thiếu tiêu đề", {"subject": ["Bắt buộc"]})
+    if not body.strip():
+        return validation_error_response("Thiếu nội dung", {"body": ["Bắt buộc"]})
+
+    try:
+        doc = frappe.get_doc(_ENTRANCE_EXAM_EMAIL_TEMPLATE, name)
+        doc.template_name = template_name
+        doc.notification_type = notification_type
+        doc.subject = subject
+        doc.body = body
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        return single_item_response(doc.as_dict(), "Đã cập nhật mẫu")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Lỗi cập nhật: {str(e)}")
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_entrance_exam_email_template():
+    """Xóa mẫu email."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name")
+    if not name or not frappe.db.exists(_ENTRANCE_EXAM_EMAIL_TEMPLATE, name):
+        return not_found_response("Không tìm thấy mẫu")
+    try:
+        frappe.delete_doc(_ENTRANCE_EXAM_EMAIL_TEMPLATE, name, ignore_permissions=True)
+        frappe.db.commit()
+        return success_response(message="Đã xóa mẫu")
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Lỗi xóa: {str(e)}")
