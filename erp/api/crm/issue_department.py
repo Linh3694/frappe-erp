@@ -147,7 +147,13 @@ def delete_department():
     if not frappe.db.exists("CRM Issue Department", name):
         return not_found_response("Khong tim thay phong ban")
 
-    cnt = frappe.db.count("CRM Issue", {"department": name})
+    n_direct = frappe.get_all("CRM Issue", filters={"department": name}, pluck="name")
+    n_child = frappe.get_all(
+        "CRM Issue Related Department",
+        filters={"department": name, "parenttype": "CRM Issue"},
+        pluck="parent",
+    )
+    cnt = len(set(n_direct or []) | set(n_child or []))
     if cnt:
         return error_response(f"Khong the xoa: dang co {cnt} van de gan phong ban nay")
 

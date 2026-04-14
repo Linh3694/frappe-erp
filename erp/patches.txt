@@ -34,3 +34,6 @@ erp.patches.v1_0.crm_remove_re_enroll_step
 
 # CRM: chuan hoa trang thai hoc sinh khoa hoc (6 trang thai)
 erp.patches.v1_0.migrate_crm_course_student_status_v2
+
+# CRM Issue: nhieu phong ban — backfill bang con tu cot department
+erp.patches.v1_0.migrate_crm_issue_departments_child

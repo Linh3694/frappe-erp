@@ -22,6 +22,7 @@
   "issue_assignment",
   "pic",
   "department",
+  "issue_departments",
   "approval_section",
   "approval_status",
   "created_by_user",
@@ -128,6 +129,12 @@
    "fieldtype": "Link",
    "label": "Related Department",
    "options": "CRM Issue Department"
+  },
+  {
+   "fieldname": "issue_departments",
+   "fieldtype": "Table",
+   "label": "Related Departments",
+   "options": "CRM Issue Related Department"
   },
   {
    "fieldname": "approval_section",

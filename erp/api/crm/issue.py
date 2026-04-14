@@ -59,15 +59,15 @@ LOG_ACCENT_SALES_ROLES = frozenset(
 
 
 def _can_write_issue_ops(user: str, issue_doc) -> bool:
-    """User duoc chinh sua van de (sau check_crm_permission): role ISSUE_WRITE_ROLES hoac thanh vien phong ban issue."""
+    """User duoc chinh sua van de (sau check_crm_permission): role ISSUE_WRITE_ROLES hoac thanh vien mot phong ban lien quan."""
     if not user or user == "Guest":
         return False
     roles = set(frappe.get_roles(user))
     if ISSUE_WRITE_ROLES & roles:
         return True
-    dept = getattr(issue_doc, "department", None) or ""
-    if dept and user in _department_member_emails(dept):
-        return True
+    for dn in _issue_department_docnames(issue_doc):
+        if dn and user in _department_member_emails(dn):
+            return True
     return False
 
 
@@ -101,9 +101,9 @@ def _compute_log_accent(logged_by: str, issue_doc) -> str:
         return "bod"
     if LOG_ACCENT_SALES_ROLES & roles:
         return "sales"
-    dept = getattr(issue_doc, "department", None) or ""
-    if dept and logged_by in _department_member_emails(dept):
-        return "dept"
+    for dn in _issue_department_docnames(issue_doc):
+        if dn and logged_by in _department_member_emails(dn):
+            return "dept"
     return "neutral"
 
 
@@ -174,6 +174,107 @@ def _department_member_emails(department_name):
         return []
     dept = frappe.get_doc("CRM Issue Department", department_name)
     return [m.user for m in (dept.members or [])]
+
+
+def _issue_department_docnames(issue_doc):
+    """Docname CRM Issue Department: uu tien bang issue_departments, fallback cot department."""
+    names = []
+    rows = getattr(issue_doc, "issue_departments", None) or []
+    for row in rows:
+        d = (getattr(row, "department", None) or "").strip()
+        if d and d not in names:
+            names.append(d)
+    if not names:
+        dept = (getattr(issue_doc, "department", None) or "").strip()
+        if dept:
+            names.append(dept)
+    return names
+
+
+def _all_department_member_emails_for_issue(issue_doc):
+    """Union email thanh vien cua tat ca phong ban lien quan (dedupe)."""
+    seen = set()
+    out = []
+    for dn in _issue_department_docnames(issue_doc):
+        for e in _department_member_emails(dn):
+            if e and e not in seen:
+                seen.add(e)
+                out.append(e)
+    return out
+
+
+def _issue_names_matching_department(dept_name):
+    """CRM Issue co department=dept_name hoac co dong child trung dept_name."""
+    if not dept_name:
+        return []
+    n1 = frappe.get_all("CRM Issue", filters={"department": dept_name}, pluck="name")
+    n2 = frappe.get_all(
+        "CRM Issue Related Department",
+        filters={"department": dept_name, "parenttype": "CRM Issue"},
+        pluck="parent",
+    )
+    return list(set(n1 or []) | set(n2 or []))
+
+
+def _issue_names_visible_to_department_members(dept_docnames):
+    """Issue ma user (thuoc mot trong cac phong ban dept_docnames) co lien quan."""
+    if not dept_docnames:
+        return []
+    n1 = frappe.get_all("CRM Issue", filters={"department": ["in", list(dept_docnames)]}, pluck="name")
+    n2 = frappe.get_all(
+        "CRM Issue Related Department",
+        filters={"department": ["in", list(dept_docnames)], "parenttype": "CRM Issue"},
+        pluck="parent",
+    )
+    return list(set(n1 or []) | set(n2 or []))
+
+
+def _sync_issue_departments(doc, data):
+    """
+    Dong bo bang con issue_departments + cot department (phan tu dau).
+    Payload: departments: list docname CRM Issue Department.
+    """
+    if "departments" not in data:
+        return
+    ids = []
+    for x in data.get("departments") or []:
+        sid = (x or "").strip() if isinstance(x, str) else ""
+        if sid and frappe.db.exists("CRM Issue Department", sid) and sid not in ids:
+            ids.append(sid)
+    doc.issue_departments = []
+    for sid in ids:
+        doc.append("issue_departments", {"department": sid})
+    doc.department = ids[0] if ids else ""
+
+
+def _enrich_issue_list_departments(issues):
+    """Gan departments: [docname,...] cho danh sach issue (list API)."""
+    if not issues:
+        return
+    names = [r.get("name") for r in issues if r.get("name")]
+    if not names:
+        return
+    rows = frappe.get_all(
+        "CRM Issue Related Department",
+        filters={"parent": ["in", names], "parenttype": "CRM Issue"},
+        fields=["parent", "department", "idx"],
+    )
+    rows = sorted(rows or [], key=lambda r: ((r.parent or ""), r.idx or 0))
+    by_parent = {}
+    for r in rows or []:
+        p = r.parent
+        d = (r.department or "").strip()
+        if not d:
+            continue
+        if p not in by_parent:
+            by_parent[p] = []
+        if d not in by_parent[p]:
+            by_parent[p].append(d)
+    for r in issues:
+        depts = by_parent.get(r.get("name")) or []
+        if not depts and r.get("department"):
+            depts = [r["department"]]
+        r["departments"] = depts
 
 
 def _user_roles():
@@ -424,7 +525,10 @@ def get_issues():
     if approval_status:
         filters["approval_status"] = approval_status
     if department:
-        filters["department"] = department
+        dept_names = _issue_names_matching_department(department)
+        if not dept_names:
+            return paginated_response([], page, 0, per_page)
+        filters["name"] = ["in", dept_names]
 
     total = frappe.db.count("CRM Issue", filters=filters)
     offset = (page - 1) * per_page
@@ -457,6 +561,7 @@ def get_issues():
     )
 
     _enrich_user_info(issues)
+    _enrich_issue_list_departments(issues)
     return paginated_response(issues, page, total, per_page)
 
 
@@ -473,8 +578,12 @@ def get_pending_issues():
     filters = {"approval_status": "Cho duyet"}
     if not (ISSUE_WRITE_ROLES & set(frappe.get_roles(user))):
         depts = _get_user_crm_issue_department_names(user)
-        if depts:
-            filters["department"] = ["in", depts]
+        if not depts:
+            return paginated_response([], page, 0, per_page)
+        visible = _issue_names_visible_to_department_members(depts)
+        if not visible:
+            return paginated_response([], page, 0, per_page)
+        filters["name"] = ["in", visible]
     total = frappe.db.count("CRM Issue", filters=filters)
     offset = (page - 1) * per_page
 
@@ -505,6 +614,7 @@ def get_pending_issues():
         page_length=per_page,
     )
     _enrich_user_info(issues)
+    _enrich_issue_list_departments(issues)
     return paginated_response(issues, page, total, per_page)
 
 
@@ -691,19 +801,29 @@ def create_issue():
         doc.occurred_at = occurred_at
         doc.lead = data.get("lead") or ""
         _sync_issue_students(doc, data)
-        doc.department = data.get("department") or ""
+        if "departments" in data:
+            _sync_issue_departments(doc, data)
+        else:
+            doc.department = (data.get("department") or "").strip()
+            doc.issue_departments = []
+            d0 = doc.department
+            if d0 and frappe.db.exists("CRM Issue Department", d0):
+                doc.append("issue_departments", {"department": d0})
         doc.attachment = data.get("attachment") or ""
 
         sla_h = float(mod.sla_hours or 0)
         doc.sla_hours = sla_h
         doc.sla_deadline = _compute_sla_deadline(now(), sla_h)
 
-        # PIC: payload > student lead > department first member
+        # PIC: payload > student lead > thanh vien dau tien theo thu tu phong ban
         pic = data.get("pic") or ""
         if not pic and doc.student:
             pic = _pic_from_student(doc.student) or ""
-        if not pic and doc.department:
-            pic = _pic_from_department(doc.department) or ""
+        if not pic:
+            for dn in _issue_department_docnames(doc):
+                pic = _pic_from_department(dn) or ""
+                if pic:
+                    break
         doc.pic = pic
 
         user = frappe.session.user
@@ -846,11 +966,19 @@ def update_issue():
             "pic",
             "attachment",
             "lead",
-            "department",
         ]
         for field in updatable:
             if field in data:
                 doc.set(field, data[field])
+
+        if "departments" in data:
+            _sync_issue_departments(doc, data)
+        elif "department" in data:
+            doc.department = (data.get("department") or "").strip()
+            doc.issue_departments = []
+            d0 = doc.department
+            if d0 and frappe.db.exists("CRM Issue Department", d0):
+                doc.append("issue_departments", {"department": d0})
 
         if "students" in data or "student" in data:
             _sync_issue_students(doc, data)
@@ -931,7 +1059,7 @@ def change_issue_status():
             recipients.append(doc.pic)
         if doc.created_by_user:
             recipients.append(doc.created_by_user)
-        recipients.extend(_department_member_emails(doc.department))
+        recipients.extend(_all_department_member_emails_for_issue(doc))
         _notify_crm_issue_mobile(
             recipients,
             "Cập nhật trạng thái vấn đề",
@@ -996,7 +1124,7 @@ def add_process_log():
                 recipients.append(doc.pic)
             if doc.created_by_user:
                 recipients.append(doc.created_by_user)
-            recipients.extend(_department_member_emails(doc.department))
+            recipients.extend(_all_department_member_emails_for_issue(doc))
             _notify_crm_issue_mobile(
                 recipients,
                 "Log xử lý vấn đề mới",
