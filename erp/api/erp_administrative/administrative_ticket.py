@@ -418,9 +418,24 @@ def _team_leader_emails_for_category(category_name):
     return out
 
 
+def _hc_normalize_base_url(raw):
+    """frontend_url đôi khi là str hoặc list trong site_config — chuẩn hoá về một chuỗi."""
+    if raw is None:
+        return ""
+    if isinstance(raw, (list, tuple)):
+        for x in raw:
+            s = _hc_normalize_base_url(x)
+            if s:
+                return s
+        return ""
+    return str(raw).strip()
+
+
 def _hc_frontend_base_url():
     """Base URL frontend SIS (site_config frontend_url)."""
-    u = (frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "").strip()
+    u = _hc_normalize_base_url(frappe.conf.get("frontend_url")) or _hc_normalize_base_url(
+        frappe.get_site_config().get("frontend_url")
+    )
     return u.rstrip("/") if u else ""
 
 
