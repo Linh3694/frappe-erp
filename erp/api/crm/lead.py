@@ -1000,6 +1000,10 @@ def update_lead_guardian():
     if not frappe.db.exists("CRM Guardian", guardian_name):
         return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}")
 
+    # FE co the gui guardian_email thay vi email (hoac JSON bo qua key email khi undefined)
+    if isinstance(updates, dict) and "guardian_email" in updates and "email" not in updates:
+        updates["email"] = updates.get("guardian_email")
+
     # Cap nhat CRM Guardian truc tiep
     guardian_fields = (
         "guardian_name", "phone_number", "email", "id_number", "occupation",
