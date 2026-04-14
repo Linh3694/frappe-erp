@@ -418,6 +418,55 @@ def _team_leader_emails_for_category(category_name):
     return out
 
 
+def _hc_frontend_base_url():
+    """Base URL frontend SIS (site_config frontend_url)."""
+    u = (frappe.conf.get("frontend_url") or frappe.get_site_config().get("frontend_url") or "").strip()
+    return u.rstrip("/") if u else ""
+
+
+def _hc_category_label(doc):
+    """Tiêu đề danh mục hiển thị trong email."""
+    c = getattr(doc, "category", None)
+    if not c:
+        return ""
+    t = frappe.db.get_value("ERP Administrative Support Category", c, "title")
+    return (t or c or "").strip()
+
+
+def _hc_ticket_url_for_recipient(doc, recipient_email):
+    """Người tạo → màn ứng dụng; PIC/staff → màn operation."""
+    base = _hc_frontend_base_url()
+    if not base:
+        return ""
+    rec = (recipient_email or "").strip().lower()
+    creator = (doc.creator_email or "").strip().lower()
+    tid = doc.name
+    if rec == creator:
+        return f"{base}/applications/ticket/administrative/view/{tid}"
+    return f"{base}/operation/administrative-ticket/view/{tid}"
+
+
+def _hc_post_ticket_email(payload):
+    """Gửi email qua email-service (POST /notify-administrative-ticket)."""
+    try:
+        import requests
+
+        base = (frappe.conf.get("email_service_url") or "http://localhost:5030").rstrip("/")
+        url = f"{base}/notify-administrative-ticket"
+        r = requests.post(
+            url,
+            json=payload,
+            timeout=20,
+            headers={"Content-Type": "application/json"},
+        )
+        if r.status_code >= 400:
+            frappe.logger().error(
+                f"administrative_ticket: email HTTP {r.status_code}: {(r.text or '')[:800]}"
+            )
+    except Exception as ex:
+        frappe.logger().error(f"administrative_ticket: email request failed: {ex}")
+
+
 def _notify_new_admin_ticket_mobile(doc):
     """
     Push Expo cho PIC / team leader khi có ticket HC mới.
@@ -469,6 +518,304 @@ def _notify_new_admin_ticket_mobile(doc):
             )
         except Exception as ex:
             frappe.logger().error(f"administrative_ticket: push failed {user_email}: {ex}")
+
+
+def _hc_user_email(user_id):
+    """Lấy email User (name có thể trùng email đăng nhập)."""
+    if not user_id:
+        return None
+    em = frappe.db.get_value("User", user_id, "email")
+    return (em or user_id or "").strip()
+
+
+def _hc_send_ticket_email(doc, event_type, recipient_email, extra=None):
+    """Gửi email thông báo HC qua email-service (template tối giản)."""
+    if not recipient_email or not (recipient_email or "").strip():
+        return
+    extra = extra or {}
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+    creator_fn = (getattr(doc, "creator_fullname", None) or "").strip() or (
+        doc.creator_email or ""
+    ).strip()
+    desc = (getattr(doc, "description", None) or "") or ""
+    desc_snippet = desc if len(desc) <= 400 else (desc[:400] + "…")
+    created_at = ""
+    try:
+        if doc.creation:
+            from frappe.utils import format_datetime
+
+            created_at = format_datetime(doc.creation, "dd/MM/yyyy HH:mm")
+    except Exception:
+        created_at = str(doc.creation or "")
+
+    payload = {
+        "eventType": event_type,
+        "recipientEmail": (recipient_email or "").strip(),
+        "ticketUrl": _hc_ticket_url_for_recipient(doc, recipient_email),
+        "ticketCode": code,
+        "title": t,
+        "categoryLabel": _hc_category_label(doc),
+        "creatorName": creator_fn,
+        "descriptionSnippet": desc_snippet,
+        "status": getattr(doc, "status", None) or "",
+        "createdAt": created_at,
+    }
+    payload.update(extra)
+    _hc_post_ticket_email(payload)
+
+
+def _hc_send_emails_on_ticket_create(doc):
+    """Xác nhận cho người tạo + thông báo ticket mới cho PIC/leader (cùng logic push)."""
+    creator = (doc.creator_email or "").strip()
+    if creator:
+        try:
+            _hc_send_ticket_email(doc, "ticket_creation_confirmation", creator, {})
+        except Exception as ex:
+            frappe.logger().error(f"administrative_ticket: email create confirm {ex}")
+
+    recipients = []
+    if getattr(doc, "assigned_to", None):
+        em = _hc_user_email(doc.assigned_to)
+        if em:
+            recipients.append(em)
+    else:
+        recipients.extend(_team_leader_emails_for_category(doc.category))
+
+    seen = set()
+    for em in recipients:
+        em = (em or "").strip()
+        if not em or em in seen or em == creator:
+            continue
+        seen.add(em)
+        try:
+            _hc_send_ticket_email(doc, "new_ticket", em, {})
+        except Exception as ex:
+            frappe.logger().error(f"administrative_ticket: email new ticket {em}: {ex}")
+
+
+def _hc_ticket_payload(doc, action, extra=None):
+    """Payload mobile + ERP — khớp NotificationsScreen (action + ticket_kind administrative)."""
+    code = (doc.ticket_code or doc.name or "").strip()
+    d = {
+        "type": "ticket",
+        "action": action,
+        "ticket_kind": "administrative",
+        "ticketId": doc.name,
+        "ticket_id": doc.name,
+        "ticketCode": code,
+    }
+    if extra:
+        d.update(extra)
+    return d
+
+
+def _hc_send_persisted(recipient_email, title, body, data, exclude_email=None):
+    """Gửi ERP Notification + Expo; bỏ qua người gửi."""
+    if not recipient_email:
+        return
+    if exclude_email and recipient_email.strip() == (exclude_email or "").strip():
+        return
+    try:
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
+
+        tid = data.get("ticketId") or data.get("ticket_id")
+        send_mobile_notification_persisted(
+            recipient_email,
+            title,
+            body,
+            data,
+            erp_notification_type="ticket",
+            reference_doctype=DOCTYPE,
+            reference_name=tid,
+        )
+    except Exception as ex:
+        frappe.logger().error(f"administrative_ticket: HC notify failed {recipient_email}: {ex}")
+
+
+def _notify_hc_user_reply(doc, sender_email):
+    """Người tạo nhắn → PIC; PIC/Staff nhắn → người tạo (tương đương IT user_reply)."""
+    sender = (sender_email or "").strip()
+    creator = (doc.creator_email or "").strip()
+    if not sender:
+        return
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+
+    if sender == creator and doc.assigned_to:
+        rec = _hc_user_email(doc.assigned_to)
+        if rec and rec != sender:
+            d = _hc_ticket_payload(doc, "user_reply")
+            _hc_send_persisted(
+                rec,
+                _("Ticket hành chính: tin nhắn mới"),
+                _("{0} có phản hồi mới: {1}").format(code, t),
+                d,
+                exclude_email=sender,
+            )
+            try:
+                _hc_send_ticket_email(doc, "user_reply", rec, {})
+            except Exception as ex:
+                frappe.logger().error(f"administrative_ticket: email user_reply {rec}: {ex}")
+    elif sender != creator and creator:
+        d = _hc_ticket_payload(doc, "user_reply")
+        _hc_send_persisted(
+            creator,
+            _("Ticket hành chính: tin nhắn mới"),
+            _("Có tin nhắn mới về {0}: {1}").format(code, t),
+            d,
+            exclude_email=sender,
+        )
+        try:
+            _hc_send_ticket_email(doc, "user_reply", creator, {})
+        except Exception as ex:
+            frappe.logger().error(f"administrative_ticket: email user_reply creator: {ex}")
+
+
+def _notify_hc_status_changed(doc, old_status, new_status, actor_email):
+    """Đổi trạng thái — thông báo người tạo + PIC (trừ người thao tác)."""
+    if old_status == new_status:
+        return
+    data = _hc_ticket_payload(
+        doc,
+        "ticket_status_changed",
+        {"oldStatus": old_status, "newStatus": new_status},
+    )
+    title = _("Cập nhật trạng thái ticket HC")
+    code = (doc.ticket_code or doc.name or "").strip()
+    body = _("{0}: {1} → {2}").format(code, old_status, new_status)
+    actor = (actor_email or "").strip()
+    recipients = []
+    ce = (doc.creator_email or "").strip()
+    ae = _hc_user_email(doc.assigned_to)
+    if ce and ce != actor:
+        recipients.append(ce)
+    if ae and ae != actor and ae not in recipients:
+        recipients.append(ae)
+    for r in recipients:
+        _hc_send_persisted(r, title, body, data, exclude_email=actor)
+        try:
+            _hc_send_ticket_email(
+                doc,
+                "ticket_status_changed",
+                r,
+                {"oldStatus": old_status, "newStatus": new_status, "actorName": actor or ""},
+            )
+        except Exception as ex:
+            frappe.logger().error(f"administrative_ticket: email status {r}: {ex}")
+
+
+def _notify_hc_assignment_changed(doc, old_assignee, new_assignee, actor_email):
+    """Gán / đổi PIC — thông báo PIC mới (giống IT ticket_assigned)."""
+    if old_assignee == new_assignee or not new_assignee:
+        return
+    data = _hc_ticket_payload(doc, "ticket_assigned")
+    ne = _hc_user_email(new_assignee)
+    actor = (actor_email or "").strip()
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+    if ne and ne != actor:
+        _hc_send_persisted(
+            ne,
+            _("Ticket hành chính được gán cho bạn"),
+            _("{0}: {1}").format(code, t),
+            data,
+            exclude_email=actor,
+        )
+        try:
+            _hc_send_ticket_email(
+                doc, "ticket_assigned", ne, {"actorName": (actor or "").strip()}
+            )
+        except Exception as ex:
+            frappe.logger().error(f"administrative_ticket: email assign {ne}: {ex}")
+
+
+def _notify_hc_ticket_pickup(doc):
+    """Staff nhấn Nhận ticket — báo người tạo."""
+    creator = (doc.creator_email or "").strip()
+    actor = _session_email()
+    if not creator or creator == actor:
+        return
+    data = _hc_ticket_payload(doc, "ticket_assigned")
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+    ufn = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
+    _hc_send_persisted(
+        creator,
+        _("Ticket HC đã được nhận xử lý"),
+        _("{0} đang được xử lý bởi {1}. {2}").format(code, ufn, t),
+        data,
+        exclude_email=actor,
+    )
+    try:
+        _hc_send_ticket_email(doc, "ticket_pickup", creator, {"actorName": ufn})
+    except Exception as ex:
+        frappe.logger().error(f"administrative_ticket: email pickup: {ex}")
+
+
+def _notify_hc_cancelled(doc, actor_email):
+    """Hủy ticket — báo bên còn lại."""
+    data = _hc_ticket_payload(doc, "ticket_cancelled")
+    actor = (actor_email or "").strip()
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+    body = _("Ticket {0} đã bị hủy: {1}").format(code, t)
+    title = _("Ticket HC đã hủy")
+    for em in ((doc.creator_email or "").strip(), _hc_user_email(doc.assigned_to)):
+        if em and em != actor:
+            _hc_send_persisted(em, title, body, data, exclude_email=actor)
+            try:
+                _hc_send_ticket_email(doc, "ticket_cancelled", em, {"actorName": actor or ""})
+            except Exception as ex:
+                frappe.logger().error(f"administrative_ticket: email cancel {em}: {ex}")
+
+
+def _notify_hc_reopened(doc, actor_email):
+    """Mở lại ticket — báo PIC + người tạo (trừ người thao tác)."""
+    data = _hc_ticket_payload(
+        doc,
+        "ticket_status_changed",
+        {"oldStatus": _("Đóng/Kết thúc"), "newStatus": "Open"},
+    )
+    title = _("Ticket HC được mở lại")
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+    body = _("{0} đã được mở lại: {1}").format(code, t)
+    actor = (actor_email or "").strip()
+    for em in ((doc.creator_email or "").strip(), _hc_user_email(doc.assigned_to)):
+        if em and em != actor:
+            _hc_send_persisted(em, title, body, data, exclude_email=actor)
+            try:
+                _hc_send_ticket_email(doc, "ticket_reopened", em, {"actorName": actor or ""})
+            except Exception as ex:
+                frappe.logger().error(f"administrative_ticket: email reopen {em}: {ex}")
+
+
+def _notify_hc_feedback_received(doc, actor_email):
+    """Người tạo đánh giá đóng ticket — báo PIC (ticket_feedback_received)."""
+    pic = _hc_user_email(doc.assigned_to)
+    actor = (actor_email or "").strip()
+    if not pic or pic == actor:
+        return
+    rating = int(getattr(doc, "feedback_rating", 0) or 0)
+    data = _hc_ticket_payload(
+        doc,
+        "ticket_feedback_received",
+        {"rating": rating},
+    )
+    code = (doc.ticket_code or doc.name or "").strip()
+    title = _("Đánh giá ticket HC")
+    body = _("{0}: {1} sao").format(code, rating)
+    _hc_send_persisted(pic, title, body, data, exclude_email=actor)
+    try:
+        _hc_send_ticket_email(
+            doc,
+            "ticket_feedback_received",
+            pic,
+            {"rating": rating, "actorName": actor or ""},
+        )
+    except Exception as ex:
+        frappe.logger().error(f"administrative_ticket: email feedback: {ex}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -915,6 +1262,11 @@ def create_ticket():
         except Exception:
             frappe.log_error(frappe.get_traceback(), "administrative_ticket._notify_new_admin_ticket_mobile")
 
+        try:
+            _hc_send_emails_on_ticket_create(frappe.get_doc(DOCTYPE, doc.name))
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket._hc_send_emails_on_ticket_create")
+
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except frappe.exceptions.ValidationError as e:
         return validation_error_response(str(e), {"error": [str(e)]})
@@ -1075,6 +1427,8 @@ def update_ticket():
                     {"related_student_ids": ["invalid"]},
                 )
 
+        old_assigned_to = getattr(doc, "assigned_to", None)
+
         if staff and "status" in data and data["status"]:
             doc.status = str(data["status"]).strip()
         if staff and "assigned_to" in data:
@@ -1092,6 +1446,19 @@ def update_ticket():
             hist_detail = _("Trạng thái: {0} → {1}").format(old_status, doc.status)
         _append_history(doc.name, _("Cập nhật ticket"), detail=hist_detail)
         frappe.db.commit()
+        try:
+            doc_reload = frappe.get_doc(DOCTYPE, doc.name)
+            if staff:
+                if "status" in data and data.get("status") and old_status != doc_reload.status:
+                    _notify_hc_status_changed(doc_reload, old_status, doc_reload.status, email)
+                if "assigned_to" in data and old_assigned_to != doc_reload.assigned_to:
+                    _notify_hc_assignment_changed(
+                        doc_reload, old_assigned_to, doc_reload.assigned_to, email
+                    )
+        except Exception:
+            frappe.log_error(
+                frappe.get_traceback(), "administrative_ticket.update_ticket.notify"
+            )
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.update_ticket")
@@ -1140,6 +1507,10 @@ def assign_ticket():
         doc.save(ignore_permissions=True)
         _append_history(doc.name, _("Nhận xử lý ticket"))
         frappe.db.commit()
+        try:
+            _notify_hc_ticket_pickup(frappe.get_doc(DOCTYPE, doc.name))
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.assign_ticket.notify")
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.assign_ticket")
@@ -1166,6 +1537,10 @@ def cancel_ticket():
         doc.save(ignore_permissions=True)
         _append_history(doc.name, _("Hủy ticket"), detail=reason[:500])
         frappe.db.commit()
+        try:
+            _notify_hc_cancelled(frappe.get_doc(DOCTYPE, doc.name), email)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.cancel_ticket.notify")
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.cancel_ticket")
@@ -1183,6 +1558,7 @@ def reopen_ticket():
         doc = frappe.get_doc(DOCTYPE, ticket_id)
         if not _can_read_ticket(doc):
             return forbidden_response(_("Không có quyền"))
+        email = _session_email()
         doc.status = "Open"
         doc.closed_at = None
         doc.feedback_rating = 0
@@ -1191,6 +1567,10 @@ def reopen_ticket():
         doc.save(ignore_permissions=True)
         _append_history(doc.name, _("Mở lại ticket"))
         frappe.db.commit()
+        try:
+            _notify_hc_reopened(frappe.get_doc(DOCTYPE, doc.name), email)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.reopen_ticket.notify")
         return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.reopen_ticket")
@@ -1227,6 +1607,10 @@ def accept_feedback():
         doc.save(ignore_permissions=True)
         _append_history(doc.name, _("Chấp nhận kết quả / đóng ticket"))
         frappe.db.commit()
+        try:
+            _notify_hc_feedback_received(frappe.get_doc(DOCTYPE, doc.name), email)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.accept_feedback.notify")
         return success_response({"success": True}, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.accept_feedback")
@@ -1460,6 +1844,10 @@ def send_comment():
             excerpt = ""
         _append_history(ticket_id, _("Trao đổi"), detail=excerpt or None)
         frappe.db.commit()
+        try:
+            _notify_hc_user_reply(frappe.get_doc(DOCTYPE, ticket_id), email)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.send_comment.notify")
         return success_response(
             {
                 "success": True,
