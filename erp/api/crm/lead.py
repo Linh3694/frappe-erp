@@ -1000,8 +1000,14 @@ def update_lead_guardian():
     if not frappe.db.exists("CRM Guardian", guardian_name):
         return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}")
 
-    # FE co the gui guardian_email thay vi email (hoac JSON bo qua key email khi undefined)
-    if isinstance(updates, dict) and "guardian_email" in updates and "email" not in updates:
+    # Chuan hoa dict updates: doi khi updates = ca body (nested updates bi long vao data["updates"])
+    if not isinstance(updates, dict):
+        updates = {}
+    elif "updates" in updates and isinstance(updates.get("updates"), dict):
+        updates = updates["updates"]
+
+    # FE co the gui guardian_email thay vi email
+    if "guardian_email" in updates and "email" not in updates:
         updates["email"] = updates.get("guardian_email")
 
     # Cap nhat CRM Guardian truc tiep
@@ -1011,8 +1017,14 @@ def update_lead_guardian():
     )
     g_doc = frappe.get_doc("CRM Guardian", guardian_name)
     for k in guardian_fields:
-        if k in updates:
-            g_doc.set(k, updates[k])
+        if k not in updates:
+            continue
+        val = updates[k]
+        if k == "email":
+            # Fieldtype Email: doc.set doi khi khong ghi DB; gan thuoc tinh truc tiep
+            g_doc.email = str(val or "").strip()
+        else:
+            g_doc.set(k, val)
     # Cap nhat phone_numbers neu co (danh sach {phone_number, is_primary})
     if "phone_numbers" in updates:
         phone_list = updates.get("phone_numbers") or []
