@@ -1,0 +1,129 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "autoname": "format:FE-IC-{#####}",
+ "creation": "2026-04-15 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "room",
+  "responsible_user",
+  "status",
+  "facility_snapshot",
+  "it_snapshot",
+  "note",
+  "submitted_on",
+  "reviewed_by",
+  "reviewed_on",
+  "review_note"
+ ],
+ "fields": [
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ph\u00f2ng",
+   "options": "ERP Administrative Room",
+   "reqd": 1
+  },
+  {
+   "fieldname": "responsible_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ng\u01b0\u1eddi g\u1eedi",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Tr\u1ea1ng th\u00e1i",
+   "options": "Pending\nAccepted\nRejected",
+   "reqd": 1
+  },
+  {
+   "fieldname": "facility_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Snapshot CSVC (JSON)"
+  },
+  {
+   "fieldname": "it_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Snapshot IT (JSON)"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Long Text",
+   "label": "Ghi ch\u00fa ng\u01b0\u1eddi g\u1eedi"
+  },
+  {
+   "fieldname": "submitted_on",
+   "fieldtype": "Datetime",
+   "label": "Th\u1eddi gian g\u1eedi"
+  },
+  {
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Ng\u01b0\u1eddi duy\u1ec7t",
+   "options": "User"
+  },
+  {
+   "fieldname": "reviewed_on",
+   "fieldtype": "Datetime",
+   "label": "Th\u1eddi gian duy\u1ec7t"
+  },
+  {
+   "fieldname": "review_note",
+   "fieldtype": "Long Text",
+   "label": "Ghi ch\u00fa duy\u1ec7t / l\u00fd do t\u1eeb ch\u1ed1i"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Administrative",
+ "name": "ERP Administrative Inventory Check",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
