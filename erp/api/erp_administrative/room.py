@@ -2729,12 +2729,13 @@ def _responsible_user_row_payload(user_id):
     """Chuẩn dict một dòng người phụ trách từ User."""
     if not user_id or not frappe.db.exists("User", user_id):
         return None
-    u = frappe.db.get_value(
-        "User",
-        user_id,
-        ["full_name", "user_image", "job_title", "designation"],
-        as_dict=True,
-    )
+    # User chuẩn Frappe không có designation; job_title thường từ custom/HR — chỉ SELECT field thật sự có trên DB
+    user_meta = frappe.get_meta("User")
+    fieldnames = ["full_name", "user_image"]
+    for fn in ("job_title", "designation"):
+        if user_meta.has_field(fn):
+            fieldnames.append(fn)
+    u = frappe.db.get_value("User", user_id, fieldnames, as_dict=True)
     if not u:
         return None
     designation = (u.get("job_title") or "").strip() or (u.get("designation") or "").strip()
