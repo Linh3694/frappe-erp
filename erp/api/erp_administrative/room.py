@@ -9,6 +9,7 @@ import json
 from typing import Dict, Any
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import success_response, error_response, validation_error_response, not_found_response
+from erp.api.erp_administrative.room_activity_log import log_room_activity
 try:
     import pandas as pd
 except ImportError:
@@ -2811,6 +2812,17 @@ def add_room_responsible_user():
         )
         room.save(ignore_permissions=False)
         frappe.db.commit()
+        try:
+            log_room_activity(
+                room_id,
+                "user_assigned",
+                user=frappe.session.user,
+                target_user=user_id,
+                note="",
+            )
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "room.add_room_responsible_user.activity_log")
         return success_response(data=payload, message=_("Đã thêm người phụ trách"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "room.add_room_responsible_user")
@@ -2846,6 +2858,17 @@ def remove_room_responsible_user():
             )
         room.save(ignore_permissions=False)
         frappe.db.commit()
+        try:
+            log_room_activity(
+                room_id,
+                "user_removed",
+                user=frappe.session.user,
+                target_user=user_id,
+                note="",
+            )
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "room.remove_room_responsible_user.activity_log")
         return success_response(data={"removed": user_id}, message=_("Đã xóa"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "room.remove_room_responsible_user")

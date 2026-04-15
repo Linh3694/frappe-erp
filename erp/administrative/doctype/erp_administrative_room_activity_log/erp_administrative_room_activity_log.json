@@ -1,0 +1,117 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "autoname": "format:RAL-{#####}",
+ "creation": "2026-04-15 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "room",
+  "activity_type",
+  "user",
+  "user_name",
+  "target_user",
+  "target_user_name",
+  "reference_doctype",
+  "reference_name",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ph\u00f2ng",
+   "options": "ERP Administrative Room",
+   "reqd": 1
+  },
+  {
+   "fieldname": "activity_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Lo\u1ea1i s\u1ef1 ki\u1ec7n",
+   "options": "handover_sent\nhandover_confirmed\ninventory_submitted\ninventory_accepted\ninventory_rejected\nuser_assigned\nuser_removed",
+   "reqd": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "Ng\u01b0\u1eddi th\u1ef1c hi\u1ec7n",
+   "options": "User"
+  },
+  {
+   "fieldname": "user_name",
+   "fieldtype": "Data",
+   "label": "H\u1ecd t\u00ean ng\u01b0\u1eddi th\u1ef1c hi\u1ec7n",
+   "read_only": 1
+  },
+  {
+   "fieldname": "target_user",
+   "fieldtype": "Link",
+   "label": "Ng\u01b0\u1eddi li\u00ean quan",
+   "options": "User"
+  },
+  {
+   "fieldname": "target_user_name",
+   "fieldtype": "Data",
+   "label": "H\u1ecd t\u00ean ng\u01b0\u1eddi li\u00ean quan",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Data",
+   "label": "DocType tham chi\u1ebfu"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Data",
+   "label": "T\u00ean b\u1ea3n ghi tham chi\u1ebfu"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Long Text",
+   "label": "Ghi ch\u00fa"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Administrative",
+ "name": "ERP Administrative Room Activity Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "write": 0
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
