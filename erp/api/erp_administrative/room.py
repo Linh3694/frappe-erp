@@ -2855,6 +2855,8 @@ def remove_room_responsible_user():
 def get_users_for_room_responsible():
     """Danh sách User để chọn người phụ trách (tương tự teacher.get_users_for_selection)."""
     try:
+        # Chỉ email nội bộ — loại phụ huynh / tài khoản email cá nhân khỏi pool chọn PIC phòng
+        internal_email_domain = "@wellspring.edu.vn"
         users = frappe.get_all(
             "User",
             fields=[
@@ -2867,7 +2869,7 @@ def get_users_for_room_responsible():
                 "employee_code",
                 "employee_id",
             ],
-            filters={"enabled": 1},
+            filters={"enabled": 1, "email": ["like", f"%{internal_email_domain}"]},
             order_by="full_name asc",
         )
         processed = []
