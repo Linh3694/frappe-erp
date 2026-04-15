@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import nowdate, get_datetime
+from frappe.utils import nowdate, get_datetime, get_fullname
 from frappe.exceptions import LinkExistsError
 import json
 from typing import Dict, Any
@@ -95,6 +95,28 @@ def get_all_rooms():
                 room["building"] = building_map[building_id]
             else:
                 room["building"] = None
+
+        # Người phụ trách phòng (child table) — dùng cho FacilityLiteRoom
+        if rooms:
+            room_names = [r["name"] for r in rooms]
+            child_rows = frappe.get_all(
+                "ERP Administrative Room Responsible User",
+                filters={"parent": ["in", room_names]},
+                fields=["parent", "user", "full_name", "user_image", "designation"],
+                order_by="idx asc",
+            )
+            by_room = {}
+            for cr in child_rows:
+                by_room.setdefault(cr.parent, []).append(
+                    {
+                        "user": cr.user,
+                        "full_name": cr.full_name or "",
+                        "user_image": cr.user_image or "",
+                        "designation": cr.designation or "",
+                    }
+                )
+            for room in rooms:
+                room["responsible_users"] = by_room.get(room["name"], [])
 
         return success_response(
             data=rooms,
@@ -2683,3 +2705,180 @@ def get_all_rooms_for_sync():
     except Exception as e:
         frappe.logger().error(f"Error fetching rooms for sync: {str(e)}")
         return error_response(f"Error fetching rooms: {str(e)}")
+
+
+def _room_api_json_body():
+    """Đọc JSON body cho API phòng (room responsible users)."""
+    data = {}
+    if frappe.request and frappe.request.data:
+        try:
+            body = (
+                frappe.request.data.decode("utf-8")
+                if isinstance(frappe.request.data, bytes)
+                else frappe.request.data
+            )
+            data = json.loads(body or "{}")
+        except Exception:
+            data = frappe.local.form_dict or {}
+    else:
+        data = frappe.local.form_dict or {}
+    return data
+
+
+def _responsible_user_row_payload(user_id):
+    """Chuẩn dict một dòng người phụ trách từ User."""
+    if not user_id or not frappe.db.exists("User", user_id):
+        return None
+    u = frappe.db.get_value(
+        "User",
+        user_id,
+        ["full_name", "user_image", "job_title", "designation"],
+        as_dict=True,
+    )
+    if not u:
+        return None
+    designation = (u.get("job_title") or "").strip() or (u.get("designation") or "").strip()
+    return {
+        "user": user_id,
+        "full_name": (u.get("full_name") or "").strip() or get_fullname(user_id) or user_id,
+        "user_image": (u.get("user_image") or "").strip(),
+        "designation": designation,
+    }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_room_responsible_users():
+    """Danh sách người phụ trách theo room_id (Frappe room name)."""
+    try:
+        data = _room_api_json_body()
+        room_id = data.get("room_id")
+        if not room_id or not frappe.db.exists("ERP Administrative Room", room_id):
+            return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
+        rows = frappe.get_all(
+            "ERP Administrative Room Responsible User",
+            filters={"parent": room_id},
+            fields=["user", "full_name", "user_image", "designation"],
+            order_by="idx asc",
+        )
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "user": r.user,
+                    "full_name": r.full_name or "",
+                    "user_image": r.user_image or "",
+                    "designation": r.designation or "",
+                }
+            )
+        return success_response(data=out, message=_("OK"))
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.get_room_responsible_users")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def add_room_responsible_user():
+    """Thêm User vào bảng người phụ trách phòng."""
+    try:
+        data = _room_api_json_body()
+        room_id = data.get("room_id")
+        user_id = data.get("user") or data.get("user_email")
+        if not room_id or not frappe.db.exists("ERP Administrative Room", room_id):
+            return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
+        if not user_id:
+            return validation_error_response(_("Thiếu user"), {"user": ["required"]})
+        if not frappe.db.exists("User", user_id):
+            return validation_error_response(_("User không tồn tại"), {"user": ["invalid"]})
+
+        room = frappe.get_doc("ERP Administrative Room", room_id)
+        for row in room.responsible_users or []:
+            if row.user == user_id:
+                return validation_error_response(_("User đã là người phụ trách phòng này"), {"user": ["duplicate"]})
+
+        payload = _responsible_user_row_payload(user_id)
+        if not payload:
+            return validation_error_response(_("Không đọc được thông tin User"), {"user": ["invalid"]})
+
+        room.append(
+            "responsible_users",
+            {
+                "user": user_id,
+                "full_name": payload["full_name"],
+                "user_image": payload["user_image"],
+                "designation": payload["designation"],
+            },
+        )
+        room.save(ignore_permissions=False)
+        frappe.db.commit()
+        return success_response(data=payload, message=_("Đã thêm người phụ trách"))
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.add_room_responsible_user")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def remove_room_responsible_user():
+    """Xóa User khỏi danh sách người phụ trách phòng."""
+    try:
+        data = _room_api_json_body()
+        room_id = data.get("room_id")
+        user_id = data.get("user") or data.get("user_email")
+        if not room_id or not frappe.db.exists("ERP Administrative Room", room_id):
+            return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
+        if not user_id:
+            return validation_error_response(_("Thiếu user"), {"user": ["required"]})
+
+        room = frappe.get_doc("ERP Administrative Room", room_id)
+        kept = [r for r in (room.responsible_users or []) if r.user != user_id]
+        if len(kept) == len(room.responsible_users or []):
+            return not_found_response(_("Không tìm thấy user trong danh sách phụ trách"))
+        room.responsible_users = []
+        for row in kept:
+            room.append(
+                "responsible_users",
+                {
+                    "user": row.user,
+                    "full_name": row.full_name,
+                    "user_image": row.user_image,
+                    "designation": row.designation,
+                },
+            )
+        room.save(ignore_permissions=False)
+        frappe.db.commit()
+        return success_response(data={"removed": user_id}, message=_("Đã xóa"))
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.remove_room_responsible_user")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def get_users_for_room_responsible():
+    """Danh sách User để chọn người phụ trách (tương tự teacher.get_users_for_selection)."""
+    try:
+        users = frappe.get_all(
+            "User",
+            fields=[
+                "name",
+                "email",
+                "full_name",
+                "first_name",
+                "last_name",
+                "user_image",
+                "employee_code",
+                "employee_id",
+            ],
+            filters={"enabled": 1},
+            order_by="full_name asc",
+        )
+        processed = []
+        for u in users:
+            processed.append(
+                {
+                    **u,
+                    "user_id": u.get("name"),
+                }
+            )
+        return success_response(data=processed, message=_("OK"))
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.get_users_for_room_responsible")
+        return error_response(str(e))

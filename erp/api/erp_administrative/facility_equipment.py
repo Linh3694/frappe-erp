@@ -635,33 +635,71 @@ def send_handover():
     """
     Gửi bàn giao: room_id, class_id, it_equipment (JSON list — snapshot từ inventory phía client).
     Snapshot CSVC lấy từ DB tại thời điểm gửi.
+
+    - handover_type=class (mặc định): cần class_id — lớp chủ nhiệm nhận bàn giao.
+    - handover_type=responsible_user: cần responsible_user (User name) — phòng chức năng.
     """
     try:
         data = _parse_json_body()
         room_id = data.get("room_id")
         class_id = data.get("class_id")
         it_equipment = data.get("it_equipment") or []
+        handover_type = (data.get("handover_type") or "class").strip()
+        responsible_user = data.get("responsible_user")
 
         if not room_id or not frappe.db.exists("ERP Administrative Room", room_id):
             return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
-        if not class_id or not frappe.db.exists("SIS Class", class_id):
-            return validation_error_response(_("Lớp không hợp lệ"), {"class_id": ["invalid"]})
 
         fac_snap = _facility_snapshot_for_room(room_id)
-        it_snap = it_equipment if isinstance(it_equipment, list) else json.loads(it_equipment) if it_equipment else []
-
-        doc = frappe.get_doc(
-            {
-                "doctype": "ERP Administrative Facility Handover",
-                "room": room_id,
-                "class_id": class_id,
-                "status": "Pending",
-                "facility_snapshot": json.dumps(fac_snap, ensure_ascii=False),
-                "it_snapshot": json.dumps(it_snap, ensure_ascii=False),
-                "sent_by": frappe.session.user,
-                "sent_on": frappe.utils.now(),
-            }
+        it_snap = (
+            it_equipment
+            if isinstance(it_equipment, list)
+            else json.loads(it_equipment)
+            if it_equipment
+            else []
         )
+
+        if handover_type == "responsible_user":
+            if not responsible_user or not frappe.db.exists("User", responsible_user):
+                return validation_error_response(_("Người phụ trách không hợp lệ"), {"responsible_user": ["invalid"]})
+            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+            valid = {r.user for r in (room_doc.responsible_users or [])}
+            if responsible_user not in valid:
+                return validation_error_response(
+                    _("User không nằm trong danh sách người phụ trách phòng"),
+                    {"responsible_user": ["not_assigned"]},
+                )
+            doc = frappe.get_doc(
+                {
+                    "doctype": "ERP Administrative Facility Handover",
+                    "room": room_id,
+                    "handover_type": "responsible_user",
+                    "class_id": None,
+                    "responsible_user": responsible_user,
+                    "status": "Pending",
+                    "facility_snapshot": json.dumps(fac_snap, ensure_ascii=False),
+                    "it_snapshot": json.dumps(it_snap, ensure_ascii=False),
+                    "sent_by": frappe.session.user,
+                    "sent_on": frappe.utils.now(),
+                }
+            )
+        else:
+            if not class_id or not frappe.db.exists("SIS Class", class_id):
+                return validation_error_response(_("Lớp không hợp lệ"), {"class_id": ["invalid"]})
+            doc = frappe.get_doc(
+                {
+                    "doctype": "ERP Administrative Facility Handover",
+                    "room": room_id,
+                    "handover_type": "class",
+                    "class_id": class_id,
+                    "responsible_user": None,
+                    "status": "Pending",
+                    "facility_snapshot": json.dumps(fac_snap, ensure_ascii=False),
+                    "it_snapshot": json.dumps(it_snap, ensure_ascii=False),
+                    "sent_by": frappe.session.user,
+                    "sent_on": frappe.utils.now(),
+                }
+            )
         doc.insert(ignore_permissions=False)
         frappe.db.commit()
         return single_item_response(
@@ -670,6 +708,8 @@ def send_handover():
                 "status": doc.status,
                 "room": doc.room,
                 "class_id": doc.class_id,
+                "handover_type": getattr(doc, "handover_type", None) or "class",
+                "responsible_user": getattr(doc, "responsible_user", None),
             },
             _("Đã gửi yêu cầu bàn giao"),
         )
@@ -864,6 +904,50 @@ def _handover_diff_pending_vs_last_confirmed(class_id, room_id, current_fac, cur
     }
 
 
+def _handover_dict_from_row(r):
+    """Build handover dict từ một row get_all (ERP Administrative Facility Handover)."""
+    fac = []
+    itl = []
+    try:
+        if r.get("facility_snapshot"):
+            fac = json.loads(r.facility_snapshot)
+    except Exception:
+        fac = []
+    try:
+        if r.get("it_snapshot"):
+            itl = json.loads(r.it_snapshot)
+    except Exception:
+        itl = []
+    confirmed_by_name = None
+    if r.get("confirmed_by"):
+        try:
+            confirmed_by_name = get_fullname(r.confirmed_by) or r.confirmed_by
+        except Exception:
+            confirmed_by_name = r.confirmed_by
+    responsible_user_name = None
+    if r.get("responsible_user"):
+        try:
+            responsible_user_name = get_fullname(r.responsible_user) or r.responsible_user
+        except Exception:
+            responsible_user_name = r.responsible_user
+    ht = r.get("handover_type") or "class"
+    return {
+        "name": r.name,
+        "room": r.room,
+        "class_id": r.get("class_id"),
+        "handover_type": ht,
+        "responsible_user": r.get("responsible_user"),
+        "responsible_user_name": responsible_user_name,
+        "status": r.status,
+        "facility_equipment": fac,
+        "it_equipment": itl,
+        "sent_on": r.sent_on,
+        "confirmed_on": r.confirmed_on,
+        "confirmed_by": r.confirmed_by,
+        "confirmed_by_name": confirmed_by_name,
+    }
+
+
 def _handover_payload_for_class(class_id):
     """Trả về dict { has_handover, handover } cho một lớp."""
     rows = frappe.get_all(
@@ -879,46 +963,98 @@ def _handover_payload_for_class(class_id):
             "sent_on",
             "confirmed_on",
             "confirmed_by",
+            "handover_type",
+            "responsible_user",
         ],
         order_by="creation desc",
         limit=1,
     )
     if not rows:
         return {"has_handover": False, "handover": None}
-    r = rows[0]
-    fac = []
-    itl = []
+    return {"has_handover": True, "handover": _handover_dict_from_row(rows[0])}
+
+
+@frappe.whitelist(allow_guest=False)
+def get_room_handover_status():
+    """Bàn giao mới nhất theo phòng — loại responsible_user (phòng chức năng)."""
     try:
-        if r.facility_snapshot:
-            fac = json.loads(r.facility_snapshot)
-    except Exception:
-        fac = []
+        data = _parse_json_body()
+        room_id = data.get("room_id")
+        if not room_id:
+            return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+        rows = frappe.get_all(
+            "ERP Administrative Facility Handover",
+            filters={"room": room_id, "handover_type": "responsible_user"},
+            fields=[
+                "name",
+                "room",
+                "class_id",
+                "status",
+                "facility_snapshot",
+                "it_snapshot",
+                "sent_on",
+                "confirmed_on",
+                "confirmed_by",
+                "handover_type",
+                "responsible_user",
+            ],
+            order_by="creation desc",
+            limit=1,
+        )
+        if not rows:
+            return single_item_response({"has_handover": False, "handover": None}, "OK")
+        return single_item_response(
+            {"has_handover": True, "handover": _handover_dict_from_row(rows[0])},
+            "OK",
+        )
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "facility_equipment.get_room_handover_status")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def get_responsible_user_handover_status():
+    """Bàn giao mới nhất theo phòng + người phụ trách (User name)."""
     try:
-        if r.it_snapshot:
-            itl = json.loads(r.it_snapshot)
-    except Exception:
-        itl = []
-    confirmed_by_name = None
-    if r.confirmed_by:
-        try:
-            confirmed_by_name = get_fullname(r.confirmed_by) or r.confirmed_by
-        except Exception:
-            confirmed_by_name = r.confirmed_by
-    return {
-        "has_handover": True,
-        "handover": {
-            "name": r.name,
-            "room": r.room,
-            "class_id": r.class_id,
-            "status": r.status,
-            "facility_equipment": fac,
-            "it_equipment": itl,
-            "sent_on": r.sent_on,
-            "confirmed_on": r.confirmed_on,
-            "confirmed_by": r.confirmed_by,
-            "confirmed_by_name": confirmed_by_name,
-        },
-    }
+        data = _parse_json_body()
+        room_id = data.get("room_id")
+        user_id = data.get("responsible_user") or data.get("user")
+        if not room_id:
+            return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+        if not user_id:
+            return validation_error_response(_("Thiếu user"), {"user": ["required"]})
+        rows = frappe.get_all(
+            "ERP Administrative Facility Handover",
+            filters={
+                "room": room_id,
+                "handover_type": "responsible_user",
+                "responsible_user": user_id,
+            },
+            fields=[
+                "name",
+                "room",
+                "class_id",
+                "status",
+                "facility_snapshot",
+                "it_snapshot",
+                "sent_on",
+                "confirmed_on",
+                "confirmed_by",
+                "handover_type",
+                "responsible_user",
+            ],
+            order_by="creation desc",
+            limit=1,
+        )
+        if not rows:
+            return single_item_response({"has_handover": False, "handover": None}, "OK")
+        return single_item_response(
+            {"has_handover": True, "handover": _handover_dict_from_row(rows[0])},
+            "OK",
+        )
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "facility_equipment.get_responsible_user_handover_status")
+        return error_response(str(e))
 
 
 @frappe.whitelist(allow_guest=False)
@@ -1006,6 +1142,15 @@ def confirm_handover():
         doc = frappe.get_doc("ERP Administrative Facility Handover", handover_id)
         if doc.status == "Confirmed":
             return single_item_response({"name": doc.name, "status": doc.status}, _("Đã xác nhận trước đó"))
+
+        ht = getattr(doc, "handover_type", None) or "class"
+        ru = getattr(doc, "responsible_user", None)
+        if ht == "responsible_user" or (ru and not doc.class_id):
+            if ru and frappe.session.user != ru:
+                return validation_error_response(
+                    _("Chỉ người phụ trách mới được xác nhận"),
+                    {"permission": ["denied"]},
+                )
 
         doc.status = "Confirmed"
         doc.confirmed_by = frappe.session.user

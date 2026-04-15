@@ -8,7 +8,9 @@
  "engine": "InnoDB",
  "field_order": [
   "room",
+  "handover_type",
   "class_id",
+  "responsible_user",
   "status",
   "facility_snapshot",
   "it_snapshot",
@@ -27,12 +29,27 @@
    "reqd": 1
   },
   {
+   "default": "class",
+   "fieldname": "handover_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Lo\u1ea1i b\u00e0n giao",
+   "options": "class\nresponsible_user",
+   "reqd": 1
+  },
+  {
    "fieldname": "class_id",
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "L\u1edbp",
-   "options": "SIS Class",
-   "reqd": 1
+   "options": "SIS Class"
+  },
+  {
+   "fieldname": "responsible_user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Ng\u01b0\u1eddi ph\u1ee5 tr\u00e1ch",
+   "options": "User"
   },
   {
    "default": "Pending",

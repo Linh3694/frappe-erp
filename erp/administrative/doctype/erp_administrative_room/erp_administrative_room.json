@@ -25,6 +25,8 @@
   "column_break_1",
   "room_type",
   "building_id",
+  "responsible_users_section",
+  "responsible_users",
   "room_classes_section",
   "room_classes"
  ],
@@ -86,6 +88,17 @@
    "label": "Building",
    "options": "ERP Administrative Building",
    "reqd": 1
+  },
+  {
+   "fieldname": "responsible_users_section",
+   "fieldtype": "Section Break",
+   "label": "Responsible Users"
+  },
+  {
+   "fieldname": "responsible_users",
+   "fieldtype": "Table",
+   "label": "Responsible Users",
+   "options": "ERP Administrative Room Responsible User"
   },
   {
    "fieldname": "room_classes_section",
