@@ -248,13 +248,13 @@
    "fieldname": "current_grade",
    "fieldtype": "Select",
    "label": "Current Grade",
-   "options": "K\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
+   "options": "\nK\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
   },
   {
    "fieldname": "target_grade",
    "fieldtype": "Select",
    "label": "Target Grade",
-   "options": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
+   "options": "\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
   },
   {
    "fieldname": "cb_student_2",

@@ -383,13 +383,13 @@ def clone_lead_for_sibling():
         doc.status = ""
 
         # Copy thong tin PH / lien he (flat)
+        # Không copy lớp đang học / dự tuyển — HS mới nhập riêng (tránh mang mặc định K/1 từ bản ghi cũ)
         for field in [
             "data_source", "staff_code", "pic", "campus_id",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note", "guardian_dob",
             "target_academic_year", "target_semester", "referrer",
-            "target_grade", "current_grade",
         ]:
             val = getattr(src, field, None)
             if val is not None and val != "":
