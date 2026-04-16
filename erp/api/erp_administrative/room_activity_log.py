@@ -13,6 +13,11 @@ ACTIVITY_TYPES = frozenset(
         "inventory_rejected",
         "user_assigned",
         "user_removed",
+        "equipment_added",
+        "equipment_updated",
+        "equipment_removed",
+        "repair_reported",
+        "repair_completed",
     }
 )
 

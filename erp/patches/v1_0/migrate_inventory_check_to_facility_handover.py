@@ -16,7 +16,7 @@ def execute():
         """
     )
 
-    if not frappe.db.has_table("tabERP Administrative Inventory Check"):
+    if not frappe.db.exists("DocType", "ERP Administrative Inventory Check"):
         frappe.db.commit()
         return
 
