@@ -600,9 +600,80 @@ def add_event_student():
         return error_response(f"Lỗi thêm học sinh: {str(e)}")
 
 
+def _excel_cell_truthy(val):
+    """Ô Excel = chọn ưu đãi: 1, x, yes, có, true, v..."""
+    if val is None:
+        return False
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        try:
+            return float(val) != 0.0
+        except (TypeError, ValueError):
+            return False
+    s = str(val).strip().lower()
+    if not s:
+        return False
+    return s in (
+        "1",
+        "x",
+        "yes",
+        "y",
+        "có",
+        "co",
+        "true",
+        "v",
+        "đúng",
+        "dung",
+        "tick",
+    )
+
+
+def _excel_event_promotion_columns(event_id, header_cells, headers_lower, crm_col_idx):
+    """
+    Các cột ưu đãi: header = mã CRM Promotion (name) hoặc tên ưu đãi (không phân biệt hoa thường).
+    """
+    meta = _event_promotions_meta(event_id)
+    valid_ids = {m["promotion_id"] for m in meta}
+    if not valid_ids:
+        return []
+    name_to_id = {}
+    for m in meta:
+        pid = m["promotion_id"]
+        pname = (m.get("promotion_name") or "").strip().lower()
+        if pname:
+            name_to_id[pname] = pid
+
+    promo_col_map = []
+    seen_idx = set()
+    for i, h in enumerate(header_cells):
+        if i == crm_col_idx:
+            continue
+        h_st = h.strip()
+        if not h_st:
+            continue
+        if headers_lower[i] in ("crm_lead", "crm_lead_id", "crm_code", "crm id"):
+            continue
+        pid = None
+        if h_st in valid_ids:
+            pid = h_st
+        else:
+            h_lower = h_st.lower()
+            for vid in valid_ids:
+                if vid.lower() == h_lower:
+                    pid = vid
+                    break
+            if not pid:
+                pid = name_to_id.get(h_lower)
+        if pid and pid in valid_ids and i not in seen_idx:
+            promo_col_map.append((i, pid))
+            seen_idx.add(i)
+    return promo_col_map
+
+
 @frappe.whitelist(methods=["POST"])
 def add_event_students_excel():
-    """Thêm nhiều học sinh từ Excel - 1 cột CRM Lead (hoặc crm_code), trạng thái mặc định Đã đăng ký"""
+    """Thêm nhiều học sinh từ Excel - cột CRM Lead (crm_code), tùy chọn cột ưu đãi theo CRM Promotion trên sự kiện"""
     check_crm_permission()
     import io
     import openpyxl
@@ -629,14 +700,19 @@ def add_event_students_excel():
     if not rows:
         return error_response("File Excel trống")
 
-    headers = [str(c).strip().lower() if c else "" for c in rows[0]]
+    header_cells = [str(c).strip() if c is not None else "" for c in rows[0]]
+    headers_lower = [h.lower() for h in header_cells]
     crm_col_idx = None
-    for i, h in enumerate(headers):
+    for i, h in enumerate(headers_lower):
         if h in ("crm_lead", "crm_lead_id", "crm_code", "crm id"):
             crm_col_idx = i
             break
     if crm_col_idx is None:
         return error_response("Không tìm thấy cột CRM Lead trong file. Cần có cột: CRM Lead, CRM Lead ID hoặc CRM Code")
+
+    promo_meta = _event_promotions_meta(event_id)
+    valid_promotion_ids = {m["promotion_id"] for m in promo_meta}
+    promo_col_map = _excel_event_promotion_columns(event_id, header_cells, headers_lower, crm_col_idx)
 
     success_count = 0
     error_count = 0
@@ -665,11 +741,20 @@ def add_event_students_excel():
             errors.append(f"Dòng {row_idx}: Học sinh đã có trong sự kiện")
             continue
 
+        to_select = set()
+        for col_idx, prom_id in promo_col_map:
+            cell = row[col_idx] if col_idx < len(row) else None
+            if _excel_cell_truthy(cell):
+                if prom_id in valid_promotion_ids:
+                    to_select.add(prom_id)
+
         try:
             doc = frappe.new_doc("CRM Admission Event Student")
             doc.event_id = event_id
             doc.crm_lead_id = lead
             doc.status = "registered"
+            for prom_id in to_select:
+                doc.append("promotion_selections", {"promotion": prom_id, "selected": 1})
             doc.insert(ignore_permissions=True)
             success_count += 1
         except Exception:
