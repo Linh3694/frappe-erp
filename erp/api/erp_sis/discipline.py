@@ -1709,17 +1709,39 @@ def get_class_violation_stats(
 
 def _sum_student_stored_deduction_points(student_id, violation_id, first_day, last_day):
     """
-    Tổng điểm trừ đã lưu (child table Học sinh) trong khoảng ngày — không dùng bậc thang công thức.
+    Tổng điểm trừ đã lưu trong khoảng ngày — không dùng bậc thang công thức.
+    - Student Entry: điểm trừ ghi trực tiếp cho học sinh.
+    - Class Entry: điểm trừ ghi theo lớp (HS thuộc lớp đó), chỉ khi không có dòng Student Entry
+      cho cùng học sinh trên bản ghi (tránh trùng với bản ghi mixed).
     """
     row = frappe.db.sql(
         """
-        SELECT COALESCE(SUM(CAST(IFNULL(se.deduction_points, '10') AS UNSIGNED)), 0) AS total
-        FROM `tabSIS Discipline Record` r
-        INNER JOIN `tabSIS Discipline Record Student Entry` se
-            ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
-        WHERE r.violation = %(violation_id)s
-            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
-            AND se.student_id = %(student_id)s
+        SELECT COALESCE(SUM(dp), 0) AS total FROM (
+            SELECT CAST(IFNULL(se.deduction_points, '10') AS UNSIGNED) AS dp
+            FROM `tabSIS Discipline Record` r
+            INNER JOIN `tabSIS Discipline Record Student Entry` se
+                ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+            WHERE r.violation = %(violation_id)s
+                AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+                AND se.student_id = %(student_id)s
+
+            UNION ALL
+
+            SELECT CAST(IFNULL(ce.deduction_points, '10') AS UNSIGNED) AS dp
+            FROM `tabSIS Discipline Record` r
+            INNER JOIN `tabSIS Discipline Record Class Entry` ce
+                ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+            INNER JOIN `tabSIS Class Student` cs
+                ON cs.class_id = ce.class_id AND cs.student_id = %(student_id)s
+            WHERE r.violation = %(violation_id)s
+                AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+                AND NOT EXISTS (
+                    SELECT 1 FROM `tabSIS Discipline Record Student Entry` se2
+                    WHERE se2.parent = r.name
+                        AND se2.parenttype = 'SIS Discipline Record'
+                        AND se2.student_id = %(student_id)s
+                )
+        ) t
         """,
         {
             "violation_id": violation_id,
@@ -1733,16 +1755,42 @@ def _sum_student_stored_deduction_points(student_id, violation_id, first_day, la
 
 
 def _sum_class_stored_deduction_points(class_id, violation_id, first_day, last_day):
-    """Tổng điểm trừ đã lưu (child table Lớp) trong khoảng ngày."""
+    """
+    Tổng điểm trừ đã lưu trong khoảng ngày cho lớp.
+    - Class Entry: điểm ghi theo lớp.
+    - Student Entry: cộng điểm HS thuộc lớp (regular), chỉ khi bản ghi không có Class Entry
+      cho chính lớp đó (đồng bộ với báo cáo Điểm thi đua theo Lớp / tránh trùng mixed).
+    """
     row = frappe.db.sql(
         """
-        SELECT COALESCE(SUM(CAST(IFNULL(ce.deduction_points, '10') AS UNSIGNED)), 0) AS total
-        FROM `tabSIS Discipline Record` r
-        INNER JOIN `tabSIS Discipline Record Class Entry` ce
-            ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
-        WHERE r.violation = %(violation_id)s
-            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
-            AND ce.class_id = %(class_id)s
+        SELECT COALESCE(SUM(dp), 0) AS total FROM (
+            SELECT CAST(IFNULL(ce.deduction_points, '10') AS UNSIGNED) AS dp
+            FROM `tabSIS Discipline Record` r
+            INNER JOIN `tabSIS Discipline Record Class Entry` ce
+                ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+            WHERE r.violation = %(violation_id)s
+                AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+                AND ce.class_id = %(class_id)s
+
+            UNION ALL
+
+            SELECT CAST(IFNULL(se.deduction_points, '10') AS UNSIGNED) AS dp
+            FROM `tabSIS Discipline Record` r
+            INNER JOIN `tabSIS Discipline Record Student Entry` se
+                ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+            INNER JOIN `tabSIS Class Student` cs
+                ON cs.student_id = se.student_id
+                AND cs.class_id = %(class_id)s
+                AND cs.class_type = 'regular'
+            WHERE r.violation = %(violation_id)s
+                AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+                AND NOT EXISTS (
+                    SELECT 1 FROM `tabSIS Discipline Record Class Entry` ce2
+                    WHERE ce2.parent = r.name
+                        AND ce2.parenttype = 'SIS Discipline Record'
+                        AND ce2.class_id = %(class_id)s
+                )
+        ) t
         """,
         {
             "violation_id": violation_id,
