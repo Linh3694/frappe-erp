@@ -340,12 +340,23 @@ def create_lead():
         return error_response(f"Loi tao ho so: {str(e)}")
 
 
+def _current_school_display_for_sibling_row(lead_doc):
+    """Link CRM School -> ten hien thi cho cot school (Data) cua bang anh/chi/em."""
+    cs = getattr(lead_doc, "current_school", None)
+    if not cs:
+        return ""
+    if frappe.db.exists("CRM School", cs):
+        return frappe.db.get_value("CRM School", cs, "school_name") or cs
+    return cs
+
+
 @frappe.whitelist(methods=["POST"])
 def clone_lead_for_sibling():
     """
     Tao ho so moi: clone thong tin gia dinh tu ho so goc (buoc Lead).
     Chi nhap ten HS, ngay sinh, truong cho ho so moi.
     Ho so moi: resolve_draft_promotion -> thuong vao Verify do trung SDT.
+    Sao chep bang anh/chi/em tu ho so goc len ho so moi + them dong HS chinh cua ho so goc.
     Them dong anh/chi/em (ACE) tren ho so goc voi thong tin HS moi.
     """
     check_crm_permission()
@@ -434,6 +445,36 @@ def clone_lead_for_sibling():
         doc.status = eff_status if eff_step == "Verify" else "Moi"
         if not doc.crm_code:
             doc.crm_code = generate_crm_code()
+        doc.save(ignore_permissions=True)
+
+        # Bang anh/chi/em tren ho so moi: giong ho so goc + them HS chinh cua ho so goc (cung gia dinh)
+        for row in getattr(src, "lead_siblings", None) or []:
+            sn = (row.get("sibling_name") or "").strip()
+            if not sn:
+                continue
+            doc.append(
+                "lead_siblings",
+                {
+                    "sibling_name": sn,
+                    "student_code": row.get("student_code") or "",
+                    "relationship_type": row.get("relationship_type") or "",
+                    "dob": row.get("dob"),
+                    "school": row.get("school") or "",
+                },
+            )
+        main_name = (getattr(src, "student_name", None) or "").strip()
+        if main_name:
+            doc.append(
+                "lead_siblings",
+                {
+                    "sibling_name": main_name,
+                    "student_code": getattr(src, "student_code", None) or "",
+                    "relationship_type": "",
+                    "dob": getattr(src, "student_dob", None),
+                    "school": _current_school_display_for_sibling_row(src),
+                },
+            )
+        doc.flags.ignore_validate = True
         doc.save(ignore_permissions=True)
 
         if not doc.pic:

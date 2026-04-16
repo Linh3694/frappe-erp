@@ -1356,8 +1356,44 @@ def _user_is_room_responsible(room_id, user_id):
     """User có trong bảng responsible_users của phòng không."""
     if not room_id or not user_id or not frappe.db.exists("ERP Administrative Room", room_id):
         return False
+    nu = _normalize_frappe_user_link_value((user_id or "").strip())
+    if not nu:
+        return False
     room_doc = frappe.get_doc("ERP Administrative Room", room_id)
-    return any((r.user or "").strip() == (user_id or "").strip() for r in (room_doc.responsible_users or []))
+    return any(_normalize_frappe_user_link_value((r.user or "").strip()) == nu for r in (room_doc.responsible_users or []))
+
+
+def _normalize_frappe_user_link_value(user_hint: str) -> str:
+    """
+    Chuẩn hóa về User.name (Link User) — tránh lệch email vs name khi lọc kiểm kê theo PIC.
+    """
+    if not (user_hint or "").strip():
+        return ""
+    u = (user_hint or "").strip()
+    if frappe.db.exists("User", u):
+        return u
+    rows = frappe.get_all("User", filters={"email": u}, fields=["name"], limit=1)
+    if rows:
+        return rows[0].name
+    return u
+
+
+def _inventory_check_cycle_cutoff_datetime(room_id, ru):
+    """
+    Thời điểm bắt đầu kỳ PIC hiện tại: lần gán user_assigned gần nhất cho (phòng, PIC).
+    Kiểm kê tạo trước (trước khi gán lại) thuộc kỳ cũ — kể cùng một User.
+    Trả None nếu không có log (dữ liệu cũ): giữ tương thích.
+    """
+    if not room_id or not ru:
+        return None
+    rows = frappe.get_all(
+        "ERP Administrative Room Activity Log",
+        filters={"room": room_id, "target_user": ru, "activity_type": "user_assigned"},
+        fields=["creation"],
+        order_by="creation desc",
+        limit=1,
+    )
+    return rows[0].creation if rows else None
 
 
 def _inventory_check_roles_can_review():
@@ -1417,20 +1453,25 @@ def submit_inventory_check():
             return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
 
         uid = frappe.session.user
+        nu = _normalize_frappe_user_link_value((uid or "").strip())
         if not _user_is_room_responsible(room_id, uid):
             return validation_error_response(
                 _("Chỉ người phụ trách phòng mới được gửi kiểm kê"),
                 {"permission": ["denied"]},
             )
 
+        pending_filters = {
+            "room": room_id,
+            "responsible_user": nu,
+            "status": "Pending",
+            "direction": "incoming",
+        }
+        cycle_cutoff = _inventory_check_cycle_cutoff_datetime(room_id, nu)
+        if cycle_cutoff:
+            pending_filters["creation"] = [">=", cycle_cutoff]
         pending = frappe.get_all(
             "ERP Administrative Facility Handover",
-            filters={
-                "room": room_id,
-                "responsible_user": uid,
-                "status": "Pending",
-                "direction": "incoming",
-            },
+            filters=pending_filters,
             fields=["name"],
             limit=1,
         )
@@ -1450,12 +1491,12 @@ def submit_inventory_check():
                 "direction": "incoming",
                 "handover_type": "responsible_user",
                 "class_id": None,
-                "responsible_user": uid,
+                "responsible_user": nu,
                 "status": "Pending",
                 "facility_snapshot": json.dumps(fac_list, ensure_ascii=False),
                 "it_snapshot": json.dumps(it_list, ensure_ascii=False),
                 "note": note,
-                "sent_by": uid,
+                "sent_by": nu,
                 "sent_on": frappe.utils.now(),
             }
         )
@@ -1490,9 +1531,13 @@ def get_inventory_check_status():
         data = _parse_json_body()
         room_id = data.get("room_id")
         ru = (data.get("responsible_user") or frappe.session.user or "").strip()
+        ru = _normalize_frappe_user_link_value(ru)
 
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+
+        # Kỳ PIC = từ lần gán user_assigned gần nhất (kể cả cùng User được gán lại sau khi gỡ)
+        cycle_cutoff = _inventory_check_cycle_cutoff_datetime(room_id, ru)
 
         ho_fields = [
             "name",
@@ -1507,9 +1552,12 @@ def get_inventory_check_status():
             "reviewed_on",
             "review_note",
         ]
+        ho_filters = {"room": room_id, "responsible_user": ru, "direction": "incoming"}
+        if cycle_cutoff:
+            ho_filters["creation"] = [">=", cycle_cutoff]
         rows = frappe.get_all(
             "ERP Administrative Facility Handover",
-            filters={"room": room_id, "responsible_user": ru, "direction": "incoming"},
+            filters=ho_filters,
             fields=ho_fields,
             order_by="creation desc",
             limit=1,
@@ -1528,23 +1576,37 @@ def get_inventory_check_status():
             "review_note",
         ]
         if not rows:
+            ic_filters = {"room": room_id, "responsible_user": ru}
+            if cycle_cutoff:
+                ic_filters["creation"] = [">=", cycle_cutoff]
             rows = frappe.get_all(
                 "ERP Administrative Inventory Check",
-                filters={"room": room_id, "responsible_user": ru},
+                filters=ic_filters,
                 fields=ic_fields,
                 order_by="creation desc",
                 limit=1,
             )
+        # Đảm bảo bản ghi trả về đúng PIC (tránh lệch định danh / dữ liệu cũ)
+        if rows:
+            row_ru = _normalize_frappe_user_link_value((rows[0].get("responsible_user") or "").strip())
+            if row_ru != ru:
+                rows = []
+        hist_ho_filters = {"room": room_id, "responsible_user": ru, "direction": "incoming"}
+        if cycle_cutoff:
+            hist_ho_filters["creation"] = [">=", cycle_cutoff]
         hist_ho = frappe.get_all(
             "ERP Administrative Facility Handover",
-            filters={"room": room_id, "responsible_user": ru, "direction": "incoming"},
+            filters=hist_ho_filters,
             fields=["name", "status", "sent_on", "reviewed_on", "responsible_user"],
             order_by="creation desc",
             limit=25,
         )
+        hist_ic_filters = {"room": room_id, "responsible_user": ru}
+        if cycle_cutoff:
+            hist_ic_filters["creation"] = [">=", cycle_cutoff]
         hist_ic = frappe.get_all(
             "ERP Administrative Inventory Check",
-            filters={"room": room_id, "responsible_user": ru},
+            filters=hist_ic_filters,
             fields=["name", "status", "submitted_on", "reviewed_on", "responsible_user"],
             order_by="creation desc",
             limit=25,
