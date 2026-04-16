@@ -25,6 +25,10 @@
   "issue_departments",
   "approval_section",
   "approval_status",
+  "approved_by_user",
+  "approved_at",
+  "rejected_by_user",
+  "rejected_at",
   "created_by_user",
   "sla_hours",
   "sla_deadline",
@@ -149,6 +153,30 @@
    "label": "Approval Status",
    "options": "Cho duyet\nDa duyet\nTu choi",
    "reqd": 1
+  },
+  {
+   "fieldname": "approved_by_user",
+   "fieldtype": "Data",
+   "label": "Approved By User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejected_by_user",
+   "fieldtype": "Data",
+   "label": "Rejected By User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejected_at",
+   "fieldtype": "Datetime",
+   "label": "Rejected At",
+   "read_only": 1
   },
   {
    "fieldname": "created_by_user",

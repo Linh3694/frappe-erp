@@ -24,11 +24,9 @@ DIRECT_ISSUE_ROLES = frozenset(
     }
 )
 
-# Role duyet / tu choi
+# Chi SIS Sales Admin / SIS Sales Care Admin duoc duyet & tu choi (dong bo frontend IssueDetail)
 APPROVER_ROLES = frozenset(
     {
-        "System Manager",
-        "SIS BOD",
         "SIS Sales Care Admin",
         "SIS Sales Admin",
     }
@@ -406,7 +404,7 @@ def _normalize_vn_name(full_name):
 
 
 def _enrich_user_info(issues):
-    """Them pic_full_name, pic_user_image, created_by_name vao danh sach issues"""
+    """Them pic_full_name, pic_user_image, created_by_name, approved_by_name, rejected_by_name vao danh sach issues"""
     emails = set()
     for r in issues:
         _get = r.get if isinstance(r, dict) else lambda k, d=None: getattr(r, k, d)
@@ -416,6 +414,12 @@ def _enrich_user_info(issues):
         creator_id = (_get("created_by_user") or _get("owner") or "").strip()
         if creator_id:
             emails.add(creator_id)
+        ab = (_get("approved_by_user") or "").strip()
+        if ab:
+            emails.add(ab)
+        rb = (_get("rejected_by_user") or "").strip()
+        if rb:
+            emails.add(rb)
     if not emails:
         return
     users = {
@@ -444,16 +448,46 @@ def _enrich_user_info(issues):
                 creator_name = _normalize_vn_name((row_u.get("full_name") or "").strip())
                 creator_img = (row_u.get("user_image") or "").strip()
 
+        ab_key = (_get("approved_by_user") or "").strip()
+        ab_u = users.get(ab_key) if ab_key else None
+        ab_name = _normalize_vn_name(ab_u.full_name) if ab_u else ""
+        if ab_key and not ab_name:
+            row_ab = frappe.db.get_value(
+                "User",
+                ab_key,
+                ["full_name", "user_image"],
+                as_dict=True,
+            )
+            if row_ab:
+                ab_name = _normalize_vn_name((row_ab.get("full_name") or "").strip())
+
+        rb_key = (_get("rejected_by_user") or "").strip()
+        rb_u = users.get(rb_key) if rb_key else None
+        rb_name = _normalize_vn_name(rb_u.full_name) if rb_u else ""
+        if rb_key and not rb_name:
+            row_rb = frappe.db.get_value(
+                "User",
+                rb_key,
+                ["full_name", "user_image"],
+                as_dict=True,
+            )
+            if row_rb:
+                rb_name = _normalize_vn_name((row_rb.get("full_name") or "").strip())
+
         if is_dict:
             r["pic_full_name"] = pic_name
             r["pic_user_image"] = pic_u.user_image if pic_u else ""
             r["created_by_name"] = creator_name
             r["created_by_image"] = creator_img
+            r["approved_by_name"] = ab_name
+            r["rejected_by_name"] = rb_name
         else:
             r.pic_full_name = pic_name
             r.pic_user_image = pic_u.user_image if pic_u else ""
             r.created_by_name = creator_name
             r.created_by_image = creator_img
+            r.approved_by_name = ab_name
+            r.rejected_by_name = rb_name
 
 
 def _enrich_issue_students_display(data):
@@ -897,6 +931,8 @@ def create_issue():
         if _can_create_directly():
             doc.approval_status = "Da duyet"
             doc.status = "Tiep nhan"
+            doc.approved_by_user = user
+            doc.approved_at = now()
         else:
             doc.approval_status = "Cho duyet"
             doc.status = "Cho duyet"
@@ -935,13 +971,17 @@ def approve_issue():
         return not_found_response("Khong tim thay van de")
 
     doc = frappe.get_doc("CRM Issue", name)
-    if not _can_write_issue_ops(frappe.session.user, doc):
+    if not _can_approve():
         frappe.throw("Khong co quyen duyet", frappe.PermissionError)
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
     doc.approval_status = "Da duyet"
     doc.status = "Tiep nhan"
+    doc.approved_by_user = frappe.session.user
+    doc.approved_at = now()
+    doc.rejected_by_user = ""
+    doc.rejected_at = None
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -977,7 +1017,7 @@ def reject_issue():
         return not_found_response("Khong tim thay van de")
 
     doc = frappe.get_doc("CRM Issue", name)
-    if not _can_write_issue_ops(frappe.session.user, doc):
+    if not _can_approve():
         frappe.throw("Khong co quyen tu choi", frappe.PermissionError)
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
@@ -985,6 +1025,10 @@ def reject_issue():
     doc.approval_status = "Tu choi"
     doc.rejection_reason = reason
     doc.status = "Hoan thanh"
+    doc.rejected_by_user = frappe.session.user
+    doc.rejected_at = now()
+    doc.approved_by_user = ""
+    doc.approved_at = None
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
