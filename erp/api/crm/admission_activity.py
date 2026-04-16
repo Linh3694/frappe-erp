@@ -1630,6 +1630,7 @@ def export_course_students_template():
             item["student_name"] = ""
             item["student_dob"] = None
 
+    # Không xuất class_summary — tránh nhập chuỗi dài; chỉ dùng lop_chinh_quy / lop_chay (hệ thống map tên hoặc mã lớp)
     return success_response(
         message="OK",
         data={
@@ -1641,7 +1642,6 @@ def export_course_students_template():
                 "status",
                 "lop_chinh_quy",
                 "lop_chay",
-                "class_summary",
             ],
             "header_labels": [
                 "CRM Lead ID",
@@ -1649,9 +1649,8 @@ def export_course_students_template():
                 "Tên học sinh",
                 "Ngày sinh",
                 "Trạng thái",
-                "Lớp chính quy",
-                "Lớp chạy",
-                "Lớp (tham khảo)",
+                "Lớp CQ (1 tên hoặc mã)",
+                "Lớp chạy (phẩy nếu nhiều)",
             ],
             "rows": [
                 {
@@ -1662,7 +1661,6 @@ def export_course_students_template():
                     "status": r.get("status", "registered_interest"),
                     "lop_chinh_quy": r.get("regular_class_name") or "",
                     "lop_chay": ", ".join(r.get("running_class_names") or []),
-                    "class_summary": r.get("class_summary") or "",
                 }
                 for r in items
             ],
@@ -1707,6 +1705,20 @@ def import_course_students_status():
     )
     reg_col = next((i for i, h in enumerate(hdr) if h in ("lop_chinh_quy", "regular_class")), None)
     run_col = next((i for i, h in enumerate(hdr) if h in ("lop_chay", "running_classes")), None)
+    # Nhãn tiếng Việt trên cùng hàng tiêu đề (người dùng sửa tên cột)
+    raw_header_cells = rows[header_idx] if len(rows) > header_idx else []
+    if reg_col is None:
+        for i, cell in enumerate(raw_header_cells):
+            s = str(cell or "").strip().lower()
+            if ("lớp" in s and "chính" in s and "quy" in s) or ("lớp" in s and "cq" in s):
+                reg_col = i
+                break
+    if run_col is None:
+        for i, cell in enumerate(raw_header_cells):
+            s = str(cell or "").strip().lower()
+            if "lớp" in s and "chạy" in s:
+                run_col = i
+                break
 
     if crm_col is None or status_col is None:
         return error_response("Không tìm thấy cột CRM Lead ID và Status. Cần tải template từ nút Nhập liệu.")
