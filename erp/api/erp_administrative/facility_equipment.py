@@ -672,11 +672,12 @@ def _facility_snapshot_for_room(room_id):
     return out
 
 
-def _apply_facility_snapshot_to_room(room_id, snapshot_raw):
+def _apply_facility_snapshot_to_room(room_id, snapshot_raw, ignore_permissions=False):
     """
     Đồng bộ snapshot kiểm kê (JSON list) vào ERP Administrative Room Facility Equipment.
     - Cập nhật/tạo theo category_id; quantity <= 0 → xóa dòng nếu có.
     - Xóa các dòng RFE của phòng không còn trong snapshot.
+    - ignore_permissions: True khi gọi từ review_inventory_check (HC đã phê duyệt hệ thống).
     """
     fac_list = _safe_json_facility_it(snapshot_raw)
     wanted = {}
@@ -706,13 +707,13 @@ def _apply_facility_snapshot_to_room(room_id, snapshot_raw):
                 frappe.delete_doc(
                     "ERP Administrative Room Facility Equipment",
                     line_name,
-                    ignore_permissions=False,
+                    ignore_permissions=ignore_permissions,
                 )
             else:
                 doc = frappe.get_doc("ERP Administrative Room Facility Equipment", line_name)
                 doc.quantity = q
                 doc.condition = cond
-                doc.save(ignore_permissions=False)
+                doc.save(ignore_permissions=ignore_permissions)
         elif q > 0:
             doc = frappe.get_doc(
                 {
@@ -723,7 +724,7 @@ def _apply_facility_snapshot_to_room(room_id, snapshot_raw):
                     "condition": cond,
                 }
             )
-            doc.insert(ignore_permissions=False)
+            doc.insert(ignore_permissions=ignore_permissions)
 
     # Cập nhật lại map sau khi xóa/tạo
     existing_rows = frappe.get_all(
@@ -736,11 +737,11 @@ def _apply_facility_snapshot_to_room(room_id, snapshot_raw):
             frappe.delete_doc(
                 "ERP Administrative Room Facility Equipment",
                 r.name,
-                ignore_permissions=False,
+                ignore_permissions=ignore_permissions,
             )
 
 
-def _remove_responsible_user_from_room(room_id, user_id):
+def _remove_responsible_user_from_room(room_id, user_id, ignore_permissions=False):
     """Gỡ một user khỏi child table responsible_users (giống room.remove_room_responsible_user)."""
     if not room_id or not user_id:
         return False
@@ -759,7 +760,7 @@ def _remove_responsible_user_from_room(room_id, user_id):
                 "designation": row.designation,
             },
         )
-    room.save(ignore_permissions=False)
+    room.save(ignore_permissions=ignore_permissions)
     return True
 
 
@@ -1653,8 +1654,12 @@ def review_inventory_check():
         doc.status = "Accepted" if action == "accept" else "Rejected"
 
         if action == "accept":
-            _apply_facility_snapshot_to_room(room_id, doc.facility_snapshot)
-            _remove_responsible_user_from_room(room_id, ru)
+            # Đọc snapshot trực tiếp từ DB (tránh doc object thiếu Long Text) + bỏ qua quyền RFE/Room khi HC đã duyệt
+            snap_raw = frappe.db.get_value(ref_doctype, doc.name, "facility_snapshot")
+            _apply_facility_snapshot_to_room(
+                room_id, snap_raw, ignore_permissions=True
+            )
+            _remove_responsible_user_from_room(room_id, ru, ignore_permissions=True)
 
         doc.save(ignore_permissions=False)
         frappe.db.commit()
