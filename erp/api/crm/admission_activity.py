@@ -142,6 +142,82 @@ def _course_has_regular_classes(course_id):
     )
 
 
+def _course_class_lookup_maps(course_id):
+    """Map chữ thường (tên lớp hoặc name) -> name CRM Admission Course Class"""
+    catalog = _course_classes_catalog(course_id)
+    reg = {}
+    run = {}
+    for c in catalog:
+        cid = c["name"]
+        cn = (c.get("class_name") or "").strip()
+        ct = c.get("class_type") or ""
+        if ct == "regular":
+            reg[cid.lower()] = cid
+            if cn:
+                reg[cn.lower()] = cid
+        elif ct == "running":
+            run[cid.lower()] = cid
+            if cn:
+                run[cn.lower()] = cid
+    return reg, run
+
+
+def _resolve_course_class_cell(raw, lookup):
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    return lookup.get(s.lower())
+
+
+def _parse_running_class_cells(raw, lookup):
+    """Nhiều lớp chạy: phân tách bởi dấu phẩy hoặc chấm phẩy"""
+    if raw is None:
+        return []
+    s = str(raw).strip()
+    if not s:
+        return []
+    import re
+
+    parts = re.split(r"[,;，]", s)
+    out = []
+    seen = set()
+    for p in parts:
+        pid = _resolve_course_class_cell(p.strip(), lookup)
+        if pid and pid not in seen:
+            out.append(pid)
+            seen.add(pid)
+    return out
+
+
+def _normalize_course_import_header_cell(cell):
+    """Chuẩn hóa tiêu đề cột Excel (ví dụ 'CRM Lead ID' -> 'crm_lead_id')"""
+    if cell is None:
+        return ""
+    return str(cell).strip().lower().replace(" ", "_")
+
+
+def _find_course_status_import_header_row(rows):
+    """File mẫu có thể có 2 hàng tiêu đề: nhãn + key API — ưu tiên hàng key (thường là hàng 2)."""
+    for idx in (1, 0):
+        if len(rows) <= idx:
+            continue
+        hdr = [_normalize_course_import_header_cell(c) for c in rows[idx]]
+        crm_col = next(
+            (i for i, h in enumerate(hdr) if h in ("crm_lead_id", "crm_lead", "crm_code")),
+            None,
+        )
+        status_col = next(
+            (i for i, h in enumerate(hdr) if h == "status" or "trạng" in h or h == "trạng_thái"),
+            None,
+        )
+        if crm_col is not None and status_col is not None:
+            return idx, hdr
+    hdr = [_normalize_course_import_header_cell(c) for c in rows[0]]
+    return 0, hdr
+
+
 # ========== SỰ KIỆN (CRM Admission Event) ==========
 
 
@@ -1464,15 +1540,17 @@ def add_course_students_excel():
     if not rows:
         return error_response("File Excel trống")
 
-    # Dòng 1: header - tìm cột CRM Lead / crm_lead_id / crm_code
-    headers = [str(c).strip().lower() if c else "" for c in rows[0]]
+    header_cells = [str(c).strip() if c is not None else "" for c in rows[0]]
+    headers_lower = [h.lower() for h in header_cells]
+
     crm_col_idx = None
-    for i, h in enumerate(headers):
-        if h in ("crm_lead", "crm_lead_id", "crm_code", "crm id"):
+    for i, hl in enumerate(headers_lower):
+        if hl in ("crm_lead", "crm_lead_id", "crm_code", "crm id"):
             crm_col_idx = i
             break
+
     if crm_col_idx is None:
-        return error_response("Không tìm thấy cột CRM Lead trong file. Cần có cột: CRM Lead, CRM Lead ID hoặc CRM Code")
+        return error_response("Không tìm thấy cột CRM Lead trong file. Cần có cột: crm_code, crm_lead_id hoặc CRM Code")
 
     success_count = 0
     error_count = 0
@@ -1484,7 +1562,6 @@ def add_course_students_excel():
             continue
         lead_id = str(val).strip()
 
-        # Tìm CRM Lead theo name hoặc crm_code
         lead = frappe.db.get_value("CRM Lead", lead_id, "name")
         if not lead:
             lead = frappe.db.get_value("CRM Lead", {"crm_code": lead_id}, "name")
@@ -1556,8 +1633,26 @@ def export_course_students_template():
     return success_response(
         message="OK",
         data={
-            "headers": ["crm_lead_id", "crm_code", "student_name", "student_dob", "status", "class_summary"],
-            "header_labels": ["CRM Lead ID", "Mã CRM", "Tên học sinh", "Ngày sinh", "Trạng thái", "Lớp (tham khảo)"],
+            "headers": [
+                "crm_lead_id",
+                "crm_code",
+                "student_name",
+                "student_dob",
+                "status",
+                "lop_chinh_quy",
+                "lop_chay",
+                "class_summary",
+            ],
+            "header_labels": [
+                "CRM Lead ID",
+                "Mã CRM",
+                "Tên học sinh",
+                "Ngày sinh",
+                "Trạng thái",
+                "Lớp chính quy",
+                "Lớp chạy",
+                "Lớp (tham khảo)",
+            ],
             "rows": [
                 {
                     "crm_lead_id": r["crm_lead_id"],
@@ -1565,6 +1660,8 @@ def export_course_students_template():
                     "student_name": r.get("student_name", ""),
                     "student_dob": str(r["student_dob"]) if r.get("student_dob") else "",
                     "status": r.get("status", "registered_interest"),
+                    "lop_chinh_quy": r.get("regular_class_name") or "",
+                    "lop_chay": ", ".join(r.get("running_class_names") or []),
                     "class_summary": r.get("class_summary") or "",
                 }
                 for r in items
@@ -1575,7 +1672,7 @@ def export_course_students_template():
 
 @frappe.whitelist(methods=["POST"])
 def import_course_students_status():
-    """Nhập liệu trạng thái - upload Excel với crm_lead_id + status mới"""
+    """Nhập liệu trạng thái + lớp (lop_chinh_quy / lop_chay) từ Excel — file mẫu nút Nhập liệu"""
     check_crm_permission()
     import io
     import openpyxl
@@ -1602,18 +1699,28 @@ def import_course_students_status():
     if not rows or len(rows) < 2:
         return error_response("File Excel trống hoặc không có dữ liệu")
 
-    headers = [str(c).strip().lower() if c else "" for c in rows[0]]
-    crm_col = next((i for i, h in enumerate(headers) if h in ("crm_lead_id", "crm_lead", "crm_code", "crm id")), None)
-    status_col = next((i for i, h in enumerate(headers) if h == "status" or "trạng thái" in (h or "")), None)
+    header_idx, hdr = _find_course_status_import_header_row(rows)
+    crm_col = next((i for i, h in enumerate(hdr) if h in ("crm_lead_id", "crm_lead", "crm_code")), None)
+    status_col = next(
+        (i for i, h in enumerate(hdr) if h == "status" or "trạng" in h or h == "trạng_thái"),
+        None,
+    )
+    reg_col = next((i for i, h in enumerate(hdr) if h in ("lop_chinh_quy", "regular_class")), None)
+    run_col = next((i for i, h in enumerate(hdr) if h in ("lop_chay", "running_classes")), None)
 
     if crm_col is None or status_col is None:
         return error_response("Không tìm thấy cột CRM Lead ID và Status. Cần tải template từ nút Nhập liệu.")
+
+    reg_lookup, run_lookup = _course_class_lookup_maps(course_id)
+    has_regular = _course_has_regular_classes(course_id)
+    touch_classes = reg_col is not None or run_col is not None
 
     success_count = 0
     error_count = 0
     errors = []
 
-    for row_idx, row in enumerate(rows[1:], start=2):
+    data_start = header_idx + 1
+    for row_idx, row in enumerate(rows[data_start:], start=data_start + 1):
         crm_val = row[crm_col] if crm_col < len(row) else None
         status_val = row[status_col] if status_col < len(row) else None
         if not crm_val or not str(crm_val).strip():
@@ -1642,6 +1749,29 @@ def import_course_students_status():
         try:
             doc = frappe.get_doc("CRM Admission Course Student", rec)
             doc.status = status
+            if touch_classes:
+                final_reg = doc.regular_class
+                final_run = [r.course_class for r in doc.running_classes]
+                if reg_col is not None:
+                    reg_cell = row[reg_col] if reg_col < len(row) else None
+                    reg_id = _resolve_course_class_cell(reg_cell, reg_lookup)
+                    if has_regular:
+                        if reg_cell is None or str(reg_cell).strip() == "":
+                            final_reg = None
+                        elif not reg_id:
+                            error_count += 1
+                            errors.append(
+                                f"Dòng {row_idx}: Không khớp lớp chính quy — nhập đúng tên/mã lớp trên khoá học"
+                            )
+                            continue
+                        else:
+                            final_reg = reg_id
+                    elif reg_id:
+                        final_reg = reg_id
+                if run_col is not None:
+                    run_cell = row[run_col] if run_col < len(row) else None
+                    final_run = _parse_running_class_cells(run_cell, run_lookup)
+                _set_course_student_class_fields(doc, final_reg, final_run)
             doc.save(ignore_permissions=True)
             success_count += 1
         except Exception:
