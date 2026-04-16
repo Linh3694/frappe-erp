@@ -450,6 +450,19 @@ def add_room_equipment():
             )
             doc.insert(ignore_permissions=False)
         frappe.db.commit()
+        try:
+            line = _room_line_to_dict(doc)
+            log_room_activity(
+                room_id,
+                "equipment_updated" if existing else "equipment_added",
+                user=frappe.session.user,
+                reference_doctype="ERP Administrative Room Facility Equipment",
+                reference_name=doc.name,
+                note=_("{0}: SL {1}").format(line.get("category_title") or "", line.get("quantity")),
+            )
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "facility_equipment.add_room_equipment.activity_log")
         return single_item_response(_room_line_to_dict(doc), _("Đã lưu"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "facility_equipment.add_room_equipment")
@@ -475,6 +488,19 @@ def update_room_equipment():
             doc.condition = data.get("condition") or ""
         doc.save(ignore_permissions=False)
         frappe.db.commit()
+        try:
+            line = _room_line_to_dict(doc)
+            log_room_activity(
+                doc.room,
+                "equipment_updated",
+                user=frappe.session.user,
+                reference_doctype="ERP Administrative Room Facility Equipment",
+                reference_name=doc.name,
+                note=_("{0}: SL {1}").format(line.get("category_title") or "", line.get("quantity")),
+            )
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "facility_equipment.update_room_equipment.activity_log")
         return single_item_response(_room_line_to_dict(doc), _("Đã cập nhật"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "facility_equipment.update_room_equipment")
@@ -490,10 +516,25 @@ def remove_room_equipment():
         if not line_id:
             return validation_error_response(_("Thiếu line_id"), {"line_id": ["required"]})
         if frappe.db.exists("ERP Administrative Room Facility Equipment", line_id):
+            rm_doc = frappe.get_doc("ERP Administrative Room Facility Equipment", line_id)
+            room_id_rm = rm_doc.room
+            line_preview = _room_line_to_dict(rm_doc)
             frappe.delete_doc(
                 "ERP Administrative Room Facility Equipment", line_id, ignore_permissions=False
             )
             frappe.db.commit()
+            try:
+                log_room_activity(
+                    room_id_rm,
+                    "equipment_removed",
+                    user=frappe.session.user,
+                    reference_doctype="ERP Administrative Room Facility Equipment",
+                    reference_name=line_id,
+                    note=_("{0}").format(line_preview.get("category_title") or ""),
+                )
+                frappe.db.commit()
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "facility_equipment.remove_room_equipment.activity_log")
         return success_response(message=_("Đã xóa"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "facility_equipment.remove_room_equipment")
@@ -765,6 +806,7 @@ def send_handover():
                 {
                     "doctype": "ERP Administrative Facility Handover",
                     "room": room_id,
+                    "direction": "outgoing",
                     "handover_type": "responsible_user",
                     "class_id": None,
                     "responsible_user": responsible_user,
@@ -782,6 +824,7 @@ def send_handover():
                 {
                     "doctype": "ERP Administrative Facility Handover",
                     "room": room_id,
+                    "direction": "outgoing",
                     "handover_type": "class",
                     "class_id": class_id,
                     "responsible_user": None,
@@ -973,7 +1016,12 @@ def _handover_diff_pending_vs_last_confirmed(class_id, room_id, current_fac, cur
 
     prev_rows = frappe.get_all(
         "ERP Administrative Facility Handover",
-        filters={"class_id": class_id, "status": "Confirmed", "room": room_id},
+        filters=[
+            ["class_id", "=", class_id],
+            ["status", "=", "Confirmed"],
+            ["room", "=", room_id],
+        ],
+        or_filters=[["direction", "=", "outgoing"], ["direction", "is", "not set"]],
         fields=["facility_snapshot", "it_snapshot", "confirmed_on"],
         order_by="confirmed_on desc",
         limit=1,
@@ -1065,7 +1113,8 @@ def _handover_payload_for_class(class_id):
     """Trả về dict { has_handover, handover } cho một lớp."""
     rows = frappe.get_all(
         "ERP Administrative Facility Handover",
-        filters={"class_id": class_id},
+        filters=[["class_id", "=", class_id]],
+        or_filters=[["direction", "=", "outgoing"], ["direction", "is", "not set"]],
         fields=[
             "name",
             "room",
@@ -1098,7 +1147,11 @@ def get_room_handover_status():
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
         rows = frappe.get_all(
             "ERP Administrative Facility Handover",
-            filters={"room": room_id, "handover_type": "responsible_user"},
+            filters=[
+                ["room", "=", room_id],
+                ["handover_type", "=", "responsible_user"],
+            ],
+            or_filters=[["direction", "=", "outgoing"], ["direction", "is", "not set"]],
             fields=[
                 "name",
                 "room",
@@ -1140,11 +1193,12 @@ def get_responsible_user_handover_status():
             return validation_error_response(_("Thiếu user"), {"user": ["required"]})
         rows = frappe.get_all(
             "ERP Administrative Facility Handover",
-            filters={
-                "room": room_id,
-                "handover_type": "responsible_user",
-                "responsible_user": user_id,
-            },
+            filters=[
+                ["room", "=", room_id],
+                ["handover_type", "=", "responsible_user"],
+                ["responsible_user", "=", user_id],
+            ],
+            or_filters=[["direction", "=", "outgoing"], ["direction", "is", "not set"]],
             fields=[
                 "name",
                 "room",
@@ -1256,6 +1310,11 @@ def confirm_handover():
             return not_found_response(_("Không tìm thấy bàn giao"))
 
         doc = frappe.get_doc("ERP Administrative Facility Handover", handover_id)
+        if getattr(doc, "direction", None) == "incoming":
+            return validation_error_response(
+                _("Bản ghi không phải bàn giao đi"),
+                {"handover_id": ["invalid_type"]},
+            )
         if doc.status == "Confirmed":
             return single_item_response({"name": doc.name, "status": doc.status}, _("Đã xác nhận trước đó"))
 
@@ -1307,7 +1366,7 @@ def _inventory_check_roles_can_review():
 
 
 def _inventory_check_dict_from_row(r):
-    """Payload kiểm kê cho API."""
+    """Payload kiểm kê cho API (Handover direction=incoming hoặc bản ghi Inventory Check cũ)."""
     fac = _safe_json_facility_it(r.get("facility_snapshot"))
     itl = _safe_json_facility_it(r.get("it_snapshot"))
     reviewed_by_name = None
@@ -1322,6 +1381,7 @@ def _inventory_check_dict_from_row(r):
             ru_name = get_fullname(r.responsible_user) or r.responsible_user
         except Exception:
             ru_name = r.responsible_user
+    submitted = r.get("submitted_on") or r.get("sent_on")
     return {
         "name": r.name,
         "room": r.room,
@@ -1331,7 +1391,7 @@ def _inventory_check_dict_from_row(r):
         "facility_equipment": fac,
         "it_equipment": itl,
         "note": r.get("note") or "",
-        "submitted_on": r.get("submitted_on"),
+        "submitted_on": submitted,
         "reviewed_by": r.get("reviewed_by"),
         "reviewed_by_name": reviewed_by_name,
         "reviewed_on": r.get("reviewed_on"),
@@ -1363,8 +1423,13 @@ def submit_inventory_check():
             )
 
         pending = frappe.get_all(
-            "ERP Administrative Inventory Check",
-            filters={"room": room_id, "responsible_user": uid, "status": "Pending"},
+            "ERP Administrative Facility Handover",
+            filters={
+                "room": room_id,
+                "responsible_user": uid,
+                "status": "Pending",
+                "direction": "incoming",
+            },
             fields=["name"],
             limit=1,
         )
@@ -1376,16 +1441,21 @@ def submit_inventory_check():
         fac_list = fac_raw if isinstance(fac_raw, list) else json.loads(fac_raw) if fac_raw else []
         it_list = it_raw if isinstance(it_raw, list) else json.loads(it_raw) if it_raw else []
 
+        # Kiểm kê = Handover chiều incoming (GV/PIC -> HC)
         doc = frappe.get_doc(
             {
-                "doctype": "ERP Administrative Inventory Check",
+                "doctype": "ERP Administrative Facility Handover",
                 "room": room_id,
+                "direction": "incoming",
+                "handover_type": "responsible_user",
+                "class_id": None,
                 "responsible_user": uid,
                 "status": "Pending",
                 "facility_snapshot": json.dumps(fac_list, ensure_ascii=False),
                 "it_snapshot": json.dumps(it_list, ensure_ascii=False),
                 "note": note,
-                "submitted_on": frappe.utils.now(),
+                "sent_by": uid,
+                "sent_on": frappe.utils.now(),
             }
         )
         doc.insert(ignore_permissions=False)
@@ -1396,7 +1466,7 @@ def submit_inventory_check():
                 "inventory_submitted",
                 user=uid,
                 target_user=uid,
-                reference_doctype="ERP Administrative Inventory Check",
+                reference_doctype="ERP Administrative Facility Handover",
                 reference_name=doc.name,
                 note=(note or "")[:500],
             )
@@ -1423,48 +1493,99 @@ def get_inventory_check_status():
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
 
+        ho_fields = [
+            "name",
+            "room",
+            "responsible_user",
+            "status",
+            "facility_snapshot",
+            "it_snapshot",
+            "note",
+            "sent_on",
+            "reviewed_by",
+            "reviewed_on",
+            "review_note",
+        ]
         rows = frappe.get_all(
-            "ERP Administrative Inventory Check",
-            filters={"room": room_id, "responsible_user": ru},
-            fields=[
-                "name",
-                "room",
-                "responsible_user",
-                "status",
-                "facility_snapshot",
-                "it_snapshot",
-                "note",
-                "submitted_on",
-                "reviewed_by",
-                "reviewed_on",
-                "review_note",
-            ],
+            "ERP Administrative Facility Handover",
+            filters={"room": room_id, "responsible_user": ru, "direction": "incoming"},
+            fields=ho_fields,
             order_by="creation desc",
             limit=1,
         )
-        hist = frappe.get_all(
+        ic_fields = [
+            "name",
+            "room",
+            "responsible_user",
+            "status",
+            "facility_snapshot",
+            "it_snapshot",
+            "note",
+            "submitted_on",
+            "reviewed_by",
+            "reviewed_on",
+            "review_note",
+        ]
+        if not rows:
+            rows = frappe.get_all(
+                "ERP Administrative Inventory Check",
+                filters={"room": room_id, "responsible_user": ru},
+                fields=ic_fields,
+                order_by="creation desc",
+                limit=1,
+            )
+        hist_ho = frappe.get_all(
+            "ERP Administrative Facility Handover",
+            filters={"room": room_id, "responsible_user": ru, "direction": "incoming"},
+            fields=["name", "status", "sent_on", "reviewed_on", "responsible_user"],
+            order_by="creation desc",
+            limit=25,
+        )
+        hist_ic = frappe.get_all(
             "ERP Administrative Inventory Check",
             filters={"room": room_id, "responsible_user": ru},
-            fields=[
-                "name",
-                "status",
-                "submitted_on",
-                "reviewed_on",
-                "responsible_user",
-            ],
+            fields=["name", "status", "submitted_on", "reviewed_on", "responsible_user"],
             order_by="creation desc",
-            limit=20,
+            limit=25,
         )
-        out_hist = []
-        for h in hist:
-            out_hist.append(
+        merged = []
+        for h in hist_ho:
+            merged.append(
+                {
+                    "name": h.name,
+                    "status": h.status,
+                    "submitted_on": h.sent_on,
+                    "reviewed_on": h.reviewed_on,
+                    "_ts": h.sent_on or h.reviewed_on,
+                }
+            )
+        for h in hist_ic:
+            merged.append(
                 {
                     "name": h.name,
                     "status": h.status,
                     "submitted_on": h.submitted_on,
                     "reviewed_on": h.reviewed_on,
+                    "_ts": h.submitted_on or h.reviewed_on,
                 }
             )
+        merged.sort(key=lambda x: str(x.get("_ts") or ""), reverse=True)
+        out_hist = []
+        seen = set()
+        for h in merged:
+            if h["name"] in seen:
+                continue
+            seen.add(h["name"])
+            out_hist.append(
+                {
+                    "name": h["name"],
+                    "status": h["status"],
+                    "submitted_on": h["submitted_on"],
+                    "reviewed_on": h["reviewed_on"],
+                }
+            )
+            if len(out_hist) >= 20:
+                break
 
         if not rows:
             return single_item_response(
@@ -1496,7 +1617,7 @@ def review_inventory_check():
         action = (data.get("action") or "").strip().lower()
         review_note = (data.get("review_note") or "").strip()
 
-        if not check_id or not frappe.db.exists("ERP Administrative Inventory Check", check_id):
+        if not check_id:
             return not_found_response(_("Không tìm thấy kiểm kê"))
 
         if not _inventory_check_roles_can_review():
@@ -1508,7 +1629,18 @@ def review_inventory_check():
         if action == "reject" and not review_note:
             return validation_error_response(_("Cần ghi chú khi từ chối"), {"review_note": ["required"]})
 
-        doc = frappe.get_doc("ERP Administrative Inventory Check", check_id)
+        ref_doctype = None
+        if frappe.db.exists("ERP Administrative Facility Handover", check_id):
+            doc = frappe.get_doc("ERP Administrative Facility Handover", check_id)
+            if getattr(doc, "direction", None) != "incoming":
+                return not_found_response(_("Không tìm thấy kiểm kê"))
+            ref_doctype = "ERP Administrative Facility Handover"
+        elif frappe.db.exists("ERP Administrative Inventory Check", check_id):
+            doc = frappe.get_doc("ERP Administrative Inventory Check", check_id)
+            ref_doctype = "ERP Administrative Inventory Check"
+        else:
+            return not_found_response(_("Không tìm thấy kiểm kê"))
+
         if doc.status != "Pending":
             return validation_error_response(_("Bản kiểm kê không còn ở trạng thái chờ duyệt"), {"status": ["invalid"]})
 
@@ -1534,7 +1666,7 @@ def review_inventory_check():
                     "inventory_accepted",
                     user=frappe.session.user,
                     target_user=ru,
-                    reference_doctype="ERP Administrative Inventory Check",
+                    reference_doctype=ref_doctype,
                     reference_name=doc.name,
                     note=_("Đồng bộ CSVC phòng và gỡ người phụ trách sau kiểm kê"),
                 )
@@ -1543,7 +1675,7 @@ def review_inventory_check():
                     "user_removed",
                     user=frappe.session.user,
                     target_user=ru,
-                    reference_doctype="ERP Administrative Inventory Check",
+                    reference_doctype=ref_doctype,
                     reference_name=doc.name,
                     note=_("Gỡ khỏi phụ trách sau khi chấp nhận kiểm kê"),
                 )
@@ -1553,7 +1685,7 @@ def review_inventory_check():
                     "inventory_rejected",
                     user=frappe.session.user,
                     target_user=ru,
-                    reference_doctype="ERP Administrative Inventory Check",
+                    reference_doctype=ref_doctype,
                     reference_name=doc.name,
                     note=review_note or "",
                 )
@@ -1578,10 +1710,15 @@ def get_inventory_check_diff():
         check_id = data.get("check_id") or data.get("name")
         it_current = data.get("it_equipment") or data.get("it_current")
 
-        if not check_id or not frappe.db.exists("ERP Administrative Inventory Check", check_id):
+        doc = None
+        if check_id and frappe.db.exists("ERP Administrative Facility Handover", check_id):
+            cand = frappe.get_doc("ERP Administrative Facility Handover", check_id)
+            if getattr(cand, "direction", None) == "incoming":
+                doc = cand
+        if doc is None and check_id and frappe.db.exists("ERP Administrative Inventory Check", check_id):
+            doc = frappe.get_doc("ERP Administrative Inventory Check", check_id)
+        if doc is None:
             return not_found_response(_("Không tìm thấy kiểm kê"))
-
-        doc = frappe.get_doc("ERP Administrative Inventory Check", check_id)
         room_id = doc.room
         ground_fac = _facility_snapshot_for_room(room_id)
         submitted_fac = _safe_json_facility_it(doc.facility_snapshot)
@@ -1619,25 +1756,46 @@ def get_inventory_check_pending_for_room():
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
 
+        ho_fields = [
+            "name",
+            "room",
+            "responsible_user",
+            "status",
+            "facility_snapshot",
+            "it_snapshot",
+            "note",
+            "sent_on",
+            "reviewed_by",
+            "reviewed_on",
+            "review_note",
+        ]
         rows = frappe.get_all(
-            "ERP Administrative Inventory Check",
-            filters={"room": room_id, "status": "Pending"},
-            fields=[
-                "name",
-                "room",
-                "responsible_user",
-                "status",
-                "facility_snapshot",
-                "it_snapshot",
-                "note",
-                "submitted_on",
-                "reviewed_by",
-                "reviewed_on",
-                "review_note",
-            ],
+            "ERP Administrative Facility Handover",
+            filters={"room": room_id, "status": "Pending", "direction": "incoming"},
+            fields=ho_fields,
             order_by="creation desc",
             limit=1,
         )
+        if not rows:
+            rows = frappe.get_all(
+                "ERP Administrative Inventory Check",
+                filters={"room": room_id, "status": "Pending"},
+                fields=[
+                    "name",
+                    "room",
+                    "responsible_user",
+                    "status",
+                    "facility_snapshot",
+                    "it_snapshot",
+                    "note",
+                    "submitted_on",
+                    "reviewed_by",
+                    "reviewed_on",
+                    "review_note",
+                ],
+                order_by="creation desc",
+                limit=1,
+            )
         if not rows:
             return single_item_response({"has_pending": False, "check": None}, "OK")
         return single_item_response(
@@ -1659,7 +1817,28 @@ def get_inventory_check_history_for_room():
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
 
-        rows = frappe.get_all(
+        ho_fields = [
+            "name",
+            "room",
+            "responsible_user",
+            "status",
+            "facility_snapshot",
+            "it_snapshot",
+            "note",
+            "sent_on",
+            "reviewed_by",
+            "reviewed_on",
+            "review_note",
+            "creation",
+        ]
+        rows_ho = frappe.get_all(
+            "ERP Administrative Facility Handover",
+            filters={"room": room_id, "direction": "incoming"},
+            fields=ho_fields,
+            order_by="creation desc",
+            limit=limit * 2,
+        )
+        rows_ic = frappe.get_all(
             "ERP Administrative Inventory Check",
             filters={"room": room_id},
             fields=[
@@ -1674,10 +1853,14 @@ def get_inventory_check_history_for_room():
                 "reviewed_by",
                 "reviewed_on",
                 "review_note",
+                "creation",
             ],
             order_by="creation desc",
-            limit=limit,
+            limit=limit * 2,
         )
+        merged = list(rows_ho) + list(rows_ic)
+        merged.sort(key=lambda r: str(r.get("creation") or ""), reverse=True)
+        rows = merged[:limit]
         items = [_inventory_check_dict_from_row(r) for r in rows]
         return list_response(items, message="OK")
     except Exception as e:
@@ -1756,15 +1939,24 @@ def get_user_facility_lite_room_state():
         )
         responsible_room_ids = list({r.parent for r in ru_rows})
 
-        rows = frappe.get_all(
-            "ERP Administrative Inventory Check",
-            filters={"responsible_user": uid},
-            fields=["room", "status"],
+        rows_ho = frappe.get_all(
+            "ERP Administrative Facility Handover",
+            filters={"responsible_user": uid, "direction": "incoming"},
+            fields=["room", "status", "creation"],
             order_by="creation desc",
             limit=500,
         )
+        rows_ic = frappe.get_all(
+            "ERP Administrative Inventory Check",
+            filters={"responsible_user": uid},
+            fields=["room", "status", "creation"],
+            order_by="creation desc",
+            limit=500,
+        )
+        merged = list(rows_ho) + list(rows_ic)
+        merged.sort(key=lambda r: str(r.get("creation") or ""), reverse=True)
         latest_by_room = {}
-        for r in rows:
+        for r in merged:
             if r.room not in latest_by_room:
                 latest_by_room[r.room] = r.status
 

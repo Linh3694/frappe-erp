@@ -8,16 +8,21 @@
  "engine": "InnoDB",
  "field_order": [
   "room",
+  "direction",
   "handover_type",
   "class_id",
   "responsible_user",
   "status",
+  "note",
   "facility_snapshot",
   "it_snapshot",
   "sent_by",
   "sent_on",
   "confirmed_by",
-  "confirmed_on"
+  "confirmed_on",
+  "reviewed_by",
+  "reviewed_on",
+  "review_note"
  ],
  "fields": [
   {
@@ -26,6 +31,15 @@
    "in_list_view": 1,
    "label": "Ph\u00f2ng",
    "options": "ERP Administrative Room",
+   "reqd": 1
+  },
+  {
+   "default": "outgoing",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Chi\u1ec1u lu\u1ed3ng",
+   "options": "outgoing\nincoming",
    "reqd": 1
   },
   {
@@ -57,8 +71,13 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Tr\u1ea1ng th\u00e1i",
-   "options": "Pending\nConfirmed",
+   "options": "Pending\nConfirmed\nAccepted\nRejected",
    "reqd": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Long Text",
+   "label": "Ghi ch\u00fa ng\u01b0\u1eddi g\u1eedi (ki\u1ec3m k\u00ea)"
   },
   {
    "fieldname": "facility_snapshot",
@@ -91,11 +110,27 @@
    "fieldname": "confirmed_on",
    "fieldtype": "Datetime",
    "label": "Th\u1eddi gian x\u00e1c nh\u1eadn"
+  },
+  {
+   "fieldname": "reviewed_by",
+   "fieldtype": "Link",
+   "label": "Ng\u01b0\u1eddi duy\u1ec7t (ki\u1ec3m k\u00ea)",
+   "options": "User"
+  },
+  {
+   "fieldname": "reviewed_on",
+   "fieldtype": "Datetime",
+   "label": "Th\u1eddi gian duy\u1ec7t"
+  },
+  {
+   "fieldname": "review_note",
+   "fieldtype": "Long Text",
+   "label": "Ghi ch\u00fa duy\u1ec7t / l\u00fd do t\u1eeb ch\u1ed1i"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-09 10:00:00.000000",
+ "modified": "2026-04-16 10:00:00.000000",
  "module": "Administrative",
  "name": "ERP Administrative Facility Handover",
  "owner": "Administrator",

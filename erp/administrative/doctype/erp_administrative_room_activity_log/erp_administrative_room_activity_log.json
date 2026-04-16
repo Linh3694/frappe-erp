@@ -30,7 +30,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Lo\u1ea1i s\u1ef1 ki\u1ec7n",
-   "options": "handover_sent\nhandover_confirmed\ninventory_submitted\ninventory_accepted\ninventory_rejected\nuser_assigned\nuser_removed",
+   "options": "handover_sent\nhandover_confirmed\ninventory_submitted\ninventory_accepted\ninventory_rejected\nuser_assigned\nuser_removed\nequipment_added\nequipment_updated\nequipment_removed\nrepair_reported\nrepair_completed",
    "reqd": 1
   },
   {
