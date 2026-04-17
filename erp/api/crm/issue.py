@@ -575,6 +575,25 @@ def _pic_from_module(module_name: str):
     return None
 
 
+def _assign_pic_from_issue_context(doc):
+    """
+    Gan PIC theo Loai van de -> Lead hoc sinh -> phong ban (dong bo create_issue).
+    Goi sau khi issue_module / hoc sinh / phong ban da dong bo len doc.
+    """
+    module_name = (getattr(doc, "issue_module", None) or "").strip()
+    if not module_name:
+        return
+    pic = _pic_from_module(module_name) or ""
+    if not pic and getattr(doc, "student", None):
+        pic = _pic_from_student(doc.student) or ""
+    if not pic:
+        for dn in _issue_department_docnames(doc):
+            pic = _pic_from_department(dn) or ""
+            if pic:
+                break
+    doc.pic = pic
+
+
 def _sync_issue_students(doc, data):
     """
     Dong bo bang con issue_students + truong student (hoc sinh dau tien, tuong thich PIC/legacy).
@@ -1166,16 +1185,8 @@ def create_issue():
             doc.first_response_at = None
             doc.sla_status = "On track"
 
-        # PIC: tu dong — uu tien thanh vien dau tien cua Loai van de > Lead hoc sinh > phong ban (khong nhan pic tu client)
-        pic = _pic_from_module(module_name) or ""
-        if not pic and doc.student:
-            pic = _pic_from_student(doc.student) or ""
-        if not pic:
-            for dn in _issue_department_docnames(doc):
-                pic = _pic_from_department(dn) or ""
-                if pic:
-                    break
-        doc.pic = pic
+        # PIC: tu dong — khong nhan tu client
+        _assign_pic_from_issue_context(doc)
 
         user = frappe.session.user
         doc.created_by_user = user
@@ -1352,7 +1363,6 @@ def update_issue():
             return error_response("Khong co quyen sua van de nay")
 
         old_pic = doc.pic
-        prev_module = (doc.issue_module or "").strip()
 
         updatable = [
             "title",
@@ -1402,18 +1412,9 @@ def update_issue():
                 _recompute_sla_state(doc)
                 doc.issue_code = doc.issue_code or _generate_issue_code(mod.code)
 
-        # Doi Loai van de -> gan lai PIC theo module (giong create); fallback hoc sinh / phong ban
-        new_mod = (doc.issue_module or "").strip()
-        if new_mod and new_mod != prev_module:
-            pic = _pic_from_module(new_mod) or ""
-            if not pic and doc.student:
-                pic = _pic_from_student(doc.student) or ""
-            if not pic:
-                for dn in _issue_department_docnames(doc):
-                    pic = _pic_from_department(dn) or ""
-                    if pic:
-                        break
-            doc.pic = pic
+        # PIC: client khong gui (mobile/web form) -> gan lai theo module/hoc sinh/phong ban
+        if "pic" not in data:
+            _assign_pic_from_issue_context(doc)
 
         doc.save(ignore_permissions=True)
         frappe.db.commit()

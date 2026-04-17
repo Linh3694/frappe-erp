@@ -133,6 +133,13 @@ def create_enrollment_records():
         lead_doc.linked_student = student.name
         lead_doc.save(ignore_permissions=True)
 
+        # Neu da co gan lop Regular (SIS Class Student) thi nang len Dang hoc ngay
+        from erp.api.crm.enrolled_class_sync import (
+            promote_leads_to_dang_hoc_if_class_assigned,
+        )
+
+        promote_leads_to_dang_hoc_if_class_assigned(student.name)
+
         frappe.db.commit()
 
         return success_response({

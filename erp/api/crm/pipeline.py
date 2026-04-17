@@ -125,7 +125,7 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
         "Verify": "Can kiem tra",
         "Lead": "Moi",
         "QLead": "Dang cham soc",
-        "Enrolled": "Dang hoc",
+        "Enrolled": "Cho xep lop",
         "Nghi hoc": extra_data.get("initial_status") or "Chuyen truong",
     }
     doc.status = default_statuses.get(target_step, "")
@@ -357,7 +357,19 @@ def advance_step():
                 create_enrollment_records()
             except Exception as e:
                 frappe.log_error(f"Loi tu dong tao enrollment records: {str(e)}")
-    
+        else:
+            try:
+                from erp.api.crm.enrolled_class_sync import (
+                    promote_leads_to_dang_hoc_if_class_assigned,
+                )
+
+                promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
+                frappe.db.commit()
+            except Exception as e:
+                frappe.log_error(
+                    f"Loi dong bo trang thai enrolled (advance_step): {str(e)}"
+                )
+
     return single_item_response(_lead_payload(doc), f"Da chuyen ho so sang buoc {doc.step}")
 
 
@@ -417,6 +429,17 @@ def bulk_advance_step():
                         frappe.log_error(
                             f"Loi tu dong tao enrollment (bulk_advance): {str(e)}"
                         )
+                else:
+                    try:
+                        from erp.api.crm.enrolled_class_sync import (
+                            promote_leads_to_dang_hoc_if_class_assigned,
+                        )
+
+                        promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
+                    except Exception as e:
+                        frappe.log_error(
+                            f"Loi dong bo enrolled (bulk_advance): {str(e)}"
+                        )
             results["success"].append(lead_name)
 
         except Exception as e:
@@ -454,7 +477,7 @@ def enroll_lead():
         old_step = doc.step
         old_status = doc.status
         doc.step = "Enrolled"
-        doc.status = "Dang hoc"
+        doc.status = "Cho xep lop"
         # Sinh ma HS neu chua co (dong bo logic QLead -> Enrolled trong advance_step)
         if not doc.student_code and not doc.linked_student:
             from erp.api.crm.student_code import _generate_code_internal
@@ -475,7 +498,7 @@ def enroll_lead():
 
     frappe.db.commit()
     
-    _log_step_change(name, old_step, "Enrolled", old_status, "Dang hoc")
+    _log_step_change(name, old_step, "Enrolled", old_status, "Cho xep lop")
     
     _sync_lead_guardians_to_family_if_needed(doc)
 
@@ -486,6 +509,16 @@ def enroll_lead():
             create_enrollment_records()
         except Exception as e:
             frappe.log_error(f"Loi tao enrollment records (enroll_lead): {str(e)}")
+    else:
+        try:
+            from erp.api.crm.enrolled_class_sync import (
+                promote_leads_to_dang_hoc_if_class_assigned,
+            )
+
+            promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
+            frappe.db.commit()
+        except Exception as e:
+            frappe.log_error(f"Loi dong bo trang thai enrolled (enroll_lead): {str(e)}")
 
     doc = frappe.get_doc("CRM Lead", name)
     return single_item_response(_lead_payload(doc), "Da nhap hoc thanh cong")
@@ -560,7 +593,7 @@ def reserve_enrollment():
         old_step = doc.step
         old_status = doc.status
         doc.step = "Enrolled"
-        doc.status = "Dang hoc"
+        doc.status = "Cho xep lop"
         try:
             doc.save(ignore_permissions=True)
             break
@@ -575,6 +608,17 @@ def reserve_enrollment():
     # Chi ghi log khi co thay doi (tranh Enrolled -> Enrolled giong het)
     if old_step != doc.step or (old_status or "") != (doc.status or ""):
         _log_step_change(name, old_step, doc.step, old_status, doc.status)
+
+    if doc.linked_student:
+        try:
+            from erp.api.crm.enrolled_class_sync import (
+                promote_leads_to_dang_hoc_if_class_assigned,
+            )
+
+            promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
+            frappe.db.commit()
+        except Exception as e:
+            frappe.log_error(f"Loi dong bo trang thai enrolled (reserve_enrollment): {str(e)}")
 
     return single_item_response(_lead_payload(doc), "Da bao luu thanh cong")
 
@@ -603,7 +647,7 @@ def move_back_to_reenroll():
         old_step = doc.step
         old_status = doc.status
         doc.step = "Enrolled"
-        doc.status = "Dang hoc"
+        doc.status = "Cho xep lop"
         try:
             doc.save(ignore_permissions=True)
             break
@@ -615,7 +659,18 @@ def move_back_to_reenroll():
 
     frappe.db.commit()
     
-    _log_step_change(name, old_step, "Enrolled", old_status, "Dang hoc")
+    _log_step_change(name, old_step, "Enrolled", old_status, "Cho xep lop")
+
+    if doc.linked_student:
+        try:
+            from erp.api.crm.enrolled_class_sync import (
+                promote_leads_to_dang_hoc_if_class_assigned,
+            )
+
+            promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
+            frappe.db.commit()
+        except Exception as e:
+            frappe.log_error(f"Loi dong bo trang thai enrolled (move_back_to_reenroll): {str(e)}")
     
     return single_item_response(_lead_payload(doc), "Da chuyen ve Nhap hoc")
 
@@ -666,7 +721,7 @@ def auto_enroll_paid_leads():
                 old_step = doc.step
                 old_status = doc.status
                 doc.step = "Enrolled"
-                doc.status = "Dang hoc"
+                doc.status = "Cho xep lop"
                 try:
                     doc.save(ignore_permissions=True)
                     break
@@ -675,7 +730,7 @@ def auto_enroll_paid_leads():
                         raise
             if skipped or old_step is None:
                 continue
-            _log_step_change(doc.name, old_step, "Enrolled", old_status, "Dang hoc")
+            _log_step_change(doc.name, old_step, "Enrolled", old_status, "Cho xep lop")
             _sync_lead_guardians_to_family_if_needed(doc)
             if not doc.linked_student:
                 try:
@@ -684,6 +739,15 @@ def auto_enroll_paid_leads():
                     create_enrollment_records()
                 except Exception as e:
                     frappe.log_error(f"Loi tao enrollment (auto_enroll): {str(e)}")
+            else:
+                try:
+                    from erp.api.crm.enrolled_class_sync import (
+                        promote_leads_to_dang_hoc_if_class_assigned,
+                    )
+
+                    promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
+                except Exception as e:
+                    frappe.log_error(f"Loi dong bo enrolled (auto_enroll): {str(e)}")
             enrolled_count += 1
         except Exception as e:
             errors.append({"name": lead["name"], "error": str(e)})
@@ -727,7 +791,7 @@ def end_of_year_transition():
                     bump = "graduated"
                 else:
                     doc.step = "Enrolled"
-                    doc.status = "Dang hoc"
+                    doc.status = "Cho xep lop"
                     bump = "re_enroll"
                 try:
                     doc.save(ignore_permissions=True)
@@ -735,6 +799,19 @@ def end_of_year_transition():
                     _log_step_change(
                         doc.name, old_step, doc.step, old_status, doc.status
                     )
+                    if bump == "re_enroll" and doc.linked_student:
+                        try:
+                            from erp.api.crm.enrolled_class_sync import (
+                                promote_leads_to_dang_hoc_if_class_assigned,
+                            )
+
+                            promote_leads_to_dang_hoc_if_class_assigned(
+                                doc.linked_student
+                            )
+                        except Exception as e:
+                            frappe.log_error(
+                                f"Loi dong bo enrolled (end_of_year): {str(e)}"
+                            )
                     break
                 except frappe.TimestampMismatchError:
                     if attempt == 1:

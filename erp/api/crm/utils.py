@@ -30,7 +30,8 @@ STEP_STATUSES: Dict[str, List[str]] = {
         "Khao sat dau vao",
         "Lost",
     ],
-    "Enrolled": ["Dang hoc"],
+    # Cho xep lop dat dau: default import Excel khi doi step khong kem status
+    "Enrolled": ["Cho xep lop", "Dang hoc", "Dinh chi hoc"],
     # Gop Withdraw + Graduated: Tốt nghiệp, Bảo lưu, Chuyển trường
     "Nghi hoc": ["Tot nghiep", "Bao luu", "Chuyen truong"],
 }

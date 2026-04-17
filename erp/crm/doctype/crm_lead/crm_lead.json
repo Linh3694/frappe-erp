@@ -131,7 +131,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "\nCan kiem tra\nTrung\nDa kiem tra - Gop ho so\nDa kiem tra - Bao trung\nDa kiem tra - Trung hoc sinh\nMoi\nKhong nghe may\nHen gap lai\nKhong nghe may nhieu lan\nKhong co nhu cau\nSau thong tin\nTrung Lead\nLost\nFollow Up\nPre-Event\nEvent\nPre-school Tour/ School Tour\nDang cham soc\nDat lich hen\nThoa thuan\nKhao sat dau vao\nPre-test\nTest\nOffered\nFailed\nRetake\nBooked\nDeposit\nRefund\nReserved\nPaid\nUnpaid\nConsidering\nDang hoc\nChuyen truong\nBao luu\nTot nghiep",
+   "options": "\nCan kiem tra\nTrung\nDa kiem tra - Gop ho so\nDa kiem tra - Bao trung\nDa kiem tra - Trung hoc sinh\nMoi\nKhong nghe may\nHen gap lai\nKhong nghe may nhieu lan\nKhong co nhu cau\nSau thong tin\nTrung Lead\nLost\nFollow Up\nPre-Event\nEvent\nPre-school Tour/ School Tour\nDang cham soc\nDat lich hen\nThoa thuan\nKhao sat dau vao\nPre-test\nTest\nOffered\nFailed\nRetake\nBooked\nDeposit\nRefund\nReserved\nPaid\nUnpaid\nConsidering\nDang hoc\nCho xep lop\nDinh chi hoc\nChuyen truong\nBao luu\nTot nghiep",
    "in_list_view": 1
   },
   {

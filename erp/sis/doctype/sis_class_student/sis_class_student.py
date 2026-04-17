@@ -8,6 +8,42 @@ class SISClassStudent(Document):
 	def validate(self):
 		"""Validate before insert/update"""
 		self.validate_no_duplicate_regular_classes()
+
+	def after_insert(self):
+		# Dong bo CRM Lead Enrolled: Cho xep lop -> Dang hoc khi xep lop Regular
+		self._maybe_promote_crm_enrolled_lead()
+
+	def on_update(self):
+		self._maybe_promote_crm_enrolled_lead()
+
+	def _sis_row_is_regular(self):
+		"""Lop gan voi ban ghi la Regular (dong bo validate_no_duplicate_regular_classes)."""
+		if not self.class_id:
+			return False
+		current_class = frappe.db.get_value(
+			"SIS Class",
+			self.class_id,
+			["class_type"],
+			as_dict=True,
+		)
+		if not current_class:
+			return False
+		ct = current_class.get("class_type")
+		return ct in ("regular", None, "")
+
+	def _maybe_promote_crm_enrolled_lead(self):
+		if not self.student_id or not self._sis_row_is_regular():
+			return
+		try:
+			from erp.api.crm.enrolled_class_sync import (
+				promote_leads_to_dang_hoc_if_class_assigned,
+			)
+
+			promote_leads_to_dang_hoc_if_class_assigned(self.student_id)
+		except Exception as e:
+			frappe.log_error(
+				f"Loi promote CRM enrolled tu SIS Class Student: {str(e)}"
+			)
 	
 	def validate_no_duplicate_regular_classes(self):
 		"""
