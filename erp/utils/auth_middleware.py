@@ -15,15 +15,6 @@ def jwt_auth_middleware():
     Applies to ALL API endpoints - no need to modify individual APIs.
     """
     try:
-        # Skip if:
-        # 1. User is already authenticated (not Guest)
-        # 2. Request is to login endpoint 
-        # 3. Request is to public endpoints
-        
-        if frappe.session.user and frappe.session.user != 'Guest':
-            # User already authenticated via session
-            return
-            
         # Skip for certain endpoints that don't need auth
         request_path = frappe.request.path if frappe.request else ''
         
@@ -38,22 +29,44 @@ def jwt_auth_middleware():
         
         if any(request_path.startswith(path) for path in skip_paths):
             return
-        
-        # Try JWT authentication
+
+        auth_header = (frappe.get_request_header("Authorization") or "").strip()
+        token_header = (frappe.get_request_header("X-Frappe-Token") or "").strip()
+        has_explicit_jwt = (
+            auth_header.lower().startswith("bearer ") and len(auth_header) > 7
+        ) or bool(token_header)
+
+        # Khi SPA gui Bearer / X-Frappe-Token: uu tien JWT truoc cookie session.
+        # Neu bo qua JWT vi da co cookie, get_issue (can_approve_reject) va approve_issue (_can_approve)
+        # co the khac user -> hien nut Duyet nhung POST bi PermissionError.
+        if has_explicit_jwt:
+            user_email = authenticate_via_jwt()
+            if user_email:
+                frappe.set_user(user_email)
+                try:
+                    frappe.local.login_manager.user = user_email
+                except Exception:
+                    pass
+                frappe.logger().info(f"🔑 Global JWT auth (token priority): Set user {user_email}")
+                frappe.local.jwt_authenticated = True
+                return
+            # Token sai/hết hạn: không return — cho phép dùng cookie session bên dưới
+
+        if frappe.session.user and frappe.session.user != 'Guest':
+            return
+
+        # Khong co header JWT: thu JWT nhu cu khi van Guest (tuong thich nguoc)
         user_email = authenticate_via_jwt()
-        
+
         if user_email:
-            # Set user in current session
             frappe.set_user(user_email)
+            try:
+                frappe.local.login_manager.user = user_email
+            except Exception:
+                pass
             frappe.logger().info(f"🔑 Global JWT auth: Set user {user_email}")
-            
-            # Mark session as authenticated via JWT
             frappe.local.jwt_authenticated = True
-        else:
-            # No JWT or invalid JWT - continue as Guest
-            # This allows public endpoints to work normally
-            pass
-            
+
     except Exception as e:
         # Don't break request processing on auth errors
         frappe.logger().error(f"Error in global JWT auth middleware: {str(e)}")
