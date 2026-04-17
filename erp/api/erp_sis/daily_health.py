@@ -15,6 +15,8 @@ from erp.utils.api_response import (
     error_response,
     validation_error_response
 )
+from erp.utils.campus_utils import get_current_campus_from_context
+from erp.api.erp_sis.student import _get_homeroom_class_map_for_students
 
 
 def _check_teacher_permission():
@@ -64,6 +66,27 @@ def _get_request_data():
             pass
     
     return data
+
+
+def _apply_homeroom_class_to_visit_dicts(visits, campus_id=None):
+    """
+    Ghi đè class_id / class_name trên response API để chỉ hiển thị lớp chủ nhiệm (regular),
+    không mixed/club — đồng bộ với search_students / SIS Class.class_type.
+    """
+    if not visits:
+        return
+    student_ids = list({v.get("student_id") for v in visits if v.get("student_id")})
+    if not student_ids:
+        return
+    try:
+        cmap = _get_homeroom_class_map_for_students(student_ids, campus_id)
+        for v in visits:
+            sid = v.get("student_id")
+            if sid and sid in cmap:
+                v["class_id"] = cmap[sid]["class_id"]
+                v["class_name"] = cmap[sid]["class_title"]
+    except Exception as e:
+        frappe.logger().warning(f"_apply_homeroom_class_to_visit_dicts: {e}")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -341,6 +364,10 @@ def get_daily_health_visits():
             ],
             order_by="leave_class_time desc"
         )
+
+        # Hiển thị lớp chủ nhiệm (regular) thống nhất — không dùng tên lớp tiết/mixed/club đã lưu trên visit
+        campus_for_homeroom = campus or get_current_campus_from_context() or "campus-1"
+        _apply_homeroom_class_to_visit_dicts(visits, campus_for_homeroom)
         
         # Filter theo search term
         if search:
@@ -429,7 +456,16 @@ def get_visit_by_id():
             return validation_error_response("visit_id là bắt buộc", {"visit_id": ["visit_id là bắt buộc"]})
 
         visit = frappe.get_doc("SIS Daily Health Visit", visit_id)
-        return success_response(data=visit.as_dict(), message="OK")
+        vd = visit.as_dict()
+        sid = vd.get("student_id")
+        if sid:
+            cmap = _get_homeroom_class_map_for_students(
+                [sid], get_current_campus_from_context() or "campus-1"
+            )
+            if sid in cmap:
+                vd["class_id"] = cmap[sid]["class_id"]
+                vd["class_name"] = cmap[sid]["class_title"]
+        return success_response(data=vd, message="OK")
 
     except frappe.DoesNotExistError:
         return error_response(message="Bản ghi xuống Y tế không tồn tại", code="NOT_FOUND")
@@ -1364,6 +1400,13 @@ def get_daily_health_report_data():
                 data={"data": [], "total": 0},
                 message="Không có dữ liệu trong ngày"
             )
+
+        campus_report = (
+            data.get("campus") or request_args.get("campus")
+            or get_current_campus_from_context()
+            or "campus-1"
+        )
+        _apply_homeroom_class_to_visit_dicts(visits, campus_report)
         
         # Lấy danh sách visit_id
         visit_ids = [v.name for v in visits]

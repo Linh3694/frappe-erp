@@ -402,16 +402,16 @@ def get_student_data():
         )
 
 
-def _enrich_students_current_class_for_batch(students, campus_id=None):
+def _get_homeroom_class_map_for_students(student_ids, campus_id=None):
     """
-    Gán current_class_id / current_class_title (năm học đang active, ưu tiên lớp regular).
-    Đồng bộ logic với search_students — batch_get_students trước đây không enrich nên FE không có lớp.
+    Map student_id -> {class_id, class_title} chỉ lớp chủ nhiệm (homeroom):
+    - SIS Class.class_type = 'regular' (không lấy mixed/club trên lớp).
+    - SIS Class Student: chỉ bản ghi xếp lớp regular (không lấy mixed).
+    Năm học: active theo campus (fallback toàn hệ thống).
     """
-    if not students:
-        return
-    student_ids = [s.get("name") for s in students if s.get("name")]
     if not student_ids:
-        return
+        return {}
+    mapping = {}
     try:
         current_school_year = None
         if campus_id:
@@ -429,7 +429,7 @@ def _enrich_students_current_class_for_batch(students, campus_id=None):
                 order_by="start_date desc",
             )
         if not current_school_year:
-            return
+            return mapping
 
         class_rows = frappe.db.sql(
             """
@@ -442,27 +442,37 @@ def _enrich_students_current_class_for_batch(students, campus_id=None):
             WHERE cs.student_id IN %(ids)s
               AND cs.school_year_id = %(year)s
               AND c.school_year_id = %(year)s
-            ORDER BY
-                cs.student_id,
-                CASE
-                    WHEN IFNULL(cs.class_type, '') IN ('', 'regular') THEN 0
-                    ELSE 1
-                END,
-                cs.creation ASC
+              AND IFNULL(NULLIF(TRIM(cs.class_type), ''), 'regular') = 'regular'
+              AND c.class_type = 'regular'
+            ORDER BY cs.student_id, cs.creation ASC
             """,
             {"ids": tuple(student_ids), "year": current_school_year},
             as_dict=True,
         )
 
-        class_mapping = {}
         for r in class_rows or []:
             sid = r.get("student_id")
-            if sid and sid not in class_mapping:
-                class_mapping[sid] = {
+            if sid and sid not in mapping:
+                mapping[sid] = {
                     "class_id": r.get("class_id"),
                     "class_title": r.get("class_title"),
                 }
+    except Exception as e:
+        frappe.logger().warning(f"_get_homeroom_class_map_for_students: {e}")
+    return mapping
 
+
+def _enrich_students_current_class_for_batch(students, campus_id=None):
+    """
+    Gán current_class_id / current_class_title — chỉ lớp chủ nhiệm (regular), đồng bộ search_students / Daily Health.
+    """
+    if not students:
+        return
+    student_ids = [s.get("name") for s in students if s.get("name")]
+    if not student_ids:
+        return
+    try:
+        class_mapping = _get_homeroom_class_map_for_students(student_ids, campus_id)
         for s in students:
             sid = s.get("name")
             if sid in class_mapping:
@@ -1199,64 +1209,19 @@ def search_students(search_term=None):
             frappe.logger().info(f"[search_students] Enriching class info for {len(student_ids)} students, campus_id={campus_id}")
             
             if student_ids:
-                # Lấy năm học hiện tại (is_enable = 1)
-                current_school_year = frappe.db.get_value(
-                    "SIS School Year",
-                    {"is_enable": 1, "campus_id": campus_id},
-                    "name",
-                    order_by="start_date desc"
+                # Chỉ lớp chủ nhiệm (regular), không mixed/club — dùng chung _get_homeroom_class_map_for_students
+                class_mapping = _get_homeroom_class_map_for_students(student_ids, campus_id)
+                frappe.logger().info(
+                    f"[search_students] Homeroom class map size={len(class_mapping)} for {len(student_ids)} students"
                 )
-                frappe.logger().info(f"[search_students] School year with campus filter: {current_school_year}")
-                
-                # Fallback nếu không có campus filter
-                if not current_school_year:
-                    current_school_year = frappe.db.get_value(
-                        "SIS School Year",
-                        {"is_enable": 1},
-                        "name",
-                        order_by="start_date desc"
-                    )
-                    frappe.logger().info(f"[search_students] School year without campus filter (fallback): {current_school_year}")
-                
-                if current_school_year:
-                    # Lấy thông tin lớp của học sinh trong năm học hiện tại
-                    class_rows = frappe.db.sql(
-                        """
-                        SELECT 
-                            cs.student_id,
-                            c.name as class_id,
-                            c.title as class_title
-                        FROM `tabSIS Class Student` cs
-                        INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
-                        WHERE cs.student_id IN %(ids)s
-                          AND cs.school_year_id = %(year)s
-                          AND c.school_year_id = %(year)s
-                        """,
-                        {"ids": tuple(student_ids), "year": current_school_year},
-                        as_dict=True,
-                    )
-                    frappe.logger().info(f"[search_students] Found {len(class_rows)} class assignments")
-                    if class_rows:
-                        frappe.logger().info(f"[search_students] First 3 class rows: {class_rows[:3]}")
-                    
-                    # Tạo mapping: student_id -> class info
-                    class_mapping = {}
-                    for r in class_rows:
-                        class_mapping[r["student_id"]] = {
-                            "class_id": r["class_id"],
-                            "class_title": r["class_title"]
-                        }
-                    # Gán vào students
-                    enriched_count = 0
-                    for s in students:
-                        sid = s.get("name")
-                        if sid in class_mapping:
-                            s["current_class_id"] = class_mapping[sid]["class_id"]
-                            s["current_class_title"] = class_mapping[sid]["class_title"]
-                            enriched_count += 1
-                    frappe.logger().info(f"[search_students] Enriched {enriched_count}/{len(students)} students with class info")
-                else:
-                    frappe.logger().warning("[search_students] No active school year found!")
+                enriched_count = 0
+                for s in students:
+                    sid = s.get("name")
+                    if sid in class_mapping:
+                        s["current_class_id"] = class_mapping[sid]["class_id"]
+                        s["current_class_title"] = class_mapping[sid]["class_title"]
+                        enriched_count += 1
+                frappe.logger().info(f"[search_students] Enriched {enriched_count}/{len(students)} students with class info")
         except Exception as e:
             frappe.logger().error(f"Failed to enrich search students with class info: {str(e)}")
         
