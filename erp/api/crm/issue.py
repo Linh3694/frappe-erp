@@ -817,7 +817,7 @@ def get_issue_pic_candidates():
     users = frappe.get_all(
         "User",
         filters={"name": ["in", unique_emails], "enabled": 1},
-        fields=["name as user_id", "full_name", "email", "user_image"],
+        fields=["name as user_id", "full_name", "email", "user_image", "job_title"],
     )
     return success_response(users)
 

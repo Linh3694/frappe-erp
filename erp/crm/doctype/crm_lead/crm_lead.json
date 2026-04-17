@@ -51,6 +51,10 @@
   "cb_student_4",
   "student_health_insurance_card",
   "student_initial_medical_registration",
+  "student_account_holder_relationship",
+  "student_bank_account_name",
+  "student_bank_account_number",
+  "student_bank_name",
   "registered_address_section",
   "registered_address_province",
   "registered_address_ward",
@@ -308,6 +312,26 @@
    "fieldname": "student_initial_medical_registration",
    "fieldtype": "Data",
    "label": "Noi dang ky kham chua benh ban dau"
+  },
+  {
+   "fieldname": "student_account_holder_relationship",
+   "fieldtype": "Data",
+   "label": "Quan he chu tai khoan"
+  },
+  {
+   "fieldname": "student_bank_account_name",
+   "fieldtype": "Data",
+   "label": "Ten tai khoan"
+  },
+  {
+   "fieldname": "student_bank_account_number",
+   "fieldtype": "Data",
+   "label": "So tai khoan"
+  },
+  {
+   "fieldname": "student_bank_name",
+   "fieldtype": "Data",
+   "label": "Ngan hang"
   },
   {
    "fieldname": "registered_address_section",
