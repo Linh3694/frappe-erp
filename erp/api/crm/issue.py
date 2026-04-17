@@ -977,7 +977,7 @@ def create_issue():
 @frappe.whitelist(methods=["POST"])
 def approve_issue():
     """Duyet van de trong hang cho"""
-    check_crm_permission()
+    # Khong dung check_crm_permission: chi can role duyet (APPROVER_ROLES) — tranh 403 khi JWT/session khac tap role CRM tong
 
     data = get_request_data()
     name = data.get("name")
@@ -1022,7 +1022,7 @@ def approve_issue():
 @frappe.whitelist(methods=["POST"])
 def reject_issue():
     """Tu choi van de trong hang cho"""
-    check_crm_permission()
+    # Chi kiem tra _can_approve — dong ly do approve_issue
 
     data = get_request_data()
     name = data.get("name")
