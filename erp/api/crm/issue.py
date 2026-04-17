@@ -330,6 +330,13 @@ def _can_create_directly():
     return bool(DIRECT_ISSUE_ROLES & _user_roles())
 
 
+def _is_valid_pic_user(pic_email: str) -> bool:
+    """PIC hop le: user ton tai va co it nhat mot role trong DIRECT_ISSUE_ROLES (dong bo get_issue_pic_candidates)."""
+    if not pic_email or not frappe.db.exists("User", pic_email):
+        return False
+    return bool(DIRECT_ISSUE_ROLES & set(frappe.get_roles(pic_email)))
+
+
 def _can_approve():
     return bool(APPROVER_ROLES & _user_roles())
 
@@ -559,7 +566,7 @@ def _compute_sla_deadline(occurred_at, sla_hours):
 @frappe.whitelist()
 def get_issue_pic_candidates():
     """Tra ve danh sach user co role PIC hop le (SIS Sales, Sales Admin, Sales Care, Sales Care Admin)"""
-    check_crm_permission()
+    # Khong dung check_crm_permission: moi user dang nhap can tai dropdown PIC khi tao/sua issue
 
     pic_roles = list(DIRECT_ISSUE_ROLES)
     user_emails = frappe.get_all(
@@ -583,7 +590,7 @@ def get_issue_pic_candidates():
 @frappe.whitelist()
 def get_issues():
     """Lay danh sach van de"""
-    check_crm_permission()
+    # Khong dung check_crm_permission: doc danh sach cho moi user dang nhap
 
     student_id = frappe.request.args.get("student_id")
     lead_name = frappe.request.args.get("lead_name")
@@ -591,6 +598,7 @@ def get_issues():
     issue_module = frappe.request.args.get("issue_module")
     approval_status = frappe.request.args.get("approval_status")
     department = frappe.request.args.get("department")
+    pic = (frappe.request.args.get("pic") or "").strip()
     only_my_departments = frappe.request.args.get("only_my_departments")
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 20))
@@ -606,6 +614,8 @@ def get_issues():
         filters["issue_module"] = issue_module
     if approval_status:
         filters["approval_status"] = approval_status
+    if pic:
+        filters["pic"] = pic
 
     name_constraint_sets = []
     if department:
@@ -667,7 +677,6 @@ def get_issues():
 @frappe.whitelist()
 def get_pending_issues():
     """Danh sach van de cho duyet (admin)"""
-    check_crm_permission()
     user = frappe.session.user
     if not _can_see_pending_issues_queue(user):
         frappe.throw("Khong co quyen xem hang cho duyet", frappe.PermissionError)
@@ -720,8 +729,6 @@ def get_pending_issues():
 @frappe.whitelist()
 def get_issue():
     """Chi tiet van de"""
-    check_crm_permission()
-
     name = frappe.request.args.get("name")
     if not name:
         return validation_error_response("Thieu name", {"name": ["Bat buoc"]})
@@ -794,7 +801,6 @@ def get_linked_feedback_replies():
     Lay lich su trao doi Feedback gan voi CRM Issue (khi co source_feedback).
     Dung cho workspace-mobile tab Qua trinh xu ly.
     """
-    check_crm_permission()
 
     issue_name = frappe.request.args.get("issue_name") or frappe.request.args.get("name")
     if not issue_name:
@@ -839,7 +845,6 @@ def get_linked_issue():
     Lay CRM Issue co source_feedback = feedback_name (thuong tu dong tao khi phu huynh gui Gop y).
     Dung cho man chi tiet Feedback (web/mobile) de dieu huong sang Issue.
     """
-    check_crm_permission()
 
     feedback_name = frappe.request.args.get("feedback_name") or frappe.request.args.get("name")
     if not feedback_name:
@@ -870,7 +875,6 @@ def get_linked_issue():
 @frappe.whitelist(methods=["POST"])
 def create_issue():
     """Tao van de moi"""
-    check_crm_permission()
     data = get_request_data()
 
     required = ["title", "content", "issue_module"]
@@ -916,6 +920,8 @@ def create_issue():
 
         # PIC: payload > student lead > thanh vien dau tien theo thu tu phong ban
         pic = data.get("pic") or ""
+        if pic and not _is_valid_pic_user(pic.strip()):
+            return error_response("PIC khong hop le: chi user co role Sales tuyen sinh (dong bo danh sach PIC)")
         if not pic and doc.student:
             pic = _pic_from_student(doc.student) or ""
         if not pic:
@@ -1079,6 +1085,13 @@ def update_issue():
         for field in updatable:
             if field in data:
                 doc.set(field, data[field])
+
+        # PIC chi gan user co role Sales (dong bo get_issue_pic_candidates)
+        if "pic" in data:
+            new_pic = (data.get("pic") or "").strip()
+            old_pic_s = (old_pic or "").strip()
+            if new_pic != old_pic_s and new_pic and not _is_valid_pic_user(new_pic):
+                return error_response("PIC khong hop le: chi user co role Sales tuyen sinh (dong bo danh sach PIC)")
 
         if "departments" in data:
             _sync_issue_departments(doc, data)

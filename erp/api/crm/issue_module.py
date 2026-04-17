@@ -10,7 +10,7 @@ from erp.utils.api_response import (
     validation_error_response,
     not_found_response,
 )
-from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.api.crm.utils import get_request_data
 
 CONFIG_ROLES = [
     "System Manager",
@@ -29,7 +29,7 @@ def _check_config_permission():
 @frappe.whitelist()
 def get_modules():
     """Danh sach CRM Issue Module"""
-    check_crm_permission()
+    # Doc cho form tao issue — moi user dang nhap
     is_active = frappe.request.args.get("is_active")
     filters = {}
     if is_active is not None and is_active != "":
@@ -51,7 +51,6 @@ def get_modules():
 @frappe.whitelist()
 def get_module():
     """Chi tiet module kem members"""
-    check_crm_permission()
     name = frappe.request.args.get("name")
     if not name:
         return validation_error_response("Thieu name", {"name": ["Bat buoc"]})

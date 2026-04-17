@@ -243,6 +243,11 @@
  "owner": "Administrator",
  "permissions": [
   {
+   "read": 1,
+   "report": 1,
+   "role": "All"
+  },
+  {
    "create": 1,
    "delete": 1,
    "email": 1,

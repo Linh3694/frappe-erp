@@ -10,7 +10,7 @@ from erp.utils.api_response import (
     validation_error_response,
     not_found_response,
 )
-from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.api.crm.utils import get_request_data
 
 
 def _enrich_members_user_image(data):
@@ -51,7 +51,6 @@ def _check_config_permission():
 @frappe.whitelist()
 def get_departments():
     """Danh sach CRM Issue Department"""
-    check_crm_permission()
     is_active = frappe.request.args.get("is_active")
     filters = {}
     if is_active is not None and is_active != "":
@@ -73,7 +72,6 @@ def get_departments():
 @frappe.whitelist()
 def get_department():
     """Chi tiet phong ban"""
-    check_crm_permission()
     name = frappe.request.args.get("name")
     if not name:
         return validation_error_response("Thieu name", {"name": ["Bat buoc"]})
