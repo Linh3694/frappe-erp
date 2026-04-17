@@ -34,6 +34,22 @@ def _get_primary_phone(lead_doc):
     return lead_doc.primary_phone or ""
 
 
+def _resolve_campus_id_for_new_student(lead_doc):
+    """
+    CRM Student bat buoc co campus_id hop le: get_all_students / search_students
+    loc theo campus nguoi dung — neu lead de trong thi lay campus hien tai.
+    """
+    cid = (lead_doc.campus_id or "").strip()
+    if cid:
+        return cid
+    try:
+        from erp.utils.campus_utils import get_current_campus_from_context
+
+        return get_current_campus_from_context() or "campus-1"
+    except Exception:
+        return "campus-1"
+
+
 def _create_crm_student(lead_doc):
     """Tao CRM Student tu CRM Lead"""
     student = frappe.get_doc({
@@ -42,7 +58,7 @@ def _create_crm_student(lead_doc):
         "student_code": lead_doc.student_code or "",
         "dob": lead_doc.student_dob or "",
         "gender": GENDER_MAP.get(lead_doc.student_gender or "", ""),
-        "campus_id": lead_doc.campus_id or "",
+        "campus_id": _resolve_campus_id_for_new_student(lead_doc),
     })
     student.insert(ignore_permissions=True)
     return student

@@ -383,6 +383,9 @@ def advance_step():
                     f"Loi dong bo trang thai enrolled (advance_step): {str(e)}"
                 )
 
+    # Tai load tu DB: sau enrollment linked_student + CRM Student da cap nhat, doc trong RAM con cu
+    doc = frappe.get_doc("CRM Lead", name)
+
     return single_item_response(_lead_payload(doc), f"Da chuyen ho so sang buoc {doc.step}")
 
 
