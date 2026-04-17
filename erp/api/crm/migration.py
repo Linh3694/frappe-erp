@@ -32,11 +32,42 @@ REVERSE_RELATIONSHIP_MAP = {
 DEFAULT_SIBLING_SCHOOL = "Wellspring Hà Nội"
 
 
+def _resolve_linked_family_via_shared_guardians(student_doc):
+    """
+    Fallback: HS chi co dong quan he duoi CRM Student — tim CRM Family khac co cung guardian.
+    """
+    rels = frappe.get_all(
+        "CRM Family Relationship",
+        filters={"student": student_doc.name},
+        fields=["guardian"],
+        limit_page_length=0,
+    )
+    seen_g = set()
+    for r in rels:
+        gid = r.get("guardian")
+        if not gid or gid in seen_g:
+            continue
+        seen_g.add(gid)
+        families = frappe.db.sql(
+            """
+            SELECT DISTINCT parent FROM `tabCRM Family Relationship`
+            WHERE guardian = %s AND parenttype = 'CRM Family'
+            LIMIT 5
+            """,
+            (gid,),
+        )
+        for (fam_name,) in families:
+            if fam_name and frappe.db.exists("CRM Family", fam_name):
+                return fam_name
+    return None
+
+
 def _resolve_linked_family_for_student(student_doc):
     """
     Tim ten document CRM Family tu CRM Student:
     - family_code (trung name hoac trung cot family_code)
     - hoac dong CRM Family Relationship co parenttype = CRM Family
+    - fallback: guardian dung chung voi bang tren CRM Family
     """
     code = (getattr(student_doc, "family_code", None) or "").strip()
     if code:
@@ -57,7 +88,7 @@ def _resolve_linked_family_for_student(student_doc):
             pname = r["parent"]
             if frappe.db.exists("CRM Family", pname):
                 return pname
-    return None
+    return _resolve_linked_family_via_shared_guardians(student_doc)
 
 
 def _sibling_relationship_label(current_doc, other_doc):
@@ -102,12 +133,54 @@ def _distinct_sibling_student_ids(family_name, exclude_student_name):
     return out
 
 
-def _lead_sibling_rows_from_family(student_doc, family_name):
-    """Dong du lieu cho bang CRM Lead Sibling — check cheo CRM Family Relationship."""
-    rows = []
-    sibling_ids = _distinct_sibling_student_ids(family_name, student_doc.name)
+def _distinct_sibling_student_ids_via_shared_guardians(exclude_student_name):
+    """
+    HS khac cung it nhat mot PH (qua bat ky dong CRM Family Relationship),
+    khi khong co document CRM Family de gom nhom.
+    """
+    rels = frappe.get_all(
+        "CRM Family Relationship",
+        filters={"student": exclude_student_name},
+        fields=["guardian"],
+        limit_page_length=0,
+    )
+    gids = {r["guardian"] for r in rels if r.get("guardian")}
+    if not gids:
+        return []
+    seen = set()
+    out = []
+    for gid in gids:
+        others = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"guardian": gid, "student": ["!=", exclude_student_name]},
+            fields=["student"],
+            limit_page_length=0,
+        )
+        for o in others:
+            sid = o.get("student")
+            if not sid or sid == exclude_student_name or sid in seen:
+                continue
+            if not frappe.db.exists("CRM Student", sid):
+                continue
+            seen.add(sid)
+            out.append(sid)
+    return out
+
+
+def _lead_sibling_rows_for_student(student_doc, family_name=None):
+    """
+    Neu co family_name: siblings trong CRM Family.
+    Neu khong: suy qua guardian dung chung (du lieu cu chi co bang duoi CRM Student).
+    """
+    if family_name:
+        sibling_ids = _distinct_sibling_student_ids(family_name, student_doc.name)
+    else:
+        sibling_ids = _distinct_sibling_student_ids_via_shared_guardians(student_doc.name)
+    if not sibling_ids:
+        return []
     siblings = [frappe.get_doc("CRM Student", sid) for sid in sibling_ids]
     siblings.sort(key=lambda d: (d.dob or "", d.student_name or ""))
+    rows = []
     for other in siblings:
         rows.append({
             "sibling_name": other.student_name,
@@ -293,8 +366,7 @@ def sync_existing_students():
             sibling_rows = []
             if include_family_siblings:
                 linked_family = _resolve_linked_family_for_student(student_doc)
-                if linked_family:
-                    sibling_rows = _lead_sibling_rows_from_family(student_doc, linked_family)
+                sibling_rows = _lead_sibling_rows_for_student(student_doc, linked_family)
             preview.append({
                 "student": s["name"],
                 "student_name": student_doc.student_name,
@@ -328,8 +400,7 @@ def sync_existing_students():
             sibling_rows = []
             if include_family_siblings:
                 linked_family = _resolve_linked_family_for_student(student_doc)
-                if linked_family:
-                    sibling_rows = _lead_sibling_rows_from_family(student_doc, linked_family)
+                sibling_rows = _lead_sibling_rows_for_student(student_doc, linked_family)
 
             lead_data = _build_lead_from_student(
                 student_doc,
@@ -428,7 +499,7 @@ def backfill_lead_family_siblings():
         for lead_doc in to_process[:150]:
             student_doc = frappe.get_doc("CRM Student", lead_doc.linked_student)
             fam = _resolve_linked_family_for_student(student_doc)
-            sib_rows = _lead_sibling_rows_from_family(student_doc, fam) if fam else []
+            sib_rows = _lead_sibling_rows_for_student(student_doc, fam)
             preview.append({
                 "lead": lead_doc.name,
                 "linked_student": lead_doc.linked_student,
@@ -448,23 +519,24 @@ def backfill_lead_family_siblings():
             "force": bool(force),
         }, f"Preview: {len(to_process)} lead can cap nhat family/siblings")
 
-    results = {"updated": 0, "skipped_no_family": 0, "errors": [], "details": []}
+    results = {"updated": 0, "skipped_no_family_or_siblings": 0, "errors": [], "details": []}
 
     for lead_doc in to_process:
         try:
             student_doc = frappe.get_doc("CRM Student", lead_doc.linked_student)
             fam = _resolve_linked_family_for_student(student_doc)
-            if not fam:
-                results["skipped_no_family"] += 1
+            sib_rows = _lead_sibling_rows_for_student(student_doc, fam)
+            if not fam and not sib_rows:
+                results["skipped_no_family_or_siblings"] += 1
                 results["details"].append({
                     "lead": lead_doc.name,
                     "linked_student": lead_doc.linked_student,
-                    "status": "skipped_no_crm_family",
+                    "status": "skipped_no_crm_family_or_siblings",
                 })
                 continue
 
-            sib_rows = _lead_sibling_rows_from_family(student_doc, fam)
-            lead_doc.linked_family = fam
+            if fam:
+                lead_doc.linked_family = fam
             lead_doc.set("lead_siblings", [])
             for r in sib_rows:
                 lead_doc.append("lead_siblings", r)
@@ -492,8 +564,8 @@ def backfill_lead_family_siblings():
 
     return success_response(
         results,
-        f"Da cap nhat {results['updated']} lead. Bo qua khong tim thay CRM Family: {results['skipped_no_family']}. "
-        f"Loi: {len(results['errors'])}",
+        f"Da cap nhat {results['updated']} lead. Bo qua (khong co CRM Family va khong suy ra anh/chi/em): "
+        f"{results['skipped_no_family_or_siblings']}. Loi: {len(results['errors'])}",
     )
 
 
