@@ -18,6 +18,10 @@ RELATIONSHIP_MAP = {
     "Bo": "Father",
     "Me": "Mother",
     "Nguoi giam ho": "Guardian",
+    # Gia dien UI tieng Viet (tab Gia dinh / lead_guardians)
+    "Bố": "Father",
+    "Mẹ": "Mother",
+    "Người giám hộ": "Guardian",
 }
 
 GENDER_MAP = {
@@ -61,6 +65,70 @@ def _coerce_student_gender(lead_doc):
     """Gioi tinh — CRM Student.gender reqd (male/female/others)."""
     g = GENDER_MAP.get(lead_doc.student_gender or "", "")
     return g if g else "others"
+
+
+def _coerce_guardian_id(lead_doc):
+    """
+    CRM Guardian.guardian_id reqd + unique — lead co the chua nhap CCCD/CMND.
+    Ma tam NO-ID-{lead} la duy nhat theo ho so.
+    """
+    gid = str(lead_doc.guardian_id_number or "").strip()
+    if gid:
+        return gid
+    return f"NO-ID-{lead_doc.name}"
+
+
+def _coerce_guardian_name(lead_doc):
+    """CRM Guardian.guardian_name reqd."""
+    n = str(lead_doc.guardian_name or "").strip()
+    if n:
+        return n
+    cc = str(lead_doc.crm_code or "").strip()
+    if cc:
+        return f"Phu huynh (HS {cc})"
+    return f"Phu huynh ({lead_doc.name})"
+
+
+def _pick_linked_guardian_row(lead_doc):
+    """
+    Phu huynh da lien ket trong lead_guardians (tab Gia dinh) — khong tao CRM Guardian moi.
+    Uu tien nguoi lien lac chinh, roi dong dau co guardian.
+    """
+    rows = list(lead_doc.get("lead_guardians") or [])
+    if not rows:
+        return None
+
+    def gid(r):
+        return (r.get("guardian") or "").strip()
+
+    chosen = None
+    for r in rows:
+        if cint(r.get("is_primary_contact")) and gid(r):
+            chosen = r
+            break
+    if not chosen:
+        for r in rows:
+            if gid(r):
+                chosen = r
+                break
+    if not chosen:
+        return None
+    return {
+        "guardian": chosen.get("guardian"),
+        "relationship_type": chosen.get("relationship_type"),
+    }
+
+
+def _relationship_type_for_family(lead_row_rel, lead_doc):
+    """Chuan hoa relationship_type cho CRM Family Relationship."""
+    r = str(lead_row_rel or "").strip()
+    if r:
+        if r in RELATIONSHIP_MAP:
+            return RELATIONSHIP_MAP[r]
+        return r
+    return RELATIONSHIP_MAP.get(
+        lead_doc.relationship or "", lead_doc.relationship or "Guardian"
+    )
 
 
 def _get_primary_phone(lead_doc):
@@ -109,8 +177,8 @@ def _create_crm_guardian(lead_doc, family_code=""):
 
     guardian = frappe.get_doc({
         "doctype": "CRM Guardian",
-        "guardian_id": lead_doc.guardian_id_number or "",
-        "guardian_name": lead_doc.guardian_name or "",
+        "guardian_id": _coerce_guardian_id(lead_doc),
+        "guardian_name": _coerce_guardian_name(lead_doc),
         "phone_number": phone,
         "email": lead_doc.guardian_email or "",
         "family_code": family_code or "",
@@ -182,17 +250,24 @@ def run_create_enrollment_records(lead_name: str):
     try:
         student = _create_crm_student(lead_doc)
 
-        relationship_type = RELATIONSHIP_MAP.get(
-            lead_doc.relationship or "", lead_doc.relationship or "Guardian"
-        )
+        linked = _pick_linked_guardian_row(lead_doc)
+        if linked and frappe.db.exists("CRM Guardian", linked["guardian"]):
+            # Da co CRM Guardian tu tab Gia dinh — chi gan vao CRM Family
+            guardian_doc = frappe.get_doc("CRM Guardian", linked["guardian"])
+            relationship_type = _relationship_type_for_family(
+                linked.get("relationship_type"), lead_doc
+            )
+        else:
+            # Khong co lead_guardians: tao Guardian tu cac truong legacy tren lead
+            guardian_doc = _create_crm_guardian(lead_doc, "")
+            relationship_type = RELATIONSHIP_MAP.get(
+                lead_doc.relationship or "", lead_doc.relationship or "Guardian"
+            )
 
-        # Guardian truoc (chua family_code), Family shell + relationship du guardian (bat buoc tren child table)
-        guardian = _create_crm_guardian(lead_doc, "")
         family = _create_crm_family_enrollment(
-            student.name, guardian.name, relationship_type
+            student.name, guardian_doc.name, relationship_type
         )
 
-        guardian_doc = frappe.get_doc("CRM Guardian", guardian.name)
         guardian_doc.family_code = family.family_code
         guardian_doc.flags.ignore_validate = True
         guardian_doc.save(ignore_permissions=True)
@@ -216,7 +291,7 @@ def run_create_enrollment_records(lead_name: str):
 
         return success_response({
             "student": student.name,
-            "guardian": guardian.name,
+            "guardian": guardian_doc.name,
             "family": family.name,
             "family_code": family.family_code,
         }, "Da tao enrollment records thanh cong")
