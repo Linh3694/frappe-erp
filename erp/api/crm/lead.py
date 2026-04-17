@@ -105,6 +105,61 @@ def enrich_lead_dict_with_pic_info(lead_dict):
     return lead_dict
 
 
+# Trung voi CRM_STEPS key trong frappe-sis-frontend (CRMProfilesTab) — URL /admission/profiles/list/:slug/:leadId
+CRM_STEP_TO_PROFILE_LIST_SLUG = {
+    "Draft": "draft",
+    "Verify": "verify",
+    "Lead": "lead",
+    "QLead": "qlead",
+    "Enrolled": "enrolled",
+    "Nghi hoc": "nghi-hoc",
+}
+
+
+def enrich_lead_dict_with_sibling_lead_links(lead_dict):
+    """
+    Bo sung tren moi dong lead_siblings: lien ket CRM Student / CRM Lead neu trung student_code,
+    de FE phan biet anh/chi/em co ho so trong he thong vs nhap tay (ngoai he thong).
+    """
+    siblings = lead_dict.get("lead_siblings") or []
+    if not siblings:
+        return lead_dict
+    for row in siblings:
+        if not isinstance(row, dict):
+            continue
+        code = (row.get("student_code") or "").strip()
+        row["sibling_linked_student"] = None
+        row["sibling_linked_lead"] = None
+        row["sibling_linked_lead_step"] = None
+        row["sibling_linked_lead_list_slug"] = None
+        row["sibling_has_student_in_system"] = False
+        row["sibling_has_lead_in_system"] = False
+        if not code:
+            continue
+        student_name = frappe.db.get_value("CRM Student", {"student_code": code}, "name")
+        if not student_name:
+            continue
+        row["sibling_linked_student"] = student_name
+        row["sibling_has_student_in_system"] = True
+        lr = frappe.db.sql(
+            """
+            SELECT name, step FROM `tabCRM Lead`
+            WHERE linked_student = %s
+            ORDER BY modified DESC
+            LIMIT 1
+            """,
+            (student_name,),
+        )
+        if lr:
+            row["sibling_linked_lead"] = lr[0][0]
+            row["sibling_linked_lead_step"] = lr[0][1]
+            row["sibling_linked_lead_list_slug"] = CRM_STEP_TO_PROFILE_LIST_SLUG.get(
+                lr[0][1], "enrolled"
+            )
+            row["sibling_has_lead_in_system"] = True
+    return lead_dict
+
+
 @frappe.whitelist()
 def get_leads():
     """Lay danh sach leads voi filter + pagination"""
@@ -212,6 +267,7 @@ def get_lead():
     doc = frappe.get_doc("CRM Lead", name)
     lead_data = doc.as_dict()
     enrich_lead_dict_with_pic_info(lead_data)
+    enrich_lead_dict_with_sibling_lead_links(lead_data)
 
     # Lay ghi chu
     notes = frappe.get_all(
