@@ -4,7 +4,7 @@ CRM Enrollment API - Tao CRM Student/Guardian/Family tu CRM Lead khi enrollment
 
 import frappe
 from frappe import _
-from frappe.utils import now, cint
+from frappe.utils import cint
 from erp.utils.api_response import (
     success_response, error_response, single_item_response,
     validation_error_response, not_found_response
@@ -81,13 +81,13 @@ def _create_crm_family(student_name, guardian_name, relationship_type):
     return family
 
 
-@frappe.whitelist(methods=["POST"])
-def create_enrollment_records():
-    """Tao CRM Student + CRM Guardian + CRM Family tu CRM Lead"""
+def run_create_enrollment_records(lead_name: str):
+    """
+    Tao CRM Student + CRM Guardian + CRM Family tu CRM Lead.
+    Goi truc tiep tu pipeline (truyen lead_name) — khong phu thuoc JSON body / form_dict.
+    """
     check_crm_permission()
-    data = get_request_data()
 
-    lead_name = data.get("lead_name")
     if not lead_name:
         return validation_error_response(
             "Thieu tham so lead_name", {"lead_name": ["Bat buoc"]}
@@ -153,6 +153,15 @@ def create_enrollment_records():
         frappe.db.rollback()
         frappe.log_error(f"Loi tao enrollment records cho {lead_name}: {str(e)}")
         return error_response(f"Loi tao enrollment records: {str(e)}")
+
+
+@frappe.whitelist(methods=["POST"])
+def create_enrollment_records():
+    """Tao CRM Student + CRM Guardian + CRM Family tu CRM Lead (API)"""
+    data = get_request_data()
+    # JSON POST: get_request_data() chi lay body — can them form_dict (pipeline cap nhat lead_name)
+    lead_name = data.get("lead_name") or frappe.form_dict.get("lead_name")
+    return run_create_enrollment_records(lead_name)
 
 
 @frappe.whitelist(methods=["GET"])

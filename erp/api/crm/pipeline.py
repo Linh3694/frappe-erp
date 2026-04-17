@@ -180,6 +180,24 @@ def _log_step_change(lead_name, old_step, new_step, old_status, new_status,
         frappe.log_error(f"Loi ghi log chuyen buoc: {str(e)}")
 
 
+def _run_create_enrollment_for_lead(lead_name: str, context: str):
+    """
+    Tao CRM Student tu lead. Phai truyen lead_name truc tiep: request JSON
+    khi advance_step khong co lead_name trong body, nen create_enrollment_records() tung that bai.
+    """
+    try:
+        from erp.api.crm.enrollment import run_create_enrollment_records
+
+        res = run_create_enrollment_records(lead_name)
+        if not res.get("success"):
+            frappe.log_error(
+                title=f"Loi tao enrollment ({context})",
+                message=f"lead={lead_name}: {res.get('message', '')}",
+            )
+    except Exception as e:
+        frappe.log_error(f"Loi tao enrollment ({context}): {str(e)}")
+
+
 @frappe.whitelist(methods=["POST"])
 def change_status():
     """Chuyen trang thai trong cung 1 step. Khi chuyen sang Lost co the truyen reject_reason, reject_detail."""
@@ -351,12 +369,7 @@ def advance_step():
     if old_step == "QLead" and doc.step == "Enrolled":
         _sync_lead_guardians_to_family_if_needed(doc)
         if not doc.linked_student:
-            try:
-                from erp.api.crm.enrollment import create_enrollment_records
-                frappe.form_dict.update({"lead_name": name})
-                create_enrollment_records()
-            except Exception as e:
-                frappe.log_error(f"Loi tu dong tao enrollment records: {str(e)}")
+            _run_create_enrollment_for_lead(name, "advance_step")
         else:
             try:
                 from erp.api.crm.enrolled_class_sync import (
@@ -421,14 +434,7 @@ def bulk_advance_step():
             if old_step == "QLead" and doc.step == "Enrolled":
                 _sync_lead_guardians_to_family_if_needed(doc)
                 if not doc.linked_student:
-                    try:
-                        from erp.api.crm.enrollment import create_enrollment_records
-                        frappe.form_dict.update({"lead_name": lead_name})
-                        create_enrollment_records()
-                    except Exception as e:
-                        frappe.log_error(
-                            f"Loi tu dong tao enrollment (bulk_advance): {str(e)}"
-                        )
+                    _run_create_enrollment_for_lead(lead_name, "bulk_advance_step")
                 else:
                     try:
                         from erp.api.crm.enrolled_class_sync import (
@@ -503,12 +509,7 @@ def enroll_lead():
     _sync_lead_guardians_to_family_if_needed(doc)
 
     if not doc.linked_student:
-        try:
-            from erp.api.crm.enrollment import create_enrollment_records
-            frappe.form_dict.update({"lead_name": name})
-            create_enrollment_records()
-        except Exception as e:
-            frappe.log_error(f"Loi tao enrollment records (enroll_lead): {str(e)}")
+        _run_create_enrollment_for_lead(name, "enroll_lead")
     else:
         try:
             from erp.api.crm.enrolled_class_sync import (
@@ -733,12 +734,7 @@ def auto_enroll_paid_leads():
             _log_step_change(doc.name, old_step, "Enrolled", old_status, "Cho xep lop")
             _sync_lead_guardians_to_family_if_needed(doc)
             if not doc.linked_student:
-                try:
-                    from erp.api.crm.enrollment import create_enrollment_records
-                    frappe.form_dict.update({"lead_name": doc.name})
-                    create_enrollment_records()
-                except Exception as e:
-                    frappe.log_error(f"Loi tao enrollment (auto_enroll): {str(e)}")
+                _run_create_enrollment_for_lead(doc.name, "auto_enroll_paid_leads")
             else:
                 try:
                     from erp.api.crm.enrolled_class_sync import (
