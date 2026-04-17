@@ -669,6 +669,26 @@ def _compute_sla_deadline(occurred_at, sla_hours):
 
 
 @frappe.whitelist()
+def whoami_crm_issue():
+    """Debug: tra ve user + roles ma server dang thay (doi chieu voi can_approve_reject)."""
+    u = frappe.session.user
+    current_roles = sorted(_session_roles_current())
+    is_approver = bool(APPROVER_ROLES & set(current_roles)) or (
+        "System Manager" in current_roles or "Administrator" in current_roles
+    )
+    return success_response(
+        data={
+            "user": u,
+            "current_roles": current_roles,
+            "approver_roles_config": sorted(APPROVER_ROLES),
+            "can_approve": is_approver,
+            "can_access_list": bool(_can_access_crm_issue_list()),
+            "jwt_authenticated": bool(getattr(frappe.local, "jwt_authenticated", False)),
+        }
+    )
+
+
+@frappe.whitelist()
 def get_issue_pic_candidates():
     """Tra ve danh sach user co role PIC hop le (SIS Sales, Sales Admin, Sales Care, Sales Care Admin)"""
     # Khong dung check_crm_permission: moi user dang nhap can tai dropdown PIC khi tao/sua issue
