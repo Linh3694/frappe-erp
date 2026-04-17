@@ -4,7 +4,7 @@ CRM Enrollment API - Tao CRM Student/Guardian/Family tu CRM Lead khi enrollment
 
 import frappe
 from frappe import _
-from frappe.utils import cint
+from frappe.utils import cint, getdate
 from erp.utils.api_response import (
     success_response, error_response, single_item_response,
     validation_error_response, not_found_response
@@ -22,6 +22,37 @@ GENDER_MAP = {
     "Nam": "male",
     "Nu": "female",
 }
+
+# CRM Student bat buoc dob — lead co the chua nhap ngay sinh
+_PLACEHOLDER_DOB = "1900-01-01"
+
+
+def _coerce_student_name(lead_doc):
+    """Ten hien thi — khong de trong (CRM Student.student_name reqd)."""
+    n = (lead_doc.student_name or "").strip()
+    if n:
+        return n
+    if (lead_doc.crm_code or "").strip():
+        return f"Hoc sinh {lead_doc.crm_code.strip()}"
+    return f"Hoc sinh {lead_doc.name}"
+
+
+def _coerce_student_dob(lead_doc):
+    """Ngay sinh — khong de trong (CRM Student.dob reqd)."""
+    raw = (lead_doc.student_dob or "").strip()
+    if not raw:
+        return _PLACEHOLDER_DOB
+    try:
+        getdate(raw)
+        return raw
+    except Exception:
+        return _PLACEHOLDER_DOB
+
+
+def _coerce_student_gender(lead_doc):
+    """Gioi tinh — CRM Student.gender reqd (male/female/others)."""
+    g = GENDER_MAP.get(lead_doc.student_gender or "", "")
+    return g if g else "others"
 
 
 def _get_primary_phone(lead_doc):
@@ -51,13 +82,13 @@ def _resolve_campus_id_for_new_student(lead_doc):
 
 
 def _create_crm_student(lead_doc):
-    """Tao CRM Student tu CRM Lead"""
+    """Tao CRM Student tu CRM Lead — dong bo bat buoc tren CRM Student."""
     student = frappe.get_doc({
         "doctype": "CRM Student",
-        "student_name": lead_doc.student_name,
-        "student_code": lead_doc.student_code or "",
-        "dob": lead_doc.student_dob or "",
-        "gender": GENDER_MAP.get(lead_doc.student_gender or "", ""),
+        "student_name": _coerce_student_name(lead_doc),
+        "student_code": (lead_doc.student_code or "").strip(),
+        "dob": _coerce_student_dob(lead_doc),
+        "gender": _coerce_student_gender(lead_doc),
         "campus_id": _resolve_campus_id_for_new_student(lead_doc),
     })
     student.insert(ignore_permissions=True)
@@ -133,6 +164,11 @@ def run_create_enrollment_records(lead_name: str):
         return error_response(
             f"Chi co the tao enrollment records tu buoc QLead hoac Enrolled. "
             f"Hien tai: {lead_doc.step}"
+        )
+
+    if not (lead_doc.student_code or "").strip():
+        return error_response(
+            "Ho so chua co ma hoc sinh. Vui long lam moi trang hoac lien he quan tri."
         )
 
     try:
