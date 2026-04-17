@@ -827,8 +827,8 @@ scheduler_events = {
         "*/5 7-17 * * 1-6": [
             "erp.api.erp_sis.daily_health_notification.check_stale_health_visits"
         ],
-        # CRM Issue SLA — canh bao sap qua / qua han (PIC + Admin duyet)
-        "0 * * * *": [
+        # CRM Issue SLA — canh bao sap qua / qua han (15 phut: tranh bo lo Warning voi SLA ngan)
+        "*/15 * * * *": [
             "erp.api.crm.sla_scheduler.check_crm_issue_sla"
         ]
     },

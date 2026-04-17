@@ -91,41 +91,86 @@ LOG_ACCENT_SALES_ROLES = frozenset(
 
 # Con lai <= 20% thoi gian SLA -> Warning (dong bo scheduler + UI)
 WARNING_THRESHOLD = 0.2
+# San canh bao toi thieu (giay): SLA ngan + cron thua tranh bo lo Warning (dong bo scheduler)
+MIN_WARNING_SECONDS = 30 * 60
+
+
+def _warning_seconds_before_deadline(total_seconds: float) -> float:
+    """Thoi luong truoc deadline ma coi la Warning: max(20% cua cua so, san toi thieu, khong qua 50% cua so)."""
+    if total_seconds <= 0:
+        return MIN_WARNING_SECONDS
+    ratio_part = total_seconds * WARNING_THRESHOLD
+    capped_floor = min(MIN_WARNING_SECONDS, total_seconds * 0.5)
+    return max(ratio_part, capped_floor)
+
+
+def _compute_sla_status_from_values(sla_started_at, sla_deadline, first_response_at):
+    """
+    Passed / On track / Warning / Breached — logic thuan (dung scheduler + _recompute_sla_state).
+    """
+    if first_response_at:
+        return "Passed"
+    if not sla_deadline or not sla_started_at:
+        return "On track"
+    try:
+        total = (get_datetime(sla_deadline) - get_datetime(sla_started_at)).total_seconds()
+        remaining = (get_datetime(sla_deadline) - get_datetime(now())).total_seconds()
+    except Exception:
+        return "On track"
+    if remaining <= 0:
+        return "Breached"
+    if total > 0:
+        w_before = _warning_seconds_before_deadline(total)
+        if remaining <= w_before:
+            return "Warning"
+    return "On track"
 
 
 def _recompute_sla_state(doc):
     """Xac dinh sla_status dua tren first_response_at, sla_deadline, now."""
-    if getattr(doc, "first_response_at", None):
-        doc.sla_status = "Passed"
-        return doc.sla_status
-    if not getattr(doc, "sla_deadline", None) or not getattr(doc, "sla_started_at", None):
-        doc.sla_status = "On track"
-        return doc.sla_status
-    try:
-        total = (get_datetime(doc.sla_deadline) - get_datetime(doc.sla_started_at)).total_seconds()
-        remaining = (get_datetime(doc.sla_deadline) - get_datetime(now())).total_seconds()
-    except Exception:
-        doc.sla_status = "On track"
-        return doc.sla_status
-    if remaining <= 0:
-        doc.sla_status = "Breached"
-    elif total > 0 and remaining / total <= WARNING_THRESHOLD:
-        doc.sla_status = "Warning"
-    else:
-        doc.sla_status = "On track"
-    return doc.sla_status
+    st = _compute_sla_status_from_values(
+        getattr(doc, "sla_started_at", None),
+        getattr(doc, "sla_deadline", None),
+        getattr(doc, "first_response_at", None),
+    )
+    doc.sla_status = st
+    return st
+
+
+def _first_pic_log_timestamp(doc):
+    """Thoi diem logged_at som nhat trong cac dong log do PIC ghi (logged_by == pic)."""
+    pic = (getattr(doc, "pic", None) or "").strip()
+    if not pic:
+        return None
+    logs = getattr(doc, "process_logs", None) or []
+    if not logs:
+        return None
+    candidates = []
+    for row in logs:
+        lb = (getattr(row, "logged_by", None) or "").strip()
+        if lb != pic:
+            continue
+        la = getattr(row, "logged_at", None)
+        if la:
+            try:
+                candidates.append(get_datetime(la))
+            except Exception:
+                continue
+    if not candidates:
+        return None
+    return min(candidates)
 
 
 def _mark_first_response_if_eligible(doc):
-    """Pass SLA = PIC chuyen trang thai 'Dang xu ly' VA co >=1 process log."""
+    """Pass SLA: trang thai 'Dang xu ly' + it nhat mot log do PIC ghi (logged_by == pic)."""
     if getattr(doc, "first_response_at", None):
         return
     if (getattr(doc, "status", None) or "").strip() != "Dang xu ly":
         return
-    logs = getattr(doc, "process_logs", None) or []
-    if not logs or len(logs) == 0:
+    ts = _first_pic_log_timestamp(doc)
+    if not ts:
         return
-    doc.first_response_at = now()
+    doc.first_response_at = ts
     doc.sla_status = "Passed"
 
 
@@ -304,14 +349,21 @@ def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_
 
 
 def _approver_emails():
-    """User co role duyet van de."""
+    """User co role duyet van de, chi user enabled."""
     roles = list(APPROVER_ROLES)
     rows = frappe.get_all(
         "Has Role",
         filters={"role": ["in", roles], "parenttype": "User"},
         pluck="parent",
     )
-    return list(set(rows or []))
+    if not rows:
+        return []
+    enabled = frappe.get_all(
+        "User",
+        filters={"name": ["in", list(set(rows))], "enabled": 1},
+        pluck="name",
+    )
+    return list(set(enabled or []))
 
 
 def _department_member_emails(department_name):
