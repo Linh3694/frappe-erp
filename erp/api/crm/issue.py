@@ -336,6 +336,33 @@ def _user_roles():
     return set(frappe.get_roles(frappe.session.user))
 
 
+def _session_roles_current():
+    """
+    Role cua user hien tai sau khi xoa cache Redis (frappe.permissions.get_roles cache theo key 'roles').
+    Neu chi gan SIS Sales Admin trong Frappe ma chua dang nhap lai, cache cu co the thieu role -> duyet that bai.
+    Cong them role tu Role Profile (neu User co role_profile_name nhung chua Save de dong bo Has Role).
+    """
+    u = frappe.session.user
+    if not u or u == "Guest":
+        return set()
+    try:
+        frappe.cache.hdel("roles", u)
+    except Exception:
+        pass
+    r = set(frappe.get_roles(u))
+    rp_name = frappe.db.get_value("User", u, "role_profile_name")
+    if rp_name and frappe.db.exists("Role Profile", rp_name):
+        try:
+            rp_doc = frappe.get_doc("Role Profile", rp_name)
+            for row in rp_doc.roles or []:
+                role = getattr(row, "role", None)
+                if role:
+                    r.add(role)
+        except Exception:
+            pass
+    return r
+
+
 def _can_create_directly():
     return bool(DIRECT_ISSUE_ROLES & _user_roles())
 
@@ -349,7 +376,7 @@ def _is_valid_pic_user(pic_email: str) -> bool:
 
 def _can_approve():
     """Duyet/tu choi: APPROVER_ROLES + System Manager / Administrator (van hanh Frappe)."""
-    r = _user_roles()
+    r = _session_roles_current()
     if APPROVER_ROLES & r:
         return True
     if "System Manager" in r or "Administrator" in r:
