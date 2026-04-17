@@ -13,6 +13,132 @@ from erp.api.crm.utils import (
     STEP_STATUSES, CRM_STEPS
 )
 from erp.api.crm.pipeline import _log_step_change
+from datetime import datetime, timedelta
+
+
+# Cot xuat / cap nhat bulk — khoi thong tin hoc sinh (StudentSection) + PIC / buoc / trang thai
+# Dong bo voi frappe-sis-frontend bulkUpdateStudentColumns.ts
+_EXPORT_BULK_LEAD_FIELDS = [
+    "name",
+    "crm_code",
+    "student_code",
+    "student_name",
+    "pic",
+    "step",
+    "status",
+    "reject_reason",
+    "reject_detail",
+    "student_gender",
+    "student_dob",
+    "current_grade",
+    "current_school",
+    "target_grade",
+    "target_academic_year",
+    "student_place_of_birth",
+    "student_nationality",
+    "student_ethnicity",
+    "student_religion",
+    "student_health_insurance_card",
+    "student_initial_medical_registration",
+    "student_account_holder_relationship",
+    "student_bank_account_name",
+    "student_bank_account_number",
+    "student_bank_name",
+    "registered_address_province",
+    "registered_address_ward",
+    "registered_address_street",
+    "current_address_province",
+    "current_address_ward",
+    "current_address_street",
+    "student_study_interruption",
+    "student_study_interruption_reason",
+    "student_special_characteristics",
+    "student_discipline_issues",
+]
+
+_BULK_FLOAT_FIELDS = frozenset()
+
+
+def _parse_bulk_cell(field, raw):
+    """Chuan hoa gia tri tu Excel / JSON."""
+    if raw is None:
+        return None
+    if isinstance(raw, str) and not raw.strip():
+        return None
+    if field in _BULK_FLOAT_FIELDS:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+    if field == "student_dob" and raw is not None:
+        if hasattr(raw, "strftime"):
+            return raw.strftime("%Y-%m-%d")
+        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            try:
+                base = datetime(1899, 12, 30)
+                d = base + timedelta(days=float(raw))
+                return d.strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        s = str(raw).strip()
+        return s or None
+    s = str(raw).strip()
+    return s if s else None
+
+
+def _set_doc_field_if_changed(doc, field, new_val):
+    """Tra ve True neu co thay doi."""
+    old = doc.get(field)
+    if field in _BULK_FLOAT_FIELDS:
+        try:
+            o = float(old) if old is not None else None
+        except (TypeError, ValueError):
+            o = None
+        n = new_val
+        if o is None and n is None:
+            return False
+        if o is None or n is None:
+            doc.set(field, n)
+            return True
+        if abs(o - float(n)) < 1e-9:
+            return False
+        doc.set(field, n)
+        return True
+    if field == "student_dob":
+        old_s = (str(old)[:10] if old else "").strip()
+        new_s = (new_val or "").strip()[:10] if new_val else ""
+        if old_s == new_s:
+            return False
+        doc.set(field, new_val or None)
+        return True
+    o = (old or "") if old is not None else ""
+    n = (new_val or "") if new_val is not None else ""
+    if o == n:
+        return False
+    doc.set(field, new_val or None)
+    return True
+
+
+def _apply_bulk_student_section_fields(doc, row):
+    """Doc row dict: chi cap nhat neu key co trong row."""
+    changed = False
+    for field in _EXPORT_BULK_LEAD_FIELDS:
+        if field in (
+            "name",
+            "crm_code",
+            "step",
+            "status",
+            "pic",
+            "reject_reason",
+            "reject_detail",
+        ):
+            continue
+        if field not in row:
+            continue
+        new_val = _parse_bulk_cell(field, row.get(field))
+        if _set_doc_field_if_changed(doc, field, new_val):
+            changed = True
+    return changed
 
 
 @frappe.whitelist()
@@ -159,7 +285,8 @@ def export_leads():
 def export_step_leads_for_update():
     """
     Xuat danh sach records cua 1 step de user cap nhat bang Excel.
-    Cot: name (ID noi bo), crm_code, student_code, student_name, pic, step, status
+    Gom PIC / buoc / trang thai va toan bo truong khoi thong tin hoc sinh (StudentSection).
+    Dong bo voi bulkUpdateStudentColumns.ts (frontend). Khong gom chuong trinh uu dai (%).
     """
     check_crm_permission()
 
@@ -175,8 +302,7 @@ def export_step_leads_for_update():
     leads = frappe.get_all(
         "CRM Lead",
         filters=filters,
-        fields=["name", "crm_code", "student_code", "student_name", "pic", "step", "status",
-                "reject_reason", "reject_detail"],
+        fields=_EXPORT_BULK_LEAD_FIELDS,
         order_by="crm_code asc, creation asc",
         limit_page_length=0,
     )
@@ -196,11 +322,12 @@ def export_step_leads_for_update():
 def bulk_update_leads():
     """
     Cap nhat hang loat records tu file Excel.
-    Khong tao ban ghi moi, chi update cac truong: pic, step, status.
+    Cap nhat: toan bo truong thong tin hoc sinh (StudentSection), pic, step, status, ly do tu choi (Lost).
     Cho phep chuyen buoc (step) — status se duoc validate theo buoc moi.
     Match bang truong 'name' (ID noi bo) hoac 'crm_code'.
+    Chi ghi CRM Lead Step History khi step hoac status pipeline thay doi.
 
-    Body JSON: { "rows": [ { "name": "...", "pic": "...", "step": "...", "status": "..." }, ... ] }
+    Body JSON: { "rows": [ { ... }, ... ] } — key trung voi export_step_leads_for_update / bulkUpdateStudentColumns.ts
     """
     check_crm_permission()
     data = get_request_data()
@@ -237,7 +364,10 @@ def bulk_update_leads():
 
         try:
             doc = frappe.get_doc("CRM Lead", doc_name)
-            changed = False
+            snap_step = doc.step
+            snap_status = doc.status
+
+            changed = _apply_bulk_student_section_fields(doc, row)
 
             new_pic = str(row.get("pic", "")).strip()
             if new_pic and new_pic != (doc.pic or ""):
@@ -249,13 +379,8 @@ def bulk_update_leads():
             reject_reason = str(row.get("reject_reason", "")).strip()
             reject_detail = str(row.get("reject_detail", "")).strip()
 
-            # Xac dinh step se ap dung de validate status
-            target_step = new_step if (new_step and new_step != doc.step) else doc.step
-            old_step = doc.step
-            old_status = doc.status
-
             # Validate step hop le
-            if new_step and new_step != doc.step:
+            if new_step and new_step != snap_step:
                 if new_step not in CRM_STEPS:
                     results["errors"].append({
                         "row": row_num,
@@ -270,7 +395,9 @@ def bulk_update_leads():
                 if not doc.crm_code and CRM_STEPS.index(new_step) >= CRM_STEPS.index("Lead"):
                     doc.crm_code = generate_crm_code()
 
-            # Validate status theo step moi (target_step)
+            target_step = doc.step
+
+            # Validate status theo step hien tai (sau khi doi buoc neu co)
             if new_status and new_status != (doc.status or ""):
                 valid = STEP_STATUSES.get(target_step, [])
                 if valid and new_status not in valid:
@@ -285,24 +412,30 @@ def bulk_update_leads():
                     doc.reject_reason = reject_reason
                     doc.reject_detail = reject_detail
                 changed = True
-            elif new_step and new_step != doc.step:
+            elif new_step and new_step != snap_step and not new_status:
                 # Doi buoc nhung khong set status -> tu dong dat status mac dinh
                 default_statuses = STEP_STATUSES.get(target_step, [])
                 if default_statuses:
                     doc.status = default_statuses[0]
                 else:
                     doc.status = ""
+                changed = True
 
             if changed:
                 doc.flags.ignore_validate = True
                 doc.flags.ignore_mandatory = True
                 doc.save(ignore_permissions=True)
-                # Ghi log step change (status hoac step thay doi)
-                _log_step_change(
-                    doc_name, old_step, doc.step, old_status, doc.status,
-                    reject_reason=reject_reason if doc.status == "Lost" else None,
-                    reject_detail=reject_detail if doc.status == "Lost" else None
-                )
+                # Chi ghi log khi buoc hoac trang thai pipeline thay doi (tranh log khi chi sua thong tin HS)
+                if doc.step != snap_step or doc.status != snap_status:
+                    _log_step_change(
+                        doc_name,
+                        snap_step,
+                        doc.step,
+                        snap_status,
+                        doc.status,
+                        reject_reason=reject_reason if doc.status == "Lost" else None,
+                        reject_detail=reject_detail if doc.status == "Lost" else None,
+                    )
                 results["updated"] += 1
             else:
                 results["skipped"] += 1

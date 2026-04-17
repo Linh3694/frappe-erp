@@ -367,6 +367,136 @@ def sync_existing_students():
     )
 
 
+def _lead_needs_family_backfill(lead_doc, force):
+    """force=0: chi lead thieu linked_family hoac chua co dong lead_siblings."""
+    if force:
+        return True
+    if not getattr(lead_doc, "linked_family", None):
+        return True
+    siblings = getattr(lead_doc, "lead_siblings", None) or []
+    return len(siblings) == 0
+
+
+@frappe.whitelist(methods=["POST"])
+def backfill_lead_family_siblings():
+    """
+    Cap nhat linked_family + lead_siblings cho CRM Lead DA CO linked_student
+    (dong bo lai sau khi migrate cu thieu anh/chi/em).
+
+    Params (JSON body):
+      - dry_run (optional): 1 = chi tra preview
+      - force (optional, default 0): 0 = chi lead dang thieu linked_family hoac lead_siblings rong;
+        1 = ghi de tu CRM Family cho moi lead co linked_student
+      - campus_id (optional): loc theo campus_id tren CRM Lead
+      - linked_students (optional, list): chi cac CRM Student name
+    """
+    check_crm_permission(["System Manager", "SIS Manager"])
+    data = get_request_data()
+
+    dry_run = cint(data.get("dry_run", 0))
+    force = cint(data.get("force", 0))
+    campus_id = data.get("campus_id")
+    linked_students_filter = data.get("linked_students") or []
+
+    lead_filters = {"linked_student": ["is", "set"]}
+    if campus_id:
+        lead_filters["campus_id"] = campus_id
+    if linked_students_filter:
+        lead_filters["linked_student"] = ["in", linked_students_filter]
+
+    leads = frappe.get_all(
+        "CRM Lead",
+        filters=lead_filters,
+        fields=["name", "linked_student"],
+        order_by="modified desc",
+        limit_page_length=0,
+    )
+
+    to_process = []
+    for row in leads:
+        lead_doc = frappe.get_doc("CRM Lead", row["name"])
+        if not lead_doc.linked_student:
+            continue
+        if not frappe.db.exists("CRM Student", lead_doc.linked_student):
+            continue
+        if not _lead_needs_family_backfill(lead_doc, force):
+            continue
+        to_process.append(lead_doc)
+
+    if dry_run:
+        preview = []
+        for lead_doc in to_process[:150]:
+            student_doc = frappe.get_doc("CRM Student", lead_doc.linked_student)
+            fam = _resolve_linked_family_for_student(student_doc)
+            sib_rows = _lead_sibling_rows_from_family(student_doc, fam) if fam else []
+            preview.append({
+                "lead": lead_doc.name,
+                "linked_student": lead_doc.linked_student,
+                "student_name": student_doc.student_name,
+                "resolved_linked_family": fam,
+                "siblings_count": len(sib_rows),
+                "siblings_preview": [
+                    {"sibling_name": r.get("sibling_name"), "student_code": r.get("student_code")}
+                    for r in sib_rows[:8]
+                ],
+            })
+        return success_response({
+            "total_leads": len(leads),
+            "to_update": len(to_process),
+            "preview": preview,
+            "dry_run": True,
+            "force": bool(force),
+        }, f"Preview: {len(to_process)} lead can cap nhat family/siblings")
+
+    results = {"updated": 0, "skipped_no_family": 0, "errors": [], "details": []}
+
+    for lead_doc in to_process:
+        try:
+            student_doc = frappe.get_doc("CRM Student", lead_doc.linked_student)
+            fam = _resolve_linked_family_for_student(student_doc)
+            if not fam:
+                results["skipped_no_family"] += 1
+                results["details"].append({
+                    "lead": lead_doc.name,
+                    "linked_student": lead_doc.linked_student,
+                    "status": "skipped_no_crm_family",
+                })
+                continue
+
+            sib_rows = _lead_sibling_rows_from_family(student_doc, fam)
+            lead_doc.linked_family = fam
+            lead_doc.set("lead_siblings", [])
+            for r in sib_rows:
+                lead_doc.append("lead_siblings", r)
+
+            lead_doc.flags.ignore_validate = True
+            lead_doc.flags.ignore_mandatory = True
+            lead_doc.save(ignore_permissions=True)
+
+            results["updated"] += 1
+            results["details"].append({
+                "lead": lead_doc.name,
+                "linked_student": lead_doc.linked_student,
+                "linked_family": fam,
+                "siblings_count": len(sib_rows),
+                "status": "updated",
+            })
+        except Exception as e:
+            results["errors"].append({
+                "lead": lead_doc.name,
+                "linked_student": getattr(lead_doc, "linked_student", None),
+                "error": str(e),
+            })
+
+    frappe.db.commit()
+
+    return success_response(
+        results,
+        f"Da cap nhat {results['updated']} lead. Bo qua khong tim thay CRM Family: {results['skipped_no_family']}. "
+        f"Loi: {len(results['errors'])}",
+    )
+
+
 @frappe.whitelist(methods=["GET"])
 def get_migration_stats():
     """Thong ke tong quan de hien thi tren UI truoc khi chay migration"""
