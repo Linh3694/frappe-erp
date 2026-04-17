@@ -319,7 +319,9 @@ def create_lead():
         if not skip_verify and not doc.pic:
             from erp.api.crm.assignment import assign_pic_sales_weight_balance
 
-            assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+            pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+            if pic:
+                frappe.db.set_value("CRM Lead", doc.name, "pic", pic)
 
         frappe.db.commit()
 
@@ -480,7 +482,9 @@ def clone_lead_for_sibling():
         if not doc.pic:
             from erp.api.crm.assignment import assign_pic_sales_weight_balance
 
-            assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+            pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
+            if pic:
+                frappe.db.set_value("CRM Lead", doc.name, "pic", pic)
 
         frappe.db.commit()
 

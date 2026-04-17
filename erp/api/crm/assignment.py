@@ -101,6 +101,7 @@ def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     """
     Gan PIC mac dinh: user SIS Sales dang dam nhan it ho so CRM Lead nhat (can bang tai / least-loaded).
     Khong ghi de neu ho so da co pic. campus_id: chi dem ho so cung campus khi co gia tri.
+    Chi tra ve email duoc chon — goi doc.pic = pic roi save, hoac set_value sau insert (khong set_value trong ham).
     """
     existing = frappe.db.get_value("CRM Lead", lead_name, "pic")
     if existing:
@@ -119,14 +120,15 @@ def assign_pic_sales_weight_balance(lead_name, campus_id=None):
 
     # Chon user co count nho nhat; hoa: sap xep theo name
     chosen = min(users, key=lambda x: (counts.get(x, 0), x))
-    frappe.db.set_value("CRM Lead", lead_name, "pic", chosen)
+    # Khong frappe.db.set_value o day: neu goi truoc doc.save() se lam lech modified -> TimestampMismatch.
+    # Luu qua doc.pic + save (pipeline/merge) hoac set_value sau insert (lead.py).
     return chosen
 
 
 def assign_pic_sales_care_weight_balance(lead_name, campus_id=None):
     """
-    Khi QLead -> Enrolled: gan PIC team cham soc — user SIS Sales Care dam nhan it ho so nhat.
-    Luon ghi de pic neu co pool; neu khong co user SIS Sales Care thi khong doi (tra ve None).
+    Khi QLead -> Enrolled: chon PIC team cham soc — user SIS Sales Care dam nhan it ho so nhat.
+    Tra ve email hoac None. Goi doc.pic = pic roi save, khong ghi DB trong ham (tranh TimestampMismatch).
     """
     users = _get_active_sis_sales_care_user_names()
     if not users:
@@ -140,7 +142,7 @@ def assign_pic_sales_care_weight_balance(lead_name, campus_id=None):
         counts[u] = frappe.db.count("CRM Lead", filters=filters)
 
     chosen = min(users, key=lambda x: (counts.get(x, 0), x))
-    frappe.db.set_value("CRM Lead", lead_name, "pic", chosen)
+    # Khong set_value truoc doc.save() (tranh TimestampMismatch) — giong assign_pic_sales_weight_balance
     return chosen
 
 
