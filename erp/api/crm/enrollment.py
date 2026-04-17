@@ -65,7 +65,7 @@ def _create_crm_student(lead_doc):
 
 
 def _create_crm_guardian(lead_doc, family_code=""):
-    """Tao CRM Guardian tu CRM Lead"""
+    """Tao CRM Guardian tu CRM Lead (family_code cap nhat sau khi co CRM Family)."""
     phone = _get_primary_phone(lead_doc)
 
     guardian = frappe.get_doc({
@@ -74,27 +74,39 @@ def _create_crm_guardian(lead_doc, family_code=""):
         "guardian_name": lead_doc.guardian_name or "",
         "phone_number": phone,
         "email": lead_doc.guardian_email or "",
-        "family_code": family_code,
+        "family_code": family_code or "",
     })
     guardian.insert(ignore_permissions=True)
     return guardian
 
 
-def _create_crm_family(student_name, guardian_name, relationship_type):
-    """Tao CRM Family voi relationship giua student va guardian"""
-    family = frappe.get_doc({
+def _create_crm_family_enrollment(student_name, guardian_docname, relationship_type):
+    """
+    Tao CRM Family giong erp.api.erp_sis.family.create_family:
+    insert shell (bo qua mandatory family_code), gan family_code = name, roi them dong relationship du guardian.
+    """
+    family_doc = frappe.get_doc({
         "doctype": "CRM Family",
-        "family_code": "",
-        "relationships": [{
+        "relationships": [],
+    })
+    family_doc.flags.ignore_validate = True
+    family_doc.insert(ignore_permissions=True, ignore_mandatory=True)
+    family_doc.family_code = family_doc.name
+    family_doc.flags.ignore_validate = True
+    family_doc.save(ignore_permissions=True)
+
+    family_doc.append(
+        "relationships",
+        {
             "student": student_name,
-            "guardian": guardian_name,
+            "guardian": guardian_docname,
             "relationship_type": relationship_type,
             "key_person": 1,
             "access": 1,
-        }]
-    })
-    family.insert(ignore_permissions=True)
-    return family
+        },
+    )
+    family_doc.save(ignore_permissions=True)
+    return family_doc
 
 
 def run_create_enrollment_records(lead_name: str):
@@ -130,19 +142,19 @@ def run_create_enrollment_records(lead_name: str):
             lead_doc.relationship or "", lead_doc.relationship or "Guardian"
         )
 
-        family = _create_crm_family(
-            student.name, None, relationship_type
+        # Guardian truoc (chua family_code), Family shell + relationship du guardian (bat buoc tren child table)
+        guardian = _create_crm_guardian(lead_doc, "")
+        family = _create_crm_family_enrollment(
+            student.name, guardian.name, relationship_type
         )
 
-        guardian = _create_crm_guardian(lead_doc, family.family_code)
+        guardian_doc = frappe.get_doc("CRM Guardian", guardian.name)
+        guardian_doc.family_code = family.family_code
+        guardian_doc.flags.ignore_validate = True
+        guardian_doc.save(ignore_permissions=True)
 
-        # Cap nhat family relationship voi guardian name
-        if family.relationships:
-            family.relationships[0].guardian = guardian.name
-            family.save(ignore_permissions=True)
-
-        # Cap nhat student family_code
         student.family_code = family.family_code
+        student.flags.ignore_validate = True
         student.save(ignore_permissions=True)
 
         # Lien ket lead voi student
