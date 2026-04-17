@@ -124,25 +124,6 @@ def _get_user_crm_issue_department_names(user: str):
     return [r[0] for r in rows] if rows else []
 
 
-def _can_see_pending_issues_queue(user: str) -> bool:
-    """Xem hang cho duyet: co role ghi hoac thuoc it nhat mot phong ban."""
-    if ISSUE_WRITE_ROLES & set(frappe.get_roles(user)):
-        return True
-    return bool(_get_user_crm_issue_department_names(user))
-
-
-def _pending_queue_scope_for_user(user: str) -> str:
-    """all | dept_only | none — UI tab Hang cho (dong bo frontend)."""
-    if not user or user == "Guest":
-        return "none"
-    r = set(frappe.get_roles(user))
-    if ISSUE_WRITE_ROLES & r:
-        return "all"
-    if _get_user_crm_issue_department_names(user):
-        return "dept_only"
-    return "none"
-
-
 def _can_access_crm_issue_list() -> bool:
     """Mo rong hon check_crm_permission: Campus *, CRM core, extra roles (dong bo mobile hasCrmAccess)."""
     u = frappe.session.user
@@ -156,15 +137,6 @@ def _can_access_crm_issue_list() -> bool:
     if CRM_ISSUE_LIST_EXTRA_ROLES & roles:
         return True
     return False
-
-
-def _issue_names_created_or_owned_by(user: str):
-    """Issue user tao (created_by_user hoac owner Frappe)."""
-    if not user or user == "Guest":
-        return []
-    n1 = frappe.get_all("CRM Issue", filters={"created_by_user": user}, pluck="name")
-    n2 = frappe.get_all("CRM Issue", filters={"owner": user}, pluck="name")
-    return list(set((n1 or []) + (n2 or [])))
 
 
 def _compute_log_accent(logged_by: str, issue_doc) -> str:
@@ -722,14 +694,14 @@ def get_issue_pic_candidates():
 
 @frappe.whitelist()
 def get_issues():
-    """Lay danh sach van de — loc theo scope user (ghi day du / phong ban / chi ban ghi cua minh)."""
+    """Lay danh sach van de — day du cho moi user co quyen CRM (khong loc theo phong ban/owner). Chi loc khi client gui department / only_my_departments."""
     if not _can_access_crm_issue_list():
         frappe.throw("Khong co quyen truy cap danh sach van de CRM", frappe.PermissionError)
 
     user = frappe.session.user
-    user_roles = set(frappe.get_roles(user))
     is_department_member = bool(_get_user_crm_issue_department_names(user))
-    can_see_pending_queue_scope = _pending_queue_scope_for_user(user)
+    # UI: danh sach chung day du — luon 'all' (phan quyen nut o get_issue / can_*)
+    list_pending_scope_hint = "all"
 
     student_id = frappe.request.args.get("student_id")
     lead_name = frappe.request.args.get("lead_name")
@@ -757,32 +729,12 @@ def get_issues():
         filters["pic"] = pic
 
     name_constraint_sets = []
-    # Scope mac dinh: full list neu ISSUE_WRITE_ROLES; neu chi thanh vien phong ban -> loc phong ban; nguoc lai -> chi issue cua user
-    if ISSUE_WRITE_ROLES & user_roles:
-        pass
-    elif is_department_member:
-        depts = _get_user_crm_issue_department_names(user)
-        visible = _issue_names_visible_to_department_members(depts) if depts else []
-        if not visible:
-            out = paginated_response([], page, 0, per_page)
-            out["can_see_pending_queue_scope"] = can_see_pending_queue_scope
-            out["is_department_member"] = is_department_member
-            return out
-        name_constraint_sets.append(set(visible))
-    else:
-        own_names = _issue_names_created_or_owned_by(user)
-        if not own_names:
-            out = paginated_response([], page, 0, per_page)
-            out["can_see_pending_queue_scope"] = can_see_pending_queue_scope
-            out["is_department_member"] = is_department_member
-            return out
-        name_constraint_sets.append(set(own_names))
 
     if department:
         dept_names = _issue_names_matching_department(department)
         if not dept_names:
             out = paginated_response([], page, 0, per_page)
-            out["can_see_pending_queue_scope"] = can_see_pending_queue_scope
+            out["can_see_pending_queue_scope"] = list_pending_scope_hint
             out["is_department_member"] = is_department_member
             return out
         name_constraint_sets.append(set(dept_names))
@@ -790,13 +742,13 @@ def get_issues():
         my_depts = _get_user_crm_issue_department_names(user)
         if not my_depts:
             out = paginated_response([], page, 0, per_page)
-            out["can_see_pending_queue_scope"] = can_see_pending_queue_scope
+            out["can_see_pending_queue_scope"] = list_pending_scope_hint
             out["is_department_member"] = is_department_member
             return out
         visible = _issue_names_visible_to_department_members(my_depts)
         if not visible:
             out = paginated_response([], page, 0, per_page)
-            out["can_see_pending_queue_scope"] = can_see_pending_queue_scope
+            out["can_see_pending_queue_scope"] = list_pending_scope_hint
             out["is_department_member"] = is_department_member
             return out
         name_constraint_sets.append(set(visible))
@@ -805,7 +757,7 @@ def get_issues():
         names_list = list(inter)
         if not names_list:
             out = paginated_response([], page, 0, per_page)
-            out["can_see_pending_queue_scope"] = can_see_pending_queue_scope
+            out["can_see_pending_queue_scope"] = list_pending_scope_hint
             out["is_department_member"] = is_department_member
             return out
         filters["name"] = ["in", names_list]
@@ -843,29 +795,23 @@ def get_issues():
     _enrich_user_info(issues)
     _enrich_issue_list_departments(issues)
     out = paginated_response(issues, page, total, per_page)
-    out["can_see_pending_queue_scope"] = can_see_pending_queue_scope
+    out["can_see_pending_queue_scope"] = list_pending_scope_hint
     out["is_department_member"] = is_department_member
     return out
 
 
 @frappe.whitelist()
 def get_pending_issues():
-    """Danh sach van de cho duyet (admin)"""
+    """Hang cho duyet — day du cho moi user co quyen CRM. Duyet/tu choi van theo can_* tren chi tiet."""
     user = frappe.session.user
-    if not _can_see_pending_issues_queue(user):
-        frappe.throw("Khong co quyen xem hang cho duyet", frappe.PermissionError)
+    if not _can_access_crm_issue_list():
+        frappe.throw("Khong co quyen truy cap hang cho duyet CRM", frappe.PermissionError)
 
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 50))
     filters = {"approval_status": "Cho duyet"}
-    if not (ISSUE_WRITE_ROLES & set(frappe.get_roles(user))):
-        depts = _get_user_crm_issue_department_names(user)
-        if not depts:
-            return paginated_response([], page, 0, per_page)
-        visible = _issue_names_visible_to_department_members(depts)
-        if not visible:
-            return paginated_response([], page, 0, per_page)
-        filters["name"] = ["in", visible]
+    scope_meta = "all"
+    dept_flag = bool(_get_user_crm_issue_department_names(user))
     total = frappe.db.count("CRM Issue", filters=filters)
     offset = (page - 1) * per_page
 
@@ -897,12 +843,18 @@ def get_pending_issues():
     )
     _enrich_user_info(issues)
     _enrich_issue_list_departments(issues)
-    return paginated_response(issues, page, total, per_page)
+    out = paginated_response(issues, page, total, per_page)
+    out["can_see_pending_queue_scope"] = scope_meta
+    out["is_department_member"] = dept_flag
+    return out
 
 
 @frappe.whitelist()
 def get_issue():
-    """Chi tiet van de"""
+    """Chi tiet van de — doc day du neu co quyen CRM (phan quyen thao tac: can_*)."""
+    if not _can_access_crm_issue_list():
+        frappe.throw("Khong co quyen xem chi tiet van de CRM", frappe.PermissionError)
+
     name = frappe.request.args.get("name")
     if not name:
         return validation_error_response("Thieu name", {"name": ["Bat buoc"]})
