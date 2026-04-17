@@ -6,7 +6,7 @@ bat ky logic nao cua he thong cu (SIS, Parent Portal).
 
 import frappe
 from frappe import _
-from frappe.utils import now, cint
+from frappe.utils import cint, getdate
 from erp.utils.api_response import (
     success_response, error_response, single_item_response,
     paginated_response, list_response, validation_error_response
@@ -27,6 +27,96 @@ REVERSE_RELATIONSHIP_MAP = {
     "Grandfather": "Ong",
     "Grandmother": "Ba",
 }
+
+# Trung voi add_lead_sibling (mode=existing) trong lead.py
+DEFAULT_SIBLING_SCHOOL = "Wellspring Hà Nội"
+
+
+def _resolve_linked_family_for_student(student_doc):
+    """
+    Tim ten document CRM Family tu CRM Student:
+    - family_code (trung name hoac trung cot family_code)
+    - hoac dong CRM Family Relationship co parenttype = CRM Family
+    """
+    code = (getattr(student_doc, "family_code", None) or "").strip()
+    if code:
+        if frappe.db.exists("CRM Family", code):
+            return code
+        fam_name = frappe.db.get_value("CRM Family", {"family_code": code}, "name")
+        if fam_name:
+            return fam_name
+
+    rels = frappe.get_all(
+        "CRM Family Relationship",
+        filters={"student": student_doc.name},
+        fields=["parent", "parenttype"],
+        limit_page_length=0,
+    )
+    for r in rels:
+        if r.get("parenttype") == "CRM Family" and r.get("parent"):
+            pname = r["parent"]
+            if frappe.db.exists("CRM Family", pname):
+                return pname
+    return None
+
+
+def _sibling_relationship_label(current_doc, other_doc):
+    """Uoc luong Anh / Chi / Em dua tren dob + gender (CRM Student)."""
+    if not getattr(current_doc, "dob", None) or not getattr(other_doc, "dob", None):
+        return ""
+    d0 = getdate(current_doc.dob)
+    d1 = getdate(other_doc.dob)
+    if d1 < d0:
+        if other_doc.gender == "male":
+            return "Anh"
+        if other_doc.gender == "female":
+            return "Chi"
+        return "Anh/Chị"
+    if d1 > d0:
+        if other_doc.gender == "male":
+            return "Em trai"
+        if other_doc.gender == "female":
+            return "Em gai"
+        return "Em"
+    return "Cùng ngày sinh"
+
+
+def _distinct_sibling_student_ids(family_name, exclude_student_name):
+    """Cac CRM Student khac trong cung CRM Family (relationships tren document CRM Family)."""
+    rel_rows = frappe.get_all(
+        "CRM Family Relationship",
+        filters={"parent": family_name},
+        fields=["student"],
+        limit_page_length=0,
+    )
+    seen = set()
+    out = []
+    for r in rel_rows:
+        sid = r.get("student")
+        if not sid or sid == exclude_student_name or sid in seen:
+            continue
+        if not frappe.db.exists("CRM Student", sid):
+            continue
+        seen.add(sid)
+        out.append(sid)
+    return out
+
+
+def _lead_sibling_rows_from_family(student_doc, family_name):
+    """Dong du lieu cho bang CRM Lead Sibling — check cheo CRM Family Relationship."""
+    rows = []
+    sibling_ids = _distinct_sibling_student_ids(family_name, student_doc.name)
+    siblings = [frappe.get_doc("CRM Student", sid) for sid in sibling_ids]
+    siblings.sort(key=lambda d: (d.dob or "", d.student_name or ""))
+    for other in siblings:
+        rows.append({
+            "sibling_name": other.student_name,
+            "student_code": other.student_code or "",
+            "relationship_type": _sibling_relationship_label(student_doc, other),
+            "dob": str(other.dob) if other.dob else None,
+            "school": DEFAULT_SIBLING_SCHOOL,
+        })
+    return rows
 
 
 def _find_key_guardian_for_student(student_name):
@@ -53,8 +143,14 @@ def _find_key_guardian_for_student(student_name):
     return guardian_doc, best.get("relationship_type", "")
 
 
-def _build_lead_from_student(student_doc, guardian_doc, relationship_type):
-    """Tao dict data cho CRM Lead tu CRM Student + CRM Guardian"""
+def _build_lead_from_student(
+    student_doc,
+    guardian_doc,
+    relationship_type,
+    linked_family=None,
+    lead_sibling_rows=None,
+):
+    """Tao dict data cho CRM Lead tu CRM Student + CRM Guardian; tuy chon linked_family + lead_siblings."""
     lead_data = {
         "doctype": "CRM Lead",
         "step": "Enrolled",
@@ -67,6 +163,11 @@ def _build_lead_from_student(student_doc, guardian_doc, relationship_type):
         "campus_id": student_doc.campus_id,
         "linked_student": student_doc.name,
     }
+
+    if linked_family:
+        lead_data["linked_family"] = linked_family
+    if lead_sibling_rows:
+        lead_data["lead_siblings"] = lead_sibling_rows
 
     if guardian_doc:
         lead_data["guardian_name"] = guardian_doc.guardian_name or ""
@@ -147,6 +248,8 @@ def sync_existing_students():
       - campus_id (optional): Chi sync students cua campus nay
       - dry_run (optional, bool): Neu True chi tra ve preview, ko tao thuc te
       - student_names (optional, list): Chi sync cac student cu the (thay vi tat ca)
+      - include_family_siblings (optional, bool, default 1): Neu 1 thi gan linked_family +
+        lead_siblings tu CRM Family / CRM Family Relationship (anh chi em cung ho)
     """
     check_crm_permission(["System Manager", "SIS Manager"])
     data = get_request_data()
@@ -154,6 +257,7 @@ def sync_existing_students():
     campus_id = data.get("campus_id")
     dry_run = cint(data.get("dry_run", 0))
     specific_students = data.get("student_names", [])
+    include_family_siblings = cint(data.get("include_family_siblings", 1))
 
     # Tim CRM Students chua co lead
     linked_students = frappe.get_all(
@@ -185,6 +289,12 @@ def sync_existing_students():
         for s in to_migrate[:100]:
             student_doc = frappe.get_doc("CRM Student", s["name"])
             guardian_doc, rel_type = _find_key_guardian_for_student(s["name"])
+            linked_family = None
+            sibling_rows = []
+            if include_family_siblings:
+                linked_family = _resolve_linked_family_for_student(student_doc)
+                if linked_family:
+                    sibling_rows = _lead_sibling_rows_from_family(student_doc, linked_family)
             preview.append({
                 "student": s["name"],
                 "student_name": student_doc.student_name,
@@ -192,11 +302,18 @@ def sync_existing_students():
                 "campus_id": student_doc.campus_id,
                 "guardian_name": guardian_doc.guardian_name if guardian_doc else "",
                 "guardian_phone": guardian_doc.phone_number if guardian_doc else "",
+                "linked_family": linked_family,
+                "siblings_count": len(sibling_rows),
+                "siblings_preview": [
+                    {"sibling_name": r.get("sibling_name"), "student_code": r.get("student_code")}
+                    for r in sibling_rows[:8]
+                ],
             })
         return success_response({
             "total_to_migrate": len(to_migrate),
             "preview": preview,
             "dry_run": True,
+            "include_family_siblings": bool(include_family_siblings),
         }, f"Preview: {len(to_migrate)} students can dong bo")
 
     # Thuc hien migration
@@ -207,7 +324,20 @@ def sync_existing_students():
             student_doc = frappe.get_doc("CRM Student", s["name"])
             guardian_doc, rel_type = _find_key_guardian_for_student(s["name"])
 
-            lead_data = _build_lead_from_student(student_doc, guardian_doc, rel_type)
+            linked_family = None
+            sibling_rows = []
+            if include_family_siblings:
+                linked_family = _resolve_linked_family_for_student(student_doc)
+                if linked_family:
+                    sibling_rows = _lead_sibling_rows_from_family(student_doc, linked_family)
+
+            lead_data = _build_lead_from_student(
+                student_doc,
+                guardian_doc,
+                rel_type,
+                linked_family=linked_family,
+                lead_sibling_rows=sibling_rows,
+            )
             lead_data["crm_code"] = generate_crm_code()
             lead_doc = frappe.get_doc(lead_data)
             # Bypass mandatory validation cho phone_numbers vi du lieu cu co the khong co SDT
