@@ -379,6 +379,16 @@ def _pic_from_department(dept_name: str):
     return None
 
 
+def _pic_from_module(module_name: str):
+    """Lay user dau tien trong bang thanh vien CRM Issue Module (uu tien PIC tu loai van de)."""
+    if not module_name or not frappe.db.exists("CRM Issue Module", module_name):
+        return None
+    doc = frappe.get_doc("CRM Issue Module", module_name)
+    if doc.members and len(doc.members) > 0:
+        return doc.members[0].user
+    return None
+
+
 def _sync_issue_students(doc, data):
     """
     Dong bo bang con issue_students + truong student (hoc sinh dau tien, tuong thich PIC/legacy).
@@ -918,10 +928,8 @@ def create_issue():
         doc.sla_hours = sla_h
         doc.sla_deadline = _compute_sla_deadline(now(), sla_h)
 
-        # PIC: payload > student lead > thanh vien dau tien theo thu tu phong ban
-        pic = data.get("pic") or ""
-        if pic and not _is_valid_pic_user(pic.strip()):
-            return error_response("PIC khong hop le: chi user co role Sales tuyen sinh (dong bo danh sach PIC)")
+        # PIC: tu dong — uu tien thanh vien dau tien cua Loai van de > Lead hoc sinh > phong ban (khong nhan pic tu client)
+        pic = _pic_from_module(module_name) or ""
         if not pic and doc.student:
             pic = _pic_from_student(doc.student) or ""
         if not pic:
@@ -1073,6 +1081,7 @@ def update_issue():
             return error_response("Khong co quyen sua van de nay")
 
         old_pic = doc.pic
+        prev_module = (doc.issue_module or "").strip()
 
         updatable = [
             "title",
@@ -1112,6 +1121,19 @@ def update_issue():
                 doc.sla_hours = float(mod.sla_hours or 0)
                 doc.sla_deadline = _compute_sla_deadline(doc.creation, doc.sla_hours)
                 doc.issue_code = doc.issue_code or _generate_issue_code(mod.code)
+
+        # Doi Loai van de -> gan lai PIC theo module (giong create); fallback hoc sinh / phong ban
+        new_mod = (doc.issue_module or "").strip()
+        if new_mod and new_mod != prev_module:
+            pic = _pic_from_module(new_mod) or ""
+            if not pic and doc.student:
+                pic = _pic_from_student(doc.student) or ""
+            if not pic:
+                for dn in _issue_department_docnames(doc):
+                    pic = _pic_from_department(dn) or ""
+                    if pic:
+                        break
+            doc.pic = pic
 
         doc.save(ignore_permissions=True)
         frappe.db.commit()
