@@ -1102,7 +1102,22 @@ def approve_issue():
 
     doc = frappe.get_doc("CRM Issue", name)
     if not _can_approve():
-        frappe.throw("Khong co quyen duyet", frappe.PermissionError)
+        # Log chi tiet de doi chieu voi can_approve_reject tra ve tu get_issue
+        current_roles = sorted(_session_roles_current())
+        frappe.logger().warning(
+            f"CRM Issue approve blocked: user={frappe.session.user}, roles={current_roles}, "
+            f"required_any={sorted(APPROVER_ROLES) + ['System Manager', 'Administrator']}, name={name}"
+        )
+        return error_response(
+            "Khong co quyen duyet",
+            code="PERMISSION_DENIED",
+            debug_info={
+                "user": frappe.session.user,
+                "current_roles": current_roles,
+                "approver_roles": sorted(APPROVER_ROLES),
+                "issue_name": name,
+            },
+        )
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
@@ -1148,7 +1163,21 @@ def reject_issue():
 
     doc = frappe.get_doc("CRM Issue", name)
     if not _can_approve():
-        frappe.throw("Khong co quyen tu choi", frappe.PermissionError)
+        current_roles = sorted(_session_roles_current())
+        frappe.logger().warning(
+            f"CRM Issue reject blocked: user={frappe.session.user}, roles={current_roles}, "
+            f"required_any={sorted(APPROVER_ROLES) + ['System Manager', 'Administrator']}, name={name}"
+        )
+        return error_response(
+            "Khong co quyen tu choi",
+            code="PERMISSION_DENIED",
+            debug_info={
+                "user": frappe.session.user,
+                "current_roles": current_roles,
+                "approver_roles": sorted(APPROVER_ROLES),
+                "issue_name": name,
+            },
+        )
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
