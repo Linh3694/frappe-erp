@@ -60,6 +60,16 @@ ALLOWED_ROLES = [
     "SIS BOD",
 ]
 
+# PIC CRM Lead khi chon thu cong + validate reassign_pic (dong bo DIRECT_ISSUE_ROLES trong issue.py)
+CRM_LEAD_PIC_ELIGIBLE_ROLES = frozenset(
+    {
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+        "SIS Sales",
+        "SIS Sales Admin",
+    }
+)
+
 
 def check_crm_permission(required_roles: Optional[List[str]] = None) -> bool:
     """Kiem tra quyen truy cap CRM"""

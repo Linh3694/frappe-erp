@@ -15,6 +15,10 @@ from erp.api.crm.utils import (
     QLEAD_TEST_STATUSES, QLEAD_DEAL_STATUSES,
 )
 from erp.api.crm.lead import enrich_lead_dict_with_pic_info
+from erp.api.crm.assignment import (
+    assign_pic_sales_weight_balance,
+    assign_pic_sales_care_weight_balance,
+)
 
 
 def _lead_payload(doc):
@@ -144,11 +148,15 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
         doc.crm_code = generate_crm_code()
 
     if target_step in ("Verify", "Lead") and not doc.pic:
-        from erp.api.crm.assignment import assign_pic_sales_weight_balance
-
         pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
         if pic:
             doc.pic = pic
+
+    # QLead -> Enrolled: PIC team cham soc (SIS Sales Care, can bang tai). Khong ap dung Nghi hoc -> Enrolled.
+    if old_step == "QLead" and target_step == "Enrolled":
+        pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
+        if pic_care:
+            doc.pic = pic_care
 
     return (doc, old_step, old_status), None
 
@@ -496,6 +504,9 @@ def enroll_lead():
                 doc.target_academic_year or "",
                 doc.target_grade or "01",
             )
+        pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
+        if pic_care:
+            doc.pic = pic_care
         try:
             doc.save(ignore_permissions=True)
             break
@@ -726,6 +737,9 @@ def auto_enroll_paid_leads():
                 old_status = doc.status
                 doc.step = "Enrolled"
                 doc.status = "Cho xep lop"
+                pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
+                if pic_care:
+                    doc.pic = pic_care
                 try:
                     doc.save(ignore_permissions=True)
                     break

@@ -8,7 +8,11 @@ from erp.utils.api_response import (
     success_response, error_response, single_item_response,
     validation_error_response, not_found_response, list_response
 )
-from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.api.crm.utils import (
+    check_crm_permission,
+    get_request_data,
+    CRM_LEAD_PIC_ELIGIBLE_ROLES,
+)
 
 
 @frappe.whitelist()
@@ -80,6 +84,19 @@ def _get_active_sis_sales_user_names():
     return [r[0] for r in rows] if rows else []
 
 
+def _get_active_sis_sales_care_user_names():
+    """Danh sach User (name) co role SIS Sales Care va enabled=1."""
+    rows = frappe.db.sql(
+        """
+        SELECT u.name FROM `tabUser` u
+        INNER JOIN `tabHas Role` r ON r.parent = u.name AND r.parenttype = 'User'
+        WHERE r.role = 'SIS Sales Care' AND IFNULL(u.enabled, 0) = 1
+        ORDER BY u.name
+        """
+    )
+    return [r[0] for r in rows] if rows else []
+
+
 def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     """
     Gan PIC mac dinh: user SIS Sales dang dam nhan it ho so CRM Lead nhat (can bang tai / least-loaded).
@@ -104,6 +121,37 @@ def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     chosen = min(users, key=lambda x: (counts.get(x, 0), x))
     frappe.db.set_value("CRM Lead", lead_name, "pic", chosen)
     return chosen
+
+
+def assign_pic_sales_care_weight_balance(lead_name, campus_id=None):
+    """
+    Khi QLead -> Enrolled: gan PIC team cham soc — user SIS Sales Care dam nhan it ho so nhat.
+    Luon ghi de pic neu co pool; neu khong co user SIS Sales Care thi khong doi (tra ve None).
+    """
+    users = _get_active_sis_sales_care_user_names()
+    if not users:
+        return None
+
+    counts = {}
+    for u in users:
+        filters = {"pic": u, "docstatus": ["<", 2]}
+        if campus_id:
+            filters["campus_id"] = campus_id
+        counts[u] = frappe.db.count("CRM Lead", filters=filters)
+
+    chosen = min(users, key=lambda x: (counts.get(x, 0), x))
+    frappe.db.set_value("CRM Lead", lead_name, "pic", chosen)
+    return chosen
+
+
+def _is_valid_crm_lead_pic_user(pic_email: str) -> bool:
+    """User ton tai, enabled, co it nhat mot role trong CRM_LEAD_PIC_ELIGIBLE_ROLES."""
+    if not pic_email or not frappe.db.exists("User", pic_email):
+        return False
+    if not frappe.db.get_value("User", pic_email, "enabled"):
+        return False
+    roles = set(frappe.get_roles(pic_email))
+    return bool(roles & CRM_LEAD_PIC_ELIGIBLE_ROLES)
 
 
 def assign_pic_internal(lead_name, campus_id):
@@ -174,7 +222,13 @@ def reassign_pic():
     
     if not frappe.db.exists("CRM Lead", lead_name):
         return not_found_response(f"Khong tim thay ho so {lead_name}")
-    
+
+    if not _is_valid_crm_lead_pic_user(new_pic):
+        return validation_error_response(
+            "PIC khong hop le: can la user hoat dong va co mot trong cac role SIS Sales / SIS Sales Admin / SIS Sales Care / SIS Sales Care Admin",
+            {"new_pic": ["User khong hop le hoac khong co quyen PIC CRM"]},
+        )
+
     frappe.db.set_value("CRM Lead", lead_name, "pic", new_pic)
     frappe.db.commit()
     
