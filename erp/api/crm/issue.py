@@ -89,6 +89,45 @@ LOG_ACCENT_SALES_ROLES = frozenset(
     }
 )
 
+# Con lai <= 20% thoi gian SLA -> Warning (dong bo scheduler + UI)
+WARNING_THRESHOLD = 0.2
+
+
+def _recompute_sla_state(doc):
+    """Xac dinh sla_status dua tren first_response_at, sla_deadline, now."""
+    if getattr(doc, "first_response_at", None):
+        doc.sla_status = "Passed"
+        return doc.sla_status
+    if not getattr(doc, "sla_deadline", None) or not getattr(doc, "sla_started_at", None):
+        doc.sla_status = "On track"
+        return doc.sla_status
+    try:
+        total = (get_datetime(doc.sla_deadline) - get_datetime(doc.sla_started_at)).total_seconds()
+        remaining = (get_datetime(doc.sla_deadline) - get_datetime(now())).total_seconds()
+    except Exception:
+        doc.sla_status = "On track"
+        return doc.sla_status
+    if remaining <= 0:
+        doc.sla_status = "Breached"
+    elif total > 0 and remaining / total <= WARNING_THRESHOLD:
+        doc.sla_status = "Warning"
+    else:
+        doc.sla_status = "On track"
+    return doc.sla_status
+
+
+def _mark_first_response_if_eligible(doc):
+    """Pass SLA = PIC chuyen trang thai 'Dang xu ly' VA co >=1 process log."""
+    if getattr(doc, "first_response_at", None):
+        return
+    if (getattr(doc, "status", None) or "").strip() != "Dang xu ly":
+        return
+    logs = getattr(doc, "process_logs", None) or []
+    if not logs or len(logs) == 0:
+        return
+    doc.first_response_at = now()
+    doc.sla_status = "Passed"
+
 
 def _can_write_issue_ops(user: str, issue_doc) -> bool:
     """User duoc chinh sua van de (sau check_crm_permission): role ISSUE_WRITE_ROLES hoac thanh vien mot phong ban lien quan."""
@@ -805,6 +844,7 @@ def get_issues():
             "creation",
             "approval_status",
             "sla_deadline",
+            "sla_status",
             "department",
         ],
         order_by="creation desc",
@@ -855,6 +895,7 @@ def get_pending_issues():
             "creation",
             "approval_status",
             "sla_deadline",
+            "sla_status",
             "department",
         ],
         order_by="creation asc",
@@ -1062,7 +1103,16 @@ def create_issue():
 
         sla_h = float(mod.sla_hours or 0)
         doc.sla_hours = sla_h
-        doc.sla_deadline = _compute_sla_deadline(now(), sla_h)
+        # SLA chi bat dau khi tao truc tiep (Da duyet); hang cho: approve_issue se gan moc
+        if _can_create_directly():
+            doc.sla_started_at = now()
+            doc.sla_deadline = _compute_sla_deadline(now(), sla_h)
+            doc.sla_status = "On track"
+        else:
+            doc.sla_started_at = None
+            doc.sla_deadline = None
+            doc.first_response_at = None
+            doc.sla_status = "On track"
 
         # PIC: tu dong — uu tien thanh vien dau tien cua Loai van de > Lead hoc sinh > phong ban (khong nhan pic tu client)
         pic = _pic_from_module(module_name) or ""
@@ -1147,6 +1197,10 @@ def approve_issue():
     doc.approved_at = now()
     doc.rejected_by_user = ""
     doc.rejected_at = None
+    # Moc SLA: luc duyet (khong phai luc tao neu qua hang cho)
+    doc.sla_started_at = now()
+    doc.sla_deadline = _compute_sla_deadline(now(), float(doc.sla_hours or 0))
+    _recompute_sla_state(doc)
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -1289,7 +1343,11 @@ def update_issue():
                 doc.issue_module = data["issue_module"]
                 mod = frappe.get_doc("CRM Issue Module", doc.issue_module)
                 doc.sla_hours = float(mod.sla_hours or 0)
-                doc.sla_deadline = _compute_sla_deadline(doc.creation, doc.sla_hours)
+                if getattr(doc, "sla_started_at", None):
+                    doc.sla_deadline = _compute_sla_deadline(doc.sla_started_at, doc.sla_hours)
+                else:
+                    doc.sla_deadline = _compute_sla_deadline(doc.creation, doc.sla_hours)
+                _recompute_sla_state(doc)
                 doc.issue_code = doc.issue_code or _generate_issue_code(mod.code)
 
         # Doi Loai van de -> gan lai PIC theo module (giong create); fallback hoc sinh / phong ban
@@ -1364,6 +1422,8 @@ def change_issue_status():
     doc.status = status
     if "result" in data:
         doc.result = result or ""
+    _mark_first_response_if_eligible(doc)
+    _recompute_sla_state(doc)
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -1431,6 +1491,8 @@ def add_process_log():
                 "attachment": data.get("attachment", ""),
             },
         )
+        _mark_first_response_if_eligible(doc)
+        _recompute_sla_state(doc)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
 

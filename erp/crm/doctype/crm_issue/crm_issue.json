@@ -31,7 +31,11 @@
   "rejected_at",
   "created_by_user",
   "sla_hours",
+  "sla_started_at",
+  "first_response_at",
+  "sla_status",
   "sla_deadline",
+  "sla_last_notified_at",
   "rejection_reason",
   "cb_issue_2",
   "status",
@@ -191,9 +195,36 @@
    "read_only": 1
   },
   {
+   "fieldname": "sla_started_at",
+   "fieldtype": "Datetime",
+   "label": "SLA Started At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "first_response_at",
+   "fieldtype": "Datetime",
+   "label": "First Response At",
+   "read_only": 1
+  },
+  {
+   "default": "On track",
+   "fieldname": "sla_status",
+   "fieldtype": "Select",
+   "label": "SLA Status",
+   "options": "On track\nWarning\nBreached\nPassed",
+   "read_only": 1
+  },
+  {
    "fieldname": "sla_deadline",
    "fieldtype": "Datetime",
    "label": "SLA Deadline",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sla_last_notified_at",
+   "fieldtype": "Datetime",
+   "hidden": 1,
+   "label": "SLA Last Notified At",
    "read_only": 1
   },
   {
