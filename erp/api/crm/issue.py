@@ -160,6 +160,16 @@ def _finalize_issue_api_dict(doc):
     _enrich_user_info([data])
     _enrich_issue_students_display(data)
     _enrich_process_logs_accent(data, doc)
+    # Quyen theo session thuc te (tranh lech JWT/Has Role o frontend)
+    u = frappe.session.user
+    if u and u != "Guest":
+        data["can_approve_reject"] = bool(_can_approve())
+        data["can_write_issue"] = bool(_can_write_issue_ops(u, doc))
+        data["can_edit_sales_status"] = bool(_can_change_issue_status_sales(u))
+    else:
+        data["can_approve_reject"] = False
+        data["can_write_issue"] = False
+        data["can_edit_sales_status"] = False
     return data
 
 
@@ -338,7 +348,13 @@ def _is_valid_pic_user(pic_email: str) -> bool:
 
 
 def _can_approve():
-    return bool(APPROVER_ROLES & _user_roles())
+    """Duyet/tu choi: APPROVER_ROLES + System Manager / Administrator (van hanh Frappe)."""
+    r = _user_roles()
+    if APPROVER_ROLES & r:
+        return True
+    if "System Manager" in r or "Administrator" in r:
+        return True
+    return False
 
 
 def _generate_issue_code(prefix: str) -> str:
