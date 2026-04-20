@@ -18,6 +18,8 @@ ACTIVITY_TYPES = frozenset(
         "equipment_removed",
         "repair_reported",
         "repair_completed",
+        "assignment_title_changed",
+        "building_moved",
     }
 )
 
@@ -30,6 +32,8 @@ def log_room_activity(
     reference_doctype=None,
     reference_name=None,
     note=None,
+    school_year_id=None,
+    activity_date=None,
 ):
     """
     Tạo bản ghi ERP Administrative Room Activity Log.
@@ -57,19 +61,22 @@ def log_room_activity(
         except Exception:
             tu_name = target_user
 
-    doc = frappe.get_doc(
-        {
-            "doctype": "ERP Administrative Room Activity Log",
-            "room": room_id,
-            "activity_type": activity_type,
-            "user": uid,
-            "user_name": un_name,
-            "target_user": target_user or None,
-            "target_user_name": tu_name or None,
-            "reference_doctype": reference_doctype or "",
-            "reference_name": reference_name or "",
-            "note": note or "",
-        }
-    )
+    row = {
+        "doctype": "ERP Administrative Room Activity Log",
+        "room": room_id,
+        "activity_type": activity_type,
+        "user": uid,
+        "user_name": un_name,
+        "target_user": target_user or None,
+        "target_user_name": tu_name or None,
+        "reference_doctype": reference_doctype or "",
+        "reference_name": reference_name or "",
+        "note": note or "",
+    }
+    if school_year_id and frappe.db.exists("SIS School Year", school_year_id):
+        row["school_year_id"] = school_year_id
+    if activity_date:
+        row["activity_date"] = activity_date
+    doc = frappe.get_doc(row)
     doc.insert(ignore_permissions=True)
     return doc.name

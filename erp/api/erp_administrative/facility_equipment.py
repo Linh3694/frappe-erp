@@ -7,7 +7,7 @@ import uuid
 
 import frappe
 from frappe import _
-from frappe.utils import get_fullname
+from frappe.utils import cint, get_fullname, today
 
 from erp.utils.api_response import (
     error_response,
@@ -17,7 +17,92 @@ from erp.utils.api_response import (
     success_response,
     validation_error_response,
 )
+from erp.api.erp_administrative.administrative_ticket import _active_school_year_id_api
 from erp.api.erp_administrative.room_activity_log import log_room_activity
+
+DOCTYPE_TICKET = "ERP Administrative Ticket"
+_TICKET_CLOSED_STATUSES = ("Closed", "Resolved", "Cancelled", "Done")
+
+
+def _get_yearly_assignment_row(room_id, school_year_id):
+    """Một dòng Yearly Assignment (dict) hoặc None."""
+    if not room_id or not school_year_id:
+        return None
+    rows = frappe.get_all(
+        "ERP Administrative Room Yearly Assignment",
+        filters={"room": room_id, "school_year_id": school_year_id},
+        fields=["name", "status", "display_title_vn", "display_short_title", "class_id", "usage_type"],
+        limit=1,
+    )
+    return rows[0] if rows else None
+
+
+def _latest_confirmed_outgoing_handover(room_id, school_year_id):
+    """Handover đi đã xác nhận gần nhất theo phòng + (tuỳ chọn) năm học."""
+    if not room_id:
+        return None
+    filters = {"room": room_id, "direction": "outgoing", "status": "Confirmed"}
+    if school_year_id:
+        filters["school_year_id"] = school_year_id
+    rows = frappe.get_all(
+        "ERP Administrative Facility Handover",
+        filters=filters,
+        fields=["name"],
+        order_by="COALESCE(confirmed_on, sent_on) desc, creation desc",
+        limit=1,
+    )
+    if rows:
+        return rows[0].name
+    # Tương thích dữ liệu cũ: chưa có school_year_id trên bàn giao
+    if school_year_id:
+        rows = frappe.get_all(
+            "ERP Administrative Facility Handover",
+            filters={"room": room_id, "direction": "outgoing", "status": "Confirmed"},
+            fields=["name"],
+            order_by="COALESCE(confirmed_on, sent_on) desc, creation desc",
+            limit=1,
+        )
+        return rows[0].name if rows else None
+    return None
+
+
+def _count_open_tickets_room(room_id):
+    if not room_id:
+        return 0
+    return frappe.db.count(
+        DOCTYPE_TICKET,
+        {"room_id": room_id, "status": ["not in", _TICKET_CLOSED_STATUSES]},
+    )
+
+
+def _open_tickets_for_room(room_id, limit=25):
+    if not room_id:
+        return []
+    return frappe.get_all(
+        DOCTYPE_TICKET,
+        filters={"room_id": room_id, "status": ["not in", _TICKET_CLOSED_STATUSES]},
+        fields=["name", "title", "status", "ticket_code", "creation"],
+        order_by="creation desc",
+        limit=limit,
+    )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_open_tickets_for_room():
+    """Ticket mở theo phòng — FacilityLite / ClassFacility cảnh báo trước kiểm kê."""
+    try:
+        data = _parse_json_body()
+        room_id = (data.get("room_id") or "").strip()
+        if not room_id:
+            return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+        rows = _open_tickets_for_room(room_id)
+        return success_response(
+            data={"tickets": rows, "count": len(rows)},
+            message="OK",
+        )
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "facility_equipment.get_open_tickets_for_room")
+        return error_response(str(e))
 
 
 def _parse_json_body():
@@ -780,9 +865,17 @@ def send_handover():
         it_equipment = data.get("it_equipment") or []
         handover_type = (data.get("handover_type") or "class").strip()
         responsible_user = data.get("responsible_user")
+        school_year_id = _active_school_year_id_api(data.get("school_year_id"))
 
         if not room_id or not frappe.db.exists("ERP Administrative Room", room_id):
             return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
+
+        ya = _get_yearly_assignment_row(room_id, school_year_id) if school_year_id else None
+        if school_year_id and ya and ya.get("status") == "closed":
+            return validation_error_response(
+                _("Năm học đã chốt cho phòng này — không gửi bàn giao mới."),
+                {"school_year_id": ["closed"]},
+            )
 
         fac_snap = _facility_snapshot_for_room(room_id)
         it_snap = (
@@ -803,10 +896,14 @@ def send_handover():
                     _("User không nằm trong danh sách người phụ trách phòng"),
                     {"responsible_user": ["not_assigned"]},
                 )
+            snap_title = (ya.get("display_title_vn") if ya else None) or ""
             doc = frappe.get_doc(
                 {
                     "doctype": "ERP Administrative Facility Handover",
                     "room": room_id,
+                    "school_year_id": school_year_id,
+                    "yearly_assignment_id": ya.get("name") if ya else None,
+                    "display_title_snapshot": snap_title,
                     "direction": "outgoing",
                     "handover_type": "responsible_user",
                     "class_id": None,
@@ -821,10 +918,20 @@ def send_handover():
         else:
             if not class_id or not frappe.db.exists("SIS Class", class_id):
                 return validation_error_response(_("Lớp không hợp lệ"), {"class_id": ["invalid"]})
+            cl_sy = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+            if school_year_id and cl_sy and cl_sy != school_year_id:
+                return validation_error_response(
+                    _("Năm học không khớp với lớp."),
+                    {"school_year_id": ["mismatch"]},
+                )
+            ct = frappe.db.get_value("SIS Class", class_id, "title") or ""
             doc = frappe.get_doc(
                 {
                     "doctype": "ERP Administrative Facility Handover",
                     "room": room_id,
+                    "school_year_id": school_year_id or cl_sy,
+                    "yearly_assignment_id": ya.get("name") if ya else None,
+                    "display_title_snapshot": (ya.get("display_title_vn") if ya else None) or ct,
                     "direction": "outgoing",
                     "handover_type": "class",
                     "class_id": class_id,
@@ -847,6 +954,8 @@ def send_handover():
                 reference_doctype="ERP Administrative Facility Handover",
                 reference_name=doc.name,
                 note="",
+                school_year_id=getattr(doc, "school_year_id", None) or school_year_id,
+                activity_date=frappe.utils.today(),
             )
             frappe.db.commit()
         except Exception:
@@ -1091,7 +1200,7 @@ def _handover_dict_from_row(r):
         except Exception:
             sent_by_name = r.sent_by
     ht = r.get("handover_type") or "class"
-    return {
+    out = {
         "name": r.name,
         "room": r.room,
         "class_id": r.get("class_id"),
@@ -1108,13 +1217,21 @@ def _handover_dict_from_row(r):
         "confirmed_by": r.confirmed_by,
         "confirmed_by_name": confirmed_by_name,
     }
+    if r.get("school_year_id") is not None:
+        out["school_year_id"] = r.get("school_year_id")
+    if r.get("yearly_assignment_id"):
+        out["yearly_assignment_id"] = r.get("yearly_assignment_id")
+    if r.get("display_title_snapshot"):
+        out["display_title_snapshot"] = r.get("display_title_snapshot")
+    return out
 
 
 def _handover_payload_for_class(class_id):
     """Trả về dict { has_handover, handover } cho một lớp."""
+    sy = frappe.db.get_value("SIS Class", class_id, "school_year_id")
     rows = frappe.get_all(
         "ERP Administrative Facility Handover",
-        filters=[["class_id", "=", class_id]],
+        filters={"class_id": class_id},
         or_filters=[["direction", "=", "outgoing"], ["direction", "is", "not set"]],
         fields=[
             "name",
@@ -1129,13 +1246,25 @@ def _handover_payload_for_class(class_id):
             "confirmed_by",
             "handover_type",
             "responsible_user",
+            "school_year_id",
+            "yearly_assignment_id",
+            "display_title_snapshot",
         ],
         order_by="creation desc",
-        limit=1,
+        limit=20,
     )
     if not rows:
         return {"has_handover": False, "handover": None}
-    return {"has_handover": True, "handover": _handover_dict_from_row(rows[0])}
+    chosen = None
+    for r in rows:
+        rsy = r.get("school_year_id")
+        if sy and rsy and rsy != sy:
+            continue
+        chosen = r
+        break
+    if not chosen:
+        chosen = rows[0]
+    return {"has_handover": True, "handover": _handover_dict_from_row(chosen)}
 
 
 @frappe.whitelist(allow_guest=False)
@@ -1238,12 +1367,15 @@ def get_class_facility_context():
             return validation_error_response(_("Lớp không hợp lệ"), {"class_id": ["invalid"]})
 
         room_id = frappe.db.get_value("SIS Class", class_id, "room")
+        school_year_id = frappe.db.get_value("SIS Class", class_id, "school_year_id")
         room_title = None
         room_name = None
         room_short_title = None
         room_type = None
         room_capacity = None
         building_title = None
+        physical_code = None
+        display_title_vn = None
         if room_id:
             rv = frappe.db.get_value(
                 "ERP Administrative Room",
@@ -1255,6 +1387,7 @@ def get_class_facility_context():
                     "building_id",
                     "room_type",
                     "capacity",
+                    "physical_code",
                 ],
                 as_dict=True,
             )
@@ -1264,11 +1397,16 @@ def get_class_facility_context():
                 room_short_title = rv.get("short_title")
                 room_type = rv.get("room_type")
                 room_capacity = rv.get("capacity")
+                physical_code = rv.get("physical_code") or room_title
                 bid = rv.get("building_id")
                 if bid:
                     building_title = frappe.db.get_value(
                         "ERP Administrative Building", bid, "title_vn"
                     )
+            if school_year_id:
+                ya = _get_yearly_assignment_row(room_id, school_year_id)
+                if ya:
+                    display_title_vn = ya.get("display_title_vn") or room_title
 
         inner = _handover_payload_for_class(class_id)
         handover_diff = None
@@ -1281,8 +1419,11 @@ def get_class_facility_context():
                 h.get("it_equipment") or [],
             )
 
+        open_tickets = _open_tickets_for_room(room_id) if room_id else []
+
         payload = {
             "class_id": class_id,
+            "school_year_id": school_year_id,
             "room_id": room_id,
             "room_title": room_title,
             "room_name": room_name,
@@ -1290,6 +1431,9 @@ def get_class_facility_context():
             "room_type": room_type,
             "room_capacity": room_capacity,
             "building_title": building_title,
+            "physical_code": physical_code,
+            "display_title_vn": display_title_vn or room_title,
+            "open_tickets": open_tickets,
             **inner,
         }
         if handover_diff is not None:
@@ -1342,6 +1486,8 @@ def confirm_handover():
                 reference_doctype="ERP Administrative Facility Handover",
                 reference_name=doc.name,
                 note="",
+                school_year_id=getattr(doc, "school_year_id", None),
+                activity_date=today(),
             )
             frappe.db.commit()
         except Exception:
@@ -1448,9 +1594,30 @@ def submit_inventory_check():
         fac_raw = data.get("facility_snapshot") or data.get("facility_equipment") or []
         it_raw = data.get("it_equipment") or data.get("it_snapshot") or []
         note = (data.get("note") or "").strip()
+        school_year_id = _active_school_year_id_api(data.get("school_year_id"))
 
         if not room_id or not frappe.db.exists("ERP Administrative Room", room_id):
             return validation_error_response(_("Phòng không hợp lệ"), {"room_id": ["invalid"]})
+
+        ya = _get_yearly_assignment_row(room_id, school_year_id) if school_year_id else None
+        if school_year_id and ya and ya.get("status") == "closed":
+            return validation_error_response(
+                _("Năm học đã chốt — không gửi kiểm kê."),
+                {"school_year_id": ["closed"]},
+            )
+
+        if _count_open_tickets_room(room_id) > 0 and not cint(data.get("ignore_open_tickets")):
+            return validation_error_response(
+                _("Còn ticket báo hỏng chưa đóng. Xử lý hoặc tick bỏ qua (ignore_open_tickets)."),
+                {"open_tickets": _open_tickets_for_room(room_id), "code": ["open_tickets"]},
+            )
+
+        against_ho = _latest_confirmed_outgoing_handover(room_id, school_year_id)
+        if not against_ho and not cint(data.get("skip_handover_required")):
+            return validation_error_response(
+                _("Chưa có bàn giao đã xác nhận trong năm học — không gửi kiểm kê."),
+                {"handover": ["required_confirmed"]},
+            )
 
         uid = frappe.session.user
         nu = _normalize_frappe_user_link_value((uid or "").strip())
@@ -1483,11 +1650,22 @@ def submit_inventory_check():
         fac_list = fac_raw if isinstance(fac_raw, list) else json.loads(fac_raw) if fac_raw else []
         it_list = it_raw if isinstance(it_raw, list) else json.loads(it_raw) if it_raw else []
 
+        ot_count = _count_open_tickets_room(room_id)
+        closure_id = (data.get("closure_id") or "").strip() or None
+        if closure_id and not frappe.db.exists("ERP Administrative Academic Year Closure", closure_id):
+            closure_id = None
+
         # Kiểm kê = Handover chiều incoming (GV/PIC -> HC)
         doc = frappe.get_doc(
             {
                 "doctype": "ERP Administrative Facility Handover",
                 "room": room_id,
+                "school_year_id": school_year_id,
+                "yearly_assignment_id": ya.get("name") if ya else None,
+                "display_title_snapshot": (ya.get("display_title_vn") if ya else None) or "",
+                "against_handover_id": against_ho,
+                "open_ticket_count_snapshot": ot_count,
+                "closure_id": closure_id,
                 "direction": "incoming",
                 "handover_type": "responsible_user",
                 "class_id": None,
@@ -1503,6 +1681,16 @@ def submit_inventory_check():
         doc.insert(ignore_permissions=False)
         frappe.db.commit()
         try:
+            if closure_id:
+                from erp.api.erp_administrative.academic_year_closure import (
+                    sync_closure_row_on_inventory_submitted,
+                )
+
+                sync_closure_row_on_inventory_submitted(closure_id, room_id, doc.name)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "facility_equipment.submit_inventory_check.closure_sync")
+
+        try:
             log_room_activity(
                 room_id,
                 "inventory_submitted",
@@ -1511,6 +1699,8 @@ def submit_inventory_check():
                 reference_doctype="ERP Administrative Facility Handover",
                 reference_name=doc.name,
                 note=(note or "")[:500],
+                school_year_id=school_year_id,
+                activity_date=today(),
             )
             frappe.db.commit()
         except Exception:
@@ -1727,6 +1917,23 @@ def review_inventory_check():
         frappe.db.commit()
 
         try:
+            cid = getattr(doc, "closure_id", None)
+            if cid and room_id and action == "accept":
+                from erp.api.erp_administrative.academic_year_closure import (
+                    sync_closure_row_on_inventory_done,
+                )
+
+                sync_closure_row_on_inventory_done(cid, room_id, doc.name, "accepted")
+            elif cid and room_id and action == "reject":
+                from erp.api.erp_administrative.academic_year_closure import (
+                    sync_closure_row_on_inventory_done,
+                )
+
+                sync_closure_row_on_inventory_done(cid, room_id, doc.name, "rejected")
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "facility_equipment.review_inventory_check.closure_sync")
+
+        try:
             if action == "accept":
                 log_room_activity(
                     room_id,
@@ -1936,7 +2143,7 @@ def get_inventory_check_history_for_room():
 
 
 def _room_activity_dict_from_row(r):
-    return {
+    out = {
         "name": r.name,
         "room": r.room,
         "activity_type": r.activity_type,
@@ -1949,29 +2156,41 @@ def _room_activity_dict_from_row(r):
         "note": r.get("note") or "",
         "creation": r.get("creation"),
     }
+    if r.get("school_year_id"):
+        out["school_year_id"] = r.get("school_year_id")
+    if r.get("activity_date"):
+        out["activity_date"] = r.get("activity_date")
+    return out
 
 
 @frappe.whitelist(allow_guest=False)
 def get_room_activity_log():
     """
     Nhật ký hoạt động phòng (bàn giao, kiểm kê, PIC).
-    Body: room_id, limit (optional, default 30, max 100)
+    Body: room_id, school_year_id (optional), limit (optional, default 30, max 100)
     """
     try:
         data = _parse_json_body()
         room_id = data.get("room_id")
+        school_year_id = (data.get("school_year_id") or "").strip()
         limit = min(int(data.get("limit") or 30), 100)
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
         if not frappe.db.exists("ERP Administrative Room", room_id):
             return validation_error_response(_("Phòng không tồn tại"), {"room_id": ["invalid"]})
 
+        filters = {"room": room_id}
+        if school_year_id:
+            filters["school_year_id"] = school_year_id
+
         rows = frappe.get_all(
             "ERP Administrative Room Activity Log",
-            filters={"room": room_id},
+            filters=filters,
             fields=[
                 "name",
                 "room",
+                "school_year_id",
+                "activity_date",
                 "activity_type",
                 "user",
                 "user_name",

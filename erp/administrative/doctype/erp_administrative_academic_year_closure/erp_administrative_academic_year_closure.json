@@ -1,0 +1,143 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "autoname": "format:AYC-{#####}",
+ "creation": "2026-04-20 12:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "school_year_id",
+  "campus_id",
+  "status",
+  "total_rooms",
+  "pending_inventory",
+  "accepted_inventory",
+  "rejected_inventory",
+  "started_on",
+  "started_by",
+  "closed_on",
+  "closed_by",
+  "rooms"
+ ],
+ "fields": [
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "draft\nin_progress\nclosed\ncancelled",
+   "default": "draft",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "total_rooms",
+   "fieldtype": "Int",
+   "label": "Total Rooms",
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "pending_inventory",
+   "fieldtype": "Int",
+   "label": "Pending Inventory",
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "accepted_inventory",
+   "fieldtype": "Int",
+   "label": "Accepted Inventory",
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "rejected_inventory",
+   "fieldtype": "Int",
+   "label": "Rejected Inventory",
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "started_on",
+   "fieldtype": "Datetime",
+   "label": "Started On"
+  },
+  {
+   "fieldname": "started_by",
+   "fieldtype": "Link",
+   "label": "Started By",
+   "options": "User"
+  },
+  {
+   "fieldname": "closed_on",
+   "fieldtype": "Datetime",
+   "label": "Closed On"
+  },
+  {
+   "fieldname": "closed_by",
+   "fieldtype": "Link",
+   "label": "Closed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "rooms",
+   "fieldtype": "Table",
+   "label": "Rooms",
+   "options": "ERP Administrative Academic Year Closure Room"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-20 12:00:00.000000",
+ "module": "Administrative",
+ "name": "ERP Administrative Academic Year Closure",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "school_year_id",
+ "track_changes": 1
+}

@@ -10,6 +10,9 @@ Tất cả cache clearing operations nên sử dụng các hàm trong module nà
 
 import frappe
 
+# Prefix key Redis cho batch homeroom — khớp với batch_get_homeroom_class_logs trong class_log.py
+HOMEROOM_CLASS_LOGS_CACHE_PREFIX = "homeroom_class_logs_v8"
+
 
 def clear_teacher_dashboard_cache():
 	"""
@@ -289,7 +292,11 @@ def clear_class_log_cache(class_id, date):
 	try:
 		patterns = [
 			f"*class_log:{class_id}:{date}:*",
-			f"*class_logs_batch:{class_id}:{date}:*"
+			f"*class_logs_batch:{class_id}:{date}:*",
+			# Homeroom batch cache (đúng prefix v8; leading * khớp site prefix Redis nếu có)
+			f"*{HOMEROOM_CLASS_LOGS_CACHE_PREFIX}:*:{date}:*",
+			# Legacy key format (nếu còn key cũ trên Redis)
+			f"*homeroom_class_logs:*:{date}:*",
 		]
 		total_deleted = 0
 		for pattern in patterns:

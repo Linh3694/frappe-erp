@@ -5,8 +5,9 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, get_datetime, now_datetime
+from frappe.utils import cint, get_datetime, now_datetime, today
 
+from erp.api.erp_administrative.room_activity_log import log_room_activity
 from erp.utils.api_response import (
     error_response,
     forbidden_response,
@@ -51,6 +52,37 @@ def _validate_related_equipment_belongs_to_room(equipment_line_id, room_ref):
         "ERP Administrative Room Facility Equipment", equipment_line_id, "room"
     )
     return (r or "").strip() == (room_ref or "").strip()
+
+
+def _ticket_log_room_repair_activity(doc, activity_type):
+    """Ghi Room Activity Log khi ticket có phòng / thiết bị gắn phòng."""
+    room_id = None
+    if cint(getattr(doc, "is_event_facility", 0)):
+        room_id = (getattr(doc, "event_room_id", None) or "").strip()
+    else:
+        room_id = (getattr(doc, "room_id", None) or "").strip()
+    if not room_id and getattr(doc, "related_equipment_id", None):
+        room_id = frappe.db.get_value(
+            "ERP Administrative Room Facility Equipment",
+            doc.related_equipment_id,
+            "room",
+        )
+    if not room_id:
+        return
+    sy = _active_school_year_id_api()
+    try:
+        log_room_activity(
+            room_id,
+            activity_type,
+            user=frappe.session.user,
+            reference_doctype=DOCTYPE,
+            reference_name=doc.name,
+            note=(getattr(doc, "title", None) or "")[:500],
+            school_year_id=sy,
+            activity_date=today(),
+        )
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket._ticket_log_room_repair_activity")
 
 
 def _active_school_year_id_api(explicit=None):
@@ -1288,6 +1320,10 @@ def create_ticket():
         doc.insert(ignore_permissions=True)
 
         _append_history(doc.name, _("Tạo yêu cầu"))
+        try:
+            _ticket_log_room_repair_activity(frappe.get_doc(DOCTYPE, doc.name), "repair_reported")
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.create_ticket.room_log")
         frappe.db.commit()
 
         try:
@@ -1478,6 +1514,11 @@ def update_ticket():
         if staff and "status" in data and data.get("status") and old_status != doc.status:
             hist_detail = _("Trạng thái: {0} → {1}").format(old_status, doc.status)
         _append_history(doc.name, _("Cập nhật ticket"), detail=hist_detail)
+        try:
+            if old_status != doc.status and doc.status in ("Resolved", "Closed", "Done"):
+                _ticket_log_room_repair_activity(frappe.get_doc(DOCTYPE, doc.name), "repair_completed")
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.update_ticket.room_log")
         frappe.db.commit()
         try:
             doc_reload = frappe.get_doc(DOCTYPE, doc.name)

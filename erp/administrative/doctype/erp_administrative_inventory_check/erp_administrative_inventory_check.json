@@ -7,6 +7,11 @@
  "engine": "InnoDB",
  "field_order": [
   "room",
+  "school_year_id",
+  "yearly_assignment_id",
+  "against_handover_id",
+  "open_ticket_count_snapshot",
+  "closure_id",
   "responsible_user",
   "status",
   "facility_snapshot",
@@ -25,6 +30,36 @@
    "label": "Ph\u00f2ng",
    "options": "ERP Administrative Room",
    "reqd": 1
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "yearly_assignment_id",
+   "fieldtype": "Link",
+   "label": "Yearly Assignment",
+   "options": "ERP Administrative Room Yearly Assignment"
+  },
+  {
+   "fieldname": "against_handover_id",
+   "fieldtype": "Link",
+   "label": "Against Handover",
+   "options": "ERP Administrative Facility Handover"
+  },
+  {
+   "fieldname": "open_ticket_count_snapshot",
+   "fieldtype": "Int",
+   "label": "Open Ticket Count (snapshot)"
+  },
+  {
+   "fieldname": "closure_id",
+   "fieldtype": "Link",
+   "label": "Academic Year Closure",
+   "options": "ERP Administrative Academic Year Closure"
   },
   {
    "fieldname": "responsible_user",

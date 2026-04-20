@@ -1,0 +1,38 @@
+{
+ "doctype": "DocType",
+ "name": "ERP Administrative Room Yearly PIC",
+ "module": "Administrative",
+ "istable": 1,
+ "parent_doctype": "ERP Administrative Room Yearly Assignment",
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "role_label",
+  "full_name"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "role_label",
+   "fieldtype": "Data",
+   "label": "Role Label",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "label": "Full Name",
+   "read_only": 1,
+   "in_list_view": 1
+  }
+ ],
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}

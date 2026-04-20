@@ -18,13 +18,17 @@
  "field_order": [
   "basic_information",
   "campus_id",
+  "building_id",
+  "room_number",
+  "physical_code",
+  "needs_review",
+  "is_active",
   "title_vn",
   "title_en",
   "short_title",
   "capacity",
   "column_break_1",
   "room_type",
-  "building_id",
   "responsible_users_section",
   "responsible_users",
   "room_classes_section",
@@ -45,25 +49,55 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "building_id",
+   "fieldtype": "Link",
+   "label": "Building",
+   "options": "ERP Administrative Building",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "room_number",
+   "fieldtype": "Data",
+   "label": "Room Number",
+   "description": "S\u1ed1 ph\u00f2ng th\u1ef1c t\u1ebf (v\u00ed d\u1ee5 303). M\u00e3 v\u1eadt l\u00fd = short_title t\u00f2a + '.' + s\u1ed1 ph\u00f2ng"
+  },
+  {
+   "fieldname": "physical_code",
+   "fieldtype": "Data",
+   "label": "Physical Code",
+   "description": "T\u1ef1 sinh: {Building.short_title}.{room_number}",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "needs_review",
+   "fieldtype": "Check",
+   "label": "Needs Review (physical code)",
+   "default": "0"
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active",
+   "default": "1"
+  },
+  {
    "fieldname": "title_vn",
    "fieldtype": "Data",
-   "label": "Room Name (VN)",
-   "reqd": 1,
-   "unique": 1,
+   "label": "Room Name (VN) legacy / display fallback",
    "in_list_view": 1
   },
   {
    "fieldname": "title_en",
    "fieldtype": "Data",
    "label": "Room Name (EN)",
-   "reqd": 1,
    "in_list_view": 1
   },
   {
    "fieldname": "short_title",
    "fieldtype": "Data",
    "label": "Short Title",
-   "reqd": 1,
    "in_list_view": 1
   },
   {
@@ -80,13 +114,6 @@
    "fieldtype": "Select",
    "label": "Room Type",
    "options": "classroom_room\nmeeting_room\nauditorium\noutdoor\noffice\nfunction_room",
-   "reqd": 1
-  },
-  {
-   "fieldname": "building_id",
-   "fieldtype": "Link",
-   "label": "Building",
-   "options": "ERP Administrative Building",
    "reqd": 1
   },
   {
@@ -116,7 +143,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-12-19 15:00:00.000000",
+ "modified": "2026-04-20 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Administrative",
  "name": "ERP Administrative Room",
@@ -134,7 +161,7 @@
    "share": 1,
    "write": 1
   },
-  { 
+  {
    "create": 1,
    "delete": 1,
    "email": 1,
@@ -162,6 +189,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "title_vn",
+ "title_field": "physical_code",
  "track_changes": 1
 }

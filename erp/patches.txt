@@ -40,3 +40,6 @@ erp.patches.v1_0.migrate_crm_issue_departments_child
 
 # CSVC: gop Inventory Check vao Facility Handover (incoming) + backfill direction outgoing
 erp.patches.v1_0.migrate_inventory_check_to_facility_handover
+
+# Phòng học: backfill physical_code / room_number
+erp.patches.v1_0.room_physical_code_and_yearly_assignment

@@ -1,9 +1,11 @@
 import json
 import re
+import time
 from datetime import datetime as dt, timedelta
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
+from erp.api.erp_sis.utils.cache_utils import clear_class_log_cache, HOMEROOM_CLASS_LOGS_CACHE_PREFIX
 
 
 def _get_body():
@@ -599,6 +601,8 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def save_class_log():
     try:
+        t_full = time.perf_counter()
+        timings_ms = {}
         body = _get_body() or {}
         timetable_instance = body.get('timetable_instance')
         class_id = body.get('class_id')
@@ -680,70 +684,104 @@ def save_class_log():
         if update_fields:
             frappe.db.set_value("SIS Class Log Subject", subject_id, update_fields, update_modified=True)
 
-        upserts = 0
+        # Một lần đọc bản ghi học sinh theo subject — tránh N lần get_all trong vòng lặp
+        t_mark = time.perf_counter()
+        existing_rows = frappe.get_all(
+            "SIS Class Log Student",
+            filters={"subject_id": subject_id},
+            fields=["name", "student_id"],
+        )
+        by_student = {r["student_id"]: r["name"] for r in existing_rows if r.get("student_id")}
+        timings_ms["preload_students"] = round((time.perf_counter() - t_mark) * 1000)
+
+        t_mark = time.perf_counter()
+        updates_by_name = {}
+        pending_insert_by_student = {}
+
         for it in items:
-            student_id = (it or {}).get('student_id') or (it or {}).get('class_student')
-            class_student_id = (it or {}).get('class_student')
+            student_id = (it or {}).get("student_id") or (it or {}).get("class_student")
+            class_student_id = (it or {}).get("class_student")
             values = {
                 "subject_id": subject_id,
                 "student_id": student_id,
                 "class_student_id": class_student_id,
-                "homework": (it or {}).get('homework'),
-                "behavior": (it or {}).get('behavior'),
-                "participation": (it or {}).get('participation'),
-                # legacy kept for backward compatibility but we now use 'issues' (comma-separated) and 'is_top_performance'
-                "issues": (it or {}).get('issues') or (it or {}).get('issue'),
-                "is_top_performance": 1 if ((it or {}).get('is_top_performance') or (it or {}).get('top_performance')) else 0,
-                "specific_comment": (it or {}).get('specific_comment'),
-                "value": (it or {}).get('value') or 0,
+                "homework": (it or {}).get("homework"),
+                "behavior": (it or {}).get("behavior"),
+                "participation": (it or {}).get("participation"),
+                "issues": (it or {}).get("issues") or (it or {}).get("issue"),
+                "is_top_performance": 1
+                if ((it or {}).get("is_top_performance") or (it or {}).get("top_performance"))
+                else 0,
+                "specific_comment": (it or {}).get("specific_comment"),
+                "value": (it or {}).get("value") or 0,
             }
             if not student_id:
                 continue
 
-            existing = frappe.get_all(
-                "SIS Class Log Student",
-                filters={"subject_id": subject_id, "student_id": student_id},
-                fields=["name"], limit=1
-            )
-            if existing:
-                frappe.db.set_value("SIS Class Log Student", existing[0]['name'], values, update_modified=True)
+            if student_id in by_student:
+                doc_name = by_student[student_id]
+                updates_by_name[doc_name] = {
+                    "class_student_id": class_student_id,
+                    "homework": values["homework"],
+                    "behavior": values["behavior"],
+                    "participation": values["participation"],
+                    "issues": values["issues"],
+                    "is_top_performance": values["is_top_performance"],
+                    "specific_comment": values["specific_comment"],
+                    "value": values["value"],
+                }
             else:
-                doc = frappe.get_doc({"doctype": "SIS Class Log Student", **values})
-                doc.insert()
-                upserts += 1
+                pending_insert_by_student[student_id] = values
 
+        if updates_by_name:
+            frappe.db.bulk_update(
+                "SIS Class Log Student",
+                updates_by_name,
+                update_modified=True,
+            )
+        timings_ms["bulk_update"] = round((time.perf_counter() - t_mark) * 1000)
+
+        t_mark = time.perf_counter()
+        inserted = 0
+        for values in pending_insert_by_student.values():
+            doc = frappe.get_doc({"doctype": "SIS Class Log Student", **values})
+            doc.insert()
+            inserted += 1
+        timings_ms["inserts_loop"] = round((time.perf_counter() - t_mark) * 1000)
+
+        t_mark = time.perf_counter()
         frappe.db.commit()
-        
-        # ⚡ CACHE: Clear class log cache after save (single, batch, and homeroom)
+        timings_ms["commit"] = round((time.perf_counter() - t_mark) * 1000)
+
+        t_mark = time.perf_counter()
         try:
-            # Clear single period cache
-            cache_key = f"class_log:{class_id}:{date}:{period or 'none'}"
-            frappe.cache().delete_key(cache_key)
-            
-            # Clear batch cache - use wildcard pattern
-            cache = frappe.cache()
-            redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else cache
-            if hasattr(redis_conn, 'scan_iter'):
-                # Clear regular batch cache
-                batch_pattern = f"*class_logs_batch:{class_id}:{date}:*"
-                batch_keys = list(redis_conn.scan_iter(match=batch_pattern, count=100))
-                if batch_keys:
-                    redis_conn.delete(*batch_keys)
-                    frappe.logger().info(f"✅ Cleared {len(batch_keys)} batch cache keys for {class_id}/{date}")
-                
-                # Clear homeroom class logs cache (any homeroom that references this class)
-                homeroom_pattern = f"*homeroom_class_logs:*:{date}:*"
-                homeroom_keys = list(redis_conn.scan_iter(match=homeroom_pattern, count=100))
-                if homeroom_keys:
-                    redis_conn.delete(*homeroom_keys)
-                    frappe.logger().info(f"✅ Cleared {len(homeroom_keys)} homeroom cache keys for date {date}")
-            
-            frappe.logger().info(f"✅ Cleared class_log cache after save: {class_id}/{date}/{period or 'none'}")
+            clear_class_log_cache(class_id, date)
+            frappe.logger().info(
+                f"✅ Cleared class_log cache after save: {class_id}/{date}/{period or 'none'}"
+            )
         except Exception as cache_error:
             frappe.logger().warning(f"Cache clear failed: {cache_error}")
-        
-        meta = {"class_id": class_id, "backend_logs": {"inserted": upserts, "total": len(items)}}
-        return success_response(message=f"Saved class log ({upserts} inserted)", meta=meta)
+        timings_ms["cache_clear"] = round((time.perf_counter() - t_mark) * 1000)
+
+        timings_ms["total_server"] = round((time.perf_counter() - t_full) * 1000)
+        updated_count = len(updates_by_name)
+
+        meta = {
+            "class_id": class_id,
+            "backend_logs": {
+                "inserted": inserted,
+                "updated": updated_count,
+                "total": len(items),
+            },
+            "timings_ms": timings_ms,
+        }
+        frappe.logger().info(
+            f"save_class_log timings_ms={timings_ms} class_id={class_id} date={date}"
+        )
+        return success_response(
+            message=f"Saved class log ({inserted} inserted, {updated_count} updated)",
+            meta=meta,
+        )
     except Exception as e:
         frappe.db.rollback()
         frappe.log_error(f"save_class_log error: {str(e)}")
@@ -1014,7 +1052,7 @@ def batch_get_homeroom_class_logs():
         # Using short TTL instead of complex event-driven invalidation
         periods_hash = hashlib.md5(json.dumps(sorted(periods)).encode()).hexdigest()[:8]
         # v8: Fix period_priority mismatch - dùng extract_period_number(period_name) thay vì period_priority
-        cache_key = f"homeroom_class_logs_v8:{homeroom_class_id}:{date}:periods_{periods_hash}"
+        cache_key = f"{HOMEROOM_CLASS_LOGS_CACHE_PREFIX}:{homeroom_class_id}:{date}:periods_{periods_hash}"
         
         try:
             cached_data = frappe.cache().get_value(cache_key)

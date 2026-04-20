@@ -1,0 +1,52 @@
+{
+ "doctype": "DocType",
+ "name": "ERP Administrative Academic Year Closure Room",
+ "module": "Administrative",
+ "istable": 1,
+ "parent_doctype": "ERP Administrative Academic Year Closure",
+ "engine": "InnoDB",
+ "field_order": [
+  "room",
+  "yearly_assignment_id",
+  "inventory_check_id",
+  "status",
+  "last_reminder_sent_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "label": "Room",
+   "options": "ERP Administrative Room",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "yearly_assignment_id",
+   "fieldtype": "Link",
+   "label": "Yearly Assignment",
+   "options": "ERP Administrative Room Yearly Assignment"
+  },
+  {
+   "fieldname": "inventory_check_id",
+   "fieldtype": "Link",
+   "label": "Inventory Check",
+   "options": "ERP Administrative Inventory Check"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "pending\nsubmitted\naccepted\nrejected\nclosed",
+   "default": "pending",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "last_reminder_sent_on",
+   "fieldtype": "Datetime",
+   "label": "Last Reminder Sent On"
+  }
+ ],
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}
