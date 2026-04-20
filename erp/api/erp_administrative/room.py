@@ -2965,29 +2965,31 @@ def get_users_for_room_responsible():
     try:
         # Chỉ email nội bộ — loại phụ huynh / tài khoản email cá nhân khỏi pool chọn PIC phòng
         internal_email_domain = "@wellspring.edu.vn"
+        user_meta = frappe.get_meta("User")
+        fieldnames = [
+            "name",
+            "email",
+            "full_name",
+            "first_name",
+            "last_name",
+            "user_image",
+            "employee_code",
+            "employee_id",
+        ]
+        for fn in ("job_title", "designation"):
+            if user_meta.has_field(fn):
+                fieldnames.append(fn)
         users = frappe.get_all(
             "User",
-            fields=[
-                "name",
-                "email",
-                "full_name",
-                "first_name",
-                "last_name",
-                "user_image",
-                "employee_code",
-                "employee_id",
-            ],
+            fields=fieldnames,
             filters={"enabled": 1, "email": ["like", f"%{internal_email_domain}"]},
             order_by="full_name asc",
         )
         processed = []
         for u in users:
-            processed.append(
-                {
-                    **u,
-                    "user_id": u.get("name"),
-                }
-            )
+            designation = (u.get("job_title") or "").strip() or (u.get("designation") or "").strip()
+            row = {**u, "user_id": u.get("name"), "designation": designation}
+            processed.append(row)
         return success_response(data=processed, message=_("OK"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "room.get_users_for_room_responsible")
