@@ -13,6 +13,14 @@ PHYSICAL_CODE_PATTERN = re.compile(r"^[A-Za-z0-9]+\.[A-Za-z0-9]+$")
 ROOM_NUMBER_PATTERN = re.compile(r"^[A-Za-z0-9]+$")
 
 
+def _normalize_room_number_raw(room_number: str) -> str:
+	"""Chuẩn hóa số phòng trước khi validate: dữ liệu cũ/migration đôi khi lưu nhầm cả mã vật lý (vd B1A.303) vào room_number."""
+	rn = str(room_number).strip().upper()
+	if "." in rn:
+		rn = rn.split(".")[-1].strip()
+	return rn
+
+
 def compose_physical_code(building_id: str, room_number: str) -> str:
 	"""Ghép mã phòng vật lý từ short_title tòa và số phòng."""
 	if not building_id or not room_number:
@@ -33,7 +41,7 @@ class ERPAdministrativeRoom(Document):
 	def _sync_physical_code_and_titles(self):
 		"""Tính physical_code từ building + room_number; đồng bộ title legacy nếu trống."""
 		if self.building_id and self.room_number:
-			rn = str(self.room_number).strip().upper()
+			rn = _normalize_room_number_raw(self.room_number)
 			if not ROOM_NUMBER_PATTERN.match(rn):
 				frappe.throw(_("Số phòng chỉ gồm chữ và số (ví dụ 303)."))
 			code = compose_physical_code(self.building_id, rn)
