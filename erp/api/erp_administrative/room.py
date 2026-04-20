@@ -2740,13 +2740,36 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
         if not room_id:
             return validation_error_response("Room ID is required", {"room_id": ["Room ID is required"]})
 
+        # school_year_id — bắt buộc lọc theo năm (tránh chọn nhầm lớp năm cũ)
+        if not school_year_id:
+            form = frappe.local.form_dict or {}
+            school_year_id = form.get("school_year_id")
+        if not school_year_id and frappe.request and getattr(frappe.request, "args", None):
+            school_year_id = frappe.request.args.get("school_year_id")
+        if not school_year_id and frappe.request and frappe.request.data:
+            try:
+                body = frappe.request.data.decode("utf-8") if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body or "{}")
+                school_year_id = data.get("school_year_id")
+            except Exception:
+                pass
+        if not school_year_id:
+            try:
+                from erp.api.erp_administrative.administrative_ticket import _active_school_year_id_api
+
+                school_year_id = _active_school_year_id_api(None)
+            except Exception:
+                school_year_id = None
+        if not school_year_id:
+            return validation_error_response(
+                _("Không xác định được năm học để lọc danh sách lớp."),
+                {"school_year_id": ["required"]},
+            )
+
         # Get current campus
         campus_id = get_current_campus_from_context()
 
-        filters = {"campus_id": campus_id or "campus-1"}
-
-        if school_year_id:
-            filters["school_year_id"] = school_year_id
+        filters = {"campus_id": campus_id or "campus-1", "school_year_id": school_year_id}
 
         # Get all classes for this campus/year
         classes = frappe.get_all(
@@ -3227,6 +3250,43 @@ def check_physical_code_unique():
         return success_response(data={"unique": not bool(exists), "physical_code": pc}, message="OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "room.check_physical_code_unique")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def sync_room_homeroom_pic_if_classroom():
+    """
+    Phòng classroom_room: đồng bộ PIC năm từ lớp CN theo school_year_id (gọi khi vào chi tiết / làm mới).
+    Bổ sung cho hook SIS Class khi người dùng chưa F5 sau khi sửa lớp.
+    """
+    try:
+        data = _room_api_json_body()
+        room_id = data.get("room_id") or data.get("room")
+        sy = data.get("school_year_id")
+        if not room_id or not sy:
+            return validation_error_response(_("Thiếu room_id hoặc school_year_id"), {})
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response(_("Không tìm thấy phòng"))
+        rt = (frappe.db.get_value("ERP Administrative Room", room_id, "room_type") or "").lower()
+        if rt != "classroom_room":
+            return success_response(data={"skipped": True}, message="OK")
+        class_id = None
+        for rc in frappe.get_all(
+            "ERP Administrative Room Class",
+            fields=["class_id"],
+            filters={"parent": room_id, "usage_type": "homeroom"},
+        ):
+            cid = rc.class_id
+            cy = frappe.db.get_value("SIS Class", cid, "school_year_id")
+            if cy == sy:
+                class_id = cid
+                break
+        if not class_id:
+            return success_response(data={"skipped": True, "reason": "no_homeroom_class"}, message="OK")
+        _sync_homeroom_teachers_to_room_yearly_pic(room_id, class_id)
+        return success_response(data={"class_id": class_id}, message="OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.sync_room_homeroom_pic_if_classroom")
         return error_response(str(e))
 
 

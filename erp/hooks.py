@@ -261,11 +261,6 @@ doc_events = {
 		"on_update": "erp.api.erp_sis.utils.assignment_cache.on_timetable_instance_row_change",
 		"after_delete": "erp.api.erp_sis.utils.assignment_cache.on_timetable_instance_row_change"
 	},
-	"SIS Class": {
-		"on_update": [
-			"erp.api.erp_administrative.room.sync_class_room_assignment"
-		]
-	},
 	# Logging hooks for audit trail
 	"File": {
 		"after_insert": [
@@ -341,6 +336,8 @@ doc_events = {
 			"erp.hooks_handlers.crud_logger.log_create"
 		],
 		"on_update": [
+			"erp.api.erp_administrative.room.sync_class_room_assignment",
+			"erp.api.erp_administrative.room.sync_class_homeroom_teachers_to_room_pic",
 			"erp.hooks_handlers.crud_logger.log_update"
 		],
 		"on_trash": [
