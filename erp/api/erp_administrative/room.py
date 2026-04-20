@@ -1957,6 +1957,16 @@ def get_room_classes(room_id: str = None):
 
         frappe.logger().info(f"get_room_classes processing room_id: {room_id}")
 
+        # Lọc theo năm học (optional) — body JSON POST
+        sy_filter = None
+        if frappe.request and frappe.request.data:
+            try:
+                _body = frappe.request.data.decode("utf-8") if isinstance(frappe.request.data, bytes) else frappe.request.data
+                _data = json.loads(_body or "{}")
+                sy_filter = _data.get("school_year_id") or None
+            except Exception:
+                sy_filter = None
+
         # Check if room exists
         if not frappe.db.exists("ERP Administrative Room", room_id):
             return not_found_response("Room not found")
@@ -2148,10 +2158,14 @@ def get_room_classes(room_id: str = None):
 
                 enhanced_classes.append(enhanced_class)
 
+        if sy_filter:
+            enhanced_classes = [c for c in enhanced_classes if (c.get("school_year_id") or "") == sy_filter]
+
         # Add debug info to response
         debug_info = {
             "room_id": room_id,
             "child_table_has_data": child_table_has_data,
+            "school_year_filter": sy_filter,
             "total_classes_found": len(enhanced_classes),
             "classes": [{"name": c["name"], "usage_type": c["usage_type"]} for c in enhanced_classes]
         }
@@ -2241,27 +2255,32 @@ def add_room_class():
                 )
 
             # Check if room already has a homeroom class (both in child table and legacy room field)
-            # Check child table
+            # Một phòng chỉ 1 lớp CN / mỗi năm học (theo school_year_id của lớp)
+            sy = class_info.school_year_id
             if hasattr(room_doc, 'room_classes'):
                 for room_class in room_doc.room_classes:
-                    if room_class.usage_type == "homeroom":
+                    if room_class.usage_type != "homeroom":
+                        continue
+                    rc_sy = room_class.school_year_id or frappe.db.get_value(
+                        "SIS Class", room_class.class_id, "school_year_id"
+                    )
+                    if rc_sy == sy:
                         return validation_error_response(
                             "Phòng đã có lớp chủ nhiệm",
-                            {"room_id": ["Phòng này đã có lớp chủ nhiệm. Một phòng chỉ có thể có 1 lớp chủ nhiệm."]}
+                            {"room_id": ["Phòng này đã có lớp chủ nhiệm cho năm học này."]}
                         )
 
-            # Check legacy room field for backward compatibility
             existing_homeroom = frappe.get_all(
                 "SIS Class",
                 fields=["name", "title"],
-                filters={"room": room_id, "class_type": "regular"},
+                filters={"room": room_id, "class_type": "regular", "school_year_id": sy},
                 limit=1
             )
 
             if existing_homeroom:
                 return validation_error_response(
                     "Phòng đã có lớp chủ nhiệm",
-                    {"room_id": [f"Phòng này đã có lớp chủ nhiệm: {existing_homeroom[0].title}. Một phòng chỉ có thể có 1 lớp chủ nhiệm."]}
+                    {"room_id": [f"Phòng này đã có lớp chủ nhiệm ({existing_homeroom[0].title}) cho năm học này."]}
                 )
 
             # Check if class is already homeroom for another room (legacy check)
@@ -3017,6 +3036,29 @@ def list_room_yearly_assignments():
         return success_response(data=rows, message="OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "room.list_room_yearly_assignments")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def get_room_yearly_assignment():
+    """Một bản ghi gán năm đầy đủ (kèm child PIC) theo room + school_year_id."""
+    try:
+        data = _room_api_json_body()
+        room_id = data.get("room_id") or data.get("room")
+        sy = data.get("school_year_id")
+        if not room_id or not sy:
+            return validation_error_response(_("Thiếu room_id hoặc school_year_id"), {})
+        name = frappe.db.get_value(
+            "ERP Administrative Room Yearly Assignment",
+            {"room": room_id, "school_year_id": sy},
+            "name",
+        )
+        if not name:
+            return success_response(data=None, message=_("Chưa có gán năm"))
+        doc = frappe.get_doc("ERP Administrative Room Yearly Assignment", name)
+        return success_response(data=doc.as_dict(), message="OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.get_room_yearly_assignment")
         return error_response(str(e))
 
 
