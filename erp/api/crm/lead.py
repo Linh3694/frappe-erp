@@ -411,7 +411,7 @@ def _current_school_display_for_sibling_row(lead_doc):
 @frappe.whitelist(methods=["POST"])
 def clone_lead_for_sibling():
     """
-    Tao ho so moi: clone thong tin gia dinh tu ho so goc (buoc Lead).
+    Tao ho so moi: clone thong tin gia dinh tu ho so goc (moi buoc pipeline deu duoc).
     Chi nhap ten HS, ngay sinh, truong cho ho so moi.
     Ho so moi: resolve_draft_promotion -> thuong vao Verify do trung SDT.
     Sao chep bang anh/chi/em tu ho so goc len ho so moi + them dong HS chinh cua ho so goc.
@@ -433,11 +433,7 @@ def clone_lead_for_sibling():
         return not_found_response(f"Khong tim thay ho so {source_lead_name}")
 
     src = frappe.get_doc("CRM Lead", source_lead_name)
-    if getattr(src, "step", None) != "Lead":
-        return validation_error_response(
-            "Chi tao hop le khi ho so goc o buoc Lead",
-            {"step": ["Phai la Lead"]},
-        )
+    # Khong gioi han buoc Lead: UI cho phep «tao ho so nhanh» tu ACE o moi trang thai ho so goc
 
     phone_rows = getattr(src, "phone_numbers", None) or []
     if not phone_rows:
