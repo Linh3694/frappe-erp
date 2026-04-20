@@ -2227,10 +2227,14 @@ def get_room_classes(room_id: str = None):
         return error_response(f"Error fetching room classes: {str(e)}")
 
 
+# Nhãn vai trò do hệ thống gán từ lớp CN — mỗi lần đồng bộ sẽ thay thế, không trộn với PIC tay cùng nhãn cũ
+ROOM_PIC_AUTO_ROLE_LABELS = frozenset({"Giáo viên chủ nhiệm", "Giáo viên phó chủ nhiệm"})
+
+
 def _sync_homeroom_teachers_to_room_yearly_pic(room_id: str, class_id: str):
     """
-    Phòng lớp học (classroom_room): sau khi gán lớp chủ nhiệm, đồng bộ PIC năm học
-    từ User của GVCN + GV phó chủ nhiệm (merge, không xóa PIC đã có).
+    Phòng lớp học (classroom_room): đồng bộ PIC năm học từ User GVCN + phó CN.
+    Giữ các PIC gán tay (nhãn khác hai nhãn trên); hai nhãn trên luôn khớp lớp hiện tại.
     """
     room_rt = (frappe.db.get_value("ERP Administrative Room", room_id, "room_type") or "").lower()
     if room_rt != "classroom_room":
@@ -2268,14 +2272,15 @@ def _sync_homeroom_teachers_to_room_yearly_pic(room_id: str, class_id: str):
         seen.add(uid)
         unique_pairs.append((uid, label))
 
-    if not unique_pairs:
-        return
-
     ya_name = frappe.db.get_value(
         "ERP Administrative Room Yearly Assignment",
         {"room": room_id, "school_year_id": sy},
         "name",
     )
+
+    if not ya_name and not unique_pairs:
+        return
+
     if ya_name:
         doc = frappe.get_doc("ERP Administrative Room Yearly Assignment", ya_name)
     else:
@@ -2295,19 +2300,88 @@ def _sync_homeroom_teachers_to_room_yearly_pic(room_id: str, class_id: str):
     if vice:
         doc.vice_homeroom_teacher_id = vice
 
-    existing_users = {r.user for r in (doc.responsible_users or []) if getattr(r, "user", None)}
+    manual_rows = []
+    for r in doc.responsible_users or []:
+        uid = getattr(r, "user", None)
+        rl = (r.role_label or "").strip()
+        if rl in ROOM_PIC_AUTO_ROLE_LABELS:
+            continue
+        if not uid:
+            continue
+        fn = r.full_name or frappe.db.get_value("User", uid, "full_name") or ""
+        manual_rows.append({"user": uid, "role_label": rl, "full_name": fn})
+
+    manual_users = {m["user"] for m in manual_rows}
+
+    doc.responsible_users = []
+    for m in manual_rows:
+        doc.append("responsible_users", m)
+
     for uid, role_label in unique_pairs:
-        if uid in existing_users:
+        if uid in manual_users:
             continue
         fn = frappe.db.get_value("User", uid, "full_name") or ""
         doc.append("responsible_users", {"user": uid, "role_label": role_label, "full_name": fn})
-        existing_users.add(uid)
 
     if doc.is_new():
         doc.insert(ignore_permissions=True)
     else:
         doc.save(ignore_permissions=True)
     frappe.db.commit()
+
+
+def sync_class_homeroom_teachers_to_room_pic(doc, method):
+    """
+    Hook SIS Class on_update: khi đổi GVCN / phó CN, cập nhật PIC phòng lớp học đã gán lớp CN.
+    """
+    try:
+        before = doc.get_doc_before_save()
+        if before:
+            h_old = before.get("homeroom_teacher") or ""
+            h_new = doc.homeroom_teacher or ""
+            v_old = before.get("vice_homeroom_teacher") or ""
+            v_new = getattr(doc, "vice_homeroom_teacher", None) or ""
+            if h_old == h_new and v_old == v_new:
+                return
+    except Exception:
+        pass
+
+    room_ids = set()
+    for r in frappe.get_all(
+        "ERP Administrative Room Class",
+        fields=["parent"],
+        filters={"class_id": doc.name, "usage_type": "homeroom"},
+    ):
+        room_ids.add(r.parent)
+    if getattr(doc, "room", None):
+        room_ids.add(doc.room)
+
+    for rid in room_ids:
+        if not rid or not frappe.db.exists("ERP Administrative Room", rid):
+            continue
+        rt = (frappe.db.get_value("ERP Administrative Room", rid, "room_type") or "").lower()
+        if rt != "classroom_room":
+            continue
+        try:
+            _sync_homeroom_teachers_to_room_yearly_pic(rid, doc.name)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "sync_class_homeroom_teachers_to_room_pic")
+
+        # Đồng bộ snapshot homeroom_teacher trên dòng Room Class (child)
+        try:
+            rdoc = frappe.get_doc("ERP Administrative Room", rid)
+            if hasattr(rdoc, "room_classes"):
+                dirty = False
+                for rc in rdoc.room_classes:
+                    if rc.class_id == doc.name and rc.usage_type == "homeroom":
+                        if rc.homeroom_teacher != (doc.homeroom_teacher or ""):
+                            rc.homeroom_teacher = doc.homeroom_teacher
+                            dirty = True
+                if dirty:
+                    rdoc.save(ignore_permissions=True)
+                    frappe.db.commit()
+        except Exception:
+            frappe.logger().warning("sync room_class homeroom_teacher snapshot failed", exc_info=True)
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
