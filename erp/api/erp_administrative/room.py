@@ -2194,14 +2194,22 @@ def get_room_classes(room_id: str = None):
 
                 enhanced_classes.append(enhanced_class)
 
+        # Lọc theo năm học (URL) — nếu lọc xong không còn lớp nào nhưng trước đó vẫn có bản ghi,
+        # thì trả về đầy đủ (tránh lệch school_year_id trên URL vs SIS Class khiến UI trống ảo).
+        classes_before_sy_filter = list(enhanced_classes)
+        school_year_filter_relaxed = False
         if sy_filter:
             enhanced_classes = [c for c in enhanced_classes if (c.get("school_year_id") or "") == sy_filter]
+            if len(enhanced_classes) == 0 and len(classes_before_sy_filter) > 0:
+                enhanced_classes = classes_before_sy_filter
+                school_year_filter_relaxed = True
 
         # Add debug info to response
         debug_info = {
             "room_id": room_id,
             "child_table_has_data": child_table_has_data,
             "school_year_filter": sy_filter,
+            "school_year_filter_relaxed": school_year_filter_relaxed,
             "total_classes_found": len(enhanced_classes),
             "classes": [{"name": c["name"], "usage_type": c["usage_type"]} for c in enhanced_classes]
         }
@@ -2490,7 +2498,8 @@ def add_room_class():
                 "usage_type": usage_type,
                 "subject_id": subject_id,
                 "class_title": class_info.title,
-                "class_type": class_info.class_type
+                "class_type": class_info.class_type,
+                "class_school_year_id": class_info.school_year_id,
             },
             message="Class added to room successfully"
         )
