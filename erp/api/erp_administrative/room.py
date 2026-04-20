@@ -2067,6 +2067,24 @@ def get_room_classes(room_id: str = None):
                             if user_info:
                                 enhanced_class["homeroom_teacher_name"] = user_info[0].get("full_name")
 
+                    enhanced_class["vice_homeroom_teacher"] = getattr(class_doc, "vice_homeroom_teacher", None)
+                    if getattr(class_doc, "vice_homeroom_teacher", None):
+                        vinfo = frappe.get_all(
+                            "SIS Teacher",
+                            fields=["user_id"],
+                            filters={"name": class_doc.vice_homeroom_teacher},
+                            limit=1
+                        )
+                        if vinfo and vinfo[0].get("user_id"):
+                            uinfo = frappe.get_all(
+                                "User",
+                                fields=["full_name"],
+                                filters={"name": vinfo[0]["user_id"]},
+                                limit=1
+                            )
+                            if uinfo:
+                                enhanced_class["vice_homeroom_teacher_name"] = uinfo[0].get("full_name")
+
                     enhanced_classes.append(enhanced_class)
 
         except Exception as e:
@@ -2089,6 +2107,7 @@ def get_room_classes(room_id: str = None):
                     "education_grade",
                     "academic_program",
                     "homeroom_teacher",
+                    "vice_homeroom_teacher",
                     "creation",
                     "modified"
                 ],
@@ -2156,6 +2175,23 @@ def get_room_classes(room_id: str = None):
                         if user_info:
                             enhanced_class["homeroom_teacher_name"] = user_info[0].get("full_name")
 
+                if class_data.get("vice_homeroom_teacher"):
+                    vinfo = frappe.get_all(
+                        "SIS Teacher",
+                        fields=["user_id"],
+                        filters={"name": class_data["vice_homeroom_teacher"]},
+                        limit=1
+                    )
+                    if vinfo and vinfo[0].get("user_id"):
+                        uinfo = frappe.get_all(
+                            "User",
+                            fields=["full_name"],
+                            filters={"name": vinfo[0]["user_id"]},
+                            limit=1
+                        )
+                        if uinfo:
+                            enhanced_class["vice_homeroom_teacher_name"] = uinfo[0].get("full_name")
+
                 enhanced_classes.append(enhanced_class)
 
         if sy_filter:
@@ -2181,6 +2217,89 @@ def get_room_classes(room_id: str = None):
     except Exception as e:
         frappe.log_error(f"Error fetching room classes: {str(e)}")
         return error_response(f"Error fetching room classes: {str(e)}")
+
+
+def _sync_homeroom_teachers_to_room_yearly_pic(room_id: str, class_id: str):
+    """
+    Phòng lớp học (classroom_room): sau khi gán lớp chủ nhiệm, đồng bộ PIC năm học
+    từ User của GVCN + GV phó chủ nhiệm (merge, không xóa PIC đã có).
+    """
+    room_rt = (frappe.db.get_value("ERP Administrative Room", room_id, "room_type") or "").lower()
+    if room_rt != "classroom_room":
+        return
+
+    class_doc = frappe.get_doc("SIS Class", class_id)
+    sy = class_doc.school_year_id
+    if not sy:
+        return
+
+    def _teacher_link_to_user(sis_teacher_id):
+        if not sis_teacher_id:
+            return None
+        uid = frappe.db.get_value("SIS Teacher", sis_teacher_id, "user_id")
+        if uid and frappe.db.exists("User", uid):
+            return uid
+        return None
+
+    pairs = []
+    if class_doc.homeroom_teacher:
+        u = _teacher_link_to_user(class_doc.homeroom_teacher)
+        if u:
+            pairs.append((u, "Giáo viên chủ nhiệm"))
+    vice = getattr(class_doc, "vice_homeroom_teacher", None)
+    if vice:
+        u = _teacher_link_to_user(vice)
+        if u:
+            pairs.append((u, "Giáo viên phó chủ nhiệm"))
+
+    seen = set()
+    unique_pairs = []
+    for uid, label in pairs:
+        if uid in seen:
+            continue
+        seen.add(uid)
+        unique_pairs.append((uid, label))
+
+    if not unique_pairs:
+        return
+
+    ya_name = frappe.db.get_value(
+        "ERP Administrative Room Yearly Assignment",
+        {"room": room_id, "school_year_id": sy},
+        "name",
+    )
+    if ya_name:
+        doc = frappe.get_doc("ERP Administrative Room Yearly Assignment", ya_name)
+    else:
+        doc = frappe.get_doc(
+            {
+                "doctype": "ERP Administrative Room Yearly Assignment",
+                "room": room_id,
+                "school_year_id": sy,
+                "usage_type": "homeroom_class",
+                "status": "active",
+            }
+        )
+
+    doc.class_id = class_id
+    if class_doc.homeroom_teacher:
+        doc.homeroom_teacher_id = class_doc.homeroom_teacher
+    if vice:
+        doc.vice_homeroom_teacher_id = vice
+
+    existing_users = {r.user for r in (doc.responsible_users or []) if getattr(r, "user", None)}
+    for uid, role_label in unique_pairs:
+        if uid in existing_users:
+            continue
+        fn = frappe.db.get_value("User", uid, "full_name") or ""
+        doc.append("responsible_users", {"user": uid, "role_label": role_label, "full_name": fn})
+        existing_users.add(uid)
+
+    if doc.is_new():
+        doc.insert(ignore_permissions=True)
+    else:
+        doc.save(ignore_permissions=True)
+    frappe.db.commit()
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
@@ -2354,6 +2473,13 @@ def add_room_class():
             import traceback
             frappe.logger().error(f"Traceback: {traceback.format_exc()}")
             return error_response(f"Không thể thêm lớp vào phòng: {str(e)}")
+
+        # Phòng lớp học: đồng bộ PIC năm từ GVCN + phó CN (User) vào bản ghi gán năm
+        if usage_type == "homeroom":
+            try:
+                _sync_homeroom_teachers_to_room_yearly_pic(room_id, class_id)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "sync_homeroom_teachers_to_room_yearly_pic")
 
         frappe.db.commit()
 
