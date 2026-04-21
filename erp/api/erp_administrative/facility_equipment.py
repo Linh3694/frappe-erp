@@ -1439,6 +1439,43 @@ def get_class_facility_context():
 
         open_tickets = _open_tickets_for_room(room_id) if room_id else []
 
+        # Đợt kiểm kê cuối năm (nếu có) — để tab CSVC lớp phản ánh tiến độ theo phòng
+        year_end_closure = None
+        if room_id and school_year_id:
+            campus_id = frappe.db.get_value("ERP Administrative Room", room_id, "campus_id")
+            if campus_id:
+                closures = frappe.get_all(
+                    "ERP Administrative Academic Year Closure",
+                    filters={
+                        "school_year_id": school_year_id,
+                        "campus_id": campus_id,
+                        "status": ["in", ["draft", "in_progress"]],
+                    },
+                    fields=["name", "status"],
+                    limit=1,
+                )
+                if closures:
+                    c = closures[0]
+                    crow = frappe.get_all(
+                        "ERP Administrative Academic Year Closure Room",
+                        filters={"parent": c.name, "room": room_id},
+                        fields=["status", "inventory_check_id", "last_reminder_sent_on"],
+                        limit=1,
+                    )
+                    if crow:
+                        from erp.api.erp_administrative.academic_year_closure import (
+                            _school_year_display_label,
+                        )
+
+                        r0 = crow[0]
+                        year_end_closure = {
+                            "closure_id": c.name,
+                            "closure_status": c.status,
+                            "room_row_status": (r0.get("status") or "pending").lower(),
+                            "inventory_check_id": r0.get("inventory_check_id"),
+                            "school_year_title": _school_year_display_label(school_year_id),
+                        }
+
         payload = {
             "class_id": class_id,
             "school_year_id": school_year_id,
@@ -1454,6 +1491,7 @@ def get_class_facility_context():
             "physical_code": physical_code,
             "yearly_assignment": yearly_assignment,
             "open_tickets": open_tickets,
+            "year_end_closure": year_end_closure,
             **inner,
         }
         if handover_diff is not None:
