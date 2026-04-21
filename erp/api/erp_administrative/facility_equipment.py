@@ -1476,6 +1476,17 @@ def get_class_facility_context():
                             "school_year_title": _school_year_display_label(school_year_id),
                         }
 
+        can_submit_year_end_inventory = False
+        if (
+            year_end_closure
+            and room_id
+            and school_year_id
+            and (year_end_closure.get("room_row_status") or "").lower() == "pending"
+        ):
+            can_submit_year_end_inventory = _user_can_submit_inventory_check(
+                room_id, school_year_id, frappe.session.user
+            )
+
         payload = {
             "class_id": class_id,
             "school_year_id": school_year_id,
@@ -1492,6 +1503,7 @@ def get_class_facility_context():
             "yearly_assignment": yearly_assignment,
             "open_tickets": open_tickets,
             "year_end_closure": year_end_closure,
+            "can_submit_year_end_inventory": can_submit_year_end_inventory,
             **inner,
         }
         if handover_diff is not None:
@@ -1565,6 +1577,68 @@ def _user_is_room_responsible(room_id, user_id):
         return False
     room_doc = frappe.get_doc("ERP Administrative Room", room_id)
     return any(_normalize_frappe_user_link_value((r.user or "").strip()) == nu for r in (room_doc.responsible_users or []))
+
+
+def _user_is_yearly_assignment_pic(room_id, school_year_id, user_id):
+    """User có trong bảng PIC gán năm (ERP Administrative Room Yearly Assignment) không."""
+    if not room_id or not school_year_id or not user_id:
+        return False
+    nu = _normalize_frappe_user_link_value((user_id or "").strip())
+    if not nu:
+        return False
+    ya_name = frappe.db.get_value(
+        "ERP Administrative Room Yearly Assignment",
+        {"room": room_id, "school_year_id": school_year_id},
+        "name",
+    )
+    if not ya_name:
+        return False
+    for row in frappe.get_all(
+        "ERP Administrative Room Yearly PIC",
+        filters={"parent": ya_name},
+        fields=["user"],
+    ):
+        if _normalize_frappe_user_link_value((row.user or "").strip()) == nu:
+            return True
+    return False
+
+
+def _user_is_homeroom_for_classroom_room(room_id, school_year_id, user_id):
+    """GVCN / Phó GVCN của lớp gắn phòng + năm học (phòng lớp học)."""
+    if not room_id or not school_year_id or not user_id:
+        return False
+    nu = _normalize_frappe_user_link_value((user_id or "").strip())
+    if not nu:
+        return False
+    for c in frappe.get_all(
+        "SIS Class",
+        filters={"room": room_id, "school_year_id": school_year_id},
+        fields=["homeroom_teacher", "vice_homeroom_teacher"],
+    ):
+        for fld in ("homeroom_teacher", "vice_homeroom_teacher"):
+            u = c.get(fld)
+            if u and _normalize_frappe_user_link_value((u or "").strip()) == nu:
+                return True
+    return False
+
+
+def _user_can_submit_inventory_check(room_id, school_year_id, user_id):
+    """
+    Gửi kiểm kê: PIC trên Room, hoặc (phòng lớp + năm) PIC gán năm / GVCN lớp gắn phòng.
+    Phòng không phải classroom_room vẫn chỉ PIC trên master Room.
+    """
+    if _user_is_room_responsible(room_id, user_id):
+        return True
+    if not school_year_id or not room_id:
+        return False
+    rt = frappe.db.get_value("ERP Administrative Room", room_id, "room_type")
+    if rt != "classroom_room":
+        return False
+    if _user_is_yearly_assignment_pic(room_id, school_year_id, user_id):
+        return True
+    if _user_is_homeroom_for_classroom_room(room_id, school_year_id, user_id):
+        return True
+    return False
 
 
 def _normalize_frappe_user_link_value(user_hint: str) -> str:
@@ -1679,9 +1753,9 @@ def submit_inventory_check():
 
         uid = frappe.session.user
         nu = _normalize_frappe_user_link_value((uid or "").strip())
-        if not _user_is_room_responsible(room_id, uid):
+        if not _user_can_submit_inventory_check(room_id, school_year_id, uid):
             return validation_error_response(
-                _("Chỉ người phụ trách phòng mới được gửi kiểm kê"),
+                _("Chỉ người phụ trách phòng / PIC năm học / GVCN lớp mới được gửi kiểm kê"),
                 {"permission": ["denied"]},
             )
 
