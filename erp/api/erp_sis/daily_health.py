@@ -1890,6 +1890,83 @@ def _auto_excused_for_current_period(visit):
         frappe.logger().warning(f"[_auto_excused_for_current_period] Error: {str(e)}")
 
 
+def _period_rows_for_class_day(class_id, visit_date, schedule_group_id):
+    """
+    Danh sách tiết (period_name + start/end) trong ngày cho lớp.
+    Ưu tiên TKB giảng dạy / TKB HS (trùng chuỗi với Lesson Log), fallback Schedule Group.
+    """
+    rows_out = []
+    seen = set()
+
+    def _consume(raw_rows):
+        for r in raw_rows or []:
+            pn = (r.get("period_name") or "").strip()
+            if not pn or pn in seen:
+                continue
+            seen.add(pn)
+            rows_out.append(
+                {
+                    "period_name": pn,
+                    "start_time": r.get("start_time"),
+                    "end_time": r.get("end_time"),
+                }
+            )
+
+    try:
+        tt_rows = frappe.db.sql(
+            """
+            SELECT tc.period_name, tc.start_time, tc.end_time
+            FROM `tabSIS Teacher Timetable` tt
+            INNER JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
+            WHERE tt.class_id = %s AND tt.date = %s
+            ORDER BY tc.start_time ASC
+            """,
+            (class_id, visit_date),
+            as_dict=True,
+        )
+        _consume(tt_rows)
+    except Exception as e:
+        frappe.logger().warning(f"[_period_rows_for_class_day] Teacher Timetable: {e}")
+
+    if not rows_out:
+        try:
+            st_rows = frappe.db.sql(
+                """
+                SELECT tc.period_name, tc.start_time, tc.end_time
+                FROM `tabSIS Student Timetable` st
+                INNER JOIN `tabSIS Timetable Column` tc ON st.timetable_column_id = tc.name
+                WHERE st.class_id = %s AND st.date = %s
+                ORDER BY tc.start_time ASC
+                """,
+                (class_id, visit_date),
+                as_dict=True,
+            )
+            _consume(st_rows)
+        except Exception as e:
+            frappe.logger().warning(f"[_period_rows_for_class_day] Student Timetable: {e}")
+
+    if not rows_out and schedule_group_id:
+        for p in frappe.get_all(
+            "SIS Timetable Column",
+            filters={"schedule_id": schedule_group_id},
+            fields=["period_name", "start_time", "end_time"],
+            order_by="start_time asc",
+        ):
+            pn = (p.get("period_name") or "").strip()
+            if not pn or pn in seen:
+                continue
+            seen.add(pn)
+            rows_out.append(
+                {
+                    "period_name": pn,
+                    "start_time": p.get("start_time"),
+                    "end_time": p.get("end_time"),
+                }
+            )
+
+    return rows_out
+
+
 def _excused_overlapping_periods(visit):
     """
     Tại checkout, excused các tiết HS vắng mặt khi xuống Y tế.
@@ -1917,28 +1994,31 @@ def _excused_overlapping_periods(visit):
             return
 
         class_doc = frappe.db.get_value("SIS Class", class_id, ["education_stage_id", "campus_id"], as_dict=True)
-        if not class_doc or not class_doc.get("education_stage_id"):
+        if not class_doc:
             return
 
-        schedule_group = frappe.db.sql("""
-            SELECT name FROM `tabSIS Schedule Group`
-            WHERE education_stage_id = %s
-              AND is_active = 1
-              AND start_date <= %s
-              AND end_date >= %s
-            ORDER BY start_date DESC
-            LIMIT 1
-        """, (class_doc.get("education_stage_id"), visit_date, visit_date), as_dict=True)
+        schedule_group_id = None
+        if class_doc.get("education_stage_id"):
+            schedule_group = frappe.db.sql(
+                """
+                SELECT name FROM `tabSIS Schedule Group`
+                WHERE education_stage_id = %s
+                  AND is_active = 1
+                  AND start_date <= %s
+                  AND end_date >= %s
+                ORDER BY start_date DESC
+                LIMIT 1
+                """,
+                (class_doc.get("education_stage_id"), visit_date, visit_date),
+                as_dict=True,
+            )
+            if schedule_group:
+                schedule_group_id = schedule_group[0].get("name")
 
-        if not schedule_group:
+        # Tiết theo TKB lớp trong ngày — trùng chuỗi period với Lesson Log / get_class_attendance
+        periods = _period_rows_for_class_day(class_id, visit_date, schedule_group_id)
+        if not periods:
             return
-
-        periods = frappe.get_all(
-            "SIS Timetable Column",
-            filters={"schedule_id": schedule_group[0].get("name")},
-            fields=["period_name", "start_time", "end_time"],
-            order_by="start_time asc"
-        )
 
         student_info = frappe.db.get_value(
             "SIS Student", student_id,
@@ -1964,18 +2044,21 @@ def _excused_overlapping_periods(visit):
                     and leave_clinic_sec > start_sec
                 )
             if overlaps:
-                period_name = p.get("period_name")
-                existing = frappe.db.exists(
-                    "SIS Class Attendance",
-                    {
-                        "student_id": student_id,
-                        "class_id": class_id,
-                        "date": visit_date,
-                        "period": period_name
-                    }
+                period_name = (p.get("period_name") or "").strip()
+                if not period_name:
+                    continue
+                existing_rows = frappe.db.sql(
+                    """
+                    SELECT name, status FROM `tabSIS Class Attendance`
+                    WHERE student_id = %s AND class_id = %s AND date = %s AND TRIM(period) = %s
+                    LIMIT 1
+                    """,
+                    (student_id, class_id, visit_date, period_name),
+                    as_dict=True,
                 )
-                if existing:
-                    current_status = frappe.db.get_value("SIS Class Attendance", existing, "status")
+                if existing_rows:
+                    existing = existing_rows[0].get("name")
+                    current_status = existing_rows[0].get("status")
                     if current_status != "excused":
                         frappe.db.set_value("SIS Class Attendance", existing, "status", "excused")
                         updated_periods.append(period_name)
@@ -2400,7 +2483,17 @@ def get_health_status_for_period():
 
             should_include = False
 
-            if has_period_times and leave_class_sec is not None:
+            # PH đón / chuyển viện: HS đã rời trường — không dùng [rời lớp, rời PYT] hẹp (sẽ không giao tiết sau)
+            if (
+                visit.status in ("picked_up", "transferred")
+                and has_period_times
+                and leave_class_sec is not None
+                and period_end_sec is not None
+            ):
+                if leave_class_sec < period_end_sec:
+                    should_include = True
+
+            if not should_include and has_period_times and leave_class_sec is not None:
                 if _visit_overlaps_period_interval(
                     leave_class_sec,
                     clinic_sec_for_overlap,

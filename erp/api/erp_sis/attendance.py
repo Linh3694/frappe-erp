@@ -1,4 +1,5 @@
 import json
+import re
 import frappe
 from frappe import _
 import requests
@@ -9,19 +10,49 @@ from erp.utils.api_response import success_response, error_response
 ATTENDANCE_STATUSES = {"present", "absent", "late", "excused"}
 
 
+def _period_num_from_name(period_name):
+	"""Lấy số tiết đầu tiên trong chuỗi (đồng bộ logic với class_log)."""
+	match = re.search(r"\d+", period_name or "")
+	return int(match.group()) if match else None
+
+
 def invalidate_class_attendance_cache(class_id, date_str, period):
 	"""
 	Xóa cache Redis của get_class_attendance (key attendance:{class_id}:{date}:{period}).
 	Gọi sau khi điểm danh đổi từ luồng Y tế để client không đọc dữ liệu cũ 5 phút.
+	Xóa thêm key variant TRIM và mọi key cùng số tiết (tránh Lesson Log "Tiết 8" vs DB "Tiết 8 ").
 	"""
 	if not class_id or not date_str or not period:
 		return
-	cache_key = f"attendance:{class_id}:{date_str}:{period}"
-	try:
-		frappe.cache().delete_key(cache_key)
-		frappe.logger().info(f"[attendance] Invalidated cache {cache_key}")
-	except Exception as e:
-		frappe.logger().warning(f"[attendance] Cache invalidate failed for {cache_key}: {e}")
+	keys_to_delete = set()
+	if period:
+		p = str(period).strip()
+		keys_to_delete.add(f"attendance:{class_id}:{date_str}:{period}")
+		keys_to_delete.add(f"attendance:{class_id}:{date_str}:{p}")
+		num = _period_num_from_name(p)
+		if num is not None:
+			try:
+				peer_periods = frappe.db.sql(
+					"""
+					SELECT DISTINCT TRIM(period) AS p
+					FROM `tabSIS Class Attendance`
+					WHERE class_id = %s AND date = %s
+					""",
+					(class_id, date_str),
+				)
+				for (pt,) in peer_periods or []:
+					if pt and _period_num_from_name(pt) == num:
+						keys_to_delete.add(f"attendance:{class_id}:{date_str}:{pt}")
+						if pt.strip() != pt:
+							keys_to_delete.add(f"attendance:{class_id}:{date_str}:{pt.strip()}")
+			except Exception as ex:
+				frappe.logger().warning(f"[attendance] peer period cache keys: {ex}")
+	for cache_key in keys_to_delete:
+		try:
+			frappe.cache().delete_key(cache_key)
+			frappe.logger().info(f"[attendance] Invalidated cache {cache_key}")
+		except Exception as e:
+			frappe.logger().warning(f"[attendance] Cache invalidate failed for {cache_key}: {e}")
 
 
 def _to_bool(val):
@@ -310,6 +341,29 @@ def get_class_attendance(class_id=None, date=None, period=None, skip_cache=None)
 				"name", "student_id", "student_code", "student_name", "class_id", "date", "period", "status", "remarks",
 			]
 		)
+		# Khớp TRIM: Lesson Log dùng tên tiết từ TKB; bản ghi từ Y tế/Schedule có thể khác khoảng trắng
+		if not rows:
+			rows = frappe.db.sql(
+				"""
+				SELECT name, student_id, student_code, student_name, class_id, date, period, status, remarks
+				FROM `tabSIS Class Attendance`
+				WHERE class_id = %(class_id)s AND date = %(date)s AND TRIM(period) = TRIM(%(period)s)
+				""",
+				{"class_id": class_id, "date": date, "period": period},
+				as_dict=True,
+			) or []
+		# Fallback theo số tiết (vd. "TIẾT 8" vs "Tiết 8") — chỉ khi vẫn chưa có dòng
+		if not rows:
+			req_num = _period_num_from_name(period)
+			if req_num is not None:
+				all_rows = frappe.get_all(
+					"SIS Class Attendance",
+					filters={"class_id": class_id, "date": date},
+					fields=[
+						"name", "student_id", "student_code", "student_name", "class_id", "date", "period", "status", "remarks",
+					],
+				)
+				rows = [r for r in all_rows if _period_num_from_name(r.get("period")) == req_num]
 		
 		# ⚡ CACHE: Store result in Redis (5 min = 300 sec)
 		try:
