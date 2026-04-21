@@ -2198,6 +2198,76 @@ def _visit_overlaps_period_interval(
     return True
 
 
+def _norm_period_key(value):
+    """Chuẩn hóa tên tiết để so khớp reported_period với query (trim + casefold)."""
+    if value is None:
+        return ""
+    return str(value).strip().casefold()
+
+
+def _load_visits_for_lesson_log(class_id, visit_date):
+    """
+    Danh sách visit cho LessonLog: theo class_id + ngày; nếu rỗng thử SQL DATE();
+    bổ sung visit của HS thuộc lớp (SIS Class Student) khi field class_id trên visit lệch dữ liệu.
+    """
+    fields = [
+        "name",
+        "student_id",
+        "student_code",
+        "status",
+        "leave_class_time",
+        "leave_clinic_time",
+        "reported_period",
+        "attendance_record_id",
+        "creation",
+    ]
+    date_str = str(visit_date)[:10]
+
+    visits = frappe.get_all(
+        "SIS Daily Health Visit",
+        filters={"class_id": class_id, "visit_date": date_str},
+        fields=fields,
+        order_by="creation desc",
+    )
+
+    if not visits:
+        visits = (
+            frappe.db.sql(
+                """
+                SELECT name, student_id, student_code, status, leave_class_time,
+                       leave_clinic_time, reported_period, attendance_record_id, creation
+                FROM `tabSIS Daily Health Visit`
+                WHERE class_id = %s AND DATE(visit_date) = %s
+                ORDER BY creation DESC
+                """,
+                (class_id, date_str),
+                as_dict=True,
+            )
+            or []
+        )
+
+    seen = {v["name"] for v in visits}
+    roster_ids = frappe.get_all(
+        "SIS Class Student",
+        filters={"class_id": class_id},
+        pluck="student_id",
+    )
+    if roster_ids:
+        extra = frappe.get_all(
+            "SIS Daily Health Visit",
+            filters={"visit_date": date_str, "student_id": ["in", roster_ids]},
+            fields=fields,
+            order_by="creation desc",
+        )
+        for row in extra:
+            if row["name"] not in seen:
+                visits.append(row)
+                seen.add(row["name"])
+
+    visits.sort(key=lambda x: str(x.get("creation") or ""), reverse=True)
+    return visits
+
+
 @frappe.whitelist(allow_guest=False)
 def get_health_status_for_period():
     """
@@ -2216,8 +2286,9 @@ def get_health_status_for_period():
         - Có khung giờ tiết + parse được leave_class_time: chồng (overlap) khung [leave_class, leave_clinic)
           với [period_start, period_end); leave_clinic rỗng = khoảng mở → vẫn hiển thị các tiết sau mốc rời lớp.
           (Thay cho tách biệt “trong tiết” / “trước tiết nhưng còn ở Y tế” — hợp nhất, phủ case ra chơi / Y tế tạo trực tiếp.)
-        - Không parse được leave_class_time hoặc cần khớp tên khi TKB lệch: reported_period / period trên điểm danh khớp period request.
-        - Không có khung giờ tiết: chỉ trả visit khớp reported_period / period trên SIS Class Attendance (tránh broadcast cả ngày).
+        - Không parse được leave_class_time: vẫn thử khớp tên tiết / HS còn trong luồng (at_clinic, examining, left_class).
+        - Không có khung giờ tiết: khớp reported_period nếu có; không thì vẫn trả HS còn trong luồng (tránh API rỗng khi TKB không resolve).
+        - Load visit mở rộng: DATE(visit_date), và HS thuộc lớp kể cả khi visit.class_id lệch.
     """
     try:
         _check_teacher_permission()
@@ -2228,6 +2299,9 @@ def get_health_status_for_period():
         class_id = data.get("class_id") or request_args.get("class_id")
         visit_date = data.get("date") or request_args.get("date")
         period_name = data.get("period") or request_args.get("period")
+        # Chuẩn hóa ngày chuỗi yyyy-MM-dd
+        if visit_date:
+            visit_date = str(visit_date)[:10]
         
         # Validation
         errors = {}
@@ -2252,28 +2326,11 @@ def get_health_status_for_period():
             frappe.logger().warning(
                 f"[get_health_status_for_period] Không resolve được khung giờ tiết "
                 f"class_id={class_id} date={visit_date} period={period_name} "
-                f"— chỉ trả visit khớp reported_period / period trên SIS Class Attendance"
+                f"— fallback: HS còn trong luồng Y tế / khớp tên tiết đã ghi"
             )
 
-        # Query tất cả visits trong ngày của lớp
-        visits = frappe.get_all(
-            "SIS Daily Health Visit",
-            filters={
-                "class_id": class_id,
-                "visit_date": visit_date
-            },
-            fields=[
-                "name",
-                "student_id",
-                "student_code",
-                "status",
-                "leave_class_time",
-                "leave_clinic_time",
-                "reported_period",
-                "attendance_record_id",
-            ],
-            order_by="leave_class_time desc"
-        )
+        # Query visits (mở rộng: SQL DATE, HS thuộc lớp)
+        visits = _load_visits_for_lesson_log(class_id, visit_date)
 
         att_ids = list(
             {
@@ -2313,27 +2370,39 @@ def get_health_status_for_period():
                 att_period_by_id.get(visit.get("attendance_record_id")) or ""
             ).strip()
 
+            eff_match = _norm_period_key(eff_rp) == _norm_period_key(period_name_norm) if eff_rp else False
+
+            # Đang ở phòng khám / đang khám: không dùng leave_clinic để cắt overlap (tránh dữ liệu lỗi làm rỗng cả ngày)
+            clinic_sec_for_overlap = leave_clinic_sec
+            if visit.status in ("at_clinic", "examining"):
+                clinic_sec_for_overlap = None
+
             should_include = False
 
             if has_period_times and leave_class_sec is not None:
-                # Overlap chuẩn: phủ mốc rời lớp nằm trong giờ ra chơi / ngoài tiết, và mọi tiết sau cho đến checkout
                 if _visit_overlaps_period_interval(
                     leave_class_sec,
-                    leave_clinic_sec,
+                    clinic_sec_for_overlap,
                     period_start_sec,
                     period_end_sec,
                 ):
                     should_include = True
-                # TKB lệch tên / thời gian: vẫn cho phép khớp tiết đã ghi trên visit hoặc điểm danh
-                elif eff_rp and eff_rp == period_name_norm:
+                elif eff_match:
                     should_include = True
             elif has_period_times:
-                # Có khung giờ nhưng không parse được leave_class_time — chỉ khớp tiết đã lưu
-                if eff_rp and eff_rp == period_name_norm:
+                if eff_match:
+                    should_include = True
+                elif leave_class_sec is None and visit.status in (
+                    "left_class",
+                    "at_clinic",
+                    "examining",
+                ):
                     should_include = True
             else:
-                # Không có khung giờ: không broadcast visit cả ngày ra mọi tiết (fix bug UI)
-                if eff_rp and eff_rp == period_name_norm:
+                if eff_match:
+                    should_include = True
+                elif visit.status in ("left_class", "at_clinic", "examining"):
+                    # Không resolve được TKB nhưng HS vẫn trong luồng Y tế — vẫn trả để cột LessonLog không trắng
                     should_include = True
 
             if should_include:
