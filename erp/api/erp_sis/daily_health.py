@@ -2019,8 +2019,9 @@ def _get_period_times(class_id, period_name, visit_date):
             return None, None
         
         schedule_group_id = schedule_group[0].get("name")
-        
-        # Tìm Period với period_name khớp
+        period_norm = str(period_name).strip() if period_name else ""
+
+        # Tìm Period với period_name khớp (chính xác)
         period = frappe.db.get_value(
             "SIS Timetable Column",
             {
@@ -2030,11 +2031,27 @@ def _get_period_times(class_id, period_name, visit_date):
             ["start_time", "end_time"],
             as_dict=True
         )
-        
+
+        # Fallback: tên tiết khác khoảng trắng / unicode space (LessonLog hay bị lệch so với TKB)
+        if not period and period_norm:
+            rows = frappe.db.sql(
+                """
+                SELECT start_time, end_time
+                FROM `tabSIS Timetable Column`
+                WHERE schedule_id = %s AND TRIM(period_name) = %s
+                LIMIT 1
+                """,
+                (schedule_group_id, period_norm),
+                as_dict=True,
+            )
+            period = rows[0] if rows else None
+
         if not period:
-            frappe.logger().warning(f"[get_period_times] Cannot find period '{period_name}' in schedule group {schedule_group_id}")
+            frappe.logger().warning(
+                f"[get_period_times] Cannot find period '{period_name}' in schedule group {schedule_group_id}"
+            )
             return None, None
-        
+
         return period.get("start_time"), period.get("end_time")
     
     except Exception as e:
@@ -2077,13 +2094,17 @@ def _time_to_seconds(time_val):
             t.hour * 3600 + t.minute * 60 + (t.second or 0) + (t.microsecond or 0) / 1_000_000
         )
 
-    # Chuỗi HH:MM hoặc HH:MM:SS
+    # Chuỗi HH:MM hoặc HH:MM:SS (có thể kèm microsecond: 13:18:00.000000)
     if isinstance(time_val, str):
         parts = time_val.split(":")
         if len(parts) >= 2:
             hours = int(parts[0])
             minutes = int(parts[1])
-            seconds = int(parts[2]) if len(parts) > 2 else 0
+            sec_raw = parts[2] if len(parts) > 2 else "0"
+            try:
+                seconds = int(float(sec_raw))
+            except (TypeError, ValueError):
+                seconds = 0
             return hours * 3600 + minutes * 60 + seconds
 
     return None
@@ -2179,6 +2200,7 @@ def get_health_status_for_period():
             fields=[
                 "name",
                 "student_id",
+                "student_code",
                 "status",
                 "leave_class_time",
                 "leave_clinic_time",
@@ -2250,13 +2272,18 @@ def get_health_status_for_period():
                     should_include = True
 
             if should_include:
-                students_at_clinic[student_id] = {
+                payload = {
                     "visit_id": visit.name,
                     "status": visit.status,
                     "leave_class_time": str(visit.leave_class_time) if visit.leave_class_time else None,
                     "leave_clinic_time": str(visit.leave_clinic_time) if visit.leave_clinic_time else None,
                 }
-        
+                students_at_clinic[student_id] = payload
+                # LessonLog tra cứu theo tên CRM hoặc mã WS — gửi song song để lệch khóa không làm mất badge
+                sc = (visit.get("student_code") or "").strip()
+                if sc and sc != student_id:
+                    students_at_clinic[sc] = payload
+
         return success_response(
             data={"students": students_at_clinic},
             message="Lấy trạng thái Y tế theo tiết học thành công"
