@@ -1666,19 +1666,18 @@ def _user_is_homeroom_for_classroom_room(room_id, school_year_id, user_id):
 
 def _user_can_submit_inventory_check(room_id, school_year_id, user_id):
     """
-    Gửi kiểm kê: PIC trên Room, hoặc (phòng lớp + năm) PIC gán năm / GVCN lớp gắn phòng.
-    Phòng không phải classroom_room vẫn chỉ PIC trên master Room.
+    Gửi kiểm kê: PIC bảng con Room; hoặc PIC gán năm (Yearly Assignment — phòng chức năng thường chỉ có ở đây);
+    phòng lớp: thêm GVCN/Phó GVCN lớp gắn phòng.
     """
     if _user_is_room_responsible(room_id, user_id):
         return True
     if not school_year_id or not room_id:
         return False
-    rt = frappe.db.get_value("ERP Administrative Room", room_id, "room_type")
-    if rt != "classroom_room":
-        return False
+    # Phòng chức năng / mọi phòng có YA: PIC năm (đồng bộ Facility Lite & get_all_rooms)
     if _user_is_yearly_assignment_pic(room_id, school_year_id, user_id):
         return True
-    if _user_is_homeroom_for_classroom_room(room_id, school_year_id, user_id):
+    rt = frappe.db.get_value("ERP Administrative Room", room_id, "room_type")
+    if rt == "classroom_room" and _user_is_homeroom_for_classroom_room(room_id, school_year_id, user_id):
         return True
     return False
 
