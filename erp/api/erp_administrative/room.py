@@ -129,17 +129,25 @@ def get_all_rooms():
             ya_rows = frappe.get_all(
                 "ERP Administrative Room Yearly Assignment",
                 filters={"room": ["in", rnames], "school_year_id": sy_id},
-                fields=["room", "display_title_vn", "homeroom_teacher_name", "status"],
+                fields=[
+                    "room",
+                    "display_title_vn",
+                    "display_title_en",
+                    "homeroom_teacher_name",
+                    "status",
+                ],
             )
             ya_map = {y["room"]: y for y in ya_rows}
             for room in rooms:
                 y = ya_map.get(room["name"])
                 room["yearly_assignment_display"] = y.get("display_title_vn") if y else None
+                room["yearly_assignment_display_en"] = y.get("display_title_en") if y else None
                 room["yearly_homeroom_name"] = y.get("homeroom_teacher_name") if y else None
                 room["yearly_assignment_status"] = y.get("status") if y else None
         else:
             for room in rooms:
                 room["yearly_assignment_display"] = None
+                room["yearly_assignment_display_en"] = None
                 room["yearly_homeroom_name"] = None
                 room["yearly_assignment_status"] = None
 
