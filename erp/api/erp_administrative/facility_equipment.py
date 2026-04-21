@@ -1464,29 +1464,33 @@ def get_class_facility_context():
                     )
                     if crow:
                         from erp.api.erp_administrative.academic_year_closure import (
+                            _inventory_rejection_note,
                             _school_year_display_label,
                         )
 
                         r0 = crow[0]
+                        rstat = (r0.get("status") or "pending").lower()
+                        inv_id = r0.get("inventory_check_id")
+                        rej_note = None
+                        if rstat == "rejected" and inv_id:
+                            rej_note = _inventory_rejection_note(inv_id)
                         year_end_closure = {
                             "closure_id": c.name,
                             "closure_status": c.status,
-                            "room_row_status": (r0.get("status") or "pending").lower(),
-                            "inventory_check_id": r0.get("inventory_check_id"),
+                            "room_row_status": rstat,
+                            "inventory_check_id": inv_id,
+                            "inventory_rejection_note": rej_note,
                             "school_year_title": _school_year_display_label(school_year_id),
                             "school_year_id": school_year_id,
                         }
 
         can_submit_year_end_inventory = False
-        if (
-            year_end_closure
-            and room_id
-            and school_year_id
-            and (year_end_closure.get("room_row_status") or "").lower() == "pending"
-        ):
-            can_submit_year_end_inventory = _user_can_submit_inventory_check(
-                room_id, school_year_id, frappe.session.user
-            )
+        if year_end_closure and room_id and school_year_id:
+            rs = (year_end_closure.get("room_row_status") or "").lower()
+            if rs in ("pending", "rejected"):
+                can_submit_year_end_inventory = _user_can_submit_inventory_check(
+                    room_id, school_year_id, frappe.session.user
+                )
 
         payload = {
             "class_id": class_id,
