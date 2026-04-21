@@ -1289,10 +1289,11 @@ def _handover_payload_for_class(class_id):
 
 @frappe.whitelist(allow_guest=False)
 def get_room_handover_status():
-    """Bàn giao mới nhất theo phòng — loại responsible_user (phòng chức năng)."""
+    """Bàn giao mới nhất theo phòng — loại responsible_user (phòng chức năng); không lọc theo người nhận."""
     try:
         data = _parse_json_body()
         room_id = data.get("room_id")
+        sy = (data.get("school_year_id") or "").strip()
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
         rows = frappe.get_all(
@@ -1315,14 +1316,26 @@ def get_room_handover_status():
                 "confirmed_by",
                 "handover_type",
                 "responsible_user",
+                "school_year_id",
+                "yearly_assignment_id",
+                "display_title_snapshot",
             ],
             order_by="creation desc",
-            limit=1,
+            limit=20,
         )
         if not rows:
             return single_item_response({"has_handover": False, "handover": None}, "OK")
+        chosen = None
+        if sy:
+            for r in rows:
+                rsy = r.get("school_year_id")
+                if rsy and rsy == sy:
+                    chosen = r
+                    break
+        if not chosen:
+            chosen = rows[0]
         return single_item_response(
-            {"has_handover": True, "handover": _handover_dict_from_row(rows[0])},
+            {"has_handover": True, "handover": _handover_dict_from_row(chosen)},
             "OK",
         )
     except Exception as e:
