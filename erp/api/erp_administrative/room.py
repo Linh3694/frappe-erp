@@ -179,9 +179,11 @@ def get_all_rooms():
                 room["yearly_assignment_display_en"] = y.get("display_title_en") if y else None
                 room["yearly_homeroom_name"] = y.get("homeroom_teacher_name") if y else None
                 room["yearly_assignment_status"] = y.get("status") if y else None
-                # PIC theo gán năm (Room Yearly Assignment) — thay thế bảng con trên Room khi đã có YA
+                # PIC theo gán năm (Room Yearly Assignment) — ưu tiên Yearly PIC khi đã có dòng
+                # Nếu có YA nhưng chưa nhập PIC trong Yearly PIC: giữ PIC bảng con trên Room (tránh cột trống trên FE)
                 if room["name"] in ya_room_ids:
-                    room["responsible_users"] = yearly_pic_by_room.get(room["name"], [])
+                    yearly = yearly_pic_by_room.get(room["name"], [])
+                    room["responsible_users"] = yearly if yearly else by_room.get(room["name"], [])
         else:
             for room in rooms:
                 room["yearly_assignment_display"] = None
