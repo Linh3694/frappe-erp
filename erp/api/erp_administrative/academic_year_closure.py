@@ -26,6 +26,18 @@ def _count_open_tickets_room(room_id):
     )
 
 
+def _inventory_rejection_note(inventory_check_id):
+    """Lý do từ chối từ bản ghi kiểm kê (Facility Handover incoming hoặc Inventory Check legacy)."""
+    if not inventory_check_id or not str(inventory_check_id).strip():
+        return None
+    iid = str(inventory_check_id).strip()
+    if frappe.db.exists("ERP Administrative Facility Handover", iid):
+        return frappe.db.get_value("ERP Administrative Facility Handover", iid, "review_note") or None
+    if frappe.db.exists("ERP Administrative Inventory Check", iid):
+        return frappe.db.get_value("ERP Administrative Inventory Check", iid, "review_note") or None
+    return None
+
+
 def _school_year_display_label(school_year_id):
     """Nhãn hiển thị năm học (title_vn ưu tiên) — tránh hiện ID doc trên UI."""
     if not school_year_id:
@@ -230,6 +242,10 @@ def get_closure_dashboard():
                     "display_title_vn",
                 )
             open_tc = _count_open_tickets_room(row.room)
+            st = (row.status or "pending").lower()
+            rej_note = None
+            if st == "rejected" and row.inventory_check_id:
+                rej_note = _inventory_rejection_note(row.inventory_check_id)
             rooms_out.append(
                 {
                     "room": row.room,
@@ -238,6 +254,7 @@ def get_closure_dashboard():
                     "display_title_vn": ya_title,
                     "row_status": row.status,
                     "inventory_check_id": row.inventory_check_id,
+                    "inventory_rejection_note": rej_note,
                     "last_reminder_sent_on": row.last_reminder_sent_on,
                     "open_ticket_count": open_tc,
                 }
