@@ -136,6 +136,7 @@ def get_all_rooms():
                 "ERP Administrative Room Yearly Assignment",
                 filters={"room": ["in", rnames], "school_year_id": sy_id},
                 fields=[
+                    "name",
                     "room",
                     "display_title_vn",
                     "display_title_en",
@@ -144,12 +145,43 @@ def get_all_rooms():
                 ],
             )
             ya_map = {y["room"]: y for y in ya_rows}
+            parent_to_room = {y["name"]: y["room"] for y in ya_rows}
+            ya_room_ids = {y["room"] for y in ya_rows}
+            yearly_pic_by_room = {}
+            ya_parent_ids = [y["name"] for y in ya_rows]
+            if ya_parent_ids:
+                pic_rows = frappe.get_all(
+                    "ERP Administrative Room Yearly PIC",
+                    filters={"parent": ["in", ya_parent_ids]},
+                    fields=["parent", "user", "full_name", "role_label"],
+                    order_by="idx asc",
+                )
+                uids = list({r.user for r in pic_rows if r.get("user")})
+                user_images = {}
+                if uids:
+                    for urow in frappe.get_all("User", filters={"name": ["in", uids]}, fields=["name", "user_image"]):
+                        user_images[urow.name] = urow.user_image or ""
+                for pr in pic_rows:
+                    rid = parent_to_room.get(pr.parent)
+                    if not rid:
+                        continue
+                    yearly_pic_by_room.setdefault(rid, []).append(
+                        {
+                            "user": pr.user,
+                            "full_name": pr.full_name or "",
+                            "user_image": user_images.get(pr.user, ""),
+                            "designation": (pr.role_label or "").strip(),
+                        }
+                    )
             for room in rooms:
                 y = ya_map.get(room["name"])
                 room["yearly_assignment_display"] = y.get("display_title_vn") if y else None
                 room["yearly_assignment_display_en"] = y.get("display_title_en") if y else None
                 room["yearly_homeroom_name"] = y.get("homeroom_teacher_name") if y else None
                 room["yearly_assignment_status"] = y.get("status") if y else None
+                # PIC theo gán năm (Room Yearly Assignment) — thay thế bảng con trên Room khi đã có YA
+                if room["name"] in ya_room_ids:
+                    room["responsible_users"] = yearly_pic_by_room.get(room["name"], [])
         else:
             for room in rooms:
                 room["yearly_assignment_display"] = None
