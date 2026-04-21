@@ -16,6 +16,41 @@ except ImportError:
     pd = None
 
 
+def _enrich_room_responsible_users_employee_codes(rooms):
+    """Gắn employee_code từ User (ưu tiên mã NV, không thì username) cho cột PIC trên FE."""
+    if not rooms:
+        return
+    all_uids = set()
+    for r in rooms:
+        for u in r.get("responsible_users") or []:
+            uid = (u.get("user") or "").strip()
+            if uid:
+                all_uids.add(uid)
+    if not all_uids:
+        return
+    user_meta = frappe.get_meta("User")
+    fields = ["name"]
+    for fn in ("employee_code", "username"):
+        if user_meta.has_field(fn):
+            fields.append(fn)
+    user_rows = frappe.get_all(
+        "User",
+        filters={"name": ["in", list(all_uids)]},
+        fields=fields,
+    )
+    uid_map = {}
+    for ur in user_rows:
+        name = ur.get("name")
+        ec = (ur.get("employee_code") or "").strip()
+        un = (ur.get("username") or "").strip()
+        uid_map[name] = ec or un or ""
+    for r in rooms:
+        for u in r.get("responsible_users") or []:
+            uid = (u.get("user") or "").strip()
+            if uid and uid in uid_map and uid_map[uid]:
+                u["employee_code"] = uid_map[uid]
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_rooms():
     """Get all rooms with basic information - SIMPLE VERSION"""
@@ -190,6 +225,8 @@ def get_all_rooms():
                 room["yearly_assignment_display_en"] = None
                 room["yearly_homeroom_name"] = None
                 room["yearly_assignment_status"] = None
+
+        _enrich_room_responsible_users_employee_codes(rooms)
 
         return success_response(
             data=rooms,

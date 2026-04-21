@@ -45,6 +45,34 @@ def _get_yearly_assignment_row(room_id, school_year_id):
     return rows[0] if rows else None
 
 
+def _function_room_pic_user_ids(room_id, school_year_id):
+    """Tập User name: PIC trên Room + PIC gán năm (Yearly Assignment)."""
+    valid = set()
+    if not room_id or not frappe.db.exists("ERP Administrative Room", room_id):
+        return valid
+    room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+    for r in room_doc.responsible_users or []:
+        u = (r.user or "").strip()
+        if u:
+            valid.add(u)
+    if school_year_id:
+        ya_name = frappe.db.get_value(
+            "ERP Administrative Room Yearly Assignment",
+            {"room": room_id, "school_year_id": school_year_id},
+            "name",
+        )
+        if ya_name:
+            for row in frappe.get_all(
+                "ERP Administrative Room Yearly PIC",
+                filters={"parent": ya_name},
+                fields=["user"],
+            ):
+                u = (row.get("user") or "").strip()
+                if u:
+                    valid.add(u)
+    return valid
+
+
 def _latest_confirmed_outgoing_handover(room_id, school_year_id):
     """Handover đi đã xác nhận gần nhất theo phòng + (tuỳ chọn) năm học."""
     if not room_id:
@@ -841,7 +869,7 @@ def send_handover():
     Snapshot CSVC lấy từ DB tại thời điểm gửi.
 
     - handover_type=class (mặc định): cần class_id — lớp chủ nhiệm nhận bàn giao.
-    - handover_type=responsible_user: cần responsible_user (User name) — phòng chức năng.
+    - handover_type=responsible_user: phòng chức năng — responsible_user tuỳ chọn; nếu bỏ trống thì mọi PIC (Room + YA) đều có thể xác nhận trên Facility lite.
     """
     try:
         data = _parse_json_body()
@@ -872,15 +900,22 @@ def send_handover():
         )
 
         if handover_type == "responsible_user":
-            if not responsible_user or not frappe.db.exists("User", responsible_user):
-                return validation_error_response(_("Người phụ trách không hợp lệ"), {"responsible_user": ["invalid"]})
-            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
-            valid = {r.user for r in (room_doc.responsible_users or [])}
-            if responsible_user not in valid:
-                return validation_error_response(
-                    _("User không nằm trong danh sách người phụ trách phòng"),
-                    {"responsible_user": ["not_assigned"]},
-                )
+            valid = _function_room_pic_user_ids(room_id, school_year_id)
+            ru_in = (responsible_user or "").strip() if responsible_user else ""
+            if ru_in:
+                if not frappe.db.exists("User", ru_in):
+                    return validation_error_response(_("Người phụ trách không hợp lệ"), {"responsible_user": ["invalid"]})
+                if ru_in not in valid:
+                    return validation_error_response(
+                        _("User không nằm trong danh sách người phụ trách phòng"),
+                        {"responsible_user": ["not_assigned"]},
+                    )
+            else:
+                if not valid:
+                    return validation_error_response(
+                        _("Chưa có người phụ trách cho phòng (năm này) — không gửi bàn giao."),
+                        {"responsible_user": ["required"]},
+                    )
             snap_title = (ya.get("display_title_vn") if ya else None) or ""
             doc = frappe.get_doc(
                 {
@@ -892,7 +927,7 @@ def send_handover():
                     "direction": "outgoing",
                     "handover_type": "responsible_user",
                     "class_id": None,
-                    "responsible_user": responsible_user,
+                    "responsible_user": ru_in or None,
                     "status": "Pending",
                     "facility_snapshot": json.dumps(fac_snap, ensure_ascii=False),
                     "it_snapshot": json.dumps(it_snap, ensure_ascii=False),
@@ -1518,11 +1553,23 @@ def confirm_handover():
         ht = getattr(doc, "handover_type", None) or "class"
         ru = getattr(doc, "responsible_user", None)
         if ht == "responsible_user" or (ru and not doc.class_id):
-            if ru and frappe.session.user != ru:
-                return validation_error_response(
-                    _("Chỉ người phụ trách mới được xác nhận"),
-                    {"permission": ["denied"]},
-                )
+            if ru:
+                if frappe.session.user != ru:
+                    return validation_error_response(
+                        _("Chỉ người phụ trách mới được xác nhận"),
+                        {"permission": ["denied"]},
+                    )
+            elif ht == "responsible_user":
+                rid = doc.room
+                sy = getattr(doc, "school_year_id", None)
+                if not (
+                    _user_is_room_responsible(rid, frappe.session.user)
+                    or (sy and _user_is_yearly_assignment_pic(rid, sy, frappe.session.user))
+                ):
+                    return validation_error_response(
+                        _("Chỉ người phụ trách phòng mới được xác nhận"),
+                        {"permission": ["denied"]},
+                    )
 
         doc.status = "Confirmed"
         doc.confirmed_by = frappe.session.user
