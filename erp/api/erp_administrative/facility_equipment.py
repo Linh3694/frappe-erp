@@ -31,7 +31,15 @@ def _get_yearly_assignment_row(room_id, school_year_id):
     rows = frappe.get_all(
         "ERP Administrative Room Yearly Assignment",
         filters={"room": room_id, "school_year_id": school_year_id},
-        fields=["name", "status", "display_title_vn", "display_short_title", "class_id", "usage_type"],
+        fields=[
+            "name",
+            "status",
+            "display_title_vn",
+            "display_title_en",
+            "display_short_title",
+            "class_id",
+            "usage_type",
+        ],
         limit=1,
     )
     return rows[0] if rows else None
@@ -1369,21 +1377,25 @@ def get_class_facility_context():
         room_id = frappe.db.get_value("SIS Class", class_id, "room")
         school_year_id = frappe.db.get_value("SIS Class", class_id, "school_year_id")
         room_title = None
+        room_title_en = None
         room_name = None
         room_short_title = None
+        room_number = None
         room_type = None
         room_capacity = None
         building_title = None
         physical_code = None
-        display_title_vn = None
+        yearly_assignment = None
         if room_id:
             rv = frappe.db.get_value(
                 "ERP Administrative Room",
                 room_id,
                 [
                     "title_vn",
+                    "title_en",
                     "name",
                     "short_title",
+                    "room_number",
                     "building_id",
                     "room_type",
                     "capacity",
@@ -1393,8 +1405,10 @@ def get_class_facility_context():
             )
             if rv:
                 room_title = rv.get("title_vn")
+                room_title_en = rv.get("title_en")
                 room_name = rv.get("name")
                 room_short_title = rv.get("short_title")
+                room_number = rv.get("room_number")
                 room_type = rv.get("room_type")
                 room_capacity = rv.get("capacity")
                 physical_code = rv.get("physical_code") or room_title
@@ -1406,7 +1420,11 @@ def get_class_facility_context():
             if school_year_id:
                 ya = _get_yearly_assignment_row(room_id, school_year_id)
                 if ya:
-                    display_title_vn = ya.get("display_title_vn") or room_title
+                    yearly_assignment = {
+                        "display_title_vn": ya.get("display_title_vn"),
+                        "display_title_en": ya.get("display_title_en"),
+                        "status": ya.get("status"),
+                    }
 
         inner = _handover_payload_for_class(class_id)
         handover_diff = None
@@ -1426,13 +1444,15 @@ def get_class_facility_context():
             "school_year_id": school_year_id,
             "room_id": room_id,
             "room_title": room_title,
+            "room_title_en": room_title_en,
             "room_name": room_name,
             "room_short_title": room_short_title,
+            "room_number": room_number,
             "room_type": room_type,
             "room_capacity": room_capacity,
             "building_title": building_title,
             "physical_code": physical_code,
-            "display_title_vn": display_title_vn or room_title,
+            "yearly_assignment": yearly_assignment,
             "open_tickets": open_tickets,
             **inner,
         }
