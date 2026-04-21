@@ -2064,6 +2064,29 @@ def _time_to_seconds(time_val):
     return None
 
 
+def _visit_overlaps_period_interval(
+    leave_class_sec, leave_clinic_sec, period_start_sec, period_end_sec
+):
+    """
+    LessonLog: HS được coi là có liên quan Y tế trong tiết [period_start, period_end)
+    khi khoảng "vắng / đang xử lý Y tế" [leave_class, leave_clinic) giao với khung tiết.
+
+    - leave_clinic None: đang trong luồng hoặc chưa checkout — coi khoảng mở về phía sau (vẫn giao các tiết sau mốc rời lớp).
+    - Phủ cả case rời lớp lúc ra chơi (không nằm trong bất kỳ tiết nào): các tiết học sau đó vẫn overlap.
+    """
+    if (
+        leave_class_sec is None
+        or period_start_sec is None
+        or period_end_sec is None
+    ):
+        return False
+    if leave_class_sec >= period_end_sec:
+        return False
+    if leave_clinic_sec is not None and leave_clinic_sec <= period_start_sec:
+        return False
+    return True
+
+
 @frappe.whitelist(allow_guest=False)
 def get_health_status_for_period():
     """
@@ -2079,9 +2102,11 @@ def get_health_status_for_period():
         students: Record<student_id, {visit_id, status, leave_class_time, leave_clinic_time}>
 
     Logic:
-        - Có khung giờ tiết: rời lớp trong tiết, hoặc rời trước tiết nhưng còn ở Y tế trong tiết.
-        - Không có khung giờ (TKB lệch tên tiết / thiếu schedule): KHÔNG broadcast cả ngày;
-          chỉ trả visit có reported_period hoặc period của bản ghi điểm danh khớp period request.
+        - Có khung giờ tiết + parse được leave_class_time: chồng (overlap) khung [leave_class, leave_clinic)
+          với [period_start, period_end); leave_clinic rỗng = khoảng mở → vẫn hiển thị các tiết sau mốc rời lớp.
+          (Thay cho tách biệt “trong tiết” / “trước tiết nhưng còn ở Y tế” — hợp nhất, phủ case ra chơi / Y tế tạo trực tiếp.)
+        - Không parse được leave_class_time hoặc cần khớp tên khi TKB lệch: reported_period / period trên điểm danh khớp period request.
+        - Không có khung giờ tiết: chỉ trả visit khớp reported_period / period trên SIS Class Attendance (tránh broadcast cả ngày).
     """
     try:
         _check_teacher_permission()
@@ -2179,12 +2204,16 @@ def get_health_status_for_period():
             should_include = False
 
             if has_period_times and leave_class_sec is not None:
-                left_during_period = period_start_sec <= leave_class_sec < period_end_sec
-                left_before_but_still_at_clinic = (
-                    leave_class_sec < period_start_sec
-                    and (leave_clinic_sec is None or leave_clinic_sec > period_start_sec)
-                )
-                if left_during_period or left_before_but_still_at_clinic:
+                # Overlap chuẩn: phủ mốc rời lớp nằm trong giờ ra chơi / ngoài tiết, và mọi tiết sau cho đến checkout
+                if _visit_overlaps_period_interval(
+                    leave_class_sec,
+                    leave_clinic_sec,
+                    period_start_sec,
+                    period_end_sec,
+                ):
+                    should_include = True
+                # TKB lệch tên / thời gian: vẫn cho phép khớp tiết đã ghi trên visit hoặc điểm danh
+                elif eff_rp and eff_rp == period_name_norm:
                     should_include = True
             elif has_period_times:
                 # Có khung giờ nhưng không parse được leave_class_time — chỉ khớp tiết đã lưu
