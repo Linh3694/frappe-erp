@@ -26,6 +26,23 @@ def _count_open_tickets_room(room_id):
     )
 
 
+def _school_year_display_label(school_year_id):
+    """Nhãn hiển thị năm học (title_vn ưu tiên) — tránh hiện ID doc trên UI."""
+    if not school_year_id:
+        return ""
+    row = frappe.db.get_value(
+        "SIS School Year",
+        school_year_id,
+        ["title_vn", "title_en"],
+        as_dict=True,
+    )
+    if not row:
+        return school_year_id
+    v = (row.get("title_vn") or "").strip()
+    e = (row.get("title_en") or "").strip()
+    return v or e or school_year_id
+
+
 def _parse_json_body():
     data = {}
     if frappe.request and frappe.request.data:
@@ -165,7 +182,7 @@ def start_closure():
         for row in doc.rooms:
             _notify_closure_room_stub(doc.name, row.room, "started")
 
-        return single_item_response({"name": doc.name, "status": doc.status}, _("Đã tạo đợt chốt năm"))
+        return single_item_response({"name": doc.name, "status": doc.status}, _("Đã tạo đợt kiểm kê cuối năm"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "academic_year_closure.start_closure")
         return error_response(str(e))
@@ -205,10 +222,12 @@ def get_closure_dashboard():
                 }
             )
 
+        sy_title = _school_year_display_label(doc.school_year_id)
         return single_item_response(
             {
                 "name": doc.name,
                 "school_year_id": doc.school_year_id,
+                "school_year_title": sy_title,
                 "campus_id": doc.campus_id,
                 "status": doc.status,
                 "total_rooms": doc.total_rooms,
@@ -335,6 +354,8 @@ def list_closures():
             order_by="creation desc",
             limit=50,
         )
+        for row in rows:
+            row["school_year_title"] = _school_year_display_label(row.get("school_year_id"))
         return list_response(rows, message="OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "academic_year_closure.list_closures")
