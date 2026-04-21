@@ -65,6 +65,13 @@ def _normalize_related_equipment_ids(raw):
     return out
 
 
+def _json_list_field_for_db(items):
+    """Ghi list vào cột JSON: Frappe base_document từ chối list thuần — chỉ dict được xử lý đặc biệt."""
+    if not items:
+        return None
+    return json.dumps(items, separators=(",", ":"))
+
+
 def _merge_equipment_ids_from_payload(data):
     """Gộp related_equipment_ids + related_equipment_id; id đơn (nếu có) đứng đầu — tương thích API cũ."""
     eq_ids = _normalize_related_equipment_ids(data.get("related_equipment_ids"))
@@ -1367,11 +1374,8 @@ def create_ticket():
         ticket_row["related_equipment_id"] = (
             related_equipment_ids_merged[0] if related_equipment_ids_merged else None
         )
-        ticket_row["related_equipment_ids"] = (
-            related_equipment_ids_merged if related_equipment_ids_merged else None
-        )
-        # Trường JSON: truyền list — Frappe tự serialize; json.dumps(list) gây double-encode → ValidationError 417
-        ticket_row["related_student_ids"] = related_student_ids_list if related_student_ids_list else None
+        ticket_row["related_equipment_ids"] = _json_list_field_for_db(related_equipment_ids_merged)
+        ticket_row["related_student_ids"] = _json_list_field_for_db(related_student_ids_list)
 
         doc = frappe.get_doc(ticket_row)
         if pic:
@@ -1497,11 +1501,11 @@ def update_ticket():
                     else "",
                 }
             )
-            doc.related_equipment_ids = merged_eq if merged_eq else None
+            doc.related_equipment_ids = _json_list_field_for_db(merged_eq)
             doc.related_equipment_id = merged_eq[0] if merged_eq else None
         if "related_student_ids" in data:
             rlist = _normalize_related_student_ids(data.get("related_student_ids"))
-            doc.related_student_ids = rlist if rlist else None
+            doc.related_student_ids = _json_list_field_for_db(rlist)
 
         if cint(getattr(doc, "is_event_facility", 0)):
             eb = (getattr(doc, "event_building_id", None) or "").strip()
