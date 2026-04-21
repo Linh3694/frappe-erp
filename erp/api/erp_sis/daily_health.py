@@ -7,10 +7,12 @@ Handles student visits to health clinic
 """
 
 import datetime
+import json
+import re
+
 import frappe
 from frappe import _
 from frappe.utils import today, now, get_datetime, nowtime
-import json
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -1989,12 +1991,75 @@ def _excused_overlapping_periods(visit):
         frappe.logger().warning(f"[_excused_overlapping_periods] Error: {str(e)}")
 
 
+def _get_period_times_from_teacher_timetable(class_id, period_name, visit_date):
+    """
+    Lấy start/end của tiết theo đúng TKB đã dạy cho lớp trong ngày (Teacher Timetable → Timetable Column).
+
+    Tránh lệch với đường Schedule Group + schedule_id trên cột (schedule_id link SIS Schedule, hay khác name Group).
+    """
+    try:
+        pn = str(period_name or "").strip()
+        if not class_id or not visit_date or not pn:
+            return None, None
+        rows = frappe.db.sql(
+            """
+            SELECT tc.start_time, tc.end_time
+            FROM `tabSIS Teacher Timetable` tt
+            INNER JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
+            WHERE tt.class_id = %s
+              AND tt.date = %s
+              AND TRIM(tc.period_name) = %s
+            LIMIT 1
+            """,
+            (class_id, visit_date, pn),
+            as_dict=True,
+        )
+        if rows:
+            return rows[0].get("start_time"), rows[0].get("end_time")
+        # Khớp tiết kép (vd. "Tiết 7 + 8") khi request chỉ gửi số tiết cuối — chỉ LIKE %+N để hẹp hơn "%Tiết N%"
+        num_m = re.search(r"(\d+)\s*$", pn)
+        if num_m:
+            num = num_m.group(1)
+            rows2 = frappe.db.sql(
+                """
+                SELECT tc.start_time, tc.end_time
+                FROM `tabSIS Teacher Timetable` tt
+                INNER JOIN `tabSIS Timetable Column` tc ON tt.timetable_column_id = tc.name
+                WHERE tt.class_id = %s
+                  AND tt.date = %s
+                  AND (tc.period_name LIKE %s OR tc.period_name LIKE %s)
+                LIMIT 1
+                """,
+                (
+                    class_id,
+                    visit_date,
+                    f"%+ {num}%",
+                    f"%+{num}%",
+                ),
+                as_dict=True,
+            )
+            if rows2:
+                return rows2[0].get("start_time"), rows2[0].get("end_time")
+    except Exception as e:
+        frappe.logger().warning(f"[_get_period_times_from_teacher_timetable] {e}")
+    return None, None
+
+
 def _get_period_times(class_id, period_name, visit_date):
     """
-    Lấy thời gian bắt đầu và kết thúc của tiết học từ Schedule Group.
+    Lấy thời gian bắt đầu và kết thúc của tiết học.
+    Ưu tiên TKB theo lớp+ngày (Teacher Timetable); fallback Schedule Group + SIS Timetable Column (legacy).
+
     Returns: (start_time, end_time) hoặc (None, None) nếu không tìm thấy
     """
     try:
+        tt_start, tt_end = _get_period_times_from_teacher_timetable(
+            class_id, period_name, visit_date
+        )
+        if tt_start is not None and tt_end is not None:
+            return tt_start, tt_end
+
+        # --- Legacy: education_stage → Schedule Group → cột theo schedule_id = Group.name ---
         # Lấy education_stage_id từ class
         class_doc = frappe.db.get_value("SIS Class", class_id, ["education_stage_id"], as_dict=True)
         if not class_doc or not class_doc.get("education_stage_id"):
