@@ -68,6 +68,8 @@
   "followup_transfer_hospital",
   "followup_accompanying_teacher",
   "followup_accompanying_health_staff",
+  "homeroom_share_section",
+  "shared_with_homeroom",
   "parent_notification_section",
   "sent_to_parent",
   "sent_to_parent_at"
@@ -405,6 +407,18 @@
    "fieldname": "followup_accompanying_health_staff",
    "fieldtype": "Data",
    "label": "NVYT đi cùng (khám bổ sung)"
+  },
+  {
+   "fieldname": "homeroom_share_section",
+   "fieldtype": "Section Break",
+   "label": "Đồng bộ GVCN"
+  },
+  {
+   "default": "1",
+   "description": "Bật: GVCN lớp xem được hồ sơ; Tắt: chỉ lưu nội bộ (Y tế), không hiển thị cho GVCN.",
+   "fieldname": "shared_with_homeroom",
+   "fieldtype": "Check",
+   "label": "Chia sẻ với GVCN lớp"
   },
   {
    "fieldname": "parent_notification_section",

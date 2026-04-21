@@ -71,6 +71,95 @@ def _get_request_data():
     return data
 
 
+def _coerce_publish_bool(val, default=True):
+    """Chuyển publish từ JSON/form về bool. Chuỗi 'false'/'0' → False."""
+    if val is None:
+        return default
+    if isinstance(val, str):
+        s = val.strip().lower()
+        if s in ("0", "false", "no", "off"):
+            return False
+        if s in ("1", "true", "yes", "on"):
+            return True
+        return bool(s)
+    return bool(val)
+
+
+def _send_examination_to_parent_notifications(exam_ids):
+    """
+    Gửi thông báo tới PH cho các hồ sơ chưa gửi (cùng logic send_exam_to_parent).
+    Trả về số bản ghi đã đánh dấu gửi thành công.
+    """
+    if not exam_ids:
+        return 0
+    if isinstance(exam_ids, str):
+        exam_ids = [exam_ids]
+    exams = frappe.get_all(
+        "SIS Health Examination",
+        filters={"name": ["in", list(exam_ids)]},
+        fields=["name", "student_id", "student_name", "student_code", "disease_classification", "sent_to_parent"],
+    )
+    exams_to_send = [e for e in exams if not e.sent_to_parent]
+    if not exams_to_send:
+        return 0
+    from erp.utils.notification_handler import send_bulk_parent_notifications
+
+    student_exams = {}
+    for exam in exams_to_send:
+        sid = exam.student_id
+        if sid not in student_exams:
+            student_exams[sid] = {
+                "student_name": exam.student_name,
+                "student_code": exam.student_code,
+                "exams": [],
+            }
+        student_exams[sid]["exams"].append(exam)
+
+    sent_count = 0
+    for student_id, info in student_exams.items():
+        student_name = info["student_name"]
+        exam_names = [e.name for e in info["exams"]]
+        title = {
+            "vi": f"Học sinh {student_name} có cập nhật mới về sức khỏe",
+            "en": f"Student {student_name} has health update",
+        }
+        body = {
+            "vi": f"Phòng Y tế đã ghi nhận thông tin thăm khám cho {student_name}. Nhấn để xem chi tiết.",
+            "en": f"Health clinic has recorded examination information for {student_name}. Tap to view details.",
+        }
+        try:
+            result = send_bulk_parent_notifications(
+                recipient_type="health_examination",
+                recipients_data={"student_ids": [student_id]},
+                title=title,
+                body=body,
+                icon="/health-icon.png",
+                data={
+                    "type": "health_examination",
+                    "student_id": student_id,
+                    "student_name": student_name,
+                    "exam_ids": exam_names,
+                },
+            )
+            if result.get("success"):
+                for exam_name in exam_names:
+                    frappe.db.set_value(
+                        "SIS Health Examination",
+                        exam_name,
+                        {
+                            "sent_to_parent": 1,
+                            "sent_to_parent_at": now(),
+                        },
+                        update_modified=False,
+                    )
+                    sent_count += 1
+        except Exception as notif_err:
+            frappe.logger().error(f"[_send_examination_to_parent_notifications] student {student_id}: {notif_err!s}")
+
+    frappe.db.commit()
+    return sent_count
+
+
 def _apply_homeroom_class_to_visit_dicts(visits, campus_id=None):
     """
     Ghi đè class_id / class_name trên response API để chỉ hiển thị lớp chủ nhiệm (regular),
@@ -847,6 +936,7 @@ def create_health_examination():
         - diagnosis: Chẩn đoán (optional) - deprecated
         - treatment: Xử lý/Dặn dò (optional) - deprecated
         - outcome: Kết quả (optional)
+        - publish: True = chia sẻ GVCN + thông báo + gửi PH; False = chỉ lưu nội bộ (mặc định True nếu không gửi — tương thích cũ)
     """
     try:
         _check_teacher_permission()
@@ -872,6 +962,8 @@ def create_health_examination():
         diagnosis = data.get("diagnosis", "")
         treatment = data.get("treatment", "")
         outcome = data.get("outcome")
+        # Không gửi key → coi như đã publish (tương thích client cũ)
+        publish = _coerce_publish_bool(data.get("publish"), default=True)
         
         # Validation
         errors = {}
@@ -926,6 +1018,7 @@ def create_health_examination():
             "outcome": outcome,
             "examined_by": examined_by_user,
             "examined_by_name": examined_by_name,
+            "shared_with_homeroom": 1 if publish else 0,
         }
         if medical_staff:
             doc_dict["medical_staff"] = medical_staff
@@ -967,15 +1060,26 @@ def create_health_examination():
         
         frappe.db.commit()
         
-        # Gửi notification cho Homeroom / Vice-homeroom biết HS đã được khám
-        try:
-            from erp.api.erp_sis.daily_health_notification import notify_examination_created
-            visit_id_for_notif = data.get("visit_id")
-            disease_cls = data.get("disease_classification", "")
-            if visit_id_for_notif:
-                notify_examination_created(visit_name=visit_id_for_notif, disease_classification=disease_cls)
-        except Exception as notif_err:
-            frappe.logger().warning(f"[create_health_examination] Không gửi được notification: {str(notif_err)}")
+        # Chỉ khi publish: thông báo GVCN + gửi PH (logic giống send_exam_to_parent)
+        if publish:
+            try:
+                from erp.api.erp_sis.daily_health_notification import notify_examination_created
+
+                if visit_id:
+                    notify_examination_created(
+                        visit_name=visit_id,
+                        disease_classification=data.get("disease_classification", "") or "",
+                    )
+            except Exception as notif_err:
+                frappe.logger().warning(
+                    f"[create_health_examination] Không gửi được notification GVCN: {str(notif_err)}"
+                )
+            try:
+                _send_examination_to_parent_notifications([exam.name])
+            except Exception as ph_err:
+                frappe.logger().warning(
+                    f"[create_health_examination] Không gửi được thông báo PH: {str(ph_err)}"
+                )
         
         return success_response(
             data={"name": exam.name},
@@ -1068,6 +1172,11 @@ def update_health_examination():
         
         # Lấy examination
         exam = frappe.get_doc("SIS Health Examination", exam_id)
+        old_shared = int(exam.shared_with_homeroom or 0)
+        publish_provided = "publish" in data
+        publish_val = (
+            _coerce_publish_bool(data.get("publish"), default=False) if publish_provided else None
+        )
         
         frappe.logger().info(f"[update_health_examination] Found exam: {exam.name}")
         
@@ -1157,6 +1266,10 @@ def update_health_examination():
             else:
                 exam.followup_medical_staff_name = None
         
+        # Đồng bộ GVCN / PH: chỉ khi client gửi publish
+        if publish_val is not None:
+            exam.shared_with_homeroom = 1 if publish_val else 0
+        
         # Khi followup outcome thay đổi, cập nhật visit status tương ứng
         # Đồng thời set leave_clinic_time và sync clinic_checkout_time cho tất cả exam liên quan
         # (tránh trường hợp PH đón/chuyển viện không ghi nhận giờ checkout trên Parent Portal)
@@ -1225,6 +1338,29 @@ def update_health_examination():
         
         frappe.logger().info(f"[update_health_examination] Successfully updated exam: {exam.name}")
         
+        new_shared = int(exam.shared_with_homeroom or 0)
+        if publish_val is not None and new_shared == 1:
+            if old_shared == 0:
+                try:
+                    from erp.api.erp_sis.daily_health_notification import notify_examination_created
+
+                    vid = exam.visit_id
+                    if vid:
+                        notify_examination_created(
+                            visit_name=vid,
+                            disease_classification=exam.disease_classification or "",
+                        )
+                except Exception as notif_err:
+                    frappe.logger().warning(
+                        f"[update_health_examination] Không gửi được notification GVCN: {str(notif_err)}"
+                    )
+            try:
+                _send_examination_to_parent_notifications([exam.name])
+            except Exception as ph_err:
+                frappe.logger().warning(
+                    f"[update_health_examination] Không gửi được thông báo PH: {str(ph_err)}"
+                )
+        
         return success_response(
             data={"name": exam.name},
             message="Cập nhật hồ sơ khám thành công"
@@ -1292,7 +1428,8 @@ def get_student_examination_history():
                 "followup_clinic_checkin_time", "followup_clinic_checkout_time",
                 "followup_is_scheduled_recheck", "followup_medical_suggestion",
                 "followup_medical_staff", "followup_medical_staff_name",
-                "sent_to_parent", "sent_to_parent_at"
+                "sent_to_parent", "sent_to_parent_at",
+                "shared_with_homeroom",
             ],
             order_by="examination_date desc, creation desc",
             limit=limit
@@ -3264,7 +3401,8 @@ def get_class_health_examinations():
             "SIS Health Examination",
             filters={
                 "student_id": ["in", student_ids],
-                "examination_date": date
+                "examination_date": date,
+                "shared_with_homeroom": 1,
             },
             fields=[
                 "name", "student_id", "student_name", "student_code",
@@ -3289,7 +3427,8 @@ def get_class_health_examinations():
                 "followup_accompanying_health_staff",
                 "followup_clinic_checkin_time", "followup_clinic_checkout_time",
                 "followup_is_scheduled_recheck", "followup_medical_suggestion",
-                "followup_medical_staff", "followup_medical_staff_name"
+                "followup_medical_staff", "followup_medical_staff_name",
+                "shared_with_homeroom",
             ],
             order_by="creation desc"
         )
@@ -3462,89 +3601,14 @@ def send_exam_to_parent():
                 message="Tất cả hồ sơ đã được gửi trước đó"
             )
         
-        # Import notification handler
-        from erp.utils.notification_handler import send_bulk_parent_notifications
-        
-        # Group exams theo student để gửi notification gộp
-        student_exams = {}
-        for exam in exams_to_send:
-            sid = exam.student_id
-            if sid not in student_exams:
-                student_exams[sid] = {
-                    "student_name": exam.student_name,
-                    "student_code": exam.student_code,
-                    "exams": []
-                }
-            student_exams[sid]["exams"].append(exam)
-        
-        sent_count = 0
-        notification_results = []
-        
-        for student_id, info in student_exams.items():
-            student_name = info["student_name"]
-            exam_names = [e.name for e in info["exams"]]
-            
-            # Chuẩn bị notification
-            title = {
-                "vi": f"Học sinh {student_name} có cập nhật mới về sức khỏe",
-                "en": f"Student {student_name} has health update"
-            }
-            
-            body = {
-                "vi": f"Phòng Y tế đã ghi nhận thông tin thăm khám cho {student_name}. Nhấn để xem chi tiết.",
-                "en": f"Health clinic has recorded examination information for {student_name}. Tap to view details."
-            }
-            
-            try:
-                result = send_bulk_parent_notifications(
-                    recipient_type="health_examination",
-                    recipients_data={"student_ids": [student_id]},
-                    title=title,
-                    body=body,
-                    icon="/health-icon.png",
-                    data={
-                        "type": "health_examination",
-                        "student_id": student_id,
-                        "student_name": student_name,
-                        "exam_ids": exam_names
-                    }
-                )
-                
-                notification_results.append({
-                    "student_id": student_id,
-                    "success": result.get("success", False),
-                    "message": result.get("message", "")
-                })
-                
-                if result.get("success"):
-                    # Cập nhật sent_to_parent cho các exams
-                    for exam_name in exam_names:
-                        frappe.db.set_value(
-                            "SIS Health Examination",
-                            exam_name,
-                            {
-                                "sent_to_parent": 1,
-                                "sent_to_parent_at": now()
-                            },
-                            update_modified=False
-                        )
-                        sent_count += 1
-                        
-            except Exception as notif_err:
-                frappe.logger().error(f"Error sending notification for student {student_id}: {str(notif_err)}")
-                notification_results.append({
-                    "student_id": student_id,
-                    "success": False,
-                    "message": str(notif_err)
-                })
-        
-        frappe.db.commit()
+        to_send_ids = [e.name for e in exams_to_send]
+        sent_count = _send_examination_to_parent_notifications(to_send_ids)
         
         return success_response(
             data={
                 "sent_count": sent_count,
                 "total_requested": len(exams_to_send),
-                "results": notification_results
+                "results": [],
             },
             message=f"Đã gửi {sent_count}/{len(exams_to_send)} hồ sơ thăm khám đến phụ huynh"
         )
