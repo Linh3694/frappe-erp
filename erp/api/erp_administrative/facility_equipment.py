@@ -1474,6 +1474,7 @@ def get_class_facility_context():
                             "room_row_status": (r0.get("status") or "pending").lower(),
                             "inventory_check_id": r0.get("inventory_check_id"),
                             "school_year_title": _school_year_display_label(school_year_id),
+                            "school_year_id": school_year_id,
                         }
 
         can_submit_year_end_inventory = False
@@ -1641,6 +1642,68 @@ def _user_can_submit_inventory_check(room_id, school_year_id, user_id):
     return False
 
 
+def _year_end_closure_context_for_room(room_id, school_year_id):
+    """
+    Đợt kiểm kê cuối năm cho phòng (đồng bộ logic get_class_facility_context).
+    Trả (year_end_closure dict hoặc None, can_submit_year_end_inventory bool).
+    """
+    year_end_closure = None
+    can_submit = False
+    if not room_id or not school_year_id:
+        return year_end_closure, can_submit
+    campus_id = frappe.db.get_value("ERP Administrative Room", room_id, "campus_id")
+    if not campus_id:
+        return year_end_closure, can_submit
+    closures = frappe.get_all(
+        "ERP Administrative Academic Year Closure",
+        filters={
+            "school_year_id": school_year_id,
+            "campus_id": campus_id,
+            "status": ["in", ["draft", "in_progress"]],
+        },
+        fields=["name", "status"],
+        limit=1,
+    )
+    if not closures:
+        return year_end_closure, can_submit
+    c = closures[0]
+    crow = frappe.get_all(
+        "ERP Administrative Academic Year Closure Room",
+        filters={"parent": c.name, "room": room_id},
+        fields=["status", "inventory_check_id", "last_reminder_sent_on"],
+        limit=1,
+    )
+    if not crow:
+        return year_end_closure, can_submit
+    from erp.api.erp_administrative.academic_year_closure import _school_year_display_label
+
+    r0 = crow[0]
+    year_end_closure = {
+        "closure_id": c.name,
+        "closure_status": c.status,
+        "room_row_status": (r0.get("status") or "pending").lower(),
+        "inventory_check_id": r0.get("inventory_check_id"),
+        "school_year_title": _school_year_display_label(school_year_id),
+        "school_year_id": school_year_id,
+    }
+    if year_end_closure and (year_end_closure.get("room_row_status") or "").lower() == "pending":
+        can_submit = _user_can_submit_inventory_check(room_id, school_year_id, frappe.session.user)
+    return year_end_closure, can_submit
+
+
+def _resolve_closure_id_for_submit(room_id, school_year_id, explicit_closure_id):
+    """Ưu tiên closure_id client; nếu thiếu thì gắn từ đợt mở khớp phòng + năm học."""
+    cid = (explicit_closure_id or "").strip() or None
+    if cid and frappe.db.exists("ERP Administrative Academic Year Closure", cid):
+        return cid
+    if not school_year_id:
+        return None
+    yc, _can = _year_end_closure_context_for_room(room_id, school_year_id)
+    if yc and yc.get("closure_id"):
+        return yc.get("closure_id")
+    return None
+
+
 def _normalize_frappe_user_link_value(user_hint: str) -> str:
     """
     Chuẩn hóa về User.name (Link User) — tránh lệch email vs name khi lọc kiểm kê theo PIC.
@@ -1783,9 +1846,7 @@ def submit_inventory_check():
         it_list = it_raw if isinstance(it_raw, list) else json.loads(it_raw) if it_raw else []
 
         ot_count = _count_open_tickets_room(room_id)
-        closure_id = (data.get("closure_id") or "").strip() or None
-        if closure_id and not frappe.db.exists("ERP Administrative Academic Year Closure", closure_id):
-            closure_id = None
+        closure_id = _resolve_closure_id_for_submit(room_id, school_year_id, data.get("closure_id"))
 
         # Kiểm kê = Handover chiều incoming (GV/PIC -> HC)
         doc = frappe.get_doc(
@@ -1857,6 +1918,11 @@ def get_inventory_check_status():
 
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+
+        sy_for_closure = _active_school_year_id_api(data.get("school_year_id"))
+        year_end_closure, can_submit_year_end = _year_end_closure_context_for_room(
+            room_id, sy_for_closure
+        )
 
         # Kỳ PIC = từ lần gán user_assigned gần nhất (kể cả cùng User được gán lại sau khi gỡ)
         cycle_cutoff = _inventory_check_cycle_cutoff_datetime(room_id, ru)
@@ -1972,9 +2038,14 @@ def get_inventory_check_status():
             if len(out_hist) >= 20:
                 break
 
+        extra = {
+            "year_end_closure": year_end_closure,
+            "can_submit_year_end_inventory": bool(can_submit_year_end),
+            "school_year_id": sy_for_closure,
+        }
         if not rows:
             return single_item_response(
-                {"has_check": False, "check": None, "history": out_hist},
+                {"has_check": False, "check": None, "history": out_hist, **extra},
                 "OK",
             )
         return single_item_response(
@@ -1982,6 +2053,7 @@ def get_inventory_check_status():
                 "has_check": True,
                 "check": _inventory_check_dict_from_row(rows[0]),
                 "history": out_hist,
+                **extra,
             },
             "OK",
         )
