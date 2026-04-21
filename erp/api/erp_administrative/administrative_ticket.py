@@ -154,6 +154,26 @@ def _active_school_year_id_api(explicit=None):
     )
 
 
+def _school_year_id_containing_datetime(dt):
+    """Năm học mà mốc thời gian (vd. creation ticket) nằm trong [start_date, end_date]."""
+    if not dt:
+        return None
+    try:
+        if isinstance(dt, str):
+            dt = get_datetime(dt)
+        d = dt.date() if hasattr(dt, "date") else dt
+    except Exception:
+        return None
+    rows = frappe.get_all(
+        "SIS School Year",
+        filters=[["start_date", "<=", d], ["end_date", ">=", d]],
+        fields=["name"],
+        order_by="start_date desc",
+        limit=1,
+    )
+    return rows[0]["name"] if rows else None
+
+
 def _resolve_campus_id_api(explicit=None):
     """Campus từ tham số hoặc ngữ cảnh user."""
     cid = (explicit or "").strip()
@@ -316,38 +336,63 @@ def _ticket_to_dict(doc, include_feedback=True):
             "ERP Administrative Room", doc.event_room_id, "title_vn"
         ) or doc.event_room_id
 
-    # Phòng (ticket thường), thiết bị & học sinh liên quan — hiển thị: Tên VN (Tên EN) · mã vật lý
+    # Phòng — ưu tiên display_title từ gán năm (theo năm học của ngày tạo ticket), sau đó title phòng + mã vật lý
     room_id_val = getattr(doc, "room_id", None) or ""
     room_label_nf = ""
     room_title_vn_out = ""
     room_title_en_out = ""
     room_physical_code_out = ""
     if room_id_val:
-        rm = frappe.db.get_value(
-            "ERP Administrative Room",
-            room_id_val,
-            ["title_vn", "title_en", "physical_code"],
-            as_dict=True,
+        rm = (
+            frappe.db.get_value(
+                "ERP Administrative Room",
+                room_id_val,
+                ["title_vn", "title_en", "physical_code"],
+                as_dict=True,
+            )
+            or {}
         )
-        if rm:
-            tvn = (rm.get("title_vn") or "").strip()
-            ten = (rm.get("title_en") or "").strip()
-            phy = (rm.get("physical_code") or "").strip()
-            room_title_vn_out = tvn
-            room_title_en_out = ten
-            room_physical_code_out = phy
-            if tvn and ten:
-                name_part = f"{tvn} ({ten})"
+        tvn_base = (rm.get("title_vn") or "").strip()
+        ten_base = (rm.get("title_en") or "").strip()
+        phy = (rm.get("physical_code") or "").strip()
+        room_physical_code_out = phy
+
+        sy_for_display = _school_year_id_containing_datetime(
+            getattr(doc, "creation", None)
+        ) or _active_school_year_id_api()
+        ya_row = None
+        if sy_for_display:
+            ya_rows = frappe.get_all(
+                "ERP Administrative Room Yearly Assignment",
+                filters={"room": room_id_val, "school_year_id": sy_for_display},
+                fields=["display_title_vn", "display_title_en"],
+                limit=1,
+            )
+            ya_row = ya_rows[0] if ya_rows else None
+
+        name_part = ""
+        if ya_row:
+            yvn = (ya_row.get("display_title_vn") or "").strip()
+            yen = (ya_row.get("display_title_en") or "").strip()
+            if yvn or yen:
+                room_title_vn_out = yvn
+                room_title_en_out = yen
+                name_part = f"{yvn} ({yen})" if yvn and yen else (yvn or yen)
+
+        if not name_part:
+            room_title_vn_out = tvn_base
+            room_title_en_out = ten_base
+            if tvn_base and ten_base:
+                name_part = f"{tvn_base} ({ten_base})"
             else:
-                name_part = tvn or ten or ""
-            if name_part and phy and phy not in name_part:
-                room_label_nf = f"{name_part} · {phy}"
-            elif name_part:
-                room_label_nf = name_part
-            else:
-                room_label_nf = phy or room_id_val
+                name_part = tvn_base or ten_base or ""
+
+        if name_part and phy and phy not in name_part:
+            room_label_nf = f"{name_part} · {phy}"
+        elif name_part:
+            room_label_nf = name_part
         else:
-            room_label_nf = room_id_val
+            room_label_nf = phy or room_id_val
 
     related_equipment_ids = _related_equipment_ids_resolved(doc)
     rel_eq = related_equipment_ids[0] if related_equipment_ids else (
