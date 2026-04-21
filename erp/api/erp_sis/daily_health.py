@@ -936,7 +936,7 @@ def create_health_examination():
         - diagnosis: Chẩn đoán (optional) - deprecated
         - treatment: Xử lý/Dặn dò (optional) - deprecated
         - outcome: Kết quả (optional)
-        - publish: True = chia sẻ GVCN + thông báo + gửi PH; False = chỉ lưu nội bộ (mặc định True nếu không gửi — tương thích cũ)
+        - publish: True = chia sẻ cho GVCN + thông báo GVCN (không gửi PH — GVCN gửi PH qua send_exam_to_parent); False = chỉ lưu nội bộ
     """
     try:
         _check_teacher_permission()
@@ -1060,7 +1060,7 @@ def create_health_examination():
         
         frappe.db.commit()
         
-        # Chỉ khi publish: thông báo GVCN + gửi PH (logic giống send_exam_to_parent)
+        # Chỉ khi publish: thông báo GVCN (PH do GVCN gửi qua API send_exam_to_parent)
         if publish:
             try:
                 from erp.api.erp_sis.daily_health_notification import notify_examination_created
@@ -1073,12 +1073,6 @@ def create_health_examination():
             except Exception as notif_err:
                 frappe.logger().warning(
                     f"[create_health_examination] Không gửi được notification GVCN: {str(notif_err)}"
-                )
-            try:
-                _send_examination_to_parent_notifications([exam.name])
-            except Exception as ph_err:
-                frappe.logger().warning(
-                    f"[create_health_examination] Không gửi được thông báo PH: {str(ph_err)}"
                 )
         
         return success_response(
@@ -1266,7 +1260,7 @@ def update_health_examination():
             else:
                 exam.followup_medical_staff_name = None
         
-        # Đồng bộ GVCN / PH: chỉ khi client gửi publish
+        # Cờ chia sẻ GVCN: chỉ khi client gửi publish
         if publish_val is not None:
             exam.shared_with_homeroom = 1 if publish_val else 0
         
@@ -1354,12 +1348,6 @@ def update_health_examination():
                     frappe.logger().warning(
                         f"[update_health_examination] Không gửi được notification GVCN: {str(notif_err)}"
                     )
-            try:
-                _send_examination_to_parent_notifications([exam.name])
-            except Exception as ph_err:
-                frappe.logger().warning(
-                    f"[update_health_examination] Không gửi được thông báo PH: {str(ph_err)}"
-                )
         
         return success_response(
             data={"name": exam.name},
