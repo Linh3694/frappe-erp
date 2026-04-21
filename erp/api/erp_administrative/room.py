@@ -123,7 +123,13 @@ def get_all_rooms():
                 room["responsible_users"] = by_room.get(room["name"], [])
 
         # Gán snapshot theo năm học (lọc FE qua ?school_year_id=...) — comment: hiển thị tên lớp / GVCN theo YA
-        sy_id = (frappe.form_dict.get("school_year_id") or "").strip()
+        # GET axios: tham số nằm trong query string (request.args), không phải lúc nào cũng có trong form_dict
+        sy_id = (
+            (getattr(frappe.request, "args", None) or {}).get("school_year_id")
+            or frappe.form_dict.get("school_year_id")
+            or ""
+        )
+        sy_id = (sy_id or "").strip()
         if sy_id and rooms:
             rnames = [r["name"] for r in rooms]
             ya_rows = frappe.get_all(
