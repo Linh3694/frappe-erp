@@ -6,6 +6,7 @@ Daily Health Visit API for SIS
 Handles student visits to health clinic
 """
 
+import datetime
 import frappe
 from frappe import _
 from frappe.utils import today, now, get_datetime, nowtime
@@ -2043,24 +2044,48 @@ def _get_period_times(class_id, period_name, visit_date):
 
 def _time_to_seconds(time_val):
     """
-    Chuyển đổi time value (có thể là timedelta hoặc string) sang seconds
+    Chuyển đổi time value (timedelta / datetime.time / string) sang giây trong ngày.
+
+    Trường Time của Frappe thường là datetime.time — nếu không xử lý thì get_health_status_for_period
+    luôn coi leave_class_time None và không khớp bất kỳ tiết nào.
     """
     if time_val is None:
         return None
-    
-    # Nếu là timedelta (từ database)
-    if hasattr(time_val, 'total_seconds'):
-        return time_val.total_seconds()
-    
-    # Nếu là string (HH:MM hoặc HH:MM:SS)
+
+    # timedelta (một số driver MySQL)
+    if hasattr(time_val, "total_seconds") and not isinstance(
+        time_val, (datetime.datetime, datetime.time)
+    ):
+        try:
+            return float(time_val.total_seconds())
+        except (TypeError, ValueError):
+            pass
+
+    # datetime.time (chuẩn khi đọc field Time từ DocType)
+    if isinstance(time_val, datetime.time):
+        return (
+            time_val.hour * 3600
+            + time_val.minute * 60
+            + (time_val.second or 0)
+            + (time_val.microsecond or 0) / 1_000_000
+        )
+
+    # datetime.datetime (phòng khi API trả datetime thay vì time)
+    if isinstance(time_val, datetime.datetime):
+        t = time_val.time()
+        return (
+            t.hour * 3600 + t.minute * 60 + (t.second or 0) + (t.microsecond or 0) / 1_000_000
+        )
+
+    # Chuỗi HH:MM hoặc HH:MM:SS
     if isinstance(time_val, str):
-        parts = time_val.split(':')
+        parts = time_val.split(":")
         if len(parts) >= 2:
             hours = int(parts[0])
             minutes = int(parts[1])
             seconds = int(parts[2]) if len(parts) > 2 else 0
             return hours * 3600 + minutes * 60 + seconds
-    
+
     return None
 
 
