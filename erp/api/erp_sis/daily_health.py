@@ -1892,7 +1892,13 @@ def _auto_excused_for_current_period(visit):
 
 def _excused_overlapping_periods(visit):
     """
-    Tại checkout, excused tất cả tiết HS vắng mặt (từ leave_class_time đến leave_clinic_time).
+    Tại checkout, excused các tiết HS vắng mặt khi xuống Y tế.
+
+    - returned: chỉ các tiết overlap khoảng [leave_class_time, leave_clinic_time] (đang ở luồng Y tế).
+    - picked_up / transferred: HS đã rời trường — excused mọi tiết trong ngày từ sau khi rời lớp
+      (overlap [leave_class_time, cuối ngày] với tiết), vì khoảng [rời lớp, rời PYT] thường quá ngắn
+      so với các tiết sau nên không giao thời gian → tránh Lesson Log vẫn "có mặt".
+
     Chỉ excused các tiết CHƯA có excused — không ghi đè bản ghi đã có từ LessonLog hoặc auto-excused lúc tiếp nhận.
     """
     try:
@@ -1902,8 +1908,12 @@ def _excused_overlapping_periods(visit):
 
         leave_class_sec = _time_to_seconds(visit.leave_class_time)
         leave_clinic_sec = _time_to_seconds(visit.leave_clinic_time)
+        # Phụ huynh đón / chuyển viện: chỉ cần thời gian rời lớp để tính các tiết còn lại trong ngày
+        rest_of_school_day = (visit.status or "") in ("picked_up", "transferred")
 
-        if leave_class_sec is None or leave_clinic_sec is None:
+        if leave_class_sec is None:
+            return
+        if not rest_of_school_day and leave_clinic_sec is None:
             return
 
         class_doc = frappe.db.get_value("SIS Class", class_id, ["education_stage_id", "campus_id"], as_dict=True)
@@ -1936,14 +1946,24 @@ def _excused_overlapping_periods(visit):
             as_dict=True
         ) or {}
 
+        day_end_sec = 24 * 3600 - 1
         updated_periods = []
         for p in periods:
             start_sec = _time_to_seconds(p.get("start_time"))
             end_sec = _time_to_seconds(p.get("end_time"))
             if start_sec is None or end_sec is None:
                 continue
-            # Tiết overlap nếu: rời lớp trước khi tiết kết thúc VÀ rời Y tế sau khi tiết bắt đầu
-            if leave_class_sec < end_sec and leave_clinic_sec > start_sec:
+            # Cửa hẹp: HS còn ở luồng Y tế — tiết overlap [rời lớp, rời PYT]
+            if rest_of_school_day:
+                # Rời trường: mọi tiết kết thúc sau lúc rời lớp đều được coi là không có mặt (excused)
+                overlaps = leave_class_sec < end_sec and day_end_sec > start_sec
+            else:
+                overlaps = (
+                    leave_clinic_sec is not None
+                    and leave_class_sec < end_sec
+                    and leave_clinic_sec > start_sec
+                )
+            if overlaps:
                 period_name = p.get("period_name")
                 existing = frappe.db.exists(
                     "SIS Class Attendance",
@@ -1985,7 +2005,8 @@ def _excused_overlapping_periods(visit):
                 pass
             frappe.logger().info(
                 f"[_excused_overlapping_periods] Đã excused {len(updated_periods)} tiết "
-                f"({', '.join(updated_periods)}) cho student {student_id}, visit {visit.name}"
+                f"({', '.join(updated_periods)}) cho student {student_id}, visit {visit.name}, "
+                f"rest_of_day={rest_of_school_day}"
             )
     except Exception as e:
         frappe.logger().warning(f"[_excused_overlapping_periods] Error: {str(e)}")
