@@ -61,6 +61,11 @@ def _parse_json_body():
     return data
 
 
+def _closure_room_row_matches(row_room, room_id):
+    """So khớp Link Room — chuẩn hóa chuỗi."""
+    return (row_room or "").strip() == (room_id or "").strip()
+
+
 def _closure_refresh_counts(doc):
     """Cập nhật số đếm trên header từ bảng con."""
     rooms = doc.rooms or []
@@ -86,12 +91,20 @@ def sync_closure_row_on_inventory_done(closure_id, room_id, inventory_id, outcom
     if not closure_id or not frappe.db.exists("ERP Administrative Academic Year Closure", closure_id):
         return
     doc = frappe.get_doc("ERP Administrative Academic Year Closure", closure_id)
+    matched = False
     for row in doc.rooms or []:
-        if row.room != room_id:
+        if not _closure_room_row_matches(row.room, room_id):
             continue
         row.inventory_check_id = inventory_id
         row.status = "accepted" if outcome == "accepted" else "rejected"
+        matched = True
         break
+    if not matched:
+        frappe.log_error(
+            f"sync_closure_row_on_inventory_done: không có dòng phòng room_id={room_id!r} closure={closure_id!r}",
+            "academic_year_closure.sync_inventory_done_no_row",
+        )
+        return
     _closure_refresh_counts(doc)
     doc.save(ignore_permissions=True)
     frappe.db.commit()
@@ -102,12 +115,20 @@ def sync_closure_row_on_inventory_submitted(closure_id, room_id, inventory_id):
     if not closure_id or not frappe.db.exists("ERP Administrative Academic Year Closure", closure_id):
         return
     doc = frappe.get_doc("ERP Administrative Academic Year Closure", closure_id)
+    matched = False
     for row in doc.rooms or []:
-        if row.room != room_id:
+        if not _closure_room_row_matches(row.room, room_id):
             continue
         row.inventory_check_id = inventory_id
         row.status = "submitted"
+        matched = True
         break
+    if not matched:
+        frappe.log_error(
+            f"sync_closure_row_on_inventory_submitted: không có dòng phòng room_id={room_id!r} closure={closure_id!r}",
+            "academic_year_closure.sync_inventory_submitted_no_row",
+        )
+        return
     _closure_refresh_counts(doc)
     doc.save(ignore_permissions=True)
     frappe.db.commit()
@@ -280,11 +301,15 @@ def link_inventory_to_closure_row():
         return validation_error_response(_("Thiếu tham số"), {})
 
     doc = frappe.get_doc("ERP Administrative Academic Year Closure", closure_id)
+    matched = False
     for row in doc.rooms or []:
-        if row.room == room_id:
+        if _closure_room_row_matches(row.room, room_id):
             row.inventory_check_id = inventory_id
             row.status = "submitted"
+            matched = True
             break
+    if not matched:
+        return validation_error_response(_("Không tìm thấy dòng phòng trong đợt"), {"room_id": ["no_row"]})
     _closure_refresh_counts(doc)
     doc.save(ignore_permissions=True)
     frappe.db.commit()

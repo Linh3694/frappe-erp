@@ -29,9 +29,9 @@
   },
   {
    "fieldname": "inventory_check_id",
-   "fieldtype": "Link",
-   "label": "Inventory Check",
-   "options": "ERP Administrative Inventory Check"
+   "fieldtype": "Data",
+   "label": "Mã kiểm kê / bàn giao nhận",
+   "description": "Tên bản ghi: ERP Administrative Facility Handover (kiểm kê) hoặc ERP Administrative Inventory Check (legacy)"
   },
   {
    "fieldname": "status",
