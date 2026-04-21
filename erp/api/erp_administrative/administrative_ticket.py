@@ -44,6 +44,47 @@ def _normalize_related_student_ids(raw):
     return [str(x).strip() for x in raw if x]
 
 
+def _normalize_related_equipment_ids(raw):
+    """Chuẩn hoá mảng name dòng CSVC (ERP Administrative Room Facility Equipment)."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(raw, list):
+        return []
+    seen = set()
+    out = []
+    for x in raw:
+        s = str(x).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _merge_equipment_ids_from_payload(data):
+    """Gộp related_equipment_ids + related_equipment_id; id đơn (nếu có) đứng đầu — tương thích API cũ."""
+    eq_ids = _normalize_related_equipment_ids(data.get("related_equipment_ids"))
+    rel_single = (data.get("related_equipment_id") or "").strip()
+    if rel_single:
+        eq_ids = [rel_single] + [x for x in eq_ids if x != rel_single]
+    return eq_ids
+
+
+def _related_equipment_ids_resolved(doc):
+    """Mảng id CSVC từ doc đã lưu (JSON + fallback Link đơn)."""
+    ids = _normalize_related_equipment_ids(getattr(doc, "related_equipment_ids", None))
+    rel = (getattr(doc, "related_equipment_id", None) or "").strip()
+    if not ids and rel:
+        return [rel]
+    if rel and rel not in ids:
+        return [rel] + ids
+    return ids
+
+
 def _validate_related_equipment_belongs_to_room(equipment_line_id, room_ref):
     """Đảm bảo dòng thiết bị CSVC thuộc đúng phòng (ERP Administrative Room name)."""
     if not equipment_line_id or not room_ref:
@@ -61,12 +102,20 @@ def _ticket_log_room_repair_activity(doc, activity_type):
         room_id = (getattr(doc, "event_room_id", None) or "").strip()
     else:
         room_id = (getattr(doc, "room_id", None) or "").strip()
-    if not room_id and getattr(doc, "related_equipment_id", None):
-        room_id = frappe.db.get_value(
-            "ERP Administrative Room Facility Equipment",
-            doc.related_equipment_id,
-            "room",
-        )
+    if not room_id:
+        eq_ids = _related_equipment_ids_resolved(doc)
+        if eq_ids:
+            room_id = frappe.db.get_value(
+                "ERP Administrative Room Facility Equipment",
+                eq_ids[0],
+                "room",
+            )
+        elif getattr(doc, "related_equipment_id", None):
+            room_id = frappe.db.get_value(
+                "ERP Administrative Room Facility Equipment",
+                doc.related_equipment_id,
+                "room",
+            )
     if not room_id:
         return
     sy = _active_school_year_id_api()
@@ -268,18 +317,26 @@ def _ticket_to_dict(doc, include_feedback=True):
             "ERP Administrative Room", room_id_val, "title_vn"
         ) or room_id_val
 
-    related_equipment_label = ""
-    rel_eq = getattr(doc, "related_equipment_id", None) or ""
-    if rel_eq:
+    related_equipment_ids = _related_equipment_ids_resolved(doc)
+    rel_eq = related_equipment_ids[0] if related_equipment_ids else (
+        getattr(doc, "related_equipment_id", None) or ""
+    )
+    related_equipments = []
+    label_parts = []
+    for eq_id in related_equipment_ids:
         cat = frappe.db.get_value(
-            "ERP Administrative Room Facility Equipment", rel_eq, "category"
+            "ERP Administrative Room Facility Equipment", eq_id, "category"
         )
-        related_equipment_label = (
+        ct = (
             frappe.db.get_value(
                 "ERP Administrative Facility Equipment Category", cat, "title"
             )
-            or rel_eq
+            if cat
+            else None
         )
+        related_equipments.append({"name": eq_id, "category_title": (ct or "")})
+        label_parts.append((ct or eq_id))
+    related_equipment_label = ", ".join(label_parts) if label_parts else ""
 
     related_student_ids = getattr(doc, "related_student_ids", None)
     if isinstance(related_student_ids, str):
@@ -380,6 +437,8 @@ def _ticket_to_dict(doc, include_feedback=True):
         "room_label": room_label_nf,
         "related_equipment_id": rel_eq,
         "related_equipment_label": related_equipment_label,
+        "related_equipment_ids": related_equipment_ids,
+        "related_equipments": related_equipments,
         "related_student_ids": related_student_ids,
         "related_students": related_students_detail,
     }
@@ -1234,7 +1293,7 @@ def create_ticket():
                 )
 
         room_id_nf = (data.get("room_id") or "").strip()
-        related_equipment_id = (data.get("related_equipment_id") or "").strip()
+        related_equipment_ids_merged = _merge_equipment_ids_from_payload(data)
         related_student_ids_list = _normalize_related_student_ids(data.get("related_student_ids"))
 
         if is_event_facility:
@@ -1251,20 +1310,20 @@ def create_ticket():
 
         effective_room_for_eq = event_room_id if is_event_facility else room_id_nf
 
-        if related_equipment_id:
+        for equipment_id in related_equipment_ids_merged:
             if not frappe.db.exists(
-                "ERP Administrative Room Facility Equipment", related_equipment_id
+                "ERP Administrative Room Facility Equipment", equipment_id
             ):
                 return validation_error_response(
                     _("Thiết bị không hợp lệ"),
-                    {"related_equipment_id": ["invalid"]},
+                    {"related_equipment_ids": ["invalid"]},
                 )
             if effective_room_for_eq and not _validate_related_equipment_belongs_to_room(
-                related_equipment_id, effective_room_for_eq
+                equipment_id, effective_room_for_eq
             ):
                 return validation_error_response(
                     _("Thiết bị không thuộc phòng đã chọn"),
-                    {"related_equipment_id": ["invalid"]},
+                    {"related_equipment_ids": ["invalid"]},
                 )
 
         for sid in related_student_ids_list:
@@ -1305,7 +1364,12 @@ def create_ticket():
             ticket_row["room_id"] = None
         else:
             ticket_row["room_id"] = room_id_nf or None
-        ticket_row["related_equipment_id"] = related_equipment_id or None
+        ticket_row["related_equipment_id"] = (
+            related_equipment_ids_merged[0] if related_equipment_ids_merged else None
+        )
+        ticket_row["related_equipment_ids"] = (
+            related_equipment_ids_merged if related_equipment_ids_merged else None
+        )
         # Trường JSON: truyền list — Frappe tự serialize; json.dumps(list) gây double-encode → ValidationError 417
         ticket_row["related_student_ids"] = related_student_ids_list if related_student_ids_list else None
 
@@ -1422,9 +1486,19 @@ def update_ticket():
         if "room_id" in data:
             rid = str(data.get("room_id") or "").strip()
             doc.room_id = rid or None
-        if "related_equipment_id" in data:
-            req = str(data.get("related_equipment_id") or "").strip()
-            doc.related_equipment_id = req or None
+        if "related_equipment_ids" in data or "related_equipment_id" in data:
+            merged_eq = _merge_equipment_ids_from_payload(
+                {
+                    "related_equipment_ids": data.get("related_equipment_ids")
+                    if "related_equipment_ids" in data
+                    else None,
+                    "related_equipment_id": data.get("related_equipment_id")
+                    if "related_equipment_id" in data
+                    else "",
+                }
+            )
+            doc.related_equipment_ids = merged_eq if merged_eq else None
+            doc.related_equipment_id = merged_eq[0] if merged_eq else None
         if "related_student_ids" in data:
             rlist = _normalize_related_student_ids(data.get("related_student_ids"))
             doc.related_student_ids = rlist if rlist else None
@@ -1473,19 +1547,18 @@ def update_ticket():
             if cint(getattr(doc, "is_event_facility", 0))
             else room_id_nf
         )
-        rel_eq = (getattr(doc, "related_equipment_id", None) or "").strip()
-        if rel_eq:
+        for rel_eq in _related_equipment_ids_resolved(doc):
             if not frappe.db.exists("ERP Administrative Room Facility Equipment", rel_eq):
                 return validation_error_response(
                     _("Thiết bị không hợp lệ"),
-                    {"related_equipment_id": ["invalid"]},
+                    {"related_equipment_ids": ["invalid"]},
                 )
             if effective_room_for_eq and not _validate_related_equipment_belongs_to_room(
                 rel_eq, effective_room_for_eq
             ):
                 return validation_error_response(
                     _("Thiết bị không thuộc phòng đã chọn"),
-                    {"related_equipment_id": ["invalid"]},
+                    {"related_equipment_ids": ["invalid"]},
                 )
 
         related_student_ids_list = _normalize_related_student_ids(getattr(doc, "related_student_ids", None))

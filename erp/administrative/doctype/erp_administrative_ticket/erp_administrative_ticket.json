@@ -19,6 +19,7 @@
   "area_title",
   "room_id",
   "related_equipment_id",
+  "related_equipment_ids",
   "related_student_ids",
   "description",
   "attachment",
@@ -123,6 +124,11 @@
    "fieldtype": "Link",
    "label": "Thi\u1ebft b\u1ecb li\u00ean quan (d\u00f2ng CSVC ph\u00f2ng)",
    "options": "ERP Administrative Room Facility Equipment"
+  },
+  {
+   "fieldname": "related_equipment_ids",
+   "fieldtype": "JSON",
+   "label": "Danh s\u00e1ch d\u00f2ng CSVC ph\u00f2ng (m\u1ea3ng name)"
   },
   {
    "fieldname": "related_student_ids",
