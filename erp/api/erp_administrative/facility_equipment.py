@@ -834,29 +834,6 @@ def _apply_facility_snapshot_to_room(room_id, snapshot_raw, ignore_permissions=F
             )
 
 
-def _remove_responsible_user_from_room(room_id, user_id, ignore_permissions=False):
-    """Gỡ một user khỏi child table responsible_users (giống room.remove_room_responsible_user)."""
-    if not room_id or not user_id:
-        return False
-    room = frappe.get_doc("ERP Administrative Room", room_id)
-    kept = [r for r in (room.responsible_users or []) if (r.user or "").strip() != (user_id or "").strip()]
-    if len(kept) == len(room.responsible_users or []):
-        return False
-    room.responsible_users = []
-    for row in kept:
-        room.append(
-            "responsible_users",
-            {
-                "user": row.user,
-                "full_name": row.full_name,
-                "user_image": row.user_image,
-                "designation": row.designation,
-            },
-        )
-    room.save(ignore_permissions=ignore_permissions)
-    return True
-
-
 @frappe.whitelist(allow_guest=False)
 def send_handover():
     """
@@ -2119,7 +2096,7 @@ def review_inventory_check():
             _apply_facility_snapshot_to_room(
                 room_id, snap_raw, ignore_permissions=True
             )
-            _remove_responsible_user_from_room(room_id, ru, ignore_permissions=True)
+            # Không gỡ PIC khỏi phòng: người phụ trách được quy hoạch theo gán năm học (Room Yearly Assignment).
 
         doc.save(ignore_permissions=False)
         frappe.db.commit()
@@ -2150,16 +2127,7 @@ def review_inventory_check():
                     target_user=ru,
                     reference_doctype=ref_doctype,
                     reference_name=doc.name,
-                    note=_("Đồng bộ CSVC phòng và gỡ người phụ trách sau kiểm kê"),
-                )
-                log_room_activity(
-                    room_id,
-                    "user_removed",
-                    user=frappe.session.user,
-                    target_user=ru,
-                    reference_doctype=ref_doctype,
-                    reference_name=doc.name,
-                    note=_("Gỡ khỏi phụ trách sau khi chấp nhận kiểm kê"),
+                    note=_("Đồng bộ CSVC phòng theo snapshot kiểm kê đã chấp nhận"),
                 )
             else:
                 log_room_activity(
@@ -2422,7 +2390,8 @@ def get_room_activity_log():
 @frappe.whitelist(allow_guest=False)
 def get_user_facility_lite_room_state():
     """
-    Phòng chức năng (Facility Lite): phòng user đang PIC + phòng đã hoàn thành kiểm kê (Accepted, không còn PIC).
+    Phòng chức năng (Facility Lite): phòng user đang PIC + phòng có bản kiểm kê gần nhất (theo user) ở trạng thái Accepted.
+    PIC giữ theo gán năm học — không phụ thuộc vào việc gỡ sau duyệt.
     """
     try:
         uid = frappe.session.user
@@ -2456,7 +2425,7 @@ def get_user_facility_lite_room_state():
 
         completed_inventory_room_ids = []
         for room_id, st in latest_by_room.items():
-            if st == "Accepted" and not _user_is_room_responsible(room_id, uid):
+            if st == "Accepted":
                 completed_inventory_room_ids.append(room_id)
 
         return single_item_response(
