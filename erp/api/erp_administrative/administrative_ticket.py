@@ -316,13 +316,38 @@ def _ticket_to_dict(doc, include_feedback=True):
             "ERP Administrative Room", doc.event_room_id, "title_vn"
         ) or doc.event_room_id
 
-    # Phòng (ticket thường), thiết bị & học sinh liên quan
+    # Phòng (ticket thường), thiết bị & học sinh liên quan — hiển thị: Tên VN (Tên EN) · mã vật lý
     room_id_val = getattr(doc, "room_id", None) or ""
     room_label_nf = ""
+    room_title_vn_out = ""
+    room_title_en_out = ""
+    room_physical_code_out = ""
     if room_id_val:
-        room_label_nf = frappe.db.get_value(
-            "ERP Administrative Room", room_id_val, "title_vn"
-        ) or room_id_val
+        rm = frappe.db.get_value(
+            "ERP Administrative Room",
+            room_id_val,
+            ["title_vn", "title_en", "physical_code"],
+            as_dict=True,
+        )
+        if rm:
+            tvn = (rm.get("title_vn") or "").strip()
+            ten = (rm.get("title_en") or "").strip()
+            phy = (rm.get("physical_code") or "").strip()
+            room_title_vn_out = tvn
+            room_title_en_out = ten
+            room_physical_code_out = phy
+            if tvn and ten:
+                name_part = f"{tvn} ({ten})"
+            else:
+                name_part = tvn or ten or ""
+            if name_part and phy and phy not in name_part:
+                room_label_nf = f"{name_part} · {phy}"
+            elif name_part:
+                room_label_nf = name_part
+            else:
+                room_label_nf = phy or room_id_val
+        else:
+            room_label_nf = room_id_val
 
     related_equipment_ids = _related_equipment_ids_resolved(doc)
     rel_eq = related_equipment_ids[0] if related_equipment_ids else (
@@ -442,6 +467,9 @@ def _ticket_to_dict(doc, include_feedback=True):
         "event_end_time": getattr(doc, "event_end_time", None),
         "room_id": room_id_val,
         "room_label": room_label_nf,
+        "room_title_vn": room_title_vn_out or None,
+        "room_title_en": room_title_en_out or None,
+        "room_physical_code": room_physical_code_out or None,
         "related_equipment_id": rel_eq,
         "related_equipment_label": related_equipment_label,
         "related_equipment_ids": related_equipment_ids,
