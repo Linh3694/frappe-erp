@@ -3565,6 +3565,22 @@ def get_room_history():
             order_by="creation desc",
             limit=50,
         )
+        # Hiển thị tab Lịch sử: thay ID bằng tên năm học + tên lớp
+        for ho in handovers:
+            sy_id = ho.get("school_year_id")
+            if sy_id:
+                sy_row = frappe.db.get_value(
+                    "SIS School Year",
+                    sy_id,
+                    ["title_vn", "title_en"],
+                    as_dict=True,
+                )
+                if sy_row:
+                    ho["school_year_title_vn"] = sy_row.get("title_vn") or ""
+                    ho["school_year_title_en"] = sy_row.get("title_en") or ""
+            cid = ho.get("class_id")
+            if cid:
+                ho["class_title"] = frappe.db.get_value("SIS Class", cid, "title") or ""
 
         ic_filters = {"room": room_id}
         if sy_filter:
@@ -3576,6 +3592,7 @@ def get_room_history():
                 "name",
                 "school_year_id",
                 "status",
+                "class_id",
                 "handover_type",
                 "display_title_snapshot",
                 "sent_on",
@@ -3585,6 +3602,21 @@ def get_room_history():
             order_by="creation desc",
             limit=50,
         )
+        for ho in inv_incoming:
+            sy_id = ho.get("school_year_id")
+            if sy_id:
+                sy_row = frappe.db.get_value(
+                    "SIS School Year",
+                    sy_id,
+                    ["title_vn", "title_en"],
+                    as_dict=True,
+                )
+                if sy_row:
+                    ho["school_year_title_vn"] = sy_row.get("title_vn") or ""
+                    ho["school_year_title_en"] = sy_row.get("title_en") or ""
+            cid = ho.get("class_id")
+            if cid:
+                ho["class_title"] = frappe.db.get_value("SIS Class", cid, "title") or ""
         inv_ic = frappe.get_all(
             "ERP Administrative Inventory Check",
             filters=ic_filters,
