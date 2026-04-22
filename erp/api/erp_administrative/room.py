@@ -3635,6 +3635,37 @@ def get_room_history():
             order_by="creation desc",
             limit=50,
         )
+        for ic in inv_ic:
+            sy_id = ic.get("school_year_id")
+            if sy_id:
+                sy_row = frappe.db.get_value(
+                    "SIS School Year",
+                    sy_id,
+                    ["title_vn", "title_en"],
+                    as_dict=True,
+                )
+                if sy_row:
+                    ic["school_year_title_vn"] = sy_row.get("title_vn") or ""
+                    ic["school_year_title_en"] = sy_row.get("title_en") or ""
+
+        closure_ids = set()
+        for row in inv_incoming + inv_ic:
+            cid = (row.get("closure_id") or "").strip()
+            if cid:
+                closure_ids.add(cid)
+        closure_started_on = {}
+        for cid in closure_ids:
+            st = frappe.db.get_value(
+                "ERP Administrative Academic Year Closure",
+                cid,
+                "started_on",
+            )
+            if st:
+                closure_started_on[cid] = st
+        for row in inv_incoming + inv_ic:
+            cid = (row.get("closure_id") or "").strip()
+            if cid and cid in closure_started_on:
+                row["closure_started_on"] = closure_started_on[cid]
 
         tickets = frappe.get_all(
             "ERP Administrative Ticket",

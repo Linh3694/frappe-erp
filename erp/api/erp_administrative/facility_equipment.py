@@ -2148,6 +2148,38 @@ def get_inventory_check_status():
             if len(out_hist) >= 20:
                 break
 
+        sy_ids = {r.get("school_year_id") for r in out_hist if r.get("school_year_id")}
+        sy_meta = {}
+        for sy in sy_ids:
+            row_sy = frappe.db.get_value(
+                "SIS School Year",
+                sy,
+                ["title_vn", "title_en"],
+                as_dict=True,
+            )
+            if row_sy:
+                sy_meta[sy] = row_sy
+        c_ids = {r.get("closure_id") for r in out_hist if r.get("closure_id")}
+        closure_started = {}
+        for cid in c_ids:
+            if not cid:
+                continue
+            st = frappe.db.get_value(
+                "ERP Administrative Academic Year Closure",
+                cid,
+                "started_on",
+            )
+            if st:
+                closure_started[cid] = st
+        for r in out_hist:
+            sy = r.get("school_year_id")
+            if sy and sy in sy_meta:
+                r["school_year_title_vn"] = sy_meta[sy].get("title_vn") or ""
+                r["school_year_title_en"] = sy_meta[sy].get("title_en") or ""
+            cid = r.get("closure_id")
+            if cid and cid in closure_started:
+                r["closure_started_on"] = closure_started[cid]
+
         extra = {
             "year_end_closure": year_end_closure,
             "can_submit_year_end_inventory": bool(can_submit_year_end),
