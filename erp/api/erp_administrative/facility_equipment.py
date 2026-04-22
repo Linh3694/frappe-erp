@@ -2068,7 +2068,16 @@ def get_inventory_check_status():
         hist_ho = frappe.get_all(
             "ERP Administrative Facility Handover",
             filters=hist_ho_filters,
-            fields=["name", "status", "sent_on", "reviewed_on", "responsible_user"],
+            fields=[
+                "name",
+                "status",
+                "school_year_id",
+                "closure_id",
+                "sent_on",
+                "reviewed_on",
+                "review_note",
+                "responsible_user",
+            ],
             order_by="creation desc",
             limit=25,
         )
@@ -2078,7 +2087,16 @@ def get_inventory_check_status():
         hist_ic = frappe.get_all(
             "ERP Administrative Inventory Check",
             filters=hist_ic_filters,
-            fields=["name", "status", "submitted_on", "reviewed_on", "responsible_user"],
+            fields=[
+                "name",
+                "status",
+                "school_year_id",
+                "closure_id",
+                "submitted_on",
+                "reviewed_on",
+                "review_note",
+                "responsible_user",
+            ],
             order_by="creation desc",
             limit=25,
         )
@@ -2088,8 +2106,11 @@ def get_inventory_check_status():
                 {
                     "name": h.name,
                     "status": h.status,
+                    "school_year_id": h.school_year_id,
+                    "closure_id": h.closure_id,
                     "submitted_on": h.sent_on,
                     "reviewed_on": h.reviewed_on,
+                    "review_note": h.review_note,
                     "_ts": h.sent_on or h.reviewed_on,
                 }
             )
@@ -2098,8 +2119,11 @@ def get_inventory_check_status():
                 {
                     "name": h.name,
                     "status": h.status,
+                    "school_year_id": h.school_year_id,
+                    "closure_id": h.closure_id,
                     "submitted_on": h.submitted_on,
                     "reviewed_on": h.reviewed_on,
+                    "review_note": h.review_note,
                     "_ts": h.submitted_on or h.reviewed_on,
                 }
             )
@@ -2114,8 +2138,11 @@ def get_inventory_check_status():
                 {
                     "name": h["name"],
                     "status": h["status"],
+                    "school_year_id": h.get("school_year_id"),
+                    "closure_id": h.get("closure_id"),
                     "submitted_on": h["submitted_on"],
                     "reviewed_on": h["reviewed_on"],
+                    "review_note": h.get("review_note"),
                 }
             )
             if len(out_hist) >= 20:
