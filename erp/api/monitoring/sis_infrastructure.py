@@ -179,13 +179,101 @@ def _mysql_combined():
 	return out
 
 
+def _count_gunicorn_worker_processes(psutil):
+	# Tổng process có tên / cmdline gunicorn, trừ 1 nếu đoán là web master (Frappe: 1 + N workers)
+	pids = []
+	for p in psutil.process_iter(["name", "cmdline", "pid"]):
+		try:
+			n = (p.info.get("name") or "").lower()
+			cmd = p.info.get("cmdline") or []
+			s = " ".join(str(x) for x in cmd).lower() if cmd else ""
+			if "gunicorn" in n or (s and "gunicorn" in s):
+				pids.append(p.info.get("pid"))
+		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError):
+			continue
+	if not pids:
+		return 0
+	return max(0, len(pids) - 1)
+
+
+def _count_frappe_background_worker_processes(psutil):
+	# Frappe RQ / background: cmdline có frappe + worker, không tính gunicorn
+	c = 0
+	for p in psutil.process_iter(["name", "cmdline"]):
+		try:
+			n = (p.info.get("name") or "").lower()
+			cmd = p.info.get("cmdline") or []
+			s = " ".join(str(x) for x in cmd).lower() if cmd else ""
+			if "gunicorn" in s or (n and "gunicorn" in n):
+				continue
+			if "frappe" in s and "worker" in s:
+				c += 1
+		except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, TypeError):
+			continue
+	return c
+
+
+def _frappe_worker_process_metrics():
+	"""
+	Số liệu worker: cấu hình từ bench, đang chạy ước lượng từ process (psutil),
+	idle = max(0, cấu hình - đang chạy).
+	"""
+	out = {
+		"gunicorn": {"configured": None, "running": None, "idle": None},
+		"background": {"configured": None, "running": None, "idle": None},
+		"error": None,
+	}
+	try:
+		import psutil
+	except Exception as e:
+		out["error"] = str(e)
+		return out
+	g_conf = frappe.conf.get("gunicorn_workers")
+	b_conf = frappe.conf.get("background_workers")
+	g_conf_i = int(g_conf) if g_conf is not None else None
+	b_conf_i = int(b_conf) if b_conf is not None else None
+	try:
+		g_run = _count_gunicorn_worker_processes(psutil)
+		b_run = _count_frappe_background_worker_processes(psutil)
+	except Exception as e:
+		out["error"] = str(e)
+		return out
+	# Gunicorn
+	if g_conf_i is not None:
+		out["gunicorn"] = {
+			"configured": g_conf_i,
+			"running": g_run,
+			"idle": max(0, g_conf_i - g_run),
+		}
+	else:
+		out["gunicorn"] = {
+			"configured": None,
+			"running": g_run,
+			"idle": None,
+		}
+	# Background: idle chỉ an toàn nếu có cấu hình bench
+	if b_conf_i is not None:
+		out["background"] = {
+			"configured": b_conf_i,
+			"running": b_run,
+			"idle": max(0, b_conf_i - b_run),
+		}
+	else:
+		out["background"] = {
+			"configured": None,
+			"running": b_run,
+			"idle": None,
+		}
+	return out
+
+
 def _frappe_meta():
 	vers = {}
 	try:
 		vers = frappe.get_versions() or {}
 	except Exception:
 		pass
-	return {
+	meta = {
 		"site": getattr(frappe.local, "site", None) or frappe.get_site_name(),
 		"apps_versions": vers,
 		"conf_workers": {
@@ -197,6 +285,15 @@ def _frappe_meta():
 		"db_name": frappe.conf.get("db_name"),
 		"db_type": frappe.conf.get("db_type", "mariadb"),
 	}
+	try:
+		meta["worker_metrics"] = _frappe_worker_process_metrics()
+	except Exception as e:
+		meta["worker_metrics"] = {
+			"gunicorn": {"configured": None, "running": None, "idle": None},
+			"background": {"configured": None, "running": None, "idle": None},
+			"error": str(e),
+		}
+	return meta
 
 
 @frappe.whitelist()
