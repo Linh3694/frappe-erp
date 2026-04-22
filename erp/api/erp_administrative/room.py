@@ -6,7 +6,7 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime, get_fullname
 from frappe.exceptions import LinkExistsError
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import success_response, error_response, validation_error_response, not_found_response
 from erp.api.erp_administrative.room_activity_log import log_room_activity
@@ -3481,6 +3481,119 @@ def save_room_yearly_assignment():
         return success_response(data={"name": doc.name}, message=_("Đã lưu"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "room.save_room_yearly_assignment")
+        return error_response(str(e))
+
+
+def _room_in_campus(room_id: str, campus_id: str) -> bool:
+    """Phòng thuộc tòa đúng campus (cùng logic lọc get_all_rooms)."""
+    if not room_id or not campus_id:
+        return False
+    building_id = frappe.db.get_value("ERP Administrative Room", room_id, "building_id")
+    if not building_id:
+        return False
+    return bool(
+        frappe.db.exists(
+            "ERP Administrative Building",
+            {"name": building_id, "campus_id": campus_id},
+        )
+    )
+
+
+def _default_yearly_usage_type_from_room_type(room_type: Optional[str]) -> str:
+    """Khớp FE RoomDetail: function_room → functional_room, còn lại homeroom_class."""
+    rt = (room_type or "").lower()
+    return "functional_room" if rt == "function_room" else "homeroom_class"
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def bulk_update_room_yearly_display_titles():
+    """
+    Import Excel tên phòng theo năm: cập nhật hàng loạt display_title_vn/en trên
+    ERP Administrative Room Yearly Assignment. Không đụng PIC / class_id (chỉ sửa tiêu đề).
+    Body JSON: school_year_id, rows: [{ room_id, display_title_vn, display_title_en }, ...]
+    """
+    try:
+        data = _room_api_json_body()
+        sy = (data.get("school_year_id") or "").strip()
+        rows = data.get("rows") or data.get("items") or []
+        if not sy:
+            return validation_error_response(_("Thiếu school_year_id"), {})
+        if not isinstance(rows, list) or len(rows) == 0:
+            return validation_error_response(_("Thiếu hoặc sai định dạng rows"), {})
+
+        campus_id = get_current_campus_from_context()
+        if not campus_id:
+            try:
+                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+                campus_id = first_campus or "CAMPUS-00001"
+            except Exception:
+                campus_id = "CAMPUS-00001"
+
+        if not frappe.db.exists("SIS School Year", sy):
+            return validation_error_response(_("Năm học không tồn tại"), {})
+
+        updated = 0
+        errors: List[Dict[str, Any]] = []
+        max_rows = 2000
+        to_process = rows[:max_rows]
+
+        for raw in to_process:
+            if not isinstance(raw, dict):
+                errors.append({"room_id": "", "message": _("Dòng không phải object")})
+                continue
+            room_id = (raw.get("room_id") or raw.get("room") or "").strip()
+            vn = (raw.get("display_title_vn") or "").strip()
+            en = (raw.get("display_title_en") or "").strip()
+            if not room_id:
+                errors.append({"room_id": "", "message": _("Thiếu room_id")})
+                continue
+            if not vn or not en:
+                errors.append(
+                    {
+                        "room_id": room_id,
+                        "message": _("Cần đủ tên tiếng Việt và tiếng Anh"),
+                    }
+                )
+                continue
+            if not frappe.db.exists("ERP Administrative Room", room_id):
+                errors.append({"room_id": room_id, "message": _("Không tìm thấy phòng")})
+                continue
+            if not _room_in_campus(room_id, campus_id):
+                errors.append({"room_id": room_id, "message": _("Phòng không thuộc campus hiện tại")})
+                continue
+
+            existing_ya = frappe.db.get_value(
+                "ERP Administrative Room Yearly Assignment",
+                {"room": room_id, "school_year_id": sy},
+                "name",
+            )
+            try:
+                if existing_ya:
+                    doc = frappe.get_doc("ERP Administrative Room Yearly Assignment", existing_ya)
+                    doc.display_title_vn = vn
+                    doc.display_title_en = en
+                    doc.save()
+                else:
+                    room_type = frappe.db.get_value("ERP Administrative Room", room_id, "room_type")
+                    doc = frappe.get_doc({"doctype": "ERP Administrative Room Yearly Assignment"})
+                    doc.room = room_id
+                    doc.school_year_id = sy
+                    doc.usage_type = _default_yearly_usage_type_from_room_type(room_type)
+                    doc.status = "active"
+                    doc.display_title_vn = vn
+                    doc.display_title_en = en
+                    doc.insert()
+                updated += 1
+            except Exception as row_err:
+                errors.append({"room_id": room_id, "message": str(row_err)})
+
+        frappe.db.commit()
+        return success_response(
+            data={"updated": updated, "errors": errors, "skipped_limit": len(rows) - len(to_process)},
+            message=_("Đã xử lý %(n)s dòng") % {"n": updated},
+        )
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.bulk_update_room_yearly_display_titles")
         return error_response(str(e))
 
 
