@@ -3500,10 +3500,50 @@ def get_room_history():
         yearly = frappe.get_all(
             "ERP Administrative Room Yearly Assignment",
             filters=ya_filters,
-            fields=["name", "school_year_id", "display_title_vn", "status", "creation"],
+            fields=[
+                "name",
+                "school_year_id",
+                "display_title_vn",
+                "display_title_en",
+                "status",
+                "creation",
+                "homeroom_teacher_name",
+                "usage_type",
+            ],
             order_by="creation desc",
             limit=50,
         )
+        # Bổ sung tên năm học (SIS School Year) + chuỗi PIC từ bảng con — phục vụ tab Lịch sử
+        for ya in yearly:
+            sy_id = ya.get("school_year_id")
+            if sy_id:
+                sy_row = frappe.db.get_value(
+                    "SIS School Year",
+                    sy_id,
+                    ["title_vn", "title_en"],
+                    as_dict=True,
+                )
+                if sy_row:
+                    ya["school_year_title_vn"] = sy_row.get("title_vn") or ""
+                    ya["school_year_title_en"] = sy_row.get("title_en") or ""
+            pic_parts = []
+            for p in frappe.get_all(
+                "ERP Administrative Room Yearly PIC",
+                filters={"parent": ya.get("name")},
+                fields=["user", "role_label", "full_name"],
+                order_by="idx asc",
+            ):
+                label = (p.get("role_label") or "").strip()
+                fn = (p.get("full_name") or "").strip()
+                uid = p.get("user") or ""
+                if not fn and uid:
+                    try:
+                        fn = get_fullname(uid) or uid
+                    except Exception:
+                        fn = uid
+                if fn:
+                    pic_parts.append(fn + (f" ({label})" if label else ""))
+            ya["pic_summary"] = "; ".join(pic_parts)
 
         ho_filters = {"room": room_id, "direction": "outgoing"}
         if sy_filter:
@@ -3511,7 +3551,17 @@ def get_room_history():
         handovers = frappe.get_all(
             "ERP Administrative Facility Handover",
             filters=ho_filters,
-            fields=["name", "school_year_id", "status", "class_id", "sent_on", "confirmed_on"],
+            fields=[
+                "name",
+                "school_year_id",
+                "status",
+                "class_id",
+                "handover_type",
+                "display_title_snapshot",
+                "sent_on",
+                "confirmed_on",
+                "creation",
+            ],
             order_by="creation desc",
             limit=50,
         )
@@ -3522,14 +3572,30 @@ def get_room_history():
         inv_incoming = frappe.get_all(
             "ERP Administrative Facility Handover",
             filters={**ic_filters, "direction": "incoming"},
-            fields=["name", "school_year_id", "status", "sent_on", "reviewed_on"],
+            fields=[
+                "name",
+                "school_year_id",
+                "status",
+                "handover_type",
+                "display_title_snapshot",
+                "sent_on",
+                "reviewed_on",
+                "creation",
+            ],
             order_by="creation desc",
             limit=50,
         )
         inv_ic = frappe.get_all(
             "ERP Administrative Inventory Check",
             filters=ic_filters,
-            fields=["name", "school_year_id", "status", "submitted_on", "reviewed_on"],
+            fields=[
+                "name",
+                "school_year_id",
+                "status",
+                "submitted_on",
+                "reviewed_on",
+                "creation",
+            ],
             order_by="creation desc",
             limit=50,
         )
@@ -3537,9 +3603,9 @@ def get_room_history():
         tickets = frappe.get_all(
             "ERP Administrative Ticket",
             filters={"room_id": room_id},
-            fields=["name", "ticket_code", "title", "status", "creation"],
+            fields=["name", "ticket_code", "title", "status", "creation", "priority"],
             order_by="creation desc",
-            limit=30,
+            limit=50,
         )
 
         return success_response(

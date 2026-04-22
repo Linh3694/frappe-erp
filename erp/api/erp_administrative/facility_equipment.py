@@ -24,6 +24,23 @@ DOCTYPE_TICKET = "ERP Administrative Ticket"
 _TICKET_CLOSED_STATUSES = ("Closed", "Resolved", "Cancelled", "Done")
 
 
+def _resolve_administrative_room_id_from_import_key(room_key):
+    """
+    Map giá trị cột phòng trong Excel → name ERP Administrative Room.
+    Thứ tự: name tài liệu, physical_code (title_field hiện tại), title_vn, short_title, title_en.
+    """
+    key = (room_key or "").strip()
+    if not key:
+        return None
+    if frappe.db.exists("ERP Administrative Room", key):
+        return key
+    for field in ("physical_code", "title_vn", "short_title", "title_en"):
+        rid = frappe.db.get_value("ERP Administrative Room", {field: key}, "name")
+        if rid:
+            return rid
+    return None
+
+
 def _get_yearly_assignment_row(room_id, school_year_id):
     """Một dòng Yearly Assignment (dict) hoặc None."""
     if not room_id or not school_year_id:
@@ -712,7 +729,7 @@ def bulk_add_room_equipment():
 def bulk_import_room_equipment_matrix():
     """
     Matrix nhiều phòng: rooms: [{ "room_name": "...", "equipment": [{ "category_name": "", "quantity": n }] }]
-    room_name khớp title_vn của ERP Administrative Room.
+    room_name: mã vật lý (physical_code), tên VN, short_title, title EN hoặc name tài liệu ROOM-#####.
     """
     try:
         data = _parse_json_body()
@@ -723,9 +740,7 @@ def bulk_import_room_equipment_matrix():
             equipment = block.get("equipment") or []
             if not room_name:
                 continue
-            rid = frappe.db.get_value(
-                "ERP Administrative Room", {"title_vn": room_name}, "name"
-            )
+            rid = _resolve_administrative_room_id_from_import_key(room_name)
             if not rid:
                 errors.append({"room_name": room_name, "error": "room not found"})
                 continue
@@ -1817,6 +1832,34 @@ def _inventory_check_dict_from_row(r):
     }
 
 
+def _inventory_history_dict_from_row(r, record_kind):
+    """Payload lịch sử snapshot: thêm record_kind, school_year_id, người gửi bàn giao (sent_by)."""
+    out = _inventory_check_dict_from_row(r)
+    out["record_kind"] = record_kind
+    sy = r.get("school_year_id")
+    if sy:
+        out["school_year_id"] = sy
+    if record_kind in ("handover_outgoing", "handover_incoming"):
+        sb = r.get("sent_by")
+        if sb:
+            out["sent_by"] = sb
+            try:
+                sn = get_fullname(sb) or sb
+            except Exception:
+                sn = sb
+            if not out.get("responsible_user_name"):
+                out["responsible_user_name"] = sn
+    return out
+
+
+def _inventory_history_row_sort_key(r):
+    for k in ("creation", "sent_on", "submitted_on"):
+        v = r.get(k)
+        if v:
+            return str(v)
+    return ""
+
+
 @frappe.whitelist(allow_guest=False)
 def submit_inventory_check():
     """
@@ -2318,18 +2361,26 @@ def get_inventory_check_pending_for_room():
 
 @frappe.whitelist(allow_guest=False)
 def get_inventory_check_history_for_room():
-    """Admin: lịch sử kiểm kê theo phòng (mọi người gửi). Body: room_id, limit (optional, default 15)."""
+    """
+    Admin: lịch sử snapshot theo phòng — kiểm kê + bàn giao vào + bàn giao ra.
+    Body: room_id, limit (optional, default 15, max 50), school_year_id (optional — lọc khớp get_room_history).
+    """
     try:
         data = _parse_json_body()
         room_id = data.get("room_id")
         limit = min(int(data.get("limit") or 15), 50)
+        school_year_id = (data.get("school_year_id") or "").strip()
         if not room_id:
             return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
 
         ho_fields = [
             "name",
             "room",
+            "school_year_id",
             "responsible_user",
+            "sent_by",
+            "class_id",
+            "handover_type",
             "status",
             "facility_snapshot",
             "it_snapshot",
@@ -2340,19 +2391,35 @@ def get_inventory_check_history_for_room():
             "review_note",
             "creation",
         ]
-        rows_ho = frappe.get_all(
+        ho_in_filters = {"room": room_id, "direction": "incoming"}
+        ho_out_filters = {"room": room_id, "direction": "outgoing"}
+        ic_filters = {"room": room_id}
+        if school_year_id:
+            ho_in_filters["school_year_id"] = school_year_id
+            ho_out_filters["school_year_id"] = school_year_id
+            ic_filters["school_year_id"] = school_year_id
+
+        rows_ho_in = frappe.get_all(
             "ERP Administrative Facility Handover",
-            filters={"room": room_id, "direction": "incoming"},
+            filters=ho_in_filters,
+            fields=ho_fields,
+            order_by="creation desc",
+            limit=limit * 2,
+        )
+        rows_ho_out = frappe.get_all(
+            "ERP Administrative Facility Handover",
+            filters=ho_out_filters,
             fields=ho_fields,
             order_by="creation desc",
             limit=limit * 2,
         )
         rows_ic = frappe.get_all(
             "ERP Administrative Inventory Check",
-            filters={"room": room_id},
+            filters=ic_filters,
             fields=[
                 "name",
                 "room",
+                "school_year_id",
                 "responsible_user",
                 "status",
                 "facility_snapshot",
@@ -2367,10 +2434,16 @@ def get_inventory_check_history_for_room():
             order_by="creation desc",
             limit=limit * 2,
         )
-        merged = list(rows_ho) + list(rows_ic)
-        merged.sort(key=lambda r: str(r.get("creation") or ""), reverse=True)
+        merged = []
+        for r in rows_ho_in:
+            merged.append((_inventory_history_row_sort_key(r), "handover_incoming", r))
+        for r in rows_ho_out:
+            merged.append((_inventory_history_row_sort_key(r), "handover_outgoing", r))
+        for r in rows_ic:
+            merged.append((_inventory_history_row_sort_key(r), "inventory_check", r))
+        merged.sort(key=lambda x: x[0], reverse=True)
         rows = merged[:limit]
-        items = [_inventory_check_dict_from_row(r) for r in rows]
+        items = [_inventory_history_dict_from_row(r, kind) for _, kind, r in rows]
         return list_response(items, message="OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "facility_equipment.get_inventory_check_history_for_room")
