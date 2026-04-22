@@ -6,7 +6,7 @@ Thu thập metric từ máy chạy Frappe, Redis, MariaDB — chỉ role SIS IT.
 
 import os
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
 
 import frappe
 from frappe import _
@@ -35,7 +35,6 @@ _MYSQL_STATUS_NAMES = {
 	"Innodb_rows_deleted",
 	"Open_tables",
 	"Table_open_cache_hits",
-	"Qcache_hits",  # có thể 0 nếu MariaDB tắt
 }
 
 _MYSQL_VARIABLE_NAMES = {
@@ -95,7 +94,7 @@ def _host_metrics():
 		data["cpu_count"] = psutil.cpu_count(logical=True)
 		try:
 			boot = psutil.boot_time()
-			data["boot_time_utc"] = datetime.utcfromtimestamp(boot).isoformat() + "Z"
+			data["boot_time_utc"] = datetime.fromtimestamp(boot, tz=timezone.utc).isoformat()
 		except Exception:
 			data["boot_time_utc"] = None
 	except Exception as e:
@@ -156,10 +155,17 @@ def _mysql_combined():
 		rows = frappe.db.sql("SHOW GLOBAL STATUS", as_list=True)
 		for k, v in rows:
 			if k in _MYSQL_STATUS_NAMES:
-				try:
-					out["status"][k] = int(v) if v.isdigit() else v
-				except (AttributeError, TypeError):
-					out["status"][k] = v
+				if isinstance(v, (int, float)):
+					out["status"][k] = int(v) if float(v) == int(float(v)) else v
+				else:
+					s = str(v)
+					if s.replace(".", "", 1).isdigit() and s.count(".") <= 1:
+						try:
+							out["status"][k] = int(s) if "." not in s else float(s)
+						except ValueError:
+							out["status"][k] = v
+					else:
+						out["status"][k] = v
 		vrows = frappe.db.sql("SHOW GLOBAL VARIABLES", as_list=True)
 		for k, v in vrows:
 			if k in _MYSQL_VARIABLE_NAMES:
