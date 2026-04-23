@@ -17,6 +17,15 @@ from erp.utils.api_response import (
 from .utils import _check_admin_permission
 
 
+def _should_legacy_flag_tuition_elsewhere(order_doc):
+    """
+    Chỉ khi đơn tuition KHÔNG gắn kế thừa (parent_order_id) — mới chạy flag tuition_paid_elsewhere cũ.
+    """
+    if not order_doc or getattr(order_doc, "order_type", None) != "tuition":
+        return False
+    return not (getattr(order_doc, "parent_order_id", None) or "").strip()
+
+
 def _flag_other_tuition_orders(finance_student_id, paid_order_id, finance_year_id, paid_order_title, logs=None):
     """
     Đánh dấu các bản ghi Order Student khác của học sinh trong các order tuition khác.
@@ -47,6 +56,7 @@ def _flag_other_tuition_orders(finance_student_id, paid_order_id, finance_year_i
             AND o.finance_year_id = %(finance_year_id)s
             AND o.order_type = 'tuition'
             AND o.name != %(paid_order_id)s
+            AND IFNULL(o.is_superseded, 0) = 0
             AND os.payment_status IN ('unpaid', 'partial')
             AND (os.tuition_paid_elsewhere IS NULL OR os.tuition_paid_elsewhere = 0)
         """, {
@@ -99,6 +109,7 @@ def _update_finance_student_summary(finance_student_id, logs=None):
             WHERE fos.finance_student_id = %s
               AND fo.is_active = 1
               AND IFNULL(fos.tuition_paid_elsewhere, 0) != 1
+              AND IFNULL(fo.is_superseded, 0) != 1
         """, (finance_student_id,), as_dict=True)[0]
         
         total_amount = summary.get('total_amount', 0)
@@ -214,7 +225,7 @@ def update_order_student_payment():
         
         # Flag các order tuition khác TRƯỚC khi tính summary (để summary loại bỏ đúng)
         flagged_count = 0
-        if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
+        if _should_legacy_flag_tuition_elsewhere(order_doc) and order_student.payment_status in ('paid', 'partial'):
             flagged_count = _flag_other_tuition_orders(
                 finance_student_id=finance_student_id,
                 paid_order_id=order_student.order_id,
@@ -344,7 +355,7 @@ def record_payment_choice():
         
         # Flag các order tuition khác TRƯỚC khi tính summary
         flagged_count = 0
-        if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
+        if _should_legacy_flag_tuition_elsewhere(order_doc) and order_student.payment_status in ('paid', 'partial'):
             flagged_count = _flag_other_tuition_orders(
                 finance_student_id=finance_student_id,
                 paid_order_id=order_student.order_id,
@@ -547,7 +558,7 @@ def record_milestone_payment():
         
         # Flag các order tuition khác TRƯỚC khi tính summary
         flagged_count = 0
-        if order_doc.order_type == 'tuition' and order_student.payment_status in ('paid', 'partial'):
+        if _should_legacy_flag_tuition_elsewhere(order_doc) and order_student.payment_status in ('paid', 'partial'):
             flagged_count = _flag_other_tuition_orders(
                 finance_student_id=finance_student_id,
                 paid_order_id=order_student.order_id,

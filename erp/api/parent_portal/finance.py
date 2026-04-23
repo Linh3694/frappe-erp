@@ -58,15 +58,19 @@ def _filter_orders_for_parent_portal(order_items):
     """
     Lọc danh sách order items cho hiển thị trên Parent Portal.
     
+    - Loại mọi dòng thuộc đơn đã bị thay thế (is_superseded), kể cả phí dịch vụ.
     Tuition orders là các mốc giá thay thế nhau - PHHS chỉ đóng 1 order tuition.
-    - Loại bỏ order tuition có tuition_paid_elsewhere = 1 (đã đóng ở order khác)
+    - Loại bỏ order tuition có tuition_paid_elsewhere = 1 (đã đóng ở order khác) — dữ liệu legacy
     - Nếu còn nhiều order tuition chưa đóng, chỉ giữ order mới nhất
     
-    Non-tuition orders (service, activity, other) giữ nguyên - cộng dồn bình thường.
+    Non-tuition orders (service, activity, other) cộng dồn bình thường (sau khi đã bỏ đơn superseded).
     """
     if not order_items:
         return order_items
-    
+
+    # Đơn hàng bị thay bởi đơn mới (kế thừa) — ẩn toàn bộ, mọi order_type
+    order_items = [i for i in order_items if not int(i.get("is_superseded") or 0)]
+
     non_tuition = [i for i in order_items if i.get('order_type') != 'tuition']
     tuition = [i for i in order_items if i.get('order_type') == 'tuition']
     
@@ -105,6 +109,7 @@ def _calculate_student_finance_totals(finance_student_id):
             fos.outstanding_amount,
             fo.order_type,
             IFNULL(fos.tuition_paid_elsewhere, 0) as tuition_paid_elsewhere,
+            IFNULL(fo.is_superseded, 0) as is_superseded,
             fo.sort_order,
             fo.creation as order_creation
         FROM `tabSIS Finance Order Student` fos
@@ -317,6 +322,7 @@ def get_student_finance_detail(finance_student_id=None):
                 fos.outstanding_amount,
                 fos.payment_status,
                 IFNULL(fos.tuition_paid_elsewhere, 0) as tuition_paid_elsewhere,
+                IFNULL(fo.is_superseded, 0) as is_superseded,
                 fo.sort_order,
                 fo.creation as order_creation
             FROM `tabSIS Finance Order Student` fos

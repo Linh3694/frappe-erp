@@ -30,11 +30,53 @@ class SISFinanceOrder(Document):
         """Cập nhật thời gian sửa đổi"""
         self.updated_at = now()
     
+    # Giới hạn độ sâu chuỗi cha để tránh vòng lặp / lỗi dữ liệu
+    _MAX_PARENT_CHAIN_DEPTH = 20
+
     def validate(self):
         """Validate dữ liệu trước khi lưu"""
         self.validate_milestones()
         self.validate_fee_lines()
         self.validate_status_transition()
+        self.validate_parent_order()
+
+    def validate_parent_order(self):
+        """Đơn cha: cùng finance_year_id, cùng order_type; không trùng; không chu trình; cha chưa bị đơn khác thay thế."""
+        if not self.parent_order_id:
+            return
+        if self.parent_order_id == self.name:
+            frappe.throw("Không thể kế thừa chính đơn hàng này")
+
+        try:
+            parent = frappe.get_doc("SIS Finance Order", self.parent_order_id)
+        except frappe.DoesNotExistError:
+            frappe.throw("Đơn hàng cha không tồn tại")
+
+        if parent.finance_year_id != self.finance_year_id:
+            frappe.throw("Đơn cha phải cùng năm tài chính")
+        if (parent.order_type or "") != (self.order_type or ""):
+            frappe.throw("Đơn cha phải cùng loại đơn hàng (order_type)")
+
+        # Cha đã bị đơn khác thay thế (trừ khi chính đơn này là đơn đang sửa = đang giữ quyền thay thế)
+        p_sup = frappe.db.get_value(
+            "SIS Finance Order",
+            self.parent_order_id,
+            ["is_superseded", "superseded_by"],
+            as_dict=True,
+        )
+        if p_sup and p_sup.get("is_superseded") and p_sup.get("superseded_by") and p_sup.get("superseded_by") != self.name:
+            frappe.throw("Đơn hàng cha đã bị thay thế bởi đơn khác. Chọn đơn cha khác hoặc gỡ thay thế ở đơn cũ.")
+
+        # Tránh chu trình: từ cha bước lên, nếu gặp tên đơn hiện tại thì tạo vòng
+        walk = self.parent_order_id
+        depth = 0
+        while walk and depth < self._MAX_PARENT_CHAIN_DEPTH:
+            if walk == self.name:
+                frappe.throw("Quan hệ kế thừa tạo chu trình (A → B → … → A). Hãy chọn đơn cha hợp lệ.")
+            walk = frappe.db.get_value("SIS Finance Order", walk, "parent_order_id")
+            depth += 1
+        if depth >= self._MAX_PARENT_CHAIN_DEPTH:
+            frappe.throw("Chuỗi đơn cha quá sâu (vui lòng kiểm tra dữ liệu)")
     
     def validate_milestones(self):
         """Kiểm tra các mốc deadline"""
@@ -172,11 +214,72 @@ class SISFinanceOrder(Document):
         return self.status in ['data_imported', 'published']
     
     def after_insert(self):
-        """Cập nhật thống kê năm tài chính sau khi thêm đơn hàng"""
+        """đồng bộ kế thừa cha-con + thống kê năm tài chính"""
+        self._sync_parent_supersession_flags(previous_parent_id=None)
         self.update_finance_year_statistics()
+
+    def on_update(self):
+        """Khi đổi parent_order_id: cập nhật cờ trên đơn cha cũ / mới (tránh lệch dữ liệu)."""
+        try:
+            doc_before = self.get_doc_before_save()
+        except Exception:
+            doc_before = None
+        previous_parent_id = (doc_before or {}).get("parent_order_id") if doc_before else None
+        self._sync_parent_supersession_flags(previous_parent_id=previous_parent_id)
+
+    def _sync_parent_supersession_flags(self, previous_parent_id=None):
+        """
+        Đơn con (self) kế thừa từ parent_order_id: đánh dấu cha là bị thay thế.
+        Dùng frappe.db.set_value để tránh đệ quy hook Document của đơn cha.
+        """
+        # Gỡ cờ ở cha cũ nếu đổi cha hoặc bỏ kế thừa
+        if previous_parent_id and previous_parent_id != (self.parent_order_id or None):
+            old_sb = frappe.db.get_value("SIS Finance Order", previous_parent_id, "superseded_by")
+            if old_sb == self.name:
+                frappe.db.set_value(
+                    "SIS Finance Order",
+                    previous_parent_id,
+                    {"is_superseded": 0, "superseded_by": None},
+                )
+
+        if not self.parent_order_id and previous_parent_id:
+            prev_sb = frappe.db.get_value("SIS Finance Order", previous_parent_id, "superseded_by")
+            if prev_sb == self.name:
+                frappe.db.set_value(
+                    "SIS Finance Order",
+                    previous_parent_id,
+                    {"is_superseded": 0, "superseded_by": None},
+                )
+            return
+
+        if self.parent_order_id:
+            frappe.db.set_value(
+                "SIS Finance Order",
+                self.parent_order_id,
+                {"is_superseded": 1, "superseded_by": self.name},
+            )
     
     def on_trash(self):
-        """Cập nhật thống kê năm tài chính sau khi xóa đơn hàng"""
+        """
+        Chặn xóa nếu còn đơn con kế thừa; gỡ cờ đơn cha; cập nhật thống kê năm.
+        """
+        child = frappe.db.get_value(
+            "SIS Finance Order",
+            {"parent_order_id": self.name},
+            "name",
+        )
+        if child:
+            frappe.throw(
+                f"Không thể xóa đơn hàng: đơn {child} đang kế thừa từ đơn này. Gỡ kế thừa ở đơn con trước."
+            )
+        if self.parent_order_id:
+            sup_by = frappe.db.get_value("SIS Finance Order", self.parent_order_id, "superseded_by")
+            if sup_by == self.name:
+                frappe.db.set_value(
+                    "SIS Finance Order",
+                    self.parent_order_id,
+                    {"is_superseded": 0, "superseded_by": None},
+                )
         self.update_finance_year_statistics()
     
     def update_finance_year_statistics(self):

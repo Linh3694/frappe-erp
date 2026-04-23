@@ -18,6 +18,68 @@ from erp.utils.api_response import (
 from .utils import _check_admin_permission
 from .collection_log import get_collection_log_stats_for_order_students
 
+_MAX_INHERITANCE_DEPTH = 20
+
+
+def _order_is_descendant_of(ancestor_id, node_id):
+    """
+    Trả về True nếu node_id nằm dưới ancestor_id trên cây parent_order_id
+    (dùng để không cho chọn đơn con làm cha của tổ tiên, tránh chu trình).
+    """
+    if not ancestor_id or not node_id or ancestor_id == node_id:
+        return False
+    walk = frappe.db.get_value("SIS Finance Order", node_id, "parent_order_id")
+    depth = 0
+    while walk and depth < _MAX_INHERITANCE_DEPTH:
+        if walk == ancestor_id:
+            return True
+        walk = frappe.db.get_value("SIS Finance Order", walk, "parent_order_id")
+        depth += 1
+    return False
+
+
+@frappe.whitelist()
+def get_eligible_parent_orders(finance_year_id=None, order_type=None, exclude_order_id=None):
+    """
+    Danh sách đơn có thể chọn làm "Kế thừa từ đơn": cùng năm, cùng loại,
+    chưa bị thay thế; loại trừ exclude_order_id (đơn đang sửa) và mọi đơn
+    nằm dưới exclude_order_id trong cây (tránh tạo chu trình).
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        if not finance_year_id:
+            finance_year_id = frappe.request.args.get("finance_year_id")
+        if not order_type:
+            order_type = frappe.request.args.get("order_type")
+        if not exclude_order_id:
+            exclude_order_id = frappe.request.args.get("exclude_order_id")
+        if not finance_year_id or not order_type:
+            return validation_error_response(
+                "Thiếu finance_year_id hoặc order_type",
+                {"finance_year_id": [finance_year_id or "bắt buộc"], "order_type": [order_type or "bắt buộc"]},
+            )
+        raw = frappe.get_all(
+            "SIS Finance Order",
+            filters={"finance_year_id": finance_year_id, "order_type": order_type, "is_superseded": 0},
+            fields=["name", "title", "order_type", "status", "creation"],
+            order_by="sort_order asc, creation asc",
+            ignore_permissions=True,
+        )
+        items = []
+        for o in raw:
+            if exclude_order_id and o.name == exclude_order_id:
+                continue
+            if exclude_order_id and _order_is_descendant_of(exclude_order_id, o.name):
+                continue
+            items.append(o)
+        return success_response(data={"items": items, "count": len(items)}, message="OK", logs=logs)
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "get_eligible_parent_orders")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
 
 @frappe.whitelist()
 def create_order_simple():
@@ -55,7 +117,7 @@ def create_order_simple():
             return validation_error_response("Thiếu title", {"title": ["Bắt buộc"]})
         
         # Tạo đơn hàng - không có milestones và fee_lines
-        order_doc = frappe.get_doc({
+        new_row = {
             "doctype": "SIS Finance Order",
             "finance_year_id": data['finance_year_id'],
             "title": data['title'],
@@ -63,8 +125,11 @@ def create_order_simple():
             "status": "draft",
             "is_active": data.get('is_active', 0),
             "is_required": data.get('is_required', 1),
-            "description": data.get('description', '')
-        })
+            "description": data.get('description', ''),
+        }
+        if data.get("parent_order_id"):
+            new_row["parent_order_id"] = data.get("parent_order_id")
+        order_doc = frappe.get_doc(new_row)
         
         order_doc.insert(ignore_permissions=True)
         frappe.db.commit()
@@ -77,7 +142,10 @@ def create_order_simple():
                 "title": order_doc.title,
                 "order_type": order_doc.order_type,
                 "status": order_doc.status,
-                "is_active": order_doc.is_active
+                "is_active": order_doc.is_active,
+                "parent_order_id": getattr(order_doc, "parent_order_id", None),
+                "is_superseded": getattr(order_doc, "is_superseded", 0),
+                "superseded_by": getattr(order_doc, "superseded_by", None),
             },
             message="Tạo đơn hàng thành công",
             logs=logs
@@ -125,7 +193,7 @@ def create_order_with_structure():
             return validation_error_response("Thiếu title", {"title": ["Bắt buộc"]})
         
         # Tạo đơn hàng
-        order_doc = frappe.get_doc({
+        row_w = {
             "doctype": "SIS Finance Order",
             "finance_year_id": data['finance_year_id'],
             "title": data['title'],
@@ -135,7 +203,10 @@ def create_order_with_structure():
             "is_required": data.get('is_required', 1),
             "description": data.get('description', ''),
             "debit_note_form_code": data.get('debit_note_form_code', 'TUITION_STANDARD')
-        })
+        }
+        if data.get("parent_order_id"):
+            row_w["parent_order_id"] = data.get("parent_order_id")
+        order_doc = frappe.get_doc(row_w)
         
         # Thêm milestones
         milestones = data.get('milestones', [])
@@ -231,6 +302,9 @@ def get_order_with_structure(order_id=None):
             "is_required": order_doc.is_required,
             "description": order_doc.description,
             "debit_note_form_code": order_doc.debit_note_form_code or 'TUITION_STANDARD',
+            "parent_order_id": getattr(order_doc, "parent_order_id", None),
+            "is_superseded": int(getattr(order_doc, "is_superseded", 0) or 0),
+            "superseded_by": getattr(order_doc, "superseded_by", None),
             "total_students": order_doc.total_students,
             "data_completed_count": order_doc.data_completed_count,
             "total_collected": order_doc.total_collected,
@@ -303,6 +377,11 @@ def update_order_structure():
         # Chỉ không cho phép khi đã đóng
         if order_doc.status == 'closed':
             return error_response("Không thể cập nhật đơn hàng đã đóng")
+
+        # Kế thừa từ đơn (parent_order_id) — validate trong DocType
+        if "parent_order_id" in data:
+            pid = data.get("parent_order_id")
+            order_doc.parent_order_id = (pid or "").strip() or None
         
         # Cập nhật milestones
         if 'milestones' in data:
@@ -380,8 +459,9 @@ def add_students_to_order_v2():
         
         order_id = data.get('order_id')
         student_ids = data.get('student_ids', [])
-        # Tùy chọn bỏ qua học sinh đã đóng học phí (mặc định True cho order tuition)
+        # Tùy chọn: alias exclude_paid_in_parent_chain (cùng mặc định với legacy)
         exclude_paid_tuition = data.get('exclude_paid_tuition', True)
+        exclude_paid_in_parent_chain = data.get('exclude_paid_in_parent_chain', exclude_paid_tuition)
         
         if not order_id:
             return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
@@ -399,11 +479,38 @@ def add_students_to_order_v2():
         
         logs.append(f"Thêm {len(student_ids)} học sinh vào đơn hàng {order_id}")
         
-        # Nếu order_type là tuition và exclude_paid_tuition = True, 
-        # lấy danh sách học sinh đã đóng học phí (paid hoặc partial) trong năm
+        # Bỏ qua HS đã paid/partial: (1) trên chuỗi đơn cha nếu có parent_order_id;
+        # (2) nếu tuition không có parent — giữ hành vi cũ: mọi đơn tuition khác trong năm.
         paid_tuition_student_ids = set()
-        if order_doc.order_type == 'tuition' and exclude_paid_tuition:
-            paid_students = frappe.db.sql("""
+        if getattr(order_doc, "parent_order_id", None) and exclude_paid_in_parent_chain:
+            chain_ids = []
+            walk = order_doc.parent_order_id
+            depth = 0
+            while walk and depth < _MAX_INHERITANCE_DEPTH:
+                chain_ids.append(walk)
+                walk = frappe.db.get_value("SIS Finance Order", walk, "parent_order_id")
+                depth += 1
+            if chain_ids:
+                # IN clause — bind từng phần tử chuỗi đơn cha
+                ph = ",".join(["%s"] * len(chain_ids))
+                paid_rows = frappe.db.sql(
+                    f"""
+                    SELECT DISTINCT os.finance_student_id
+                    FROM `tabSIS Finance Order Student` os
+                    WHERE os.order_id IN ({ph})
+                    AND os.payment_status IN ('paid', 'partial')
+                """,
+                    chain_ids,
+                    as_list=True,
+                )
+                paid_tuition_student_ids = {r[0] for r in paid_rows}
+                if paid_tuition_student_ids:
+                    logs.append(
+                        f"Tìm thấy {len(paid_tuition_student_ids)} HS đã paid/partial trên chuỗi đơn cha ({len(chain_ids)} đơn)"
+                    )
+        elif order_doc.order_type == "tuition" and exclude_paid_tuition:
+            paid_students = frappe.db.sql(
+                """
                 SELECT DISTINCT os.finance_student_id
                 FROM `tabSIS Finance Order Student` os
                 JOIN `tabSIS Finance Order` o ON o.name = os.order_id
@@ -411,13 +518,13 @@ def add_students_to_order_v2():
                 AND o.order_type = 'tuition'
                 AND o.name != %(current_order)s
                 AND os.payment_status IN ('paid', 'partial')
-            """, {
-                "finance_year_id": order_doc.finance_year_id,
-                "current_order": order_id
-            }, as_list=True)
+            """,
+                {"finance_year_id": order_doc.finance_year_id, "current_order": order_id},
+                as_list=True,
+            )
             paid_tuition_student_ids = {r[0] for r in paid_students}
             if paid_tuition_student_ids:
-                logs.append(f"Tìm thấy {len(paid_tuition_student_ids)} học sinh đã có ghi nhận học phí trong năm")
+                logs.append(f"Tìm thấy {len(paid_tuition_student_ids)} học sinh đã có ghi nhận học phí trong năm (legacy, không kế thừa)")
         
         created_count = 0
         skipped_count = 0
@@ -607,6 +714,75 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
         
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_paid_in_parent_order_chain(order_id=None):
+    """
+    Danh sách finance_student_id đã paid/partial trên bất kỳ đơn nào trong chuỗi cha
+    (parent, ông, ...) — dùng StudentPool khi đơn có kế thừa, mọi order_type.
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+        if not order_id:
+            order_id = frappe.request.args.get("order_id")
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        if not getattr(order_doc, "parent_order_id", None):
+            return success_response(
+                data={"paid_student_ids": [], "paid_students": [], "count": 0, "parent_chain": []},
+                message="OK (không có chuỗi cha)",
+                logs=logs,
+            )
+        chain_ids = []
+        walk = order_doc.parent_order_id
+        depth = 0
+        while walk and depth < _MAX_INHERITANCE_DEPTH:
+            chain_ids.append(walk)
+            walk = frappe.db.get_value("SIS Finance Order", walk, "parent_order_id")
+            depth += 1
+        if not chain_ids:
+            return success_response(
+                data={"paid_student_ids": [], "paid_students": [], "count": 0, "parent_chain": []},
+                message="OK",
+                logs=logs,
+            )
+        ph = ",".join(["%s"] * len(chain_ids))
+        paid_students = frappe.db.sql(
+            f"""
+            SELECT DISTINCT
+                os.finance_student_id,
+                fs.student_name,
+                fs.student_code,
+                o.title as order_title,
+                o.name as order_id
+            FROM `tabSIS Finance Order Student` os
+            JOIN `tabSIS Finance Order` o ON o.name = os.order_id
+            JOIN `tabSIS Finance Student` fs ON fs.name = os.finance_student_id
+            WHERE os.order_id IN ({ph})
+            AND os.payment_status IN ('paid', 'partial')
+        """,
+            chain_ids,
+            as_dict=True,
+        )
+        paid_ids = [r.finance_student_id for r in paid_students]
+        return success_response(
+            data={
+                "paid_student_ids": paid_ids,
+                "paid_students": paid_students,
+                "count": len(paid_ids),
+                "parent_chain": chain_ids,
+            },
+            message="OK",
+            logs=logs,
+        )
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "get_paid_in_parent_order_chain")
         return error_response(f"Lỗi: {str(e)}", logs=logs)
 
 

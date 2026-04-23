@@ -225,7 +225,9 @@ def get_student_orders(finance_student_id=None):
                 "paid_amount": os.paid_amount or 0,
                 "outstanding_amount": outstanding_amount,
                 "payment_status": payment_status,
-                "is_active": order_doc.is_active
+                "is_active": order_doc.is_active,
+                "is_order_superseded": int(getattr(order_doc, "is_superseded", 0) or 0),
+                "parent_order_id": getattr(order_doc, "parent_order_id", None),
             })
 
         # Nhật ký thu phí (số lượng + mới nhất) cho từng dòng order

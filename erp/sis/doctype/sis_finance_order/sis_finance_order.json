@@ -26,6 +26,10 @@
   "is_required",
   "sort_order",
   "debit_note_form_code",
+  "inheritance_section",
+  "parent_order_id",
+  "is_superseded",
+  "superseded_by",
   "description_section",
   "description",
   "milestones_section",
@@ -115,6 +119,33 @@
    "label": "Form Debit Note",
    "default": "TUITION_STANDARD",
    "description": "Mã form template dùng để render Debit Note. VD: TUITION_STANDARD, SERVICES_STANDARD"
+  },
+  {
+   "fieldname": "inheritance_section",
+   "fieldtype": "Section Break",
+   "label": "Kế thừa / thay thế trên Parent Portal",
+   "description": "Đơn mới thay thế đơn cha: đơn cha sẽ ẩn trên PH và bị loại khỏi tổng (cùng loại, cùng niên khoá)."
+  },
+  {
+   "fieldname": "parent_order_id",
+   "fieldtype": "Link",
+   "label": "Kế thừa từ đơn",
+   "options": "SIS Finance Order",
+   "description": "Chọn đơn hàng cùng loại, cùng năm tài chính — đơn này sẽ đè đơn cha khi hiển thị cho phụ huynh."
+  },
+  {
+   "fieldname": "is_superseded",
+   "fieldtype": "Check",
+   "label": "Đã bị thay thế bởi đơn khác",
+   "default": 0,
+   "read_only": 1
+  },
+  {
+   "fieldname": "superseded_by",
+   "fieldtype": "Link",
+   "label": "Được thay bởi đơn",
+   "options": "SIS Finance Order",
+   "read_only": 1
   },
   {
    "fieldname": "description_section",

@@ -54,7 +54,8 @@ def get_orders(finance_year_id=None):
                 "name", "title", "order_type", "status", "is_active", "is_required",
                 "debit_note_form_code", "total_students", "data_completed_count",
                 "total_collected", "total_outstanding", "collection_rate",
-                "sort_order"
+                "sort_order",
+                "parent_order_id", "is_superseded", "superseded_by",
             ],
             order_by="sort_order asc, creation asc",
             ignore_permissions=True
@@ -255,12 +256,16 @@ def update_order():
         updatable_fields = [
             'title', 'order_type', 'total_amount', 'payment_type',
             'installment_count', 'deadline', 'is_active', 'is_required',
-            'sort_order', 'description', 'late_fee_percent'
+            'sort_order', 'description', 'late_fee_percent',
+            'parent_order_id',
         ]
         
         for field in updatable_fields:
             if field in data:
-                setattr(order_doc, field, data[field])
+                val = data[field]
+                if field == "parent_order_id" and val in (None, "", "null"):
+                    val = None
+                setattr(order_doc, field, val)
         
         order_doc.save(ignore_permissions=True)
         frappe.db.commit()
