@@ -466,7 +466,8 @@ def clone_lead_for_sibling():
         doc.student_name = student_name
         if student_dob:
             doc.student_dob = student_dob
-        if current_school and frappe.db.exists("CRM School", current_school):
+        # Trường đang học: lưu chuỗi tự do (field Small Text trên CRM Lead), có thể trùng docname CRM School để vẫn tra school_name ở ACE
+        if current_school:
             doc.current_school = current_school
 
         # SDT

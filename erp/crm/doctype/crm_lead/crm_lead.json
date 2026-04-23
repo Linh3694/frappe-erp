@@ -268,9 +268,8 @@
   },
   {
    "fieldname": "current_school",
-   "fieldtype": "Link",
-   "label": "Current School",
-   "options": "CRM School"
+   "fieldtype": "Small Text",
+   "label": "Trường đang học"
   },
   {
    "fieldname": "student_note",
