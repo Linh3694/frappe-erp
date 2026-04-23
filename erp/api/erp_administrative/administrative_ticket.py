@@ -745,15 +745,6 @@ def _hc_new_message_recipient_emails(doc, sender_email: str) -> set:
     return out
 
 
-def _frappe_user_name_from_email(email: str) -> str:
-    """publish_realtime(user=) cần User.name (kênh user:{name}) — ưu tiên tìm theo cột email."""
-    em = (email or "").strip()
-    if not em:
-        return ""
-    un = frappe.db.get_value("User", {"email": em}, "name")
-    return (un or em).strip()
-
-
 def _emit_hc_new_message_realtime(doc, message_dict, sender_email: str):
     """
     Đẩy tin mới tới Frappe Realtime (publish_realtime) cho các client đã mở ticket.
@@ -762,8 +753,18 @@ def _emit_hc_new_message_realtime(doc, message_dict, sender_email: str):
     if not message_dict or not doc or not getattr(doc, "name", None):
         return
     payload = {"ticket_id": doc.name, "message": message_dict}
-    for em in _hc_new_message_recipient_emails(doc, sender_email):
-        uid = _frappe_user_name_from_email(em)
+    emails = [e for e in _hc_new_message_recipient_emails(doc, sender_email) if (e or "").strip()]
+    if not emails:
+        return
+    users = frappe.get_all("User", filters={"email": ["in", emails]}, fields=["name", "email"])
+    em_lower_to_uid = {}
+    for u in users:
+        e = (u.get("email") or "").strip().lower()
+        if e:
+            em_lower_to_uid[e] = (u.get("name") or "").strip() or (u.get("email") or "").strip()
+    for em in emails:
+        el = (em or "").strip().lower()
+        uid = em_lower_to_uid.get(el) or (em or "").strip()
         if not uid:
             continue
         try:
@@ -925,6 +926,16 @@ def _notify_hc_user_reply(doc, sender_email):
             _hc_send_ticket_email(doc, "user_reply", creator, {})
         except Exception as ex:
             frappe.logger().error(f"administrative_ticket: email user_reply creator: {ex}")
+
+
+def _notify_hc_user_reply_job(ticket_id, sender_email):
+    """
+    Job nền: thông báo phản hồi ticket HC (không chặn request send_comment).
+    """
+    if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+        return
+    doc = frappe.get_doc(DOCTYPE, ticket_id)
+    _notify_hc_user_reply(doc, sender_email)
 
 
 def _notify_hc_status_changed(doc, old_status, new_status, actor_email):
@@ -2027,33 +2038,45 @@ def get_comments():
         rows = frappe.get_all(
             COMMENT_DOCTYPE,
             filters={"ticket": ticket_id},
-            fields=["name"],
+            fields=[
+                "name",
+                "sender_email",
+                "sender_fullname",
+                "sender_avatar",
+                "text",
+                "message_type",
+                "images_json",
+                "creation",
+            ],
             order_by="creation asc",
         )
         messages = []
         for r in rows:
-            c = frappe.get_doc(COMMENT_DOCTYPE, r.name)
             sender = {
-                "_id": c.sender_email or "",
-                "fullname": c.sender_fullname or "",
-                "email": c.sender_email or "",
-                "avatarUrl": c.sender_avatar or "",
+                "_id": r.get("sender_email") or "",
+                "fullname": r.get("sender_fullname") or "",
+                "email": r.get("sender_email") or "",
+                "avatarUrl": r.get("sender_avatar") or "",
             }
-            imgs = c.images_json
+            imgs = r.get("images_json")
             if isinstance(imgs, str):
                 try:
                     imgs = json.loads(imgs)
                 except Exception:
                     imgs = []
+            elif isinstance(imgs, (list, tuple)):
+                pass
+            else:
+                imgs = []
             if not isinstance(imgs, list):
                 imgs = []
             messages.append(
                 {
-                    "_id": c.name,
+                    "_id": r.get("name"),
                     "sender": sender,
-                    "text": c.text or "",
-                    "timestamp": c.creation,
-                    "type": c.message_type or "text",
+                    "text": r.get("text") or "",
+                    "timestamp": r.get("creation"),
+                    "type": r.get("message_type") or "text",
                     "images": imgs,
                 }
             )
@@ -2120,9 +2143,16 @@ def send_comment():
         _append_history(ticket_id, _("Trao đổi"), detail=excerpt or None)
         frappe.db.commit()
         try:
-            _notify_hc_user_reply(frappe.get_doc(DOCTYPE, ticket_id), email)
+            frappe.enqueue(
+                method="erp.api.erp_administrative.administrative_ticket._notify_hc_user_reply_job",
+                queue="short",
+                job_name="hc_ticket_user_reply_%s" % (ticket_id,),
+                ticket_id=ticket_id,
+                sender_email=email,
+                enqueue_after_commit=True,
+            )
         except Exception:
-            frappe.log_error(frappe.get_traceback(), "administrative_ticket.send_comment.notify")
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.send_comment.enqueue_notify")
         message_data = {
             "_id": c.name,
             "sender": {
@@ -2137,7 +2167,7 @@ def send_comment():
             "images": images,
         }
         try:
-            _emit_hc_new_message_realtime(frappe.get_doc(DOCTYPE, ticket_id), message_data, email)
+            _emit_hc_new_message_realtime(doc, message_data, email)
         except Exception:
             frappe.log_error(frappe.get_traceback(), "administrative_ticket.send_comment.emit_realtime")
         return success_response(
