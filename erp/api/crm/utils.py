@@ -119,17 +119,43 @@ def validate_step_transition(current_step: str, target_step: str) -> bool:
 
 
 def generate_crm_code() -> str:
-    """Sinh ma CRM tu dong theo format CRM-00001, tang dan"""
-    last = frappe.db.sql(
-        "SELECT crm_code FROM `tabCRM Lead` "
-        "WHERE crm_code IS NOT NULL AND crm_code != '' "
-        "ORDER BY crm_code DESC LIMIT 1"
-    )
-    if last and last[0][0]:
-        num = int(last[0][0].replace("CRM-", "")) + 1
-    else:
-        num = 1
-    return f"CRM-{num:05d}"
+    """
+    Sinh ma CRM tu dong theo format CRM-00001, tang dan.
+
+    - Sort theo gia tri SO (CAST) thay vi chuoi de tranh bug khi vuot CRM-99999
+      (vi CRM-9999 > CRM-10000 khi so sanh chuoi).
+    - Dung FOR UPDATE de lock row khi transaction dang mo, giam race condition
+      khi co nhieu request tao Lead dong thoi (migration + UI).
+    - Retry toi da 5 lan neu unique constraint bi trung (edge case khi 2 worker
+      doc cung 1 "last" giua 2 transaction).
+    - Format: CRM-{N:05d} voi N >= 1; neu N > 99999 se tu nhien tang do rong (vd CRM-100000).
+    """
+    for _ in range(5):
+        last = frappe.db.sql(
+            """
+            SELECT crm_code
+            FROM `tabCRM Lead`
+            WHERE crm_code IS NOT NULL AND crm_code != ''
+            ORDER BY CAST(REPLACE(crm_code, 'CRM-', '') AS UNSIGNED) DESC
+            LIMIT 1
+            FOR UPDATE
+            """
+        )
+        if last and last[0][0]:
+            try:
+                num = int(last[0][0].replace("CRM-", "")) + 1
+            except ValueError:
+                num = 1
+        else:
+            num = 1
+        candidate = f"CRM-{num:05d}"
+        # Kiem tra lai de chac chan chua co ai chen cung ma (truong hop FOR UPDATE
+        # khong block do transaction khac da commit truoc). Neu trung, thu lai.
+        if not frappe.db.exists("CRM Lead", {"crm_code": candidate}):
+            return candidate
+    # Fallback cuoi cung: dung timestamp de tranh deadlock vong lap
+    import time
+    return f"CRM-{int(time.time() * 1000) % 10**8:08d}"
 
 
 def get_request_data() -> dict:

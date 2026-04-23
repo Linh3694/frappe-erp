@@ -245,7 +245,8 @@ def _build_lead_from_student(
     if guardian_doc:
         lead_data["guardian_name"] = guardian_doc.guardian_name or ""
         lead_data["guardian_email"] = guardian_doc.email or ""
-        lead_data["guardian_id_number"] = guardian_doc.guardian_id or ""
+        # CCCD thuc te nam o field id_number; guardian_id la ma unique cua doc (vd GRD-00001)
+        lead_data["guardian_id_number"] = getattr(guardian_doc, "id_number", "") or ""
         lead_data["relationship"] = REVERSE_RELATIONSHIP_MAP.get(
             relationship_type, relationship_type or ""
         )
@@ -255,7 +256,7 @@ def _build_lead_from_student(
                 "phone_number": guardian_doc.phone_number,
                 "is_primary": 1,
             }]
-            lead_data["primary_phone"] = guardian_doc.phone_number
+            # Khong gan primary_phone: khong phai field DocType CRM Lead, chi enrich dong o API list
 
     return lead_data
 
@@ -389,10 +390,22 @@ def sync_existing_students():
         }, f"Preview: {len(to_migrate)} students can dong bo")
 
     # Thuc hien migration
-    results = {"created": 0, "errors": [], "leads_created": []}
+    results = {"created": 0, "skipped": 0, "errors": [], "leads_created": []}
+    batch_size = cint(data.get("batch_size", 100)) or 100
 
-    for s in to_migrate:
+    for idx, s in enumerate(to_migrate, start=1):
+        # Moi record chay trong 1 savepoint rieng de co the rollback ma khong anh huong
+        # cac record truoc da insert thanh cong trong cung transaction.
+        savepoint = f"crm_mig_{idx}"
         try:
+            frappe.db.savepoint(savepoint)
+
+            # Kiem tra lai ngay truoc khi insert de tranh race condition
+            # (vd: admin khac dang chay cung thao tac, hoac vua chay backfill)
+            if frappe.db.exists("CRM Lead", {"linked_student": s["name"]}):
+                results["skipped"] += 1
+                continue
+
             student_doc = frappe.get_doc("CRM Student", s["name"])
             guardian_doc, rel_type = _find_key_guardian_for_student(s["name"])
 
@@ -424,18 +437,141 @@ def sync_existing_students():
             })
 
         except Exception as e:
+            # Rollback chi savepoint nay; cac record truoc van giu nguyen
+            try:
+                frappe.db.rollback(save_point=savepoint)
+            except Exception:
+                pass
+            error_msg = str(e)
             results["errors"].append({
                 "student": s["name"],
-                "error": str(e),
+                "error": error_msg,
             })
+            # Ghi log vinh vien de trace sau migration
+            frappe.log_error(
+                message=frappe.get_traceback() or error_msg,
+                title=f"CRM Migration sync_existing_students - {s['name']}",
+            )
+
+        # Commit theo batch de tranh mat tien do khi process bi kill giua chung
+        if idx % batch_size == 0:
+            frappe.db.commit()
 
     frappe.db.commit()
 
     return success_response(
         results,
         f"Da tao {results['created']} CRM Lead tu {len(to_migrate)} students. "
-        f"Loi: {len(results['errors'])}"
+        f"Bo qua (da co lead): {results['skipped']}. Loi: {len(results['errors'])}"
     )
+
+
+def _run_migration_in_background(job_id: str, method: str, params: dict, user: str = None):
+    """
+    Chay sync/backfill o background job, luu ket qua vao cache de client poll qua
+    `get_migration_job_status`.
+
+    - job_id: key cache de theo doi.
+    - method: dotted path cua whitelisted function (vd erp.api.crm.migration.sync_existing_students).
+    - params: dict params (campus_id, include_family_siblings, ...).
+    - user: session user goc (de check_crm_permission hoat dong dung).
+    """
+    cache_key = f"crm_migration_result:{job_id}"
+    cache = frappe.cache()
+    try:
+        if user:
+            frappe.set_user(user)
+        cache.set_value(
+            cache_key,
+            {"status": "running", "method": method, "params": params},
+            expires_in_sec=86400,
+        )
+        # Gia lap form_dict de get_request_data() trong target function nhan duoc params
+        frappe.local.form_dict = frappe._dict(params or {})
+        fn = frappe.get_attr(method)
+        result = fn()
+        cache.set_value(
+            cache_key,
+            {"status": "completed", "method": method, "result": result},
+            expires_in_sec=86400,
+        )
+    except Exception as e:
+        frappe.log_error(
+            message=frappe.get_traceback() or str(e),
+            title=f"CRM Migration Worker - {method} - {job_id}",
+        )
+        cache.set_value(
+            cache_key,
+            {
+                "status": "failed",
+                "method": method,
+                "error": str(e),
+                "traceback": frappe.get_traceback(),
+            },
+            expires_in_sec=86400,
+        )
+
+
+def _enqueue_migration(method: str) -> dict:
+    """Helper chung de enqueue 1 migration method va tra ve job_id."""
+    data = get_request_data()
+    job_id = f"crm_mig_{frappe.generate_hash(length=10)}"
+    frappe.enqueue(
+        "erp.api.crm.migration._run_migration_in_background",
+        queue="long",
+        timeout=36000,
+        job_name=job_id,
+        job_id=job_id,
+        method=method,
+        params=dict(data or {}),
+        user=frappe.session.user,
+    )
+    return {"job_id": job_id, "status": "queued", "method": method}
+
+
+@frappe.whitelist(methods=["POST"])
+def enqueue_sync_existing_students():
+    """
+    Enqueue `sync_existing_students` chay background (queue=long, timeout=36000s).
+    Tra ve job_id de client poll qua `get_migration_job_status`.
+    Nhan cung tham so nhu `sync_existing_students`.
+    """
+    check_crm_permission(["System Manager", "SIS Manager"])
+    result = _enqueue_migration("erp.api.crm.migration.sync_existing_students")
+    return success_response(result, f"Da queue sync_existing_students (job_id={result['job_id']})")
+
+
+@frappe.whitelist(methods=["POST"])
+def enqueue_backfill_lead_family_siblings():
+    """
+    Enqueue `backfill_lead_family_siblings` chay background.
+    Tra ve job_id de poll qua `get_migration_job_status`.
+    """
+    check_crm_permission(["System Manager", "SIS Manager"])
+    result = _enqueue_migration("erp.api.crm.migration.backfill_lead_family_siblings")
+    return success_response(result, f"Da queue backfill (job_id={result['job_id']})")
+
+
+@frappe.whitelist(methods=["GET"])
+def get_migration_job_status():
+    """
+    Kiem tra trang thai cua migration job da enqueue.
+    Params: job_id (required).
+    Tra ve: {status: queued|running|completed|failed, result?, error?}.
+    """
+    check_crm_permission(["System Manager", "SIS Manager"])
+    job_id = frappe.form_dict.get("job_id")
+    if not job_id:
+        return error_response("Thieu job_id")
+    cache_val = frappe.cache().get_value(f"crm_migration_result:{job_id}")
+    if not cache_val:
+        # Co the job chua start hoac da het TTL
+        return single_item_response(
+            {"job_id": job_id, "status": "unknown"},
+            "Khong tim thay job (chua start hoac da het han cache)",
+        )
+    cache_val["job_id"] = job_id
+    return single_item_response(cache_val, f"Trang thai job {job_id}")
 
 
 def _lead_needs_family_backfill(lead_doc, force):
@@ -520,9 +656,13 @@ def backfill_lead_family_siblings():
         }, f"Preview: {len(to_process)} lead can cap nhat family/siblings")
 
     results = {"updated": 0, "skipped_no_family_or_siblings": 0, "errors": [], "details": []}
+    batch_size = cint(data.get("batch_size", 100)) or 100
 
-    for lead_doc in to_process:
+    for idx, lead_doc in enumerate(to_process, start=1):
+        savepoint = f"crm_backfill_{idx}"
         try:
+            frappe.db.savepoint(savepoint)
+
             student_doc = frappe.get_doc("CRM Student", lead_doc.linked_student)
             fam = _resolve_linked_family_for_student(student_doc)
             sib_rows = _lead_sibling_rows_for_student(student_doc, fam)
@@ -554,11 +694,23 @@ def backfill_lead_family_siblings():
                 "status": "updated",
             })
         except Exception as e:
+            try:
+                frappe.db.rollback(save_point=savepoint)
+            except Exception:
+                pass
+            error_msg = str(e)
             results["errors"].append({
                 "lead": lead_doc.name,
                 "linked_student": getattr(lead_doc, "linked_student", None),
-                "error": str(e),
+                "error": error_msg,
             })
+            frappe.log_error(
+                message=frappe.get_traceback() or error_msg,
+                title=f"CRM Migration backfill - {lead_doc.name}",
+            )
+
+        if idx % batch_size == 0:
+            frappe.db.commit()
 
     frappe.db.commit()
 
@@ -605,8 +757,13 @@ def fix_migrated_statuses():
     """
     Cap nhat status cu khong con hop le sang status moi.
     Chuyen cac records co status bi loi do thay doi step/status mapping.
+
+    Params (JSON body):
+      - dry_run (optional, bool): Neu 1 chi dem + tra ve chi tiet, KHONG UPDATE
     """
     check_crm_permission(["System Manager", "SIS Manager"])
+    data = get_request_data()
+    dry_run = cint(data.get("dry_run", 0))
 
     # (step, old_status, new_status) — Nghi hoc co 2 mapping legacy Withdraw/Graduated
     STATUS_FIXES = [
@@ -628,42 +785,50 @@ def fix_migrated_statuses():
         "Fail": {"QLead": "Lost"},
     }
 
-    results = {"updated": 0, "details": []}
+    results = {"updated": 0, "details": [], "dry_run": bool(dry_run)}
 
-    # Fix step-specific status renames
+    # Helper dem truoc, log va update (bo qua update neu dry_run)
+    def _apply_status_fix(step, old_status, new_status):
+        count = frappe.db.sql(
+            "SELECT COUNT(*) FROM `tabCRM Lead` WHERE step = %(step)s AND status = %(old)s",
+            {"step": step, "old": old_status},
+        )[0][0]
+        if not count:
+            return
+        detail = f"{step}: {old_status} -> {new_status} ({count} records)"
+        results["updated"] += count
+        results["details"].append(detail)
+        if not dry_run:
+            frappe.db.sql(
+                "UPDATE `tabCRM Lead` SET status = %(new)s WHERE step = %(step)s AND status = %(old)s",
+                {"new": new_status, "step": step, "old": old_status},
+            )
+            frappe.logger("crm_migration").info(f"[fix_migrated_statuses] {detail}")
+
     for step, old_status, new_status in STATUS_FIXES:
-        frappe.db.sql(
-            "UPDATE `tabCRM Lead` SET status = %(new)s WHERE step = %(step)s AND status = %(old)s",
-            {"new": new_status, "step": step, "old": old_status},
-        )
-        affected = frappe.db.sql("SELECT ROW_COUNT()")[0][0]
-        if affected:
-            results["updated"] += affected
-            results["details"].append(f"{step}: {old_status} -> {new_status} ({affected} records)")
+        _apply_status_fix(step, old_status, new_status)
 
-    # Fix old status names
     for old_status, step_map in OLD_STATUS_MAP.items():
         for step, new_status in step_map.items():
-            affected_count = frappe.db.sql(
-                "SELECT COUNT(*) FROM `tabCRM Lead` WHERE step = %(step)s AND status = %(old)s",
-                {"step": step, "old": old_status}
-            )[0][0]
-            if affected_count:
-                frappe.db.sql(
-                    "UPDATE `tabCRM Lead` SET status = %(new)s WHERE step = %(step)s AND status = %(old)s",
-                    {"new": new_status, "step": step, "old": old_status}
-                )
-                results["updated"] += affected_count
-                results["details"].append(f"{step}: {old_status} -> {new_status} ({affected_count} records)")
+            _apply_status_fix(step, old_status, new_status)
 
-    # Fix Draft records co status 'New' -> status rong
+    # Fix Draft records co status != '' -> status rong
     draft_count = frappe.db.sql(
         "SELECT COUNT(*) FROM `tabCRM Lead` WHERE step = 'Draft' AND status != ''",
     )[0][0]
     if draft_count:
-        frappe.db.sql("UPDATE `tabCRM Lead` SET status = '' WHERE step = 'Draft' AND status != ''")
+        detail = f"Draft: cleared status ({draft_count} records)"
         results["updated"] += draft_count
-        results["details"].append(f"Draft: cleared status ({draft_count} records)")
+        results["details"].append(detail)
+        if not dry_run:
+            frappe.db.sql("UPDATE `tabCRM Lead` SET status = '' WHERE step = 'Draft' AND status != ''")
+            frappe.logger("crm_migration").info(f"[fix_migrated_statuses] {detail}")
+
+    if dry_run:
+        return success_response(
+            results,
+            f"Dry-run: {results['updated']} records se duoc cap nhat. KHONG co thay doi DB.",
+        )
 
     frappe.db.commit()
 
