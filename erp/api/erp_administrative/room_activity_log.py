@@ -8,6 +8,7 @@ ACTIVITY_TYPES = frozenset(
     {
         "handover_sent",
         "handover_confirmed",
+        "handover_rejected",
         "inventory_submitted",
         "inventory_accepted",
         "inventory_rejected",

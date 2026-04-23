@@ -219,15 +219,15 @@ def export_simple_template(order_id=None):
         
         order_doc = frappe.get_doc("SIS Finance Order", order_id)
         
-        # Headers đơn giản (thêm semester_amount)
-        headers = ["student_code", "student_name", "class_title", "total_amount", "semester_amount", "paid_amount", "note"]
-        header_labels = ["Mã học sinh", "Tên học sinh", "Lớp", "Tiền cả năm", "Tiền 1 kỳ", "Số tiền đã đóng", "Ghi chú"]
+        # Headers đơn giản (tiền theo từng kỳ)
+        headers = ["student_code", "student_name", "class_title", "total_amount", "semester_1_amount", "semester_2_amount", "paid_amount", "note"]
+        header_labels = ["Mã học sinh", "Tên học sinh", "Lớp", "Tiền cả năm", "Tiền kỳ 1", "Tiền kỳ 2", "Số tiền đã đóng", "Ghi chú"]
         
         # Get students
         students = frappe.get_all(
             "SIS Finance Order Student",
             filters={"order_id": order_id},
-            fields=["name", "student_code", "student_name", "class_title", "total_amount", "semester_amount", "paid_amount", "notes"],
+            fields=["name", "student_code", "student_name", "class_title", "total_amount", "semester_1_amount", "semester_2_amount", "paid_amount", "notes"],
             order_by="student_name ASC"
         )
         
@@ -239,7 +239,8 @@ def export_simple_template(order_id=None):
                 "student_name": student.student_name,
                 "class_title": student.class_title or "",
                 "total_amount": student.total_amount or "",
-                "semester_amount": student.semester_amount or "",
+                "semester_1_amount": student.semester_1_amount or "",
+                "semester_2_amount": student.semester_2_amount or "",
                 "paid_amount": student.paid_amount or "",
                 "note": student.notes or ""
             }
@@ -298,6 +299,12 @@ def import_simple_amounts():
         df = pd.read_excel(file, header=1)
         
         logs.append(f"Columns in Excel: {list(df.columns)}")
+
+        warnings = []
+        if 'semester_amount' in df.columns:
+            warnings.append(
+                "File dùng cột cũ semester_amount (đã bỏ). Dùng semester_1_amount và semester_2_amount; cột cũ đã bị bỏ qua."
+            )
         
         # Validate cột student_code
         if 'student_code' not in df.columns:
@@ -329,18 +336,36 @@ def import_simple_amounts():
                 order_student_doc = frappe.get_doc("SIS Finance Order Student", order_student_name)
                 
                 # Cập nhật total_amount nếu có
+                total_from_file = None
                 if 'total_amount' in row and pd.notna(row['total_amount']):
                     try:
-                        order_student_doc.total_amount = float(row['total_amount'])
+                        total_from_file = float(row['total_amount'])
+                        order_student_doc.total_amount = total_from_file
                     except (ValueError, TypeError):
                         pass
                 
-                # Cập nhật semester_amount nếu có
-                if 'semester_amount' in row and pd.notna(row['semester_amount']):
+                # Cập nhật tiền từng kỳ nếu có
+                sem1_val = None
+                sem2_val = None
+                if 'semester_1_amount' in row and pd.notna(row['semester_1_amount']):
                     try:
-                        order_student_doc.semester_amount = float(row['semester_amount'])
+                        sem1_val = float(row['semester_1_amount'])
+                        order_student_doc.semester_1_amount = sem1_val
                     except (ValueError, TypeError):
                         pass
+                if 'semester_2_amount' in row and pd.notna(row['semester_2_amount']):
+                    try:
+                        sem2_val = float(row['semester_2_amount'])
+                        order_student_doc.semester_2_amount = sem2_val
+                    except (ValueError, TypeError):
+                        pass
+
+                # Cảnh báo lỏng: tiền cả năm vs tổng 2 kỳ (không chặn import)
+                if total_from_file is not None and sem1_val is not None and sem2_val is not None:
+                    if abs(total_from_file - (sem1_val + sem2_val)) > 1:
+                        warnings.append(
+                            f"Dòng ~{idx + 3} ({student_code}): Tiền cả năm ({total_from_file:,.0f}) khác tổng kỳ 1 + kỳ 2 ({sem1_val + sem2_val:,.0f})."
+                        )
                 
                 # Cập nhật paid_amount nếu có
                 if 'paid_amount' in row and pd.notna(row['paid_amount']):
@@ -373,7 +398,8 @@ def import_simple_amounts():
                 "success_count": success_count,
                 "error_count": error_count,
                 "total_count": len(df),
-                "errors": errors[:20]
+                "errors": errors[:20],
+                "warnings": warnings[:50]
             },
             message=f"Import thành công {success_count}/{len(df)} dòng",
             logs=logs

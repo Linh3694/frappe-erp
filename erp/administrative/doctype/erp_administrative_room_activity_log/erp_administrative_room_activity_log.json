@@ -43,7 +43,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Lo\u1ea1i s\u1ef1 ki\u1ec7n",
-   "options": "handover_sent\nhandover_confirmed\ninventory_submitted\ninventory_accepted\ninventory_rejected\nuser_assigned\nuser_removed\nequipment_added\nequipment_updated\nequipment_removed\nrepair_reported\nrepair_completed\nassignment_title_changed\nbuilding_moved",
+   "options": "handover_sent\nhandover_confirmed\nhandover_rejected\ninventory_submitted\ninventory_accepted\ninventory_rejected\nuser_assigned\nuser_removed\nequipment_added\nequipment_updated\nequipment_removed\nrepair_reported\nrepair_completed\nassignment_title_changed\nbuilding_moved",
    "reqd": 1
   },
   {

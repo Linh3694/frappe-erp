@@ -35,7 +35,8 @@
   "milestone_amounts_json",
   "payment_summary",
   "total_amount",
-  "semester_amount",
+  "semester_1_amount",
+  "semester_2_amount",
   "paid_amount",
   "column_break_payment",
   "outstanding_amount",
@@ -179,11 +180,18 @@
    "description": "Số tiền phải đóng nếu đóng cả năm (yearly)"
   },
   {
-   "fieldname": "semester_amount",
+   "fieldname": "semester_1_amount",
    "fieldtype": "Currency",
-   "label": "Tiền 1 kỳ",
+   "label": "Tiền kỳ 1",
    "default": 0,
-   "description": "Số tiền phải đóng mỗi kỳ (2 kỳ bằng nhau). Tổng semester = semester_amount × 2"
+   "description": "Số tiền phải đóng cho kỳ 1 (đóng theo kỳ). Tổng 2 kỳ = kỳ 1 + kỳ 2 khi chọn thanh toán theo kỳ"
+  },
+  {
+   "fieldname": "semester_2_amount",
+   "fieldtype": "Currency",
+   "label": "Tiền kỳ 2",
+   "default": 0,
+   "description": "Số tiền phải đóng cho kỳ 2 (đóng theo kỳ). Tổng 2 kỳ = kỳ 1 + kỳ 2 khi chọn thanh toán theo kỳ"
   },
   {
    "fieldname": "paid_amount",

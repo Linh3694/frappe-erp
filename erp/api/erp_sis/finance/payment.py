@@ -308,8 +308,10 @@ def record_payment_choice():
         finance_student_id = order_student.finance_student_id
         
         yearly_amount = order_student.total_amount or 0
-        sem_amount = order_student.semester_amount or 0
-        
+        # Mỗi kỳ một mức phí riêng (DocType: semester_1_amount / semester_2_amount)
+        sem1_amt = order_student.semester_1_amount or 0
+        sem2_amt = order_student.semester_2_amount or 0
+
         if payment_choice == 'yearly':
             if yearly_amount <= 0:
                 return error_response("Chưa có số tiền cả năm (total_amount)", logs=logs)
@@ -324,21 +326,21 @@ def record_payment_choice():
             logs.append(f"Ghi nhận đóng cả năm: {yearly_amount:,.0f} đ")
         
         elif payment_choice == 'semester_1':
-            if sem_amount <= 0:
-                return error_response("Chưa có số tiền kỳ (semester_amount)", logs=logs)
+            if sem1_amt <= 0:
+                return error_response("Chưa có số tiền kỳ 1 (semester_1_amount)", logs=logs)
             
             order_student.payment_scheme_choice = 'semester'
-            order_student.semester_1_paid = sem_amount
+            order_student.semester_1_paid = sem1_amt
             # before_save sẽ tính lại total_amount, paid_amount, outstanding, status
-            logs.append(f"Ghi nhận đóng Kỳ 1: {sem_amount:,.0f} đ")
+            logs.append(f"Ghi nhận đóng Kỳ 1: {sem1_amt:,.0f} đ")
         
         elif payment_choice == 'semester_2':
-            if sem_amount <= 0:
-                return error_response("Chưa có số tiền kỳ (semester_amount)", logs=logs)
+            if sem2_amt <= 0:
+                return error_response("Chưa có số tiền kỳ 2 (semester_2_amount)", logs=logs)
             
             order_student.payment_scheme_choice = 'semester'
-            order_student.semester_2_paid = sem_amount
-            logs.append(f"Ghi nhận đóng Kỳ 2: {sem_amount:,.0f} đ")
+            order_student.semester_2_paid = sem2_amt
+            logs.append(f"Ghi nhận đóng Kỳ 2: {sem2_amt:,.0f} đ")
         
         if notes:
             existing_notes = order_student.notes or ''
@@ -377,7 +379,8 @@ def record_payment_choice():
                 "payment_choice": payment_choice,
                 "payment_scheme_choice": order_student.payment_scheme_choice,
                 "total_amount": order_student.total_amount,
-                "semester_amount": order_student.semester_amount,
+                "semester_1_amount": order_student.semester_1_amount,
+                "semester_2_amount": order_student.semester_2_amount,
                 "paid_amount": order_student.paid_amount,
                 "outstanding_amount": order_student.outstanding_amount,
                 "payment_status": order_student.payment_status,

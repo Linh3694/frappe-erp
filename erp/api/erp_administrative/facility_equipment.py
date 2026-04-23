@@ -1234,6 +1234,12 @@ def _handover_dict_from_row(r):
             sent_by_name = get_fullname(r.sent_by) or r.sent_by
         except Exception:
             sent_by_name = r.sent_by
+    reviewed_by_name = None
+    if r.get("reviewed_by"):
+        try:
+            reviewed_by_name = get_fullname(r.reviewed_by) or r.reviewed_by
+        except Exception:
+            reviewed_by_name = r.reviewed_by
     ht = r.get("handover_type") or "class"
     out = {
         "name": r.name,
@@ -1251,6 +1257,10 @@ def _handover_dict_from_row(r):
         "confirmed_on": r.confirmed_on,
         "confirmed_by": r.confirmed_by,
         "confirmed_by_name": confirmed_by_name,
+        "reviewed_by": r.get("reviewed_by"),
+        "reviewed_by_name": reviewed_by_name,
+        "reviewed_on": r.get("reviewed_on"),
+        "review_note": r.get("review_note") or None,
     }
     if r.get("school_year_id") is not None:
         out["school_year_id"] = r.get("school_year_id")
@@ -1279,6 +1289,9 @@ def _handover_payload_for_class(class_id):
             "sent_on",
             "confirmed_on",
             "confirmed_by",
+            "reviewed_by",
+            "reviewed_on",
+            "review_note",
             "handover_type",
             "responsible_user",
             "school_year_id",
@@ -1329,6 +1342,9 @@ def get_room_handover_status():
                 "sent_on",
                 "confirmed_on",
                 "confirmed_by",
+                "reviewed_by",
+                "reviewed_on",
+                "review_note",
                 "handover_type",
                 "responsible_user",
                 "school_year_id",
@@ -1388,6 +1404,9 @@ def get_responsible_user_handover_status():
                 "sent_on",
                 "confirmed_on",
                 "confirmed_by",
+                "reviewed_by",
+                "reviewed_on",
+                "review_note",
                 "handover_type",
                 "responsible_user",
             ],
@@ -1622,6 +1641,91 @@ def confirm_handover():
         return single_item_response({"name": doc.name, "status": doc.status}, _("Đã xác nhận"))
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "facility_equipment.confirm_handover")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
+def reject_handover():
+    """GV / PIC từ chối bàn giao, trả lại Hành chính kèm lý do."""
+    try:
+        data = _parse_json_body()
+        handover_id = data.get("handover_id") or data.get("name")
+        reason = (data.get("reason") or data.get("review_note") or "").strip()
+        if not handover_id or not frappe.db.exists("ERP Administrative Facility Handover", handover_id):
+            return not_found_response(_("Không tìm thấy bàn giao"))
+        if not reason:
+            return validation_error_response(
+                _("Cần ghi chú lý do từ chối"),
+                {"reason": ["required"]},
+            )
+
+        doc = frappe.get_doc("ERP Administrative Facility Handover", handover_id)
+        if getattr(doc, "direction", None) == "incoming":
+            return validation_error_response(
+                _("Bản ghi không phải bàn giao đi"),
+                {"handover_id": ["invalid_type"]},
+            )
+        if doc.status == "Confirmed":
+            return validation_error_response(
+                _("Bàn giao đã được xác nhận, không thể từ chối"),
+                {"status": ["invalid"]},
+            )
+        if doc.status == "Rejected":
+            return single_item_response(
+                {"name": doc.name, "status": doc.status},
+                _("Đã từ chối trước đó"),
+            )
+        if doc.status != "Pending":
+            return validation_error_response(
+                _("Bàn giao không còn ở trạng thái chờ xác nhận"),
+                {"status": ["invalid"]},
+            )
+
+        ht = getattr(doc, "handover_type", None) or "class"
+        ru = getattr(doc, "responsible_user", None)
+        if ht == "responsible_user" or (ru and not doc.class_id):
+            if ru:
+                if frappe.session.user != ru:
+                    return validation_error_response(
+                        _("Chỉ người phụ trách mới được từ chối"),
+                        {"permission": ["denied"]},
+                    )
+            elif ht == "responsible_user":
+                rid = doc.room
+                sy = getattr(doc, "school_year_id", None)
+                if not (
+                    _user_is_room_responsible(rid, frappe.session.user)
+                    or (sy and _user_is_yearly_assignment_pic(rid, sy, frappe.session.user))
+                ):
+                    return validation_error_response(
+                        _("Chỉ người phụ trách phòng mới được từ chối"),
+                        {"permission": ["denied"]},
+                    )
+
+        doc.status = "Rejected"
+        doc.reviewed_by = frappe.session.user
+        doc.reviewed_on = frappe.utils.now()
+        doc.review_note = reason
+        doc.save(ignore_permissions=False)
+        frappe.db.commit()
+        try:
+            log_room_activity(
+                doc.room,
+                "handover_rejected",
+                user=frappe.session.user,
+                target_user=getattr(doc, "sent_by", None) or None,
+                reference_doctype="ERP Administrative Facility Handover",
+                reference_name=doc.name,
+                note=reason,
+                school_year_id=getattr(doc, "school_year_id", None),
+                activity_date=today(),
+            )
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "facility_equipment.reject_handover.activity_log")
+        return single_item_response({"name": doc.name, "status": doc.status}, _("Đã từ chối bàn giao"))
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "facility_equipment.reject_handover")
         return error_response(str(e))
 
 
