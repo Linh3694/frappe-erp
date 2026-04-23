@@ -61,6 +61,25 @@ _EXPORT_BULK_LEAD_FIELDS = [
 _BULK_FLOAT_FIELDS = frozenset()
 
 
+def _resolve_pic_to_user_name(pic_raw):
+    """
+    Map gia tri nhap o cot PIC (email hoac User.name) -> name (khoa Link User).
+    Trung User.name truc tiep; neu khong, tim theo email (khong phan biet hoa thuong).
+    """
+    s = (pic_raw or "").strip()
+    if not s:
+        return None
+    if frappe.db.exists("User", s):
+        return s
+    row = frappe.db.sql(
+        "select name from `tabUser` where lower(nullif(ifnull(`email`,''),'')) = lower(%s) limit 1",
+        (s,),
+    )
+    if row:
+        return row[0][0]
+    return None
+
+
 def _parse_bulk_cell(field, raw):
     """Chuan hoa gia tri tu Excel / JSON."""
     if raw is None:
@@ -309,6 +328,18 @@ def export_step_leads_for_update():
         limit_page_length=0,
     )
 
+    # Hien thi email trong file Excel (de nguoi dung sua); nhap lai se map ve User.name
+    for lead in leads:
+        pic_name = lead.get("pic")
+        if not pic_name:
+            continue
+        u = frappe.db.get_value("User", pic_name, ["name", "email"], as_dict=True)
+        if u:
+            em = (u.get("email") or "").strip()
+            if em:
+                lead["pic"] = em
+            # neu khong co email, giu name (hien thi dang nhap Frappe)
+
     all_step_statuses = {s: STEP_STATUSES.get(s, []) for s in CRM_STEPS}
 
     return success_response({
@@ -325,6 +356,7 @@ def bulk_update_leads():
     """
     Cap nhat hang loat records tu file Excel.
     Cap nhat: toan bo truong thong tin hoc sinh (StudentSection), pic, step, status, ly do tu choi (Lost).
+    Cot pic: nhap email User hoac User.name; he thong map ve User (Link). Neu khong tim thay User -> bao loi dong.
     Cho phep chuyen buoc (step) — status se duoc validate theo buoc moi.
     Match bang truong 'name' (ID noi bo) hoac 'crm_code'.
     Chi ghi CRM Lead Step History khi step hoac status pipeline thay doi.
@@ -372,9 +404,16 @@ def bulk_update_leads():
             changed = _apply_bulk_student_section_fields(doc, row)
 
             new_pic = str(row.get("pic", "")).strip()
-            if new_pic and new_pic != (doc.pic or ""):
-                doc.pic = new_pic
-                changed = True
+            if new_pic:
+                resolved = _resolve_pic_to_user_name(new_pic)
+                if not resolved:
+                    results["errors"].append({
+                        "row": row_num,
+                        "error": f"PIC '{new_pic}' khong co User tuong ung (dung dung email hoac ten dang nhap nhu trong he thong)"
+                    })
+                elif resolved != (doc.pic or ""):
+                    doc.pic = resolved
+                    changed = True
 
             new_step = str(row.get("step", "")).strip()
             new_status = str(row.get("status", "")).strip()
