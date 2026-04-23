@@ -64,17 +64,33 @@ fi
 
 OVERLAY="${ERP_DIR}/patches/overlay/v${MAJOR}/realtime/middlewares/authenticate.js"
 
-# SHA-256 của pristine upstream (frappe/frappe raw) đã chốt.
-# Nếu Frappe vá hotfix và đổi hash, script sẽ từ chối (tránh ghi đè mù).
-PRISTINE_V15_SHA256="3c153527523c584b04a465a1167d6fbc3c585e8e72c26eadf2d7b3c42d36ddc9"
-PRISTINE_V16_SHA256="a150cbedb44008a24ae697a6173d33493eb8e1bac71887579801a3b522e2c220"
+# SHA-256 của pristine upstream đã chốt (nhiều bản cho cùng major vì Frappe ra hotfix file này nhiều lần).
+# Bổ sung SHA vào danh sách khi gặp bản cũ/mới hợp lệ — giữ an toàn để không ghi đè mù.
+PRISTINE_V15_SHAS=(
+	"3c153527523c584b04a465a1167d6fbc3c585e8e72c26eadf2d7b3c42d36ddc9" # frappe:version-15 (hiện tại trên GitHub)
+	"d124a8c5edbc8449ceca5bbbf3df9e89bf254f3970b796de1833b738983655c8" # frappe:version-15 (bản 2024-07 cũ hơn, chỉ check !cookie)
+)
+PRISTINE_V16_SHAS=(
+	"a150cbedb44008a24ae697a6173d33493eb8e1bac71887579801a3b522e2c220" # frappe:version-16 (hiện tại trên GitHub)
+)
 
-pristine_sha_for_major() {
-	case "$1" in
-		15) echo "$PRISTINE_V15_SHA256" ;;
-		16) echo "$PRISTINE_V16_SHA256" ;;
-		*)  echo "" ;;
-	esac
+is_known_pristine_sha() {
+	# $1 = major, $2 = sha
+	local arr_name="PRISTINE_V${1}_SHAS[@]"
+	local s
+	for s in "${!arr_name}"; do
+		[[ "$s" == "$2" ]] && return 0
+	done
+	return 1
+}
+
+first_known_pristine_sha() {
+	local arr_name="PRISTINE_V${1}_SHAS[@]"
+	local s
+	for s in "${!arr_name}"; do
+		echo "$s"; return 0
+	done
+	return 1
 }
 
 # Trạng thái hiện tại của file đích:
@@ -87,9 +103,7 @@ classify_target() {
 	fi
 	local have
 	have="$(hash_file "$TARGET_FILE")"
-	local want
-	want="$(pristine_sha_for_major "$MAJOR")"
-	if [[ -n "$want" && "$have" == "$want" ]]; then
+	if is_known_pristine_sha "$MAJOR" "$have"; then
 		echo "pristine"
 	else
 		echo "unknown"
@@ -147,9 +161,12 @@ apply_cmd() {
 			;;
 		unknown)
 			if [[ "${FORCE:-0}" != "1" ]]; then
-				warn "File đích KHÁC upstream đã chốt cho v${MAJOR} (có thể Frappe ra hotfix hoặc đã có hotfix tay khác)."
-				warn "Target sha256: $(hash_file "$TARGET_FILE")"
-				warn "Expect sha256: $(pristine_sha_for_major "$MAJOR")"
+				warn "File đích KHÁC tất cả pristine đã chốt cho v${MAJOR} (có thể Frappe ra hotfix hoặc đã có hotfix tay khác)."
+				warn "Target sha256 : $(hash_file "$TARGET_FILE")"
+				warn "Known pristine:"
+				local arr_name="PRISTINE_V${MAJOR}_SHAS[@]"
+				local s
+				for s in "${!arr_name}"; do warn "  - $s"; done
 				warn "Để tránh break prod, lệnh dừng lại. Kiểm tra diff với overlay, hoặc chạy lại với FORCE=1 nếu bạn chắc chắn overlay tương thích."
 				warn "Gợi ý: diff -u \"$TARGET_FILE\" \"$OVERLAY\" | less"
 				exit 2
