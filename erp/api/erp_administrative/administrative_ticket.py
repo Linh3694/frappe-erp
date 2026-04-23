@@ -26,6 +26,9 @@ HISTORY_DOCTYPE = "ERP Administrative Ticket History"
 
 _STAFF_ROLES = ("System Manager", "SIS Administrative", "SIS BOD")
 
+# Sự kiện Socket.IO (frappe.publish_realtime) — trùng tên ở web + mobile
+HC_TICKET_RT_EVENT_NEW_MESSAGE = "administrative_ticket_new_message"
+
 # Danh mục cố định — tên Doc ERP Administrative Support Category (đồng bộ frontend)
 EVENT_FACILITY_CATEGORY_NAME = "__event_facility__"
 
@@ -727,6 +730,54 @@ def _hc_user_email(user_id):
         return None
     em = frappe.db.get_value("User", user_id, "email")
     return (em or user_id or "").strip()
+
+
+def _hc_new_message_recipient_emails(doc, sender_email: str) -> set:
+    """Email nhận realtime trao đổi (một-một creator & PIC, trừ người gửi) — cùng tuyến với _notify_hc_user_reply."""
+    se = (sender_email or "").strip().lower()
+    out = set()
+    ce = (getattr(doc, "creator_email", None) or "").strip()
+    if ce and ce.lower() != se:
+        out.add(ce)
+    ae = _hc_user_email(getattr(doc, "assigned_to", None))
+    if ae and ae.lower() != se:
+        out.add(ae)
+    return out
+
+
+def _frappe_user_name_from_email(email: str) -> str:
+    """publish_realtime(user=) cần User.name (kênh user:{name}) — ưu tiên tìm theo cột email."""
+    em = (email or "").strip()
+    if not em:
+        return ""
+    un = frappe.db.get_value("User", {"email": em}, "name")
+    return (un or em).strip()
+
+
+def _emit_hc_new_message_realtime(doc, message_dict, sender_email: str):
+    """
+    Đẩy tin mới tới Frappe Realtime (publish_realtime) cho các client đã mở ticket.
+    Payload khớp messageData / get_comments; user= User.name.
+    """
+    if not message_dict or not doc or not getattr(doc, "name", None):
+        return
+    payload = {"ticket_id": doc.name, "message": message_dict}
+    for em in _hc_new_message_recipient_emails(doc, sender_email):
+        uid = _frappe_user_name_from_email(em)
+        if not uid:
+            continue
+        try:
+            frappe.publish_realtime(
+                HC_TICKET_RT_EVENT_NEW_MESSAGE,
+                payload,
+                user=uid,
+                after_commit=True,
+            )
+        except Exception as ex:
+            frappe.log_error(
+                f"administrative_ticket: publish_realtime new_message to {em} ({uid}): {ex!s}",
+                "administrative_ticket.emit_hc_new_message_realtime",
+            )
 
 
 def _hc_send_ticket_email(doc, event_type, recipient_email, extra=None):
@@ -2072,22 +2123,27 @@ def send_comment():
             _notify_hc_user_reply(frappe.get_doc(DOCTYPE, ticket_id), email)
         except Exception:
             frappe.log_error(frappe.get_traceback(), "administrative_ticket.send_comment.notify")
+        message_data = {
+            "_id": c.name,
+            "sender": {
+                "_id": email,
+                "fullname": ufn,
+                "email": email,
+                "avatarUrl": uimg,
+            },
+            "text": text,
+            "timestamp": c.creation,
+            "type": msg_type,
+            "images": images,
+        }
+        try:
+            _emit_hc_new_message_realtime(frappe.get_doc(DOCTYPE, ticket_id), message_data, email)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), "administrative_ticket.send_comment.emit_realtime")
         return success_response(
             {
                 "success": True,
-                "messageData": {
-                    "_id": c.name,
-                    "sender": {
-                        "_id": email,
-                        "fullname": ufn,
-                        "email": email,
-                        "avatarUrl": uimg,
-                    },
-                    "text": text,
-                    "timestamp": c.creation,
-                    "type": msg_type,
-                    "images": images,
-                },
+                "messageData": message_data,
             },
             "OK",
         )

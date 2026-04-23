@@ -12,6 +12,14 @@ bench get-app $URL_OF_THIS_REPO --branch develop
 bench install-app erp
 ```
 
+### patch lên cây Frappe (tùy chọn, Socket.IO + JWT / SPA)
+
+Một số tính năng cần sửa file trong `apps/frappe` (không nằm trong repo `erp` khi bạn chỉ push app). Xem hướng dẫn, nâng cấp Frappe, và tệp patch trong [patches/core/README.md](./patches/core/README.md). Sau khi cài bench:
+
+```bash
+cd apps/erp && ./scripts/apply-frappe-core-patches.sh
+```
+
 ### Contributing
 
 This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:
