@@ -4,8 +4,8 @@ Các thay đổi **không nằm** trong app `erp` trên GitHub (ví dụ `frappe
 
 ## Patch hiện có
 
-| Tệp | Mục đích | Nền tả | Ghi chú |
-|-----|----------|--------|---------|
+| Tệp                                              | Mục đích                                                                                              | Nền tả                                                               | Ghi chú                                                                                                                                 |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `frappe-version-15-realtime-jwt-handshake.patch` | Socket.IO: nhận JWT qua `handshake.auth.token`, nới origin nếu không có header `origin` (SPA + proxy) | So khớp `frappe:version-15` → `realtime/middlewares/authenticate.js` | Tạo từ diff với bản gốc [version-15 trên GitHub](https://github.com/frappe/frappe/blob/version-15/realtime/middlewares/authenticate.js) |
 
 ## Cách áp dụng
@@ -32,7 +32,7 @@ Script sẽ **bỏ qua** nếu file đã chứa `socket.handshake.auth` (đã pa
 
 1. Chạy `bench update` (hoặc quy trình nâng cấp của bạn) như bình thường.
 2. **Mở lại** `frappe/realtime/middlewares/authenticate.js` trên bản mới, xem upstream có sửa cùng đoạn chưa (merge từ Frappe).
-3. Thử lại: `./scripts/apply-frappe-core-patches.sh`  
+3. Thử lại: `./scripts/apply-frappe-core-patches.sh`
    - Nếu `patch` **báo lỗi** (hunk failed): file upstream đã đổi, patch cần **cập nhật tay** (so sánh, tạo lại `.patch` từ bản mới) hoặc gộp thay đổi tương đương vào.
 4. Khôi phục dịch vụ: `bench restart` nếu cần.
 
