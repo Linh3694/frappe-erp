@@ -1711,7 +1711,16 @@ def update_ticket():
         old_assigned_to = getattr(doc, "assigned_to", None)
 
         if staff and "status" in data and data["status"]:
-            doc.status = str(data["status"]).strip()
+            new_status = str(data["status"]).strip()
+            if new_status == "Resolved":
+                return validation_error_response(
+                    _(
+                        "Không tự cập nhật Resolved; dùng Done khi kết thúc xử lý, "
+                        "chừng nào người tạo chấp nhận kết quả hệ thống mới ghi nhận tương ứng."
+                    ),
+                    {"status": ["invalid"]},
+                )
+            doc.status = new_status
         if staff and "assigned_to" in data:
             at = data.get("assigned_to")
             if at:
@@ -1845,7 +1854,10 @@ def reopen_ticket():
         if not _can_read_ticket(doc):
             return forbidden_response(_("Không có quyền"))
         email = _session_email()
-        doc.status = "Open"
+        # Nếu đã có PIC tiếp nhận thì đưa về "In Progress" để PIC xử lý tiếp,
+        # ngược lại (chưa có PIC) mới quay về "Open" để tiếp nhận lại.
+        assigned_pic = (doc.assigned_to or "").strip() if getattr(doc, "assigned_to", None) else ""
+        doc.status = "In Progress" if assigned_pic else "Open"
         doc.closed_at = None
         doc.feedback_rating = 0
         doc.feedback_comment = None
