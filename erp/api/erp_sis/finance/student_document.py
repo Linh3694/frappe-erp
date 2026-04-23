@@ -17,6 +17,21 @@ from erp.utils.api_response import (
 from .utils import _check_admin_permission, _get_request_data
 
 
+def _student_code_from_debit_bulk_filename(file_name: str) -> str:
+    """
+    Suy mã học sinh từ tên file upload Debit Note hàng loạt (bỏ đuôi mở rộng).
+    Hỗ trợ:
+    - WS11224455.pdf -> WS11224455
+    - WS11510190 - Vũ Hải Lâm 20260326102139.pdf -> WS11510190 (lấy phần trước dấu ' - ')
+    """
+    import os as _os
+
+    base = _os.path.splitext(file_name or "")[0].strip()
+    if " - " in base:
+        return base.split(" - ", 1)[0].strip()
+    return base
+
+
 @frappe.whitelist()
 def upload_student_document():
     """
@@ -237,7 +252,8 @@ def delete_student_document():
 def bulk_upload_debit_notes():
     """
     Upload hàng loạt Debit Note cho học sinh trong order.
-    Tên file (bỏ phần mở rộng) phải trùng với student_code.
+    Mã khớp dựa trên tên file (bỏ đuôi): trùng student_code, hoặc tên dạng
+    \"<mã> - <mô tả...>.pdf\" thì lấy <mã> phía trước \" - \".
     
     Args (form data):
         order_id: ID của SIS Finance Order
@@ -246,7 +262,6 @@ def bulk_upload_debit_notes():
     Returns:
         Kết quả upload: total, success_count, error_count, errors[]
     """
-    import os as _os
     logs = []
     
     try:
@@ -293,7 +308,7 @@ def bulk_upload_debit_notes():
         
         for uploaded_file in uploaded_files:
             file_name = uploaded_file.filename
-            student_code = _os.path.splitext(file_name)[0]
+            student_code = _student_code_from_debit_bulk_filename(file_name)
             
             student = student_map.get(student_code)
             if not student:

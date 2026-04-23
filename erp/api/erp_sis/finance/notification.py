@@ -293,6 +293,86 @@ def get_fee_notifications(order_id=None):
 
 
 @frappe.whitelist()
+def get_fee_notification_detail(notification_id=None):
+    """
+    Lấy chi tiết một thông báo phí (nội dung đã mail merge) để xem lại trên SIS.
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+
+        if not notification_id:
+            notification_id = frappe.request.args.get("notification_id")
+
+        if not notification_id:
+            return validation_error_response("Thiếu notification_id", {"notification_id": ["Bắt buộc"]})
+
+        doc = frappe.get_doc("SIS Announcement", notification_id)
+        if doc.announcement_type != "fee_notification":
+            return validation_error_response(
+                "Không phải thông báo phí",
+                {"notification_id": ["Sai loại"]}
+            )
+
+        sent_by_fullname = None
+        if doc.sent_by:
+            try:
+                user = frappe.get_doc("User", doc.sent_by)
+                sent_by_fullname = user.full_name or doc.sent_by
+            except Exception:
+                sent_by_fullname = doc.sent_by
+
+        student_name = student_code = class_title = None
+        if doc.finance_student_id:
+            try:
+                fs = frappe.get_doc("SIS Finance Student", doc.finance_student_id)
+                student_name = fs.student_name
+                student_code = fs.student_code
+                class_title = fs.class_title
+            except Exception:
+                pass
+
+        # include_debit_note_link: Int trong DB, trả về số 0/1 cho FE
+        inc_dn = doc.include_debit_note_link
+        if inc_dn in (1, "1", True):
+            include_dn = 1
+        else:
+            include_dn = 0
+
+        data = {
+            "name": doc.name,
+            "title_vn": doc.title_vn,
+            "title_en": doc.title_en,
+            "content_vn": (doc.content_vn or "").strip(),
+            "content_en": (doc.content_en or "").strip(),
+            "status": doc.status,
+            "sent_at": doc.sent_at,
+            "sent_by": doc.sent_by,
+            "sent_by_fullname": sent_by_fullname,
+            "include_debit_note_link": include_dn,
+            "recipient_count": doc.recipient_count or 0,
+            "sent_count": doc.sent_count or 0,
+            "creation": str(doc.creation) if doc.creation else None,
+            "finance_order_id": doc.finance_order_id,
+            "order_student_id": doc.order_student_id,
+            "finance_student_id": doc.finance_student_id,
+            "student_name": student_name,
+            "student_code": student_code,
+            "class_title": class_title,
+        }
+
+        return success_response(data=data, message="OK", logs=logs)
+
+    except frappe.DoesNotExistError:
+        return error_response("Không tìm thấy thông báo", logs=logs)
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "get_fee_notification_detail")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
 def delete_fee_notification():
     """
     Xóa thông báo phí.

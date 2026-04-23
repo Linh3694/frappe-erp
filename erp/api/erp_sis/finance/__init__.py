@@ -88,6 +88,7 @@ from .debit_note import (
 from .notification import (
     create_fee_notification,
     get_fee_notifications,
+    get_fee_notification_detail,
     delete_fee_notification,
     send_fee_notification
 )
@@ -174,6 +175,7 @@ __all__ = [
     # Fee Notification
     'create_fee_notification',
     'get_fee_notifications',
+    'get_fee_notification_detail',
     'delete_fee_notification',
     'send_fee_notification',
     
