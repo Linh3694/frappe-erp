@@ -3460,7 +3460,11 @@ def save_room_yearly_assignment():
         if data.get("notes") is not None:
             doc.notes = data.get("notes") or ""
 
-        pic_list = data.get("responsible_users") or data.get("pic_list")
+        # Phải dùng is None, không dùng `or` — mảng rỗng [] là falsy, nếu không khi gửi responsible_users: []
+        # thì sẽ bỏ qua cập nhật child PIC (không xoá hết người phụ trách được).
+        pic_list = data.get("responsible_users")
+        if pic_list is None:
+            pic_list = data.get("pic_list")
         if isinstance(pic_list, list):
             doc.responsible_users = []
             for p in pic_list:
