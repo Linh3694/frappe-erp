@@ -1088,8 +1088,21 @@ def add_lead_guardian():
         if lg.get("guardian") == guardian_name_doc:
             return validation_error_response("Phu huynh nay da duoc them vao ho so", {"guardian": ["Duplicate"]})
 
+    # Nguoi lien lac chinh: toi da 1. is_first = chua co bat ky phu huynh nao trong pham vi lead nay
+    # (ke ca khi lead_guardians rong nhung da co CRM Family Relationship + linked_student).
+    has_any_guardian = len(lead_guardians) > 0
+    if not has_any_guardian and getattr(doc, "linked_family", None) and getattr(
+        doc, "linked_student", None
+    ):
+        has_any_guardian = (
+            frappe.db.count(
+                "CRM Family Relationship",
+                filters={"parent": doc.linked_family, "student": doc.linked_student},
+            )
+            > 0
+        )
+    is_first = not has_any_guardian
     # Them vao lead_guardians
-    is_first = len(lead_guardians) == 0
     doc.append("lead_guardians", {
         "guardian": guardian_name_doc,
         "relationship_type": relationship_type,
