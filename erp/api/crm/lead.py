@@ -836,37 +836,60 @@ def get_lead_family():
             filters={"parent": doc.linked_family},
             fields=["student", "guardian", "relationship_type", "key_person", "access"],
         )
-        guardian_ids = list({r["guardian"] for r in rels if r.get("guardian")})
-        guardians_by_id = {}
-        for gid in guardian_ids:
-            g_doc = frappe.get_doc("CRM Guardian", gid)
-            guardians_by_id[gid] = g_doc
+        # Dedupe theo guardian: 1 guardian co the co N row (moi HS 1 row trong family).
+        # Uu tien row gan voi linked_student cua lead nay (vi relationship_type cua
+        # guardian voi moi HS co the khac nhau), sau do den row co key_person, cuoi
+        # cung la row dau tien.
+        linked_sid = getattr(doc, "linked_student", None)
+        rel_by_guardian = {}
         for r in rels:
-            if not r.get("guardian"):
+            gid = r.get("guardian")
+            if not gid:
                 continue
-            g_doc = guardians_by_id.get(r["guardian"])
-            if g_doc:
-                phones = _get_guardian_phones(g_doc)
-                members.append({
-                    "guardian": {
-                        "name": g_doc.name,
-                        "guardian_id": getattr(g_doc, "guardian_id", None),
-                        "guardian_name": getattr(g_doc, "guardian_name", None),
-                        "phone_number": getattr(g_doc, "phone_number", None),
-                        "email": getattr(g_doc, "email", None),
-                        "id_number": getattr(g_doc, "id_number", None),
-                        "occupation": getattr(g_doc, "occupation", None),
-                        "position": getattr(g_doc, "position", None),
-                        "workplace": getattr(g_doc, "workplace", None),
-                        "address": getattr(g_doc, "address", None),
-                        "nationality": getattr(g_doc, "nationality", None),
-                        "note": getattr(g_doc, "note", None),
-                        "dob": str(g_doc.dob) if getattr(g_doc, "dob", None) else None,
-                    },
-                    "relationship_type": r.get("relationship_type", ""),
-                    "is_primary_contact": bool(r.get("key_person")),
-                    "phones": phones,
-                })
+            existing = rel_by_guardian.get(gid)
+            if existing is None:
+                rel_by_guardian[gid] = r
+                continue
+            # Uu tien row match linked_student
+            if linked_sid and r.get("student") == linked_sid and existing.get("student") != linked_sid:
+                rel_by_guardian[gid] = r
+                continue
+            # Uu tien key_person neu existing chua phai
+            if r.get("key_person") and not existing.get("key_person") and not (
+                linked_sid and existing.get("student") == linked_sid
+            ):
+                rel_by_guardian[gid] = r
+
+        guardians_by_id = {}
+        for gid in rel_by_guardian.keys():
+            if frappe.db.exists("CRM Guardian", gid):
+                guardians_by_id[gid] = frappe.get_doc("CRM Guardian", gid)
+
+        for gid, r in rel_by_guardian.items():
+            g_doc = guardians_by_id.get(gid)
+            if not g_doc:
+                continue
+            phones = _get_guardian_phones(g_doc)
+            members.append({
+                "guardian": {
+                    "name": g_doc.name,
+                    "guardian_id": getattr(g_doc, "guardian_id", None),
+                    "guardian_name": getattr(g_doc, "guardian_name", None),
+                    "phone_number": getattr(g_doc, "phone_number", None),
+                    "email": getattr(g_doc, "email", None),
+                    "id_number": getattr(g_doc, "id_number", None),
+                    "occupation": getattr(g_doc, "occupation", None),
+                    "position": getattr(g_doc, "position", None),
+                    "workplace": getattr(g_doc, "workplace", None),
+                    "address": getattr(g_doc, "address", None),
+                    "nationality": getattr(g_doc, "nationality", None),
+                    "note": getattr(g_doc, "note", None),
+                    "dob": str(g_doc.dob) if getattr(g_doc, "dob", None) else None,
+                },
+                "relationship_type": r.get("relationship_type", ""),
+                "is_primary_contact": bool(r.get("key_person")),
+                "phones": phones,
+            })
 
     # Che do A: lead_guardians child table (chua co linked_family)
     elif getattr(doc, "lead_guardians", None) and len(doc.lead_guardians) > 0:
