@@ -12,13 +12,18 @@ bench get-app $URL_OF_THIS_REPO --branch develop
 bench install-app erp
 ```
 
-### patch lên cây Frappe (tùy chọn, Socket.IO + JWT / SPA)
+### patch lên cây Frappe (Socket.IO + JWT / SPA)
 
-Một số tính năng cần sửa file trong `apps/frappe` (không nằm trong repo `erp` khi bạn chỉ push app). Xem hướng dẫn, nâng cấp Frappe, và tệp patch trong [patches/core/README.md](./patches/core/README.md). Sau khi cài bench:
+Một số tính năng cần sửa file trong `apps/frappe` (không nằm trong repo `erp` khi bạn chỉ push app). Xem hướng dẫn, nâng cấp Frappe và cơ chế an toàn trong [patches/core/README.md](./patches/core/README.md).
 
 ```bash
-cd apps/erp && ./scripts/apply-frappe-core-patches.sh
+cd apps/erp
+./scripts/apply-frappe-core-patches.sh verify   # kiểm tra trạng thái
+./scripts/apply-frappe-core-patches.sh          # áp dụng (có backup + node --check + rollback)
+cd .. && cd .. && bench restart                 # để node-socketio nạp lại middleware
 ```
+
+Nếu gặp lỗi sau khi apply, `cd apps/erp && ./scripts/apply-frappe-core-patches.sh revert` + `bench restart` sẽ đưa bench trở lại bản Frappe gốc.
 
 ### Contributing
 
