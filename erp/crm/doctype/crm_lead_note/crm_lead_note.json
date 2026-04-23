@@ -78,7 +78,7 @@
    "fieldname": "content",
    "fieldtype": "Text Editor",
    "label": "Content",
-   "reqd": 1
+   "reqd": 0
   },
   {
    "fieldname": "note_assignment",

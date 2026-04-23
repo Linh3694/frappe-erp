@@ -16,7 +16,8 @@
  "field_order": [
   "guardian",
   "relationship_type",
-  "is_primary_contact"
+  "is_primary_contact",
+  "display_order"
  ],
  "fields": [
   {
@@ -42,6 +43,13 @@
    "default": "0",
    "in_list_view": 1,
    "description": "Người liên lạc chính"
+  },
+  {
+   "fieldname": "display_order",
+   "fieldtype": "Int",
+   "label": "Display Order",
+   "default": "0",
+   "description": "Thu tu uu tien hien thi (primary luon dung dau)"
   }
  ],
  "index_web_pages_for_search": 0,

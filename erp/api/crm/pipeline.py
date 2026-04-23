@@ -91,6 +91,33 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
 
     validate_step_transition(old_step, target_step)
 
+    # Lead -> QLead: sinh ma WS (student_code) som — giong tham so QLead->Enrolled / enroll_lead
+    if old_step == "Lead" and target_step == "QLead":
+        if not doc.student_code and not getattr(doc, "linked_student", None):
+            from erp.api.crm.student_code import _generate_code_internal
+
+            ex = extra_data or {}
+            campus_code = ex.get("campus_code")
+            if not campus_code or (isinstance(campus_code, str) and not str(campus_code).strip()):
+                campus_code = "WS1"
+            else:
+                campus_code = str(campus_code).strip()
+            academic_year = ex.get("academic_year")
+            if academic_year in (None, ""):
+                academic_year = doc.target_academic_year or ""
+            else:
+                academic_year = str(academic_year).strip()
+            grade = ex.get("grade")
+            if grade in (None, ""):
+                grade = doc.target_grade or doc.current_grade or "01"
+            else:
+                grade = str(grade).strip() or "01"
+            doc.student_code = _generate_code_internal(
+                campus_code,
+                academic_year,
+                grade,
+            )
+
     # QLead -> Enrolled: sinh ma HS (hoc sinh moi) + kiem tra trung Enrolled
     if old_step == "QLead" and target_step == "Enrolled":
         student_type = extra_data.get("student_type", "new")

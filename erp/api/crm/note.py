@@ -58,15 +58,14 @@ def create_note():
     if not frappe.db.exists("CRM Lead", lead_name):
         return not_found_response(f"Khong tim thay ho so {lead_name}")
     
-    required_fields = ["title", "content", "communication_method", "category"]
+    # Nhiệm vụ: content + deadline tùy chọn; Logcall/Loại khác: vẫn bắt buộc nội dung
     errors = {}
-    for field in required_fields:
+    for field in ["title", "communication_method", "category"]:
         if not data.get(field):
             errors[field] = ["Bat buoc"]
-    
-    if data.get("category") == "Nhiem vu" and not data.get("deadline"):
-        errors["deadline"] = ["Bat buoc khi phan loai la Nhiem vu"]
-    
+    if data.get("category") and data.get("category") != "Nhiem vu":
+        if not (data.get("content") or "").strip():
+            errors["content"] = ["Bat buoc"]
     if errors:
         return validation_error_response("Thieu thong tin bat buoc", errors)
     

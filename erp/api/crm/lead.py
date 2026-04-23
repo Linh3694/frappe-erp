@@ -786,7 +786,9 @@ def _get_guardian_phones(guardian_doc):
     return phones
 
 
-def _guardian_to_member_dict(guardian_doc, relationship_type=None, is_primary_contact=False):
+def _guardian_to_member_dict(
+    guardian_doc, relationship_type=None, is_primary_contact=False, display_order=0
+):
     """Chuyen CRM Guardian doc thanh dict cho LeadFamilyMember."""
     g = guardian_doc
     phones = _get_guardian_phones(g)
@@ -808,8 +810,63 @@ def _guardian_to_member_dict(guardian_doc, relationship_type=None, is_primary_co
         },
         "relationship_type": relationship_type or "",
         "is_primary_contact": bool(is_primary_contact),
+        "display_order": int(display_order) if display_order is not None else 0,
         "phones": phones,
     }
+
+
+def _dedupe_family_rel_by_guardian(rels, linked_sid):
+    """Giong logic trong get_lead_family: 1 row dai dien / guardian."""
+    rel_by_guardian = {}
+    for r in rels:
+        gid = r.get("guardian")
+        if not gid:
+            continue
+        existing = rel_by_guardian.get(gid)
+        if existing is None:
+            rel_by_guardian[gid] = r
+            continue
+        if linked_sid and r.get("student") == linked_sid and existing.get("student") != linked_sid:
+            rel_by_guardian[gid] = r
+            continue
+        if r.get("key_person") and not existing.get("key_person") and not (
+            linked_sid and existing.get("student") == linked_sid
+        ):
+            rel_by_guardian[gid] = r
+    return rel_by_guardian
+
+
+def _ordered_guardian_names_for_lead(doc):
+    """
+    Danh sach ten CRM Guardian theo thu tu hien thi (giong get_lead_family).
+    Tra ve None neu che do thong tin phang (1 guardian phang), khong sap xep duoc.
+    """
+    if getattr(doc, "linked_family", None):
+        rels = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"parent": doc.linked_family},
+            fields=["student", "guardian", "relationship_type", "key_person", "access", "display_order"],
+        )
+        linked_sid = getattr(doc, "linked_student", None)
+        rel_by_guardian = _dedupe_family_rel_by_guardian(rels, linked_sid)
+        items = list(rel_by_guardian.items())
+        items.sort(
+            key=lambda gr: (not gr[1].get("key_person"), gr[1].get("display_order") or 0, gr[0] or "")
+        )
+        return [gr[0] for gr in items]
+    if getattr(doc, "lead_guardians", None) and len(doc.lead_guardians) > 0:
+        rows = [lg for lg in doc.lead_guardians if lg.get("guardian")]
+        if not rows:
+            return None
+        rows.sort(
+            key=lambda r: (
+                not (r.get("is_primary_contact") or 0),
+                r.get("display_order") or 0,
+                r.idx or 0,
+            )
+        )
+        return [r.guardian for r in rows]
+    return None
 
 
 @frappe.whitelist()
@@ -838,38 +895,22 @@ def get_lead_family():
         rels = frappe.get_all(
             "CRM Family Relationship",
             filters={"parent": doc.linked_family},
-            fields=["student", "guardian", "relationship_type", "key_person", "access"],
+            fields=["student", "guardian", "relationship_type", "key_person", "access", "display_order"],
         )
         # Dedupe theo guardian: 1 guardian co the co N row (moi HS 1 row trong family).
-        # Uu tien row gan voi linked_student cua lead nay (vi relationship_type cua
-        # guardian voi moi HS co the khac nhau), sau do den row co key_person, cuoi
-        # cung la row dau tien.
         linked_sid = getattr(doc, "linked_student", None)
-        rel_by_guardian = {}
-        for r in rels:
-            gid = r.get("guardian")
-            if not gid:
-                continue
-            existing = rel_by_guardian.get(gid)
-            if existing is None:
-                rel_by_guardian[gid] = r
-                continue
-            # Uu tien row match linked_student
-            if linked_sid and r.get("student") == linked_sid and existing.get("student") != linked_sid:
-                rel_by_guardian[gid] = r
-                continue
-            # Uu tien key_person neu existing chua phai
-            if r.get("key_person") and not existing.get("key_person") and not (
-                linked_sid and existing.get("student") == linked_sid
-            ):
-                rel_by_guardian[gid] = r
+        rel_by_guardian = _dedupe_family_rel_by_guardian(rels, linked_sid)
+        items_sorted = sorted(
+            rel_by_guardian.items(),
+            key=lambda gr: (not gr[1].get("key_person"), gr[1].get("display_order") or 0, gr[0] or ""),
+        )
 
         guardians_by_id = {}
-        for gid in rel_by_guardian.keys():
+        for gid, _r in rel_by_guardian.items():
             if frappe.db.exists("CRM Guardian", gid):
                 guardians_by_id[gid] = frappe.get_doc("CRM Guardian", gid)
 
-        for gid, r in rel_by_guardian.items():
+        for gid, r in items_sorted:
             g_doc = guardians_by_id.get(gid)
             if not g_doc:
                 continue
@@ -892,14 +933,21 @@ def get_lead_family():
                 },
                 "relationship_type": r.get("relationship_type", ""),
                 "is_primary_contact": bool(r.get("key_person")),
+                "display_order": int(r.get("display_order") or 0),
                 "phones": phones,
             })
 
     # Che do A: lead_guardians child table (chua co linked_family)
     elif getattr(doc, "lead_guardians", None) and len(doc.lead_guardians) > 0:
-        for lg in doc.lead_guardians:
-            if not lg.get("guardian"):
-                continue
+        lg_rows = [lg for lg in doc.lead_guardians if lg.get("guardian")]
+        lg_rows.sort(
+            key=lambda row: (
+                not (row.get("is_primary_contact") or 0),
+                row.get("display_order") or 0,
+                row.idx or 0,
+            )
+        )
+        for lg in lg_rows:
             if not frappe.db.exists("CRM Guardian", lg.guardian):
                 continue
             g_doc = frappe.get_doc("CRM Guardian", lg.guardian)
@@ -907,6 +955,7 @@ def get_lead_family():
                 g_doc,
                 relationship_type=lg.get("relationship_type"),
                 is_primary_contact=lg.get("is_primary_contact"),
+                display_order=lg.get("display_order") or 0,
             ))
 
     # Fallback: flat fields
@@ -940,6 +989,7 @@ def get_lead_family():
                 },
                 "relationship_type": doc.relationship or "",
                 "is_primary_contact": True,
+                "display_order": 0,
                 "phones": phones,
             })
 
@@ -1602,6 +1652,72 @@ def set_primary_contact():
 
     frappe.db.commit()
     return single_item_response({"guardian": guardian_name}, "Da dat nguoi lien lac chinh")
+
+
+@frappe.whitelist(methods=["POST"])
+def reorder_lead_guardians():
+    """Luu thu tu uu tien guardian cho 1 Lead (primary luon o vi tri dau)."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    order = data.get("order")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if order is None or not isinstance(order, list) or len(order) == 0:
+        return validation_error_response("Thieu order (danh sach)", {"order": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    expected = _ordered_guardian_names_for_lead(doc)
+    if expected is None:
+        return validation_error_response(
+            "Khong the sap xep o che do thong tin phang", {"order": ["Khong ho tro"]}
+        )
+    if len(expected) < 2:
+        return validation_error_response(
+            "Can it nhat 2 phu huynh de sap xep thu tu", {"order": ["It nhat 2 phu huynh"]}
+        )
+    order = [str(x) for x in order]
+    if set(order) != set(expected) or len(order) != len(expected):
+        return validation_error_response(
+            "Danh sach thu tu khong khop voi phu huynh trong ho so", {"order": ["Khong hop le"]}
+        )
+    if order[0] != expected[0]:
+        return validation_error_response(
+            "Nguoi lien lac chinh phai o vi tri dau tien", {"order": ["Primary phai dung dau"]}
+        )
+
+    if getattr(doc, "linked_family", None):
+        stud = getattr(doc, "linked_student", None)
+        if not stud:
+            return validation_error_response(
+                "Can linked_student de sap xep thu tu gia dinh", {"linked_student": ["Bat buoc"]}
+            )
+        for i, gid in enumerate(order):
+            row_name = frappe.db.get_value(
+                "CRM Family Relationship",
+                {"parent": doc.linked_family, "student": stud, "guardian": gid},
+                "name",
+            )
+            if not row_name:
+                return validation_error_response(
+                    f"Khong tim thay quan he gia dinh cho phu huynh {gid}",
+                    {"order": ["Thieu relationship"]},
+                )
+            frappe.db.set_value("CRM Family Relationship", row_name, "display_order", i)
+        frappe.db.commit()
+        return success_response(message="Da luu thu tu phu huynh")
+
+    # Che do A: child table lead_guardians
+    for i, gid in enumerate(order):
+        for lg in doc.lead_guardians:
+            if lg.get("guardian") == gid:
+                lg.display_order = i
+    doc.flags.ignore_validate = True
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return success_response(message="Da luu thu tu phu huynh")
 
 
 # === Guardian Phone APIs (nhiều số/guardian, 1 số chính) ===

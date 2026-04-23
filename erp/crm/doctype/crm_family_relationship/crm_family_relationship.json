@@ -22,7 +22,8 @@
   "relationship_type",
   "column_break_1",
   "key_person",
-  "access"
+  "access",
+  "display_order"
  ],
  "fields": [
   {
@@ -71,6 +72,13 @@
    "label": "Access Granted",
    "description": "Whether this guardian has access to student information",
    "default": 0
+  },
+  {
+   "fieldname": "display_order",
+   "fieldtype": "Int",
+   "label": "Display Order",
+   "default": "0",
+   "description": "Thu tu uu tien hien thi (primary luon dung dau)"
   }
  ],
  "index_web_pages_for_search": 1,
