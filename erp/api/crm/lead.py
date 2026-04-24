@@ -869,21 +869,11 @@ def _ordered_guardian_names_for_lead(doc):
     return None
 
 
-@frappe.whitelist()
-def get_lead_family():
-    """Lay thong tin gia dinh cua lead: members (guardian + relationship + phones), family_code."""
-    check_crm_permission()
-    # GET: params trong query string (request.args). POST: trong body (get_request_data).
-    data = get_request_data() or {}
-    if hasattr(frappe.request, "args") and frappe.request.args:
-        data = dict(frappe.request.args)
-    name = data.get("name") or data.get("lead_name")
-    if not name:
-        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
-    if not frappe.db.exists("CRM Lead", name):
-        return not_found_response(f"Khong tim thay ho so {name}")
-
-    doc = frappe.get_doc("CRM Lead", name)
+def build_lead_family_payload(doc):
+    """
+    Giong logic get_lead_family (members + family_code) nhung tra ve dict,
+    dung chung cho API Staff va Parent Portal.
+    """
     members = []
     family_code = None
 
@@ -993,11 +983,36 @@ def get_lead_family():
                 "phones": phones,
             })
 
-    return single_item_response({
+    return {
         "members": members,
         "family_code": family_code,
         "linked_family": getattr(doc, "linked_family", None),
-    })
+    }
+
+
+@frappe.whitelist()
+def get_lead_family():
+    """Lay thong tin gia dinh cua lead: members (guardian + relationship + phones), family_code."""
+    check_crm_permission()
+    # GET: params trong query string (request.args). POST: trong body (get_request_data).
+    data = get_request_data() or {}
+    if hasattr(frappe.request, "args") and frappe.request.args:
+        data = dict(frappe.request.args)
+    name = data.get("name") or data.get("lead_name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
+    doc = frappe.get_doc("CRM Lead", name)
+    payload = build_lead_family_payload(doc)
+    return single_item_response(
+        {
+            "members": payload["members"],
+            "family_code": payload["family_code"],
+            "linked_family": payload["linked_family"],
+        }
+    )
 
 
 @frappe.whitelist(methods=["POST"])
