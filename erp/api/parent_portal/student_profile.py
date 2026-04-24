@@ -15,6 +15,7 @@ LEAD_SUBSET_FIELDNAMES = [
     "student_name",
     "student_gender",
     "student_dob",
+    "student_personal_id_number",
     "student_code",
     "current_grade",
     "current_school",
@@ -28,9 +29,11 @@ LEAD_SUBSET_FIELDNAMES = [
     "registered_address_province",
     "registered_address_ward",
     "registered_address_street",
+    "registered_address_detail",
     "current_address_province",
     "current_address_ward",
     "current_address_street",
+    "current_address_detail",
     "student_health_insurance_card",
     "student_initial_medical_registration",
     "student_health_notes",
@@ -114,6 +117,7 @@ def _serialize_crm_student_min(student_id):
         "dob": _json_safe_value(d.get("dob")),
         "gender": d.get("gender"),
         "campus_id": d.get("campus_id"),
+        "personal_id_number": d.get("personal_id_number"),
     }
 
 

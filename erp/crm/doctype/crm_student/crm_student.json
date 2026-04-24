@@ -20,6 +20,7 @@
   "student_name",
   "student_code",
   "dob",
+  "personal_id_number",
   "gender",
   "campus_id",
   "family_information",
@@ -54,6 +55,12 @@
    "label": "Date of Birth",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "personal_id_number",
+   "fieldtype": "Data",
+   "label": "So dinh danh ca nhan (CCCD/CMND)",
+   "description": "So CCCD, CMND hoc sinh (field goc tren CRM Student)"
   },
   {
    "fieldname": "gender",

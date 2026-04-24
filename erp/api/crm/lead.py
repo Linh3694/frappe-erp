@@ -312,7 +312,7 @@ def create_lead():
         # Set thong tin co ban
         simple_fields = [
             "data_source", "staff_code", "pic", "campus_id",
-            "student_name", "student_gender", "student_dob", "student_code",
+            "student_name", "student_gender", "student_dob", "student_personal_id_number", "student_code",
             "current_grade", "target_grade", "current_school", "student_note",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
@@ -593,7 +593,7 @@ def update_lead():
         
         updatable_fields = [
             "data_source", "staff_code", "pic", "campus_id",
-            "student_name", "student_gender", "student_dob", "student_code",
+            "student_name", "student_gender", "student_dob", "student_personal_id_number", "student_code",
             "current_grade", "target_grade", "current_school", "student_note",
             "student_place_of_birth", "student_nationality", "student_ethnicity", "student_religion",
             "student_health_insurance_card", "student_initial_medical_registration",
@@ -601,7 +601,9 @@ def update_lead():
             "student_account_holder_relationship", "student_bank_account_name",
             "student_bank_account_number", "student_bank_name", "student_bank_branch",
             "registered_address_province", "registered_address_ward", "registered_address_street",
+            "registered_address_detail",
             "current_address_province", "current_address_ward", "current_address_street",
+            "current_address_detail",
             "student_study_interruption", "student_study_interruption_reason",
             "student_special_characteristics", "student_discipline_issues",
             "tuition_fee_pct", "service_fee_pct", "dev_fee_pct", "ksdv_pct",
