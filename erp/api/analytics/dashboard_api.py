@@ -195,12 +195,15 @@ def get_feedback_ratings(page=1, page_size=20):
 		page_size = int(page_size)
 		offset = (page - 1) * page_size
 		
-		# Get total count
-		total_count = frappe.db.count("Feedback", {
-			"feedback_type": "Đánh giá"
-		})
+		# Tổng số: chỉ bản ghi có rating (cùng tập dữ liệu với average_rating / rating_count / file Excel)
+		total_count = frappe.db.sql("""
+			SELECT COUNT(*) AS cnt
+			FROM `tabFeedback`
+			WHERE feedback_type = 'Đánh giá' AND rating IS NOT NULL
+		""", as_dict=True)
+		total_count = int(total_count[0].cnt) if total_count else 0
 		
-		# Get feedback ratings with guardian name
+		# Lấy đánh giá kèm tên phụ huynh (bỏ bản ghi thiếu rating để khớp thống kê dashboard)
 		feedbacks = frappe.db.sql("""
 			SELECT 
 				f.name,
@@ -211,7 +214,7 @@ def get_feedback_ratings(page=1, page_size=20):
 				g.guardian_name as guardian_name
 			FROM `tabFeedback` f
 			LEFT JOIN `tabCRM Guardian` g ON f.guardian = g.name
-			WHERE f.feedback_type = 'Đánh giá'
+			WHERE f.feedback_type = 'Đánh giá' AND f.rating IS NOT NULL
 			ORDER BY f.submitted_at DESC
 			LIMIT %s OFFSET %s
 		""", (page_size, offset), as_dict=True)
