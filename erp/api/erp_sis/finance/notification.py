@@ -22,6 +22,109 @@ from .utils import (
 )
 
 
+def _get_parent_portal_base_url():
+    # URL frontend Parent Portal (trùng logic re_enrollment: allow_cors)
+    allow_cors = frappe.conf.get("allow_cors") or []
+    base = "https://wis.wellspring.edu.vn"
+    for u in allow_cors:
+        if u and (
+            "wis.wellspring.edu.vn" in u
+            or "wis-staging.wellspring.edu.vn" in u
+        ):
+            return u.rstrip("/")
+    return base.rstrip("/")
+
+
+def _get_guardian_emails_for_student(crm_student_id):
+    """
+    Lấy danh sách email CRM Guardian thật (không dùng @parent.wellspring)
+    từ CRM Family Relationship + CRM Family + CRM Guardian.
+    """
+    if not crm_student_id:
+        return []
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT g.email
+        FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+        INNER JOIN `tabCRM Guardian` g ON g.name = fr.guardian
+        WHERE fr.student = %(s)s
+          AND fr.parentfield = 'relationships'
+          AND f.docstatus < 2
+          AND g.email IS NOT NULL AND g.email != ''
+    """,
+        {"s": crm_student_id},
+        as_dict=True,
+    )
+    return [r["email"] for r in rows if r.get("email")]
+
+
+def _send_guardian_emails_for_fee_announcement(
+    announcement_id,
+    crm_student_id,
+    title_vn,
+    content_vn,
+    content_en,
+    order_student_id,
+    include_debit_note,
+    logs,
+):
+    """
+    Render HTML song ngữ (md_to_html) và gửi email qua GraphQL tới từng guardian.
+    Trả về { email_sent, email_total, email_errors }.
+    """
+    from frappe.utils import md_to_html
+    from erp.utils.email_service import send_email_via_service
+
+    emails = _get_guardian_emails_for_student(crm_student_id)
+    email_total = len(emails)
+    email_errors = []
+    email_sent = 0
+
+    if not emails:
+        logs.append(
+            f"Không có email guardian hợp lệ cho CRM Student {crm_student_id}, bỏ qua gửi email thật"
+        )
+        return {"email_sent": 0, "email_total": 0, "email_errors": []}
+
+    html_vn = str(md_to_html(content_vn) or content_vn)
+    html_en = str(md_to_html(content_en) or content_en)
+    body_html = (
+        f"<div>{html_vn}</div>"
+        "<hr style='margin:24px 0;border:none;border-top:1px solid #ddd;'/>"
+        f"<div>{html_en}</div>"
+    )
+    if include_debit_note:
+        base = _get_parent_portal_base_url()
+        portal_path = f"/announcement/{announcement_id}"
+        full = f"{base}{portal_path}"
+        body_html += (
+            "<hr style='margin:24px 0;border:none;border-top:1px solid #ddd;'/>"
+            f"<p><strong>Thông tin thêm trên Parent Portal / Additional info</strong></p>"
+            f"<p>VI: <a href=\"{full}\">Xem thông báo phí & Debit Note (Parent Portal)</a><br/>"
+            f"EN: <a href=\"{full}\">View fee announcement & Debit Note (Parent Portal)</a></p>"
+        )
+
+    # Luôn gửi từ hộp noreply chung (không dùng cấu hình khác)
+    sender = "no-reply@wellspring.edu.vn"
+    for addr in emails:
+        r = send_email_via_service(
+            [addr], str(title_vn or "").strip() or "Thông báo phí", body_html, from_email=sender
+        )
+        if r.get("success"):
+            email_sent += 1
+        else:
+            email_errors.append({"email": addr, "error": r.get("message")})
+            logs.append(f"Gửi email thất bại tới {addr}: {r.get('message')}")
+
+    logs.append(f"Email gửi tới {email_sent}/{email_total} guardian (order_student={order_student_id})")
+    return {
+        "email_sent": email_sent,
+        "email_total": email_total,
+        "email_errors": email_errors,
+    }
+
+
 @frappe.whitelist()
 def create_fee_notification():
     """
@@ -174,6 +277,11 @@ def create_fee_notification():
             announcement.insert()
             logs.append(f"Created announcement {announcement.name} for {finance_student.student_name}")
             
+            # Thống kê email (chỉ khi gửi ngay)
+            email_sent = 0
+            email_total = 0
+            email_errors = []
+
             # Nếu gửi ngay
             if send_immediately:
                 try:
@@ -199,9 +307,30 @@ def create_fee_notification():
                         }
                     )
                     
+                    push_count = notification_result.get("total_parents", 0)
+                    # Gửi email thật (lỗi email không rollback trạng thái đã gửi portal)
+                    em = {"email_sent": 0, "email_total": 0, "email_errors": []}
+                    try:
+                        em = _send_guardian_emails_for_fee_announcement(
+                            announcement_id=announcement.name,
+                            crm_student_id=finance_student.student_id,
+                            title_vn=merged_title_vn,
+                            content_vn=merged_content_vn,
+                            content_en=merged_content_en,
+                            order_student_id=os.name,
+                            include_debit_note=bool(include_debit_note),
+                            logs=logs,
+                        )
+                    except Exception as ex_em:
+                        logs.append(f"Lỗi gửi email phụ huynh: {str(ex_em)}")
+                        frappe.log_error(frappe.get_traceback(), "fee_notification_email")
+                    email_sent = em["email_sent"]
+                    email_total = em["email_total"]
+                    email_errors = em["email_errors"]
+
                     announcement.status = "sent"
                     announcement.sent_at = frappe.utils.now()
-                    announcement.sent_count = notification_result.get("total_parents", 0)
+                    announcement.sent_count = push_count + email_sent
                     announcement.save()
                     
                     logs.append(f"Sent notification for {announcement.name}")
@@ -213,16 +342,24 @@ def create_fee_notification():
                 "name": announcement.name,
                 "student_name": finance_student.student_name,
                 "status": announcement.status,
+                "email_sent": email_sent,
+                "email_total": email_total,
+                "email_errors": email_errors,
             })
         
         frappe.db.commit()
+
+        email_sent_total = sum(a.get("email_sent", 0) for a in created_announcements)
+        email_total_sum = sum(a.get("email_total", 0) for a in created_announcements)
         
         return success_response(
             message=f"Đã tạo {len(created_announcements)} thông báo phí",
             data={
                 "announcements": created_announcements,
                 "total": len(created_announcements),
-                "sent_immediately": send_immediately
+                "sent_immediately": send_immediately,
+                "email_sent": email_sent_total,
+                "email_total": email_total_sum,
             },
             logs=logs
         )
@@ -473,11 +610,33 @@ def send_fee_notification():
                 "url": f"/announcement/{announcement.name}"
             }
         )
+
+        inc_dn = announcement.include_debit_note_link
+        include_dn = inc_dn in (1, "1", True)
+        em = {"email_sent": 0, "email_total": 0, "email_errors": []}
+        try:
+            em = _send_guardian_emails_for_fee_announcement(
+                announcement_id=announcement.name,
+                crm_student_id=finance_student.student_id,
+                title_vn=announcement.title_vn,
+                content_vn=announcement.content_vn or "",
+                content_en=announcement.content_en or "",
+                order_student_id=announcement.order_student_id,
+                include_debit_note=include_dn,
+                logs=logs,
+            )
+        except Exception as ex_em:
+            logs.append(f"Lỗi gửi email phụ huynh: {str(ex_em)}")
+            frappe.log_error(frappe.get_traceback(), "fee_notification_resend_email")
+        push_count = notification_result.get("total_parents", 0)
+        email_sent = em["email_sent"]
+        email_total = em["email_total"]
+        email_errors = em["email_errors"]
         
         # Cập nhật trạng thái
         announcement.status = "sent"
         announcement.sent_at = frappe.utils.now()
-        announcement.sent_count = notification_result.get("total_parents", 0)
+        announcement.sent_count = push_count + email_sent
         announcement.save()
         
         frappe.db.commit()
@@ -488,7 +647,10 @@ def send_fee_notification():
             message="Đã gửi thông báo phí",
             data={
                 "notification_id": notification_id,
-                "sent_count": announcement.sent_count
+                "sent_count": announcement.sent_count,
+                "email_sent": email_sent,
+                "email_total": email_total,
+                "email_errors": email_errors,
             },
             logs=logs
         )
