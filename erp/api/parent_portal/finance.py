@@ -16,6 +16,30 @@ from erp.utils.api_response import (
 from erp.api.parent_portal.otp_auth import is_production_server
 
 
+def _class_display_title_from_sis_class(class_id, stored_class_title=None):
+    """
+    Tên lớp hiển thị: ưu tiên SIS Class.short_title (tránh lặp chữ "Lớp" khi dùng title đầy đủ),
+    sau đó class.title, cuối cùng mới dùng class_title đã lưu trên SIS Finance Student.
+    """
+    if not class_id:
+        return stored_class_title
+    row = frappe.db.get_value(
+        "SIS Class",
+        class_id,
+        ["short_title", "title"],
+        as_dict=True,
+    )
+    if not row:
+        return stored_class_title
+    st = (row.get("short_title") or "").strip()
+    if st:
+        return st
+    t = (row.get("title") or "").strip()
+    if t:
+        return t
+    return stored_class_title
+
+
 def _get_current_parent():
     """Lấy thông tin phụ huynh đang đăng nhập"""
     user_email = frappe.session.user
@@ -186,7 +210,11 @@ def get_student_finance(student_id=None):
                 sy.title_vn as school_year_name_vn,
                 sy.title_en as school_year_name_en,
                 fy.is_active,
-                fs.class_title,
+                COALESCE(
+                    NULLIF(TRIM(c.`short_title`), ''),
+                    NULLIF(TRIM(c.`title`), ''),
+                    fs.class_title
+                ) as class_title,
                 fs.total_amount,
                 fs.paid_amount,
                 fs.outstanding_amount,
@@ -194,6 +222,7 @@ def get_student_finance(student_id=None):
             FROM `tabSIS Finance Student` fs
             INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
             LEFT JOIN `tabSIS School Year` sy ON fy.school_year_id = sy.name
+            LEFT JOIN `tabSIS Class` c ON c.name = fs.class_id
             WHERE fs.student_id = %s
             ORDER BY fy.start_date DESC
         """, (student_id,), as_dict=True)
@@ -280,13 +309,19 @@ def get_student_finance_detail(finance_student_id=None):
         finance_student = frappe.db.get_value(
             "SIS Finance Student",
             finance_student_id,
-            ["student_id", "finance_year_id", "student_name", "student_code", "class_title",
+            ["student_id", "finance_year_id", "student_name", "student_code", "class_id", "class_title",
              "total_amount", "paid_amount", "outstanding_amount", "payment_status"],
             as_dict=True
         )
         
         if not finance_student:
             return error_response(f"Không tìm thấy: {finance_student_id}", logs=logs)
+        
+        # Hiển thị: ưu tiên SIS Class short_title
+        class_title_display = _class_display_title_from_sis_class(
+            finance_student.get("class_id"),
+            finance_student.get("class_title"),
+        )
         
         # Kiểm tra học sinh có thuộc phụ huynh này không
         parent_students = _get_parent_students(parent_id)
@@ -391,7 +426,7 @@ def get_student_finance_detail(finance_student_id=None):
                 "student_id": finance_student.student_id,
                 "student_name": finance_student.student_name,
                 "student_code": finance_student.student_code,
-                "class_title": finance_student.class_title,
+                "class_title": class_title_display,
                 "total_amount": filtered_total,
                 "paid_amount": filtered_paid,
                 "outstanding_amount": filtered_outstanding,
