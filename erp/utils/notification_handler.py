@@ -472,6 +472,10 @@ def send_bulk_parent_notifications(
                 # Mỗi phiếu khám SK định kỳ (checkup_name) một thông báo — không gộp theo phút
                 checkup_key = (data.get("checkup_name") or "").strip()
                 debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{checkup_key}"
+            elif recipient_type == "finance_payment" and data:
+                # Mỗi lần cập nhật đóng phí: không gộp theo phút (tránh nuốt thông báo hợp lệ cùng phút)
+                fin_key = f"{data.get('order_student_id') or ''}_{frappe.utils.now()}"
+                debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{fin_key}"
             else:
                 event_ts = data.get("timestamp", "") if data else ""
                 # Round timestamp to minute để debounce trong cùng 1 phút

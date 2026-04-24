@@ -143,6 +143,78 @@ def _update_finance_student_summary(finance_student_id, logs=None):
         return False
 
 
+def _parse_suppress_notify(data):
+    """
+    Từ body form/json: bật tắt gửi push (dùng khi UI gọi 2 bước liên tiếp, chỉ bước cuối gửi 1 lần).
+    """
+    if not data:
+        return False
+    v = data.get("suppress_notify")
+    if v is True:
+        return True
+    if isinstance(v, str) and v.strip().lower() in ("true", "1", "yes"):
+        return True
+    return False
+
+
+def _notify_parent_payment_update(order_student_doc, order_doc):
+    """
+    Gửi Web Push tới phụ huynh (Parent Portal) sau khi ghi nhận thanh toán — gọi sau frappe.db.commit().
+    Lỗi gửi không làm sập response API; chỉ log.
+    """
+    # Thông điệp theo nghiệp vụ; Title cố định theo yêu cầu
+    try:
+        from erp.utils.notification_handler import send_bulk_parent_notifications
+
+        if not order_student_doc or not order_doc:
+            return
+
+        is_completed = order_student_doc.payment_status == "paid"
+        student_name = (
+            (order_student_doc.student_name or "").strip()
+            or (order_student_doc.student_code or "").strip()
+            or "Học sinh"
+        )
+        order_title = (getattr(order_doc, "title", None) or "").strip() or order_doc.name
+        title = "Thông báo đóng phí"
+        if is_completed:
+            body = f"Học sinh {student_name} đã hoàn thành đóng phí cho {order_title}."
+        else:
+            body = f"Học sinh {student_name} có cập nhật đóng phí mới."
+
+        finance_sid = order_student_doc.finance_student_id
+        crm_student_id = None
+        if finance_sid:
+            crm_student_id = frappe.db.get_value("SIS Finance Student", finance_sid, "student_id")
+        if not crm_student_id and finance_sid:
+            crm_student_id = finance_sid
+
+        if not crm_student_id:
+            frappe.logger().warning("notify_parent_payment: thiếu student_id từ Finance Student, bỏ gửi push")
+            return
+
+        url = f"/finance/{finance_sid}" if finance_sid else "/finance"
+        data_payload = {
+            "type": "finance_payment",
+            "order_id": order_student_doc.order_id,
+            "order_student_id": order_student_doc.name,
+            "finance_student_id": finance_sid,
+            "is_completed": is_completed,
+            "url": url,
+        }
+
+        send_bulk_parent_notifications(
+            recipient_type="finance_payment",
+            recipients_data={"student_ids": [crm_student_id]},
+            title=title,
+            body=body,
+            icon="/icon.png",
+            data=data_payload,
+        )
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Notify Parent Finance Payment Error")
+
+
 @frappe.whitelist()
 def update_order_student_payment():
     """
@@ -156,6 +228,7 @@ def update_order_student_payment():
         mode: (optional) 'absolute' (mặc định) | 'delta'
         payment_scheme: (optional) 'yearly' | 'semester' — nếu truyền, set payment_scheme_choice
         target_milestone: (optional) 'semester_1' | 'semester_2' — cộng delta vào kỳ tương ứng (kèm mode=delta, payment_scheme=semester)
+        suppress_notify: (optional) true — bỏ qua gửi push (UI gom nhiều bước thanh toán thành một thông báo)
     
     Returns:
         Thông tin Order Student sau cập nhật
@@ -177,6 +250,7 @@ def update_order_student_payment():
         mode = (data.get('mode') or 'absolute') or 'absolute'
         payment_scheme = data.get('payment_scheme')
         target_milestone = data.get('target_milestone')
+        suppress_notify = _parse_suppress_notify(data)
         
         # Debug: log raw data nhận được
         logs.append(f"DEBUG RAW: is_json={frappe.request.is_json}, data={data}")
@@ -303,6 +377,10 @@ def update_order_student_payment():
         
         frappe.db.commit()
         
+        if not suppress_notify:
+            order_student.reload()
+            _notify_parent_payment_update(order_student, order_doc)
+        
         return success_response(
             data={
                 "name": order_student.name,
@@ -333,6 +411,7 @@ def record_payment_choice():
         order_student_id: ID của Order Student
         payment_choice: 'yearly' | 'semester_1' | 'semester_2'
         notes: Ghi chú (optional)
+        suppress_notify: (optional) true — bỏ qua gửi push (UI gom nhiều bước)
     """
     logs = []
     
@@ -348,6 +427,7 @@ def record_payment_choice():
         order_student_id = data.get('order_student_id')
         payment_choice = data.get('payment_choice')
         notes = data.get('notes')
+        suppress_notify = _parse_suppress_notify(data)
         
         if not order_student_id:
             return validation_error_response(
@@ -432,6 +512,10 @@ def record_payment_choice():
         
         frappe.db.commit()
         
+        if not suppress_notify:
+            order_student.reload()
+            _notify_parent_payment_update(order_student, order_doc)
+        
         payment_info = order_student.get_payment_display_info()
         
         return success_response(
@@ -471,6 +555,7 @@ def record_milestone_payment():
         milestone_key: Mốc thanh toán (yearly_1, yearly_2, semester_1, semester_2)
         amount: Số tiền thanh toán (phải khớp với số tiền của mốc)
         notes: Ghi chú (optional)
+        suppress_notify: (optional) true — bỏ qua gửi push
     
     Returns:
         Thông tin Order Student sau cập nhật
@@ -490,6 +575,7 @@ def record_milestone_payment():
         milestone_key = data.get('milestone_key')
         amount = data.get('amount')
         notes = data.get('notes')
+        suppress_notify = _parse_suppress_notify(data)
         
         # Validate required fields
         if not order_student_id:
@@ -638,6 +724,10 @@ def record_milestone_payment():
         order_doc.update_statistics()
         
         frappe.db.commit()
+        
+        if not suppress_notify:
+            order_student.reload()
+            _notify_parent_payment_update(order_student, order_doc)
         
         # Lấy payment info để trả về
         payment_info = order_student.get_payment_display_info()
