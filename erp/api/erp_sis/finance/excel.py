@@ -360,12 +360,7 @@ def import_simple_amounts():
                     except (ValueError, TypeError):
                         pass
 
-                # Cảnh báo lỏng: tiền cả năm vs tổng 2 kỳ (không chặn import)
-                if total_from_file is not None and sem1_val is not None and sem2_val is not None:
-                    if abs(total_from_file - (sem1_val + sem2_val)) > 1:
-                        warnings.append(
-                            f"Dòng ~{idx + 3} ({student_code}): Tiền cả năm ({total_from_file:,.0f}) khác tổng kỳ 1 + kỳ 2 ({sem1_val + sem2_val:,.0f})."
-                        )
+                # Không so sánh tổng cả năm với kỳ 1 + kỳ 2: số từ Excel theo công thức nguồn riêng.
                 
                 # Cập nhật paid_amount nếu có
                 if 'paid_amount' in row and pd.notna(row['paid_amount']):
