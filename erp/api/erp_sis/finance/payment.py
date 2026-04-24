@@ -161,13 +161,14 @@ def _notify_parent_payment_update(order_student_doc, order_doc):
     """
     Gửi Web Push tới phụ huynh (Parent Portal) sau khi ghi nhận thanh toán — gọi sau frappe.db.commit().
     Lỗi gửi không làm sập response API; chỉ log.
+    Trả về dict tóm tắt (đưa vào response API) hoặc None nếu lỗi nghiêm trọng ngoài try.
     """
     # Thông điệp theo nghiệp vụ; Title cố định theo yêu cầu
     try:
         from erp.utils.notification_handler import send_bulk_parent_notifications
 
         if not order_student_doc or not order_doc:
-            return
+            return {"skipped": True, "reason": "missing_doc", "message": "Thiếu order_student hoặc order"}
 
         is_completed = order_student_doc.payment_status == "paid"
         student_name = (
@@ -191,7 +192,11 @@ def _notify_parent_payment_update(order_student_doc, order_doc):
 
         if not crm_student_id:
             frappe.logger().warning("notify_parent_payment: thiếu student_id từ Finance Student, bỏ gửi push")
-            return
+            return {
+                "skipped": True,
+                "reason": "no_crm_student_id",
+                "message": "Bản ghi SIS Finance Student thiếu student_id — không gửi tới Parent Portal",
+            }
 
         # Deep-link Parent Portal: chi tiết tài chính + ?student=CRM (header chọn đúng con)
         if finance_sid:
@@ -211,7 +216,7 @@ def _notify_parent_payment_update(order_student_doc, order_doc):
             "url": url,
         }
 
-        send_bulk_parent_notifications(
+        return send_bulk_parent_notifications(
             recipient_type="finance_payment",
             recipients_data={"student_ids": [crm_student_id]},
             title=title,
@@ -221,6 +226,26 @@ def _notify_parent_payment_update(order_student_doc, order_doc):
         )
     except Exception:
         frappe.log_error(frappe.get_traceback(), "Notify Parent Finance Payment Error")
+        return {
+            "skipped": True,
+            "reason": "exception",
+            "message": "Lỗi khi gửi thông báo (đã ghi log)",
+        }
+
+
+def _compact_parent_notify_for_api(notify_result):
+    """Rút gọn kết quả gửi push cho response JSON (không lộ PII dư thừa)."""
+    if not notify_result or not isinstance(notify_result, dict):
+        return None
+    return {
+        "success": bool(notify_result.get("success")),
+        "success_count": int(notify_result.get("success_count") or 0),
+        "total_parents": int(notify_result.get("total_parents") or 0),
+        "message": (notify_result.get("message") or "")[:300],
+        "debounce_skipped": bool(notify_result.get("debounce_skipped")),
+        "skipped": bool(notify_result.get("skipped")),
+        "reason": notify_result.get("reason"),
+    }
 
 
 @frappe.whitelist()
@@ -385,10 +410,16 @@ def update_order_student_payment():
         
         frappe.db.commit()
         
+        parent_notif = None
         if not suppress_notify:
             order_student.reload()
-            _notify_parent_payment_update(order_student, order_doc)
-        
+            parent_notif = _compact_parent_notify_for_api(
+                _notify_parent_payment_update(order_student, order_doc)
+            )
+        else:
+            # UI gom nhiều bước: chỉ bước cuối gửi push
+            parent_notif = {"suppressed": True, "message": "suppress_notify — không gửi ở bước này"}
+
         return success_response(
             data={
                 "name": order_student.name,
@@ -397,7 +428,8 @@ def update_order_student_payment():
                 "payment_status": order_student.payment_status,
                 "finance_student_id": finance_student_id,
                 "finance_student_updated": finance_student_updated,
-                "flagged_count": flagged_count
+                "flagged_count": flagged_count,
+                "parent_notification": parent_notif,
             },
             message="Cập nhật thành công",
             logs=logs
@@ -520,10 +552,15 @@ def record_payment_choice():
         
         frappe.db.commit()
         
+        parent_notif = None
         if not suppress_notify:
             order_student.reload()
-            _notify_parent_payment_update(order_student, order_doc)
-        
+            parent_notif = _compact_parent_notify_for_api(
+                _notify_parent_payment_update(order_student, order_doc)
+            )
+        else:
+            parent_notif = {"suppressed": True, "message": "suppress_notify — không gửi ở bước này"}
+
         payment_info = order_student.get_payment_display_info()
         
         return success_response(
@@ -540,7 +577,8 @@ def record_payment_choice():
                 "semester_1_paid": order_student.semester_1_paid,
                 "semester_2_paid": order_student.semester_2_paid,
                 "payment_info": payment_info,
-                "flagged_count": flagged_count
+                "flagged_count": flagged_count,
+                "parent_notification": parent_notif,
             },
             message=f"Ghi nhận thanh toán ({payment_choice}) thành công",
             logs=logs
@@ -733,10 +771,15 @@ def record_milestone_payment():
         
         frappe.db.commit()
         
+        parent_notif = None
         if not suppress_notify:
             order_student.reload()
-            _notify_parent_payment_update(order_student, order_doc)
-        
+            parent_notif = _compact_parent_notify_for_api(
+                _notify_parent_payment_update(order_student, order_doc)
+            )
+        else:
+            parent_notif = {"suppressed": True, "message": "suppress_notify — không gửi ở bước này"}
+
         # Lấy payment info để trả về
         payment_info = order_student.get_payment_display_info()
         
@@ -755,7 +798,8 @@ def record_milestone_payment():
                 "payment_info": payment_info,
                 "finance_student_id": finance_student_id,
                 "finance_student_updated": finance_student_updated,
-                "flagged_count": flagged_count
+                "flagged_count": flagged_count,
+                "parent_notification": parent_notif,
             },
             message=f"Ghi nhận thanh toán {milestone_key} thành công",
             logs=logs
