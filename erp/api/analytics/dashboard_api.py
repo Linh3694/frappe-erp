@@ -181,18 +181,36 @@ def get_module_usage(period="30d"):
 
 
 @frappe.whitelist()
-def get_feedback_ratings(page=1, page_size=20):
+def get_feedback_ratings(page=None, page_size=None, **kwargs):
 	"""
 	Get feedback ratings from Parent Portal
 	Returns list of "Đánh giá" type feedbacks, newest first
+
 	Args:
 		page: Page number (default 1)
 		page_size: Number of items per page (default 20)
+
+	Ghi chú: dọc params từ form_dict để phòng trường hợp Frappe không auto-bind
+	query args → kwargs (đã gặp thực tế khiến mọi trang đều trả về page=1, size=20).
 	"""
 	try:
-		# Calculate offset
-		page = int(page)
-		page_size = int(page_size)
+		# Ưu tiên kwargs Frappe bind; nếu thiếu thì đọc thẳng từ form_dict (query string + body)
+		form = getattr(frappe.local, "form_dict", {}) or {}
+		raw_page = page if page is not None else form.get("page", 1)
+		raw_page_size = page_size if page_size is not None else form.get("page_size", 20)
+
+		# Ép kiểu an toàn + kẹp biên để tránh LIMIT quá lớn
+		try:
+			page = max(1, int(raw_page))
+		except (TypeError, ValueError):
+			page = 1
+		try:
+			page_size = int(raw_page_size)
+		except (TypeError, ValueError):
+			page_size = 20
+		# Cho phép tối đa 500 bản ghi/trang để xuất Excel một phát không cần lặp nhiều
+		page_size = max(1, min(page_size, 500))
+
 		offset = (page - 1) * page_size
 		
 		# Tổng số: chỉ bản ghi có rating (cùng tập dữ liệu với average_rating / rating_count / file Excel)
