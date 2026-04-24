@@ -5,6 +5,7 @@ Handles finance viewing for parent portal
 API endpoints cho phụ huynh xem khoản phí của học sinh.
 """
 
+import re
 import frappe
 from frappe import _
 from frappe.utils import nowdate, getdate
@@ -15,6 +16,29 @@ from erp.utils.api_response import (
 )
 from erp.api.parent_portal.otp_auth import is_production_server
 
+# Tên cột: "Tên viết tắt" — gỡ lặp với chuỗi "Lớp: …" trên phụ huynh
+_LOP_PREFIX_RE = re.compile(r"^Lớp\s*[:：]?\s*")
+
+
+def _strip_redundant_lop_prefix_for_portal(s):
+    """
+    Bỏ tiền tố 'Lớp' dư ở đầu tên lớp (DB/sync thường lưu cả 'Lớp 3A6'),
+    vì UI parent portal dùng i18n "Lớp: {{className}} → tránh "Lớp: Lớp 3A6".
+    Lặp tối đa vài lần để gỡ "Lớp: Lớp 10AP" nếu có.
+    """
+    if s is None:
+        return None
+    t = (str(s)).strip()
+    if not t:
+        return t
+    original = t
+    for _ in range(4):
+        t2 = _LOP_PREFIX_RE.sub("", t, count=1).strip()
+        if t2 == t:
+            break
+        t = t2
+    return t if t else original
+
 
 def _class_display_title_from_sis_class(class_id, stored_class_title=None):
     """
@@ -22,7 +46,7 @@ def _class_display_title_from_sis_class(class_id, stored_class_title=None):
     sau đó class.title, cuối cùng mới dùng class_title đã lưu trên SIS Finance Student.
     """
     if not class_id:
-        return stored_class_title
+        return _strip_redundant_lop_prefix_for_portal(stored_class_title)
     row = frappe.db.get_value(
         "SIS Class",
         class_id,
@@ -30,14 +54,14 @@ def _class_display_title_from_sis_class(class_id, stored_class_title=None):
         as_dict=True,
     )
     if not row:
-        return stored_class_title
+        return _strip_redundant_lop_prefix_for_portal(stored_class_title)
     st = (row.get("short_title") or "").strip()
     if st:
-        return st
+        return _strip_redundant_lop_prefix_for_portal(st)
     t = (row.get("title") or "").strip()
     if t:
-        return t
-    return stored_class_title
+        return _strip_redundant_lop_prefix_for_portal(t)
+    return _strip_redundant_lop_prefix_for_portal(stored_class_title)
 
 
 def _get_current_parent():
@@ -255,7 +279,7 @@ def get_student_finance(student_id=None):
                 "school_year_name_vn": fs.school_year_name_vn,
                 "school_year_name_en": fs.school_year_name_en,
                 "is_active": fs.is_active,
-                "class_title": fs.class_title,
+                "class_title": _strip_redundant_lop_prefix_for_portal(fs.class_title),
                 "total_amount": fs.total_amount or 0,
                 "paid_amount": fs.paid_amount or 0,
                 "outstanding_amount": fs.outstanding_amount or 0,
@@ -612,9 +636,14 @@ def get_all_students_finance(finance_year_id=None):
                         fs.name as finance_student_id,
                         fs.finance_year_id,
                         fy.title as finance_year_title,
-                        fs.class_title
+                        COALESCE(
+                            NULLIF(TRIM(c.`short_title`), ''),
+                            NULLIF(TRIM(c.`title`), ''),
+                            fs.class_title
+                        ) as class_title
                     FROM `tabSIS Finance Student` fs
                     INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
+                    LEFT JOIN `tabSIS Class` c ON c.name = fs.class_id
                     WHERE fs.student_id = %s
                       AND fs.finance_year_id = %s
                     LIMIT 1
@@ -625,9 +654,14 @@ def get_all_students_finance(finance_year_id=None):
                         fs.name as finance_student_id,
                         fs.finance_year_id,
                         fy.title as finance_year_title,
-                        fs.class_title
+                        COALESCE(
+                            NULLIF(TRIM(c.`short_title`), ''),
+                            NULLIF(TRIM(c.`title`), ''),
+                            fs.class_title
+                        ) as class_title
                     FROM `tabSIS Finance Student` fs
                     INNER JOIN `tabSIS Finance Year` fy ON fs.finance_year_id = fy.name
+                    LEFT JOIN `tabSIS Class` c ON c.name = fs.class_id
                     WHERE fs.student_id = %s
                       AND fy.is_active = 1
                     LIMIT 1
@@ -660,7 +694,7 @@ def get_all_students_finance(finance_year_id=None):
                     "finance_student_id": af.finance_student_id,
                     "finance_year_id": af.finance_year_id,
                     "finance_year_title": af.finance_year_title,
-                    "class_title": af.class_title,
+                    "class_title": _strip_redundant_lop_prefix_for_portal(af.class_title),
                     "total_amount": ot["total_amount"],
                     "paid_amount": ot["paid_amount"],
                     "outstanding_amount": ot["outstanding_amount"],
