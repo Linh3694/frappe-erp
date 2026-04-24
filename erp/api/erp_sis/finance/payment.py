@@ -193,12 +193,20 @@ def _notify_parent_payment_update(order_student_doc, order_doc):
             frappe.logger().warning("notify_parent_payment: thiếu student_id từ Finance Student, bỏ gửi push")
             return
 
-        url = f"/finance/{finance_sid}" if finance_sid else "/finance"
+        # Deep-link Parent Portal: chi tiết tài chính + ?student=CRM (header chọn đúng con)
+        if finance_sid:
+            from urllib.parse import quote
+
+            url = f"/finance/{quote(str(finance_sid), safe='')}?student={quote(str(crm_student_id), safe='')}"
+        else:
+            url = "/finance"
+
         data_payload = {
             "type": "finance_payment",
             "order_id": order_student_doc.order_id,
             "order_student_id": order_student_doc.name,
             "finance_student_id": finance_sid,
+            "student_id": crm_student_id,
             "is_completed": is_completed,
             "url": url,
         }
