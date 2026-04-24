@@ -165,21 +165,23 @@ def get_student_orders(finance_student_id=None):
             filters={"finance_student_id": finance_student_id},
             fields=[
                 "name", "order_id", "total_amount", "paid_amount", "outstanding_amount",
-                "payment_status", "student_code", "student_name", "class_title"
+                "payment_status", "student_code", "student_name", "class_title",
+                "payment_scheme_choice", "semester_1_amount", "semester_1_paid",
+                "semester_2_amount", "semester_2_paid",
             ],
             order_by="creation asc"
         )
         
         orders = []
-        for os in order_students:
-            # Lấy thông tin order
-            order_doc = frappe.get_doc("SIS Finance Order", os.order_id)
+        for row in order_students:
+            # Một bản ghi SIS Finance Order Student
+            order_doc = frappe.get_doc("SIS Finance Order", row.order_id)
             
             # Nếu total_amount = 0, tính lại từ fee_lines
-            total_amount = os.total_amount or 0
+            total_amount = row.total_amount or 0
             if total_amount == 0:
                 # Lấy order_student_doc để tính total từ fee_lines
-                order_student_doc = frappe.get_doc("SIS Finance Order Student", os.name)
+                order_student_doc = frappe.get_doc("SIS Finance Order Student", row.name)
                 for fee_line in order_student_doc.fee_lines:
                     if fee_line.line_type == 'total' and fee_line.amounts_json:
                         try:
@@ -194,15 +196,15 @@ def get_student_orders(finance_student_id=None):
                         except:
                             pass
             
-            outstanding_amount = total_amount - (os.paid_amount or 0)
+            outstanding_amount = total_amount - (row.paid_amount or 0)
             
             # Xác định payment_status
-            payment_status = os.payment_status
+            payment_status = row.payment_status
             if total_amount == 0:
                 payment_status = 'no_fee'
-            elif (os.paid_amount or 0) >= total_amount:
+            elif (row.paid_amount or 0) >= total_amount:
                 payment_status = 'paid'
-            elif (os.paid_amount or 0) > 0:
+            elif (row.paid_amount or 0) > 0:
                 payment_status = 'partial'
             else:
                 payment_status = 'unpaid'
@@ -216,18 +218,23 @@ def get_student_orders(finance_student_id=None):
             }
             
             orders.append({
-                "order_student_id": os.name,
-                "order_id": os.order_id,
+                "order_student_id": row.name,
+                "order_id": row.order_id,
                 "order_title": order_doc.title,
                 "order_type": order_doc.order_type,
                 "order_type_display": order_type_display.get(order_doc.order_type, order_doc.order_type),
                 "total_amount": total_amount,
-                "paid_amount": os.paid_amount or 0,
+                "paid_amount": row.paid_amount or 0,
                 "outstanding_amount": outstanding_amount,
                 "payment_status": payment_status,
                 "is_active": order_doc.is_active,
                 "is_order_superseded": int(getattr(order_doc, "is_superseded", 0) or 0),
                 "parent_order_id": getattr(order_doc, "parent_order_id", None),
+                "payment_scheme_choice": row.get("payment_scheme_choice"),
+                "semester_1_amount": float(row.get("semester_1_amount") or 0),
+                "semester_1_paid": float(row.get("semester_1_paid") or 0),
+                "semester_2_amount": float(row.get("semester_2_amount") or 0),
+                "semester_2_paid": float(row.get("semester_2_paid") or 0),
             })
 
         # Nhật ký thu phí (số lượng + mới nhất) cho từng dòng order

@@ -151,8 +151,11 @@ def update_order_student_payment():
     
     Body:
         order_student_id: ID của Order Student
-        paid_amount: Số tiền đã đóng
+        paid_amount: Số tiền đã đóng (tuyệt đối nếu mode=absolute) hoặc số cộng thêm nếu mode=delta
         notes: Ghi chú (optional)
+        mode: (optional) 'absolute' (mặc định) | 'delta'
+        payment_scheme: (optional) 'yearly' | 'semester' — nếu truyền, set payment_scheme_choice
+        target_milestone: (optional) 'semester_1' | 'semester_2' — cộng delta vào kỳ tương ứng (kèm mode=delta, payment_scheme=semester)
     
     Returns:
         Thông tin Order Student sau cập nhật
@@ -171,10 +174,14 @@ def update_order_student_payment():
         order_student_id = data.get('order_student_id')
         paid_amount = data.get('paid_amount')
         notes = data.get('notes')
+        mode = (data.get('mode') or 'absolute') or 'absolute'
+        payment_scheme = data.get('payment_scheme')
+        target_milestone = data.get('target_milestone')
         
         # Debug: log raw data nhận được
         logs.append(f"DEBUG RAW: is_json={frappe.request.is_json}, data={data}")
         logs.append(f"DEBUG RAW: paid_amount={paid_amount}, type={type(paid_amount).__name__}")
+        logs.append(f"DEBUG: mode={mode}, payment_scheme={payment_scheme}, target_milestone={target_milestone}")
         
         if not order_student_id:
             return validation_error_response(
@@ -195,23 +202,77 @@ def update_order_student_payment():
         order_student = frappe.get_doc("SIS Finance Order Student", order_student_id)
         finance_student_id = order_student.finance_student_id
         
-        # Chuyển đổi paid_amount sang float
-        new_paid = float(paid_amount) if paid_amount is not None else 0
-        
-        # Nếu đang dùng semester payment scheme, chuyển về yearly/None để cho phép
-        # cập nhật paid_amount trực tiếp (workflow đơn giản)
-        if order_student.payment_scheme_choice == 'semester':
-            logs.append(f"Chuyển từ semester sang yearly để cập nhật paid_amount trực tiếp")
-            order_student.payment_scheme_choice = None
-            order_student.semester_1_paid = 0
-            order_student.semester_2_paid = 0
-        
-        # Cập nhật paid_amount
-        order_student.paid_amount = new_paid
-        
-        # Cập nhật notes nếu có
-        if notes is not None:
-            order_student.notes = notes
+        # Số từ request
+        amount_val = float(paid_amount) if paid_amount is not None else 0
+
+        # --- Chế độ mới: delta theo năm / theo kỳ ---
+        if mode == 'delta':
+            if amount_val < 0:
+                return validation_error_response("Số tiền cộng thêm không thể âm", {"paid_amount": ["Số dương"]})
+
+            if payment_scheme == 'semester' and target_milestone in ('semester_1', 'semester_2'):
+                order_student.payment_scheme_choice = 'semester'
+                s1a = order_student.semester_1_amount or 0
+                s2a = order_student.semester_2_amount or 0
+                if target_milestone == 'semester_1':
+                    cap = s1a
+                    current = order_student.semester_1_paid or 0
+                    headroom = max(0, cap - current)
+                    added = min(headroom, amount_val)
+                    if amount_val > headroom and headroom > 0:
+                        logs.append(
+                            f"Cảnh báo: delta kỳ 1 yêu cầu {amount_val:,.0f}, chỉ còn thiếu {headroom:,.0f} - ghi {added:,.0f}"
+                        )
+                    elif amount_val > 0 and cap <= current:
+                        logs.append("Cảnh báo: kỳ 1 đã đủ, không ghi thêm")
+                    order_student.semester_1_paid = current + added
+                else:
+                    cap = s2a
+                    current = order_student.semester_2_paid or 0
+                    headroom = max(0, cap - current)
+                    added = min(headroom, amount_val)
+                    if amount_val > headroom and headroom > 0:
+                        logs.append(
+                            f"Cảnh báo: delta kỳ 2 yêu cầu {amount_val:,.0f}, chỉ còn thiếu {headroom:,.0f} - ghi {added:,.0f}"
+                        )
+                    elif amount_val > 0 and cap <= current:
+                        logs.append(f"Cảnh báo: kỳ 2 đã đủ, không ghi thêm")
+                    order_student.semester_2_paid = current + added
+
+            elif payment_scheme == 'yearly':
+                # Đóng cộng dồn theo tổng cả năm (tách khỏi mô hình theo kỳ)
+                was_semester = order_student.payment_scheme_choice == 'semester'
+                if was_semester:
+                    base = (order_student.semester_1_paid or 0) + (order_student.semester_2_paid or 0)
+                    order_student.semester_1_paid = 0
+                    order_student.semester_2_paid = 0
+                else:
+                    base = order_student.paid_amount or 0
+                order_student.payment_scheme_choice = 'yearly'
+                # Mức trần: total_amount tại thời điểm lưu (kỳ trước thường = sem1+sem2)
+                cap = order_student.total_amount or 0
+                if (not cap) and (order_student.semester_1_amount or order_student.semester_2_amount):
+                    cap = (order_student.semester_1_amount or 0) + (order_student.semester_2_amount or 0)
+                new_paid = min(cap, base + amount_val) if cap else base + amount_val
+                if cap and (base + amount_val) > cap:
+                    logs.append(
+                        f"Cảnh báo: cộng cả năm vượt mức; chốt tại {new_paid:,.0f} (trần {cap:,.0f})"
+                    )
+                order_student.paid_amount = new_paid
+            else:
+                return validation_error_response(
+                    "Khi mode=delta cần payment_scheme=yearly hoặc (payment_scheme=semester + target_milestone)",
+                    {"mode": ["Thiếu payment_scheme hợp lệ cho delta"]}
+                )
+        else:
+            # Chế độ tuyệt đối — giữ tương thích modal nhập số trực tiếp (input mode) cũ
+            new_paid = amount_val
+            if payment_scheme is None and order_student.payment_scheme_choice == 'semester':
+                logs.append("Chuyển từ semester sang cập nhật paid_amount tuyệt đối (legacy)")
+                order_student.payment_scheme_choice = None
+                order_student.semester_1_paid = 0
+                order_student.semester_2_paid = 0
+            order_student.paid_amount = new_paid
         
         # Lưu Order Student (before_save sẽ tự tính outstanding và payment_status)
         order_student.save(ignore_permissions=True)
