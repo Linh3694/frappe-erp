@@ -6,7 +6,12 @@ Homeroom Teacher, Vice-Homeroom Teacher khi có sự kiện y tế (tạo visit,
 
 import frappe
 from frappe.utils import now, today, get_datetime, now_datetime, time_diff_in_seconds
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional, Tuple
+
+from erp.api.erp_sis.student import _get_homeroom_class_map_for_students
+
+# Tiêu đề thống nhất mọi push y tế (workspace-mobile)
+STANDARD_HEALTH_NOTIFICATION_TITLE = "Thông báo Y tế"
 
 
 # =====================================================================
@@ -48,6 +53,8 @@ def _get_mobile_supervisory_users() -> List[str]:
 
 def _get_homeroom_teachers(class_id: str) -> List[str]:
     """Lấy email của homeroom + vice-homeroom teacher từ class_id."""
+    if not class_id:
+        return []
     class_doc = frappe.db.get_value(
         "SIS Class", class_id,
         ["homeroom_teacher", "vice_homeroom_teacher"],
@@ -72,6 +79,40 @@ def _get_homeroom_teachers(class_id: str) -> List[str]:
         if user_id:
             emails.append(user_id)
     return emails
+
+
+def _label_hoc_sinh(ten_hien_thi: str) -> str:
+    """Nội dung push: gắn 'Học sinh' trước tên khi hiển thị học sinh."""
+    t = (ten_hien_thi or "").strip()
+    if not t:
+        return ""
+    return f"Học sinh {t}"
+
+
+def _regular_class_id_and_title(
+    student_id: Optional[str],
+    fallback_class_id: Optional[str] = None,
+    fallback_title: Optional[str] = None,
+) -> Tuple[Optional[str], str]:
+    """
+    Lấy lớp regular (chủ nhiệm) từ SIS Class Student + SIS Class; fallback class trên visit nếu không có.
+    Dùng cho copy push và cho class_id gửi GVCN (tránh lớp mixed/club).
+    """
+    if not student_id:
+        return fallback_class_id, (fallback_title or fallback_class_id or "")
+    try:
+        campus_id = frappe.db.get_value("CRM Student", student_id, "campus_id")
+    except Exception:
+        campus_id = None
+    m = _get_homeroom_class_map_for_students([student_id], campus_id)
+    if student_id in m:
+        r = m[student_id]
+        rid = r.get("class_id") or fallback_class_id
+        t = (r.get("class_title") or "").strip()
+        if not t:
+            t = (fallback_title or fallback_class_id or "")
+        return rid, t
+    return fallback_class_id, (fallback_title or fallback_class_id or "")
 
 
 def get_health_notification_recipients(
@@ -144,23 +185,29 @@ def notify_health_visit_created(visit_name: str):
 
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
         student_name = visit.student_name or visit.student_id
-        class_name = visit.class_name or visit.class_id
+        r_class_id, class_name = _regular_class_id_and_title(
+            visit.student_id, visit.class_id, visit.class_name
+        )
         reason = visit.reason or ""
+        label_hs = _label_hoc_sinh(student_name)
 
-        frappe.logger().info(f"[health_notification] Visit info: student={student_name}, class={visit.class_id}, status={visit.status}")
+        frappe.logger().info(
+            f"[health_notification] Visit info: student={student_name}, class_visit={visit.class_id}, "
+            f"class_regular={r_class_id}, status={visit.status}"
+        )
 
         # Log chi tiết từng bước resolve recipients
         medical_users = _get_mobile_medical_users()
         frappe.logger().info(f"[health_notification] Mobile Medical users: {medical_users}")
 
-        homeroom_teachers = _get_homeroom_teachers(visit.class_id)
+        homeroom_teachers = _get_homeroom_teachers(r_class_id)
         frappe.logger().info(f"[health_notification] Homeroom teachers: {homeroom_teachers}")
 
         supervisory_users = _get_mobile_supervisory_users()
         frappe.logger().info(f"[health_notification] Mobile Supervisory users: {supervisory_users}")
 
         recipients = get_health_notification_recipients(
-            class_id=visit.class_id,
+            class_id=r_class_id,
             include_medical=True,
             include_homeroom=True,
             include_supervisory=True,
@@ -172,15 +219,15 @@ def notify_health_visit_created(visit_name: str):
             frappe.logger().warning(f"[health_notification] KHÔNG TÌM THẤY người nhận nào cho visit {visit_name}")
             return
 
-        title = "Báo Y tế"
-        body = f"{student_name} ({class_name}) đã được báo xuống Y tế. Lý do: {reason}"
+        title = STANDARD_HEALTH_NOTIFICATION_TITLE
+        body = f"{label_hs} ({class_name}) đã được báo xuống Y tế. Lý do: {reason}"
 
         data = {
             "type": "health_visit_created",
             "visit_id": visit.name,
             "student_id": visit.student_id,
             "student_name": student_name,
-            "class_id": visit.class_id,
+            "class_id": r_class_id,
             "class_name": class_name,
             "status": visit.status,
         }
@@ -205,13 +252,17 @@ def notify_health_visit_received(visit_name: str):
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
         student_name = visit.student_name or visit.student_id
+        r_class_id, class_name = _regular_class_id_and_title(
+            visit.student_id, visit.class_id, visit.class_name
+        )
+        label_hs = _label_hoc_sinh(student_name)
 
         extra_users = []
         if visit.reported_by:
             extra_users.append(visit.reported_by)
 
         recipients = get_health_notification_recipients(
-            class_id=visit.class_id,
+            class_id=r_class_id,
             include_medical=False,
             include_homeroom=True,
             include_supervisory=True,
@@ -221,15 +272,16 @@ def notify_health_visit_received(visit_name: str):
         if not recipients:
             return
 
-        title = "Y tế đã tiếp nhận"
-        body = f"{student_name} đã được tiếp nhận tại phòng Y tế"
+        title = STANDARD_HEALTH_NOTIFICATION_TITLE
+        body = f"{label_hs} đã được tiếp nhận tại phòng Y tế"
 
         data = {
             "type": "health_visit_received",
             "visit_id": visit.name,
             "student_id": visit.student_id,
             "student_name": student_name,
-            "class_id": visit.class_id,
+            "class_id": r_class_id,
+            "class_name": class_name,
             "status": "at_clinic",
         }
 
@@ -251,10 +303,13 @@ def notify_health_visit_cancelled(visit_name: str):
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
         student_name = visit.student_name or visit.student_id
-        class_name = visit.class_name or visit.class_id
+        r_class_id, class_name = _regular_class_id_and_title(
+            visit.student_id, visit.class_id, visit.class_name
+        )
+        label_hs = _label_hoc_sinh(student_name)
 
         recipients = get_health_notification_recipients(
-            class_id=visit.class_id,
+            class_id=r_class_id,
             include_medical=True,
             include_homeroom=False,
             include_supervisory=True,
@@ -263,15 +318,15 @@ def notify_health_visit_cancelled(visit_name: str):
         if not recipients:
             return
 
-        title = "Đã hủy báo Y tế"
-        body = f"{student_name} ({class_name}) - GV đã hủy đơn báo xuống Y tế"
+        title = STANDARD_HEALTH_NOTIFICATION_TITLE
+        body = f"{label_hs} ({class_name}) - GV đã hủy đơn báo xuống Y tế"
 
         data = {
             "type": "health_visit_cancelled",
             "visit_id": visit.name,
             "student_id": visit.student_id,
             "student_name": student_name,
-            "class_id": visit.class_id,
+            "class_id": r_class_id,
             "class_name": class_name,
             "status": "cancelled",
         }
@@ -294,14 +349,17 @@ def notify_health_visit_rejected(visit_name: str):
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
         student_name = visit.student_name or visit.student_id
-        class_name = visit.class_name or visit.class_id
+        r_class_id, class_name = _regular_class_id_and_title(
+            visit.student_id, visit.class_id, visit.class_name
+        )
+        label_hs = _label_hoc_sinh(student_name)
 
         extra_users = []
         if visit.reported_by:
             extra_users.append(visit.reported_by)
 
         recipients = get_health_notification_recipients(
-            class_id=visit.class_id,
+            class_id=r_class_id,
             include_medical=False,
             include_homeroom=True,
             include_supervisory=True,
@@ -311,15 +369,15 @@ def notify_health_visit_rejected(visit_name: str):
         if not recipients:
             return
 
-        title = "Y tế từ chối tiếp nhận"
-        body = f"{student_name} ({class_name}) - Y tế đã từ chối, học sinh đang về lớp"
+        title = STANDARD_HEALTH_NOTIFICATION_TITLE
+        body = f"{label_hs} ({class_name}) - Y tế đã từ chối, học sinh đang về lớp"
 
         data = {
             "type": "health_visit_rejected",
             "visit_id": visit.name,
             "student_id": visit.student_id,
             "student_name": student_name,
-            "class_id": visit.class_id,
+            "class_id": r_class_id,
             "class_name": class_name,
             "status": "rejected",
         }
@@ -344,20 +402,25 @@ def notify_health_visit_completed(visit_name: str):
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
         student_name = visit.student_name or visit.student_id
         outcome = visit.status
-
-        outcome_messages = {
-            "returned": ("Học sinh đã về lớp", f"{student_name} đã được Y tế cho về lớp"),
-            "picked_up": ("Phụ huynh đã đón học sinh", f"{student_name} đã được phụ huynh đón về"),
-            "transferred": ("Chuyển viện", f"{student_name} đã được chuyển viện"),
-        }
-
-        title, body = outcome_messages.get(
-            outcome,
-            ("Hoàn thành Y tế", f"{student_name} đã hoàn thành lượt xuống Y tế")
+        r_class_id, class_name = _regular_class_id_and_title(
+            visit.student_id, visit.class_id, visit.class_name
         )
+        label_hs = _label_hoc_sinh(student_name)
+
+        # Nội dung theo kết quả; tiêu đề thống nhất
+        outcome_bodies = {
+            "returned": f"{label_hs} đã được Y tế cho về lớp",
+            "picked_up": f"{label_hs} đã được phụ huynh đón về",
+            "transferred": f"{label_hs} đã được chuyển viện",
+        }
+        body = outcome_bodies.get(
+            outcome,
+            f"{label_hs} đã hoàn thành lượt xuống Y tế",
+        )
+        title = STANDARD_HEALTH_NOTIFICATION_TITLE
 
         recipients = get_health_notification_recipients(
-            class_id=visit.class_id,
+            class_id=r_class_id,
             include_medical=True,
             include_homeroom=True,
             include_supervisory=True,
@@ -371,7 +434,8 @@ def notify_health_visit_completed(visit_name: str):
             "visit_id": visit.name,
             "student_id": visit.student_id,
             "student_name": student_name,
-            "class_id": visit.class_id,
+            "class_id": r_class_id,
+            "class_name": class_name,
             "status": outcome,
         }
 
@@ -392,15 +456,18 @@ def notify_examination_created(visit_name: str, disease_classification: str = ""
     try:
         visit = frappe.get_doc("SIS Daily Health Visit", visit_name)
         student_name = visit.student_name or visit.student_id
-        class_name = visit.class_name or visit.class_id
+        r_class_id, class_name = _regular_class_id_and_title(
+            visit.student_id, visit.class_id, visit.class_name
+        )
+        label_hs = _label_hoc_sinh(student_name)
 
-        title = "Hồ sơ thăm khám"
-        body = f"{student_name} ({class_name}) đã được Y tế thăm khám"
+        title = STANDARD_HEALTH_NOTIFICATION_TITLE
+        body = f"{label_hs} ({class_name}) đã được Y tế thăm khám"
         if disease_classification:
             body += f" - {disease_classification}"
 
         recipients = get_health_notification_recipients(
-            class_id=visit.class_id,
+            class_id=r_class_id,
             include_medical=False,
             include_homeroom=True,
         )
@@ -413,7 +480,8 @@ def notify_examination_created(visit_name: str, disease_classification: str = ""
             "visit_id": visit.name,
             "student_id": visit.student_id,
             "student_name": student_name,
-            "class_id": visit.class_id,
+            "class_id": r_class_id,
+            "class_name": class_name,
         }
 
         _send_to_recipients(recipients, title, body, data)
@@ -473,7 +541,10 @@ def check_stale_health_visits():
                 continue
 
             student_name = visit.student_name or visit.student_id
-            class_name = visit.class_name or visit.class_id
+            r_class_id, class_name = _regular_class_id_and_title(
+                visit.student_id, visit.class_id, visit.class_name
+            )
+            label_hs = _label_hoc_sinh(student_name)
 
             # Gửi cho Mobile Medical + Mobile Supervisory + Homeroom + Vice-homeroom + Reporter
             extra_users = []
@@ -481,7 +552,7 @@ def check_stale_health_visits():
                 extra_users.append(visit.reported_by)
 
             recipients = get_health_notification_recipients(
-                class_id=visit.class_id,
+                class_id=r_class_id,
                 include_medical=True,
                 include_homeroom=True,
                 include_supervisory=True,
@@ -493,15 +564,16 @@ def check_stale_health_visits():
                 frappe.logger().warning(f"[health_notification] Không tìm thấy người nhận nào cho escalation visit {visit.name}")
                 continue
 
-            title = "Nhắc nhở Y tế"
-            body = f"{student_name} ({class_name}) đã rời lớp hơn 15 phút nhưng chưa đến phòng Y tế"
+            title = STANDARD_HEALTH_NOTIFICATION_TITLE
+            body = f"{label_hs} ({class_name}) đã rời lớp hơn 15 phút nhưng chưa đến phòng Y tế"
 
             data = {
                 "type": "health_visit_escalation",
                 "visit_id": visit.name,
                 "student_id": visit.student_id,
                 "student_name": student_name,
-                "class_id": visit.class_id,
+                "class_id": r_class_id,
+                "class_name": class_name,
                 "status": "left_class",
             }
 
