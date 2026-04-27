@@ -303,6 +303,89 @@ def get_feedback_ratings(page=None, page_size=None, **kwargs):
 
 
 @frappe.whitelist()
+def get_all_feedback_ratings():
+	"""
+	Lấy TẤT CẢ feedback ratings của Parent Portal (không phân trang).
+
+	Mục đích: Phục vụ chức năng "Tải toàn bộ (Excel)" ở trang
+	Parent Portal Analytics. Endpoint phân trang `get_feedback_ratings` đôi khi
+	không nhận đúng tham số `page_size` qua query string (Frappe có thể bỏ qua
+	một số tham số) khiến phía client chỉ lấy được 20 bản ghi đầu tiên.
+
+	Endpoint này trả về toàn bộ Feedback có `feedback_type = 'Đánh giá'` và
+	`rating IS NOT NULL`, sắp xếp mới nhất → cũ nhất, kèm theo điểm trung bình
+	và phân phối số sao để client không cần tự tính lại.
+	"""
+	try:
+		# Lấy toàn bộ đánh giá (không LIMIT) — sắp xếp mới nhất trước
+		feedbacks = frappe.db.sql(
+			"""
+			SELECT
+				f.name,
+				f.guardian,
+				f.rating,
+				f.rating_comment,
+				f.submitted_at,
+				g.guardian_name AS guardian_name
+			FROM `tabFeedback` f
+			LEFT JOIN `tabCRM Guardian` g ON f.guardian = g.name
+			WHERE f.feedback_type = 'Đánh giá' AND f.rating IS NOT NULL
+			ORDER BY f.submitted_at DESC
+			""",
+			as_dict=True,
+		)
+
+		# Tính điểm trung bình + tổng số đánh giá (rating gốc lưu thang 0-1)
+		total = len(feedbacks)
+		avg_rating = 0
+		if total > 0:
+			sum_rating = sum((fb.get("rating") or 0) for fb in feedbacks)
+			avg_rating_normalized = sum_rating / total
+			avg_rating = round(avg_rating_normalized * 5, 1)
+
+		# Phân phối số sao 1-5 (giống `get_feedback_ratings` để FE dùng chung)
+		rating_distribution = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+		formatted_feedbacks = []
+		for fb in feedbacks:
+			star_rating = round((fb.rating or 0) * 5) if fb.rating else 0
+			# Kẹp vào [1,5] để tránh giá trị 0 do làm tròn rating ~0
+			star_clamped = max(1, min(5, star_rating)) if star_rating else 0
+			if star_clamped:
+				rating_distribution[star_clamped] = rating_distribution.get(star_clamped, 0) + 1
+
+			formatted_feedbacks.append({
+				"name": fb.name,
+				"guardian": fb.guardian,
+				"guardian_name": fb.guardian_name or fb.guardian,
+				"rating": star_rating,
+				"rating_comment": fb.rating_comment or "",
+				"submitted_at": str(fb.submitted_at) if fb.submitted_at else "",
+			})
+
+		return {
+			"success": True,
+			"data": {
+				"feedbacks": formatted_feedbacks,
+				"total_count": total,
+				"average_rating": avg_rating,
+				"rating_count": total,
+				"rating_distribution": rating_distribution,
+			},
+		}
+
+	except Exception as e:
+		import traceback
+		frappe.log_error(
+			f"Error getting all feedback ratings: {str(e)}\n{traceback.format_exc()}",
+			"Dashboard API Error",
+		)
+		return {
+			"success": False,
+			"message": str(e),
+		}
+
+
+@frappe.whitelist()
 def trigger_analytics_aggregation():
 	"""
 	Manually trigger analytics aggregation

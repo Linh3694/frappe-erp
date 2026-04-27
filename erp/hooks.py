@@ -661,6 +661,7 @@ whitelisted_methods = [
 	"erp.api.analytics.dashboard_api.get_user_trends",
 	"erp.api.analytics.dashboard_api.get_module_usage",
 	"erp.api.analytics.dashboard_api.get_feedback_ratings",
+	"erp.api.analytics.dashboard_api.get_all_feedback_ratings",
 	"erp.api.analytics.dashboard_api.trigger_analytics_aggregation"
 ]
 
