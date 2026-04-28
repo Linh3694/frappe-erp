@@ -275,3 +275,135 @@ def get_student_attendance_summary(student_id=None, month=None, year=None):
         frappe.log_error(f"get_student_attendance_summary error: {str(e)}")
         frappe.logger().error(f"❌ [Backend] get_student_attendance_summary error: {str(e)}")
         return error_response(message="Failed to fetch attendance summary", code="GET_ATTENDANCE_SUMMARY_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_student_homeroom_summary(student_id=None, school_year_id=None):
+    """
+    Thống kê điểm danh chủ nhiệm (SIS Class Attendance, period=homeroom) theo năm học.
+
+    Args:
+        student_id: Tên document CRM Student của con
+        school_year_id: Tùy chọn; mặc định = SIS School Year đang is_enable=1 (mới nhất theo start_date)
+
+    Returns:
+        success_response data: { school_year: {...}, counts: {present, late, absent, excused, total} }
+    """
+    try:
+        if not student_id:
+            student_id = frappe.form_dict.get("student_id")
+        if not school_year_id:
+            school_year_id = frappe.form_dict.get("school_year_id")
+
+        if hasattr(frappe.request, "content_type") and frappe.request.content_type and "json" in frappe.request.content_type.lower():
+            try:
+                raw_data = frappe.request.get_data(as_text=True)
+                if raw_data:
+                    json_data = json.loads(raw_data)
+                    student_id = student_id or json_data.get("student_id")
+                    school_year_id = school_year_id or json_data.get("school_year_id")
+            except Exception:
+                pass
+
+        user_email = frappe.session.user
+        if not user_email:
+            return error_response(message="User not authenticated", code="NOT_AUTHENTICATED")
+
+        parent_student_ids = _get_parent_student_ids(user_email)
+        if not student_id:
+            return error_response(message="Missing student_id", code="MISSING_PARAMETERS")
+        if student_id not in parent_student_ids:
+            return error_response(message="Access denied: Student not found in your family", code="ACCESS_DENIED")
+
+        if school_year_id:
+            sy_row = frappe.db.get_value(
+                "SIS School Year",
+                school_year_id,
+                ["name", "title_vn", "title_en", "start_date", "end_date"],
+                as_dict=True,
+            )
+            if not sy_row:
+                return error_response(message="Invalid school_year_id", code="INVALID_SCHOOL_YEAR")
+        else:
+            rows = frappe.get_all(
+                "SIS School Year",
+                filters={"is_enable": 1},
+                fields=["name", "title_vn", "title_en", "start_date", "end_date"],
+                order_by="start_date desc",
+                limit=1,
+            )
+            if not rows:
+                return error_response(message="No active school year", code="NO_SCHOOL_YEAR")
+            sy_row = rows[0]
+
+        school_year_id = sy_row["name"]
+        start_dt = sy_row["start_date"]
+        end_dt = sy_row["end_date"]
+        start_str = start_dt.strftime("%Y-%m-%d") if hasattr(start_dt, "strftime") else str(start_dt)
+        end_str = end_dt.strftime("%Y-%m-%d") if hasattr(end_dt, "strftime") else str(end_dt)
+
+        class_ids = _get_student_classes(student_id, school_year_id)
+
+        present_count = late_count = absent_count = excused_count = 0
+
+        if not class_ids:
+            total = 0
+        else:
+            rows = frappe.db.sql(
+                """
+                SELECT status, COUNT(*) AS cnt
+                FROM `tabSIS Class Attendance`
+                WHERE student_id = %s
+                  AND class_id IN ({0})
+                  AND date BETWEEN %s AND %s
+                  AND (
+                        period = 'Homeroom'
+                     OR period = 'HOMEROOM'
+                     OR LOWER(TRIM(period)) = 'homeroom'
+                  )
+                GROUP BY status
+                """.format(", ".join(["%s"] * len(class_ids))),
+                tuple([student_id] + list(class_ids) + [start_str, end_str]),
+                as_dict=True,
+            )
+
+            for row in rows:
+                st = (row.get("status") or "").strip().lower()
+                c = int(row.get("cnt") or 0)
+                if st == "present":
+                    present_count += c
+                elif st == "late":
+                    late_count += c
+                elif st == "absent":
+                    absent_count += c
+                elif st == "excused":
+                    excused_count += c
+
+            total = present_count + late_count + absent_count + excused_count
+
+        counts = {
+            "present": present_count,
+            "late": late_count,
+            "absent": absent_count,
+            "excused": excused_count,
+            "total": total,
+        }
+
+        return success_response(
+            data={
+                "school_year": {
+                    "name": school_year_id,
+                    "title_vn": sy_row.get("title_vn"),
+                    "title_en": sy_row.get("title_en"),
+                    "start_date": start_str,
+                    "end_date": end_str,
+                },
+                "counts": counts,
+            },
+            message="Homeroom attendance summary",
+        )
+
+    except Exception as e:
+        frappe.log_error(f"get_student_homeroom_summary error: {str(e)}")
+        frappe.logger().error(f"❌ [Backend] get_student_homeroom_summary error: {str(e)}")
+        return error_response(message="Failed to fetch homeroom attendance summary", code="GET_HOMEROOM_SUMMARY_ERROR")
