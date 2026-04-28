@@ -15,6 +15,11 @@ try:
 except ImportError:
     pd = None
 
+from erp.administrative.doctype.erp_administrative_room.erp_administrative_room import (
+    ROOM_NUMBER_PATTERN,
+    _normalize_room_number_raw,
+)
+
 
 def _enrich_room_responsible_users_employee_codes(rooms):
     """Gắn employee_code từ User (ưu tiên mã NV, không thì username) cho cột PIC trên FE."""
@@ -672,7 +677,7 @@ def delete_room():
 
 
 class RoomExcelImporter:
-    """Handle Excel import for Rooms with validation and mapping"""
+    """Import phòng theo định dạng vật lý: tòa + số phòng → physical_code (vd. B1A.303)."""
 
     def __init__(self, campus_id: str):
         self.campus_id = campus_id
@@ -680,11 +685,23 @@ class RoomExcelImporter:
         self.warnings: list = []
         self.building_mapping = {}
 
-    def validate_excel_structure(self, df):
-        """Validate Excel file structure for room import
+    @staticmethod
+    def _clean_cell(val):
+        """Chuẗi/NaN từ pandas → None hoặc giá trị thô."""
+        if val is None:
+            return None
+        try:
+            if pd is not None and pd.isna(val):
+                return None
+        except Exception:
+            pass
+        return val
 
-        Required columns: title_vn, title_en, short_title, room_type, building_title
-        Optional columns: capacity
+    def validate_excel_structure(self, df):
+        """Kiểm tra cấu trúc file import phòng vật lý.
+
+        Cột bắt buộc: building_title, room_number, room_type
+        Cột tuỳ chọn: capacity (trùng với form Tạo phòng cố định; title_vn/title_en chỉ khi cần tùy biến)
         """
         # Check if dataframe is empty after reading
         if df is None or df.empty:
@@ -694,7 +711,7 @@ class RoomExcelImporter:
         # Normalize column names
         df = self.normalize_columns(df)
 
-        required_cols = ['title_vn', 'title_en', 'short_title', 'room_type', 'building_title']
+        required_cols = ['building_title', 'room_number', 'room_type']
         cols_lower = [str(c).strip().lower() for c in df.columns]
 
         missing_cols = []
@@ -703,14 +720,18 @@ class RoomExcelImporter:
                 missing_cols.append(col)
 
         if missing_cols:
-            self.errors.append(f"Missing required columns: {', '.join(missing_cols)}")
+            self.errors.append(
+                "Thiếu cột bắt buộc: "
+                + ", ".join(missing_cols)
+                + ". File giống form «Tạo phòng cố định»: cần cột Tòa nhà, Số phòng, Loại phòng (hoặc tên tiếng Anh building_title, room_number, room_type). Tuỳ chọn: Sức chứa."
+            )
             return False
 
         # Check if there's at least one data row (skip empty rows)
         data_rows = 0
         for idx, row in df.iterrows():
             # Check if at least one required field has data
-            has_data = any(str(row.get(col, '')).strip() for col in required_cols)
+            has_data = any(str(row.get(col, '') or '').strip() for col in required_cols)
             if has_data:
                 data_rows += 1
 
@@ -740,6 +761,9 @@ class RoomExcelImporter:
                 'building': 'building_title',
                 'tên tòa nhà': 'building_title',
                 'tên toà nhà': 'building_title',
+                'số phòng': 'room_number',
+                'so phong': 'room_number',
+                'room number': 'room_number',
                 'sức chứa': 'capacity',
                 'capacity': 'capacity',
                 'số lượng': 'capacity'
@@ -824,49 +848,77 @@ class RoomExcelImporter:
         return self.building_mapping.get(title_lower)
 
     def validate_room_data(self, row_data):
-        """Validate individual room data"""
+        """Kiểm tra một dòng import phòng vật lý (building + room_number → physical_code)."""
         errors = []
 
-        # Required fields
-        if not row_data.get('title_vn'):
-            errors.append("Tên tiếng Việt là bắt buộc")
-        if not row_data.get('short_title'):
-            errors.append("Ký hiệu phòng là bắt buộc")
+        bt = row_data.get('building_title')
+        if not bt or not str(bt).strip():
+            errors.append(_("Tòa nhà (building_title) là bắt buộc"))
+            row_data['building_id'] = None
+        else:
+            building_id = self.find_building_id(bt)
+            if not building_id:
+                errors.append(
+                    _("Không tìm thấy tòa nhà '{0}'. Nhập đúng tên hoặc ký hiệu tòa (title_vn / short_title).").format(bt)
+                )
+                row_data['building_id'] = None
+            else:
+                row_data['building_id'] = building_id
 
-        # Room type validation
+        rn_raw = row_data.get('room_number')
+        # Excel hay đọc số phòng kiểu float (303.0) — chuyển về chuỗi số nguyên trước khi validate
+        if rn_raw is not None:
+            try:
+                if pd is not None and pd.isna(rn_raw):
+                    rn_raw = None
+                elif isinstance(rn_raw, (int, float)) and not isinstance(rn_raw, bool):
+                    rn_raw = str(int(float(rn_raw)))
+                else:
+                    rn_raw = str(rn_raw).strip()
+            except Exception:
+                rn_raw = str(rn_raw).strip() if rn_raw is not None else None
+            row_data['room_number'] = rn_raw or None
+
+        if not rn_raw or not str(rn_raw).strip():
+            errors.append(_("Số phòng (room_number) là bắt buộc"))
+        else:
+            rn = _normalize_room_number_raw(str(rn_raw))
+            if not ROOM_NUMBER_PATTERN.match(rn):
+                errors.append(_("Số phòng chỉ gồm chữ và số (ví dụ 303). Giá trị: {0}").format(rn_raw))
+            else:
+                row_data['room_number'] = rn
+
         room_type = self.normalize_room_type(row_data.get('room_type'))
         if not room_type:
-            errors.append(f"Invalid room_type: {row_data.get('room_type')}")
+            errors.append(_("Loại phòng không hợp lệ: {0}").format(row_data.get('room_type')))
         else:
-            row_data['room_type'] = room_type  # Update with normalized value
+            row_data['room_type'] = room_type
 
-        # Building validation (optional)
-        building_id = self.find_building_id(row_data.get('building_title'))
-        if building_id:
-            row_data['building_id'] = building_id
+        tv = row_data.get('title_vn')
+        if tv is not None and str(tv).strip():
+            row_data['title_vn'] = str(tv).strip()
         else:
-            # Building not found, log warning but don't fail validation
-            if row_data.get('building_title'):
-                self.warnings.append(f"Toà nhà '{row_data.get('building_title')}' không tìm thấy trong hệ thống. Phòng sẽ được tạo mà không gán tòa nhà.")
-            row_data['building_id'] = None
+            row_data['title_vn'] = None
 
-        # Capacity validation (optional)
+        ten = row_data.get('title_en')
+        if ten is not None and str(ten).strip():
+            row_data['title_en'] = str(ten).strip()
+        else:
+            row_data['title_en'] = None
+
         capacity = row_data.get('capacity')
         if capacity is not None and str(capacity).strip():
             try:
-                # Handle NaN values from pandas
                 if str(capacity).lower() == 'nan' or (hasattr(capacity, 'isnan') and capacity.isnan()):
-                    # Keep as None for empty capacity
                     row_data['capacity'] = None
                 else:
                     capacity = int(float(capacity))
                     if capacity < 0:
-                        errors.append("Sức chứa phải là số không âm")
+                        errors.append(_("Sức chứa phải là số không âm"))
                     row_data['capacity'] = capacity
             except (ValueError, TypeError):
-                errors.append("Sức chứa phải là số hợp lệ")
+                errors.append(_("Sức chứa phải là số hợp lệ"))
         else:
-            # Keep as None for empty capacity
             row_data['capacity'] = None
 
         return errors
@@ -1097,19 +1149,25 @@ class RoomExcelImporter:
 
             for index, row in df.iterrows():
                 row_data = {
-                    'title_vn': row.get('title_vn'),
-                    'title_en': row.get('title_en'),
-                    'short_title': row.get('short_title'),
-                    'room_type': row.get('room_type'),
-                    'building_title': row.get('building_title'),
-                    'capacity': row.get('capacity')
+                    'title_vn': self._clean_cell(row.get('title_vn')),
+                    'title_en': self._clean_cell(row.get('title_en')),
+                    'room_number': self._clean_cell(row.get('room_number')),
+                    'room_type': self._clean_cell(row.get('room_type')),
+                    'building_title': self._clean_cell(row.get('building_title')),
+                    'capacity': self._clean_cell(row.get('capacity')),
                 }
 
-                # Validate row data
+                # Bỏ qua dòng hoàn toàn trống
+                if not any(
+                    row_data.get(k)
+                    for k in ('building_title', 'room_number', 'room_type', 'title_vn', 'title_en', 'capacity')
+                ):
+                    continue
+
                 row_errors = self.validate_room_data(row_data)
                 if row_errors:
                     validation_errors.append({
-                        "row": index + 2,  # +2 because Excel is 1-indexed and has header
+                        "row": index + 2,
                         "data": row_data,
                         "errors": row_errors
                     })
@@ -1126,33 +1184,35 @@ class RoomExcelImporter:
                     "debug_info": debug_info
                 }
 
+            created_count = 0
             if not dry_run and processed_rooms:
-                # Create rooms in database
-                created_count = 0
                 for room_data in processed_rooms:
                     try:
                         room_data_dict = {
                             "doctype": "ERP Administrative Room",
-                            "title_vn": room_data['title_vn'],
-                            "title_en": room_data.get('title_en') or room_data['title_vn'],  # Fallback to title_vn if empty
-                            "short_title": room_data['short_title'],
-                            "room_type": room_data['room_type'],
-                            "campus_id": self.campus_id
+                            "campus_id": self.campus_id,
+                            "building_id": room_data["building_id"],
+                            "room_number": room_data["room_number"],
+                            "room_type": room_data["room_type"],
                         }
-
-                        # Only add building_id if it exists
-                        if room_data.get('building_id'):
-                            room_data_dict["building_id"] = room_data['building_id']
-
-                        # Only add capacity if it has a value
-                        if room_data.get('capacity') is not None:
-                            room_data_dict["capacity"] = room_data['capacity']
+                        if room_data.get("title_vn"):
+                            room_data_dict["title_vn"] = room_data["title_vn"]
+                        if room_data.get("title_en"):
+                            room_data_dict["title_en"] = room_data["title_en"]
+                        if room_data.get("capacity") is not None:
+                            room_data_dict["capacity"] = room_data["capacity"]
 
                         room_doc = frappe.get_doc(room_data_dict)
                         room_doc.insert()
                         created_count += 1
                     except Exception as e:
-                        self.errors.append(f"Error creating room {room_data.get('title_vn')}: {str(e)}")
+                        self.errors.append(
+                            _("Lỗi tạo phòng (tòa {0}, số {1}): {2}").format(
+                                room_data.get("building_title"),
+                                room_data.get("room_number"),
+                                str(e),
+                            )
+                        )
 
                 frappe.db.commit()
 
