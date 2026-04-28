@@ -993,6 +993,20 @@ def get_application_detail(application_id=None):
                 "attachment": ach.attachment
             })
         
+        # Danh sách bài dự thi (child table)
+        contest_entries = []
+        contest_rows = getattr(app, "contest_entries", None) or []
+        for e in contest_rows:
+            contest_entries.append({
+                "name": e.name,
+                "file_url": e.file_url,
+                "file_name": e.file_name,
+                "file_type": getattr(e, "file_type", None),
+                "description": getattr(e, "description", None),
+                "uploaded_by": getattr(e, "uploaded_by", None),
+                "uploaded_at": str(e.uploaded_at) if getattr(e, "uploaded_at", None) else None
+            })
+        
         # Lấy thư giới thiệu
         recommendations = []
         if app.main_recommendation_id:
@@ -1089,6 +1103,7 @@ def get_application_detail(application_id=None):
                 "academic_report_link": app.academic_report_link,
                 "academic_report_upload": app.academic_report_upload,
                 "video_url": app.video_url,
+                "contest_entries": contest_entries,
                 "main_teacher_name": app.main_teacher_name,
                 "second_teacher_name": app.second_teacher_name,
                 "achievements": achievements,
@@ -1112,6 +1127,145 @@ def get_application_detail(application_id=None):
             message=f"Lỗi: {str(e)}",
             logs=logs
         )
+
+
+@frappe.whitelist()
+def add_contest_entry(application_id=None, file_url=None, file_name=None, description=None):
+    """
+    Thêm một bản ghi bài dự thi (file đã upload lên Frappe) vào đơn học bổng.
+    """
+    logs = []
+
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+
+        application_id = application_id or data.get("application_id")
+        file_url = file_url or data.get("file_url")
+        file_name = file_name or data.get("file_name")
+        description = description if description is not None else data.get("description")
+
+        if not application_id:
+            return validation_error_response(
+                "Thiếu application_id",
+                {"application_id": ["Application ID là bắt buộc"]},
+            )
+        if not file_url or not file_name:
+            return validation_error_response(
+                "Thiếu thông tin file",
+                {"file_url": ["file_url và file_name là bắt buộc"]},
+            )
+
+        if not frappe.db.exists("SIS Scholarship Application", application_id):
+            return not_found_response("Không tìm thấy đơn đăng ký")
+
+        app = frappe.get_doc("SIS Scholarship Application", application_id)
+        app.append(
+            "contest_entries",
+            {
+                "file_url": file_url,
+                "file_name": file_name,
+                "description": description or "",
+            },
+        )
+        app.save(ignore_permissions=True)
+
+        new_row = app.contest_entries[-1]
+        entry = {
+            "name": new_row.name,
+            "file_url": new_row.file_url,
+            "file_name": new_row.file_name,
+            "file_type": getattr(new_row, "file_type", None),
+            "description": getattr(new_row, "description", None),
+            "uploaded_by": getattr(new_row, "uploaded_by", None),
+            "uploaded_at": str(new_row.uploaded_at) if getattr(new_row, "uploaded_at", None) else None,
+        }
+        logs.append(f"Đã thêm bài dự thi vào đơn {application_id}: {entry['name']}")
+
+        return single_item_response(
+            data=entry,
+            message="Thêm bài dự thi thành công",
+            logs=logs,
+        )
+
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Admin Add Contest Entry Error")
+        return error_response(message=f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def delete_contest_entry(application_id=None, entry_name=None):
+    """
+    Xóa một dòng bài dự thi khỏi đơn học bổng.
+    """
+    logs = []
+
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+
+        application_id = application_id or data.get("application_id")
+        entry_name = entry_name or data.get("entry_name")
+
+        if not application_id or not entry_name:
+            err = {}
+            if not application_id:
+                err["application_id"] = ["Application ID là bắt buộc"]
+            if not entry_name:
+                err["entry_name"] = ["Entry name là bắt buộc"]
+            return validation_error_response("Thiếu tham số", err)
+
+        if not frappe.db.exists("SIS Scholarship Application", application_id):
+            return not_found_response("Không tìm thấy đơn đăng ký")
+
+        app = frappe.get_doc("SIS Scholarship Application", application_id)
+        row_to_remove = None
+        for row in getattr(app, "contest_entries", None) or []:
+            if row.name == entry_name:
+                row_to_remove = row
+                break
+
+        if not row_to_remove:
+            return not_found_response("Không tìm thấy bài dự thi")
+
+        app.remove(row_to_remove)
+        app.save(ignore_permissions=True)
+
+        contest_entries = []
+        for e in getattr(app, "contest_entries", None) or []:
+            contest_entries.append({
+                "name": e.name,
+                "file_url": e.file_url,
+                "file_name": e.file_name,
+                "file_type": getattr(e, "file_type", None),
+                "description": getattr(e, "description", None),
+                "uploaded_by": getattr(e, "uploaded_by", None),
+                "uploaded_at": str(e.uploaded_at) if getattr(e, "uploaded_at", None) else None,
+            })
+
+        logs.append(f"Đã xóa {entry_name} khỏi đơn {application_id}")
+
+        return success_response(
+            data={"contest_entries": contest_entries},
+            message="Xóa bài dự thi thành công",
+            logs=logs,
+        )
+
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Admin Delete Contest Entry Error")
+        return error_response(message=f"Lỗi: {str(e)}", logs=logs)
 
 
 # ==================== SCORING APIs ====================

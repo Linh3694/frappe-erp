@@ -47,6 +47,8 @@
   "achievements",
   "video_section",
   "video_url",
+  "contest_entries_section",
+  "contest_entries",
   "teacher_selection_section",
   "main_teacher_id",
   "main_teacher_name",
@@ -266,6 +268,19 @@
    "fieldtype": "Attach",
    "label": "Video",
    "description": "Video giới thiệu bản thân (nếu có)"
+  },
+  {
+   "fieldname": "contest_entries_section",
+   "fieldtype": "Section Break",
+   "label": "Bài dự thi",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "contest_entries",
+   "fieldtype": "Table",
+   "label": "Danh sách bài dự thi",
+   "options": "SIS Scholarship Contest Entry",
+   "description": "File bài dự thi: PPT, Word, Excel, PDF, ảnh, video"
   },
   {
    "fieldname": "teacher_selection_section",
