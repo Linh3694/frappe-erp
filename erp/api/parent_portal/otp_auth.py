@@ -322,8 +322,8 @@ def request_otp(phone_number):
         )
         logs.append(f"💾 Stored OTP in cache with key: {cache_key}")
         
-        # Prepare SMS message
-        sms_message = f"Ma xac thuc Parent Portal cua ban la: {otp_code}. Ma co hieu luc trong 5 phut."
+        # Dùng mẫu SMS có cụm "verification code" để iOS/Android nhận diện OTP ổn định hơn.
+        sms_message = f"{otp_code} is your Parent Portal verification code. This code expires in 5 minutes."
         
         # Send SMS (truyền otp_code để log trong môi trường dev)
         sms_result = send_sms_via_vivas(normalized_phone, sms_message, otp_code=otp_code)
