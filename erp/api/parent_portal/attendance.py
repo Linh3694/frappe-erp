@@ -59,7 +59,8 @@ def _get_student_classes(student_id, school_year_id=None):
                 "SIS School Year",
                 filters={"is_enable": 1},
                 fields=["name"],
-                limit=1
+                order_by="start_date desc",
+                limit=1,
             )
             if current_year:
                 school_year_id = current_year[0].name
@@ -357,9 +358,7 @@ def get_student_homeroom_summary(student_id=None, school_year_id=None):
                   AND class_id IN ({0})
                   AND date BETWEEN %s AND %s
                   AND (
-                        period = 'Homeroom'
-                     OR period = 'HOMEROOM'
-                     OR LOWER(TRIM(period)) = 'homeroom'
+                        LOWER(TRIM(COALESCE(period, ''))) = 'homeroom'
                   )
                 GROUP BY status
                 """.format(", ".join(["%s"] * len(class_ids))),

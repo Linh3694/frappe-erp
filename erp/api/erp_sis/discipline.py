@@ -2076,6 +2076,10 @@ def _enrich_discipline_records_list(records):
             "student_photo_url": None,
         }
 
+    def student_display_row(sid):
+        """Copy thông tin HS để điểm trừ của từng record không ghi đè lẫn nhau."""
+        return dict(st_batch.get(sid) or empty_st(sid))
+
     for r in records:
         if r.get("classification"):
             r["classification_title"] = cls_map.get(r["classification"]) or r["classification"]
@@ -2115,7 +2119,7 @@ def _enrich_discipline_records_list(records):
 
         if has_students and len(student_ids_to_fetch) == 1:
             r["target_student"] = student_ids_to_fetch[0]
-            st_info = st_batch.get(r["target_student"]) or empty_st(r["target_student"])
+            st_info = student_display_row(r["target_student"])
             st_info["deduction_points"] = dp_by_sid.get(r["target_student"], "10")
             r["target_students"] = [st_info]
             r["student_name"] = st_info.get("student_name") or ""
@@ -2125,7 +2129,7 @@ def _enrich_discipline_records_list(records):
         elif has_students and len(student_ids_to_fetch) > 1:
             r["target_students"] = []
             for sid in student_ids_to_fetch:
-                st_row = st_batch.get(sid) or empty_st(sid)
+                st_row = student_display_row(sid)
                 st_row["deduction_points"] = dp_by_sid.get(sid, "10")
                 r["target_students"].append(st_row)
             names = [
