@@ -23,17 +23,23 @@ VIVAS_SMS_CONFIG = {
 
 
 def get_parent_portal_user_from_request():
-    """Lấy user Parent Portal từ session hoặc Bearer Guardian JWT."""
-    session_user = getattr(frappe.session, "user", None)
-    if session_user and session_user != "Guest":
-        return session_user
+    """Lấy user Parent Portal từ header riêng hoặc session."""
+    token = (
+        frappe.get_request_header("X-Parent-Portal-Token")
+        or frappe.get_request_header("X-Auth-Token")
+        or frappe.get_request_header("X-Frappe-Auth-Token")
+        or ""
+    ).strip()
 
-    auth_header = frappe.get_request_header("Authorization") or ""
-    if not auth_header.lower().startswith("bearer "):
-        return None
-
-    token = auth_header.split(" ", 1)[1].strip()
     if not token:
+        auth_header = frappe.get_request_header("Authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+
+    if not token:
+        session_user = getattr(frappe.session, "user", None)
+        if session_user and session_user != "Guest":
+            return session_user
         return None
 
     from erp.api.parent_portal.guardian_auth import verify_guardian_jwt_token
