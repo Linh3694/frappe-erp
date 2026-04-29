@@ -453,7 +453,7 @@ def verify_otp_and_login(phone_number, otp):
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"phone_number": ["in", [normalized_phone, f"+{normalized_phone}"]]},
-            fields=["name", "guardian_name", "phone_number", "email", "guardian_id"],
+            fields=["name", "guardian_name", "phone_number", "email", "guardian_id", "guardian_image"],
             ignore_permissions=True
         )
         
@@ -569,6 +569,7 @@ def verify_otp_and_login(phone_number, otp):
                     "guardian_name": guardian["guardian_name"],
                     "phone_number": guardian["phone_number"],
                     "email": guardian.get("email", ""),
+                    "guardian_image": guardian.get("guardian_image", ""),
                     "first_login_at": str(first_login_at) if first_login_at else None
                 },
                 "user": {
@@ -618,7 +619,7 @@ def phone_login(phone_number):
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"phone_number": ["in", [normalized_phone, f"+{normalized_phone}"]]},
-            fields=["name", "guardian_name", "phone_number", "email", "guardian_id"],
+            fields=["name", "guardian_name", "phone_number", "email", "guardian_id", "guardian_image"],
             ignore_permissions=True
         )
 
@@ -685,6 +686,7 @@ def phone_login(phone_number):
                     "guardian_name": guardian["guardian_name"],
                     "phone_number": guardian["phone_number"],
                     "email": guardian.get("email", ""),
+                    "guardian_image": guardian.get("guardian_image", ""),
                     "first_login_at": str(first_login_at) if first_login_at else None
                 },
                 "user": {
@@ -742,7 +744,7 @@ def get_guardian_info():
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"guardian_id": guardian_id},
-            fields=["name", "guardian_id", "guardian_name", "phone_number", "email", "first_login_at"],
+            fields=["name", "guardian_id", "guardian_name", "phone_number", "email", "guardian_image", "first_login_at"],
             ignore_permissions=True
         )
 
@@ -807,7 +809,7 @@ def get_current_guardian_comprehensive_data():
         guardian_list = frappe.db.get_list(
             "CRM Guardian",
             filters={"guardian_id": guardian_id},
-            fields=["name", "guardian_id", "guardian_name", "phone_number", "email", "family_code"],
+            fields=["name", "guardian_id", "guardian_name", "phone_number", "email", "guardian_image", "family_code"],
             ignore_permissions=True
         )
 
@@ -863,6 +865,15 @@ def get_guardian_comprehensive_data(guardian_name):
         logs.append(f"✅ Retrieved guardian: {guardian.guardian_name}")
 
         comprehensive_data = {
+            "guardian": {
+                "name": guardian.name,
+                "guardian_id": guardian.guardian_id,
+                "guardian_name": guardian.guardian_name,
+                "phone_number": guardian.phone_number,
+                "email": guardian.email,
+                "guardian_image": getattr(guardian, "guardian_image", None),
+                "first_login_at": str(guardian.first_login_at) if guardian.first_login_at else None,
+            },
             "families": [],  # Array of families - supports multiple families
             "students": [],  # Flat list of all students across all families
             "campus": {}     # Primary campus (from first student)
@@ -1112,16 +1123,24 @@ def get_guardian_comprehensive_data(guardian_name):
                         except Exception as e:
                             logs.append(f"⚠️ Could not get student details for {rel['student']}: {str(e)}")
 
-                    # Get guardian details (if different from current guardian)
-                    if rel["guardian"] and rel["guardian"] != guardian_name:
+                    # Luôn trả về guardian_details để mobile có đủ thông tin và ảnh đại diện.
+                    if rel["guardian"]:
                         try:
-                            other_guardian = frappe.get_doc("CRM Guardian", rel["guardian"])
+                            other_guardian = guardian if rel["guardian"] == guardian_name else frappe.get_doc("CRM Guardian", rel["guardian"])
                             rel_data["guardian_details"] = {
                                 "name": other_guardian.name,
                                 "guardian_id": other_guardian.guardian_id,
                                 "guardian_name": other_guardian.guardian_name,
                                 "phone_number": other_guardian.phone_number,
-                                "email": other_guardian.email
+                                "email": other_guardian.email,
+                                "id_number": getattr(other_guardian, "id_number", None),
+                                "occupation": getattr(other_guardian, "occupation", None),
+                                "position": getattr(other_guardian, "position", None),
+                                "workplace": getattr(other_guardian, "workplace", None),
+                                "address": getattr(other_guardian, "address", None),
+                                "nationality": getattr(other_guardian, "nationality", None),
+                                "dob": str(other_guardian.dob) if getattr(other_guardian, "dob", None) else None,
+                                "guardian_image": getattr(other_guardian, "guardian_image", None)
                             }
                             logs.append(f"✅ Retrieved related guardian: {other_guardian.guardian_name}")
                         except Exception as e:

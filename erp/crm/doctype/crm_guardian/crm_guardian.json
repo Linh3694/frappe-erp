@@ -19,6 +19,7 @@
   "basic_information",
   "guardian_id",
   "guardian_name",
+  "guardian_image",
   "phone_number",
   "phone_numbers_section",
   "phone_numbers",
@@ -64,6 +65,13 @@
    "reqd": 1,
    "unique": 0,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "guardian_image",
+   "fieldtype": "Attach Image",
+   "label": "Guardian Image",
+   "reqd": 0,
+   "description": "Ảnh đại diện phụ huynh dùng trong Parent Portal"
   },
   {
    "fieldname": "phone_number",
