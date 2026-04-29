@@ -43,6 +43,72 @@ def _add_days(dt, days):
     return dt + timedelta(days=days)
 
 
+def _get_student_leave_for_date(student_id, date_str):
+    """Lấy đơn nghỉ phép của học sinh trong một ngày cụ thể."""
+    empty = {
+        "is_on_leave": False,
+        "leave_request_id": None,
+        "reason": None,
+        "reason_display": None,
+        "other_reason": None,
+        "description": None,
+        "start_date": None,
+        "end_date": None,
+    }
+
+    if not student_id or not date_str:
+        return empty
+
+    reason_mapping = {
+        "sick_child": "Con ốm",
+        "family_matters": "Gia đình có việc bận",
+        "other": "Lý do khác",
+    }
+
+    try:
+        leave_requests = frappe.get_all(
+            "SIS Student Leave Request",
+            filters={
+                "student_id": student_id,
+                "start_date": ["<=", date_str],
+                "end_date": [">=", date_str],
+            },
+            fields=[
+                "name",
+                "reason",
+                "other_reason",
+                "description",
+                "start_date",
+                "end_date",
+            ],
+            order_by="creation desc",
+            limit=1,
+            ignore_permissions=True,
+        )
+
+        if not leave_requests:
+            return empty
+
+        leave = leave_requests[0]
+        reason_display = reason_mapping.get(leave.get("reason"), leave.get("reason"))
+        if leave.get("reason") == "other" and leave.get("other_reason"):
+            reason_display = leave.get("other_reason")
+
+        return {
+            "is_on_leave": True,
+            "leave_request_id": leave.get("name"),
+            "reason": leave.get("reason"),
+            "reason_display": reason_display,
+            "other_reason": leave.get("other_reason"),
+            "description": leave.get("description"),
+            "start_date": str(leave.get("start_date")) if leave.get("start_date") else None,
+            "end_date": str(leave.get("end_date")) if leave.get("end_date") else None,
+        }
+    except Exception as e:
+        frappe.logger().warning(f"⚠️ Could not get leave request for {student_id} on {date_str}: {str(e)}")
+        return empty
+
+
 def _get_student_classes(student_id, school_year_id=None):
     """
     Get all classes a student belongs to (regular + mixed)
@@ -1002,6 +1068,7 @@ def get_student_timetable_today(student_id=None):
         today_str = today.strftime("%Y-%m-%d")
         day_of_week_full = today.strftime("%A")  # For display: Tuesday
         day_of_week = day_of_week_full.lower()[:3]  # For query: tue
+        leave_today = _get_student_leave_for_date(student_id, today_str)
         
         logs.append(f"📅 Today: {today_str} ({day_of_week_full})")
         
@@ -1025,7 +1092,8 @@ def get_student_timetable_today(student_id=None):
                 "data": {
                     "date": today_str,
                     "day_of_week": day_of_week,
-                    "entries": []
+                    "entries": [],
+                    "leave_today": leave_today
                 },
                 "logs": logs
             }
@@ -1054,7 +1122,8 @@ def get_student_timetable_today(student_id=None):
             "data": {
                 "date": today_str,
                 "day_of_week": day_of_week_full,  # Return full name for display
-                "entries": all_entries
+                "entries": all_entries,
+                "leave_today": leave_today
             },
             "logs": logs
         }
