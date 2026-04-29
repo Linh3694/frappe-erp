@@ -66,6 +66,10 @@ def get_departments():
         r["member_count"] = frappe.db.count(
             "CRM Issue Dept Member", {"parent": r["name"], "parenttype": "CRM Issue Department"}
         )
+        r["manager_count"] = frappe.db.count(
+            "CRM Issue Dept Member",
+            {"parent": r["name"], "parenttype": "CRM Issue Department", "is_manager": 1},
+        )
     return success_response(rows)
 
 
@@ -97,7 +101,7 @@ def create_department():
         doc.is_active = 1 if data.get("is_active", True) else 0
         for row in data.get("members") or []:
             if row.get("user"):
-                doc.append("members", {"user": row["user"]})
+                doc.append("members", {"user": row["user"], "is_manager": 1 if row.get("is_manager") else 0})
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Tao phong ban thanh cong")
@@ -125,7 +129,7 @@ def update_department():
             doc.members = []
             for row in data.get("members") or []:
                 if row.get("user"):
-                    doc.append("members", {"user": row["user"]})
+                    doc.append("members", {"user": row["user"], "is_manager": 1 if row.get("is_manager") else 0})
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Cap nhat thanh cong")

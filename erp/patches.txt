@@ -38,6 +38,9 @@ erp.patches.v1_0.migrate_crm_course_student_status_v2
 # CRM Issue: nhieu phong ban — backfill bang con tu cot department
 erp.patches.v1_0.migrate_crm_issue_departments_child
 
+# CRM Issue: workflow moi — priority, result, ngay tiep nhan
+erp.patches.v1_0.migrate_crm_issue_workflow_v2
+
 # CSVC: gop Inventory Check vao Facility Handover (incoming) + backfill direction outgoing
 erp.patches.v1_0.migrate_inventory_check_to_facility_handover
 

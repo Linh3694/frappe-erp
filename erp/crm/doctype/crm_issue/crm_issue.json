@@ -23,6 +23,7 @@
   "pic",
   "department",
   "issue_departments",
+  "priority",
   "approval_section",
   "approval_status",
   "approved_by_user",
@@ -60,8 +61,7 @@
    "fieldname": "title",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Title",
-   "reqd": 1
+  "label": "Title"
   },
   {
    "fieldname": "issue_module",
@@ -103,7 +103,7 @@
   },
   {
    "fieldname": "occurred_at",
-   "fieldtype": "Datetime",
+  "fieldtype": "Date",
    "label": "Occurred At",
    "reqd": 1
   },
@@ -143,6 +143,14 @@
    "fieldtype": "Table",
    "label": "Related Departments",
    "options": "CRM Issue Related Department"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Priority",
+   "options": "Cao\nTrung binh\nThap",
+   "reqd": 1
   },
   {
    "fieldname": "approval_section",
@@ -242,14 +250,14 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Cho duyet\nTiep nhan\nDang xu ly\nHoan thanh",
+  "options": "Cho duyet\nTiep nhan\nDang xu ly\nHoan thanh\nDong",
    "reqd": 1
   },
   {
    "fieldname": "result",
    "fieldtype": "Select",
    "label": "Result",
-   "options": "\nHai long\nChua hai long\nDong y nhung chua hai long\nTiep tuc theo doi"
+  "options": "\nHai long\nChua hai long"
   },
   {
    "fieldname": "process_section",

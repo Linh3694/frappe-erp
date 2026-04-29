@@ -3,7 +3,7 @@ CRM Issue API - Van de chung (tuyen sinh): module, SLA, duyet, PIC tu CRM Lead
 """
 
 import frappe
-from frappe.utils import now, add_to_date, get_datetime
+from frappe.utils import now, add_to_date, get_datetime, getdate
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -14,23 +14,34 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import ALLOWED_ROLES, check_crm_permission, get_request_data
 
-# Role duoc tao ticket truc tiep (khong qua hang cho)
+# Role Care duoc tao issue truc tiep (khong qua hang cho)
 DIRECT_ISSUE_ROLES = frozenset(
     {
         "SIS Sales Care",
         "SIS Sales Care Admin",
-        "SIS Sales",
-        "SIS Sales Admin",
     }
 )
 
-# Chi SIS Sales Admin / SIS Sales Care Admin duoc duyet & tu choi (dong bo frontend IssueDetail)
+# Team Care duoc duyet & tu choi (dong bo frontend IssueDetail)
 APPROVER_ROLES = frozenset(
     {
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+    }
+)
+
+# User co the duoc gan lam PIC; tach khoi DIRECT_ISSUE_ROLES de Sales van co the xu ly issue.
+PIC_ELIGIBLE_ROLES = frozenset(
+    {
+        "SIS Sales",
+        "SIS Sales Care",
         "SIS Sales Care Admin",
         "SIS Sales Admin",
     }
 )
+
+CARE_ADMIN_ROLES = frozenset({"SIS Sales Care Admin"})
+VALID_ISSUE_RESULTS = frozenset({"Hai long", "Chua hai long"})
 
 # Role duoc ghi / xu ly van de (dong bo frontend canWriteIssue; SM tuong duong Sales Admin trong module)
 ISSUE_WRITE_ROLES = frozenset(
@@ -194,6 +205,30 @@ def _can_change_issue_status_sales(user: str) -> bool:
     return bool(ISSUE_STATUS_SALES_ROLES & set(frappe.get_roles(user)))
 
 
+def _can_care_admin(user: str = None) -> bool:
+    """Care Admin xac nhan dong issue hoac tra lai PIC xu ly tiep."""
+    u = user or frappe.session.user
+    if not u or u == "Guest":
+        return False
+    roles = _session_roles_current() if u == frappe.session.user else set(frappe.get_roles(u))
+    return bool(CARE_ADMIN_ROLES & roles or "System Manager" in roles or u == "Administrator")
+
+
+def _is_issue_pic(user: str, issue_doc) -> bool:
+    """PIC hien tai cua issue."""
+    return bool(user and user != "Guest" and (getattr(issue_doc, "pic", "") or "").strip() == user)
+
+
+def _normalize_issue_date(value):
+    """Nhan date/datetime/string va tra YYYY-MM-DD cho field Date."""
+    if not value:
+        return str(getdate(now()))
+    try:
+        return str(getdate(value))
+    except Exception:
+        return str(value)[:10]
+
+
 def _get_user_crm_issue_department_names(user: str):
     """Docname CRM Issue Department ma user la thanh vien."""
     if not user or user == "Guest":
@@ -279,24 +314,29 @@ def _finalize_issue_api_dict(doc):
     # Quyen theo session thuc te (tranh lech JWT/Has Role o frontend)
     u = frappe.session.user
     if u and u != "Guest":
-        data["can_approve_reject"] = bool(_can_approve())
-        data["can_write_issue"] = bool(_can_write_issue_ops(u, doc))
-        data["can_edit_sales_status"] = bool(_can_change_issue_status_sales(u))
         ap = (getattr(doc, "approval_status", None) or "").strip()
         st = (getattr(doc, "status", None) or "").strip()
         src_fb = (getattr(doc, "source_feedback", None) or "").strip()
+        data["can_approve_reject"] = bool(_can_approve())
+        data["can_write_issue"] = bool(_can_write_issue_ops(u, doc))
+        data["can_edit_sales_status"] = bool(
+            ap == "Da duyet"
+            and st != "Dong"
+            and (_is_issue_pic(u, doc) or _can_care_admin(u) or _can_change_issue_status_sales(u))
+        )
         roles = _session_roles_current()
         can_pic_role = bool(PIC_CHANGE_ROLES & roles)
         data["can_change_pic"] = bool(can_pic_role and ap == "Da duyet")
         data["can_change_department"] = bool(_can_write_issue_ops(u, doc) and ap == "Da duyet")
         data["can_add_process_log"] = bool(
-            _can_write_issue_ops(u, doc) and ap == "Da duyet" and st != "Hoan thanh"
+            (_is_issue_pic(u, doc) or _can_write_issue_ops(u, doc)) and ap == "Da duyet" and st == "Dang xu ly"
         )
+        data["can_edit_process_log"] = bool(_can_care_admin(u) and ap == "Da duyet" and st != "Dong")
         data["can_reply_parent"] = bool(
             _can_change_issue_status_sales(u)
             and bool(src_fb)
             and ap == "Da duyet"
-            and st != "Hoan thanh"
+            and st not in ("Hoan thanh", "Dong")
         )
     else:
         data["can_approve_reject"] = False
@@ -305,6 +345,7 @@ def _finalize_issue_api_dict(doc):
         data["can_change_pic"] = False
         data["can_change_department"] = False
         data["can_add_process_log"] = False
+        data["can_edit_process_log"] = False
         data["can_reply_parent"] = False
     return data
 
@@ -366,12 +407,37 @@ def _approver_emails():
     return list(set(enabled or []))
 
 
+def _care_admin_emails():
+    """User Care Admin nhan thong bao can xac nhan issue hoan thanh."""
+    rows = frappe.get_all(
+        "Has Role",
+        filters={"role": ["in", list(CARE_ADMIN_ROLES)], "parenttype": "User"},
+        pluck="parent",
+    )
+    if not rows:
+        return []
+    enabled = frappe.get_all(
+        "User",
+        filters={"name": ["in", list(set(rows))], "enabled": 1},
+        pluck="name",
+    )
+    return list(set(enabled or []))
+
+
 def _department_member_emails(department_name):
     """Email thanh vien phong ban CRM Issue."""
     if not department_name or not frappe.db.exists("CRM Issue Department", department_name):
         return []
     dept = frappe.get_doc("CRM Issue Department", department_name)
     return [m.user for m in (dept.members or [])]
+
+
+def _department_manager_emails(department_name):
+    """Email manager cua phong ban CRM Issue."""
+    if not department_name or not frappe.db.exists("CRM Issue Department", department_name):
+        return []
+    dept = frappe.get_doc("CRM Issue Department", department_name)
+    return [m.user for m in (dept.members or []) if getattr(m, "is_manager", 0)]
 
 
 def _issue_department_docnames(issue_doc):
@@ -395,6 +461,18 @@ def _all_department_member_emails_for_issue(issue_doc):
     out = []
     for dn in _issue_department_docnames(issue_doc):
         for e in _department_member_emails(dn):
+            if e and e not in seen:
+                seen.add(e)
+                out.append(e)
+    return out
+
+
+def _all_department_manager_emails_for_issue(issue_doc):
+    """Union email manager cua tat ca phong ban lien quan."""
+    seen = set()
+    out = []
+    for dn in _issue_department_docnames(issue_doc):
+        for e in _department_manager_emails(dn):
             if e and e not in seen:
                 seen.add(e)
                 out.append(e)
@@ -511,10 +589,10 @@ def _can_create_directly():
 
 
 def _is_valid_pic_user(pic_email: str) -> bool:
-    """PIC hop le: user ton tai va co it nhat mot role trong DIRECT_ISSUE_ROLES (dong bo get_issue_pic_candidates)."""
+    """PIC hop le: user ton tai va co it nhat mot role xu ly (dong bo get_issue_pic_candidates)."""
     if not pic_email or not frappe.db.exists("User", pic_email):
         return False
-    return bool(DIRECT_ISSUE_ROLES & set(frappe.get_roles(pic_email)))
+    return bool(PIC_ELIGIBLE_ROLES & set(frappe.get_roles(pic_email)))
 
 
 def _can_approve():
@@ -646,7 +724,11 @@ def _enrich_user_info(issues):
         return
     users = {
         u.name: u
-        for u in frappe.get_all("User", filters={"name": ["in", list(emails)]}, fields=["name", "full_name", "user_image"])
+        for u in frappe.get_all(
+            "User",
+            filters={"name": ["in", list(emails)]},
+            fields=["name", "full_name", "user_image", "job_title"],
+        )
     }
     for r in issues:
         is_dict = isinstance(r, dict)
@@ -658,17 +740,19 @@ def _enrich_user_info(issues):
         creator_u = users.get(creator_key) if creator_key else None
         creator_name = _normalize_vn_name(creator_u.full_name) if creator_u else ""
         creator_img = (creator_u.user_image if creator_u else "") or ""
+        creator_title = (creator_u.job_title if creator_u else "") or ""
         # Batch get_all doi khi khong khop — tra truc tiep User
         if creator_key and not creator_name:
             row_u = frappe.db.get_value(
                 "User",
                 creator_key,
-                ["full_name", "user_image"],
+                ["full_name", "user_image", "job_title"],
                 as_dict=True,
             )
             if row_u:
                 creator_name = _normalize_vn_name((row_u.get("full_name") or "").strip())
                 creator_img = (row_u.get("user_image") or "").strip()
+                creator_title = (row_u.get("job_title") or "").strip()
 
         ab_key = (_get("approved_by_user") or "").strip()
         ab_u = users.get(ab_key) if ab_key else None
@@ -701,6 +785,7 @@ def _enrich_user_info(issues):
             r["pic_user_image"] = pic_u.user_image if pic_u else ""
             r["created_by_name"] = creator_name
             r["created_by_image"] = creator_img
+            r["created_by_title"] = creator_title
             r["approved_by_name"] = ab_name
             r["rejected_by_name"] = rb_name
         else:
@@ -708,6 +793,7 @@ def _enrich_user_info(issues):
             r.pic_user_image = pic_u.user_image if pic_u else ""
             r.created_by_name = creator_name
             r.created_by_image = creator_img
+            r.created_by_title = creator_title
             r.approved_by_name = ab_name
             r.rejected_by_name = rb_name
 
@@ -800,10 +886,10 @@ def whoami_crm_issue():
 
 @frappe.whitelist()
 def get_issue_pic_candidates():
-    """Tra ve danh sach user co role PIC hop le (SIS Sales, Sales Admin, Sales Care, Sales Care Admin)"""
+    """Tra ve danh sach user co role PIC hop le (Sales/Care)."""
     # Khong dung check_crm_permission: moi user dang nhap can tai dropdown PIC khi tao/sua issue
 
-    pic_roles = list(DIRECT_ISSUE_ROLES)
+    pic_roles = list(PIC_ELIGIBLE_ROLES)
     user_emails = frappe.get_all(
         "Has Role",
         filters={"role": ["in", pic_roles], "parenttype": "User"},
@@ -905,6 +991,7 @@ def get_issues():
             "issue_module",
             "status",
             "result",
+            "priority",
             "pic",
             "created_by_user",
             "owner",
@@ -956,6 +1043,7 @@ def get_pending_issues():
             "issue_module",
             "status",
             "result",
+            "priority",
             "pic",
             "created_by_user",
             "owner",
@@ -1135,11 +1223,16 @@ def create_issue():
     """Tao van de moi"""
     data = get_request_data()
 
-    required = ["title", "content", "issue_module"]
+    required = ["content", "issue_module", "priority"]
     errors = {}
     for f in required:
         if not data.get(f):
             errors[f] = ["Bat buoc"]
+    dept_payload = data.get("departments") or ([data.get("department")] if data.get("department") else [])
+    if not dept_payload:
+        errors["departments"] = ["Bat buoc"]
+    if data.get("priority") and data.get("priority") not in ("Cao", "Trung binh", "Thap"):
+        errors["priority"] = ["Gia tri khong hop le"]
     if errors:
         return validation_error_response("Thieu thong tin", errors)
 
@@ -1153,12 +1246,13 @@ def create_issue():
 
     try:
         doc = frappe.new_doc("CRM Issue")
-        doc.title = data["title"]
         doc.content = data["content"]
         doc.issue_module = module_name
         doc.issue_code = _generate_issue_code(mod.code)
+        doc.title = (data.get("title") or doc.issue_code or mod.module_name or module_name).strip()
+        doc.priority = data.get("priority")
 
-        occurred_at = data.get("occurred_at") or now()
+        occurred_at = _normalize_issue_date(data.get("occurred_at"))
         doc.occurred_at = occurred_at
         doc.lead = data.get("lead") or ""
         _sync_issue_students(doc, data)
@@ -1254,6 +1348,35 @@ def approve_issue():
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
+    if "departments" in data:
+        dept_values = data.get("departments") or []
+        if not dept_values:
+            return validation_error_response("Phong ban lien quan la bat buoc", {"departments": ["Bat buoc"]})
+        _sync_issue_departments(doc, data)
+    elif "department" in data:
+        dept_value = (data.get("department") or "").strip()
+        if not dept_value:
+            return validation_error_response("Phong ban lien quan la bat buoc", {"department": ["Bat buoc"]})
+        doc.department = dept_value
+        doc.issue_departments = []
+        if frappe.db.exists("CRM Issue Department", dept_value):
+            doc.append("issue_departments", {"department": dept_value})
+
+    if "priority" in data:
+        priority = (data.get("priority") or "").strip()
+        if priority not in ("Cao", "Trung binh", "Thap"):
+            return validation_error_response("Muc do khong hop le", {"priority": ["Khong hop le"]})
+        doc.priority = priority
+
+    if "pic" in data:
+        new_pic = (data.get("pic") or "").strip()
+        if new_pic and not _is_valid_pic_user(new_pic):
+            return error_response("PIC khong hop le")
+        doc.pic = new_pic
+
+    if not (doc.pic or "").strip():
+        _assign_pic_from_issue_context(doc)
+
     doc.approval_status = "Da duyet"
     doc.status = "Tiep nhan"
     doc.approved_by_user = frappe.session.user
@@ -1271,8 +1394,7 @@ def approve_issue():
         recipients = []
         if doc.pic:
             recipients.append(doc.pic)
-        if doc.created_by_user:
-            recipients.append(doc.created_by_user)
+        recipients.extend(_all_department_manager_emails_for_issue(doc))
         _notify_crm_issue_mobile(
             recipients,
             "Vấn đề đã được duyệt",
@@ -1367,14 +1489,20 @@ def update_issue():
         updatable = [
             "title",
             "content",
-            "occurred_at",
             "pic",
             "attachment",
             "lead",
+            "priority",
         ]
         for field in updatable:
             if field in data:
                 doc.set(field, data[field])
+
+        if "occurred_at" in data:
+            doc.occurred_at = _normalize_issue_date(data.get("occurred_at"))
+
+        if "priority" in data and (data.get("priority") or "").strip() not in ("Cao", "Trung binh", "Thap"):
+            return validation_error_response("Muc do khong hop le", {"priority": ["Khong hop le"]})
 
         # PIC chi gan user co role Sales (dong bo get_issue_pic_candidates)
         if "pic" in data:
@@ -1385,7 +1513,7 @@ def update_issue():
                     return error_response("Khong co quyen doi PIC")
                 if new_pic and not _is_valid_pic_user(new_pic):
                     return error_response(
-                        "PIC khong hop le: chi user co role Sales tuyen sinh (dong bo danh sach PIC)"
+                        "PIC khong hop le: chi user co role xu ly van de (dong bo danh sach PIC)"
                     )
 
         if "departments" in data:
@@ -1456,25 +1584,55 @@ def change_issue_status():
             {"name": ["Bat buoc"] if not name else [], "status": ["Bat buoc"] if not status else []},
         )
 
-    valid_statuses = ["Cho duyet", "Tiep nhan", "Dang xu ly", "Hoan thanh"]
+    valid_statuses = ["Cho duyet", "Tiep nhan", "Dang xu ly", "Hoan thanh", "Dong"]
     if status not in valid_statuses:
         return error_response(f"Trang thai khong hop le: {', '.join(valid_statuses)}")
 
-    if status == "Hoan thanh" and not result:
-        return validation_error_response("Can co ket qua khi hoan thanh", {"result": ["Bat buoc"]})
+    if status in ("Cho duyet", "Tiep nhan"):
+        return error_response("Khong duoc chuyen thu cong sang Cho duyet hoac Tiep nhan")
+
+    if result and result not in VALID_ISSUE_RESULTS:
+        return validation_error_response("Ket qua khong hop le", {"result": ["Khong hop le"]})
 
     if not frappe.db.exists("CRM Issue", name):
         return not_found_response(f"Khong tim thay van de {name}")
 
     doc = frappe.get_doc("CRM Issue", name)
-    if not _can_change_issue_status_sales(frappe.session.user):
-        return error_response("Khong co quyen cap nhat trang thai van de")
-    if doc.approval_status != "Da duyet" and status != "Cho duyet":
+    current_user = frappe.session.user
+    old_status = (getattr(doc, "status", None) or "").strip()
+    if doc.approval_status != "Da duyet":
         return error_response("Van de chua duoc duyet, khong doi trang thai xu ly")
 
+    is_pic = _is_issue_pic(current_user, doc)
+    is_care_admin = _can_care_admin(current_user)
+    is_status_role = _can_change_issue_status_sales(current_user)
+
+    if status == "Dang xu ly":
+        if old_status == "Hoan thanh":
+            if not is_care_admin:
+                return error_response("Chi Care Admin duoc tra van de ve Dang xu ly")
+        elif old_status != "Tiep nhan":
+            return error_response("Chi duoc chuyen sang Dang xu ly tu Tiep nhan hoac Hoan thanh")
+        elif not (is_pic or is_status_role or is_care_admin):
+            return error_response("Khong co quyen tiep tuc xu ly van de")
+    elif status == "Hoan thanh":
+        if old_status != "Dang xu ly":
+            return error_response("Chi duoc hoan thanh van de tu trang thai Dang xu ly")
+        if not is_pic:
+            return error_response("Chi PIC duoc chuyen van de sang Hoan thanh")
+        if not result:
+            return validation_error_response("Can co ket qua khi hoan thanh", {"result": ["Bat buoc"]})
+    elif status == "Dong":
+        if old_status != "Hoan thanh":
+            return error_response("Chi duoc dong van de sau khi PIC hoan thanh")
+        if not is_care_admin:
+            return error_response("Chi Care Admin duoc dong van de")
+
     doc.status = status
-    if "result" in data:
+    if status == "Hoan thanh":
         doc.result = result or ""
+    elif old_status == "Hoan thanh" and status == "Dang xu ly":
+        doc.result = ""
     _mark_first_response_if_eligible(doc)
     _recompute_sla_state(doc)
     doc.save(ignore_permissions=True)
@@ -1482,15 +1640,32 @@ def change_issue_status():
 
     try:
         recipients = []
-        if doc.pic:
-            recipients.append(doc.pic)
-        if doc.created_by_user:
-            recipients.append(doc.created_by_user)
-        recipients.extend(_all_department_member_emails_for_issue(doc))
+        title = "Cập nhật trạng thái vấn đề"
+        body = f"{doc.issue_code}: {status}"
+        if status == "Hoan thanh":
+            recipients.extend(_care_admin_emails())
+            title = "Vấn đề đã hoàn thành"
+            body = f"{doc.issue_code}: PIC đã hoàn thành, cần xác nhận"
+        elif status == "Dong":
+            if doc.pic:
+                recipients.append(doc.pic)
+            title = "Vấn đề đã đóng"
+            body = f"{doc.issue_code}: Care Admin đã xác nhận đóng"
+        elif old_status == "Hoan thanh" and status == "Dang xu ly":
+            if doc.pic:
+                recipients.append(doc.pic)
+            title = "Vấn đề cần tiếp tục xử lý"
+            body = f"{doc.issue_code}: Care Admin yêu cầu tiếp tục xử lý"
+        else:
+            if doc.pic:
+                recipients.append(doc.pic)
+            if doc.created_by_user:
+                recipients.append(doc.created_by_user)
+            recipients.extend(_all_department_manager_emails_for_issue(doc))
         _notify_crm_issue_mobile(
             recipients,
-            "Cập nhật trạng thái vấn đề",
-            f"{doc.issue_code}: {status}",
+            title,
+            body,
             doc,
             "crm_issue_status_changed",
             exclude_user=frappe.session.user,
@@ -1514,7 +1689,7 @@ def add_process_log():
     if not frappe.db.exists("CRM Issue", issue_name):
         return not_found_response(f"Khong tim thay van de {issue_name}")
 
-    required = ["title", "content"]
+    required = ["content"]
     errors = {}
     for f in required:
         if not data.get(f):
@@ -1527,15 +1702,15 @@ def add_process_log():
         current_user = frappe.session.user
         if doc.approval_status != "Da duyet":
             return error_response("Van de chua duoc duyet, khong them log")
-        if (getattr(doc, "status", None) or "").strip() == "Hoan thanh":
-            return error_response("Van de da hoan thanh, khong them log")
-        if not _can_write_issue_ops(current_user, doc):
+        if (getattr(doc, "status", None) or "").strip() != "Dang xu ly":
+            return error_response("Chi them log khi van de dang xu ly")
+        if not (_is_issue_pic(current_user, doc) or _can_write_issue_ops(current_user, doc)):
             return error_response("Khong co quyen them log")
         user_full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
         doc.append(
             "process_logs",
             {
-                "title": data["title"],
+                "title": data.get("title") or "Nhật ký xử lý",
                 "content": data["content"],
                 "logged_at": data.get("logged_at", now()),
                 "logged_by": current_user,
@@ -1559,7 +1734,7 @@ def add_process_log():
             _notify_crm_issue_mobile(
                 recipients,
                 "Log xử lý vấn đề mới",
-                f"{doc.issue_code}: {data.get('title', '')}",
+                f"{doc.issue_code}: Có cập nhật xử lý mới",
                 doc,
                 "crm_issue_log_added",
                 exclude_user=frappe.session.user,
@@ -1593,8 +1768,10 @@ def update_process_log():
         doc = frappe.get_doc("CRM Issue", issue_name)
         if doc.approval_status != "Da duyet":
             return error_response("Van de chua duoc duyet, khong sua log")
-        if not _can_write_issue_ops(frappe.session.user, doc):
-            return error_response("Khong co quyen sua log")
+        if (getattr(doc, "status", None) or "").strip() == "Dong":
+            return error_response("Van de da dong, khong sua log")
+        if not _can_care_admin(frappe.session.user):
+            return error_response("Chi Care Admin duoc sua log")
 
         idx = None
         if log_name:

@@ -8,7 +8,7 @@ Guardians can create, view, update, delete feedback and add replies
 
 import frappe
 from frappe import _
-from frappe.utils import now, get_datetime, escape_html
+from frappe.utils import now, get_datetime, escape_html, getdate
 import json
 import base64
 from erp.utils.api_response import (
@@ -268,7 +268,8 @@ def _create_issue_from_feedback(feedback_doc, guardian_name):
     # Lien ket nguoc ve Feedback de mobile/staff reply phu huynh tu man CRM Issue
     doc.source_feedback = getattr(feedback_doc, "name", None) or ""
     doc.issue_code = _generate_issue_code(mod.code)
-    doc.occurred_at = now()
+    doc.occurred_at = str(getdate(now()))
+    doc.priority = (getattr(feedback_doc, "priority", None) or "").strip() or "Trung binh"
     doc.lead = ""
     doc.department = ""
     doc.attachment = first_url or ""

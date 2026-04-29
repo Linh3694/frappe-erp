@@ -18,8 +18,7 @@
    "fieldname": "title",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Title",
-   "reqd": 1
+  "label": "Title"
   },
   {
    "fieldname": "content",
