@@ -125,7 +125,6 @@ def get_guardians_by_students(student_ids=None):
                 for value in [
                     guardian.get("name"),
                     guardian.get("guardian_id"),
-                    guardian.get("guardian_name"),
                     guardian.get("email"),
                     guardian.get("portalEmail"),
                 ]
