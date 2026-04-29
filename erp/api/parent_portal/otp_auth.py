@@ -22,6 +22,33 @@ VIVAS_SMS_CONFIG = {
 }
 
 
+def get_parent_portal_user_from_request():
+    """Lấy user Parent Portal từ session hoặc Bearer Guardian JWT."""
+    session_user = getattr(frappe.session, "user", None)
+    if session_user and session_user != "Guest":
+        return session_user
+
+    auth_header = frappe.get_request_header("Authorization") or ""
+    if not auth_header.lower().startswith("bearer "):
+        return None
+
+    token = auth_header.split(" ", 1)[1].strip()
+    if not token:
+        return None
+
+    from erp.api.parent_portal.guardian_auth import verify_guardian_jwt_token
+
+    payload = verify_guardian_jwt_token(token)
+    if not payload:
+        return None
+
+    user_email = payload.get("email") or payload.get("sub")
+    if not user_email:
+        return None
+
+    return user_email
+
+
 def generate_otp(length=6):
     """Generate random OTP code"""
     return ''.join([str(secrets.randbelow(10)) for _ in range(length)])
@@ -743,7 +770,7 @@ def get_guardian_info():
         }
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_current_guardian_comprehensive_data():
     """
     Get comprehensive data for current logged-in guardian
@@ -753,9 +780,9 @@ def get_current_guardian_comprehensive_data():
         dict: Comprehensive guardian data including family, students, and campus
     """
     try:
-        user_email = frappe.session.user
+        user_email = get_parent_portal_user_from_request()
 
-        if user_email == "Guest":
+        if not user_email or user_email == "Guest":
             return {
                 "success": False,
                 "message": "Vui lòng đăng nhập"

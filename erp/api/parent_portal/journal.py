@@ -5,6 +5,7 @@ Trả về phạm vi lớp/năm học mà phụ huynh được phép xem Nhật 
 
 import frappe
 from frappe import _
+from erp.api.parent_portal.otp_auth import get_parent_portal_user_from_request
 from erp.utils.api_response import success_response, error_response
 
 
@@ -31,7 +32,7 @@ def _get_parent_student_ids(parent_email):
     )
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=True)
 def get_student_class_scopes(student_id=None):
     """
     Lấy toàn bộ lớp/năm học học sinh từng học để social-service lọc bài Nhật ký.
@@ -42,7 +43,11 @@ def get_student_class_scopes(student_id=None):
         if not student_id:
             return error_response(message="Thiếu student_id", code="MISSING_STUDENT")
 
-        allowed_students = _get_parent_student_ids(frappe.session.user)
+        parent_email = get_parent_portal_user_from_request()
+        if not parent_email:
+            return error_response(message="Vui lòng đăng nhập", code="NOT_AUTHENTICATED")
+
+        allowed_students = _get_parent_student_ids(parent_email)
         if student_id not in allowed_students:
             return error_response(
                 message="Bạn không có quyền xem Nhật ký của học sinh này",
