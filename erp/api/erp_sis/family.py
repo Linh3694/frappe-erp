@@ -31,6 +31,93 @@ def _find_existing_family_for_student(student_id: str, exclude_family: str | Non
     return result[0] if result else None
 
 
+def build_guardians_by_student_ids(student_ids):
+    """
+    Nội bộ server: cùng cấu trúc với get_guardians_by_students.data.guardians.
+    Dùng cho Parent Portal / social-service (tránh whitelist + permission Resource).
+    """
+    student_ids = [student_id for student_id in (student_ids or []) if student_id]
+    if not student_ids:
+        return []
+
+    rows = frappe.db.sql(
+        """
+        SELECT
+            fr.parent AS family_code,
+            fr.student AS student_id,
+            fr.relationship_type,
+            fr.key_person,
+            fr.access,
+            fr.display_order,
+            s.student_name,
+            s.student_code,
+            s.family_code AS student_family_code,
+            g.name,
+            g.guardian_id,
+            g.guardian_name,
+            g.email,
+            g.guardian_image,
+            g.phone_number
+        FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Guardian` g ON g.name = fr.guardian
+        LEFT JOIN `tabCRM Student` s ON s.name = fr.student
+        WHERE fr.student IN %(student_ids)s
+        ORDER BY fr.display_order ASC, fr.key_person DESC, g.guardian_name ASC
+        """,
+        {"student_ids": tuple(student_ids)},
+        as_dict=True,
+    ) or []
+
+    guardian_map = {}
+    for row in rows:
+        key = row.get("name") or row.get("guardian_id") or row.get("email")
+        if not key:
+            continue
+
+        portal_email = (
+            f"{row.get('guardian_id')}@parent.wellspring.edu.vn"
+            if row.get("guardian_id")
+            else None
+        )
+        guardian = guardian_map.setdefault(key, {
+            "name": row.get("name"),
+            "guardian_id": row.get("guardian_id"),
+            "guardian_name": row.get("guardian_name"),
+            "email": row.get("email"),
+            "portalEmail": portal_email,
+            "guardian_image": row.get("guardian_image"),
+            "phone_number": row.get("phone_number"),
+            "students": [],
+            "matchKeys": [],
+        })
+
+        student_id = row.get("student_id")
+        if student_id and not any(item.get("student_id") == student_id for item in guardian["students"]):
+            guardian["students"].append({
+                "student_id": student_id,
+                "student_name": row.get("student_name"),
+                "student_code": row.get("student_code"),
+                "family_code": row.get("student_family_code") or row.get("family_code"),
+                "relationship_type": row.get("relationship_type"),
+                "key_person": row.get("key_person"),
+                "access": row.get("access"),
+                "display_order": row.get("display_order"),
+            })
+
+        guardian["matchKeys"] = list({
+            str(value).strip().lower()
+            for value in [
+                guardian.get("name"),
+                guardian.get("guardian_id"),
+                guardian.get("email"),
+                guardian.get("portalEmail"),
+            ]
+            if value
+        })
+
+    return list(guardian_map.values())
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def get_guardians_by_students(student_ids=None):
     """Lấy danh sách phụ huynh theo danh sách học sinh từ CRM Family Relationship."""
@@ -56,83 +143,10 @@ def get_guardians_by_students(student_ids=None):
         if not student_ids:
             return success_response(data={"guardians": []}, message="No students provided")
 
-        rows = frappe.db.sql(
-            """
-            SELECT
-                fr.parent AS family_code,
-                fr.student AS student_id,
-                fr.relationship_type,
-                fr.key_person,
-                fr.access,
-                fr.display_order,
-                s.student_name,
-                s.student_code,
-                s.family_code AS student_family_code,
-                g.name,
-                g.guardian_id,
-                g.guardian_name,
-                g.email,
-                g.guardian_image,
-                g.phone_number
-            FROM `tabCRM Family Relationship` fr
-            INNER JOIN `tabCRM Guardian` g ON g.name = fr.guardian
-            LEFT JOIN `tabCRM Student` s ON s.name = fr.student
-            WHERE fr.student IN %(student_ids)s
-            ORDER BY fr.display_order ASC, fr.key_person DESC, g.guardian_name ASC
-            """,
-            {"student_ids": tuple(student_ids)},
-            as_dict=True,
-        ) or []
-
-        guardian_map = {}
-        for row in rows:
-            key = row.get("name") or row.get("guardian_id") or row.get("email")
-            if not key:
-                continue
-
-            portal_email = (
-                f"{row.get('guardian_id')}@parent.wellspring.edu.vn"
-                if row.get("guardian_id")
-                else None
-            )
-            guardian = guardian_map.setdefault(key, {
-                "name": row.get("name"),
-                "guardian_id": row.get("guardian_id"),
-                "guardian_name": row.get("guardian_name"),
-                "email": row.get("email"),
-                "portalEmail": portal_email,
-                "guardian_image": row.get("guardian_image"),
-                "phone_number": row.get("phone_number"),
-                "students": [],
-                "matchKeys": [],
-            })
-
-            student_id = row.get("student_id")
-            if student_id and not any(item.get("student_id") == student_id for item in guardian["students"]):
-                guardian["students"].append({
-                    "student_id": student_id,
-                    "student_name": row.get("student_name"),
-                    "student_code": row.get("student_code"),
-                    "family_code": row.get("student_family_code") or row.get("family_code"),
-                    "relationship_type": row.get("relationship_type"),
-                    "key_person": row.get("key_person"),
-                    "access": row.get("access"),
-                    "display_order": row.get("display_order"),
-                })
-
-            guardian["matchKeys"] = list({
-                str(value).strip().lower()
-                for value in [
-                    guardian.get("name"),
-                    guardian.get("guardian_id"),
-                    guardian.get("email"),
-                    guardian.get("portalEmail"),
-                ]
-                if value
-            })
+        guardians = build_guardians_by_student_ids(student_ids)
 
         return success_response(
-            data={"guardians": list(guardian_map.values())},
+            data={"guardians": guardians},
             message="Guardians fetched successfully",
         )
     except Exception as e:
