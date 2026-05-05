@@ -266,6 +266,13 @@ def bulk_upload_debit_notes():
     
     Returns:
         Kết quả upload: total, success_count, error_count, errors[]
+
+    Giới hạn hạ tầng (nếu frontend gửi cực nhiều file trong một request):
+        - Nginx/client_max_body_size, timeout proxy
+        - Gunicorn/Uvicorn worker timeout
+        - Werkzeug multipart mặc định max_form_parts=1000
+
+    FE nên chia nhỏ đợt upload; mỗi đợt vẫn gọi endpoint này.
     """
     logs = []
     
