@@ -6,7 +6,8 @@ import frappe
 
 
 def execute():
-    if not frappe.db.has_column("tabSIS Finance Order Student", "bypass_supersession"):
+    # has_column nhận *tên DocType*, không phải tên bảng tab...
+    if not frappe.db.has_column("SIS Finance Order Student", "bypass_supersession"):
         return
     frappe.db.sql(
         """
