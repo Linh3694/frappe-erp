@@ -70,6 +70,27 @@ def get_staging_default_otp():
     return now.strftime("%d%m%y")
 
 
+# OTP cố định cho SĐT demo (App Store / Play review). Key = SĐT đã chuẩn hoá 84xxxxxxxxxx.
+PARENT_PORTAL_STATIC_OTP_MAP = {
+    "84378881694": "999000",
+}
+
+
+def get_static_demo_otp_for_phone(normalized_phone):
+    """Trả về mã OTP cố định cho SĐT whitelist (demo), hoặc None."""
+    if not normalized_phone:
+        return None
+    return PARENT_PORTAL_STATIC_OTP_MAP.get(normalized_phone)
+
+
+def is_static_demo_otp_accepted(normalized_phone, otp_input):
+    """True nếu SĐT + OTP khớp cấu hình demo (OTP tĩnh)."""
+    expected = get_static_demo_otp_for_phone(normalized_phone)
+    if expected is None or not otp_input:
+        return False
+    return otp_input.strip() == expected
+
+
 def update_guardian_login_stats(guardian_name):
     """
     Cập nhật thống kê login của guardian.
@@ -333,7 +354,12 @@ def request_otp(phone_number):
         
         # Generate OTP
         is_prod = is_production_server()
-        if not is_prod:
+        static_demo_otp = get_static_demo_otp_for_phone(normalized_phone)
+        if static_demo_otp:
+            # SĐT demo: luôn dùng OTP cố định (cache/SMS đồng bộ với bước verify)
+            otp_code = static_demo_otp
+            logs.append(f"🔐 [DEMO] OTP cố định cho review/demo: {otp_code}")
+        elif not is_prod:
             # Staging/Dev: dùng OTP mặc định theo ngày (DDMMYY) để dễ kiểm thử
             otp_code = get_staging_default_otp()
             logs.append(f"🔐 [STAGING] OTP mặc định theo ngày (DDMMYY): {otp_code}")
@@ -427,7 +453,12 @@ def verify_otp_and_login(phone_number, otp):
                 staging_otp_accepted = True
                 logs.append(f"✅ [STAGING] OTP mặc định theo ngày được chấp nhận: {staging_default}")
         
-        if not cached_data and not staging_otp_accepted:
+        # SĐT demo: chấp nhận OTP tĩnh kể cả khi cache hết hạn / không khớp cache
+        static_otp_accepted = is_static_demo_otp_accepted(normalized_phone, otp)
+        if static_otp_accepted:
+            logs.append("✅ [DEMO] OTP cố định (whitelist SĐT) được chấp nhận")
+        
+        if not cached_data and not staging_otp_accepted and not static_otp_accepted:
             logs.append(f"❌ No OTP found in cache for: {normalized_phone}")
             return {
                 "success": False,
@@ -439,13 +470,14 @@ def verify_otp_and_login(phone_number, otp):
             logs.append(f"💾 Found cached OTP data")
         
         # Verify OTP
-        if not staging_otp_accepted and cached_data["otp"] != otp.strip():
-            logs.append(f"❌ OTP mismatch: expected {cached_data['otp']}, got {otp}")
-            return {
-                "success": False,
-                "message": "Mã OTP không đúng. Vui lòng thử lại.",
-                "logs": logs
-            }
+        if not staging_otp_accepted and not static_otp_accepted:
+            if not cached_data or cached_data["otp"] != otp.strip():
+                logs.append(f"❌ OTP mismatch: expected {cached_data['otp'] if cached_data else 'N/A'}, got {otp}")
+                return {
+                    "success": False,
+                    "message": "Mã OTP không đúng. Vui lòng thử lại.",
+                    "logs": logs
+                }
         
         logs.append(f"✅ OTP verified successfully")
         
