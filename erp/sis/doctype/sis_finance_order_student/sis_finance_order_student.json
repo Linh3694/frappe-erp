@@ -43,6 +43,10 @@
   "payment_status",
   "tuition_paid_elsewhere",
   "tuition_paid_elsewhere_order",
+  "parent_portal_section",
+  "bypass_supersession",
+  "released_at",
+  "released_from_order",
   "debit_note_section",
   "latest_debit_note_version",
   "latest_debit_note_url",
@@ -235,6 +239,33 @@
    "label": "Đơn hàng đã đóng HP",
    "read_only": 1,
    "description": "Tên đơn hàng tuition mà học sinh đã đóng học phí"
+  },
+  {
+   "fieldname": "parent_portal_section",
+   "fieldtype": "Section Break",
+   "label": "Hiển thị Parent Portal",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "bypass_supersession",
+   "fieldtype": "Check",
+   "label": "Bỏ qua ẩn đơn (superseded)",
+   "default": 0,
+   "read_only": 1,
+   "description": "Khi HS được gỡ khỏi đơn con, hiển thị lại trên đơn cha dù đơn cha is_superseded"
+  },
+  {
+   "fieldname": "released_at",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm gỡ về đơn cha",
+   "read_only": 1
+  },
+  {
+   "fieldname": "released_from_order",
+   "fieldtype": "Link",
+   "label": "Gỡ từ đơn",
+   "options": "SIS Finance Order",
+   "read_only": 1
   },
   {
    "fieldname": "debit_note_section",

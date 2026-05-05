@@ -116,8 +116,13 @@ def _filter_orders_for_parent_portal(order_items):
     if not order_items:
         return order_items
 
-    # Đơn hàng bị thay bởi đơn mới (kế thừa) — ẩn toàn bộ, mọi order_type
-    order_items = [i for i in order_items if not int(i.get("is_superseded") or 0)]
+    # Đơn superseded: ẩn, trừ khi học sinh có cờ bypass trên Order Student
+    order_items = [
+        i
+        for i in order_items
+        if (not int(i.get("is_superseded") or 0))
+        or int(i.get("bypass_supersession") or 0)
+    ]
 
     non_tuition = [i for i in order_items if i.get('order_type') != 'tuition']
     tuition = [i for i in order_items if i.get('order_type') == 'tuition']
@@ -158,6 +163,7 @@ def _calculate_student_finance_totals(finance_student_id):
             fo.order_type,
             IFNULL(fos.tuition_paid_elsewhere, 0) as tuition_paid_elsewhere,
             IFNULL(fo.is_superseded, 0) as is_superseded,
+            IFNULL(fos.bypass_supersession, 0) as bypass_supersession,
             fo.sort_order,
             fo.creation as order_creation
         FROM `tabSIS Finance Order Student` fos
@@ -376,12 +382,14 @@ def get_student_finance_detail(finance_student_id=None):
                 fo.title as order_title,
                 fo.order_type,
                 fo.description as order_description,
+                fo.order_deadline,
                 fos.total_amount as final_amount,
                 fos.paid_amount,
                 fos.outstanding_amount,
                 fos.payment_status,
                 IFNULL(fos.tuition_paid_elsewhere, 0) as tuition_paid_elsewhere,
                 IFNULL(fo.is_superseded, 0) as is_superseded,
+                IFNULL(fos.bypass_supersession, 0) as bypass_supersession,
                 fo.sort_order,
                 fo.creation as order_creation
             FROM `tabSIS Finance Order Student` fos
@@ -420,6 +428,7 @@ def get_student_finance_detail(finance_student_id=None):
                 "order_type": item.order_type,
                 "order_type_display": order_type_display.get(item.order_type, item.order_type),
                 "order_description": item.order_description,
+                "order_deadline": str(item.order_deadline) if item.get("order_deadline") else None,
                 "final_amount": item.final_amount or 0,
                 "paid_amount": item.paid_amount or 0,
                 "outstanding_amount": item.outstanding_amount or 0,

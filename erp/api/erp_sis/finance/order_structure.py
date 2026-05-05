@@ -127,6 +127,10 @@ def create_order_simple():
             "is_required": data.get('is_required', 1),
             "description": data.get('description', ''),
         }
+        # Hạn cuối toàn đơn (đơn mới, không dùng bảng milestones)
+        if "order_deadline" in data:
+            od = data.get("order_deadline")
+            new_row["order_deadline"] = None if od in (None, "", "null") else od
         if data.get("parent_order_id"):
             new_row["parent_order_id"] = data.get("parent_order_id")
         order_doc = frappe.get_doc(new_row)
@@ -204,6 +208,9 @@ def create_order_with_structure():
             "description": data.get('description', ''),
             "debit_note_form_code": data.get('debit_note_form_code', 'TUITION_STANDARD')
         }
+        if "order_deadline" in data:
+            od = data.get("order_deadline")
+            row_w["order_deadline"] = None if od in (None, "", "null") else od
         if data.get("parent_order_id"):
             row_w["parent_order_id"] = data.get("parent_order_id")
         order_doc = frappe.get_doc(row_w)
@@ -305,6 +312,9 @@ def get_order_with_structure(order_id=None):
             "parent_order_id": getattr(order_doc, "parent_order_id", None),
             "is_superseded": int(getattr(order_doc, "is_superseded", 0) or 0),
             "superseded_by": getattr(order_doc, "superseded_by", None),
+            "order_deadline": str(order_doc.order_deadline)
+            if getattr(order_doc, "order_deadline", None)
+            else None,
             "total_students": order_doc.total_students,
             "data_completed_count": order_doc.data_completed_count,
             "total_collected": order_doc.total_collected,
@@ -382,6 +392,10 @@ def update_order_structure():
         if "parent_order_id" in data:
             pid = data.get("parent_order_id")
             order_doc.parent_order_id = (pid or "").strip() or None
+        
+        if "order_deadline" in data:
+            od_dl = data.get("order_deadline")
+            order_doc.order_deadline = None if od_dl in (None, "", "null") else od_dl
         
         # Cập nhật milestones
         if 'milestones' in data:
@@ -666,7 +680,9 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
                 os.payment_scheme_choice, os.current_milestone_key,
                 os.semester_1_paid, os.semester_2_paid,
                 os.milestone_amounts_json,
-                os.tuition_paid_elsewhere, os.tuition_paid_elsewhere_order
+                os.tuition_paid_elsewhere, os.tuition_paid_elsewhere_order,
+                IFNULL(os.bypass_supersession, 0) as bypass_supersession,
+                os.released_at, os.released_from_order
             FROM `tabSIS Finance Order Student` os
             WHERE {where_sql}
             ORDER BY os.student_name ASC
@@ -714,6 +730,164 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
         
     except Exception as e:
         logs.append(f"Lỗi: {str(e)}")
+        return error_response(f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def remove_students_from_order(
+    order_id=None,
+    finance_student_ids=None,
+    note=None,
+    force=False,
+):
+    """
+    Gỡ học sinh (SIS Finance Student) khỏi đơn hiện tại.
+    Nếu đơn có parent_order_id: bật bypass_trên Order Student đơn cha hoặc tạo mới
+    để Parent Portal hiển thị lại đơn cha dù is_superseded.
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền thực hiện", logs=logs)
+
+        if frappe.request.is_json:
+            data = frappe.request.json or {}
+        else:
+            data = frappe.form_dict
+
+        order_id = order_id or data.get("order_id")
+        finance_student_ids = finance_student_ids or data.get("finance_student_ids")
+        note = note or data.get("note")
+        force = frappe.utils.cint(data.get("force", force))
+
+        if not order_id:
+            return validation_error_response("Thiếu order_id", {"order_id": ["Bắt buộc"]})
+        if not finance_student_ids:
+            return validation_error_response(
+                "Thiếu finance_student_ids",
+                {"finance_student_ids": ["Bắt buộc"]},
+            )
+
+        if isinstance(finance_student_ids, str):
+            finance_student_ids = json.loads(finance_student_ids)
+
+        if not frappe.db.exists("SIS Finance Order", order_id):
+            return not_found_response(f"Không tìm thấy đơn: {order_id}")
+
+        order_doc = frappe.get_doc("SIS Finance Order", order_id)
+        if order_doc.status == "closed":
+            return error_response("Đơn đã đóng, không thể gỡ học sinh", logs=logs)
+
+        parent_id = getattr(order_doc, "parent_order_id", None) or None
+        removed = []
+        skipped = []
+        rolled_back = []
+        now = frappe.utils.now_datetime()
+
+        for fsid in finance_student_ids:
+            os_name = frappe.db.get_value(
+                "SIS Finance Order Student",
+                {"order_id": order_id, "finance_student_id": fsid},
+                "name",
+            )
+            if not os_name:
+                skipped.append(
+                    {"id": fsid, "reason": "Không có Order Student trên đơn này"}
+                )
+                continue
+
+            os_doc = frappe.get_doc("SIS Finance Order Student", os_name)
+            paid = frappe.utils.flt(os_doc.paid_amount or 0)
+            if paid > 0 and not force:
+                skipped.append(
+                    {
+                        "id": fsid,
+                        "reason": "Đã có thanh toán — không gỡ (truyền force=1 để ép)",
+                    }
+                )
+                continue
+
+            if parent_id:
+                p_name = frappe.db.get_value(
+                    "SIS Finance Order Student",
+                    {"order_id": parent_id, "finance_student_id": fsid},
+                    "name",
+                )
+                if p_name:
+                    frappe.db.set_value(
+                        "SIS Finance Order Student",
+                        p_name,
+                        {
+                            "bypass_supersession": 1,
+                            "released_at": now,
+                            "released_from_order": order_id,
+                        },
+                    )
+                    rolled_back.append(
+                        {
+                            "finance_student_id": fsid,
+                            "parent_order_student": p_name,
+                            "action": "updated",
+                        }
+                    )
+                else:
+                    new_os = frappe.get_doc(
+                        {
+                            "doctype": "SIS Finance Order Student",
+                            "order_id": parent_id,
+                            "finance_student_id": fsid,
+                            "data_status": os_doc.data_status or "pending",
+                            "payment_scheme_choice": os_doc.payment_scheme_choice,
+                            "total_amount": os_doc.total_amount or 0,
+                            "semester_1_amount": os_doc.semester_1_amount or 0,
+                            "semester_2_amount": os_doc.semester_2_amount or 0,
+                            "semester_1_paid": 0,
+                            "semester_2_paid": 0,
+                            "paid_amount": 0,
+                            "payment_status": "unpaid",
+                            "bypass_supersession": 1,
+                            "released_at": now,
+                            "released_from_order": order_id,
+                        }
+                    )
+                    new_os.insert(ignore_permissions=True)
+                    rolled_back.append(
+                        {
+                            "finance_student_id": fsid,
+                            "parent_order_student": new_os.name,
+                            "action": "created",
+                        }
+                    )
+
+            frappe.delete_doc(
+                "SIS Finance Order Student", os_name, ignore_permissions=True
+            )
+            removed.append(fsid)
+            if note:
+                logs.append(f"Ghi chú khi gỡ HS {fsid}: {note}")
+
+        affected = {order_id}
+        if parent_id:
+            affected.add(parent_id)
+
+        for oid in affected:
+            od = frappe.get_doc("SIS Finance Order", oid)
+            od.update_statistics()
+
+        frappe.db.commit()
+
+        return success_response(
+            data={
+                "removed": removed,
+                "skipped": skipped,
+                "rolled_back_to_parent": rolled_back,
+            },
+            message="OK",
+            logs=logs,
+        )
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "remove_students_from_order")
         return error_response(f"Lỗi: {str(e)}", logs=logs)
 
 

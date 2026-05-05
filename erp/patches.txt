@@ -46,3 +46,6 @@ erp.patches.v1_0.migrate_inventory_check_to_facility_handover
 
 # Phòng học: backfill physical_code / room_number
 erp.patches.v1_0.room_physical_code_and_yearly_assignment
+
+# Finance: bypass_supersession trên Order Student (Parent Portal rollback từ đơn con)
+erp.patches.v1_0.backfill_finance_order_student_bypass_supersession

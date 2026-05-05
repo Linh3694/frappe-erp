@@ -54,7 +54,7 @@ def get_orders(finance_year_id=None):
                 "name", "title", "order_type", "status", "is_active", "is_required",
                 "debit_note_form_code", "total_students", "data_completed_count",
                 "total_collected", "total_outstanding", "collection_rate",
-                "sort_order",
+                "sort_order", "order_deadline",
                 "parent_order_id", "is_superseded", "superseded_by",
             ],
             order_by="sort_order asc, creation asc",
@@ -257,13 +257,15 @@ def update_order():
             'title', 'order_type', 'total_amount', 'payment_type',
             'installment_count', 'deadline', 'is_active', 'is_required',
             'sort_order', 'description', 'late_fee_percent',
-            'parent_order_id',
+            'parent_order_id', 'order_deadline',
         ]
         
         for field in updatable_fields:
             if field in data:
                 val = data[field]
                 if field == "parent_order_id" and val in (None, "", "null"):
+                    val = None
+                if field == "order_deadline" and val in (None, "", "null"):
                     val = None
                 setattr(order_doc, field, val)
         

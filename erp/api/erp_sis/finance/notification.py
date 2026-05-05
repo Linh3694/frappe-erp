@@ -201,6 +201,10 @@ def create_fee_notification():
             # Nếu tất cả đã qua, lấy cái cuối cùng
             if not nearest_deadline and milestones:
                 nearest_deadline = frappe.utils.format_date(milestones[-1].deadline_date, "dd/MM/yyyy")
+        if not nearest_deadline and getattr(order_doc, "order_deadline", None):
+            nearest_deadline = frappe.utils.format_date(
+                order_doc.order_deadline, "dd/MM/yyyy"
+            )
         
         logs.append(f"Nearest deadline: {nearest_deadline}")
         

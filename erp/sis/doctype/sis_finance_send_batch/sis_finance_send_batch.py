@@ -32,6 +32,9 @@ class SISFinanceSendBatch(Document):
                 if milestone.milestone_number == self.milestone_number:
                     self.milestone_title = milestone.title
                     break
+            # Đơn không còn milestones — dùng tiêu đề đơn
+            if not self.milestone_title:
+                self.milestone_title = order.title or order.name
     
     def mark_as_sent(self):
         """Đánh dấu đã gửi thành công"""

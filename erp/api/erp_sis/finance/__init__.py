@@ -59,6 +59,7 @@ from .order_structure import (
     get_paid_tuition_students,
     get_eligible_parent_orders,
     get_paid_in_parent_order_chain,
+    remove_students_from_order,
 )
 
 # Payment APIs
@@ -156,6 +157,7 @@ __all__ = [
     'get_paid_tuition_students',
     'get_eligible_parent_orders',
     'get_paid_in_parent_order_chain',
+    'remove_students_from_order',
     
     # Payment
     'update_order_student_payment',

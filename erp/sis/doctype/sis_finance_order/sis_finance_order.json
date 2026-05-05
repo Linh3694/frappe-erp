@@ -33,6 +33,7 @@
   "description_section",
   "description",
   "milestones_section",
+  "order_deadline",
   "milestones",
   "fee_lines_section",
   "fee_lines",
@@ -160,14 +161,21 @@
   {
    "fieldname": "milestones_section",
    "fieldtype": "Section Break",
-   "label": "Các mốc deadline"
+   "label": "Các mốc deadline",
+   "description": "Bảng mốc legacy — đơn mới dùng \"Hạn cuối đơn\" phía trên"
+  },
+  {
+   "fieldname": "order_deadline",
+   "fieldtype": "Date",
+   "label": "Hạn cuối đơn",
+   "description": "Hạn chót áp dụng cho toàn bộ đơn (đơn mới thay thế mốc deadline riêng lẻ)"
   },
   {
    "fieldname": "milestones",
    "fieldtype": "Table",
    "label": "Mốc deadline",
    "options": "SIS Finance Deadline Milestone",
-   "description": "Định nghĩa các mốc thanh toán với ưu đãi khác nhau"
+   "description": "Đã ngừng dùng cho đơn mới — giữ lại cho Debit Note / PDF đơn cũ"
   },
   {
    "fieldname": "fee_lines_section",

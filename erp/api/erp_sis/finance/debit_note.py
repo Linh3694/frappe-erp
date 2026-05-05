@@ -229,11 +229,15 @@ def get_debit_note_preview(order_student_id=None, milestone_key=None):
             order_doc.milestones,
             key=lambda m: (m.payment_scheme or 'yearly', m.milestone_number)
         )
-        
-        # Nếu không có milestone_key, dùng milestone đầu tiên
-        if not milestone_key and sorted_milestones:
-            first_m = sorted_milestones[0]
-            milestone_key = f"{first_m.payment_scheme or 'yearly'}_{first_m.milestone_number}"
+        use_synthetic_milestones = not sorted_milestones
+
+        # Nếu không có milestone_key: đơn có mốc → milestone đầu; đơn không mốc → single
+        if not milestone_key:
+            if sorted_milestones:
+                first_m = sorted_milestones[0]
+                milestone_key = f"{first_m.payment_scheme or 'yearly'}_{first_m.milestone_number}"
+            else:
+                milestone_key = "single"
         
         lines = []
         for fee_line in order_student.fee_lines:
@@ -278,6 +282,21 @@ def get_debit_note_preview(order_student_id=None, milestone_key=None):
                 yearly_milestones.append(m_data)
             else:
                 semester_milestones.append(m_data)
+
+        # Đơn mới không có bảng milestones — một cột ảo + deadline = order_deadline
+        if use_synthetic_milestones:
+            od_dl = getattr(order_doc, "order_deadline", None)
+            syn_key = "single"
+            yearly_milestones.append({
+                "key": syn_key,
+                "payment_scheme": "yearly",
+                "milestone_number": 1,
+                "title": "Toàn đơn",
+                "column_header_en": "Toàn đơn",
+                "column_header_vn": "Toàn đơn",
+                "deadline_date": str(od_dl) if od_dl else None,
+                "is_current": milestone_key == syn_key,
+            })
         
         return success_response(
             data={
