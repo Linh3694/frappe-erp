@@ -22,13 +22,18 @@ def _student_code_from_debit_bulk_filename(file_name: str) -> str:
     Suy mã học sinh từ tên file upload Debit Note hàng loạt (bỏ đuôi mở rộng).
     Hỗ trợ:
     - WS11224455.pdf -> WS11224455
-    - WS11510190 - Vũ Hải Lâm 20260326102139.pdf -> WS11510190 (lấy phần trước dấu ' - ')
+    - WS11510190 - Vũ Hải Lâm 20260326102139.pdf -> WS11510190 (trước cụm ' - ')
+    - WS11510190 Vũ Hải Lâm.pdf -> WS11510190 (token đầu sau khoảng trắng — xuất từ phần mềm khác)
     """
     import os as _os
 
     base = _os.path.splitext(file_name or "")[0].strip()
     if " - " in base:
         return base.split(" - ", 1)[0].strip()
+    # Phần mềm khác có thể nối mã + tên chỉ bằng khoảng trắng (không có gạch ngang)
+    parts = base.split()
+    if len(parts) > 1:
+        return parts[0]
     return base
 
 
@@ -252,8 +257,8 @@ def delete_student_document():
 def bulk_upload_debit_notes():
     """
     Upload hàng loạt Debit Note cho học sinh trong order.
-    Mã khớp dựa trên tên file (bỏ đuôi): trùng student_code, hoặc tên dạng
-    \"<mã> - <mô tả...>.pdf\" thì lấy <mã> phía trước \" - \".
+    Mã khớp dựa trên tên file (bỏ đuôi): trùng student_code; hoặc \"<mã> - <mô tả>.pdf\"
+    lấy <mã> trước \" - \"; hoặc \"<mã> <mô tả>.pdf\" (một khoảng trắng) lấy token đầu.
     
     Args (form data):
         order_id: ID của SIS Finance Order
