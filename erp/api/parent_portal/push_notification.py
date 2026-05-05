@@ -444,75 +444,79 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
         dict: {"success": True/False, "message": "...", "log": "...", "devices_sent": int, "devices_failed": int}
     """
     try:
-        # Lấy TẤT CẢ subscriptions của user (multi-device)
+        # Chuẩn hoá data dict — dùng chung cho Web Push và Expo mobile (parent-portal-mobile)
+        if isinstance(data, str):
+            try:
+                data = json.loads(data) if data else {}
+            except Exception:
+                data = {}
+        elif data is None:
+            data = {}
+        else:
+            data = dict(data)
+
+        if tag and "type" not in data:
+            data["type"] = tag
+
+        # Lấy TẤT CẢ subscriptions của user (multi-device) — PWA
         subscription_docs = frappe.db.get_all(
             "Push Subscription",
             filters={"user": user_email},
             fields=["name", "subscription_json", "device_name", "endpoint"]
         )
-        
-        if not subscription_docs:
-            return {
-                "success": False,
-                "message": f"No push subscription found for user: {user_email}",
-                "log": f"User {user_email} has not subscribed to push notifications",
-                "devices_sent": 0,
-                "devices_failed": 0
-            }
-        
-        # VAPID keys từ site config
-        vapid_private_key = frappe.conf.get("vapid_private_key")
-        vapid_public_key = frappe.conf.get("vapid_public_key")
-        vapid_claims_email = frappe.conf.get("vapid_claims_email", "admin@example.com")
-        
-        if not vapid_private_key or not vapid_public_key:
-            return {
-                "success": False,
-                "message": "VAPID keys not configured",
-                "log": "Please configure VAPID keys in site_config.json",
-                "devices_sent": 0,
-                "devices_failed": 0
-            }
-        
-        # Tạo payload
-        payload = {
-            "title": title,
-            "body": body,
-            "icon": icon or "/icon.png",
-            "badge": icon or "/icon.png",
-            "data": data or {},
-            "tag": tag or "default-notification",
-            "timestamp": frappe.utils.now_datetime().isoformat(),
-        }
-        
-        if actions:
-            payload["actions"] = actions
-        
-        # Gửi đến TẤT CẢ devices
+
         devices_sent = 0
         devices_failed = 0
         expired_subscriptions = []
         successful_subscriptions = []  # Track để update last_used
         device_results = []
-        
-        for sub_doc in subscription_docs:
-            result = send_push_to_single_subscription(
-                sub_doc, payload, vapid_private_key, vapid_claims_email, user_email
-            )
-            
-            device_results.append({
-                "device": result["device_name"],
-                "success": result["success"],
-                "error": result["error"]
-            })
-            
-            if result["success"]:
-                devices_sent += 1
-                successful_subscriptions.append(result["subscription_name"])
+
+        if subscription_docs:
+            vapid_private_key = frappe.conf.get("vapid_private_key")
+            vapid_public_key = frappe.conf.get("vapid_public_key")
+            vapid_claims_email = frappe.conf.get("vapid_claims_email", "admin@example.com")
+
+            if not vapid_private_key or not vapid_public_key:
+                frappe.logger().warning(
+                    f"⚠️ [Push Notification] VAPID keys not configured — bỏ qua web push cho {user_email}"
+                )
             else:
-                devices_failed += 1
-                if result["expired"]:
-                    expired_subscriptions.append(result["subscription_name"])
+                # Tạo payload PWA
+                payload = {
+                    "title": title,
+                    "body": body,
+                    "icon": icon or "/icon.png",
+                    "badge": icon or "/icon.png",
+                    "data": data,
+                    "tag": tag or "default-notification",
+                    "timestamp": frappe.utils.now_datetime().isoformat(),
+                }
+
+                if actions:
+                    payload["actions"] = actions
+
+                for sub_doc in subscription_docs:
+                    result = send_push_to_single_subscription(
+                        sub_doc, payload, vapid_private_key, vapid_claims_email, user_email
+                    )
+
+                    device_results.append({
+                        "device": result["device_name"],
+                        "success": result["success"],
+                        "error": result["error"]
+                    })
+
+                    if result["success"]:
+                        devices_sent += 1
+                        successful_subscriptions.append(result["subscription_name"])
+                    else:
+                        devices_failed += 1
+                        if result["expired"]:
+                            expired_subscriptions.append(result["subscription_name"])
+        else:
+            frappe.logger().info(
+                f"📱 [Push Notification] Không có Push Subscription (PWA) cho {user_email} — sẽ chỉ thử Expo mobile"
+            )
         
         # Update last_used cho các subscription gửi thành công
         if successful_subscriptions:
@@ -557,23 +561,55 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
                     frappe.logger().error(f"Failed to create re-enable notification: {str(notif_error)}")
         
         frappe.db.commit()
-        
-        # Log result
+
+        # Expo push — app native parent-portal-mobile (DocType Mobile Device Token)
+        mobile_sent = False
+        mobile_result = None
+        try:
+            from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+
+            mobile_result = send_mobile_notification(user_email, title, body, data)
+            mobile_sent = bool(mobile_result.get("success"))
+            if mobile_sent:
+                frappe.logger().info(
+                    f"📱 [Push Notification] Expo mobile OK cho {user_email}: {mobile_result.get('message', '')}"
+                )
+            else:
+                frappe.logger().info(
+                    f"📱 [Push Notification] Expo mobile không gửi được cho {user_email}: {mobile_result.get('message', '')}"
+                )
+        except Exception as mobile_err:
+            frappe.logger().warning(
+                f"📱 [Push Notification] Lỗi Expo mobile cho {user_email}: {str(mobile_err)}"
+            )
+
         total_devices = len(subscription_docs)
-        log_message = f"Push notification sent to {devices_sent}/{total_devices} devices for {user_email}: {title}"
-        
-        # Determine overall success
-        overall_success = devices_sent > 0
-        
+        web_ok = devices_sent > 0
+        overall_success = web_ok or mobile_sent
+
+        if overall_success:
+            parts = []
+            if web_ok:
+                parts.append(f"PWA {devices_sent}/{total_devices}")
+            if mobile_sent:
+                parts.append("Mobile OK")
+            log_message = f"Push {user_email} ({', '.join(parts)}): {title}"
+            message = ", ".join(parts)
+        else:
+            log_message = f"Push thất bại cho {user_email} (PWA + mobile): {title}"
+            message = "Không gửi được PWA và không có/không gửi được mobile"
+
         return {
             "success": overall_success,
-            "message": f"Sent to {devices_sent}/{total_devices} device(s)" if overall_success else "Failed to send to all devices",
+            "message": message,
             "log": log_message,
             "devices_sent": devices_sent,
             "devices_failed": devices_failed,
             "total_devices": total_devices,
             "expired_removed": len(expired_subscriptions),
-            "device_results": device_results
+            "device_results": device_results,
+            "mobile_sent": mobile_sent,
+            "mobile_result": mobile_result,
         }
         
     except Exception as e:
