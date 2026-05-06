@@ -850,21 +850,27 @@ def add_reply():
         feedback.save()
         frappe.db.commit()
         
-        # Send push notification to guardian (only for non-internal replies)
+        # Wave 2 - F.3: Đẩy notification sang RQ short queue thay vì gọi sync
+        # Trước: GV reply → block 5-30s chờ Expo + VAPID hoàn tất
+        # Sau:   GV reply → API trả < 500ms, push gửi qua worker
         frappe.logger().info(f"[add_reply] Checking notification: is_internal={is_internal}")
         if not is_internal:
             try:
-                frappe.logger().info(f"[add_reply] Sending notification to guardian for feedback {feedback.name}")
-                from erp.api.notification.feedback import send_staff_reply_notification_to_guardian
-                # Get staff name for notification
                 staff_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
-                send_staff_reply_notification_to_guardian(feedback, staff_name)
-                frappe.logger().info(f"[add_reply] Notification function called successfully")
+                frappe.enqueue(
+                    "erp.api.notification.feedback.send_staff_reply_notification_by_name",
+                    queue="short",
+                    timeout=120,
+                    enqueue_after_commit=True,
+                    feedback_name=feedback.name,
+                    staff_name=staff_name,
+                )
+                frappe.logger().info(f"[add_reply] Notification enqueued for feedback {feedback.name}")
             except Exception as notify_error:
-                frappe.logger().error(f"Error sending guardian notification: {str(notify_error)}")
+                frappe.logger().error(f"Error enqueueing guardian notification: {str(notify_error)}")
                 import traceback
                 frappe.logger().error(f"Traceback: {traceback.format_exc()}")
-                # Don't fail the request if notification fails
+                # Don't fail the request if enqueue fails
         else:
             frappe.logger().info(f"[add_reply] Skipping notification because is_internal={is_internal}")
         

@@ -797,14 +797,30 @@ def approve_class_reports():
         
         frappe.db.commit()
         
-        # Gửi notification nếu publish
+        # Wave 2 - G.4: Khi approve >=20 báo cáo, gửi async để API không block
+        # 100 reports × 2-5s sync = 200-500s vượt timeout 60s gunicorn
         if pending_level == "publish":
-            for report_data in reports:
-                try:
-                    report = frappe.get_doc("SIS Student Report Card", report_data.name)
-                    send_report_card_notification(report)
-                except Exception as notif_error:
-                    frappe.logger().error(f"Failed to send notification: {str(notif_error)}")
+            ASYNC_THRESHOLD = 20
+            if len(reports) >= ASYNC_THRESHOLD:
+                for report_data in reports:
+                    try:
+                        frappe.enqueue(
+                            "erp.api.erp_sis.report_card.approval_helpers.helpers.send_report_card_notification_by_name",
+                            queue="default",
+                            timeout=300,
+                            enqueue_after_commit=True,
+                            report_name=report_data.name,
+                        )
+                    except Exception as enqueue_error:
+                        frappe.logger().error(f"Failed to enqueue notification: {str(enqueue_error)}")
+                frappe.logger().info(f"⚡ [Report Card] Enqueued {len(reports)} notifications (>= {ASYNC_THRESHOLD})")
+            else:
+                for report_data in reports:
+                    try:
+                        report = frappe.get_doc("SIS Student Report Card", report_data.name)
+                        send_report_card_notification(report)
+                    except Exception as notif_error:
+                        frappe.logger().error(f"Failed to send notification: {str(notif_error)}")
         
         message = f"Đã duyệt {approved_count}/{len(reports)} báo cáo ({section}) thành công"
         if pending_level == "review" and skipped_incomplete:
@@ -1441,7 +1457,12 @@ def publish_batch_reports():
         skipped_count = 0
         errors = []
         now = datetime.now()
-        
+
+        # Wave 2 - G.4: nếu publish hàng loạt (>=20 reports), gửi notification async
+        ASYNC_THRESHOLD = 20
+        use_async_notification = len(report_ids) >= ASYNC_THRESHOLD
+        published_report_names = []
+
         for report_id in report_ids:
             try:
                 report = frappe.get_doc("SIS Student Report Card", report_id)
@@ -1467,12 +1488,15 @@ def publish_batch_reports():
                 add_approval_history(report, "batch_publish", user, "published", "Batch publish from ApprovalList")
                 
                 report.save(ignore_permissions=True)
-                
-                try:
-                    send_report_card_notification(report)
-                except Exception as notif_error:
-                    frappe.logger().error(f"Failed to send notification for {report_id}: {str(notif_error)}")
-                
+
+                if use_async_notification:
+                    published_report_names.append(report.name)
+                else:
+                    try:
+                        send_report_card_notification(report)
+                    except Exception as notif_error:
+                        frappe.logger().error(f"Failed to send notification for {report_id}: {str(notif_error)}")
+
                 published_count += 1
                 
             except frappe.DoesNotExistError:
@@ -1487,13 +1511,31 @@ def publish_batch_reports():
                 })
         
         frappe.db.commit()
-        
+
+        # Wave 2 - G.4: enqueue notifications cho batch lớn (>=20)
+        if use_async_notification and published_report_names:
+            for report_name in published_report_names:
+                try:
+                    frappe.enqueue(
+                        "erp.api.erp_sis.report_card.approval_helpers.helpers.send_report_card_notification_by_name",
+                        queue="default",
+                        timeout=300,
+                        enqueue_after_commit=True,
+                        report_name=report_name,
+                    )
+                except Exception as enqueue_error:
+                    frappe.logger().error(f"Failed to enqueue notification for {report_name}: {str(enqueue_error)}")
+            frappe.logger().info(
+                f"⚡ [Report Card Publish] Enqueued {len(published_report_names)} notifications (>= {ASYNC_THRESHOLD})"
+            )
+
         return success_response(
             data={
                 "published_count": published_count,
                 "skipped_count": skipped_count,
                 "total_requested": len(report_ids),
-                "errors": errors if errors else None
+                "errors": errors if errors else None,
+                "notifications_queued": len(published_report_names) if use_async_notification else 0,
             },
             message=f"Đã xuất bản {published_count}/{len(report_ids)} báo cáo"
         )

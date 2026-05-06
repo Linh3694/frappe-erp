@@ -15,21 +15,22 @@ from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
 @frappe.whitelist(allow_guest=True, methods=['POST'])
 def handle_ticket_event():
 	"""
-	Handle ticket events từ ticket-service
+	Webhook nhận ticket events từ ticket-service.
+	Wave 2 - F.2: chỉ validate + đẩy job sang RQ rồi return ngay,
+	tránh để ticket-service phải chờ vài giây cho mỗi notification batch.
 	Endpoint: /api/method/erp.api.notification.ticket.handle_ticket_event
 	"""
 	try:
 		# Validate service-to-service call via custom header (simpler than JWT)
 		service_name = frappe.get_request_header("X-Service-Name", "")
 		request_source = frappe.get_request_header("X-Request-Source", "")
-		
+
 		if service_name == "ticket-service" and request_source == "service-to-service":
 			frappe.logger().info("🎫 [Ticket Event] Valid service-to-service call from ticket-service")
 		else:
 			frappe.logger().warning(f"🎫 [Ticket Event] Request from unknown source: service={service_name}, source={request_source}")
 			# Still allow for backward compatibility but log warning
 
-		# Get request data
 		if frappe.request.method != 'POST':
 			frappe.throw(_("Method not allowed"), frappe.PermissionError)
 
@@ -45,7 +46,33 @@ def handle_ticket_event():
 		if not event_type:
 			frappe.throw(_("Missing event_type"), frappe.ValidationError)
 
-		# Route to appropriate handler
+		# Đẩy xử lý nặng sang RQ short queue → webhook trả 200 ngay (< 50ms)
+		try:
+			frappe.enqueue(
+				"erp.api.notification.ticket._handle_ticket_event_async",
+				queue="short",
+				timeout=180,
+				event_type=event_type,
+				event_data=event_data,
+			)
+			frappe.logger().info(f"🎫 [Ticket Event] Enqueued {event_type} for async processing")
+			return {"success": True, "message": f"Queued {event_type} event for async processing", "queued": True}
+		except Exception as enqueue_err:
+			frappe.logger().error(f"❌ [Ticket Event] Enqueue failed, fallback sync: {str(enqueue_err)}")
+			_handle_ticket_event_async(event_type, event_data)
+			return {"success": True, "message": f"Processed {event_type} event sync (fallback)", "queued": False}
+
+	except Exception as e:
+		frappe.logger().error(f"❌ [Ticket Event] Error processing API event: {str(e)}")
+		frappe.log_error(message=str(e), title="Ticket Event Processing Error")
+		return {"success": False, "message": str(e)}
+
+
+def _handle_ticket_event_async(event_type, event_data):
+	"""
+	Xử lý ticket event ở RQ worker (background) — toàn bộ logic dispatch + send notifications.
+	"""
+	try:
 		if event_type == 'ticket_status_changed':
 			handle_ticket_status_change(event_data)
 		elif event_type == 'new_ticket_created':
@@ -59,15 +86,10 @@ def handle_ticket_event():
 		elif event_type == 'ticket_feedback_received':
 			handle_ticket_feedback_received(event_data)
 		else:
-			frappe.logger().warning(f"⚠️ [Ticket Event] Unknown event type: {event_type}")
-			return {"success": False, "message": f"Unknown event type: {event_type}"}
-
-		return {"success": True, "message": f"Processed {event_type} event via API"}
-
+			frappe.logger().warning(f"⚠️ [Ticket Event Async] Unknown event type: {event_type}")
 	except Exception as e:
-		frappe.logger().error(f"❌ [Ticket Event] Error processing API event: {str(e)}")
-		frappe.log_error(message=str(e), title="Ticket Event Processing Error")
-		return {"success": False, "message": str(e)}
+		frappe.logger().error(f"❌ [Ticket Event Async] Error processing {event_type}: {str(e)}")
+		frappe.log_error(message=str(e), title=f"Ticket Event Async Error - {event_type}")
 
 
 def handle_ticket_status_change(event_data):
@@ -123,18 +145,17 @@ def handle_ticket_status_change(event_data):
 			"timestamp": event_data.get('timestamp', datetime.now().isoformat())
 		}
 
-		# Send notifications to each recipient
-		for email in recipient_emails:
-			try:
-				send_ticket_notification_to_user(
-					email,
-					title,
-					body,
-					ticket_notification_data,
-					action
-				)
-			except Exception as e:
-				frappe.logger().error(f"❌ [Ticket Status] Failed to send to {email}: {str(e)}")
+		# Wave 2 - F.2: gửi BATCH thay vì loop từng recipient
+		try:
+			send_ticket_notifications_bulk(
+				recipient_emails,
+				title,
+				body,
+				ticket_notification_data,
+				action,
+			)
+		except Exception as e:
+			frappe.logger().error(f"❌ [Ticket Status] Bulk send failed: {str(e)}")
 
 		frappe.logger().info(f"✅ [Ticket Status] Processed status change for {ticket_code}")
 
@@ -191,18 +212,17 @@ def handle_new_ticket_created(event_data):
 			"timestamp": event_data.get('timestamp', datetime.now().isoformat())
 		}
 
-		# Send to all recipients
-		for email in recipient_emails:
-			try:
-				send_ticket_notification_to_user(
-					email,
-					notification_title,
-					body,
-					ticket_notification_data,
-					action
-				)
-			except Exception as e:
-				frappe.logger().error(f"❌ [New Ticket] Failed to send to {email}: {str(e)}")
+		# Wave 2 - F.2: gửi BATCH thay vì loop từng recipient
+		try:
+			send_ticket_notifications_bulk(
+				recipient_emails,
+				notification_title,
+				body,
+				ticket_notification_data,
+				action,
+			)
+		except Exception as e:
+			frappe.logger().error(f"❌ [New Ticket] Bulk send failed: {str(e)}")
 
 		frappe.logger().info(f"✅ [New Ticket] Processed new ticket {ticket_code}")
 
@@ -248,18 +268,17 @@ def handle_user_reply(event_data):
 			"timestamp": event_data.get('timestamp', datetime.now().isoformat())
 		}
 
-		# Send to all recipients
-		for email in recipient_emails:
-			try:
-				send_ticket_notification_to_user(
-					email,
-					notification_title,
-					body,
-					ticket_notification_data,
-					action
-				)
-			except Exception as e:
-				frappe.logger().error(f"❌ [User Reply] Failed to send to {email}: {str(e)}")
+		# Wave 2 - F.2: gửi BATCH thay vì loop từng recipient
+		try:
+			send_ticket_notifications_bulk(
+				recipient_emails,
+				notification_title,
+				body,
+				ticket_notification_data,
+				action,
+			)
+		except Exception as e:
+			frappe.logger().error(f"❌ [User Reply] Bulk send failed: {str(e)}")
 
 		frappe.logger().info(f"✅ [User Reply] Processed user reply for {ticket_code}")
 
@@ -305,18 +324,17 @@ def handle_ticket_cancelled(event_data):
 			"timestamp": event_data.get('timestamp', datetime.now().isoformat())
 		}
 
-		# Send to all recipients
-		for email in recipient_emails:
-			try:
-				send_ticket_notification_to_user(
-					email,
-					notification_title,
-					body,
-					ticket_notification_data,
-					action
-				)
-			except Exception as e:
-				frappe.logger().error(f"❌ [Ticket Cancelled] Failed to send to {email}: {str(e)}")
+		# Wave 2 - F.2: gửi BATCH thay vì loop từng recipient
+		try:
+			send_ticket_notifications_bulk(
+				recipient_emails,
+				notification_title,
+				body,
+				ticket_notification_data,
+				action,
+			)
+		except Exception as e:
+			frappe.logger().error(f"❌ [Ticket Cancelled] Bulk send failed: {str(e)}")
 
 		frappe.logger().info(f"✅ [Ticket Cancelled] Processed ticket cancellation for {ticket_code}")
 
@@ -362,18 +380,17 @@ def handle_completion_confirmed(event_data):
 			"timestamp": event_data.get('timestamp', datetime.now().isoformat())
 		}
 
-		# Send to all recipients
-		for email in recipient_emails:
-			try:
-				send_ticket_notification_to_user(
-					email,
-					notification_title,
-					body,
-					ticket_notification_data,
-					action
-				)
-			except Exception as e:
-				frappe.logger().error(f"❌ [Completion Confirmed] Failed to send to {email}: {str(e)}")
+		# Wave 2 - F.2: gửi BATCH thay vì loop từng recipient
+		try:
+			send_ticket_notifications_bulk(
+				recipient_emails,
+				notification_title,
+				body,
+				ticket_notification_data,
+				action,
+			)
+		except Exception as e:
+			frappe.logger().error(f"❌ [Completion Confirmed] Bulk send failed: {str(e)}")
 
 		frappe.logger().info(f"✅ [Completion Confirmed] Processed completion confirmation for {ticket_code}")
 
@@ -421,24 +438,156 @@ def handle_ticket_feedback_received(event_data):
 			"timestamp": event_data.get('timestamp', datetime.now().isoformat())
 		}
 
-		# Send to all recipients
-		for email in recipient_emails:
-			try:
-				send_ticket_notification_to_user(
-					email,
-					notification_title,
-					body,
-					ticket_notification_data,
-					action
-				)
-			except Exception as e:
-				frappe.logger().error(f"❌ [Feedback Received] Failed to send to {email}: {str(e)}")
+		# Wave 2 - F.2: gửi BATCH thay vì loop từng recipient
+		try:
+			send_ticket_notifications_bulk(
+				recipient_emails,
+				notification_title,
+				body,
+				ticket_notification_data,
+				action,
+			)
+		except Exception as e:
+			frappe.logger().error(f"❌ [Feedback Received] Bulk send failed: {str(e)}")
 
 		frappe.logger().info(f"✅ [Feedback Received] Processed feedback for {ticket_code}")
 
 	except Exception as e:
 		frappe.logger().error(f"❌ [Feedback Received] Error in handle_ticket_feedback_received: {str(e)}")
 		frappe.log_error(message=str(e), title="Feedback Received Error")
+
+
+def _build_ticket_notification_data(data, notification_type):
+	"""
+	Helper: chuẩn hoá notification_data + mapped_priority + event_timestamp
+	cho cả send_ticket_notification_to_user và send_ticket_notifications_bulk.
+	"""
+	raw_priority = data.get('priority', 'medium')
+	priority_map = {
+		'low': 'low',
+		'normal': 'medium',
+		'medium': 'medium',
+		'high': 'high',
+		'urgent': 'urgent',
+		'critical': 'urgent',
+	}
+	mapped_priority = priority_map.get(raw_priority.lower() if raw_priority else 'medium', 'medium')
+
+	raw_timestamp = data.get('timestamp')
+	if raw_timestamp:
+		try:
+			if isinstance(raw_timestamp, str):
+				clean_timestamp = raw_timestamp.replace('Z', '').split('.')[0]
+				parsed_dt = datetime.fromisoformat(clean_timestamp)
+				from datetime import timedelta
+				vietnam_dt = parsed_dt + timedelta(hours=7)
+				event_timestamp = vietnam_dt.strftime('%Y-%m-%d %H:%M:%S')
+			else:
+				event_timestamp = frappe.utils.now()
+		except Exception as e:
+			frappe.logger().warning(f"Failed to parse timestamp {raw_timestamp}: {str(e)}")
+			event_timestamp = frappe.utils.now()
+	else:
+		event_timestamp = frappe.utils.now()
+
+	notification_data = {
+		"type": "ticket",
+		"notificationType": notification_type,
+		"ticketId": data.get('ticketId'),
+		"ticketCode": data.get('ticketCode'),
+		"action": notification_type,
+		"priority": mapped_priority,
+		"timestamp": event_timestamp,
+		**{k: v for k, v in data.items() if k not in ['type', 'ticketId', 'ticketCode', 'priority', 'timestamp']},
+	}
+
+	return notification_data, mapped_priority, event_timestamp
+
+
+def send_ticket_notifications_bulk(recipient_emails, title, body, data, notification_type):
+	"""
+	Wave 2 - F.2: Gửi ticket notification cho nhiều recipient trong 1 lần.
+
+	- ERP Notification record vẫn insert per-user (cần lưu trạng thái đọc riêng)
+	- Realtime emit per-user (socketio)
+	- Expo push: gom toàn bộ recipient vào 1 BATCH POST (max 100/POST)
+
+	Trước (loop send_mobile_notification): N × 5s = O(N)
+	Sau  (1 POST batch):                   1 × 5s = O(1)
+	"""
+	if not recipient_emails:
+		return
+
+	from erp.api.erp_sis.mobile_push_notification import send_mobile_notifications_bulk
+	from erp.common.doctype.erp_notification.erp_notification import get_unread_count
+
+	notification_data, mapped_priority, event_timestamp = _build_ticket_notification_data(data, notification_type)
+
+	frappe.logger().info(
+		f"📤 [Ticket Bulk] Sending {notification_type} to {len(recipient_emails)} users"
+	)
+
+	# 1. Insert ERP Notification records per-user (DB write nhanh, không nghẽn)
+	notification_ids = {}
+	for user_email in recipient_emails:
+		try:
+			notif_doc = frappe.get_doc({
+				"doctype": "ERP Notification",
+				"title": title,
+				"message": body,
+				"recipient_user": user_email,
+				"recipients": json.dumps([user_email]),
+				"notification_type": "ticket",
+				"priority": mapped_priority,
+				"data": json.dumps(notification_data),
+				"channel": "push",
+				"status": "sent",
+				"delivery_status": "pending",
+				"sent_at": frappe.utils.now(),
+				"event_timestamp": event_timestamp,
+			})
+			notif_doc.insert(ignore_permissions=True)
+			notification_ids[user_email] = notif_doc.name
+		except Exception as create_error:
+			frappe.logger().error(
+				f"❌ [Ticket Bulk] Failed to create notification record for {user_email}: {str(create_error)}"
+			)
+
+	frappe.db.commit()
+
+	# 2. Gửi Expo push BATCH 1 lần
+	try:
+		targets = [{"email": email, "data": notification_data} for email in recipient_emails]
+		bulk_result = send_mobile_notifications_bulk(targets, title, body)
+		frappe.logger().info(
+			f"📱 [Ticket Bulk] Expo result: {bulk_result.get('success_count', 0)}/"
+			f"{bulk_result.get('total_messages', 0)} OK"
+		)
+	except Exception as bulk_err:
+		frappe.logger().error(f"❌ [Ticket Bulk] Bulk Expo failed: {str(bulk_err)}")
+
+	# 3. Realtime emit + unread count per-user (socketio nhanh, không bị nghẽn)
+	for user_email in recipient_emails:
+		try:
+			notification_id = notification_ids.get(user_email) or f"TICKET-{frappe.generate_hash(length=8)}"
+			emit_notification_to_user(user_email, {
+				"id": notification_id,
+				"type": "ticket",
+				"title": title,
+				"message": body,
+				"status": "unread",
+				"priority": mapped_priority,
+				"created_at": data.get('timestamp', datetime.now().isoformat()),
+				"data": notification_data,
+			})
+			unread_count = get_unread_count(user_email)
+			emit_unread_count_update(user_email, unread_count)
+		except Exception as realtime_error:
+			frappe.logger().error(
+				f"❌ [Ticket Bulk] Failed realtime emit for {user_email}: {str(realtime_error)}"
+			)
+
+	frappe.logger().info(f"✅ [Ticket Bulk] Done {notification_type} for {len(recipient_emails)} users")
 
 
 def send_ticket_notification_to_user(user_email, title, body, data, notification_type):

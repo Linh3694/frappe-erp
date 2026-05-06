@@ -990,25 +990,46 @@ def publish_news_article():
                 student_ids = resolve_recipient_students(recipients)
                 
                 if student_ids:
-                    notification_result = send_bulk_parent_notifications(
-                        recipient_type="news",
-                        recipients_data={
+                    # Wave 2 - G.4: News article publish — N có thể > 1000 với toàn trường
+                    # Threshold pattern: < 50 students sync, >= 50 enqueue background
+                    ASYNC_THRESHOLD = 50
+                    notification_kwargs = {
+                        "recipient_type": "news",
+                        "recipients_data": {
                             "student_ids": student_ids,
-                            "article_id": article.name
+                            "article_id": article.name,
                         },
-                        title=article.title_vn or article.title_en,
-                        body=article.content_vn[:200] if article.content_vn else (article.content_en[:200] if article.content_en else article.title_vn or article.title_en),
-                        icon="/icon.png",
-                        data={
+                        "title": article.title_vn or article.title_en,
+                        "body": article.content_vn[:200] if article.content_vn else (article.content_en[:200] if article.content_en else article.title_vn or article.title_en),
+                        "icon": "/icon.png",
+                        "data": {
                             "type": "news",
                             "article_id": article.name,
                             "title_en": article.title_en,
                             "title_vn": article.title_vn,
-                            "url": f"/news/{article.name}"
-                        }
-                    )
-                    
-                    frappe.logger().info(f"✅ [News Article] Notification sent to {notification_result.get('total_parents', 0)} parents")
+                            "url": f"/news/{article.name}",
+                        },
+                    }
+
+                    if len(student_ids) >= ASYNC_THRESHOLD:
+                        try:
+                            frappe.enqueue(
+                                "erp.utils.notification_handler.send_bulk_parent_notifications",
+                                queue="default",
+                                timeout=900,
+                                enqueue_after_commit=True,
+                                **notification_kwargs,
+                            )
+                            frappe.logger().info(
+                                f"✅ [News Article] Queued ASYNC for {len(student_ids)} students (>= {ASYNC_THRESHOLD})"
+                            )
+                        except Exception as enqueue_err:
+                            frappe.logger().warning(f"⚠️ [News Article] Enqueue failed, fallback sync: {str(enqueue_err)}")
+                            notification_result = send_bulk_parent_notifications(**notification_kwargs)
+                            frappe.logger().info(f"✅ [News Article] Notification sent to {notification_result.get('total_parents', 0)} parents (sync)")
+                    else:
+                        notification_result = send_bulk_parent_notifications(**notification_kwargs)
+                        frappe.logger().info(f"✅ [News Article] Notification sent to {notification_result.get('total_parents', 0)} parents (sync)")
         
         except Exception as e:
             frappe.logger().warning(f"⚠️ [News Article] Error sending notifications: {str(e)}")

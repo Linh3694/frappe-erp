@@ -233,7 +233,16 @@ def create_fee_notification():
             )
         
         logs.append(f"Processing {len(order_students)} students")
-        
+
+        # Wave 2 - G.2: nếu gửi cho >= 50 học sinh, đẩy notification sang background
+        # để API không block 100-2500s khi gửi cuối tháng cho cả khối/trường.
+        ASYNC_THRESHOLD = 50
+        use_async_notification = bool(send_immediately) and len(order_students) >= ASYNC_THRESHOLD
+        if use_async_notification:
+            logs.append(
+                f"⚡ [G.2] {len(order_students)} students >= {ASYNC_THRESHOLD} → enqueue notification per student"
+            )
+
         # Tạo announcement cho từng học sinh
         created_announcements = []
         
@@ -290,26 +299,43 @@ def create_fee_notification():
             if send_immediately:
                 try:
                     from erp.utils.notification_handler import send_bulk_parent_notifications
-                    
-                    notification_result = send_bulk_parent_notifications(
-                        recipient_type="announcement",
-                        recipients_data={
+
+                    notification_kwargs = {
+                        "recipient_type": "announcement",
+                        "recipients_data": {
                             "student_ids": [finance_student.student_id],
                             "recipients": [{"id": finance_student.student_id, "type": "student"}],
-                            "announcement_id": announcement.name
+                            "announcement_id": announcement.name,
                         },
-                        title="Thông báo phí",
-                        body=merged_title_vn,
-                        icon="/icon.png",
-                        data={
+                        "title": "Thông báo phí",
+                        "body": merged_title_vn,
+                        "icon": "/icon.png",
+                        "data": {
                             "type": "fee_notification",
                             "announcement_id": announcement.name,
                             "order_id": order_id,
                             "order_student_id": os.name,
                             "include_debit_note": include_debit_note,
-                            "url": f"/announcement/{announcement.name}"
-                        }
-                    )
+                            "url": f"/announcement/{announcement.name}",
+                        },
+                    }
+
+                    if use_async_notification:
+                        # G.2: gửi async qua RQ default queue
+                        try:
+                            frappe.enqueue(
+                                "erp.utils.notification_handler.send_bulk_parent_notifications",
+                                queue="default",
+                                timeout=600,
+                                enqueue_after_commit=True,
+                                **notification_kwargs,
+                            )
+                            notification_result = {"queued": True, "total_parents": 0, "success_count": 0, "failed_count": 0}
+                        except Exception as enqueue_err:
+                            logs.append(f"⚠️ [G.2] Enqueue failed, fallback sync: {str(enqueue_err)}")
+                            notification_result = send_bulk_parent_notifications(**notification_kwargs)
+                    else:
+                        notification_result = send_bulk_parent_notifications(**notification_kwargs)
                     
                     push_count = notification_result.get("total_parents", 0)
                     # Gửi email thật (lỗi email không rollback trạng thái đã gửi portal)

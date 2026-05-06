@@ -394,14 +394,29 @@ def send_contact_log():
         
         sent_count = len(valid_log_ids)
         
-        # ⚡ Gửi notification synchronous (đảm bảo phụ huynh nhận được)
-        notification_result = _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row)
+        # Đẩy notification sang RQ short queue để worker xử lý nền
+        # Trước: SYNC trong @whitelist → block worker 60-180s khi gửi cả lớp
+        # Sau:   API trả về < 200ms, push tới phụ huynh trong vài giây qua worker
+        try:
+            frappe.enqueue(
+                "erp.api.erp_sis.contact_log._send_contact_log_notifications",
+                queue="short",
+                timeout=300,
+                enqueue_after_commit=True,
+                class_id=class_id,
+                student_ids=student_ids,
+                student_id_to_log_row=student_id_to_log_row,
+            )
+            notification_summary = {"queued": True, "student_count": len(student_ids)}
+        except Exception as enqueue_err:
+            frappe.logger().error(f"❌ [CONTACT_LOG] Enqueue failed, fallback sync: {str(enqueue_err)}")
+            notification_summary = _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row)
         
         return success_response(
             message="Contact logs sent successfully",
             data={
                 "total_logs_updated": sent_count,
-                "notification_summary": notification_result
+                "notification_summary": notification_summary
             }
         )
         
@@ -472,7 +487,16 @@ def _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row
         from erp.common.doctype.erp_notification.erp_notification import get_unread_count
         from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update, get_notification_text
         from erp.api.parent_portal.push_notification import send_push_notification
-        
+        from erp.api.erp_sis.mobile_push_notification import _build_expo_message, _post_expo_batch
+
+        # Wave 2 - F.1: Tránh gọi Expo N×M lần (N PH × M con)
+        # - VAPID web push: skip_expo=True trong loop (parallel sẵn ở send_push_notification)
+        # - Expo: build messages riêng cho mỗi (parent × student × device) và POST 1 BATCH cuối loop
+        # Ghi chú: KHÔNG dùng send_mobile_notifications_bulk vì hàm đó cần title/body chung,
+        # còn ở đây mỗi student có body khác nhau (chứa student_name)
+        expo_messages_to_send = []
+        email_to_tokens = {}
+
         # Gửi notification cho từng phụ huynh × từng học sinh
         # VD: PH có 2 con A, B → gửi 2 notification riêng biệt:
         #   "Học sinh A có nhận xét mới..."
@@ -481,7 +505,16 @@ def _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row
             matched_students = email_to_students_map.get(parent_email, [])
             if not matched_students:
                 continue
-            
+
+            # Lấy mobile tokens của parent 1 lần (cached) — dùng cho mọi student của PH này
+            if parent_email not in email_to_tokens:
+                email_to_tokens[parent_email] = frappe.get_all(
+                    "Mobile Device Token",
+                    filters={"user": parent_email, "is_active": 1},
+                    fields=["device_token", "platform", "user"],
+                )
+            parent_tokens = email_to_tokens[parent_email]
+
             for student_id in matched_students:
                 try:
                     student_name = student_names.get(student_id, student_id)
@@ -537,22 +570,33 @@ def _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row
                         "student_id": student_id
                     })
                     
-                    # Gửi push notification → hiện notification trên điện thoại/browser
-                    # Dùng tag riêng cho mỗi student để KHÔNG bị ghi đè nhau
+                    # Resolve final text 1 lần để tái dùng cho cả VAPID + Expo
+                    final_title = get_notification_text(notification_title)
+                    final_body = get_notification_text(notification_body)
+
+                    # VAPID web push: skip_expo=True để Expo gửi BATCH ở dưới
                     try:
-                        final_title = get_notification_text(notification_title)
-                        final_body = get_notification_text(notification_body)
                         send_push_notification(
                             user_email=parent_email,
                             title=final_title,
                             body=final_body,
                             icon="/icon.png",
                             data=merged_data,
-                            tag=f"contact_log_{student_id}"
+                            tag=f"contact_log_{student_id}",
+                            skip_expo=True,
                         )
                     except Exception as push_err:
-                        frappe.logger().warning(f"❌ [CONTACT_LOG] Push failed for {parent_email}/{student_id}: {str(push_err)}")
-                    
+                        frappe.logger().warning(f"❌ [CONTACT_LOG] VAPID push failed for {parent_email}/{student_id}: {str(push_err)}")
+
+                    # Build Expo messages cho từng device của PH này — gom batch
+                    for token in parent_tokens:
+                        try:
+                            expo_messages_to_send.append(
+                                _build_expo_message(token, final_title, final_body, merged_data)
+                            )
+                        except Exception as build_err:
+                            frappe.logger().warning(f"❌ [CONTACT_LOG] Build Expo msg failed: {str(build_err)}")
+
                     result["success_count"] += 1
                     
                 except Exception as parent_err:
@@ -565,7 +609,20 @@ def _send_contact_log_notifications(class_id, student_ids, student_id_to_log_row
                 emit_unread_count_update(parent_email, unread_count)
             except Exception:
                 pass
-        
+
+        # Wave 2 - F.1: Gửi Expo BATCH (max 100 messages/POST) cho toàn bộ phụ huynh
+        # Trước: N×M POST × 5s = 60×5 = 300s với 1 lớp
+        # Sau:   1-2 POST × 5s = 5-10s
+        if expo_messages_to_send:
+            try:
+                expo_result = _post_expo_batch(expo_messages_to_send)
+                frappe.logger().info(
+                    f"📱 [CONTACT_LOG] Bulk Expo: {expo_result.get('success_count', 0)}/"
+                    f"{expo_result.get('total_messages', 0)} messages OK"
+                )
+            except Exception as expo_err:
+                frappe.logger().error(f"❌ [CONTACT_LOG] Bulk Expo failed: {str(expo_err)}")
+
         # Commit tất cả notification records 1 lần duy nhất
         frappe.db.commit()
         

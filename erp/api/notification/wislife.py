@@ -11,7 +11,7 @@ from frappe import _
 from frappe.utils import now_datetime
 from datetime import datetime
 import json
-from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+from erp.api.erp_sis.mobile_push_notification import send_mobile_notification, send_mobile_notifications_bulk
 from erp.common.doctype.erp_notification.erp_notification import create_notification
 from erp.api.utils import format_vietnamese_name
 
@@ -145,52 +145,52 @@ def _do_broadcast_new_post(event_data):
         frappe.logger().info(f"📱 [Wislife Broadcast Job] Broadcasting to {len(recipient_emails)} users")
         
         notification_message = f'{author_name} vừa đăng: "{content_preview}..."'
-        
-        # Gửi notification đến từng user
-        success_count = 0
+        notification_data = {
+            'type': 'wislife_new_post',
+            'postId': post_id,
+            'action': 'open_post',
+        }
+
+        # Wave 2 - F.4: Gửi Expo BATCH 1 lần (max 100 messages/POST) cho toàn bộ users
+        # Trước: N POST × 5s với N=2000 = 10000s. Sau: 20 POST × 5s = 100s tối đa.
+        try:
+            targets = [{"email": email, "data": notification_data} for email in recipient_emails]
+            bulk_result = send_mobile_notifications_bulk(
+                targets,
+                'Wislife - Bài viết mới',
+                notification_message,
+            )
+            success_count = bulk_result.get('success_count', 0)
+            total_messages = bulk_result.get('total_messages', 0)
+            frappe.logger().info(
+                f"✅ [Wislife Broadcast Job] Bulk Expo: {success_count}/{total_messages} messages OK"
+            )
+        except Exception as bulk_err:
+            frappe.logger().error(f"❌ [Wislife Broadcast Job] Bulk Expo failed: {str(bulk_err)}")
+
+        # Lưu Notification Center per-user (DB write nhanh, không nghẽn)
         saved_count = 0
         for user_email in recipient_emails:
             try:
-                # Gửi push notification
-                result = send_mobile_notification(
-                    user_email=user_email,
-                    title='Wislife - Bài viết mới',
-                    body=notification_message,
+                create_notification(
+                    title="Wislife - Bài viết mới",
+                    message=notification_message,
+                    recipient_user=user_email,
+                    notification_type="system",
+                    priority="normal",
                     data={
                         'type': 'wislife_new_post',
                         'postId': post_id,
-                        'action': 'open_post'
-                    }
+                        'action': 'open_post',
+                        'actorName': author_name,
+                    },
+                    channel="push",
+                    event_timestamp=frappe.utils.now(),
                 )
-                
-                if result.get("success"):
-                    success_count += 1
-                
-                # Lưu vào Notification Center
-                try:
-                    create_notification(
-                        title="Wislife - Bài viết mới",
-                        message=notification_message,
-                        recipient_user=user_email,
-                        notification_type="system",
-                        priority="normal",
-                        data={
-                            'type': 'wislife_new_post',
-                            'postId': post_id,
-                            'action': 'open_post',
-                            'actorName': author_name
-                        },
-                        channel="push",
-                        event_timestamp=frappe.utils.now()
-                    )
-                    saved_count += 1
-                except Exception as db_error:
-                    frappe.logger().error(f"❌ [Wislife Broadcast Job] DB save failed for {user_email}: {str(db_error)}")
-                    
-            except Exception as user_error:
-                frappe.logger().error(f"❌ [Wislife Broadcast Job] Error for {user_email}: {str(user_error)}")
-        
-        frappe.logger().info(f"✅ [Wislife Broadcast Job] Push sent: {success_count}/{len(recipient_emails)}")
+                saved_count += 1
+            except Exception as db_error:
+                frappe.logger().error(f"❌ [Wislife Broadcast Job] DB save failed for {user_email}: {str(db_error)}")
+
         frappe.logger().info(f"✅ [Wislife Broadcast Job] Saved to DB: {saved_count}/{len(recipient_emails)}")
         
     except Exception as e:
@@ -462,161 +462,124 @@ def handle_comment_reacted(event_data):
 
 def handle_post_mention(event_data):
     """
-    Xử lý khi có người mention trong comment
-    
-    Args:
-        event_data: Dictionary containing:
-            - postId: ID bài viết
-            - commentId: ID comment
-            - mentionedEmails: Array emails người được mention (new format)
-            - mentionedNames: Array tên người được mention (legacy format)
-            - userId: ID người mention
-            - userName: Tên người mention
+    Wave 2 - F.4: chỉ enqueue, xử lý nặng chuyển sang _do_handle_post_mention
+    để webhook social-service không phải chờ.
     """
     try:
-        # Ưu tiên mentionedEmails (new format) trước mentionedNames (legacy)
+        frappe.enqueue(
+            'erp.api.notification.wislife._do_handle_post_mention',
+            queue='short',
+            timeout=180,
+            event_data=event_data,
+        )
+        frappe.logger().info("📱 [Wislife Mention] Enqueued for async processing")
+    except Exception as e:
+        frappe.logger().error(f"❌ [Wislife Mention] Enqueue failed, fallback sync: {str(e)}")
+        _do_handle_post_mention(event_data)
+
+
+def _do_handle_post_mention(event_data):
+    """
+    Background job: xử lý mention - dùng send_mobile_notifications_bulk thay vì loop.
+    """
+    try:
         mentioned_emails = event_data.get('mentionedEmails', [])
         mentioned_names = event_data.get('mentionedNames', [])
-        
+
         raw_name = event_data.get('userName', 'Ai đó')
         user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
-        
-        # Nếu có mentionedEmails, sử dụng trực tiếp (không cần lookup)
-        if mentioned_emails and len(mentioned_emails) > 0:
-            frappe.logger().info(f"📱 [Wislife Mention] Processing {len(mentioned_emails)} mentions by email")
-            
-            notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
-            success_count = 0
-            saved_count = 0
-            
-            for recipient_email in mentioned_emails:
+
+        notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
+        notification_data = {
+            'type': 'wislife_mention',
+            'postId': post_id,
+            'commentId': comment_id,
+            'action': 'open_post',
+        }
+        center_data = {
+            **notification_data,
+            'actorName': user_name,
+        }
+
+        # Resolve danh sách email: ưu tiên mentionedEmails, fallback lookup theo name (legacy)
+        recipient_emails = []
+        if mentioned_emails:
+            recipient_emails = [e for e in mentioned_emails if e]
+            frappe.logger().info(f"📱 [Wislife Mention] Processing {len(recipient_emails)} mentions by email")
+        elif mentioned_names:
+            frappe.logger().info(f"📱 [Wislife Mention] Processing mentions by name (legacy): {mentioned_names}")
+            for name in mentioned_names:
                 try:
-                    # Gửi push notification
-                    result = send_mobile_notification(
-                        user_email=recipient_email,
-                        title='Wislife',
-                        body=notification_message,
-                        data={
-                            'type': 'wislife_mention',
-                            'postId': post_id,
-                            'commentId': comment_id,
-                            'action': 'open_post'
-                        }
+                    users = frappe.db.sql(
+                        """
+                        SELECT email FROM `tabUser`
+                        WHERE full_name LIKE %s AND enabled = 1 AND email IS NOT NULL
+                        LIMIT 1
+                        """,
+                        (f"%{name}%",),
+                        as_dict=True,
                     )
-                    
-                    if result.get("success"):
-                        success_count += 1
-                    
-                    # Lưu vào Notification Center
-                    try:
-                        create_notification(
-                            title="Wislife",
-                            message=notification_message,
-                            recipient_user=recipient_email,
-                            notification_type="system",
-                            priority="normal",
-                            data={
-                                'type': 'wislife_mention',
-                                'postId': post_id,
-                                'commentId': comment_id,
-                                'action': 'open_post',
-                                'actorName': user_name
-                            },
-                            channel="push",
-                            event_timestamp=frappe.utils.now()
+                    if not users:
+                        users = frappe.db.sql(
+                            """
+                            SELECT email FROM `tabCRM Teacher`
+                            WHERE teacher_name LIKE %s AND email IS NOT NULL
+                            LIMIT 1
+                            """,
+                            (f"%{name}%",),
+                            as_dict=True,
                         )
-                        saved_count += 1
-                    except Exception as db_error:
-                        frappe.logger().error(f"❌ [Wislife Mention] DB error for {recipient_email}: {str(db_error)}")
-                        
-                except Exception as user_error:
-                    frappe.logger().error(f"❌ [Wislife Mention] Error sending to {recipient_email}: {str(user_error)}")
-            
-            frappe.logger().info(f"✅ [Wislife Mention] Push: {success_count}/{len(mentioned_emails)}, Saved: {saved_count}/{len(mentioned_emails)}")
-            return
-        
-        # Legacy: Tìm users theo tên nếu không có emails
-        if not mentioned_names:
+                    if users:
+                        email = users[0].get('email')
+                        if email:
+                            recipient_emails.append(email)
+                    else:
+                        frappe.logger().warning(f"⚠️ [Wislife Mention] No user found for name: {name}")
+                except Exception as lookup_err:
+                    frappe.logger().error(f"❌ [Wislife Mention] Lookup error for {name}: {str(lookup_err)}")
+        else:
             frappe.logger().warning("⚠️ [Wislife Mention] No mentions provided")
             return
-        
-        frappe.logger().info(f"📱 [Wislife Mention] Processing mentions by name (legacy): {mentioned_names}")
-        
-        notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
-        success_count = 0
-        
-        for name in mentioned_names:
+
+        if not recipient_emails:
+            frappe.logger().warning("⚠️ [Wislife Mention] No recipients resolved")
+            return
+
+        # Wave 2 - F.4: Gửi Expo BATCH 1 lần thay vì loop
+        try:
+            targets = [{"email": email, "data": notification_data} for email in recipient_emails]
+            bulk_result = send_mobile_notifications_bulk(targets, 'Wislife', notification_message)
+            frappe.logger().info(
+                f"✅ [Wislife Mention] Bulk Expo: {bulk_result.get('success_count', 0)}/"
+                f"{bulk_result.get('total_messages', 0)} OK"
+            )
+        except Exception as bulk_err:
+            frappe.logger().error(f"❌ [Wislife Mention] Bulk Expo failed: {str(bulk_err)}")
+
+        saved_count = 0
+        for recipient_email in recipient_emails:
             try:
-                # Tìm user có tên trùng khớp - tìm trong User trước
-                users = frappe.db.sql("""
-                    SELECT email
-                    FROM `tabUser`
-                    WHERE full_name LIKE %s
-                    AND enabled = 1
-                    AND email IS NOT NULL
-                    LIMIT 1
-                """, (f"%{name}%",), as_dict=True)
-                
-                # Fallback: tìm trong CRM Teacher
-                if not users:
-                    users = frappe.db.sql("""
-                        SELECT email
-                        FROM `tabCRM Teacher`
-                        WHERE teacher_name LIKE %s
-                        AND email IS NOT NULL
-                        LIMIT 1
-                    """, (f"%{name}%",), as_dict=True)
-                
-                if users and len(users) > 0:
-                    recipient_email = users[0].get('email')
-                    
-                    result = send_mobile_notification(
-                        user_email=recipient_email,
-                        title='Wislife',
-                        body=notification_message,
-                        data={
-                            'type': 'wislife_mention',
-                            'postId': post_id,
-                            'commentId': comment_id,
-                            'action': 'open_post'
-                        }
-                    )
-                    
-                    if result.get("success"):
-                        success_count += 1
-                    
-                    try:
-                        create_notification(
-                            title="Wislife",
-                            message=notification_message,
-                            recipient_user=recipient_email,
-                            notification_type="system",
-                            priority="normal",
-                            data={
-                                'type': 'wislife_mention',
-                                'postId': post_id,
-                                'commentId': comment_id,
-                                'action': 'open_post',
-                                'actorName': user_name
-                            },
-                            channel="push",
-                            event_timestamp=frappe.utils.now()
-                        )
-                    except Exception as db_error:
-                        frappe.logger().error(f"❌ [Wislife Mention] DB error: {str(db_error)}")
-                else:
-                    frappe.logger().warning(f"⚠️ [Wislife Mention] No user found for name: {name}")
-                        
-            except Exception as user_error:
-                frappe.logger().error(f"❌ [Wislife Mention] Error for {name}: {str(user_error)}")
-        
-        frappe.logger().info(f"✅ [Wislife Mention] Sent to {success_count}/{len(mentioned_names)} users (legacy)")
-        
+                create_notification(
+                    title="Wislife",
+                    message=notification_message,
+                    recipient_user=recipient_email,
+                    notification_type="system",
+                    priority="normal",
+                    data=center_data,
+                    channel="push",
+                    event_timestamp=frappe.utils.now(),
+                )
+                saved_count += 1
+            except Exception as db_error:
+                frappe.logger().error(f"❌ [Wislife Mention] DB error for {recipient_email}: {str(db_error)}")
+
+        frappe.logger().info(f"✅ [Wislife Mention] Saved {saved_count}/{len(recipient_emails)} to notification center")
+
     except Exception as e:
-        frappe.logger().error(f"❌ [Wislife Mention] Error: {str(e)}")
-        frappe.log_error(message=str(e), title="Wislife Mention Error")
+        frappe.logger().error(f"❌ [Wislife Mention Async] Error: {str(e)}")
+        frappe.log_error(message=str(e), title="Wislife Mention Async Error")
 
 
 # Whitelist for testing

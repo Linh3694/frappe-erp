@@ -348,35 +348,83 @@ def create_announcement():
         created_announcement = frappe.get_doc("SIS Announcement", announcement.name)
 
         # If status is "sent", send notifications immediately and set sent_at
+        # Wave 2 - G.1: copy threshold pattern từ send_announcement (line ~841)
+        # < 100 recipients: gửi sync (UX tốt). >= 100: enqueue background.
         if created_announcement.status == "sent":
             try:
-                from erp.utils.notification_handler import send_bulk_parent_notifications
-                
-                notification_result = send_bulk_parent_notifications(
-                    recipient_type="announcement",
-                    recipients_data={
-                        "student_ids": [],
-                        "recipients": recipients_data,
-                        "announcement_id": created_announcement.name
-                    },
-                    title="Thông báo",
-                    body=created_announcement.content_vn or created_announcement.content_en or "Thông báo mới",
-                    icon="/icon.png",
-                    data={
-                        "type": "announcement",
-                        "announcement_id": created_announcement.name,
-                        "title_en": created_announcement.title_en,
-                        "title_vn": created_announcement.title_vn,
-                        "url": f"/announcement/{created_announcement.name}"
-                    }
+                ASYNC_THRESHOLD = 100
+
+                # Estimate recipient count để chọn sync/async
+                from erp.utils.notification_handler import (
+                    resolve_recipient_students,
+                    get_guardians_for_students,
+                    get_parent_emails,
                 )
-                
-                # Update with send info
+
+                estimated_count = recipient_count or 0
+                try:
+                    student_ids = resolve_recipient_students(recipients_data) or []
+                    if student_ids:
+                        guardians = get_guardians_for_students(student_ids)
+                        parent_emails = get_parent_emails(guardians)
+                        estimated_count = len(parent_emails)
+                except Exception as estimate_err:
+                    frappe.logger().warning(f"⚠️ [Announcement Create] Estimate recipients failed: {str(estimate_err)}")
+
+                # Mark sent ngay để tránh gửi lại nếu user retry
                 created_announcement.sent_at = frappe.utils.now()
-                created_announcement.sent_count = notification_result.get("total_parents", 0)
+                created_announcement.sent_count = estimated_count
                 created_announcement.save()
-                
-                frappe.logger().info(f"✅ Announcement {created_announcement.name} sent to {notification_result.get('total_parents', 0)} parents on creation")
+                frappe.db.commit()
+
+                if estimated_count < ASYNC_THRESHOLD:
+                    frappe.logger().info(
+                        f"📤 [Announcement Create] Sending SYNC ({estimated_count} < {ASYNC_THRESHOLD})"
+                    )
+                    from erp.utils.notification_handler import send_bulk_parent_notifications
+
+                    notification_result = send_bulk_parent_notifications(
+                        recipient_type="announcement",
+                        recipients_data={
+                            "student_ids": [],
+                            "recipients": recipients_data,
+                            "announcement_id": created_announcement.name,
+                        },
+                        title="Thông báo",
+                        body=created_announcement.content_vn or created_announcement.content_en or "Thông báo mới",
+                        icon="/icon.png",
+                        data={
+                            "type": "announcement",
+                            "announcement_id": created_announcement.name,
+                            "title_en": created_announcement.title_en,
+                            "title_vn": created_announcement.title_vn,
+                            "url": f"/announcement/{created_announcement.name}",
+                        },
+                    )
+
+                    created_announcement.reload()
+                    created_announcement.sent_count = notification_result.get("total_parents", 0)
+                    created_announcement.save()
+                    frappe.db.commit()
+                    frappe.logger().info(
+                        f"✅ Announcement {created_announcement.name} sent to "
+                        f"{notification_result.get('total_parents', 0)} parents (sync)"
+                    )
+                else:
+                    frappe.logger().info(
+                        f"📤 [Announcement Create] Queueing ASYNC ({estimated_count} >= {ASYNC_THRESHOLD})"
+                    )
+                    frappe.enqueue(
+                        method="erp.api.erp_sis.announcement._send_announcement_background",
+                        queue="long",
+                        timeout=1800,
+                        enqueue_after_commit=True,
+                        announcement_id=created_announcement.name,
+                        user_email=frappe.session.user,
+                    )
+                    frappe.logger().info(
+                        f"✅ Announcement {created_announcement.name} queued for background ({estimated_count} parents)"
+                    )
             except Exception as e:
                 frappe.logger().error(f"❌ Error sending notifications on announcement creation: {str(e)}")
                 # Don't fail the creation, just log the error

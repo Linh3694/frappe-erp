@@ -3590,8 +3590,34 @@ def send_exam_to_parent():
             )
         
         to_send_ids = [e.name for e in exams_to_send]
+
+        # Wave 2 - G.3: nếu gửi >= 30 hồ sơ, đẩy notification sang background
+        # vì _send_examination_to_parent_notifications gọi send_bulk_parent_notifications PER STUDENT
+        # → 30 student × 2-5s ~= 60-150s sync = block worker
+        ASYNC_THRESHOLD = 30
+        if len(to_send_ids) >= ASYNC_THRESHOLD:
+            try:
+                frappe.enqueue(
+                    "erp.api.erp_sis.daily_health._send_examination_to_parent_notifications",
+                    queue="default",
+                    timeout=900,
+                    enqueue_after_commit=True,
+                    exam_ids=to_send_ids,
+                )
+                return success_response(
+                    data={
+                        "sent_count": 0,
+                        "total_requested": len(exams_to_send),
+                        "queued": True,
+                        "results": [],
+                    },
+                    message=f"Đang gửi {len(exams_to_send)} hồ sơ thăm khám trong nền. Vui lòng đợi vài phút."
+                )
+            except Exception as enqueue_err:
+                frappe.logger().error(f"❌ [G.3 daily_health] Enqueue failed, fallback sync: {str(enqueue_err)}")
+
         sent_count = _send_examination_to_parent_notifications(to_send_ids)
-        
+
         return success_response(
             data={
                 "sent_count": sent_count,

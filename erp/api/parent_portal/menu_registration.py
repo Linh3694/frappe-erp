@@ -1866,39 +1866,62 @@ def send_menu_registration_reminder():
         logs.append(f"Gửi nhắc nhở cho {len(student_ids)} học sinh")
         logs.append(f"Message: {message}")
         
-        # Gửi push notification
+        # Wave 2 - G.4: Menu registration reminder — N có thể > 200 → enqueue async
         try:
             from erp.utils.notification_handler import send_bulk_parent_notifications
-            
-            # Sử dụng notification_type = "reminder"
-            result = send_bulk_parent_notifications(
-                recipient_type="reminder",
-                recipients_data={
-                    "student_ids": student_ids
-                },
-                title="Đăng ký suất ăn",
-                body=message,
-                icon="/icon.png",
-                data={
+
+            ASYNC_THRESHOLD = 50
+            notification_kwargs = {
+                "recipient_type": "reminder",
+                "recipients_data": {"student_ids": student_ids},
+                "title": "Đăng ký suất ăn",
+                "body": message,
+                "icon": "/icon.png",
+                "data": {
                     "type": "reminder",
                     "subtype": "menu_registration",
-                    "url": "/menu/registration"  # URL trên parent-portal
-                }
-            )
-            
+                    "url": "/menu/registration",
+                },
+            }
+
+            if len(student_ids) >= ASYNC_THRESHOLD:
+                try:
+                    frappe.enqueue(
+                        "erp.utils.notification_handler.send_bulk_parent_notifications",
+                        queue="default",
+                        timeout=900,
+                        enqueue_after_commit=True,
+                        **notification_kwargs,
+                    )
+                    logs.append(f"⚡ Đã enqueue gửi nhắc cho {len(student_ids)} học sinh (>= {ASYNC_THRESHOLD})")
+                    return success_response(
+                        data={
+                            "success_count": 0,
+                            "failed_count": 0,
+                            "total_students": len(student_ids),
+                            "total_parents": 0,
+                            "queued": True,
+                        },
+                        message=f"Đang gửi thông báo cho {len(student_ids)} học sinh trong nền. Vui lòng đợi vài phút.",
+                        logs=logs,
+                    )
+                except Exception as enqueue_err:
+                    logs.append(f"⚠️ Enqueue failed, fallback sync: {str(enqueue_err)}")
+
+            result = send_bulk_parent_notifications(**notification_kwargs)
             logs.append(f"Kết quả gửi: {result}")
-            
+
             return success_response(
                 data={
                     "success_count": result.get("success_count", 0),
                     "failed_count": result.get("failed_count", 0),
                     "total_students": len(student_ids),
-                    "total_parents": result.get("total_parents", 0)
+                    "total_parents": result.get("total_parents", 0),
                 },
                 message=f"Đã gửi thông báo đến {result.get('success_count', 0)} phụ huynh",
-                logs=logs
+                logs=logs,
             )
-            
+
         except Exception as notif_err:
             logs.append(f"Lỗi gửi notification: {str(notif_err)}")
             frappe.log_error(frappe.get_traceback(), "Send Menu Registration Reminder Error")

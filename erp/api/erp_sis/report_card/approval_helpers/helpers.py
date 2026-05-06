@@ -619,6 +619,18 @@ def can_approve_level_3(report, template) -> tuple:
 # NOTIFICATION
 # =============================================================================
 
+def send_report_card_notification_by_name(report_name):
+    """
+    Wave 2 - G.4 wrapper: nhận report_name (string) cho frappe.enqueue.
+    Dùng khi approve hàng loạt → enqueue mỗi report thay vì gọi sync.
+    """
+    try:
+        report = frappe.get_doc("SIS Student Report Card", report_name)
+        return send_report_card_notification(report)
+    except Exception as e:
+        frappe.logger().error(f"❌ [Report Card] Notification wrapper error for {report_name}: {str(e)}")
+
+
 def send_report_card_notification(report):
     """
     Gửi push notification đến phụ huynh khi report card được phê duyệt.

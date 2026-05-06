@@ -411,6 +411,18 @@ def send_feedback_reply_notification_by_name(feedback_name, reply_type="Guardian
         frappe.logger().error(f"❌ [Feedback Notification] Error in reply wrapper: {str(e)}")
 
 
+def send_staff_reply_notification_by_name(feedback_name, staff_name=None):
+    """
+    Wave 2 - F.3: Wrapper cho frappe.enqueue.
+    Nhận feedback_name (string) thay vì feedback_doc (object) vì RQ không serialize doc.
+    """
+    try:
+        feedback_doc = frappe.get_doc("Feedback", feedback_name)
+        send_staff_reply_notification_to_guardian(feedback_doc, staff_name=staff_name)
+    except Exception as e:
+        frappe.logger().error(f"❌ [Feedback Notification] Error in staff reply wrapper: {str(e)}")
+
+
 # Whitelist for testing
 @frappe.whitelist()
 def test_feedback_notification(feedback_name):
