@@ -42,6 +42,17 @@ DISCIPLINE_REPORT_CC_COMMON = [
 DISCIPLINE_REPORT_SENDER = "no-reply@wellspring.edu.vn"
 
 
+def _is_production_server() -> bool:
+    """
+    Cờ production đọc từ site_config.json: "is_production": true.
+    Trùng pattern với otp_auth.is_production_server / attendance.is_production_server.
+    """
+    try:
+        return bool(frappe.get_site_config().get("is_production", False))
+    except Exception:
+        return False
+
+
 def _recipients_for_scope(scope: str) -> list:
     if scope == "thcs":
         return list(DISCIPLINE_REPORT_RECIPIENTS_THCS)
@@ -586,10 +597,25 @@ def _fetch_discipline_records_for_date(report_date: str) -> list:
     return records
 
 
-def _send_discipline_reports_for_date(report_date: str):
+def _send_discipline_reports_for_date(report_date: str, force: bool = False):
     """
     Gửi 2 email: THCS và THPT — mỗi email chỉ dữ liệu và ngữ cảnh của một cấp.
+
+    Chỉ gửi thật trên production (site_config.is_production = true). Trên môi
+    trường staging/dev, hàm trả về `success=True, skipped="dev"` để tránh spam
+    người nhận thật. Dev có thể truyền `force=True` (qua API thủ công) để test.
     """
+    if not force and not _is_production_server():
+        frappe.logger().info(
+            f"[discipline_report] Bỏ qua gửi email ngày {report_date} — không phải production server."
+        )
+        return {
+            "success": True,
+            "skipped": "non_production",
+            "message": "Không phải production server — bỏ qua gửi email kỷ luật.",
+            "report_date": report_date,
+        }
+
     records = _fetch_discipline_records_for_date(report_date)
     all_count = len(records)
     thcs_records = _records_for_school_scope(records, "thcs")
@@ -683,10 +709,13 @@ def _coerce_date_string(date_val, req):
 
 
 @frappe.whitelist(allow_guest=False)
-def send_discipline_daily_report(date=None):
+def send_discipline_daily_report(date=None, force=None):
     """
     Gọi thủ công qua API để gửi/test báo cáo theo ngày.
-    Params: date (YYYY-MM-DD), mặc định hôm nay.
+    Params:
+        date: YYYY-MM-DD, mặc định hôm nay.
+        force: "1"/"true" để gửi thật trên dev (bỏ qua kiểm tra production).
+               Mặc định KHÔNG gửi trên dev/staging — chỉ gửi trên production server.
 
     POST /api/method/erp.api.erp_sis.discipline_report.send_discipline_daily_report
     """
@@ -694,7 +723,10 @@ def send_discipline_daily_report(date=None):
         req = _get_request_data()
         report_date = _coerce_date_string(date, req)
 
-        return _send_discipline_reports_for_date(report_date)
+        force_val = force if force is not None else (req.get("force") if isinstance(req, dict) else None)
+        force_flag = str(force_val or "").strip().lower() in {"1", "true", "yes"}
+
+        return _send_discipline_reports_for_date(report_date, force=force_flag)
     except Exception as e:
         frappe.logger().error(f"send_discipline_daily_report: {str(e)}")
         frappe.log_error(f"send_discipline_daily_report: {str(e)}")
