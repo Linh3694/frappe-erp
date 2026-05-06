@@ -20,15 +20,22 @@ from erp.api.erp_sis.discipline import (
 )
 from erp.utils.email_service import send_email_via_service
 
-# Người nhận tách riêng theo cấp — mỗi cấp THCS/THPT gửi đến danh sách của cấp đó
-# Tạm thời cùng người nhận, có thể đổi riêng cho từng cấp khi triển khai chính thức
+# Danh sách người nhận theo cấp THCS / THPT (production)
 DISCIPLINE_REPORT_RECIPIENTS_THCS = [
-    "linh.nguyenhai@wellspring.edu.vn",
-    "hieu.nguyenduy@wellspring.edu.vn",
+    "nga.lt@wellspring.edu.vn",
+    "linh.nguyenviet@wellspring.edu.vn",
+    "chunhiem_thcs@wellspring.edu.vn",
 ]
 DISCIPLINE_REPORT_RECIPIENTS_THPT = [
-    "linh.nguyenhai@wellspring.edu.vn",
-    "hieu.nguyenduy@wellspring.edu.vn",
+    "nhan.dothithanh@wellspring.edu.vn",
+    "minh.hoangthi@wellspring.edu.vn",
+    "chunhiem_thpt@wellspring.edu.vn",
+]
+
+# CC dùng chung cho cả 2 cấp — Ban An toàn học đường + lãnh đạo theo dõi
+DISCIPLINE_REPORT_CC_COMMON = [
+    "antoanhocduong@wellspring.edu.vn",
+    "son.nguyenvinh@wellspring.edu.vn",
 ]
 
 # Hộp thư gửi đi — đồng bộ các email tự động khác (xem finance/notification.py)
@@ -40,6 +47,13 @@ def _recipients_for_scope(scope: str) -> list:
         return list(DISCIPLINE_REPORT_RECIPIENTS_THCS)
     if scope == "thpt":
         return list(DISCIPLINE_REPORT_RECIPIENTS_THPT)
+    return []
+
+
+def _cc_for_scope(scope: str) -> list:
+    """Hiện cả 2 cấp dùng chung danh sách CC; tách hàm sẵn cho tương lai cần khác nhau."""
+    if scope in {"thcs", "thpt"}:
+        return list(DISCIPLINE_REPORT_CC_COMMON)
     return []
 
 # Link mở báo cáo tương tác trên WIS (tab Tổng quan)
@@ -453,11 +467,14 @@ def _generate_scoped_report_html(
         'với Phụ huynh để cùng Ban An toàn học đường cải thiện nề nếp – kỷ luật của học sinh.'
         '</p>'
         '<p style="margin:0 0 4px 0;">Trân trọng cảm ơn Quý Thầy Cô.</p>'
-        '<p style="margin:0;color:#888;font-size:12px;">'
-        'Email này được gửi tự động từ hệ thống WIS — vui lòng không trả lời.'
+        '<p style="margin:18px 0 0 0;">'
+        'Trân trọng,<br>'
+        '<strong>Ban An toàn học đường — Wellspring Hanoi</strong>'
         '</p>'
         '</div>'
     )
+    # Chân chữ ký Wellspring (địa chỉ các trường + banner) sẽ được email-service
+    # tự động chèn vào khi gửi từ mailbox no-reply — không append thủ công ở đây.
     return parts
 
 
@@ -599,6 +616,7 @@ def _send_discipline_reports_for_date(report_date: str):
         subject=f"[WSHN] Báo cáo kỷ luật THCS ngày {report_date_display}",
         body=body_thcs,
         from_email=DISCIPLINE_REPORT_SENDER,
+        cc_list=_cc_for_scope("thcs"),
     )
     results.append({"school": "THCS", "email": r1})
 
@@ -613,6 +631,7 @@ def _send_discipline_reports_for_date(report_date: str):
         subject=f"[WSHN] Báo cáo kỷ luật THPT ngày {report_date_display}",
         body=body_thpt,
         from_email=DISCIPLINE_REPORT_SENDER,
+        cc_list=_cc_for_scope("thpt"),
     )
     results.append({"school": "THPT", "email": r2})
 

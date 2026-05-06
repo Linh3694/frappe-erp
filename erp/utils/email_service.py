@@ -10,16 +10,26 @@ import frappe
 import requests
 
 
-def send_email_via_service(to_list, subject, body, from_email=None, attachments=None):
+def send_email_via_service(
+    to_list,
+    subject,
+    body,
+    from_email=None,
+    attachments=None,
+    cc_list=None,
+    bcc_list=None,
+):
     """
     Gửi email qua email service GraphQL API.
 
     Args:
-        to_list: danh sách email người nhận
+        to_list: danh sách email người nhận chính (To)
         subject: tiêu đề email
         body: nội dung email HTML
         from_email: (optional) mailbox Microsoft 365 gửi đi — truyền sang GraphQL `from`
         attachments: (optional) danh sách file đính kèm theo format EmailAttachmentInput
+        cc_list: (optional) danh sách CC — người nhận đồng thời, hiện trên header
+        bcc_list: (optional) danh sách BCC — ẩn
 
     Returns:
         dict: {"success": bool, "message": str}
@@ -38,9 +48,21 @@ def send_email_via_service(to_list, subject, body, from_email=None, attachments=
         }
         """
 
+        # Chuẩn hoá list (loại None / empty / dedupe nhẹ giữ thứ tự)
+        def _norm(lst):
+            seen = set()
+            out = []
+            for v in lst or []:
+                s = (v or "").strip()
+                if not s or s.lower() in seen:
+                    continue
+                seen.add(s.lower())
+                out.append(s)
+            return out
+
         variables = {
             "input": {
-                "to": to_list,
+                "to": _norm(to_list),
                 "subject": subject,
                 "body": body,
                 "contentType": "HTML",
@@ -50,6 +72,12 @@ def send_email_via_service(to_list, subject, body, from_email=None, attachments=
             variables["input"]["from"] = from_email
         if attachments:
             variables["input"]["attachments"] = attachments
+        cc_norm = _norm(cc_list)
+        if cc_norm:
+            variables["input"]["cc"] = cc_norm
+        bcc_norm = _norm(bcc_list)
+        if bcc_norm:
+            variables["input"]["bcc"] = bcc_norm
 
         payload = {"query": graphql_query, "variables": variables}
 
