@@ -637,135 +637,259 @@ def send_mobile_notification(user_email, title, body, data=None):
         for t in tokens:
             frappe.logger().info(f"   - Token: {t.device_token[:40]}... | Platform: {t.platform} | App Type: {t.get('app_type', 'unknown')}")
 
-        # Prepare Expo notification payload
-        messages = []
-        for token_doc in tokens:
-            # Determine channelId and sound based on notification type
-            notification_type = data.get("type") if data else None
-            action = data.get("action") if data else None
-            
-            if notification_type == "attendance":
-                channel_id = "attendance"
-                sound_name = "default"
-            elif notification_type == "ticket":
-                channel_id = "ticket"
-                # Custom sound: Ticket IT (microservice) & Ticket Hành chính Frappe (ticket_kind=administrative) dùng chung action
-                if action in ["new_ticket_admin", "ticket_assigned"]:
-                    sound_name = "ticket_create.wav"  # Custom sound file
-                else:
-                    sound_name = "default"
-            elif notification_type == "feedback":
-                channel_id = "feedback"
-                sound_name = "default"
-            elif notification_type == "leave_request" or notification_type == "leave":
-                channel_id = "leave_request"
-                sound_name = "default"
-            elif notification_type in (
-                "daily_health", "health_visit_created", "health_visit_received",
-                "health_visit_completed", "health_visit_escalation",
-                "health_visit_cancelled", "health_visit_rejected"
-            ):
-                channel_id = "daily_health"
-                sound_name = "default"
-            elif notification_type and str(notification_type).startswith("crm_issue"):
-                channel_id = "crm_issue"
-                sound_name = "default"
-            else:
-                channel_id = "default"
-                sound_name = "default"
-            
-            message = {
-                "to": token_doc.device_token,
-                "title": title,
-                "body": body,
-                "data": data or {},
-                "priority": "high",
-                "channelId": channel_id
-            }
+        # Build messages cho từng token (dùng helper _build_expo_message)
+        messages = [_build_expo_message(token_doc, title, body, data) for token_doc in tokens]
 
-            # Add platform-specific settings
-            if token_doc.platform == "ios":
-                message["badge"] = 1
-                # iOS uses sound name for custom sounds bundled in app
-                message["sound"] = sound_name
-            elif token_doc.platform == "android":
-                # Android: sound phải ở top-level, không phải trong android object
-                # Custom sound file phải có trong res/raw folder của app
-                # Format: sound name without extension for custom, hoặc "default"
-                if sound_name != "default":
-                    # Custom sound: ticket_create.wav -> ticket_create
-                    android_sound_name = sound_name.replace(".wav", "").replace(".mp3", "")
-                    message["sound"] = android_sound_name
-                else:
-                    message["sound"] = "default"
-                
-                # Android notification channel configuration
-                message["android"] = {
-                    "channelId": channel_id,
-                    "priority": "high",
-                    "notification": {
-                        "channelId": channel_id,
-                        "sound": sound_name.replace(".wav", "").replace(".mp3", "") if sound_name != "default" else "default"
-                    }
-                }
-            else:
-                # Expo/other platforms - use sound at top level
-                message["sound"] = sound_name
-
-            messages.append(message)
-
-        # Send to Expo Push API
-        success_count = 0
-        failed_count = 0
-        results = []
-
-        for message in messages:
-            try:
-                import requests
-                response = requests.post(
-                    "https://exp.host/--/api/v2/push/send",
-                    json=message,
-                    headers={
-                        "Accept": "application/json",
-                        "Content-Type": "application/json"
-                    },
-                    timeout=10
-                )
-
-                if response.status_code == 200:
-                    result = response.json()
-                    if result.get("data", {}).get("status") == "ok":
-                        success_count += 1
-                        results.append({"token": message["to"], "status": "success"})
-                    else:
-                        failed_count += 1
-                        results.append({"token": message["to"], "status": "failed", "error": result})
-                else:
-                    failed_count += 1
-                    results.append({"token": message["to"], "status": "failed", "http_code": response.status_code})
-
-            except Exception as e:
-                failed_count += 1
-                results.append({"token": message["to"], "status": "error", "error": str(e)})
-
-        message = f"Sent to {success_count}/{len(messages)} devices successfully"
-        if failed_count > 0:
-            message += f" ({failed_count} failed)"
-
-        return {
-            "success": success_count > 0,
-            "message": message,
-            "results": results,
-            "total_sent": len(messages),
-            "success_count": success_count,
-            "failed_count": failed_count
-        }
+        # Phase C.2: Gửi BATCH thay vì loop từng message
+        # Trước: N POST × 10s timeout = worst case 30-60s cho 1 user nhiều device
+        # Sau:   1 POST × 5s = nhanh hơn 10x
+        return _post_expo_batch(messages)
 
     except Exception as e:
         frappe.log_error(f"Error sending mobile notification: {str(e)}", "Mobile Notification Error")
         return {
             "success": False,
             "message": f"Error sending notification: {str(e)}"
+        }
+
+
+def _build_expo_message(token_doc, title, body, data):
+    """
+    Build 1 Expo message payload cho 1 device token.
+    Tách ra để tái dùng trong send_mobile_notification và send_mobile_notifications_bulk.
+    """
+    notification_type = data.get("type") if data else None
+    action = data.get("action") if data else None
+    
+    if notification_type == "attendance":
+        channel_id = "attendance"
+        sound_name = "default"
+    elif notification_type == "ticket":
+        channel_id = "ticket"
+        if action in ["new_ticket_admin", "ticket_assigned"]:
+            sound_name = "ticket_create.wav"
+        else:
+            sound_name = "default"
+    elif notification_type == "feedback":
+        channel_id = "feedback"
+        sound_name = "default"
+    elif notification_type == "leave_request" or notification_type == "leave":
+        channel_id = "leave_request"
+        sound_name = "default"
+    elif notification_type in (
+        "daily_health", "health_visit_created", "health_visit_received",
+        "health_visit_completed", "health_visit_escalation",
+        "health_visit_cancelled", "health_visit_rejected"
+    ):
+        channel_id = "daily_health"
+        sound_name = "default"
+    elif notification_type and str(notification_type).startswith("crm_issue"):
+        channel_id = "crm_issue"
+        sound_name = "default"
+    else:
+        channel_id = "default"
+        sound_name = "default"
+    
+    message = {
+        "to": token_doc.device_token,
+        "title": title,
+        "body": body,
+        "data": data or {},
+        "priority": "high",
+        "channelId": channel_id,
+    }
+
+    platform = getattr(token_doc, "platform", None) or token_doc.get("platform") if isinstance(token_doc, dict) else getattr(token_doc, "platform", None)
+    if platform == "ios":
+        message["badge"] = 1
+        message["sound"] = sound_name
+    elif platform == "android":
+        if sound_name != "default":
+            android_sound_name = sound_name.replace(".wav", "").replace(".mp3", "")
+            message["sound"] = android_sound_name
+        else:
+            message["sound"] = "default"
+        message["android"] = {
+            "channelId": channel_id,
+            "priority": "high",
+            "notification": {
+                "channelId": channel_id,
+                "sound": sound_name.replace(".wav", "").replace(".mp3", "") if sound_name != "default" else "default"
+            }
+        }
+    else:
+        message["sound"] = sound_name
+
+    return message
+
+
+# Expo Push API giới hạn 100 messages/POST
+EXPO_BATCH_SIZE = 100
+EXPO_POST_TIMEOUT = 5  # giây — giảm từ 10s
+
+
+def _post_expo_batch(messages):
+    """
+    POST danh sách messages tới Expo theo BATCH (max 100/POST).
+    Expo trả per-message status → parse và đếm success/failed riêng.
+    """
+    if not messages:
+        return {
+            "success": False,
+            "message": "No messages to send",
+            "results": [],
+            "total_messages": 0,
+            "success_count": 0,
+            "failed_count": 0,
+        }
+    
+    import requests
+    
+    success_count = 0
+    failed_count = 0
+    results = []
+    
+    for chunk_start in range(0, len(messages), EXPO_BATCH_SIZE):
+        chunk = messages[chunk_start:chunk_start + EXPO_BATCH_SIZE]
+        try:
+            response = requests.post(
+                "https://exp.host/--/api/v2/push/send",
+                json=chunk,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                },
+                timeout=EXPO_POST_TIMEOUT,
+            )
+            
+            if response.status_code == 200:
+                resp_json = response.json()
+                # Expo trả {"data": [...]} với mỗi item là kết quả của 1 message
+                tickets = resp_json.get("data", [])
+                if not isinstance(tickets, list):
+                    tickets = [tickets]
+                
+                for idx, ticket in enumerate(tickets):
+                    if idx >= len(chunk):
+                        break
+                    target_token = chunk[idx].get("to")
+                    if isinstance(ticket, dict) and ticket.get("status") == "ok":
+                        success_count += 1
+                        results.append({"token": target_token, "status": "success"})
+                    else:
+                        failed_count += 1
+                        results.append({
+                            "token": target_token,
+                            "status": "failed",
+                            "error": ticket if isinstance(ticket, dict) else str(ticket),
+                        })
+                
+                # Trường hợp số ticket < số messages → đánh dấu các message còn lại là failed
+                for idx in range(len(tickets), len(chunk)):
+                    failed_count += 1
+                    results.append({
+                        "token": chunk[idx].get("to"),
+                        "status": "failed",
+                        "error": "No ticket returned",
+                    })
+            else:
+                # HTTP fail → đánh dấu cả batch là failed
+                for msg in chunk:
+                    failed_count += 1
+                    results.append({
+                        "token": msg.get("to"),
+                        "status": "failed",
+                        "http_code": response.status_code,
+                    })
+        except Exception as e:
+            for msg in chunk:
+                failed_count += 1
+                results.append({
+                    "token": msg.get("to"),
+                    "status": "error",
+                    "error": str(e),
+                })
+    
+    msg_summary = f"Sent to {success_count}/{len(messages)} devices successfully"
+    if failed_count > 0:
+        msg_summary += f" ({failed_count} failed)"
+    
+    return {
+        "success": success_count > 0,
+        "message": msg_summary,
+        "results": results,
+        "total_messages": len(messages),
+        "success_count": success_count,
+        "failed_count": failed_count,
+    }
+
+
+def send_mobile_notifications_bulk(targets, title, body):
+    """
+    Gửi Expo push BATCH cho nhiều user (multiple parents) trong 1 POST.
+    
+    Args:
+        targets: List of dicts [{"email": str, "data": dict}]
+        title: Tiêu đề (string đã resolve, không phải dict bilingual)
+        body: Nội dung
+    
+    Returns:
+        dict: {"success", "success_count", "failed_count", "total_messages", ...}
+    
+    Performance:
+    - Trước (gọi send_mobile_notification N lần): N user × M device × 10s = O(N×M)
+    - Sau (1 POST batch):                          1 POST × 5s = O(1)
+    
+    Lý do cần function này:
+    - send_bulk_parent_notifications gửi cùng nội dung cho 5-50 phụ huynh
+    - Mỗi phụ huynh có 1-3 mobile device
+    - Loop tuần tự = 30-150s; batch = < 5s
+    """
+    if not targets:
+        return {
+            "success": False,
+            "message": "No targets",
+            "success_count": 0,
+            "failed_count": 0,
+            "total_messages": 0,
+        }
+    
+    try:
+        # Lấy tất cả tokens cho danh sách emails (1 query)
+        emails = list({t.get("email") for t in targets if t.get("email")})
+        if not emails:
+            return {"success": False, "message": "No valid emails", "success_count": 0, "failed_count": 0, "total_messages": 0}
+        
+        all_tokens = frappe.get_all(
+            "Mobile Device Token",
+            filters={"user": ["in", emails], "is_active": 1},
+            fields=["device_token", "platform", "user"],
+        )
+        
+        if not all_tokens:
+            frappe.logger().info(f"📱 [Bulk Expo] No active device tokens for {len(emails)} users")
+            return {"success": False, "message": "No active device tokens", "success_count": 0, "failed_count": 0, "total_messages": 0}
+        
+        # Map email → data (mỗi user có data riêng với student_id riêng)
+        email_to_data = {t.get("email"): t.get("data", {}) for t in targets}
+        
+        # Build messages cho tất cả token
+        messages = []
+        for token in all_tokens:
+            user_data = email_to_data.get(token.get("user"), {})
+            messages.append(_build_expo_message(token, title, body, user_data))
+        
+        frappe.logger().info(f"📱 [Bulk Expo] Sending BATCH: {len(messages)} messages cho {len(emails)} users")
+        return _post_expo_batch(messages)
+        
+    except Exception as e:
+        frappe.log_error(f"Error in send_mobile_notifications_bulk: {str(e)}", "Bulk Mobile Notification Error")
+        return {
+            "success": False,
+            "message": f"Error: {str(e)}",
+            "success_count": 0,
+            "failed_count": 0,
+            "total_messages": 0,
         }
 
 

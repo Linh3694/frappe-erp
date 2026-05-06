@@ -11,6 +11,8 @@ PERFORMANCE OPTIMIZED:
 import frappe
 from frappe import _
 import json
+import time
+from collections import deque
 from datetime import datetime
 import pytz
 import logging
@@ -29,6 +31,31 @@ USE_DIRECT_PROCESSING = True
 
 # Sự kiện AccessController không mang mã người (VD: 1029) — thường gửi hàng loạt, chỉ cần trả 200, không spam log
 SKIP_SUB_EVENT_TYPES_NO_PERSON = frozenset({1029})
+
+# Phase D.1: Track latency p95 in-memory cho monitoring
+# Mỗi gunicorn worker có deque riêng (process-level state) → OK vì dùng để health check, không phải metric chính xác
+_LATENCY_SAMPLES = deque(maxlen=200)
+_LATENCY_LOG_INTERVAL = 100  # Log p95 mỗi 100 request
+
+
+def _record_request_latency(start_ts):
+	"""Append latency rồi log p95 mỗi N request."""
+	try:
+		latency_ms = (time.time() - start_ts) * 1000
+		_LATENCY_SAMPLES.append(latency_ms)
+		# Log p95/p99 mỗi N request để theo dõi xu hướng
+		if len(_LATENCY_SAMPLES) % _LATENCY_LOG_INTERVAL == 0:
+			samples = sorted(_LATENCY_SAMPLES)
+			n = len(samples)
+			p50 = samples[n // 2]
+			p95 = samples[int(n * 0.95)] if n >= 20 else samples[-1]
+			p99 = samples[int(n * 0.99)] if n >= 100 else samples[-1]
+			get_hikvision_logger().info(
+				"latency stats n=%d p50=%.1fms p95=%.1fms p99=%.1fms",
+				n, p50, p95, p99,
+			)
+	except Exception:
+		pass
 
 
 def _post_employee_code(post):
@@ -87,6 +114,9 @@ def handle_hikvision_event():
 	This endpoint accepts multipart/form-data or JSON from HiVision devices
 	No authentication required so devices can send events directly
 	"""
+	# Phase D.1: track latency cho monitoring p95
+	_request_start = time.time()
+	
 	# Get logger riêng cho HiVision
 	logger = get_hikvision_logger()
 
@@ -463,6 +493,9 @@ def handle_hikvision_event():
 			"error": str(e),
 			"timestamp": frappe.utils.now()
 		}
+	finally:
+		# Phase D.1: ghi latency mọi response path
+		_record_request_latency(_request_start)
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -612,21 +645,34 @@ def format_vn_time(dt):
 
 def get_historical_attendance_threshold_minutes():
 	"""
-	Get threshold in minutes for determining historical attendance data.
-	Attendance older than this threshold will be silently synced without notification.
-	Default: 1440 minutes (24 hours / 1 day)
+	Lấy ngưỡng phút để xác định attendance là "historical" (sẽ silent sync không noti).
 	
-	This prevents notifications for old data from newly connected devices
-	while still allowing same-day delayed syncs to trigger notifications.
+	Thứ tự ưu tiên:
+	1. site_config.json: "historical_attendance_threshold_minutes" (nhanh, không query DB)
+	2. System Settings DocType (legacy)
+	3. Default 30 phút
+	
+	Lý do default 30 phút (thay vì 1440):
+	- Tránh gửi noti "ma" cho phụ huynh khi backlog dồn (vd: device sync lại event 27 phút trễ)
+	- Same-day delayed sync vẫn được noti nếu < 30 phút
 	"""
+	# Ưu tiên 1: site_config.json
 	try:
-		# Allow configuration via site config
+		threshold = frappe.conf.get("historical_attendance_threshold_minutes")
+		if threshold:
+			return int(threshold)
+	except Exception:
+		pass
+	
+	# Ưu tiên 2: System Settings DocType (giữ tương thích ngược)
+	try:
 		threshold = frappe.get_system_settings("historical_attendance_threshold_minutes")
 		if threshold:
 			return int(threshold)
-	except:
+	except Exception:
 		pass
-	return 1440  # Default 24 hours (1 day) - safe for same-day delayed syncs
+	
+	return 30
 
 
 def is_historical_attendance(attendance_timestamp, threshold_minutes=None):
@@ -829,18 +875,21 @@ def process_single_attendance_event(event_data):
 		
 		logger.info("attendance saved employee=%s", employee_code)
 		
-		# Skip notification nếu subEventType = 7 (Invalid Time Period)
-		# Đây là trường hợp học sinh quẹt thẻ ngoài khung giờ cho phép trên máy HiKvision
+		# Bỏ qua notification nếu subEventType = 7 (Invalid Time Period)
+		# Học sinh quẹt thẻ ngoài khung giờ cho phép trên máy HiKvision
 		INVALID_TIME_PERIOD_SUB_EVENT = 7
 		if sub_event_type == INVALID_TIME_PERIOD_SUB_EVENT:
 			logger.debug("skip notif Invalid Time subEvent=7 employee=%s", employee_code)
-		# Gửi notification SYNC nếu không phải historical data
-		# Thay đổi từ async (RQ) sang sync vì RQ có vấn đề với site config
 		elif not is_historical_attendance(parsed_timestamp):
+			# Đẩy notification sang RQ queue 'short' để worker xử lý nền
+			# enqueue_after_commit=True đảm bảo job chỉ chạy sau khi DB transaction commit
+			# → request HiKvision trả 200 trong < 100ms thay vì chờ 5-60s
 			try:
-				from erp.api.attendance.notification import publish_attendance_notification
-				
-				publish_attendance_notification(
+				frappe.enqueue(
+					"erp.api.attendance.notification.publish_attendance_notification",
+					queue="short",
+					timeout=120,
+					enqueue_after_commit=True,
 					employee_code=employee_code,
 					employee_name=employee_name,
 					timestamp=parsed_timestamp.isoformat(),
@@ -849,11 +898,11 @@ def process_single_attendance_event(event_data):
 					check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
 					check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
 					total_check_ins=attendance_doc.total_check_ins,
-					date=str(attendance_doc.date)
+					date=str(attendance_doc.date),
 				)
-				logger.debug("notif sent employee=%s", employee_code)
+				logger.debug("notif enqueued employee=%s", employee_code)
 			except Exception as notif_error:
-				logger.error("notif fail employee=%s: %s", employee_code, str(notif_error))
+				logger.error("notif enqueue fail employee=%s: %s", employee_code, str(notif_error))
 		
 		return True
 		

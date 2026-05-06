@@ -427,7 +427,7 @@ def send_push_to_single_subscription(subscription_doc, payload, vapid_private_ke
 
 
 @frappe.whitelist()
-def send_push_notification(user_email, title, body, icon=None, data=None, tag=None, actions=None):
+def send_push_notification(user_email, title, body, icon=None, data=None, tag=None, actions=None, skip_expo=False):
     """
     Gửi push notification đến TẤT CẢ thiết bị của một user (multi-device support)
     
@@ -439,6 +439,8 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
         data: Additional data (optional)
         tag: Notification tag (optional)
         actions: Array of action buttons (optional)
+        skip_expo: Nếu True, BỎ QUA Expo mobile (caller tự gọi send_mobile_notification riêng)
+                   → Tránh gọi Expo 2 lần khi caller đã batch Expo
         
     Returns:
         dict: {"success": True/False, "message": "...", "log": "...", "devices_sent": int, "devices_failed": int}
@@ -495,24 +497,47 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
                 if actions:
                     payload["actions"] = actions
 
-                for sub_doc in subscription_docs:
-                    result = send_push_to_single_subscription(
-                        sub_doc, payload, vapid_private_key, vapid_claims_email, user_email
-                    )
-
-                    device_results.append({
-                        "device": result["device_name"],
-                        "success": result["success"],
-                        "error": result["error"]
-                    })
-
-                    if result["success"]:
-                        devices_sent += 1
-                        successful_subscriptions.append(result["subscription_name"])
-                    else:
-                        devices_failed += 1
-                        if result["expired"]:
-                            expired_subscriptions.append(result["subscription_name"])
+                # Phase C.3: gửi VAPID push PARALLEL cho nhiều device thay vì tuần tự
+                # Trước: N device × 10s timeout = O(N) thời gian
+                # Sau:   max(timeout per device, 5s) qua ThreadPoolExecutor → O(1)
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                
+                max_workers = min(len(subscription_docs), 10)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_sub = {
+                        executor.submit(
+                            send_push_to_single_subscription,
+                            sub_doc, payload, vapid_private_key, vapid_claims_email, user_email,
+                        ): sub_doc
+                        for sub_doc in subscription_docs
+                    }
+                    
+                    for future in as_completed(future_to_sub):
+                        try:
+                            result = future.result(timeout=5)
+                        except Exception as fe:
+                            sub_doc = future_to_sub[future]
+                            result = {
+                                "success": False,
+                                "subscription_name": sub_doc.get("name"),
+                                "device_name": sub_doc.get("device_name", "Unknown"),
+                                "error": f"future error: {str(fe)}",
+                                "expired": False,
+                            }
+                        
+                        device_results.append({
+                            "device": result["device_name"],
+                            "success": result["success"],
+                            "error": result["error"],
+                        })
+                        
+                        if result["success"]:
+                            devices_sent += 1
+                            successful_subscriptions.append(result["subscription_name"])
+                        else:
+                            devices_failed += 1
+                            if result["expired"]:
+                                expired_subscriptions.append(result["subscription_name"])
         else:
             frappe.logger().info(
                 f"📱 [Push Notification] Không có Push Subscription (PWA) cho {user_email} — sẽ chỉ thử Expo mobile"
@@ -563,25 +588,32 @@ def send_push_notification(user_email, title, body, icon=None, data=None, tag=No
         frappe.db.commit()
 
         # Expo push — app native parent-portal-mobile (DocType Mobile Device Token)
+        # skip_expo=True khi caller (vd: send_bulk_parent_notifications) đã batch Expo riêng
+        # → Tránh gọi Expo 2 lần cho cùng 1 user
         mobile_sent = False
         mobile_result = None
-        try:
-            from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
-
-            mobile_result = send_mobile_notification(user_email, title, body, data)
-            mobile_sent = bool(mobile_result.get("success"))
-            if mobile_sent:
-                frappe.logger().info(
-                    f"📱 [Push Notification] Expo mobile OK cho {user_email}: {mobile_result.get('message', '')}"
-                )
-            else:
-                frappe.logger().info(
-                    f"📱 [Push Notification] Expo mobile không gửi được cho {user_email}: {mobile_result.get('message', '')}"
-                )
-        except Exception as mobile_err:
-            frappe.logger().warning(
-                f"📱 [Push Notification] Lỗi Expo mobile cho {user_email}: {str(mobile_err)}"
+        if skip_expo:
+            frappe.logger().debug(
+                f"📱 [Push Notification] skip_expo=True cho {user_email}, caller t\u1ef1 g\u1ecdi Expo"
             )
+        else:
+            try:
+                from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+
+                mobile_result = send_mobile_notification(user_email, title, body, data)
+                mobile_sent = bool(mobile_result.get("success"))
+                if mobile_sent:
+                    frappe.logger().info(
+                        f"📱 [Push Notification] Expo mobile OK cho {user_email}: {mobile_result.get('message', '')}"
+                    )
+                else:
+                    frappe.logger().info(
+                        f"📱 [Push Notification] Expo mobile không gửi được cho {user_email}: {mobile_result.get('message', '')}"
+                    )
+            except Exception as mobile_err:
+                frappe.logger().warning(
+                    f"📱 [Push Notification] Lỗi Expo mobile cho {user_email}: {str(mobile_err)}"
+                )
 
         total_devices = len(subscription_docs)
         web_ok = devices_sent > 0

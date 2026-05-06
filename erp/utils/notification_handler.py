@@ -503,6 +503,13 @@ def send_bulk_parent_notifications(
             redis.set_value(debounce_key, frappe.utils.now(), expires_in_sec=60)
             frappe.logger().info(f"🔓 [Notification Handler] Set debounce key: {debounce_key} (TTL: 60s)")
             
+            # Resolve title/body 1 lần (cùng 1 noti cho tất cả parents)
+            final_title_str = get_notification_text(notification_title)
+            final_body_str = get_notification_text(notification_body)
+            
+            # Phase C.1+C.2: Collect targets cho Expo BATCH push (gửi 1 lần sau loop)
+            expo_targets = []  # [{email, data}]
+            
             # Create notification for each parent
             frappe.logger().info(f"📧 [Bulk Handler] Processing {len(parent_emails)} parent emails")
             for parent_email in parent_emails:
@@ -561,41 +568,33 @@ def send_bulk_parent_notifications(
                     unread_count = get_unread_count(parent_email)
                     emit_unread_count_update(parent_email, unread_count)
 
-                    # Send push notification immediately (don't wait for hook)
-                    frappe.logger().info(f"📤 [Bulk Push] Attempting to send push notification to {parent_email}")
+                    # Send VAPID push only (skip_expo=True) — Expo sẽ gửi BATCH 1 lần ở dưới
+                    # Tránh gọi Expo N lần cho N parents (mỗi lần ~10s timeout)
                     try:
                         from erp.api.parent_portal.push_notification import send_push_notification
 
-                        final_title = get_notification_text(notification_title)
-                        final_body = get_notification_text(notification_body)
-
-                        frappe.logger().info(f"📤 [Bulk Push] Title: '{final_title}', Body: '{final_body[:50]}...'")
-
                         push_result = send_push_notification(
                             user_email=parent_email,
-                            title=final_title,
-                            body=final_body,
+                            title=final_title_str,
+                            body=final_body_str,
                             icon="/icon.png",
                             data=parent_merged_data,
-                            tag=recipient_type
+                            tag=recipient_type,
+                            skip_expo=True,  # Phase C.1: gửi Expo BATCH ở cuối
                         )
 
-                        # FIX: Simplified push result logging - chỉ log key info
                         devices_sent = push_result.get('devices_sent', 0)
-                        devices_failed = push_result.get('devices_failed', 0)
-                        push_success = push_result.get('success', False)
-                        
-                        if push_success and devices_sent > 0:
-                            frappe.logger().info(f"✅ [Bulk Push] Push OK for {parent_email}: {devices_sent} device(s)")
-                        elif devices_sent == 0 and devices_failed == 0:
-                            frappe.logger().warning(f"⚠️ [Bulk Push] No push subscription for {parent_email}")
-                        else:
-                            frappe.logger().warning(f"❌ [Bulk Push] Push FAILED for {parent_email}: sent={devices_sent}, failed={devices_failed}, msg={push_result.get('message')}")
+                        if devices_sent > 0:
+                            frappe.logger().debug(f"✅ [Bulk Push] VAPID OK for {parent_email}: {devices_sent} device(s)")
 
                     except Exception as push_error:
-                        frappe.logger().error(f"💥 [Bulk Push] Exception sending push to {parent_email}: {str(push_error)}")
-                        import traceback
-                        frappe.logger().error(f"💥 [Bulk Push] Traceback: {traceback.format_exc()}")
+                        frappe.logger().error(f"💥 [Bulk Push] VAPID exception for {parent_email}: {str(push_error)}")
+                    
+                    # Collect target để gửi Expo BATCH 1 lần sau loop
+                    expo_targets.append({
+                        "email": parent_email,
+                        "data": parent_merged_data,
+                    })
                     
                     success_count += 1
                     results.append({
@@ -614,6 +613,26 @@ def send_bulk_parent_notifications(
                     })
             
             frappe.db.commit()
+            
+            # Phase C.2: Gửi Expo BATCH cho tất cả parents trong 1 POST duy nhất
+            # Trước: N parents × 1-3 device × 10s timeout = worst case 30-150s
+            # Sau:   1 POST với tất cả messages, timeout 5s
+            if expo_targets:
+                try:
+                    from erp.api.erp_sis.mobile_push_notification import send_mobile_notifications_bulk
+                    
+                    bulk_expo_result = send_mobile_notifications_bulk(
+                        targets=expo_targets,
+                        title=final_title_str,
+                        body=final_body_str,
+                    )
+                    frappe.logger().info(
+                        f"📱 [Bulk Expo] sent={bulk_expo_result.get('success_count', 0)} "
+                        f"failed={bulk_expo_result.get('failed_count', 0)} "
+                        f"total={bulk_expo_result.get('total_messages', 0)}"
+                    )
+                except Exception as bulk_expo_err:
+                    frappe.logger().error(f"💥 [Bulk Expo] Lỗi gửi BATCH Expo: {str(bulk_expo_err)}")
             
             frappe.logger().info(f"✅ [Notification Handler] Notifications sent - Success: {success_count}, Failed: {failed_count}")
             

@@ -421,30 +421,33 @@ def process_employee_events(key, events, logger, existing_name=None):
 
 def enqueue_attendance_notification(notif_data):
 	"""
-	Gửi notification SYNC (trực tiếp) thay vì qua RQ.
+	Đẩy notification sang RQ queue 'short' để worker xử lý nền.
 	
-	Lý do thay đổi từ async sang sync:
-	- RQ jobs fail với lỗi frappe.init(site=site) trong một số trường hợp
-	- Notification cần được gửi ngay lập tức để phụ huynh nhận kịp thời
-	- Gọi sync chỉ mất 1-2 giây, không ảnh hưởng performance đáng kể
+	Lý do dùng RQ:
+	- Tránh block batch processor khi gửi push notification (Expo + Web Push)
+	- 1 noti job có thể mất 1-3s; nếu sync, batch 200 events × 3s = 10 phút
+	- Async cho phép batch processor commit DB nhanh, noti chạy song song trên worker
 	
 	Args:
 		notif_data: Dict with notification data
 	"""
-	from erp.api.attendance.notification import publish_attendance_notification
-	
 	logger = get_batch_processor_logger()
 	employee_code = notif_data.get("employee_code")
 	
 	try:
-		# Gọi TRỰC TIẾP (sync) thay vì qua RQ
-		publish_attendance_notification(**notif_data)
-		logger.info(f"✅ [SYNC] Notification sent for {employee_code}")
+		frappe.enqueue(
+			"erp.api.attendance.notification.publish_attendance_notification",
+			queue="short",
+			timeout=120,
+			enqueue_after_commit=True,
+			**notif_data,
+		)
+		logger.info(f"✅ [ENQUEUE] Notification enqueued for {employee_code}")
 	except Exception as e:
-		logger.error(f"❌ [SYNC] Failed to send notification for {employee_code}: {str(e)}")
-		# Log error nhưng không raise để không ảnh hưởng batch processing
+		logger.error(f"❌ [ENQUEUE] Failed to enqueue notification for {employee_code}: {str(e)}")
+		# Log lỗi nhưng không raise để không ảnh hưởng batch processing
 		frappe.log_error(
-			message=f"Failed to send attendance notification for {employee_code}: {str(e)}",
+			message=f"Failed to enqueue attendance notification for {employee_code}: {str(e)}",
 			title="Attendance Notification Error"
 		)
 
@@ -461,18 +464,75 @@ def trigger_batch_processing():
 @frappe.whitelist()
 def get_processor_stats():
 	"""
-	API để lấy statistics của batch processor.
+	API monitoring batch processor + RQ short queue.
+	Trả thêm oldest_event_age_seconds để alert khi backlog.
 	"""
 	try:
 		buffer_length = get_buffer_length()
+		
+		# Peek event cuối Redis list (FIFO: rpop pull từ tail nên LINDEX -1 là event cũ nhất)
+		oldest_event_age_seconds = None
+		oldest_event_received_at = None
+		try:
+			cache = frappe.cache()
+			redis_conn = cache.redis if hasattr(cache, 'redis') else None
+			if redis_conn:
+				oldest_event_json = redis_conn.lindex(ATTENDANCE_BUFFER_KEY, -1)
+				if oldest_event_json:
+					if isinstance(oldest_event_json, bytes):
+						oldest_event_json = oldest_event_json.decode('utf-8')
+					evt = json.loads(oldest_event_json)
+					received_at_str = evt.get("received_at")
+					if received_at_str:
+						received_at = frappe.utils.get_datetime(received_at_str)
+						oldest_event_received_at = received_at_str
+						now_dt = frappe.utils.now_datetime()
+						# Đảm bảo cả 2 cùng timezone-naive để trừ
+						if received_at.tzinfo is not None:
+							received_at = received_at.replace(tzinfo=None)
+						if now_dt.tzinfo is not None:
+							now_dt = now_dt.replace(tzinfo=None)
+						oldest_event_age_seconds = (now_dt - received_at).total_seconds()
+		except Exception as peek_err:
+			get_batch_processor_logger().warning(f"⚠️ peek oldest event err: {peek_err}")
+		
+		# Đếm RQ short queue length (jobs đang chờ noti)
+		rq_short_pending = None
+		try:
+			from rq import Queue
+			from frappe.utils.background_jobs import get_redis_conn  # type: ignore[import]
+			rq_redis = get_redis_conn()
+			rq_short_pending = Queue("short", connection=rq_redis).count
+		except Exception as rq_err:
+			get_batch_processor_logger().debug(f"rq queue count err: {rq_err}")
+		
+		# Đánh giá health
+		alert_level = "ok"
+		alerts = []
+		if oldest_event_age_seconds and oldest_event_age_seconds > 120:
+			alert_level = "critical"
+			alerts.append(f"oldest_event_age={oldest_event_age_seconds:.0f}s > 120s")
+		elif oldest_event_age_seconds and oldest_event_age_seconds > 60:
+			alert_level = "warning"
+			alerts.append(f"oldest_event_age={oldest_event_age_seconds:.0f}s > 60s")
+		if buffer_length > 500:
+			alert_level = "critical"
+			alerts.append(f"buffer_length={buffer_length} > 500")
+		if rq_short_pending and rq_short_pending > 200:
+			alert_level = "warning" if alert_level == "ok" else alert_level
+			alerts.append(f"rq_short_pending={rq_short_pending} > 200")
 		
 		return {
 			"status": "success",
 			"stats": {
 				"pending_events": buffer_length,
+				"oldest_event_age_seconds": oldest_event_age_seconds,
+				"oldest_event_received_at": oldest_event_received_at,
+				"rq_short_pending": rq_short_pending,
 				"buffer_key": ATTENDANCE_BUFFER_KEY,
 				"batch_size": BUFFER_BATCH_SIZE,
-				"processing_interval": "5 seconds"
+				"alert_level": alert_level,
+				"alerts": alerts,
 			},
 			"timestamp": frappe.utils.now()
 		}
