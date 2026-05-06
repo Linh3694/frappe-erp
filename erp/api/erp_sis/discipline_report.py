@@ -53,9 +53,17 @@ def _get_class_titles_for_record(record: dict):
     Danh sách tên lớp dùng để xác định THCS/THPT — khớp utils.ts isTHCS/isTHPT.
     target_type === 'student' -> student_class_title; ngược lại -> target_class_titles.
     """
+    titles = []
+    for st in record.get("target_students") or []:
+        title = (st.get("student_class_title") or "").strip()
+        if title and title not in titles:
+            titles.append(title)
+    if titles:
+        return titles
+
     target_type = (record.get("target_type") or "").strip()
     if target_type == "student":
-        st = record.get("student_class_title") or ""
+        st = (record.get("student_class_title") or "").strip()
         return [st] if st else []
     return list(record.get("target_class_titles") or [])
 
@@ -119,6 +127,87 @@ def _records_for_school_scope(records: list, scope: str) -> list:
     if scope == "thpt":
         return [r for r in records if _is_thpt(r)]
     return []
+
+
+def _collect_student_ids_from_record(record: dict):
+    ids = []
+    for st in record.get("target_students") or []:
+        sid = st.get("student_id")
+        if sid:
+            ids.append(sid)
+    if ids:
+        return ids
+    if (record.get("target_type") or "").strip() != "class" and record.get("target_student"):
+        return [record.get("target_student")]
+    if (record.get("target_type") or "").strip() != "class":
+        return [sid for sid in record.get("target_student_ids") or [] if sid]
+    return []
+
+
+def _student_class_title_for_record(record: dict, student_id: str):
+    for st in record.get("target_students") or []:
+        if st.get("student_id") == student_id and st.get("student_class_title"):
+            return st.get("student_class_title")
+    if record.get("target_student") == student_id and record.get("student_class_title"):
+        return record.get("student_class_title")
+    if student_id in (record.get("target_student_ids") or []) and record.get("student_class_title"):
+        return record.get("student_class_title")
+    return ""
+
+
+def _student_program_bucket(student_id: str, records: list):
+    max_grade = None
+    for r in records:
+        if student_id not in _collect_student_ids_from_record(r):
+            continue
+        grade = _get_grade_from_class_title(_student_class_title_for_record(r, student_id) or "")
+        if grade is not None and (max_grade is None or grade > max_grade):
+            max_grade = grade
+    if max_grade is None:
+        return None
+    if 6 <= max_grade <= 9:
+        return "thcs"
+    if 10 <= max_grade <= 12:
+        return "thpt"
+    return None
+
+
+def _student_ids_for_scope(records: list, scope: str):
+    ids = set()
+    for r in records:
+        for sid in _collect_student_ids_from_record(r):
+            if _student_program_bucket(sid, records) == scope:
+                ids.add(sid)
+    return ids
+
+
+def _aggregate_student_counts_for_scope(records: list, scope: str, label_fn):
+    acc = defaultdict(set)
+    for r in records:
+        label = label_fn(r)
+        for sid in _collect_student_ids_from_record(r):
+            if _student_program_bucket(sid, records) == scope:
+                acc[label].add(sid)
+    return sorted(((label, len(ids)) for label, ids in acc.items()), key=lambda x: (-x[1], x[0]))
+
+
+def _aggregate_student_severity_counts_for_scope(records: list, scope: str):
+    student_max = {}
+    for r in records:
+        level = _severity_level_key(r)
+        if level not in {"1", "2", "3"}:
+            continue
+        for sid in _collect_student_ids_from_record(r):
+            if _student_program_bucket(sid, records) != scope:
+                continue
+            prev = student_max.get(sid)
+            if prev is None or int(level) > int(prev):
+                student_max[sid] = level
+
+    counts = {"1": 0, "2": 0, "3": 0}
+    for level in student_max.values():
+        counts[level] += 1
+    return [(f"Mức độ {level}", counts[level]) for level in ("1", "2", "3")]
 
 
 def _aggregate_counts(records: list, label_fn):
@@ -249,12 +338,17 @@ def _generate_scoped_report_html(
     scope: str,
     report_date_display: str,
     scoped_records: list,
+    all_records: list,
 ):
     """Email chỉ dành cho một cấp (THCS hoặc THPT): không lẫn dữ liệu cấp kia."""
-    n = len(scoped_records)
+    n = len(_student_ids_for_scope(all_records, scope))
 
-    by_classification = _aggregate_counts(scoped_records, _classification_label)
-    by_severity = _aggregate_severity_counts(scoped_records)
+    by_classification = _aggregate_student_counts_for_scope(
+        all_records,
+        scope,
+        _classification_label,
+    )
+    by_severity = _aggregate_student_severity_counts_for_scope(all_records, scope)
     accent = "#1565c0" if scope == "thcs" else "#6a1b9a"
     dashboard_url = escape_html(DISCIPLINE_DASHBOARD_URL)
     school_short = "THCS" if scope == "thcs" else "THPT"
@@ -278,7 +372,7 @@ def _generate_scoped_report_html(
         <div style="background: #f7fbff; border-left: 4px solid {accent}; padding: 14px 16px; margin: 12px 0 16px 0;">
             <p style="margin: 4px 0;"><strong>Thời gian :</strong> {escape_html(report_date_display)}</p>
             <p style="margin: 4px 0;"><strong>Trường :</strong> {escape_html(school_short)}</p>
-            <p style="margin: 4px 0;"><strong>Tổng số ca vi phạm :</strong> {n}</p>
+            <p style="margin: 4px 0;"><strong>Tổng số học sinh vi phạm :</strong> {n}</p>
         </div>
     """
 
@@ -423,8 +517,8 @@ def _send_discipline_reports_for_date(report_date: str):
     all_count = len(records)
     thcs_records = _records_for_school_scope(records, "thcs")
     thpt_records = _records_for_school_scope(records, "thpt")
-    thcs_count = len(thcs_records)
-    thpt_count = len(thpt_records)
+    thcs_count = len(_student_ids_for_scope(records, "thcs"))
+    thpt_count = len(_student_ids_for_scope(records, "thpt"))
 
     try:
         d_obj = datetime.strptime(report_date, "%Y-%m-%d")
@@ -438,6 +532,7 @@ def _send_discipline_reports_for_date(report_date: str):
         "thcs",
         report_date_display,
         thcs_records,
+        records,
     )
     r1 = send_email_via_service(
         DISCIPLINE_REPORT_RECIPIENTS,
@@ -450,6 +545,7 @@ def _send_discipline_reports_for_date(report_date: str):
         "thpt",
         report_date_display,
         thpt_records,
+        records,
     )
     r2 = send_email_via_service(
         DISCIPLINE_REPORT_RECIPIENTS,
