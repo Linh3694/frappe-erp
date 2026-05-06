@@ -6,9 +6,6 @@ Báo cáo kỷ luật gửi email hàng ngày (scheduler + gọi thủ công).
 Logic phân THCS/THPT khớp DisciplineDashboard (parse khối từ tên lớp).
 """
 
-import base64
-import csv
-import io
 import re
 from collections import defaultdict
 from datetime import datetime
@@ -124,6 +121,13 @@ def _records_for_school_scope(records: list, scope: str) -> list:
     return []
 
 
+def _aggregate_counts(records: list, label_fn):
+    acc = defaultdict(int)
+    for r in records:
+        acc[label_fn(r)] += 1
+    return sorted(acc.items(), key=lambda x: (-x[1], x[0]))
+
+
 def _target_type_label_vn(record: dict) -> str:
     t = (record.get("target_type") or "").strip()
     if t == "student":
@@ -133,30 +137,6 @@ def _target_type_label_vn(record: dict) -> str:
     if t == "mixed":
         return "Hỗn hợp"
     return t or "Không xác định"
-
-
-def _display_classes_or_student_line(record: dict) -> str:
-    """Một dòng mô tả lớp / HS cho bảng chi tiết."""
-    tt = (record.get("target_type") or "").strip()
-    if tt == "student":
-        parts = [
-            record.get("student_class_title") or "",
-            record.get("student_name") or "",
-            record.get("student_code") or "",
-        ]
-        line = " — ".join(p for p in parts if p)
-        return line or "-"
-    titles = record.get("target_class_titles") or []
-    if titles:
-        return ", ".join(titles)
-    return "-"
-
-
-def _aggregate_counts(records: list, label_fn):
-    acc = defaultdict(int)
-    for r in records:
-        acc[label_fn(r)] += 1
-    return sorted(acc.items(), key=lambda x: (-x[1], x[0]))
 
 
 def _html_count_list(title: str, rows) -> str:
@@ -189,6 +169,30 @@ def _class_line_for_record(record: dict) -> str:
         if title and title not in class_titles:
             class_titles.append(title)
     return ", ".join(class_titles) if class_titles else "-"
+
+
+def _students_line_for_record(record: dict) -> str:
+    students = record.get("target_students") or []
+    if students:
+        lines = []
+        for st in students:
+            name = st.get("student_name") or st.get("student_id") or ""
+            code = st.get("student_code") or ""
+            class_title = st.get("student_class_title") or ""
+            main = f"{name} ({code})" if code else name
+            lines.append(" - ".join(x for x in [class_title, main] if x))
+        return "; ".join(lines)
+    if record.get("student_name"):
+        return " - ".join(
+            x
+            for x in [
+                record.get("student_class_title") or "",
+                record.get("student_name") or "",
+                record.get("student_code") or "",
+            ]
+            if x
+        )
+    return ""
 
 
 def _html_detail_records_table(records: list, limit: int = 50) -> str:
@@ -239,97 +243,6 @@ def _html_detail_records_table(records: list, limit: int = 50) -> str:
     </table>
     {more}
     """
-
-
-def _csv_text(value) -> str:
-    return str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-
-
-def _students_line_for_record(record: dict) -> str:
-    students = record.get("target_students") or []
-    if students:
-        lines = []
-        for st in students:
-            name = st.get("student_name") or st.get("student_id") or ""
-            code = st.get("student_code") or ""
-            class_title = st.get("student_class_title") or ""
-            main = f"{name} ({code})" if code else name
-            lines.append(" - ".join(x for x in [class_title, main] if x))
-        return "; ".join(lines)
-    if record.get("student_name"):
-        return " - ".join(
-            x
-            for x in [
-                record.get("student_class_title") or "",
-                record.get("student_name") or "",
-                record.get("student_code") or "",
-            ]
-            if x
-        )
-    return ""
-
-
-def _deduction_points_line_for_record(record: dict) -> str:
-    points = []
-    for row in record.get("target_student_entry_rows") or []:
-        if row.get("student_id"):
-            points.append(f"{row.get('student_id')}: {row.get('deduction_points') or ''}")
-    for row in record.get("target_class_entries") or []:
-        if row.get("class_id"):
-            points.append(f"{row.get('class_id')}: {row.get('deduction_points') or ''}")
-    return "; ".join(points)
-
-
-def _build_detail_csv_attachment(scope: str, school_label: str, report_date: str, records: list):
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(
-        [
-            "Ma ban ghi",
-            "Ngay",
-            "Thoi gian",
-            "Truong",
-            "Phan loai",
-            "Vi pham",
-            "Muc do",
-            "Hinh thuc",
-            "Doi tuong",
-            "Lop",
-            "Hoc sinh",
-            "Diem tru",
-            "Mo ta",
-        ]
-    )
-    for r in records:
-        writer.writerow(
-            [
-                _csv_text(r.get("name")),
-                _csv_text(r.get("date")),
-                _csv_text(r.get("record_time")),
-                school_label,
-                _csv_text(_classification_label(r)),
-                _csv_text(_violation_label(r)),
-                _csv_text(
-                    f"Mức độ {_severity_level_key(r)}"
-                    if _severity_level_key(r) != "unknown"
-                    else "Không xác định"
-                ),
-                _csv_text(r.get("form_title") or r.get("form")),
-                _csv_text(_target_type_label_vn(r)),
-                _csv_text(", ".join(r.get("target_class_titles") or [])),
-                _csv_text(_students_line_for_record(r)),
-                _csv_text(_deduction_points_line_for_record(r)),
-                _csv_text(r.get("description")),
-            ]
-        )
-
-    # utf-8-sig giúp Excel mở tiếng Việt đúng encoding.
-    content = output.getvalue().encode("utf-8-sig")
-    return {
-        "name": f"bao-cao-ky-luat-{scope}-{report_date}.csv",
-        "contentType": "text/csv",
-        "contentBytes": base64.b64encode(content).decode("ascii"),
-    }
 
 
 def _generate_scoped_report_html(
@@ -530,9 +443,6 @@ def _send_discipline_reports_for_date(report_date: str):
         DISCIPLINE_REPORT_RECIPIENTS,
         subject=f"[WSHN] Báo cáo kỷ luật THCS ngày {report_date_display}",
         body=body_thcs,
-        attachments=[
-            _build_detail_csv_attachment("thcs", "THCS", report_date, thcs_records)
-        ],
     )
     results.append({"school": "THCS", "email": r1})
 
@@ -545,9 +455,6 @@ def _send_discipline_reports_for_date(report_date: str):
         DISCIPLINE_REPORT_RECIPIENTS,
         subject=f"[WSHN] Báo cáo kỷ luật THPT ngày {report_date_display}",
         body=body_thpt,
-        attachments=[
-            _build_detail_csv_attachment("thpt", "THPT", report_date, thpt_records)
-        ],
     )
     results.append({"school": "THPT", "email": r2})
 
