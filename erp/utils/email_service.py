@@ -10,7 +10,7 @@ import frappe
 import requests
 
 
-def send_email_via_service(to_list, subject, body, from_email=None):
+def send_email_via_service(to_list, subject, body, from_email=None, attachments=None):
     """
     Gửi email qua email service GraphQL API.
 
@@ -19,6 +19,7 @@ def send_email_via_service(to_list, subject, body, from_email=None):
         subject: tiêu đề email
         body: nội dung email HTML
         from_email: (optional) mailbox Microsoft 365 gửi đi — truyền sang GraphQL `from`
+        attachments: (optional) danh sách file đính kèm theo format EmailAttachmentInput
 
     Returns:
         dict: {"success": bool, "message": str}
@@ -47,6 +48,8 @@ def send_email_via_service(to_list, subject, body, from_email=None):
         }
         if from_email:
             variables["input"]["from"] = from_email
+        if attachments:
+            variables["input"]["attachments"] = attachments
 
         payload = {"query": graphql_query, "variables": variables}
 

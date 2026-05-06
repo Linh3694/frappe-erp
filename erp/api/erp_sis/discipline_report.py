@@ -6,6 +6,9 @@ Báo cáo kỷ luật gửi email hàng ngày (scheduler + gọi thủ công).
 Logic phân THCS/THPT khớp DisciplineDashboard (parse khối từ tên lớp).
 """
 
+import base64
+import csv
+import io
 import re
 from collections import defaultdict
 from datetime import datetime
@@ -93,6 +96,26 @@ def _violation_label(record: dict) -> str:
     )
 
 
+def _severity_level_key(record: dict) -> str:
+    raw = str(record.get("severity_level") or "").strip()
+    if raw in {"1", "2", "3"}:
+        return raw
+    m = re.search(r"([123])", raw)
+    if m:
+        return m.group(1)
+    return "unknown"
+
+
+def _aggregate_severity_counts(records: list):
+    counts = {"1": 0, "2": 0, "3": 0, "unknown": 0}
+    for r in records:
+        counts[_severity_level_key(r)] += 1
+    rows = [(f"Mức độ {level}", counts[level]) for level in ("1", "2", "3")]
+    if counts["unknown"]:
+        rows.append(("Không xác định", counts["unknown"]))
+    return rows
+
+
 def _records_for_school_scope(records: list, scope: str) -> list:
     """scope: 'thcs' | 'thpt' — chỉ bản ghi thuộc cấp đó."""
     if scope == "thcs":
@@ -137,31 +160,20 @@ def _aggregate_counts(records: list, label_fn):
     return sorted(acc.items(), key=lambda x: (-x[1], x[0]))
 
 
-def _html_table_two_columns(title: str, rows, col2_header: str) -> str:
+def _html_count_list(title: str, rows) -> str:
     if not rows:
         return f"""
-        <h3 style="color: #37474f; margin: 24px 0 8px 0;">{escape_html(title)}</h3>
-        <p style="color: #757575; font-size: 14px;">Không có dữ liệu.</p>
+        <p style="margin: 18px 0 6px 0; font-weight: 700;">{escape_html(title)} :</p>
+        <p style="margin: 4px 0 0 0; color: #757575;">Không có dữ liệu.</p>
         """
-    body = ""
+    body = []
     for label, cnt in rows:
-        body += f"""
-        <tr>
-            <td style="padding: 8px 10px; border: 1px solid #e0e0e0;">{escape_html(label)}</td>
-            <td style="padding: 8px 10px; border: 1px solid #e0e0e0; text-align: center; width: 90px;">{cnt}</td>
-        </tr>
-        """
+        body.append(
+            f'<li style="margin: 5px 0;"><span>{escape_html(label)}</span>: <strong>{cnt}</strong></li>'
+        )
     return f"""
-    <h3 style="color: #37474f; margin: 24px 0 8px 0;">{escape_html(title)}</h3>
-    <table style="width: 100%; border-collapse: collapse; margin: 0 0 8px 0; font-size: 14px;">
-        <thead>
-            <tr style="background: #eceff1;">
-                <th style="padding: 10px; border: 1px solid #cfd8dc; text-align: left;">Tên</th>
-                <th style="padding: 10px; border: 1px solid #cfd8dc; text-align: center;">{escape_html(col2_header)}</th>
-            </tr>
-        </thead>
-        <tbody>{body}</tbody>
-    </table>
+    <p style="margin: 18px 0 6px 0; font-weight: 700;">{escape_html(title)} :</p>
+    <ul style="margin: 0 0 0 18px; padding: 0;">{''.join(body)}</ul>
     """
 
 
@@ -211,80 +223,148 @@ def _html_detail_records_table(records: list, limit: int = 25) -> str:
     """
 
 
+def _csv_text(value) -> str:
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _students_line_for_record(record: dict) -> str:
+    students = record.get("target_students") or []
+    if students:
+        lines = []
+        for st in students:
+            name = st.get("student_name") or st.get("student_id") or ""
+            code = st.get("student_code") or ""
+            class_title = st.get("student_class_title") or ""
+            main = f"{name} ({code})" if code else name
+            lines.append(" - ".join(x for x in [class_title, main] if x))
+        return "; ".join(lines)
+    if record.get("student_name"):
+        return " - ".join(
+            x
+            for x in [
+                record.get("student_class_title") or "",
+                record.get("student_name") or "",
+                record.get("student_code") or "",
+            ]
+            if x
+        )
+    return ""
+
+
+def _deduction_points_line_for_record(record: dict) -> str:
+    points = []
+    for row in record.get("target_student_entry_rows") or []:
+        if row.get("student_id"):
+            points.append(f"{row.get('student_id')}: {row.get('deduction_points') or ''}")
+    for row in record.get("target_class_entries") or []:
+        if row.get("class_id"):
+            points.append(f"{row.get('class_id')}: {row.get('deduction_points') or ''}")
+    return "; ".join(points)
+
+
+def _build_detail_csv_attachment(scope: str, school_label: str, report_date: str, records: list):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "Ma ban ghi",
+            "Ngay",
+            "Thoi gian",
+            "Truong",
+            "Phan loai",
+            "Vi pham",
+            "Muc do",
+            "Hinh thuc",
+            "Doi tuong",
+            "Lop",
+            "Hoc sinh",
+            "Diem tru",
+            "Mo ta",
+        ]
+    )
+    for r in records:
+        writer.writerow(
+            [
+                _csv_text(r.get("name")),
+                _csv_text(r.get("date")),
+                _csv_text(r.get("record_time")),
+                school_label,
+                _csv_text(_classification_label(r)),
+                _csv_text(_violation_label(r)),
+                _csv_text(
+                    f"Mức độ {_severity_level_key(r)}"
+                    if _severity_level_key(r) != "unknown"
+                    else "Không xác định"
+                ),
+                _csv_text(r.get("form_title") or r.get("form")),
+                _csv_text(_target_type_label_vn(r)),
+                _csv_text(", ".join(r.get("target_class_titles") or [])),
+                _csv_text(_students_line_for_record(r)),
+                _csv_text(_deduction_points_line_for_record(r)),
+                _csv_text(r.get("description")),
+            ]
+        )
+
+    # utf-8-sig giúp Excel mở tiếng Việt đúng encoding.
+    content = output.getvalue().encode("utf-8-sig")
+    return {
+        "name": f"bao-cao-ky-luat-{scope}-{report_date}.csv",
+        "contentType": "text/csv",
+        "contentBytes": base64.b64encode(content).decode("ascii"),
+    }
+
+
 def _generate_scoped_report_html(
     scope: str,
-    school_title_vn: str,
     report_date_display: str,
     scoped_records: list,
 ):
-    """
-    Email chỉ dành cho một cấp (THCS hoặc THPT): không lẫn cột/khái niệm cấp kia.
-    """
-    now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
+    """Email chỉ dành cho một cấp (THCS hoặc THPT): không lẫn dữ liệu cấp kia."""
     n = len(scoped_records)
 
-    # Sắp bản ghi chi tiết: theo giờ ghi / modified
-    def _sort_key(r):
-        return (r.get("record_time") or "", r.get("modified") or "")
-
-    detail_list = sorted(scoped_records, key=_sort_key, reverse=True)
-
-    by_class = _aggregate_counts(scoped_records, _classification_label)
-    by_violation = _aggregate_counts(scoped_records, _violation_label)
-    by_target = _aggregate_counts(scoped_records, _target_type_label_vn)
-    by_campus = _aggregate_counts(
-        scoped_records,
-        lambda r: (r.get("campus") or "").strip() or "Không gán cơ sở",
-    )
-
+    by_classification = _aggregate_counts(scoped_records, _classification_label)
+    by_severity = _aggregate_severity_counts(scoped_records)
     accent = "#1565c0" if scope == "thcs" else "#6a1b9a"
-
     dashboard_url = escape_html(DISCIPLINE_DASHBOARD_URL)
+    school_short = "THCS" if scope == "thcs" else "THPT"
 
     parts = f"""
-    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 820px; margin: 0 auto; color: #212121;">
-        <h1 style="color: {accent}; text-align: center; border-bottom: 3px solid {accent}; padding-bottom: 12px; margin-bottom: 8px;">
-            Báo cáo kỷ luật — {escape_html(school_title_vn)}
-        </h1>
-        <p style="text-align: center; color: #546e7a; margin: 0 0 20px 0;">Ngày {escape_html(report_date_display)}</p>
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 820px; margin: 0 auto; color: #212121; line-height: 1.55;">
+        <p style="margin: 0 0 12px 0;">Kính gửi Ban Giám hiệu và các Thầy/Cô Chủ nhiệm khối {escape_html(school_short)},</p>
 
-        <div style="text-align: center; margin: 24px 0;">
-            <a href="{DISCIPLINE_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer"
-               style="display: inline-block; padding: 14px 28px; background: {accent}; color: #ffffff !important;
-                      text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px;
-                      box-shadow: 0 2px 6px rgba(0,0,0,0.12);">
-                Mở Báo cáo kỷ luật trên WIS
-            </a>
-            <p style="font-size: 12px; color: #90a4ae; margin-top: 10px;">{dashboard_url}</p>
-        </div>
+        <p style="margin: 0 0 14px 0;">
+            Ban An toàn học đường kính gửi Quý Thầy Cô thông tin tóm tắt về nề nếp, kỷ luật học sinh ngày
+            {escape_html(report_date_display)} cụ thể:
+        </p>
 
-        <div style="background: #f5f5f5; padding: 20px; border-radius: 10px; margin: 16px 0; border: 1px solid #e0e0e0;">
-            <h2 style="color: #263238; margin: 0 0 12px 0; font-size: 18px;">Tổng quan trong ngày</h2>
-            <p style="margin: 6px 0; font-size: 15px;"><strong>Số bản ghi thuộc {escape_html(school_title_vn)}:</strong> {n}</p>
+        <p style="margin: 0 0 12px 0; font-weight: 700;">Chi tiết Học sinh vi phạm đính kèm trong email này:</p>
+
+        <div style="background: #f7fbff; border-left: 4px solid {accent}; padding: 14px 16px; margin: 12px 0 16px 0;">
+            <p style="margin: 4px 0;"><strong>Thời gian :</strong> {escape_html(report_date_display)}</p>
+            <p style="margin: 4px 0;"><strong>Trường :</strong> {escape_html(school_short)}</p>
+            <p style="margin: 4px 0;"><strong>Tổng số ca vi phạm :</strong> {n}</p>
         </div>
     """
 
-    if n > 0:
-        parts += _html_table_two_columns(
-            "Theo phân loại kỷ luật", by_class, "Số bản ghi"
-        )
-        parts += _html_table_two_columns(
-            "Theo loại vi phạm", by_violation, "Số bản ghi"
-        )
-        parts += _html_table_two_columns(
-            "Theo đối tượng ghi nhận", by_target, "Số bản ghi"
-        )
-        parts += _html_table_two_columns(
-            "Theo cơ sở (campus)", by_campus, "Số bản ghi"
-        )
-        parts += _html_detail_records_table(detail_list)
-
+    parts += _html_count_list("Loại Vi phạm", by_classification)
+    parts += _html_count_list("Mức độ vi phạm", by_severity)
     parts += f"""
-        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 28px 0;">
-        <div style="text-align: center; color: #78909c; font-size: 13px;">
-            <p style="margin: 4px 0;"><strong>Hệ thống quản lý trường học</strong> — Wellspring</p>
-            <p style="margin: 4px 0;">Thời gian tạo email: {now_str}</p>
-        </div>
+        <p style="margin: 18px 0 10px 0;">
+            Đồng thời Ban An toàn học đường gửi Ban Giám hiệu và Quý Thầy Cô file theo dõi vi phạm và điểm thi đua lớp
+            hàng tháng để tiện theo dõi và có hướng hỗ trợ cho học sinh vi phạm.
+        </p>
+
+        <p style="margin: 0 0 16px 0;">
+            <a href="{DISCIPLINE_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer"
+               style="color: {accent}; font-weight: 700; text-decoration: underline;">{dashboard_url}</a>
+        </p>
+
+        <p style="margin: 0 0 14px 0;">
+            Rất mong Quý Thầy Cô hỗ trợ theo dõi, kịp thời nhắc nhở học sinh trong tiết sinh hoạt đầu giờ và phối hợp
+            chặt chẽ với Phụ huynh để cùng Ban An toàn học đường cải thiện nề nếp – kỷ luật của học sinh.
+        </p>
+
+        <p style="margin: 0 0 12px 0;">Trân trọng cảm ơn Quý Thầy Cô</p>
     </div>
     """
     return parts
@@ -419,7 +499,6 @@ def _send_discipline_reports_for_date(report_date: str):
 
     body_thcs = _generate_scoped_report_html(
         "thcs",
-        "Trường THCS (Trung học cơ sở)",
         report_date_display,
         thcs_records,
     )
@@ -427,12 +506,14 @@ def _send_discipline_reports_for_date(report_date: str):
         DISCIPLINE_REPORT_RECIPIENTS,
         subject=f"[WSHN] Báo cáo kỷ luật THCS ngày {report_date_display}",
         body=body_thcs,
+        attachments=[
+            _build_detail_csv_attachment("thcs", "THCS", report_date, thcs_records)
+        ],
     )
     results.append({"school": "THCS", "email": r1})
 
     body_thpt = _generate_scoped_report_html(
         "thpt",
-        "Trường THPT (Trung học phổ thông)",
         report_date_display,
         thpt_records,
     )
@@ -440,6 +521,9 @@ def _send_discipline_reports_for_date(report_date: str):
         DISCIPLINE_REPORT_RECIPIENTS,
         subject=f"[WSHN] Báo cáo kỷ luật THPT ngày {report_date_display}",
         body=body_thpt,
+        attachments=[
+            _build_detail_csv_attachment("thpt", "THPT", report_date, thpt_records)
+        ],
     )
     results.append({"school": "THPT", "email": r2})
 
