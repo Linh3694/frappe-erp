@@ -19,7 +19,7 @@ from erp.api.utils import format_vietnamese_name
 # Emoji names mapping (Vietnamese)
 EMOJI_NAMES = {
     'like': 'Thích',
-    'love': 'Yêu thích', 
+    'love': 'Yêu thích',
     'haha': 'Haha',
     'wow': 'Wow',
     'sad': 'Buồn',
@@ -27,22 +27,49 @@ EMOJI_NAMES = {
 }
 
 
+def _wislife_extra_fields(event_data):
+    """
+    Wave 3: Truyền classId / studentId từ social-service → payload push + ERP Notification (deep link mobile).
+    """
+    if not event_data:
+        return {}
+    out = {}
+    cid = event_data.get("classId") or event_data.get("class_id")
+    if cid:
+        s = str(cid).strip()
+        if s:
+            out["classId"] = s
+            out["class_id"] = s
+    sid = event_data.get("studentId") or event_data.get("student_id")
+    if sid:
+        s = str(sid).strip()
+        if s:
+            out["studentId"] = s
+            out["student_id"] = s
+    # Danh sách học sinh (lớp) từ social-service — app có thể dùng để chọn con khi deep link
+    pids = event_data.get("participantStudentIds") or event_data.get("participant_student_ids")
+    if isinstance(pids, (list, tuple)) and pids:
+        cleaned = [str(x).strip() for x in pids if x and str(x).strip()]
+        if cleaned:
+            out["participantStudentIds"] = cleaned
+    return out
+
+
 @frappe.whitelist(allow_guest=True, methods=['POST'])
 def handle_wislife_event():
     """
-    Handle Wislife events từ social-service
+    Wave 3: Webhook từ social-service — chỉ validate + enqueue RQ short, tránh block HTTP worker.
     Endpoint: /api/method/erp.api.notification.wislife.handle_wislife_event
     """
     try:
         # Validate service-to-service call via custom header
         service_name = frappe.get_request_header("X-Service-Name", "")
         request_source = frappe.get_request_header("X-Request-Source", "")
-        
+
         if service_name == "social-service" and request_source == "service-to-service":
             frappe.logger().info("📱 [Wislife Event] Valid service-to-service call from social-service")
         else:
             frappe.logger().warning(f"📱 [Wislife Event] Request from unknown source: service={service_name}, source={request_source}")
-            # Still allow for backward compatibility but log warning
 
         # Get request data
         if frappe.request.method != 'POST':
@@ -60,9 +87,34 @@ def handle_wislife_event():
         if not event_type:
             frappe.throw(_("Missing event_type"), frappe.ValidationError)
 
-        # Route to appropriate handler
+        try:
+            frappe.enqueue(
+                "erp.api.notification.wislife._handle_wislife_event_async",
+                queue="short",
+                timeout=180,
+                event_type=event_type,
+                event_data=event_data,
+            )
+            frappe.logger().info(f"📱 [Wislife Event] Enqueued {event_type}")
+            return {"success": True, "message": f"Queued {event_type} for async processing", "queued": True}
+        except Exception as enqueue_err:
+            frappe.logger().error(f"❌ [Wislife Event] Enqueue failed, sync fallback: {str(enqueue_err)}")
+            _handle_wislife_event_async(event_type, event_data)
+            return {"success": True, "message": f"Processed {event_type} sync (fallback)", "queued": False}
+
+    except Exception as e:
+        frappe.logger().error(f"❌ [Wislife Event] Error processing API event: {str(e)}")
+        frappe.log_error(message=str(e), title="Wislife Event Processing Error")
+        return {"success": False, "message": str(e)}
+
+
+def _handle_wislife_event_async(event_type, event_data):
+    """Wave 3: Dispatch Wislife trong RQ worker."""
+    try:
         if event_type == 'new_post_broadcast':
             handle_new_post_broadcast(event_data)
+        elif event_type == 'post_tagged':
+            handle_post_tagged(event_data)
         elif event_type == 'post_reacted':
             handle_post_reacted(event_data)
         elif event_type == 'post_commented':
@@ -74,15 +126,10 @@ def handle_wislife_event():
         elif event_type == 'post_mention':
             handle_post_mention(event_data)
         else:
-            frappe.logger().warning(f"⚠️ [Wislife Event] Unknown event type: {event_type}")
-            return {"success": False, "message": f"Unknown event type: {event_type}"}
-
-        return {"success": True, "message": f"Processed {event_type} event via API"}
-
+            frappe.logger().warning(f"⚠️ [Wislife Event Async] Unknown event type: {event_type}")
     except Exception as e:
-        frappe.logger().error(f"❌ [Wislife Event] Error processing API event: {str(e)}")
-        frappe.log_error(message=str(e), title="Wislife Event Processing Error")
-        return {"success": False, "message": str(e)}
+        frappe.logger().error(f"❌ [Wislife Event Async] {event_type}: {str(e)}")
+        frappe.log_error(message=str(e), title=f"Wislife Event Async Error - {event_type}")
 
 
 # Note: Social-service giờ gửi email trực tiếp, không cần map từ MongoDB ObjectId nữa
@@ -150,6 +197,7 @@ def _do_broadcast_new_post(event_data):
             'postId': post_id,
             'action': 'open_post',
         }
+        notification_data.update(_wislife_extra_fields(event_data))
 
         # Wave 2 - F.4: Gửi Expo BATCH 1 lần (max 100 messages/POST) cho toàn bộ users
         # Trước: N POST × 5s với N=2000 = 10000s. Sau: 20 POST × 5s = 100s tối đa.
@@ -183,6 +231,7 @@ def _do_broadcast_new_post(event_data):
                         'postId': post_id,
                         'action': 'open_post',
                         'actorName': author_name,
+                        **_wislife_extra_fields(event_data),
                     },
                     channel="push",
                     event_timestamp=frappe.utils.now(),
@@ -196,6 +245,58 @@ def _do_broadcast_new_post(event_data):
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife Broadcast Job] Error: {str(e)}")
         frappe.log_error(message=str(e), title="Wislife Broadcast Job Error")
+
+
+def handle_post_tagged(event_data):
+    """
+    Wave 3: Có người tag user trong bài — social-service gửi recipientEmails.
+    """
+    try:
+        recipient_emails = event_data.get('recipientEmails') or []
+        if not isinstance(recipient_emails, list):
+            recipient_emails = []
+        recipient_emails = [e for e in recipient_emails if e]
+        if not recipient_emails:
+            frappe.logger().warning("⚠️ [Wislife Post Tagged] No recipientEmails")
+            return
+
+        post_id = event_data.get('postId')
+        author_name = format_vietnamese_name(event_data.get('authorName', 'Ai đó'))
+        notification_message = f'{author_name} đã tag bạn trong một bài viết'
+        extra = _wislife_extra_fields(event_data)
+        push_data = {
+            'type': 'wislife_post_tagged',
+            'postId': post_id,
+            'action': 'open_post',
+            **extra,
+        }
+        targets = [{"email": e, "data": push_data} for e in recipient_emails]
+        try:
+            bulk_result = send_mobile_notifications_bulk(targets, 'Wislife', notification_message)
+            frappe.logger().info(
+                f"✅ [Wislife Post Tagged] Bulk Expo: {bulk_result.get('success_count', 0)}/"
+                f"{bulk_result.get('total_messages', 0)}"
+            )
+        except Exception as bulk_err:
+            frappe.logger().error(f"❌ [Wislife Post Tagged] Bulk failed: {bulk_err}")
+
+        for recipient_email in recipient_emails:
+            try:
+                create_notification(
+                    title="Wislife",
+                    message=notification_message,
+                    recipient_user=recipient_email,
+                    notification_type="system",
+                    priority="normal",
+                    data={**push_data, 'actorName': author_name},
+                    channel="push",
+                    event_timestamp=frappe.utils.now(),
+                )
+            except Exception as db_error:
+                frappe.logger().error(f"❌ [Wislife Post Tagged] DB {recipient_email}: {str(db_error)}")
+    except Exception as e:
+        frappe.logger().error(f"❌ [Wislife Post Tagged] Error: {str(e)}")
+        frappe.log_error(message=str(e), title="Wislife Post Tagged Error")
 
 
 def handle_post_reacted(event_data):
@@ -215,26 +316,30 @@ def handle_post_reacted(event_data):
         raw_name = event_data.get('userName', 'Ai đó')
         user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
+        extra = _wislife_extra_fields(event_data)
         
         # Message đơn giản, không cần chi tiết emoji
         notification_message = f'{user_name} đã bày tỏ cảm xúc về bài viết của bạn'
-        
-        # Gửi push notification
-        result = send_mobile_notification(
-            user_email=recipient_email,
-            title='Wislife',
-            body=notification_message,
-            data={
-                'type': 'wislife_post_reaction',
-                'postId': post_id,
-                'action': 'open_post'
-            }
-        )
-        
-        if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Post React] Push notification sent to {recipient_email}")
-        else:
-            frappe.logger().warning(f"⚠️ [Wislife Post React] Push notification failed: {result.get('message')}")
+        push_data = {
+            'type': 'wislife_post_reaction',
+            'postId': post_id,
+            'action': 'open_post',
+            **extra,
+        }
+
+        # Wave 3: gửi Expo qua bulk (đồng bộ pattern Wave 2)
+        try:
+            result = send_mobile_notifications_bulk(
+                [{"email": recipient_email, "data": push_data}],
+                'Wislife',
+                notification_message,
+            )
+            if result.get("success"):
+                frappe.logger().info(f"✅ [Wislife Post React] Push sent to {recipient_email}")
+            else:
+                frappe.logger().warning(f"⚠️ [Wislife Post React] Push may have failed: {result.get('message')}")
+        except Exception as push_err:
+            frappe.logger().error(f"❌ [Wislife Post React] Bulk push error: {str(push_err)}")
         
         # Lưu vào Notification Center để frontend có thể query và hiển thị
         try:
@@ -249,7 +354,8 @@ def handle_post_reacted(event_data):
                     'postId': post_id,
                     'action': 'open_post',
                     'actorName': user_name,
-                    'reactionType': event_data.get('reactionType')
+                    'reactionType': event_data.get('reactionType'),
+                    **extra,
                 },
                 channel="push",
                 event_timestamp=frappe.utils.now()
@@ -280,25 +386,28 @@ def handle_post_commented(event_data):
         raw_name = event_data.get('userName', 'Ai đó')
         user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
+        extra = _wislife_extra_fields(event_data)
         
         notification_message = f'{user_name} đã bình luận bài viết của bạn'
-        
-        # Gửi push notification
-        result = send_mobile_notification(
-            user_email=recipient_email,
-            title='Wislife',
-            body=notification_message,
-            data={
-                'type': 'wislife_post_comment',
-                'postId': post_id,
-                'action': 'open_post'
-            }
-        )
-        
-        if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Post Comment] Push notification sent to {recipient_email}")
-        else:
-            frappe.logger().warning(f"⚠️ [Wislife Post Comment] Push notification failed: {result.get('message')}")
+        push_data = {
+            'type': 'wislife_post_comment',
+            'postId': post_id,
+            'action': 'open_post',
+            **extra,
+        }
+
+        try:
+            result = send_mobile_notifications_bulk(
+                [{"email": recipient_email, "data": push_data}],
+                'Wislife',
+                notification_message,
+            )
+            if result.get("success"):
+                frappe.logger().info(f"✅ [Wislife Post Comment] Push sent to {recipient_email}")
+            else:
+                frappe.logger().warning(f"⚠️ [Wislife Post Comment] Push may have failed: {result.get('message')}")
+        except Exception as push_err:
+            frappe.logger().error(f"❌ [Wislife Post Comment] Bulk push error: {str(push_err)}")
         
         # Lưu vào Notification Center
         try:
@@ -312,7 +421,8 @@ def handle_post_commented(event_data):
                     'type': 'wislife_post_comment',
                     'postId': post_id,
                     'action': 'open_post',
-                    'actorName': user_name
+                    'actorName': user_name,
+                    **extra,
                 },
                 channel="push",
                 event_timestamp=frappe.utils.now()
@@ -344,26 +454,29 @@ def handle_comment_replied(event_data):
         user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
+        extra = _wislife_extra_fields(event_data)
         
         notification_message = f'{user_name} đã trả lời bình luận của bạn'
-        
-        # Gửi push notification
-        result = send_mobile_notification(
-            user_email=recipient_email,
-            title='Wislife',
-            body=notification_message,
-            data={
-                'type': 'wislife_comment_reply',
-                'postId': post_id,
-                'commentId': comment_id,
-                'action': 'open_post'
-            }
-        )
-        
-        if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Comment Reply] Push notification sent to {recipient_email}")
-        else:
-            frappe.logger().warning(f"⚠️ [Wislife Comment Reply] Push notification failed: {result.get('message')}")
+        push_data = {
+            'type': 'wislife_comment_reply',
+            'postId': post_id,
+            'commentId': comment_id,
+            'action': 'open_post',
+            **extra,
+        }
+
+        try:
+            result = send_mobile_notifications_bulk(
+                [{"email": recipient_email, "data": push_data}],
+                'Wislife',
+                notification_message,
+            )
+            if result.get("success"):
+                frappe.logger().info(f"✅ [Wislife Comment Reply] Push sent to {recipient_email}")
+            else:
+                frappe.logger().warning(f"⚠️ [Wislife Comment Reply] Push may have failed: {result.get('message')}")
+        except Exception as push_err:
+            frappe.logger().error(f"❌ [Wislife Comment Reply] Bulk push error: {str(push_err)}")
         
         # Lưu vào Notification Center
         try:
@@ -378,7 +491,8 @@ def handle_comment_replied(event_data):
                     'postId': post_id,
                     'commentId': comment_id,
                     'action': 'open_post',
-                    'actorName': user_name
+                    'actorName': user_name,
+                    **extra,
                 },
                 channel="push",
                 event_timestamp=frappe.utils.now()
@@ -410,27 +524,30 @@ def handle_comment_reacted(event_data):
         user_name = format_vietnamese_name(raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
+        extra = _wislife_extra_fields(event_data)
         
         # Message đơn giản
         notification_message = f'{user_name} đã bày tỏ cảm xúc về bình luận của bạn'
-        
-        # Gửi push notification
-        result = send_mobile_notification(
-            user_email=recipient_email,
-            title='Wislife',
-            body=notification_message,
-            data={
-                'type': 'wislife_comment_reaction',
-                'postId': post_id,
-                'commentId': comment_id,
-                'action': 'open_post'
-            }
-        )
-        
-        if result.get("success"):
-            frappe.logger().info(f"✅ [Wislife Comment React] Push notification sent to {recipient_email}")
-        else:
-            frappe.logger().warning(f"⚠️ [Wislife Comment React] Push notification failed: {result.get('message')}")
+        push_data = {
+            'type': 'wislife_comment_reaction',
+            'postId': post_id,
+            'commentId': comment_id,
+            'action': 'open_post',
+            **extra,
+        }
+
+        try:
+            result = send_mobile_notifications_bulk(
+                [{"email": recipient_email, "data": push_data}],
+                'Wislife',
+                notification_message,
+            )
+            if result.get("success"):
+                frappe.logger().info(f"✅ [Wislife Comment React] Push sent to {recipient_email}")
+            else:
+                frappe.logger().warning(f"⚠️ [Wislife Comment React] Push may have failed: {result.get('message')}")
+        except Exception as push_err:
+            frappe.logger().error(f"❌ [Wislife Comment React] Bulk push error: {str(push_err)}")
         
         # Lưu vào Notification Center
         try:
@@ -446,7 +563,8 @@ def handle_comment_reacted(event_data):
                     'commentId': comment_id,
                     'action': 'open_post',
                     'actorName': user_name,
-                    'reactionType': event_data.get('reactionType')
+                    'reactionType': event_data.get('reactionType'),
+                    **extra,
                 },
                 channel="push",
                 event_timestamp=frappe.utils.now()
@@ -492,11 +610,14 @@ def _do_handle_post_mention(event_data):
         comment_id = event_data.get('commentId')
 
         notification_message = f'{user_name} đã nhắc đến bạn trong một bình luận'
+        # Wave 3: classId / studentId cho deep link mobile
+        extra = _wislife_extra_fields(event_data)
         notification_data = {
             'type': 'wislife_mention',
             'postId': post_id,
             'commentId': comment_id,
             'action': 'open_post',
+            **extra,
         }
         center_data = {
             **notification_data,

@@ -9,6 +9,25 @@ import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
 
+# Bundle đăng ký push — tiêu đề Wislife/journal theo app (yêu cầu UX)
+BUNDLE_PARENT_PORTAL = "com.hailinh.n23.parentportalmobile"
+BUNDLE_WORKSPACE_IDS = frozenset(
+    {
+        "com.wellspring.workspace",
+        "com.hailinh.n23.workspace",  # Android workspace (nếu gửi package thay vì iOS id)
+    }
+)
+
+
+def _wislife_push_title_for_bundle(bundle_id, fallback_title):
+    """Tiêu đề noti Nhật ký: Parent Portal vs workspace-mobile."""
+    bid = (bundle_id or "").strip().lower()
+    if bid == BUNDLE_PARENT_PORTAL.lower():
+        return "WISer's Diaries"
+    if bid in BUNDLE_WORKSPACE_IDS:
+        return "Hoạt động"
+    return fallback_title
+
 
 # ===== MOBILE NOTIFICATION SERVICE =====
 
@@ -622,7 +641,7 @@ def send_mobile_notification(user_email, title, body, data=None):
                 "user": user_email,
                 "is_active": 1
             },
-            fields=["device_token", "platform", "app_type", "device_id"]
+            fields=["device_token", "platform", "app_type", "device_id", "bundle_id"]
         )
 
         if not tokens:
@@ -658,7 +677,17 @@ def _build_expo_message(token_doc, title, body, data):
     Build 1 Expo message payload cho 1 device token.
     Tách ra để tái dùng trong send_mobile_notification và send_mobile_notifications_bulk.
     """
+    bundle_id = (
+        token_doc.get("bundle_id")
+        if isinstance(token_doc, dict)
+        else getattr(token_doc, "bundle_id", None)
+    )
     notification_type = data.get("type") if data else None
+    # Wislife / journal: tiêu đề theo app (Parent Portal vs workspace-mobile)
+    nt_str = str(notification_type or "")
+    if nt_str == "journal" or nt_str.startswith("wislife_"):
+        title = _wislife_push_title_for_bundle(bundle_id, title)
+
     action = data.get("action") if data else None
     
     if notification_type == "attendance":
@@ -685,6 +714,16 @@ def _build_expo_message(token_doc, title, body, data):
         sound_name = "default"
     elif notification_type and str(notification_type).startswith("crm_issue"):
         channel_id = "crm_issue"
+        sound_name = "default"
+    # Wave 3: kênh Trao đổi chat + Nhật ký (Wislife) trên Android
+    elif notification_type in ("chat", "chat_message", "chat_message_reaction", "chat_message_recalled"):
+        channel_id = "chat"
+        sound_name = "default"
+    elif notification_type and (
+        str(notification_type) == "journal"
+        or str(notification_type).startswith("wislife_")
+    ):
+        channel_id = "journal"
         sound_name = "default"
     else:
         channel_id = "default"
@@ -863,7 +902,7 @@ def send_mobile_notifications_bulk(targets, title, body):
         all_tokens = frappe.get_all(
             "Mobile Device Token",
             filters={"user": ["in", emails], "is_active": 1},
-            fields=["device_token", "platform", "user"],
+            fields=["device_token", "platform", "user", "bundle_id"],
         )
         
         if not all_tokens:
