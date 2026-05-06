@@ -37,6 +37,40 @@ def _student_code_from_debit_bulk_filename(file_name: str) -> str:
     return base
 
 
+def _remove_existing_debit_notes(order_student_id, logs):
+    """
+    Xóa mọi bản ghi debit_note và file đính kèm cũ của học sinh trong đơn.
+    Upload debit note mới sẽ đè lên — receipt/invoice không dùng hàm này.
+    """
+    existing = frappe.get_all(
+        "SIS Finance Student Document",
+        filters={"order_student_id": order_student_id, "document_type": "debit_note"},
+        fields=["name", "file_url"],
+    )
+    removed = 0
+    for row in existing:
+        file_url = row.get("file_url")
+        try:
+            frappe.delete_doc("SIS Finance Student Document", row.name, ignore_permissions=True)
+            removed += 1
+        except Exception as e:
+            logs.append(f"Không xóa được tài liệu {row.name}: {str(e)}")
+            continue
+        if file_url:
+            try:
+                file_doc = frappe.get_doc("File", {"file_url": file_url})
+                if file_doc:
+                    frappe.delete_doc("File", file_doc.name, ignore_permissions=True)
+                    logs.append(f"Đã xóa file debit note cũ: {file_url}")
+            except Exception as file_error:
+                logs.append(f"Không xóa được File cho {file_url}: {str(file_error)}")
+    if removed:
+        logs.append(
+            f"Đã gỡ {removed} debit note cũ trước khi upload mới (order_student_id={order_student_id})"
+        )
+    return removed
+
+
 @frappe.whitelist()
 def upload_student_document():
     """
@@ -85,7 +119,11 @@ def upload_student_document():
         file_name = uploaded_file.filename
         
         logs.append(f"Uploading file: {file_name} for student: {order_student_id}")
-        
+
+        # Mỗi học sinh chỉ giữ tối đa 1 debit note; bản mới đè bản cũ
+        if document_type == "debit_note":
+            _remove_existing_debit_notes(order_student_id, logs)
+
         # Lưu file vào Frappe File Manager (public để có thể xem trực tiếp)
         file_doc = frappe.get_doc({
             "doctype": "File",
@@ -333,7 +371,10 @@ def bulk_upload_debit_notes():
             
             try:
                 order_student_id = student.name
-                
+
+                # Đè debit note cũ (cùng học sinh) trước khi lưu file bulk mới
+                _remove_existing_debit_notes(order_student_id, logs)
+
                 file_doc = frappe.get_doc({
                     "doctype": "File",
                     "file_name": file_name,
