@@ -16,7 +16,6 @@ from datetime import datetime
 import frappe
 from frappe.utils import escape_html
 
-from erp.api.erp_sis.attendance import is_production_server
 from erp.api.erp_sis.discipline import (
     _enrich_discipline_records_list,
     _get_request_data,
@@ -541,15 +540,9 @@ def _send_discipline_reports_for_date(report_date: str):
 
 def daily_discipline_email_report():
     """
-    Scheduler: 17h hàng ngày. Giai đoạn test — không gửi khi is_production = true.
+    Scheduler: 17h hàng ngày.
     """
     try:
-        if is_production_server():
-            frappe.logger().info(
-                "⏭️ Bỏ qua daily_discipline_email_report — server production (chờ bật sau khi hoàn thiện)"
-            )
-            return {"success": True, "skipped": True, "reason": "production"}
-
         report_date = frappe.utils.nowdate()
         frappe.logger().info(f"📧 daily_discipline_email_report — ngày {report_date}")
         return _send_discipline_reports_for_date(report_date)
@@ -583,22 +576,12 @@ def _coerce_date_string(date_val, req):
 @frappe.whitelist(allow_guest=False)
 def send_discipline_daily_report(date=None):
     """
-    Gọi thủ công qua API để test (cùng điều kiện production: không gửi trên production).
+    Gọi thủ công qua API để gửi/test báo cáo theo ngày.
     Params: date (YYYY-MM-DD), mặc định hôm nay.
 
     POST /api/method/erp.api.erp_sis.discipline_report.send_discipline_daily_report
     """
     try:
-        if is_production_server():
-            frappe.logger().info(
-                "⏭️ Bỏ qua send_discipline_daily_report — server production"
-            )
-            return {
-                "success": True,
-                "skipped": True,
-                "reason": "production",
-            }
-
         req = _get_request_data()
         report_date = _coerce_date_string(date, req)
 
