@@ -26,7 +26,7 @@ from erp.utils.email_service import send_email_via_service
 # Người nhận tạm thời (giai đoạn triển khai)
 DISCIPLINE_REPORT_RECIPIENTS = [
     "linh.nguyenhai@wellspring.edu.vn",
-    # "hieu.nguyenduy@wellspring.edu.vn",
+    "hieu.nguyenduy@wellspring.edu.vn",
 ]
 
 # Link mở báo cáo tương tác trên WIS (tab Tổng quan)
@@ -176,44 +176,63 @@ def _html_count_list(title: str, rows) -> str:
     """
 
 
-def _html_detail_records_table(records: list, limit: int = 25) -> str:
-    """Bảng bản ghi chi tiết (giới hạn số dòng)."""
+def _class_line_for_record(record: dict) -> str:
+    titles = [t for t in record.get("target_class_titles") or [] if t]
+    if titles:
+        return ", ".join(titles)
+    if record.get("student_class_title"):
+        return record.get("student_class_title")
+    students = record.get("target_students") or []
+    class_titles = []
+    for st in students:
+        title = st.get("student_class_title")
+        if title and title not in class_titles:
+            class_titles.append(title)
+    return ", ".join(class_titles) if class_titles else "-"
+
+
+def _html_detail_records_table(records: list, limit: int = 50) -> str:
+    """Bảng chi tiết giúp BGH/GVCN thấy rõ lớp nào phát sinh vi phạm trong ngày."""
     subset = records[:limit]
     if not subset:
         return ""
     rows_html = ""
     for r in subset:
-        rid = escape_html(r.get("name") or "")
         cls_viol = escape_html(_classification_label(r))
         viol = escape_html(_violation_label(r))
-        tgt = escape_html(_target_type_label_vn(r))
-        line = escape_html(_display_classes_or_student_line(r))
+        class_line = escape_html(_class_line_for_record(r))
+        student_line = escape_html(_students_line_for_record(r) or _target_type_label_vn(r))
+        severity = _severity_level_key(r)
+        severity_label = f"Mức độ {severity}" if severity != "unknown" else "Không xác định"
+        desc = escape_html(r.get("description") or "")
         rt = r.get("record_time") or ""
         time_s = escape_html(str(rt)) if rt else "—"
         rows_html += f"""
         <tr>
-            <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{rid}</td>
             <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{time_s}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{class_line}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{student_line}</td>
             <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{cls_viol}</td>
             <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{viol}</td>
-            <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{tgt}</td>
-            <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{line}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{escape_html(severity_label)}</td>
+            <td style="padding: 6px 8px; border: 1px solid #e0e0e0; font-size: 13px;">{desc}</td>
         </tr>
         """
     more = ""
     if len(records) > limit:
         more = f'<p style="color:#757575;font-size:13px;margin-top:8px;">… và {len(records) - limit} bản ghi khác (xem đầy đủ trên WIS).</p>'
     return f"""
-    <h3 style="color: #37474f; margin: 24px 0 8px 0;">Chi tiết bản ghi (tối đa {limit} dòng đầu)</h3>
+    <h3 style="color: #37474f; margin: 24px 0 8px 0;">Các vi phạm diễn ra trong ngày</h3>
     <table style="width: 100%; border-collapse: collapse; margin: 0 0 8px 0; font-size: 13px;">
         <thead>
             <tr style="background: #eceff1;">
-                <th style="padding: 8px; border: 1px solid #cfd8dc;">Mã</th>
                 <th style="padding: 8px; border: 1px solid #cfd8dc;">Giờ ghi</th>
-                <th style="padding: 8px; border: 1px solid #cfd8dc;">Phân loại</th>
+                <th style="padding: 8px; border: 1px solid #cfd8dc;">Lớp</th>
+                <th style="padding: 8px; border: 1px solid #cfd8dc;">Học sinh / đối tượng</th>
+                <th style="padding: 8px; border: 1px solid #cfd8dc;">Loại vi phạm</th>
                 <th style="padding: 8px; border: 1px solid #cfd8dc;">Vi phạm</th>
-                <th style="padding: 8px; border: 1px solid #cfd8dc;">Đối tượng</th>
-                <th style="padding: 8px; border: 1px solid #cfd8dc;">Lớp / học sinh</th>
+                <th style="padding: 8px; border: 1px solid #cfd8dc;">Mức độ</th>
+                <th style="padding: 8px; border: 1px solid #cfd8dc;">Mô tả</th>
             </tr>
         </thead>
         <tbody>{rows_html}</tbody>
@@ -326,6 +345,11 @@ def _generate_scoped_report_html(
     accent = "#1565c0" if scope == "thcs" else "#6a1b9a"
     dashboard_url = escape_html(DISCIPLINE_DASHBOARD_URL)
     school_short = "THCS" if scope == "thcs" else "THPT"
+    detail_records = sorted(
+        scoped_records,
+        key=lambda r: (r.get("record_time") or "", r.get("modified") or ""),
+        reverse=True,
+    )
 
     parts = f"""
     <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 820px; margin: 0 auto; color: #212121; line-height: 1.55;">
@@ -347,6 +371,7 @@ def _generate_scoped_report_html(
 
     parts += _html_count_list("Loại Vi phạm", by_classification)
     parts += _html_count_list("Mức độ vi phạm", by_severity)
+    parts += _html_detail_records_table(detail_records)
     parts += f"""
         <p style="margin: 18px 0 10px 0;">
             Đồng thời Ban An toàn học đường gửi Ban Giám hiệu và Quý Thầy Cô file theo dõi vi phạm và điểm thi đua lớp
