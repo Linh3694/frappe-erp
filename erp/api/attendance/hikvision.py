@@ -840,7 +840,24 @@ def process_single_attendance_event(event_data):
 		device_name = event_data.get("device_name")
 		event_type = event_data.get("event_type")
 		sub_event_type = event_data.get("sub_event_type")  # 7 = Invalid Time Period
-		
+
+		# DEDUP: HiKvision device gửi mỗi event 3 lần (cơ chế retry mặc định)
+		# Cùng employee_code + dateTime gốc → bỏ qua 2 lần sau, giảm 66% load endpoint
+		# TTL 600s đủ để cover khoảng cách giữa các retry mà không chặn event hợp lệ tiếp theo
+		# (event tiếp theo cùng employee thường cách >10 phút)
+		if employee_code and timestamp:
+			dedup_key = f"hikvision_evt:{employee_code}:{timestamp}"
+			try:
+				if frappe.cache().get_value(dedup_key):
+					logger.debug(
+						"dedup skip employee=%s timestamp=%s (device retry)",
+						employee_code, timestamp,
+					)
+					return True
+				frappe.cache().set_value(dedup_key, 1, expires_in_sec=600)
+			except Exception as dedup_err:
+				logger.warning("dedup cache error: %s", str(dedup_err))
+
 		# Parse timestamp
 		parsed_timestamp = parse_attendance_timestamp(timestamp)
 		

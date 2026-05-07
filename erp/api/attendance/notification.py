@@ -52,6 +52,32 @@ def publish_attendance_notification(
 			timestamp = frappe.utils.get_datetime(timestamp)
 			frappe.logger().info(f"📢 [Attendance Notif] Parsed timestamp: {timestamp}")
 
+		# RE-CHECK STALE EVENT khi worker pick up job
+		# Nguyên nhân: HiKvision device có thể buffer event tới 30+ phút (mất mạng / retry)
+		# rồi flush hàng loạt → lúc backend nhận được, event đã quá cũ
+		# Nếu push noti ngay sẽ làm phụ huynh nhầm tưởng con vừa check-in
+		# (vd thấy "đã đến trường lúc 07:38" lúc 08:05).
+		# Dùng cùng threshold với hikvision.py (mặc định 30 phút, có thể giảm qua site_config).
+		try:
+			from erp.api.attendance.hikvision import (
+				is_historical_attendance,
+				get_historical_attendance_threshold_minutes,
+			)
+			if timestamp and is_historical_attendance(timestamp):
+				threshold = get_historical_attendance_threshold_minutes()
+				frappe.logger().warning(
+					f"⏭️ [Attendance Notif] SKIP stale event for {employee_code} - "
+					f"event_time={timestamp} > {threshold}min ago "
+					f"(suspected device buffer/queue delay)"
+				)
+				return
+		except ImportError:
+			pass
+		except Exception as stale_err:
+			frappe.logger().error(
+				f"[Attendance Notif] historical check failed for {employee_code}: {stale_err}"
+			)
+
 		# DEBOUNCE CHECK với ATOMIC LOCK để tránh race condition
 		# Dùng Redis SETNX (set if not exists) để đảm bảo chỉ 1 request được xử lý
 		frappe.logger().info(f"🔍 [Attendance Notif] Checking debounce for {employee_code}")
