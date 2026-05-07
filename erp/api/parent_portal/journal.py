@@ -242,6 +242,26 @@ def get_class_chat_scope(class_id=None, school_year_id=None):
             if snap:
                 teachers.append(snap)
 
+        # Giáo viên bộ môn phân công vào lớp (dùng social-service / parent hiển thị avatar GV)
+        subject_rows = frappe.get_all(
+            "SIS Subject Assignment",
+            filters={"class_id": class_id},
+            fields=["teacher_id"],
+            ignore_permissions=True,
+            limit_page_length=2000,
+        )
+        homeroom_ids = {cls.get("homeroom_teacher"), cls.get("vice_homeroom_teacher")}
+        seen_subj_teacher = {t.get("teacherId") for t in teachers if t.get("teacherId")}
+        subject_teachers = []
+        for row in subject_rows:
+            tid = row.get("teacher_id")
+            if not tid or tid in homeroom_ids or tid in seen_subj_teacher:
+                continue
+            snap = _teacher_snapshot_for_chat(tid)
+            if snap:
+                subject_teachers.append(snap)
+                seen_subj_teacher.add(tid)
+
         class_year_on_doc = cls.get("school_year_id")
         is_active = (not class_year_on_doc) or (str(class_year_on_doc) == str(school_year_id))
 
@@ -255,6 +275,7 @@ def get_class_chat_scope(class_id=None, school_year_id=None):
             "students": students_out,
             "guardians": guardians,
             "teachers": teachers,
+            "subject_teachers": subject_teachers,
         }
 
         return success_response(data=scope, message="OK")
