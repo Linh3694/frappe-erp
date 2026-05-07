@@ -728,9 +728,14 @@ def _build_expo_message(token_doc, title, body, data):
     else:
         channel_id = "default"
         sound_name = "default"
-    
+
+    push_to = (
+        token_doc.get("device_token")
+        if isinstance(token_doc, dict)
+        else getattr(token_doc, "device_token", None)
+    )
     message = {
-        "to": token_doc.device_token,
+        "to": push_to,
         "title": title,
         "body": body,
         "data": data or {},
@@ -738,7 +743,11 @@ def _build_expo_message(token_doc, title, body, data):
         "channelId": channel_id,
     }
 
-    platform = getattr(token_doc, "platform", None) or token_doc.get("platform") if isinstance(token_doc, dict) else getattr(token_doc, "platform", None)
+    platform = (
+        token_doc.get("platform")
+        if isinstance(token_doc, dict)
+        else getattr(token_doc, "platform", None)
+    )
     if platform == "ios":
         message["badge"] = 1
         message["sound"] = sound_name
@@ -930,6 +939,184 @@ def send_mobile_notifications_bulk(targets, title, body):
             "failed_count": 0,
             "total_messages": 0,
         }
+
+
+# --- Broadcast: thông báo bản cập nhật app workspace-mobile (Wis) ---
+
+# Số thiết bị trở lên thì mặc định enqueue (tránh timeout HTTP / worker web).
+_WORKSPACE_UPDATE_AUTO_ENQUEUE_MIN_DEVICES = 80
+
+
+def _get_workspace_mobile_push_tokens():
+    """Token Expo đang hoạt động, bundle thuộc workspace-mobile (iOS + Android)."""
+    bundle_list = list(BUNDLE_WORKSPACE_IDS)
+    return frappe.get_all(
+        "Mobile Device Token",
+        filters={
+            "is_active": 1,
+            "bundle_id": ["in", bundle_list],
+        },
+        fields=["device_token", "platform", "user", "bundle_id", "device_id"],
+    )
+
+
+def _run_workspace_app_update_broadcast(title, body, data_json=None):
+    """
+    Thực thi gửi push (gọi từ enqueue hoặc sync).
+    data_json: JSON string để serialize an toàn qua background job.
+    """
+    data = {}
+    if data_json:
+        try:
+            data = json.loads(data_json) if isinstance(data_json, str) else data_json
+        except Exception:
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    tokens = _get_workspace_mobile_push_tokens()
+    unique_users = {t.get("user") for t in tokens if t.get("user")}
+    if not tokens:
+        frappe.logger().info("[workspace app update] Không có Mobile Device Token workspace nào.")
+        return {
+            "success": False,
+            "message": "Không có thiết bị workspace đang đăng ký push",
+            "token_count": 0,
+            "unique_users": 0,
+            "total_messages": 0,
+            "success_count": 0,
+            "failed_count": 0,
+        }
+
+    messages = [_build_expo_message(t, title, body, data) for t in tokens]
+    result = _post_expo_batch(messages)
+    result["token_count"] = len(tokens)
+    result["unique_users"] = len(unique_users)
+    frappe.logger().info(
+        f"[workspace app update] Đã gửi batch: {result.get('success_count')}/{result.get('total_messages')} — users: {len(unique_users)}"
+    )
+    return result
+
+
+@frappe.whitelist()
+def broadcast_workspace_app_update(
+    title=None,
+    body=None,
+    new_version=None,
+    store_url_ios=None,
+    store_url_android=None,
+    extra_data=None,
+    dry_run=0,
+    sync=0,
+):
+    """
+    Gửi push Expo đến **mọi thiết bị** đang đăng ký workspace-mobile (bundle trong BUNDLE_WORKSPACE_IDS).
+
+    Quyền: **System Manager** (hoặc Administrator).
+
+    Tham số:
+    - title / body: tuỳ chỉnh (mặc định tiếng Việt về bản cập nhật).
+    - new_version: ví dụ 1.5.27 — nhét vào data để app xử lý sau.
+    - store_url_ios / store_url_android: link store (tuỳ chọn).
+    - extra_data: JSON object/string, merge vào payload data.
+    - dry_run=1: chỉ đếm token/users, không gửi.
+    - sync=1: gửi ngay trong request (dev / ít máy). Mặc định sync=0: enqueue queue ``long``
+      khi số thiết bị >= {_WORKSPACE_UPDATE_AUTO_ENQUEUE_MIN_DEVICES}, ngược lại gửi sync.
+
+    API: POST ``/api/method/erp.api.erp_sis.mobile_push_notification.broadcast_workspace_app_update``
+    """
+    if frappe.session.user == "Guest":
+        return error_response("Authentication required", code="NOT_AUTHENTICATED")
+
+    if frappe.session.user != "Administrator" and "System Manager" not in frappe.get_roles():
+        return error_response("Chỉ System Manager được gọi endpoint này", code="FORBIDDEN")
+
+    # Chuẩn hoá từ form / JSON
+    if isinstance(extra_data, str) and extra_data.strip():
+        try:
+            extra_data = json.loads(extra_data)
+        except Exception:
+            extra_data = {}
+    if extra_data is None or not isinstance(extra_data, dict):
+        extra_data = {}
+
+    nv = (new_version or "").strip()
+    default_body = (
+        f"Đã có phiên bản mới ({nv}). Mở App Store / CH Play hoặc mở app để cập nhật."
+        if nv
+        else "Đã có phiên bản mới. Vui lòng cập nhật ứng dụng Wis để có trải nghiệm tốt nhất."
+    )
+    title = (title or "Ứng dụng Wis có bản cập nhật mới").strip()
+    body = (body or default_body).strip()
+
+    data = {
+        "type": "app_update",
+        "new_version": nv,
+        "timestamp": str(frappe.utils.now()),
+    }
+    if store_url_ios:
+        data["store_url_ios"] = store_url_ios.strip()
+    if store_url_android:
+        data["store_url_android"] = store_url_android.strip()
+    data.update(extra_data)
+
+    tokens = _get_workspace_mobile_push_tokens()
+    token_count = len(tokens)
+    unique_users = len({t.get("user") for t in tokens if t.get("user")})
+
+    if frappe.utils.cint(dry_run):
+        return success_response(
+            {
+                "dry_run": True,
+                "token_count": token_count,
+                "unique_users": unique_users,
+                "title": title,
+                "body": body,
+                "data": data,
+            },
+            "Dry run — chưa gửi push",
+        )
+
+    if not tokens:
+        return success_response(
+            {
+                "success": False,
+                "message": "Không có thiết bị workspace đăng ký push",
+                "token_count": 0,
+                "unique_users": 0,
+            },
+            "Không có token",
+        )
+
+    data_json = json.dumps(data)
+    force_sync = frappe.utils.cint(sync) == 1
+    use_enqueue = (not force_sync) and token_count >= _WORKSPACE_UPDATE_AUTO_ENQUEUE_MIN_DEVICES
+
+    if use_enqueue:
+        frappe.enqueue(
+            "erp.api.erp_sis.mobile_push_notification._run_workspace_app_update_broadcast",
+            queue="long",
+            job_name=f"workspace_app_update_{frappe.utils.now_datetime()}",
+            title=title,
+            body=body,
+            data_json=data_json,
+            timeout=600,
+        )
+        return success_response(
+            {
+                "enqueued": True,
+                "token_count": token_count,
+                "unique_users": unique_users,
+                "title": title,
+                "body": body,
+                "data": data,
+            },
+            f"Đã xếp hàng gửi push tới {token_count} thiết bị ({unique_users} user)",
+        )
+
+    result = _run_workspace_app_update_broadcast(title, body, data_json=data_json)
+    ok = result.get("success")
+    return success_response(result, "Đã gửi push" if ok else (result.get("message") or "Gửi push thất bại"))
 
 
 # ===== INTEGRATION WITH EXISTING ATTENDANCE SYSTEM =====

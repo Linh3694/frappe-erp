@@ -1,6 +1,45 @@
 """
 API để quản lý version của mobile apps (WIS Staff Portal)
 Dùng cho việc check update vì app là Unlisted trên App Store
+
+================================================================================
+Bench console — copy từng khối (không copy dòng ---)
+
+Mở:  cd /path/to/frappe-bench && bench --site TEN_SITE console
+
+--- [1] Sau khi sửa file app_version.py: reload module + test (không HTTP) ---
+from importlib import reload
+from erp.api.erp_sis import app_version as av
+reload(av)
+
+print(av.APP_VERSIONS)
+print(av.get_latest_version("wis_staff", "ios"))
+print(av.get_latest_version("wis_staff", "android"))
+print(av.check_update("wis_staff", "ios", "1.5.10"))
+print(av.check_update("wis_staff", "android", "1.5.10"))
+
+--- [2] Gửi push “có bản cập nhật” tới mọi máy workspace-mobile (sau khi đã sửa version trong file + deploy) ---
+# Cần session Administrator hoặc System Manager. Dry-run trước, bỏ dry_run để gửi thật.
+
+frappe.set_user("Administrator")
+from erp.api.erp_sis.app_version import APP_VERSIONS
+from erp.api.erp_sis.mobile_push_notification import broadcast_workspace_app_update
+
+ios = APP_VERSIONS["wis_staff"]["ios"]
+android = APP_VERSIONS["wis_staff"]["android"]
+
+print(
+    broadcast_workspace_app_update(
+        new_version=ios["version"],
+        store_url_ios=ios["store_url"],
+        store_url_android=android["store_url"],
+        dry_run=1,
+        sync=0,
+    )
+)
+# Gửi thật: đổi dry_run=0 . Nhiều máy sẽ vào queue ``long`` (xem mobile_push_notification.py).
+
+================================================================================
 """
 import frappe
 from frappe import _
@@ -10,12 +49,12 @@ from frappe import _
 APP_VERSIONS = {
     "wis_staff": {
         "ios": {
-            "version": "1.5.24",  # Version mới nhất trên App Store
+            "version": "1.5.26",  # Version mới nhất trên App Store
             "min_version": "1.0.0",  # Version tối thiểu bắt buộc (force update nếu thấp hơn)
             "store_url": "https://apps.apple.com/app/id6746143732",
         },
         "android": {
-            "version": "1.5.24",  # Version mới nhất trên Play Store
+            "version": "1.5.26",  # Version mới nhất trên Play Store
             "min_version": "1.0.0",  # Version tối thiểu bắt buộc
             "store_url": "https://play.google.com/store/apps/details?id=com.hailinh.n23.workspace",
         },
