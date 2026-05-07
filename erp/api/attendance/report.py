@@ -9,6 +9,214 @@ import json
 from datetime import datetime, timedelta
 from erp.utils.api_response import success_response, error_response
 
+# Giới hạn số ngày một lần gọi API báo cáo Face ID theo khoảng (tránh query quá lớn)
+MAX_FACEID_REPORT_RANGE_DAYS = 400
+
+
+def _resolve_campus_id_for_faceid(campus_id):
+    """
+    Chuẩn hóa campus_id giống get_campus_faceid_summary (name / title / campus mặc định).
+    """
+    original_campus_id = campus_id
+    campus_exists = frappe.db.exists("SIS Campus", campus_id)
+    if not campus_exists:
+        campus_id = frappe.db.get_value(
+            "SIS Campus",
+            {"title_vn": original_campus_id},
+            "name"
+        ) or frappe.db.get_value(
+            "SIS Campus",
+            {"title_en": original_campus_id},
+            "name"
+        )
+        if not campus_id:
+            school_year_campus = frappe.db.get_value(
+                "SIS School Year",
+                {"is_enable": 1},
+                "campus_id"
+            )
+            if school_year_campus:
+                campus_id = school_year_campus
+        if not campus_id:
+            campus_id = frappe.db.get_value(
+                "SIS School Year",
+                {},
+                "campus_id",
+                order_by="creation desc"
+            )
+    return campus_id
+
+
+def _resolve_school_year_for_faceid(campus_id, date_obj):
+    """Năm học active / theo ngày / gần nhất — cùng thứ tự get_campus_faceid_summary."""
+    school_year = frappe.db.get_value(
+        "SIS School Year",
+        {"campus_id": campus_id, "is_enable": 1},
+        "name"
+    )
+    if not school_year:
+        school_year = frappe.db.get_value(
+            "SIS School Year",
+            {
+                "campus_id": campus_id,
+                "start_date": ["<=", date_obj],
+                "end_date": [">=", date_obj]
+            },
+            "name"
+        )
+    if not school_year:
+        school_year = frappe.db.get_value(
+            "SIS School Year",
+            {"campus_id": campus_id},
+            "name",
+            order_by="start_date desc"
+        )
+    return school_year
+
+
+def _get_regular_students_by_campus(campus_id, school_year):
+    """Một query: học sinh các lớp regular của campus trong năm học."""
+    return frappe.db.sql("""
+        SELECT
+            cs.student_id,
+            s.student_code,
+            s.student_name,
+            cs.class_id,
+            c.title AS class_title
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabCRM Student` s ON cs.student_id = s.name
+        INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+        WHERE c.campus_id = %(campus_id)s
+            AND c.school_year_id = %(school_year)s
+            AND c.class_type = 'regular'
+        ORDER BY c.title, s.student_name
+    """, {"campus_id": campus_id, "school_year": school_year}, as_dict=True)
+
+
+def _build_faceid_student_detail(student_id, student_name, student_code, att):
+    """
+    Tạo payload học sinh giống get_class_faceid_summary.students (để FE tái dùng).
+    att: bản ghi tabERP Time Attendance hoặc None.
+    """
+    if not att:
+        return {
+            "student_id": student_id,
+            "student_name": student_name,
+            "student_code": student_code,
+            "check_in_time": None,
+            "check_out_time": None,
+            "total_check_ins": 0,
+            "device_name": None,
+            "device_in": None,
+            "device_out": None,
+            "status": "not_checked_in",
+        }
+
+    morning_records = []
+    afternoon_records = []
+    total_check_ins = att.get("total_check_ins") or 0
+
+    if att.get("raw_data"):
+        try:
+            raw_data = json.loads(att["raw_data"]) if isinstance(att["raw_data"], str) else att["raw_data"]
+            if raw_data and len(raw_data) > 0:
+                for item in raw_data:
+                    ts_str = item.get("timestamp")
+                    device = item.get("device_name") or item.get("device") or att.get("device_name")
+                    if ts_str:
+                        ts = frappe.utils.get_datetime(ts_str)
+                        record = {"time": ts, "device": device}
+                        if ts.hour < 12:
+                            morning_records.append(record)
+                        else:
+                            afternoon_records.append(record)
+                total_check_ins = len(raw_data)
+        except Exception:
+            pass
+
+    if not morning_records and not afternoon_records:
+        if att.get("check_in_time"):
+            record = {"time": att["check_in_time"], "device": att.get("device_name")}
+            if att["check_in_time"].hour < 12:
+                morning_records.append(record)
+            else:
+                afternoon_records.append(record)
+        if att.get("check_out_time") and att.get("check_out_time") != att.get("check_in_time"):
+            record = {"time": att["check_out_time"], "device": att.get("device_name")}
+            if att["check_out_time"].hour < 12:
+                morning_records.append(record)
+            else:
+                afternoon_records.append(record)
+
+    check_in_record = min(morning_records, key=lambda x: x["time"]) if morning_records else None
+    check_in_time = check_in_record["time"] if check_in_record else None
+    device_in = check_in_record["device"] if check_in_record else None
+
+    check_out_record = max(afternoon_records, key=lambda x: x["time"]) if afternoon_records else None
+    check_out_time = check_out_record["time"] if check_out_record else None
+    device_out = check_out_record["device"] if check_out_record else None
+
+    if check_in_time:
+        status_morning = "on_time" if check_in_time.hour < 8 else "late"
+    else:
+        status_morning = "absent_morning"
+
+    if check_out_time:
+        status_afternoon = "on_time" if check_out_time.hour >= 16 else "early_leave"
+    else:
+        status_afternoon = "no_checkout"
+
+    has_check_in = check_in_time is not None
+
+    return {
+        "student_id": student_id,
+        "student_name": student_name,
+        "student_code": student_code,
+        "check_in_time": check_in_time.isoformat() if check_in_time else None,
+        "check_out_time": check_out_time.isoformat() if check_out_time else None,
+        "total_check_ins": total_check_ins,
+        "device_name": device_in or device_out,
+        "device_in": device_in,
+        "device_out": device_out,
+        "status": "checked_in" if has_check_in else "absent_morning",
+        "status_morning": status_morning,
+        "status_afternoon": status_afternoon,
+    }
+
+
+def _erp_row_has_faceid_for_mode(att_row, mode):
+    """Có quét Face ID buổi sáng (check_in) hoặc chiều (check_out) — đồng bộ get_hikvision_class_attendance_mismatch."""
+    morning_times = []
+    afternoon_times = []
+    if att_row.get("raw_data"):
+        try:
+            raw_data = json.loads(att_row["raw_data"]) if isinstance(att_row["raw_data"], str) else att_row["raw_data"]
+            if raw_data:
+                for item in raw_data:
+                    ts_str = item.get("timestamp")
+                    if ts_str:
+                        ts = frappe.utils.get_datetime(ts_str)
+                        if ts.hour < 12:
+                            morning_times.append(ts)
+                        else:
+                            afternoon_times.append(ts)
+        except Exception:
+            pass
+    if not morning_times and not afternoon_times:
+        if att_row.get("check_in_time"):
+            if att_row["check_in_time"].hour < 12:
+                morning_times.append(att_row["check_in_time"])
+            else:
+                afternoon_times.append(att_row["check_in_time"])
+        if att_row.get("check_out_time") and att_row.get("check_out_time") != att_row.get("check_in_time"):
+            if att_row["check_out_time"].hour < 12:
+                morning_times.append(att_row["check_out_time"])
+            else:
+                afternoon_times.append(att_row["check_out_time"])
+    if mode == "check_out":
+        return len(afternoon_times) > 0
+    return len(morning_times) > 0
+
 
 @frappe.whitelist(allow_guest=False)
 def get_class_faceid_summary(class_id=None, date=None):
@@ -1167,4 +1375,445 @@ def get_hikvision_class_attendance_mismatch(campus_id=None, date=None, mode=None
         return error_response(
             message=f"Lỗi khi lấy danh sách mismatch: {str(e)}",
             code="GET_MISMATCH_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_campus_faceid_not_checked_students(campus_id=None, date=None, mode=None):
+    """
+    Danh sách học sinh toàn campus chưa check-in hoặc chưa check-out Face ID trong 1 ngày.
+    Một round-trip + 2 query chính (học sinh, attendance) thay vì N lần get_class_faceid_summary.
+
+    Args:
+        campus_id, date (YYYY-MM-DD), mode: check_in | check_out
+    """
+    try:
+        campus_id = campus_id or frappe.request.args.get("campus_id")
+        date = date or frappe.request.args.get("date")
+        mode = mode or frappe.request.args.get("mode") or "check_in"
+        if mode not in ("check_in", "check_out"):
+            mode = "check_in"
+
+        if not campus_id or not date:
+            return error_response(
+                message="Thiếu tham số: campus_id và date là bắt buộc",
+                code="MISSING_PARAMS",
+            )
+
+        date_obj = frappe.utils.getdate(date)
+        campus_id = _resolve_campus_id_for_faceid(campus_id)
+        if not campus_id:
+            return error_response(
+                message="Không tìm thấy campus nào trong hệ thống",
+                code="NO_CAMPUS",
+            )
+
+        school_year = _resolve_school_year_for_faceid(campus_id, date_obj)
+        if not school_year:
+            return error_response(
+                message=f"Không tìm thấy năm học cho campus: {campus_id}",
+                code="NO_SCHOOL_YEAR",
+            )
+
+        students = _get_regular_students_by_campus(campus_id, school_year)
+        if not students:
+            return success_response(
+                data={
+                    "summary": {"total": 0, "by_class_count": 0, "mode": mode},
+                    "students": [],
+                    "date": str(date_obj),
+                },
+                message="Không có học sinh lớp regular",
+            )
+
+        codes = sorted({(s.get("student_code") or "").upper() for s in students if s.get("student_code")})
+        attendance_by_code = {}
+        if codes:
+            for r in frappe.db.sql(
+                """
+                SELECT
+                    UPPER(employee_code) AS code,
+                    check_in_time,
+                    check_out_time,
+                    raw_data,
+                    total_check_ins,
+                    device_name
+                FROM `tabERP Time Attendance`
+                WHERE UPPER(employee_code) IN %(codes)s
+                    AND date = %(date)s
+                """,
+                {"codes": codes, "date": date_obj},
+                as_dict=True,
+            ):
+                attendance_by_code[r["code"]] = r
+
+        out = []
+        class_ids = set()
+        for st in students:
+            code = (st.get("student_code") or "").upper()
+            att = attendance_by_code.get(code)
+            d = _build_faceid_student_detail(
+                st["student_id"], st["student_name"], st["student_code"], att
+            )
+            d["class_id"] = st["class_id"]
+            d["class_title"] = st["class_title"]
+            d["date"] = str(date_obj)
+
+            if mode == "check_out":
+                if not d.get("check_out_time"):
+                    out.append(d)
+                    class_ids.add(st["class_id"])
+            else:
+                if not d.get("check_in_time"):
+                    out.append(d)
+                    class_ids.add(st["class_id"])
+
+        return success_response(
+            data={
+                "summary": {
+                    "total": len(out),
+                    "by_class_count": len(class_ids),
+                    "mode": mode,
+                },
+                "students": out,
+                "date": str(date_obj),
+            },
+            message="Lấy danh sách học sinh chưa check Face ID thành công",
+        )
+    except Exception as e:
+        frappe.log_error(f"get_campus_faceid_not_checked_students error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách chưa check-in/out: {str(e)}",
+            code="GET_NOT_CHECKED_FACEID_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_campus_faceid_not_checked_students_range(
+    campus_id=None, start_date=None, end_date=None, mode=None
+):
+    """
+    Cùng logic get_campus_faceid_not_checked_students nhưng cho khoảng ngày;
+    1 query attendance cho cả khoảng + vòng lặp ngày × học sinh (chỉ RAM, không N× API HTTP).
+    Mỗi học sinh có thêm field date (YYYY-MM-DD).
+    """
+    try:
+        campus_id = campus_id or frappe.request.args.get("campus_id")
+        start_date = start_date or frappe.request.args.get("start_date")
+        end_date = end_date or frappe.request.args.get("end_date")
+        mode = mode or frappe.request.args.get("mode") or "check_in"
+        if mode not in ("check_in", "check_out"):
+            mode = "check_in"
+
+        if not campus_id or not start_date or not end_date:
+            return error_response(
+                message="Thiếu tham số: campus_id, start_date, end_date là bắt buộc",
+                code="MISSING_PARAMS",
+            )
+
+        start_obj = frappe.utils.getdate(start_date)
+        end_obj = frappe.utils.getdate(end_date)
+        if start_obj > end_obj:
+            return error_response(
+                message="start_date không được sau end_date",
+                code="INVALID_RANGE",
+            )
+        if (end_obj - start_obj).days > MAX_FACEID_REPORT_RANGE_DAYS:
+            return error_response(
+                message=f"Khoảng ngày tối đa {MAX_FACEID_REPORT_RANGE_DAYS} ngày",
+                code="RANGE_TOO_LARGE",
+            )
+
+        campus_id = _resolve_campus_id_for_faceid(campus_id)
+        if not campus_id:
+            return error_response(
+                message="Không tìm thấy campus nào trong hệ thống",
+                code="NO_CAMPUS",
+            )
+
+        school_year = _resolve_school_year_for_faceid(campus_id, start_obj)
+        if not school_year:
+            return error_response(
+                message=f"Không tìm thấy năm học cho campus: {campus_id}",
+                code="NO_SCHOOL_YEAR",
+            )
+
+        students = _get_regular_students_by_campus(campus_id, school_year)
+        if not students:
+            return success_response(
+                data={
+                    "summary": {"total": 0, "by_class_count": 0, "mode": mode},
+                    "students": [],
+                },
+                message="Không có học sinh lớp regular",
+            )
+
+        codes = sorted({(s.get("student_code") or "").upper() for s in students if s.get("student_code")})
+        att_map = {}
+        if codes:
+            for r in frappe.db.sql(
+                """
+                SELECT
+                    UPPER(employee_code) AS code,
+                    date,
+                    check_in_time,
+                    check_out_time,
+                    raw_data,
+                    total_check_ins,
+                    device_name
+                FROM `tabERP Time Attendance`
+                WHERE UPPER(employee_code) IN %(codes)s
+                    AND date BETWEEN %(start)s AND %(end)s
+                """,
+                {"codes": codes, "start": start_obj, "end": end_obj},
+                as_dict=True,
+            ):
+                att_map[(r["code"], r["date"])] = r
+
+        out = []
+        class_ids = set()
+        cur = start_obj
+        while cur <= end_obj:
+            for st in students:
+                code = (st.get("student_code") or "").upper()
+                att = att_map.get((code, cur))
+                d = _build_faceid_student_detail(
+                    st["student_id"], st["student_name"], st["student_code"], att
+                )
+                d["class_id"] = st["class_id"]
+                d["class_title"] = st["class_title"]
+                d["date"] = str(cur)
+
+                if mode == "check_out":
+                    if not d.get("check_out_time"):
+                        out.append(d)
+                        class_ids.add(st["class_id"])
+                else:
+                    if not d.get("check_in_time"):
+                        out.append(d)
+                        class_ids.add(st["class_id"])
+
+            cur = cur + timedelta(days=1)
+
+        return success_response(
+            data={
+                "summary": {
+                    "total": len(out),
+                    "by_class_count": len(class_ids),
+                    "mode": mode,
+                },
+                "students": out,
+            },
+            message="Lấy danh sách chưa check Face ID theo khoảng ngày thành công",
+        )
+    except Exception as e:
+        frappe.log_error(f"get_campus_faceid_not_checked_students_range error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy danh sách chưa check-in/out theo khoảng: {str(e)}",
+            code="GET_NOT_CHECKED_FACEID_RANGE_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_hikvision_class_attendance_mismatch_range(
+    campus_id=None, start_date=None, end_date=None, mode=None
+):
+    """
+    Mismatch có mặt ở lớp nhưng không quét Face ID — cho cả khoảng ngày (ít query hơn N lần gọi API lẻ).
+    Mỗi học sinh có thêm field date (YYYY-MM-DD).
+    """
+    try:
+        campus_id = campus_id or frappe.request.args.get("campus_id")
+        start_date = start_date or frappe.request.args.get("start_date")
+        end_date = end_date or frappe.request.args.get("end_date")
+        mode = mode or frappe.request.args.get("mode") or "check_in"
+        if mode not in ("check_in", "check_out"):
+            mode = "check_in"
+
+        if not campus_id or not start_date or not end_date:
+            return error_response(
+                message="Thiếu tham số: campus_id, start_date, end_date là bắt buộc",
+                code="MISSING_PARAMS",
+            )
+
+        start_obj = frappe.utils.getdate(start_date)
+        end_obj = frappe.utils.getdate(end_date)
+        if start_obj > end_obj:
+            return error_response(
+                message="start_date không được sau end_date",
+                code="INVALID_RANGE",
+            )
+        if (end_obj - start_obj).days > MAX_FACEID_REPORT_RANGE_DAYS:
+            return error_response(
+                message=f"Khoảng ngày tối đa {MAX_FACEID_REPORT_RANGE_DAYS} ngày",
+                code="RANGE_TOO_LARGE",
+            )
+
+        original_campus_id = campus_id
+        campus_exists = frappe.db.exists("SIS Campus", campus_id)
+        if not campus_exists:
+            campus_id = frappe.db.get_value(
+                "SIS Campus",
+                {"title_vn": original_campus_id},
+                "name"
+            ) or frappe.db.get_value(
+                "SIS Campus",
+                {"title_en": original_campus_id},
+                "name"
+            )
+            if not campus_id:
+                school_year_campus = frappe.db.get_value(
+                    "SIS School Year",
+                    {"is_enable": 1},
+                    "campus_id"
+                )
+                if school_year_campus:
+                    campus_id = school_year_campus
+            if not campus_id:
+                campus_id = frappe.db.get_value(
+                    "SIS School Year",
+                    {},
+                    "campus_id",
+                    order_by="creation desc"
+                )
+            if not campus_id:
+                return error_response(
+                    message="Không tìm thấy campus nào trong hệ thống",
+                    code="NO_CAMPUS",
+                )
+
+        school_year = frappe.db.get_value(
+            "SIS School Year",
+            {"campus_id": campus_id, "is_enable": 1},
+            "name"
+        )
+        if not school_year:
+            school_year = frappe.db.get_value(
+                "SIS School Year",
+                {
+                    "campus_id": campus_id,
+                    "start_date": ["<=", start_obj],
+                    "end_date": [">=", start_obj],
+                },
+                "name",
+            )
+        if not school_year:
+            school_year = frappe.db.get_value(
+                "SIS School Year",
+                {"campus_id": campus_id},
+                "name",
+                order_by="start_date desc"
+            )
+        if not school_year:
+            return error_response(
+                message=f"Không tìm thấy năm học cho campus: {campus_id}",
+                code="NO_SCHOOL_YEAR",
+            )
+
+        class_att_rows = frappe.db.sql(
+            """
+            SELECT
+                ca.student_id,
+                ca.student_name,
+                ca.student_code,
+                ca.class_id,
+                c.title AS class_title,
+                ca.date AS attendance_date,
+                GROUP_CONCAT(DISTINCT ca.period ORDER BY ca.period SEPARATOR ', ') AS attendance_periods
+            FROM `tabSIS Class Attendance` ca
+            INNER JOIN `tabSIS Class` c ON ca.class_id = c.name
+            WHERE ca.date BETWEEN %(start)s AND %(end)s
+                AND ca.status IN ('present', 'late')
+                AND c.campus_id = %(campus_id)s
+                AND c.school_year_id = %(school_year)s
+            GROUP BY ca.student_id, ca.student_name, ca.student_code, ca.class_id, c.title, ca.date
+            """,
+            {
+                "start": start_obj,
+                "end": end_obj,
+                "campus_id": campus_id,
+                "school_year": school_year,
+            },
+            as_dict=True,
+        )
+
+        if not class_att_rows:
+            return success_response(
+                data={
+                    "summary": {"total": 0, "by_class_count": 0, "mode": mode},
+                    "students": [],
+                },
+                message="Không có dữ liệu điểm danh lớp trong khoảng thời gian",
+            )
+
+        student_codes = [
+            s["student_code"].upper()
+            for s in class_att_rows
+            if s.get("student_code")
+        ]
+        student_codes = sorted(set(student_codes))
+
+        faceid_ok = set()
+        if student_codes:
+            for r in frappe.db.sql(
+                """
+                SELECT
+                    UPPER(employee_code) AS code,
+                    date,
+                    check_in_time,
+                    check_out_time,
+                    raw_data
+                FROM `tabERP Time Attendance`
+                WHERE UPPER(employee_code) IN %(codes)s
+                    AND date BETWEEN %(start)s AND %(end)s
+                """,
+                {"codes": student_codes, "start": start_obj, "end": end_obj},
+                as_dict=True,
+            ):
+                if _erp_row_has_faceid_for_mode(r, mode):
+                    faceid_ok.add((r["code"], r["date"]))
+
+        mismatch_students = []
+        class_count = {}
+        for row in class_att_rows:
+            code = (row.get("student_code") or "").upper()
+            adate = row.get("attendance_date")
+            if not code or not adate:
+                continue
+            if (code, adate) in faceid_ok:
+                continue
+            mismatch_students.append(
+                {
+                    "student_id": row.get("student_id"),
+                    "student_name": row.get("student_name"),
+                    "student_code": row.get("student_code"),
+                    "class_id": row.get("class_id"),
+                    "class_title": row.get("class_title"),
+                    "attendance_periods": row.get("attendance_periods"),
+                    "date": str(adate),
+                }
+            )
+            cid = row.get("class_id")
+            class_count[cid] = True
+
+        mismatch_students.sort(
+            key=lambda x: (x.get("date") or "", x.get("class_title") or "", x.get("student_name") or "")
+        )
+
+        return success_response(
+            data={
+                "summary": {
+                    "total": len(mismatch_students),
+                    "by_class_count": len(class_count),
+                    "mode": mode,
+                },
+                "students": mismatch_students,
+            },
+            message="Lấy danh sách mismatch theo khoảng ngày thành công",
+        )
+    except Exception as e:
+        frappe.log_error(f"get_hikvision_class_attendance_mismatch_range error: {str(e)}")
+        return error_response(
+            message=f"Lỗi khi lấy mismatch theo khoảng: {str(e)}",
+            code="GET_MISMATCH_RANGE_ERROR",
         )
