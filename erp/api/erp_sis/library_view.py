@@ -23,6 +23,7 @@ LOOKUP_DTYPE = "SIS Library Lookup"
 EVENT_DTYPE = "SIS Library Event"
 EVENT_DAY_DTYPE = "SIS Library Event Day"
 BOOK_INTRO_DTYPE = "SIS Library Book Introduction"
+COPY_DTYPE = "SIS Library Book Copy"
 
 VALID_PUBLIC_LOOKUP_TYPES = {"document_type", "series"}
 
@@ -63,7 +64,48 @@ def _create_slug(title: str) -> str:
     return slug
 
 
-def _transform_title_to_public(doc) -> Dict[str, Any]:
+def _convention_code_lower_to_storage() -> Dict[str, str]:
+    # Mã convention.code (chuẩn hóa lower) -> trường Nơi lưu trữ trên danh mục
+    rows = frappe.get_all(
+        LOOKUP_DTYPE,
+        filters={"lookup_type": "convention"},
+        fields=["code", "storage"],
+    )
+    m: Dict[str, str] = {}
+    for row in rows:
+        raw = (row.get("code") or "").strip()
+        if not raw:
+            continue
+        loc = (row.get("storage") or "").strip()
+        m[raw.lower()] = loc
+    return m
+
+
+def _storage_locations_for_title_ids(title_ids: List[str]) -> Dict[str, List[str]]:
+    # special_code trên từng book copy -> tra convention -> các Nơi lưu trữ (unique, đã sắp xếp)
+    if not title_ids:
+        return {}
+    code_map = _convention_code_lower_to_storage()
+    by_title: Dict[str, set] = {tid: set() for tid in title_ids}
+    copies = frappe.get_all(
+        COPY_DTYPE,
+        filters={"title_id": ("in", title_ids)},
+        fields=["title_id", "special_code"],
+    )
+    for row in copies:
+        tid = row.get("title_id")
+        if not tid or tid not in by_title:
+            continue
+        sc = (row.get("special_code") or "").strip().lower()
+        if not sc:
+            continue
+        loc = code_map.get(sc)
+        if loc:
+            by_title[tid].add(loc)
+    return {tid: sorted(by_title[tid]) for tid in title_ids}
+
+
+def _transform_title_to_public(doc, storage_location: List[str] | None = None) -> Dict[str, Any]:
     """Transform title document sang format cho public API."""
     # Parse authors từ JSON string
     authors = []
@@ -94,7 +136,10 @@ def _transform_title_to_public(doc) -> Dict[str, Any]:
             audio_book = json.loads(doc.audio_book) if isinstance(doc.audio_book, str) else doc.audio_book
         except:
             audio_book = {}
-    
+
+    if storage_location is None:
+        storage_location = _storage_locations_for_title_ids([doc.name]).get(doc.name, [])
+
     return {
         "_id": doc.name,
         "libraryId": doc.name,
@@ -114,7 +159,7 @@ def _transform_title_to_public(doc) -> Dict[str, Any]:
         "introduction": introduction,
         "audioBook": audio_book,
         "publishYear": getattr(doc, 'publish_year', None),
-        "storageLocation": getattr(doc, "storage_location", None) or "",
+        "storageLocation": storage_location,
         "createdAt": str(doc.creation) if hasattr(doc, 'creation') else None,
         "modifiedAt": str(doc.modified) if hasattr(doc, 'modified') else None,
         "borrowCount": 0,  # TODO: Count from copies if needed
@@ -199,13 +244,20 @@ def list_public_titles(limit: int = 20, page: int = 1):
         
         titles = frappe.get_all(TITLE_DTYPE, **query_params)
         
+        title_ids = [t.name for t in titles]
+        loc_map = _storage_locations_for_title_ids(title_ids)
+        
         # Transform data
         result = []
         for title_dict in titles:
             # Get full doc để có đủ fields
             try:
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
-                result.append(_transform_title_to_public(doc))
+                result.append(
+                    _transform_title_to_public(
+                        doc, storage_location=loc_map.get(title_dict.name, [])
+                    )
+                )
             except:
                 # Fallback nếu không get được doc
                 result.append({
@@ -224,6 +276,7 @@ def list_public_titles(limit: int = 20, page: int = 1):
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
         return success_response(data=result, message="Fetched public titles")
@@ -297,13 +350,18 @@ def list_featured_titles(limit: int = 4):
             limit=limit,
             order_by="modified desc",
         )
+        loc_map = _storage_locations_for_title_ids([t.name for t in titles])
         
         # Transform data
         result = []
         for title_dict in titles:
             try:
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
-                result.append(_transform_title_to_public(doc))
+                result.append(
+                    _transform_title_to_public(
+                        doc, storage_location=loc_map.get(title_dict.name, [])
+                    )
+                )
             except:
                 # Fallback
                 result.append({
@@ -319,6 +377,7 @@ def list_featured_titles(limit: int = 4):
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
         return success_response(data=result, message="Fetched featured titles")
@@ -356,13 +415,18 @@ def list_new_titles(limit: int = 4):
             limit=limit,
             order_by="modified desc",
         )
+        loc_map = _storage_locations_for_title_ids([t.name for t in titles])
         
         # Transform data
         result = []
         for title_dict in titles:
             try:
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
-                result.append(_transform_title_to_public(doc))
+                result.append(
+                    _transform_title_to_public(
+                        doc, storage_location=loc_map.get(title_dict.name, [])
+                    )
+                )
             except:
                 result.append({
                     "_id": title_dict.name,
@@ -377,6 +441,7 @@ def list_new_titles(limit: int = 4):
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
         return success_response(data=result, message="Fetched new titles")
@@ -414,13 +479,18 @@ def list_audio_titles(limit: int = 4):
             limit=limit,
             order_by="modified desc",
         )
+        loc_map = _storage_locations_for_title_ids([t.name for t in titles])
         
         # Transform data
         result = []
         for title_dict in titles:
             try:
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
-                result.append(_transform_title_to_public(doc))
+                result.append(
+                    _transform_title_to_public(
+                        doc, storage_location=loc_map.get(title_dict.name, [])
+                    )
+                )
             except:
                 result.append({
                     "_id": title_dict.name,
@@ -435,6 +505,7 @@ def list_audio_titles(limit: int = 4):
                     "isAudioBook": True,
                     "borrowCount": 0,
                     "rating": 4,
+                    "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
         return success_response(data=result, message="Fetched audio titles")
@@ -537,13 +608,18 @@ def list_related_titles(
         
         # Lấy top N sách
         top_titles = [t[1] for t in scored_titles[:limit]]
+        loc_map = _storage_locations_for_title_ids([t.name for t in top_titles])
         
         # Transform data
         result = []
         for title_dict in top_titles:
             try:
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
-                result.append(_transform_title_to_public(doc))
+                result.append(
+                    _transform_title_to_public(
+                        doc, storage_location=loc_map.get(title_dict.name, [])
+                    )
+                )
             except:
                 result.append({
                     "_id": title_dict.name,
@@ -558,6 +634,7 @@ def list_related_titles(
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
         return success_response(data=result, message="Fetched related titles")

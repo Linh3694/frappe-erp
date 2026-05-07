@@ -15,7 +15,6 @@
   "document_type",
   "series_name",
   "language",
-  "storage_location",
   "cover_image",
   "is_new_book",
   "is_featured_book",
@@ -62,11 +61,6 @@
    "fieldname": "language",
    "fieldtype": "Data",
    "label": "Ngôn ngữ"
-  },
-  {
-   "fieldname": "storage_location",
-   "fieldtype": "Data",
-   "label": "Vị trí lưu trữ"
   },
   {
    "fieldname": "cover_image",
