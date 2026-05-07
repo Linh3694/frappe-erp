@@ -33,7 +33,7 @@ print(
         new_version=ios["version"],
         store_url_ios=ios["store_url"],
         store_url_android=android["store_url"],
-        dry_run=1,
+        dry_run=0,
         sync=0,
     )
 )

@@ -662,6 +662,7 @@ def create_title():
                 "document_type": data.get("document_type"),
                 "series_name": data.get("series_name"),
                 "language": data.get("language"),
+                "storage_location": data.get("storage_location"),
                 "is_new_book": bool(data.get("is_new_book")),
                 "is_featured_book": bool(data.get("is_featured_book")),
                 "is_audio_book": bool(data.get("is_audio_book")),
@@ -708,6 +709,8 @@ def update_title():
             doc.series_name = data["series_name"]
         if "language" in data:
             doc.language = data["language"]
+        if "storage_location" in data:
+            doc.storage_location = data["storage_location"]
         if "is_new_book" in data:
             doc.is_new_book = bool(data["is_new_book"])
         if "is_featured_book" in data:
