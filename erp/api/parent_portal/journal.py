@@ -124,8 +124,8 @@ def _parse_class_chat_scope_payload():
     return d
 
 
-def _teacher_snapshot_for_chat(teacher_id):
-    """Ảnh chụp GVCN/Phó GVCN cho payload chat (không qua Resource API)."""
+def _teacher_snapshot_for_chat(teacher_id, subjects=None):
+    """Ảnh chụp GVCN/Phó GVCN/GV bộ môn cho payload chat (không qua Resource API)."""
     if not teacher_id:
         return None
     t = frappe.db.get_value(
@@ -135,14 +135,22 @@ def _teacher_snapshot_for_chat(teacher_id):
         as_dict=True,
     )
     if not t:
-        return {"teacherId": teacher_id, "name": teacher_id, "email": "", "avatarUrl": ""}
+        return {
+            "teacherId": teacher_id,
+            "name": teacher_id,
+            "email": "",
+            "avatarUrl": "",
+            "userId": "",
+            "userName": "",
+            "subjects": subjects or [],
+        }
     user_id = t.get("user_id")
     user = None
     if user_id:
         user = frappe.db.get_value(
             "User",
             user_id,
-            ["email", "full_name", "user_image"],
+            ["name", "email", "full_name", "user_image"],
             as_dict=True,
         )
     return {
@@ -150,6 +158,9 @@ def _teacher_snapshot_for_chat(teacher_id):
         "email": (user or {}).get("email") or user_id or "",
         "name": (user or {}).get("full_name") or user_id or teacher_id,
         "avatarUrl": (user or {}).get("user_image") or "",
+        "userId": user_id or "",
+        "userName": (user or {}).get("name") or user_id or "",
+        "subjects": subjects or [],
     }
 
 
@@ -246,18 +257,38 @@ def get_class_chat_scope(class_id=None, school_year_id=None):
         subject_rows = frappe.get_all(
             "SIS Subject Assignment",
             filters={"class_id": class_id},
-            fields=["teacher_id"],
+            fields=["teacher_id", "actual_subject_id"],
             ignore_permissions=True,
             limit_page_length=2000,
         )
+        # Map teacher_id -> [{id,title}] và resolve title môn 1 lần.
+        subj_ids = {r.get("actual_subject_id") for r in subject_rows if r.get("actual_subject_id")}
+        subj_title_map = {}
+        if subj_ids:
+            for sid, title_vn, title_en in frappe.db.get_values(
+                "SIS Actual Subject",
+                {"name": ["in", list(subj_ids)]},
+                ["name", "title_vn", "title_en"],
+            ) or []:
+                subj_title_map[sid] = title_vn or title_en or sid
+        teacher_subject_map = {}
+        for row in subject_rows:
+            tid = row.get("teacher_id")
+            sid = row.get("actual_subject_id")
+            if not tid or not sid:
+                continue
+            entry = {"id": sid, "title": subj_title_map.get(sid, sid)}
+            bucket = teacher_subject_map.setdefault(tid, [])
+            if not any(item.get("id") == sid for item in bucket):
+                bucket.append(entry)
+
         homeroom_ids = {cls.get("homeroom_teacher"), cls.get("vice_homeroom_teacher")}
         seen_subj_teacher = {t.get("teacherId") for t in teachers if t.get("teacherId")}
         subject_teachers = []
-        for row in subject_rows:
-            tid = row.get("teacher_id")
+        for tid in teacher_subject_map.keys():
             if not tid or tid in homeroom_ids or tid in seen_subj_teacher:
                 continue
-            snap = _teacher_snapshot_for_chat(tid)
+            snap = _teacher_snapshot_for_chat(tid, subjects=teacher_subject_map.get(tid, []))
             if snap:
                 subject_teachers.append(snap)
                 seen_subj_teacher.add(tid)

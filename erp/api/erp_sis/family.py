@@ -115,6 +115,12 @@ def build_guardians_by_student_ids(student_ids):
             if value
         })
 
+    # Tổng hợp cờ là Người liên hệ chính cho ít nhất 1 con — dùng cho FE lọc nhanh.
+    for guardian in guardian_map.values():
+        guardian["is_key_person_any"] = any(
+            bool(student.get("key_person")) for student in guardian.get("students", [])
+        )
+
     return list(guardian_map.values())
 
 
