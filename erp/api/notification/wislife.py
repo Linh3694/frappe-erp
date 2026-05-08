@@ -237,13 +237,25 @@ def _do_notify_class_new_post(event_data):
         school_year_id = event_data.get("schoolYearId") or event_data.get("school_year_id")
 
         if not post_id or not class_id:
-            frappe.logger.warning("⚠️ [Wislife Class Post Job] Thiếu postId hoặc classId")
+            frappe.logger().warning("⚠️ [Wislife Class Post Job] Thiếu postId hoặc classId")
             return
 
         pairs = _guardian_student_pairs_for_class(class_id, school_year_id)
+        frappe.logger().info(
+            f"📱 [Wislife Class Post Job] class={class_id} sy={school_year_id or '_'} → pairs={len(pairs)}"
+        )
         if not pairs:
-            frappe.logger.warning(f"⚠️ [Wislife Class Post Job] Không có PH nào cho lớp {class_id}")
-            return
+            # Thử lại không lọc school_year_id để tránh mismatch (data cũ / format khác).
+            if school_year_id:
+                pairs = _guardian_student_pairs_for_class(class_id, None)
+                frappe.logger().info(
+                    f"📱 [Wislife Class Post Job] retry không lọc school_year_id → pairs={len(pairs)}"
+                )
+            if not pairs:
+                frappe.logger().warning(
+                    f"⚠️ [Wislife Class Post Job] Không có PH nào cho lớp {class_id}"
+                )
+                return
 
         # Mỗi guardian (portal email) → tập con trong lớp; chọn 1 studentId để deep link mobile
         email_to_students = defaultdict(set)
