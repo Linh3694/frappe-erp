@@ -12,6 +12,122 @@ import unicodedata
 from typing import Optional
 
 
+GUARDIAN_PROFILE_FIELDS = [
+    "id_number",
+    "occupation",
+    "position",
+    "workplace",
+    "address",
+    "nationality",
+    "note",
+    "dob",
+]
+
+GUARDIAN_EXCEL_COLUMN_ALIASES = {
+    "name": ["docname", "guardian_docname", "ma_ban_ghi", "mã bản ghi"],
+    "guardian_id": ["guardian_id", "guardian code", "guardian_code", "ma_giam_ho", "mã giám hộ"],
+    "guardian_name": ["guardian_name", "guardian name", "name", "ho_ten", "họ tên", "ten_giam_ho", "tên giám hộ"],
+    "phone_number": ["phone_number", "phone number", "phone", "sdt", "số điện thoại", "so_dien_thoai"],
+    "email": ["email", "e-mail", "guardian_email"],
+    "id_number": ["id_number", "id number", "cccd", "passport", "so_cccd", "số cccd", "so_cccd_ho_chieu", "số cccd/hộ chiếu"],
+    "occupation": ["occupation", "nghe_nghiep", "nghề nghiệp"],
+    "position": ["position", "chuc_vu", "chức vụ"],
+    "workplace": ["workplace", "noi_lam_viec", "nơi làm việc"],
+    "address": ["address", "dia_chi", "địa chỉ", "dia_chi_nha", "địa chỉ nhà"],
+    "nationality": ["nationality", "quoc_tich", "quốc tịch"],
+    "note": ["note", "ghi_chu", "ghi chú", "luu_y_dac_biet", "lưu ý đặc biệt"],
+    "dob": ["dob", "date_of_birth", "ngay_sinh", "ngày sinh"],
+}
+
+
+def _normalize_excel_column_name(column: str) -> str:
+    text = _normalize_text(str(column or ""))
+    text = text.replace("-", "_").replace("/", "_")
+    text = "".join(ch if ch.isalnum() else "_" for ch in text)
+    while "__" in text:
+        text = text.replace("__", "_")
+    return text.strip("_")
+
+
+def _build_guardian_excel_column_map(columns) -> dict:
+    normalized_columns = {
+        _normalize_excel_column_name(col): col
+        for col in columns
+        if col is not None
+    }
+    column_map = {}
+    for fieldname, aliases in GUARDIAN_EXCEL_COLUMN_ALIASES.items():
+        for alias in aliases:
+            actual_col = normalized_columns.get(_normalize_excel_column_name(alias))
+            if actual_col is not None:
+                column_map[fieldname] = actual_col
+                break
+    return column_map
+
+
+def _clean_excel_value(value) -> str:
+    if value is None:
+        return ""
+    try:
+        if value != value:
+            return ""
+    except Exception:
+        pass
+    text = str(value).strip()
+    if text.lower() in {"nan", "none", "null"}:
+        return ""
+    return text
+
+
+def _read_guardian_excel_value(row, column_map: dict, fieldname: str) -> str:
+    actual_col = column_map.get(fieldname)
+    if not actual_col:
+        return ""
+    return _clean_excel_value(row.get(actual_col))
+
+
+def _normalize_guardian_dob(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        return str(frappe.utils.getdate(value))
+    except Exception:
+        return value
+
+
+def _extract_guardian_profile_updates(row, column_map: dict, fields=None) -> dict:
+    updates = {}
+    for fieldname in fields or GUARDIAN_PROFILE_FIELDS:
+        if fieldname not in column_map:
+            continue
+        value = _read_guardian_excel_value(row, column_map, fieldname)
+        if not value:
+            continue
+        updates[fieldname] = _normalize_guardian_dob(value) if fieldname == "dob" else value
+    return updates
+
+
+def _build_guardian_errors_preview(errors: list, limit: int = 20) -> list:
+    import re
+
+    preview = []
+    for idx, error_msg in enumerate(errors[:limit]):
+        match = re.match(r"Row (\d+): (.+)", str(error_msg))
+        if match:
+            preview.append({
+                "row": int(match.group(1)),
+                "error": match.group(2),
+                "data": {},
+            })
+        else:
+            preview.append({
+                "row": idx + 2,
+                "error": str(error_msg),
+                "data": {},
+            })
+    return preview
+
+
 def _normalize_text(text: str) -> str:
     try:
         text = unicodedata.normalize('NFD', text or '')
@@ -107,6 +223,14 @@ def get_all_guardians(page=1, limit=20):
                 "guardian_name",
                 "phone_number",
                 "email",
+                "id_number",
+                "occupation",
+                "position",
+                "workplace",
+                "address",
+                "nationality",
+                "note",
+                "dob",
                 "family_code",
                 "creation",
                 "modified"
@@ -119,6 +243,8 @@ def get_all_guardians(page=1, limit=20):
         for g in guardians:
             if g.get("email") is None:
                 g["email"] = ""
+            if g.get("dob"):
+                g["dob"] = str(g["dob"])
         # Enrich with all family codes per guardian
         try:
             guardian_ids = [g.get("name") for g in guardians if g.get("name")]
@@ -945,14 +1071,10 @@ def validate_vietnamese_phone_number(phone):
 
 @frappe.whitelist(allow_guest=False)
 def bulk_import_guardians():
-    """Bulk import guardians from Excel file with phone number validation and uniqueness check"""
+    """Import danh sách CRM Guardian từ Excel."""
     try:
-        # Get file from request
-        import io
         import pandas as pd
-        from werkzeug.datastructures import FileStorage
         
-        # Get uploaded file
         uploaded_file = frappe.request.files.get('file')
         if not uploaded_file:
             return error_response(
@@ -971,159 +1093,89 @@ def bulk_import_guardians():
                 message=f"Error reading Excel file: {str(e)}",
                 code="EXCEL_READ_ERROR"
             )
-        
-        # Log available columns for debugging
+
         frappe.logger().info(f"Excel columns found: {list(df.columns)}")
-        
-        # Validate required columns
-        required_columns = ['guardian_name']
-        optional_columns = ['phone_number', 'Phone Number', 'email', 'guardian_id']
-        
-        # Check for guardian_name column (case insensitive)
-        guardian_name_col = None
-        for col in df.columns:
-            if col.lower().replace(' ', '').replace('_', '') in ['guardianname', 'name']:
-                guardian_name_col = col
-                break
-        
-        if guardian_name_col is None and 'guardian_name' not in df.columns:
+        column_map = _build_guardian_excel_column_map(df.columns)
+
+        if "guardian_name" not in column_map:
             return error_response(
                 message=f"Missing required column: guardian_name or similar. Found columns: {', '.join(df.columns)}",
                 code="MISSING_COLUMNS"
             )
-        
-        # Get existing guardians to check for uniqueness
+
         existing_guardians = frappe.get_all(
             "CRM Guardian",
-            fields=["name", "guardian_name", "phone_number"],
+            fields=["name", "guardian_id", "guardian_name", "phone_number"],
             order_by="creation asc"
         )
-        
         existing_phones = {}
+        existing_guardian_ids = {}
         for g in existing_guardians:
+            if g.get("guardian_id"):
+                existing_guardian_ids[str(g["guardian_id"]).strip().lower()] = g["name"]
             if g.get('phone_number'):
                 try:
                     normalized_phone = validate_vietnamese_phone_number(g['phone_number'])
                     if normalized_phone:
                         existing_phones[normalized_phone] = g['name']
-                except:
+                except Exception:
                     pass
-        
-        # Process each row
+
         success_count = 0
         error_count = 0
         errors = []
         logs = []
-        
+
         for index, row in df.iterrows():
+            row_number = index + 2
             try:
-                # Extract data from row with better handling of Excel formats
-                guardian_name = ''
-                for name_col in ['guardian_name', 'Guardian Name', 'name', 'Name']:
-                    if name_col in row and pd.notna(row.get(name_col)):
-                        guardian_name = str(row.get(name_col, '')).strip()
-                        frappe.logger().info(f"Found name in column '{name_col}': '{guardian_name}'")
-                        break
-                
-                # Handle phone number - could be in various Excel columns
-                phone_number = ''
-                for phone_col in ['Phone Number', 'phone_number', 'phone', 'Phone']:
-                    if phone_col in row and pd.notna(row.get(phone_col)):
-                        phone_number = str(row.get(phone_col, '')).strip()
-                        frappe.logger().info(f"Found phone in column '{phone_col}': '{phone_number}'")
-                        break
-                
-                # Also check if there are any columns with 'phone' in name (case insensitive)
-                if not phone_number:
-                    for col_name in df.columns:
-                        if 'phone' in col_name.lower() and pd.notna(row.get(col_name)):
-                            phone_number = str(row.get(col_name, '')).strip()
-                            frappe.logger().info(f"Found phone in fuzzy column '{col_name}': '{phone_number}'")
-                            break
-                
-                # Handle email - could be in various Excel columns
-                email = ''
-                frappe.logger().info(f"Row {index + 2}: Available columns: {list(df.columns)}")
-                frappe.logger().info(f"Row {index + 2}: Looking for email in row data: {dict(row)}")
-                
-                # First try exact column name matches
-                for email_col in ['email', 'Email', 'E-mail', 'e-mail', 'EMAIL']:
-                    if email_col in row:
-                        frappe.logger().info(f"Row {index + 2}: Found email column '{email_col}', value: {row.get(email_col)}, notna: {pd.notna(row.get(email_col))}")
-                        if pd.notna(row.get(email_col)):
-                            email = str(row.get(email_col, '')).strip()
-                            frappe.logger().info(f"Row {index + 2}: Extracted email from column '{email_col}': '{email}'")
-                            break
-                
-                # Also check if there are any columns with 'email' in name (case insensitive)
-                if not email:
-                    frappe.logger().info(f"Row {index + 2}: No email found in exact columns, trying fuzzy search")
-                    for col_name in df.columns:
-                        if 'email' in col_name.lower():
-                            frappe.logger().info(f"Row {index + 2}: Checking fuzzy column '{col_name}', value: {row.get(col_name)}, notna: {pd.notna(row.get(col_name))}")
-                            if pd.notna(row.get(col_name)):
-                                email = str(row.get(col_name, '')).strip()
-                                frappe.logger().info(f"Row {index + 2}: Found email in fuzzy column '{col_name}': '{email}'")
-                                break
-                
-                # Handle special Excel values
-                if email and email.lower() in ['nan', 'none', 'null']:
-                    frappe.logger().info(f"Row {index + 2}: Email contained special value '{email}', clearing")
-                    email = ''
-                
-                frappe.logger().info(f"Row {index + 2}: Final email value: '{email}'")
-                
-                guardian_id = str(row.get('guardian_id', '')).strip() if pd.notna(row.get('guardian_id')) else ''
-                
-                frappe.logger().info(f"Processing row {index + 2}: Name='{guardian_name}', Phone='{phone_number}', Email='{email}'")
-                
-                # Validation
+                guardian_name = _read_guardian_excel_value(row, column_map, "guardian_name")
+                phone_number = _read_guardian_excel_value(row, column_map, "phone_number")
+                email = _read_guardian_excel_value(row, column_map, "email")
+                guardian_id = _read_guardian_excel_value(row, column_map, "guardian_id")
+
                 if not guardian_name:
                     error_count += 1
-                    error_msg = f"Row {index + 2}: Guardian name is required"
+                    error_msg = f"Row {row_number}: Guardian name is required"
                     errors.append(error_msg)
                     logs.append(error_msg)
                     continue
-                
-                # Validate and format phone number
+
+                if guardian_id and guardian_id.lower() in existing_guardian_ids:
+                    error_count += 1
+                    error_msg = f"Row {row_number}: Guardian ID '{guardian_id}' already exists"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+
                 formatted_phone = None
                 if phone_number:
                     try:
-                        frappe.logger().info(f"Row {index + 2}: Processing phone '{phone_number}'")
                         formatted_phone = validate_vietnamese_phone_number(phone_number)
-                        frappe.logger().info(f"Row {index + 2}: Formatted phone result: '{formatted_phone}'")
-                        
-                        # Check phone uniqueness
                         if formatted_phone and formatted_phone in existing_phones:
                             error_count += 1
-                            error_msg = f"Row {index + 2}: Phone number '{phone_number}' already exists (record: {existing_phones[formatted_phone]})"
+                            error_msg = f"Row {row_number}: Phone number '{phone_number}' already exists (record: {existing_phones[formatted_phone]})"
                             errors.append(error_msg)
                             logs.append(error_msg)
                             continue
                     except ValueError as ve:
                         error_count += 1
-                        error_msg = f"Row {index + 2}: Phone validation error: {str(ve)}"
+                        error_msg = f"Row {row_number}: Phone validation error: {str(ve)}"
                         errors.append(error_msg)
                         logs.append(error_msg)
-                        frappe.logger().error(f"Row {index + 2}: Phone validation failed for '{phone_number}': {str(ve)}")
                         continue
-                else:
-                    frappe.logger().info(f"Row {index + 2}: No phone number provided")
-                
-                # Validate email format
+
                 if email:
                     import re
                     email_regex = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
                     if not email_regex.match(email):
-                        # Email is optional, just log warning but don't fail
-                        logs.append(f"Row {index + 2}: Warning - Invalid email format: {email}")
-                        email = ''  # Clear invalid email
-                
-                # Generate guardian_id if not provided
-                # Sử dụng timestamp + index để đảm bảo unique khi nhiều row có cùng tên
+                        logs.append(f"Row {row_number}: Warning - Invalid email format: {email}")
+                        email = ''
+
                 if not guardian_id and guardian_name:
                     import re
                     import time
+                    # Tao ma tam tu ten va timestamp de tranh trung khi import nhieu dong.
                     base_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
                     base_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', base_id)
                     base_id = re.sub(r'[ìíịỉĩ]', 'i', base_id)
@@ -1133,115 +1185,202 @@ def bulk_import_guardians():
                     base_id = base_id.replace('đ', 'd')
                     base_id = re.sub(r'[^a-z0-9]', '-', base_id)
                     base_id = re.sub(r'-+', '-', base_id).strip('-')
-                    # Thêm timestamp milliseconds + row index để đảm bảo unique
                     unique_suffix = f"{int(time.time() * 1000) % 100000}-{index}"
                     guardian_id = f"{base_id}-{unique_suffix}"
-                
-                # Create guardian
-                guardian_doc = frappe.get_doc({
+
+                guardian_payload = {
                     "doctype": "CRM Guardian",
                     "guardian_id": guardian_id,
                     "guardian_name": guardian_name,
                     "phone_number": formatted_phone or '',
                     "email": email or ''
-                })
+                }
+                guardian_payload.update(_extract_guardian_profile_updates(row, column_map))
+                guardian_doc = frappe.get_doc(guardian_payload)
                 
                 guardian_doc.flags.ignore_validate = True
                 guardian_doc.flags.ignore_permissions = True
+                guardian_doc.flags.ignore_mandatory = True
                 guardian_doc.insert(ignore_permissions=True)
-                
-                update_data = {}
-                if formatted_phone:
-                    update_data["phone_number"] = formatted_phone
-                    frappe.logger().info(f"About to force update phone for {guardian_doc.name}: '{formatted_phone}'")
-                else:
-                    frappe.logger().info(f"No phone number to update for {guardian_doc.name}")
-                
-                if email:
-                    update_data["email"] = email
-                    frappe.logger().info(f"About to force update email for {guardian_doc.name}: '{email}'")
-                else:
-                    frappe.logger().info(f"No email to update for {guardian_doc.name}")
-                
-                # Apply updates if any
-                if update_data:
-                    frappe.db.set_value("CRM Guardian", guardian_doc.name, update_data)
-                    frappe.db.commit()  # Force commit immediately
-                    frappe.logger().info(f"Force updated and committed guardian {guardian_doc.name}: {update_data}")
-                
-                # Log what was actually saved
-                guardian_doc.reload()
-                final_phone = guardian_doc.phone_number or ''
-                final_email = guardian_doc.email or ''
-                frappe.logger().info(f"Guardian {guardian_doc.name} final saved state - phone: '{final_phone}', email: '{final_email}'")
-                
-                # Track phone number for uniqueness checking in subsequent rows
+
                 if formatted_phone:
                     existing_phones[formatted_phone] = guardian_doc.name
-                
+                if guardian_id:
+                    existing_guardian_ids[guardian_id.lower()] = guardian_doc.name
+
                 success_count += 1
-                logs.append(f"Row {index + 2}: Successfully created guardian '{guardian_name}'")
-                
+                logs.append(f"Row {row_number}: Successfully created guardian '{guardian_name}'")
+
             except Exception as e:
                 error_count += 1
-                error_msg = f"Row {index + 2}: Error creating guardian: {str(e)}"
+                error_msg = f"Row {row_number}: Error creating guardian: {str(e)}"
                 errors.append(error_msg)
                 logs.append(error_msg)
-        
-        # Commit all changes
+
         frappe.db.commit()
-        
-        # Prepare response
         total_rows = len(df)
         is_success = success_count > 0
-        
-        # Prepare errors_preview for frontend display
-        errors_preview = []
-        for idx, error_msg in enumerate(errors[:20]):  # Limit to first 20 errors
-            # Extract row number from error message (format: "Row X: ...")
-            import re
-            match = re.match(r'Row (\d+): (.+)', error_msg)
-            if match:
-                row_num = int(match.group(1))
-                error_text = match.group(2)
-                errors_preview.append({
-                    "row": row_num,
-                    "error": error_text,
-                    "data": {}
-                })
-            else:
-                errors_preview.append({
-                    "row": idx + 2,
-                    "error": error_msg,
-                    "data": {}
-                })
-        
         response_data = {
             "total_rows": total_rows,
             "success_count": success_count,
             "error_count": error_count,
-            "errors_preview": errors_preview,
-            "logs": logs[-20:],  # Last 20 logs
+            "errors_preview": _build_guardian_errors_preview(errors),
+            "logs": logs[-20:],
         }
-        
+
         if is_success:
             return success_response(
                 data=response_data,
                 message=f"Bulk import completed. {success_count} guardians created, {error_count} errors."
             )
         else:
-            # ❌ KHÔNG ĐƯỢC truyền parameter 'data' vào error_response
-            # ✅ Thay vào đó dùng debug_info để truyền data
             return {
                 "success": False,
                 "message": f"Bulk import failed. {error_count} errors occurred.",
                 "code": "BULK_IMPORT_FAILED",
-                "data": response_data  # Truyền data trực tiếp trong response dict
+                "data": response_data
             }
-            
+
     except Exception as e:
         frappe.log_error(f"Error in bulk import guardians: {str(e)}", "Guardian Bulk Import Error")
         return error_response(
             message=f"Error in bulk import guardians: {str(e)}",
             code="BULK_IMPORT_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False)
+def bulk_update_guardians():
+    """Cap nhat CRM Guardian hang loat tu Excel, dinh danh bang name/docname hoac guardian_id."""
+    try:
+        import pandas as pd
+        import re
+
+        uploaded_file = frappe.request.files.get("file")
+        if not uploaded_file:
+            return error_response(
+                message="No file uploaded",
+                code="NO_FILE_UPLOADED"
+            )
+
+        try:
+            df = pd.read_excel(uploaded_file, sheet_name=0)
+        except Exception as e:
+            return error_response(
+                message=f"Error reading Excel file: {str(e)}",
+                code="EXCEL_READ_ERROR"
+            )
+
+        column_map = _build_guardian_excel_column_map(df.columns)
+        if "name" not in column_map and "guardian_id" not in column_map:
+            return error_response(
+                message="Missing identifier column: name/docname or guardian_id",
+                code="MISSING_IDENTIFIER_COLUMN"
+            )
+
+        email_regex = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        success_count = 0
+        error_count = 0
+        skipped_count = 0
+        errors = []
+        logs = []
+
+        update_fields = ["guardian_name", "phone_number", "email"] + GUARDIAN_PROFILE_FIELDS
+
+        for index, row in df.iterrows():
+            row_number = index + 2
+            try:
+                identifier = _read_guardian_excel_value(row, column_map, "name")
+                if not identifier:
+                    identifier = _read_guardian_excel_value(row, column_map, "guardian_id")
+
+                if not identifier:
+                    error_count += 1
+                    error_msg = f"Row {row_number}: Missing name/docname or guardian_id"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+
+                docname = _resolve_guardian_docname(identifier=identifier)
+                if not docname:
+                    error_count += 1
+                    error_msg = f"Row {row_number}: Guardian not found for identifier '{identifier}'"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+
+                updates = _extract_guardian_profile_updates(row, column_map, fields=update_fields)
+
+                if "phone_number" in updates:
+                    try:
+                        formatted_phone = validate_vietnamese_phone_number(updates["phone_number"])
+                    except ValueError as ve:
+                        error_count += 1
+                        error_msg = f"Row {row_number}: Phone validation error: {str(ve)}"
+                        errors.append(error_msg)
+                        logs.append(error_msg)
+                        continue
+
+                    duplicate_phone = frappe.db.get_value(
+                        "CRM Guardian",
+                        {"phone_number": formatted_phone, "name": ["!=", docname]},
+                        "name"
+                    )
+                    if duplicate_phone:
+                        error_count += 1
+                        error_msg = f"Row {row_number}: Phone number already exists (record: {duplicate_phone})"
+                        errors.append(error_msg)
+                        logs.append(error_msg)
+                        continue
+                    updates["phone_number"] = formatted_phone
+
+                if "email" in updates and updates["email"] and not email_regex.match(updates["email"]):
+                    error_count += 1
+                    error_msg = f"Row {row_number}: Invalid email format: {updates['email']}"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+
+                if not updates:
+                    skipped_count += 1
+                    logs.append(f"Row {row_number}: Skipped because there is no data to update")
+                    continue
+
+                frappe.db.set_value("CRM Guardian", docname, updates)
+                success_count += 1
+                logs.append(f"Row {row_number}: Updated guardian '{docname}'")
+
+            except Exception as e:
+                error_count += 1
+                error_msg = f"Row {row_number}: Error updating guardian: {str(e)}"
+                errors.append(error_msg)
+                logs.append(error_msg)
+
+        frappe.db.commit()
+        response_data = {
+            "total_rows": len(df),
+            "success_count": success_count,
+            "error_count": error_count,
+            "skipped_count": skipped_count,
+            "errors_preview": _build_guardian_errors_preview(errors),
+            "logs": logs[-20:],
+        }
+
+        if success_count > 0:
+            return success_response(
+                data=response_data,
+                message=f"Bulk update completed. {success_count} guardians updated, {error_count} errors, {skipped_count} skipped."
+            )
+
+        return {
+            "success": False,
+            "message": f"Bulk update failed. {error_count} errors, {skipped_count} skipped.",
+            "code": "BULK_UPDATE_FAILED",
+            "data": response_data
+        }
+    except Exception as e:
+        frappe.log_error(f"Error in bulk update guardians: {str(e)}", "Guardian Bulk Update Error")
+        return error_response(
+            message=f"Error in bulk update guardians: {str(e)}",
+            code="BULK_UPDATE_ERROR"
         )

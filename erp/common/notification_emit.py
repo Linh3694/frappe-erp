@@ -110,3 +110,95 @@ def emit_standard_parent_notification(
     """Tiện ích gọn cho module nghiệp vụ chỉ có list email."""
     ch = channel or _notification_channel()
     return emit_notify(ch, emails, title, body, data=dict(data or {}), notification_type=event_type)
+
+
+def emit_notify_hc_email(
+    channel: str,
+    recipient_email: str,
+    title: str,
+    body: str,
+    administrative_email_payload: Dict[str, Any],
+    notification_type: str = "administrative_ticket_email",
+) -> bool:
+    """
+    Ticket Hành chính (Frappe): envelope chỉ kênh email — notification-service đọc
+    `administrativeEmailPayload` và POST /notify-administrative-ticket (cùng tuyến tích hợp như ticket IT).
+    """
+    em = str(recipient_email or "").strip().lower()
+    if not em or "@" not in em:
+        return False
+    pay = dict(administrative_email_payload or {})
+    pay["recipientEmail"] = em
+    envelope: Dict[str, Any] = {
+        "service": "erp",
+        "event": notification_type,
+        "type": notification_type,
+        "kind": "notify.send",
+        "deliver": True,
+        "deliverFromStream": True,
+        "recipients": [em],
+        "title": str(title or "").strip(),
+        "body": str(body or "").strip(),
+        "channel": "email",
+        "channels": ["email"],
+        "data": {
+            "ticket_kind": "administrative",
+            "administrativeEmailPayload": pay,
+            "type": "administrative_ticket_email",
+        },
+    }
+    try:
+        return bool(publish(channel, envelope))
+    except Exception:
+        frappe.logger().error("notification_emit.emit_notify_hc_email failed", exc_info=True)
+        return False
+
+
+def emit_notify_hc_unified(
+    channel: str,
+    recipient_email: str,
+    title: str,
+    body: str,
+    push_data: Dict[str, Any],
+    administrative_email_payload: Optional[Dict[str, Any]] = None,
+    notification_type: str = "administrative_ticket",
+    *,
+    reference_doctype: Optional[str] = None,
+    reference_name: Optional[str] = None,
+) -> bool:
+    """
+    Ticket HC: một envelope push (+ email tùy chọn) → notification-service (giống luồng ticket IT).
+    """
+    em = str(recipient_email or "").strip().lower()
+    if not em or "@" not in em:
+        return False
+    pdata = dict(push_data or {})
+    chans = ["push", "email"] if administrative_email_payload else ["push"]
+    data: Dict[str, Any] = {**pdata, "ticket_kind": "administrative"}
+    if administrative_email_payload:
+        pay = dict(administrative_email_payload)
+        pay["recipientEmail"] = em
+        data["administrativeEmailPayload"] = pay
+    envelope: Dict[str, Any] = {
+        "service": "erp",
+        "event": notification_type,
+        "type": notification_type,
+        "kind": "notify.send",
+        "deliver": True,
+        "deliverFromStream": True,
+        "recipients": [em],
+        "title": str(title or "").strip(),
+        "body": str(body or "").strip(),
+        "channel": "push",
+        "channels": chans,
+        "data": data,
+    }
+    if reference_doctype:
+        envelope["reference_doctype"] = reference_doctype
+    if reference_name:
+        envelope["reference_name"] = reference_name
+    try:
+        return bool(publish(channel, envelope))
+    except Exception:
+        frappe.logger().error("notification_emit.emit_notify_hc_unified failed", exc_info=True)
+        return False

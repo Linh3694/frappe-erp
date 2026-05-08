@@ -765,10 +765,62 @@ def _hc_administrative_ticket_email_enabled():
     return True
 
 
+def _hc_via_notification_service():
+    """
+    Toàn bộ thông báo HC (push + email) qua Redis → notification-service.
+    - Mặc định: bật.
+    - Tắt (Frappe gửi Expo + HTTP email-service trực tiếp như cũ):
+      site_config administrative_ticket_via_notification_service = 0
+      hoặc (legacy) administrative_ticket_email_via_notification_service = 0
+    """
+    v = frappe.conf.get("administrative_ticket_via_notification_service")
+    if v is not None:
+        return bool(cint(v))
+    v_old = frappe.conf.get("administrative_ticket_email_via_notification_service")
+    if v_old is not None:
+        return bool(cint(v_old))
+    return True
+
+
+def _hc_emit_ticket_email_stream(payload) -> bool:
+    """Đẩy envelope notify.send (kênh email) lên Redis — notification-service gọi /notify-administrative-ticket."""
+    try:
+        from erp.common.notification_emit import emit_notify_hc_email
+    except Exception:
+        frappe.logger().error(
+            "administrative_ticket: import emit_notify_hc_email failed", exc_info=True
+        )
+        return False
+    ch = str(frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications")
+    recipient = (payload.get("recipientEmail") or "").strip()
+    if not recipient:
+        return False
+    code = (payload.get("ticketCode") or "").strip() or "HC"
+    tit = (payload.get("title") or "").strip() or code
+    event_type = str(payload.get("eventType") or "email")
+    subject_preview = f"[HC {code}] {tit}"
+    body_preview = _("Thông báo ticket hành chính ({0})").format(event_type)
+    ntype = f"administrative_ticket_{event_type}"
+    return emit_notify_hc_email(
+        ch,
+        recipient,
+        subject_preview,
+        body_preview,
+        dict(payload),
+        notification_type=ntype,
+    )
+
+
 def _hc_post_ticket_email(payload):
-    """Gửi email qua email-service (POST /notify-administrative-ticket)."""
+    """Gửi email: ưu tiên stream → notification-service; rollback HTTP trực tiếp khi tắt cờ hoặc emit lỗi."""
     if not _hc_administrative_ticket_email_enabled():
         return
+    if _hc_via_notification_service():
+        if _hc_emit_ticket_email_stream(payload):
+            return
+        frappe.logger().warning(
+            "administrative_ticket: emit Redis stream failed → fallback HTTP email-service"
+        )
     try:
         import requests
 
@@ -793,6 +845,9 @@ def _notify_new_admin_ticket_mobile(doc):
     Push Expo cho PIC + team leader hạng mục (luôn gộp, dedupe) khi có ticket HC mới.
     Payload: type=ticket + action=new_ticket_admin → kênh ticket (như Ticket IT).
     """
+    # Đã gửi push+email qua notification-service trong _hc_notify_new_ticket_via_stream — tránh trùng.
+    if _hc_via_notification_service():
+        return
     try:
         from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
     except Exception as e:
@@ -914,10 +969,8 @@ def _emit_hc_new_message_realtime(doc, message_dict, sender_email: str):
             )
 
 
-def _hc_send_ticket_email(doc, event_type, recipient_email, extra=None):
-    """Gửi email thông báo HC qua email-service (template tối giản)."""
-    if not recipient_email or not (recipient_email or "").strip():
-        return
+def _hc_build_email_service_payload(doc, event_type, recipient_email, extra=None):
+    """Payload JSON gửi email-service /notify-administrative-ticket (dùng chung stream + HTTP)."""
     extra = extra or {}
     code = (doc.ticket_code or doc.name or "").strip()
     t = (doc.title or "").strip() or code
@@ -939,7 +992,6 @@ def _hc_send_ticket_email(doc, event_type, recipient_email, extra=None):
     payload = {
         "eventType": event_type,
         "recipientEmail": (recipient_email or "").strip(),
-        # email-service: bật khối English khi recipient == creator (user); PIC/HC chỉ TV
         "creatorEmail": creator_em,
         "ticketUrl": _hc_ticket_url_for_recipient(doc, recipient_email),
         "ticketCode": code,
@@ -949,13 +1001,115 @@ def _hc_send_ticket_email(doc, event_type, recipient_email, extra=None):
         "descriptionSnippet": desc_snippet,
         "status": getattr(doc, "status", None) or "",
         "createdAt": created_at,
+        "ticketDocName": doc.name,
     }
     payload.update(extra)
+    return payload
+
+
+def _hc_send_ticket_email(doc, event_type, recipient_email, extra=None):
+    """Gửi email thông báo HC (HTTP hoặc stream — qua _hc_post_ticket_email)."""
+    if not recipient_email or not (recipient_email or "").strip():
+        return
+    payload = _hc_build_email_service_payload(doc, event_type, recipient_email, extra)
     _hc_post_ticket_email(payload)
+
+
+def _hc_notify_new_ticket_via_stream(doc):
+    """Ticket mới: push + email qua notification-service (thay mobile trực tiếp + email riêng)."""
+    try:
+        from erp.common.notification_emit import emit_notify_hc_email, emit_notify_hc_unified
+    except Exception:
+        frappe.logger().error(
+            "administrative_ticket: import emit_notify_hc_* failed", exc_info=True
+        )
+        return
+
+    ch = str(frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications")
+    creator = (doc.creator_email or "").strip()
+    creator_lower = creator.lower() if creator else ""
+    code = (doc.ticket_code or doc.name or "").strip()
+    t = (doc.title or "").strip() or code
+    cat = _hc_category_label(doc) or (getattr(doc, "category", None) or "")
+    body_ml = (
+        _("{0} · {1}: {2}").format(f"#{code}", cat, t)
+        if cat
+        else _("{0}: {1}").format(f"#{code}", t)
+    )
+    title_ml = _("Ticket hành chính mới")
+    ref_name = doc.name
+
+    seen = set()
+    for user_key in _hc_new_ticket_recipient_user_keys(doc):
+        em = _hc_user_email(user_key)
+        em = (em or "").strip().lower()
+        if not em or em in seen:
+            continue
+        if _hc_is_same_user_as_email(user_key, creator):
+            continue
+        if creator_lower and em == creator_lower:
+            continue
+        seen.add(em)
+        pdata = _hc_ticket_payload(doc, "new_ticket_admin")
+        ep = None
+        if _hc_administrative_ticket_email_enabled():
+            ep = _hc_build_email_service_payload(doc, "new_ticket", em, {})
+        emit_notify_hc_unified(
+            ch,
+            em,
+            title_ml,
+            body_ml,
+            pdata,
+            ep,
+            "administrative_ticket_new_ticket",
+            reference_doctype=DOCTYPE,
+            reference_name=ref_name,
+        )
+
+    if not creator:
+        return
+    ep_c = None
+    if _hc_administrative_ticket_email_enabled():
+        ep_c = _hc_build_email_service_payload(doc, "ticket_creation_confirmation", creator, {})
+
+    if _hc_administrative_confirm_creator_push_enabled():
+        title_c = _("Ticket hành chính đã gửi")
+        body_c = _("{0}: {1}. Bộ phận hành chính sẽ phản hồi sớm.").format(f"#{code}", t)
+        data_c = {
+            "type": "ticket",
+            "action": "new_ticket",
+            "ticket_kind": "administrative",
+            "ticketId": doc.name,
+            "ticket_id": doc.name,
+            "ticketCode": code,
+        }
+        emit_notify_hc_unified(
+            ch,
+            creator,
+            title_c,
+            body_c,
+            data_c,
+            ep_c if ep_c else None,
+            "administrative_ticket_creation_confirmation",
+            reference_doctype=DOCTYPE,
+            reference_name=ref_name,
+        )
+    elif ep_c:
+        emit_notify_hc_email(
+            ch,
+            creator,
+            f"[HC {code}] {t}",
+            _("Xác nhận tạo ticket hành chính"),
+            ep_c,
+            "administrative_ticket_ticket_creation_confirmation",
+        )
 
 
 def _hc_send_emails_on_ticket_create(doc):
     """Xác nhận cho người tạo + thông báo ticket mới cho PIC/leader (cùng logic push)."""
+    if _hc_via_notification_service():
+        _hc_notify_new_ticket_via_stream(doc)
+        return
     creator = (doc.creator_email or "").strip()
     if creator:
         try:
@@ -1000,19 +1154,82 @@ def _hc_ticket_payload(doc, action, extra=None):
     return d
 
 
-def _hc_send_persisted(recipient_email, title, body, data, exclude_email=None):
-    """Gửi ERP Notification + Expo; bỏ qua chính người thao tác (theo name hoặc email)."""
+def _hc_send_persisted(
+    recipient_email,
+    title,
+    body,
+    data,
+    exclude_email=None,
+    *,
+    doc=None,
+    email_event_type=None,
+    email_extra=None,
+    stream_notification_type="administrative_ticket_event",
+):
+    """
+    Thông báo HC một người: Redis unified (push ± email) khi bật stream;
+    ngược lại ERP Notification + Expo và email HTTP (legacy).
+    """
     rid = _hc_push_recipient_id(recipient_email)
     if not rid:
         return
     ex = _hc_push_recipient_id(exclude_email) if exclude_email else None
     if ex and ex == rid:
         return
-    # So khớp theo email (ví dụ cùng user khác cách gõ)
     e_r = (frappe.db.get_value("User", rid, "email") or rid or "").strip().lower()
     e_x = (frappe.db.get_value("User", ex, "email") or ex or "").strip().lower() if ex else ""
     if e_x and e_r and e_x == e_r:
         return
+
+    em_deliver = (
+        frappe.db.get_value("User", rid, "email") or recipient_email or rid or ""
+    ).strip().lower()
+    if not em_deliver or "@" not in em_deliver:
+        frappe.logger().error(
+            "administrative_ticket: HC notify bỏ qua — không resolve được email cho recipient %r",
+            recipient_email,
+        )
+        return
+
+    ref_name = (doc.name if doc else None) or (data.get("ticketId") or data.get("ticket_id"))
+
+    if _hc_via_notification_service():
+        try:
+            from erp.common.notification_emit import emit_notify_hc_unified
+        except Exception:
+            frappe.logger().error(
+                "administrative_ticket: import emit_notify_hc_unified failed", exc_info=True
+            )
+            return
+        ch = str(frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications")
+        ep = None
+        if doc and email_event_type and _hc_administrative_ticket_email_enabled():
+            ep = _hc_build_email_service_payload(
+                doc, email_event_type, em_deliver, email_extra or {}
+            )
+        try:
+            if not emit_notify_hc_unified(
+                ch,
+                em_deliver,
+                title,
+                body,
+                data,
+                ep,
+                stream_notification_type,
+                reference_doctype=DOCTYPE,
+                reference_name=ref_name,
+            ):
+                frappe.logger().warning(
+                    "administrative_ticket: emit_notify_hc_unified false — %s / %s",
+                    em_deliver,
+                    stream_notification_type,
+                )
+        except Exception as ex_unified:
+            frappe.logger().error(
+                "administrative_ticket: HC stream notify failed %s: %s", em_deliver, ex_unified
+            )
+        return
+
     try:
         from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
 
@@ -1028,6 +1245,16 @@ def _hc_send_persisted(recipient_email, title, body, data, exclude_email=None):
         )
     except Exception as ex:
         frappe.logger().error(f"administrative_ticket: HC notify failed {rid}: {ex}")
+    if doc and email_event_type and _hc_administrative_ticket_email_enabled():
+        try:
+            _hc_send_ticket_email(doc, email_event_type, em_deliver, email_extra or {})
+        except Exception as ex_mail:
+            frappe.logger().error(
+                "administrative_ticket: email kèm persisted %s %s: %s",
+                email_event_type,
+                em_deliver,
+                ex_mail,
+            )
 
 
 def _notify_hc_user_reply(doc, sender_email, message_snippet: str = ""):
@@ -1058,11 +1285,11 @@ def _notify_hc_user_reply(doc, sender_email, message_snippet: str = ""):
                 _("{0} vừa phản hồi {1}: {2}").format(sender_name, f"#{code}", snip),
                 d,
                 exclude_email=sender,
+                doc=doc,
+                email_event_type="user_reply",
+                email_extra={},
+                stream_notification_type="administrative_ticket_user_reply",
             )
-            try:
-                _hc_send_ticket_email(doc, "user_reply", rec, {})
-            except Exception as ex:
-                frappe.logger().error(f"administrative_ticket: email user_reply {rec}: {ex}")
     elif (sender or "").lower() != (creator or "").lower() and creator:
         d = _hc_ticket_payload(
             doc,
@@ -1078,11 +1305,11 @@ def _notify_hc_user_reply(doc, sender_email, message_snippet: str = ""):
             _("{0} vừa phản hồi {1}: {2}").format(sender_name, f"#{code}", snip),
             d,
             exclude_email=sender,
+            doc=doc,
+            email_event_type="user_reply",
+            email_extra={},
+            stream_notification_type="administrative_ticket_user_reply",
         )
-        try:
-            _hc_send_ticket_email(doc, "user_reply", creator, {})
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: email user_reply creator: {ex}")
 
 
 def _notify_hc_user_reply_job(ticket_id, sender_email, message_snippet=None):
@@ -1144,16 +1371,21 @@ def _notify_hc_status_changed(doc, old_status, new_status, actor_email):
     if ae and ae not in recipients and (ae or "").lower() != (actor or "").lower():
         recipients.append(ae)
     for r in recipients:
-        _hc_send_persisted(r, title, body, data, exclude_email=actor)
-        try:
-            _hc_send_ticket_email(
-                doc,
-                "ticket_status_changed",
-                r,
-                {"oldStatus": old_status, "newStatus": new_status, "actorName": ufn or actor or ""},
-            )
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: email status {r}: {ex}")
+        _hc_send_persisted(
+            r,
+            title,
+            body,
+            data,
+            exclude_email=actor,
+            doc=doc,
+            email_event_type="ticket_status_changed",
+            email_extra={
+                "oldStatus": old_status,
+                "newStatus": new_status,
+                "actorName": ufn or actor or "",
+            },
+            stream_notification_type="administrative_ticket_status_changed",
+        )
 
 
 def _notify_hc_assignment_changed(doc, old_assignee, new_assignee, actor_email):
@@ -1172,13 +1404,11 @@ def _notify_hc_assignment_changed(doc, old_assignee, new_assignee, actor_email):
             _("{0} đã được gán cho bạn: {1}").format(f"#{code}", t),
             data,
             exclude_email=actor,
+            doc=doc,
+            email_event_type="ticket_assigned",
+            email_extra={"actorName": (actor or "").strip()},
+            stream_notification_type="administrative_ticket_assigned",
         )
-        try:
-            _hc_send_ticket_email(
-                doc, "ticket_assigned", ne, {"actorName": (actor or "").strip()}
-            )
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: email assign {ne}: {ex}")
 
 
 def _notify_hc_ticket_pickup(doc):
@@ -1201,11 +1431,11 @@ def _notify_hc_ticket_pickup(doc):
         _("{0} đang xử lý {1}: {2}").format(ufn, f"#{code}", t),
         data,
         exclude_email=actor,
+        doc=doc,
+        email_event_type="ticket_pickup",
+        email_extra={"actorName": ufn},
+        stream_notification_type="administrative_ticket_pickup",
     )
-    try:
-        _hc_send_ticket_email(doc, "ticket_pickup", creator, {"actorName": ufn})
-    except Exception as ex:
-        frappe.logger().error(f"administrative_ticket: email pickup: {ex}")
 
 
 def _notify_hc_cancelled(doc, actor_email):
@@ -1219,11 +1449,17 @@ def _notify_hc_cancelled(doc, actor_email):
     for em in ((doc.creator_email or "").strip(), _hc_user_email(doc.assigned_to)):
         if not em or (em or "").lower() == (actor or "").lower():
             continue
-        _hc_send_persisted(em, title, body, data, exclude_email=actor)
-        try:
-            _hc_send_ticket_email(doc, "ticket_cancelled", em, {"actorName": actor or ""})
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: email cancel {em}: {ex}")
+        _hc_send_persisted(
+            em,
+            title,
+            body,
+            data,
+            exclude_email=actor,
+            doc=doc,
+            email_event_type="ticket_cancelled",
+            email_extra={"actorName": actor or ""},
+            stream_notification_type="administrative_ticket_cancelled",
+        )
 
 
 def _notify_hc_reopened(doc, actor_email):
@@ -1251,11 +1487,17 @@ def _notify_hc_reopened(doc, actor_email):
             continue
         d = dict(data)
         d["reopenedByName"] = ufn
-        _hc_send_persisted(em, title, body, d, exclude_email=actor)
-        try:
-            _hc_send_ticket_email(doc, "ticket_reopened", em, {"actorName": ufn or actor or ""})
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: email reopen {em}: {ex}")
+        _hc_send_persisted(
+            em,
+            title,
+            body,
+            d,
+            exclude_email=actor,
+            doc=doc,
+            email_event_type="ticket_reopened",
+            email_extra={"actorName": ufn or actor or ""},
+            stream_notification_type="administrative_ticket_reopened",
+        )
 
 
 def _notify_hc_completion_and_feedback_to_pic(doc, actor_email):
@@ -1283,16 +1525,17 @@ def _notify_hc_completion_and_feedback_to_pic(doc, actor_email):
     )
     title = _("Ticket hành chính đã được xác nhận hoàn thành")
     body = _("{0} xác nhận {1} hoàn thành (đánh giá {2}★): {3}").format(ufn, f"#{code}", rating, t)
-    _hc_send_persisted(pic, title, body, data, exclude_email=actor)
-    try:
-        _hc_send_ticket_email(
-            doc,
-            "ticket_feedback_received",
-            pic,
-            {"rating": rating, "actorName": ufn or actor or ""},
-        )
-    except Exception as ex:
-        frappe.logger().error(f"administrative_ticket: email feedback: {ex}")
+    _hc_send_persisted(
+        pic,
+        title,
+        body,
+        data,
+        exclude_email=actor,
+        doc=doc,
+        email_event_type="ticket_feedback_received",
+        email_extra={"rating": rating, "actorName": ufn or actor or ""},
+        stream_notification_type="administrative_ticket_feedback",
+    )
 
 
 @frappe.whitelist(allow_guest=False)
