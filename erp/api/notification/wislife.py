@@ -340,25 +340,46 @@ def _do_broadcast_new_post(event_data):
         author_name = format_vietnamese_name(raw_author_name)
         post_id = event_data.get('postId')
         content_preview = event_data.get('content', '')[:50]
-        author_email = event_data.get('authorEmail')
-        
+        author_email = (event_data.get('authorEmail') or '').strip().lower()
+
         frappe.logger().info(f"📱 [Wislife Broadcast Job] Starting for post by {author_name}")
-        
-        # Lấy tất cả users có device token đã đăng ký
-        all_tokens = frappe.get_all("Mobile Device Token",
-            filters={"is_active": 1},
-            fields=["user"],
-            distinct=True
+
+        # Lấy tất cả users có device token đã đăng ký + user còn enabled (loại tài khoản bị khoá).
+        token_rows = frappe.db.sql(
+            """
+            SELECT DISTINCT t.user AS user
+            FROM `tabMobile Device Token` t
+            INNER JOIN `tabUser` u ON u.name = t.user
+            WHERE t.is_active = 1
+              AND u.enabled = 1
+              AND IFNULL(t.user, '') != ''
+            """,
+            as_dict=True,
         )
-        
-        if not all_tokens:
-            frappe.logger().warning("📱 [Wislife Broadcast Job] No device tokens found")
+
+        if not token_rows:
+            frappe.logger().warning("📱 [Wislife Broadcast Job] No active device tokens found")
             return
-        
-        # Loại bỏ author khỏi danh sách nhận
-        recipient_emails = [t.user for t in all_tokens if t.user != author_email]
-        
-        frappe.logger().info(f"📱 [Wislife Broadcast Job] Broadcasting to {len(recipient_emails)} users")
+
+        # Dedupe + loại bỏ author (case-insensitive); chuẩn hoá lowercase email Frappe.
+        seen = set()
+        recipient_emails = []
+        for row in token_rows:
+            email = (row.get("user") or "").strip().lower()
+            if not email or email in seen:
+                continue
+            if author_email and email == author_email:
+                continue
+            seen.add(email)
+            recipient_emails.append(email)
+
+        frappe.logger().info(
+            f"📱 [Wislife Broadcast Job] tokens={len(token_rows)} → recipients={len(recipient_emails)} (author={author_email or '_'})"
+        )
+
+        if not recipient_emails:
+            frappe.logger().warning("📱 [Wislife Broadcast Job] No recipients sau khi loại author")
+            return
         
         notification_message = f'{author_name} vừa đăng: "{content_preview}..."'
         notification_data = {
@@ -617,7 +638,19 @@ def handle_comment_replied(event_data):
         if not recipient_email:
             frappe.logger().warning(f"⚠️ [Wislife Comment Reply] No recipient email provided")
             return
-            
+
+        # Debug: đếm device token đang active cho recipient để chẩn đoán "không nhận noti"
+        try:
+            token_count = frappe.db.count(
+                "Mobile Device Token",
+                {"user": recipient_email, "is_active": 1},
+            )
+            frappe.logger().info(
+                f"🔍 [Wislife Comment Reply] recipient={recipient_email} active_tokens={token_count}"
+            )
+        except Exception:
+            pass
+
         # Format tên theo chuẩn Việt Nam
         raw_name = event_data.get('userName', 'Ai đó')
         user_name = format_vietnamese_name(raw_name)
