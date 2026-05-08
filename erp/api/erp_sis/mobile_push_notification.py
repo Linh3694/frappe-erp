@@ -31,7 +31,10 @@ def _wislife_push_title_for_bundle(bundle_id, fallback_title):
 
 
 def _mobile_notify_via_redis_stream_only():
-    """site_config: MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY=1 — gửi qua notification-service (Streams)."""
+    """site_config: MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY=1 — gửi qua notification-service (Streams).
+
+    Cùng cờ áp dụng cho ticket hành chính (Frappe): xem _hc_via_notification_service trong administrative_ticket.
+    """
     return bool(frappe.utils.cint(frappe.conf.get("MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY") or 0))
 
 

@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import cint, get_datetime, now_datetime, today
 
 from erp.api.erp_administrative.room_activity_log import log_room_activity
+from erp.api.erp_sis.mobile_push_notification import _mobile_notify_via_redis_stream_only
 from erp.utils.api_response import (
     error_response,
     forbidden_response,
@@ -767,19 +768,12 @@ def _hc_administrative_ticket_email_enabled():
 
 def _hc_via_notification_service():
     """
-    Toàn bộ thông báo HC (push + email) qua Redis → notification-service.
-    - Mặc định: bật.
-    - Tắt (Frappe gửi Expo + HTTP email-service trực tiếp như cũ):
-      site_config administrative_ticket_via_notification_service = 0
-      hoặc (legacy) administrative_ticket_email_via_notification_service = 0
+    Ticket HC dùng chung cờ chuyển giao với mobile push:
+    `MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY` = 1 → push (+ email nếu bật) qua Redis → notification-service.
+    = 0 → legacy (Expo trực tiếp + email HTTP từ Frappe như cũ).
+    Không còn cờ riêng `administrative_ticket_via_notification_service`.
     """
-    v = frappe.conf.get("administrative_ticket_via_notification_service")
-    if v is not None:
-        return bool(cint(v))
-    v_old = frappe.conf.get("administrative_ticket_email_via_notification_service")
-    if v_old is not None:
-        return bool(cint(v_old))
-    return True
+    return _mobile_notify_via_redis_stream_only()
 
 
 def _hc_emit_ticket_email_stream(payload) -> bool:
