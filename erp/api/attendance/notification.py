@@ -62,9 +62,11 @@ def publish_attendance_notification(
 			from erp.api.attendance.hikvision import (
 				is_historical_attendance,
 				get_historical_attendance_threshold_minutes,
+				_increment_daily_counter,
 			)
 			if timestamp and is_historical_attendance(timestamp):
 				threshold = get_historical_attendance_threshold_minutes()
+				_increment_daily_counter("attendance:stale_skipped:count")
 				frappe.logger().warning(
 					f"⏭️ [Attendance Notif] SKIP stale event for {employee_code} - "
 					f"event_time={timestamp} > {threshold}min ago "

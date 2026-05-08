@@ -105,6 +105,28 @@ def get_hikvision_logger():
 	return logger
 
 
+def _increment_daily_counter(prefix):
+	"""
+	Tăng counter daily trên Redis để track metrics (dedup, stale skip, ...).
+	Key có dạng `{prefix}:YYYY-MM-DD`, TTL 48h để đủ thời gian đọc cuối ngày.
+	An toàn nếu Redis lỗi (silent fail, không ảnh hưởng business logic).
+	"""
+	try:
+		from datetime import datetime as _dt
+		today = _dt.now().strftime("%Y-%m-%d")
+		key = f"{prefix}:{today}"
+		redis_conn = frappe.cache().redis if hasattr(frappe.cache(), "redis") else None
+		if redis_conn is None:
+			return
+		new_val = redis_conn.incr(key)
+		# Set TTL chỉ ở lần đầu (khi counter == 1) để tránh extend TTL liên tục
+		if new_val == 1:
+			redis_conn.expire(key, 60 * 60 * 48)
+	except Exception:
+		# Counter chỉ là metric, không được phép raise lên business logic
+		pass
+
+
 @frappe.whitelist(allow_guest=True, methods=["POST"])
 def handle_hikvision_event():
 	"""
@@ -849,6 +871,8 @@ def process_single_attendance_event(event_data):
 			dedup_key = f"hikvision_evt:{employee_code}:{timestamp}"
 			try:
 				if frappe.cache().get_value(dedup_key):
+					# Counter để verify rate dedup (logger.debug bị filter ở INFO level)
+					_increment_daily_counter("hikvision:dedup:count")
 					logger.debug(
 						"dedup skip employee=%s timestamp=%s (device retry)",
 						employee_code, timestamp,
