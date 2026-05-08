@@ -1,5 +1,6 @@
 import json
 import os
+import uuid as _uuid
 from typing import Any, Dict, Optional, Tuple
 
 import frappe
@@ -103,7 +104,31 @@ def publish(channel: str, message: Dict[str, Any]) -> bool:
             pass
         return False
     try:
-        client.publish(channel, json.dumps(message, default=str))
+        if isinstance(message, dict) and not message.get("eventId"):
+            message = {**message, "eventId": str(_uuid.uuid4())}
+
+        mode = (_get_conf("EVENT_BUS_MODE") or "both").strip().lower()
+        body = json.dumps(message, default=str)
+
+        prefix = ((_get_conf("EVENT_BUS_STREAM_PREFIX") or "events").strip(":") or "events")
+        stream_key = f"{prefix}:{channel}"
+        try:
+            stream_maxlen = int(_get_conf("EVENT_BUS_STREAM_MAXLEN") or 100000)
+        except Exception:
+            stream_maxlen = 100000
+
+        if mode in ("pubsub", "both"):
+            client.publish(channel, body)
+        if mode in ("streams", "both"):
+            try:
+                client.xadd(
+                    stream_key,
+                    {"payload": body},
+                    maxlen=stream_maxlen,
+                    approximate=True,
+                )
+            except TypeError:
+                client.xadd(stream_key, {"payload": body}, maxlen=stream_maxlen)
         return True
     except Exception:
         try:

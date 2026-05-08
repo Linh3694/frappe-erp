@@ -8,6 +8,7 @@ import json
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
+from erp.common.notification_emit import emit_notify, emit_notify_bulk
 
 # Bundle đăng ký push — tiêu đề Wislife/journal theo app (yêu cầu UX)
 BUNDLE_PARENT_PORTAL = "com.hailinh.n23.parentportalmobile"
@@ -27,6 +28,11 @@ def _wislife_push_title_for_bundle(bundle_id, fallback_title):
     if bid in BUNDLE_WORKSPACE_IDS:
         return "Hoạt động"
     return fallback_title
+
+
+def _mobile_notify_via_redis_stream_only():
+    """site_config: MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY=1 — gửi qua notification-service (Streams)."""
+    return bool(frappe.utils.cint(frappe.conf.get("MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY") or 0))
 
 
 # ===== MOBILE NOTIFICATION SERVICE =====
@@ -635,6 +641,16 @@ def send_mobile_notification(user_email, title, body, data=None):
         dict: {"success": true/false, "message": "..."}
     """
     try:
+        if _mobile_notify_via_redis_stream_only():
+            ch = frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications"
+            ndata = data if isinstance(data, dict) else {}
+            ntype = str(ndata.get("type") or "general")
+            ok = emit_notify(ch, [user_email], title, body, data=ndata, notification_type=ntype)
+            return {
+                "success": bool(ok),
+                "message": "redis_stream" if ok else "redis_stream_failed",
+            }
+
         # Get active device tokens for user
         tokens = frappe.get_all("Mobile Device Token",
             filters={
@@ -903,6 +919,10 @@ def send_mobile_notifications_bulk(targets, title, body):
         }
     
     try:
+        if _mobile_notify_via_redis_stream_only():
+            ch = frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications"
+            return emit_notify_bulk(ch, targets, title, body, notification_type="general")
+
         # Lấy tất cả tokens cho danh sách emails (1 query)
         emails = list({t.get("email") for t in targets if t.get("email")})
         if not emails:

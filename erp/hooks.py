@@ -83,14 +83,10 @@ app_license = "mit"
 # ------------
 
 # before_install = "erp.install.before_install"
-after_install = [
-    "erp.api.notification.ticket.start_redis_listener"
-]
+# Start Redis listeners — start_redis_listener đã gỡ khỏi ticket.py; tránh lỗi import khi install/start.
+after_install = []
 
-# Start Redis listeners on app startup
-app_startup = [
-    "erp.api.notification.ticket.start_redis_listener"
-]
+app_startup = []
 
 # Uninstallation
 # ------------
