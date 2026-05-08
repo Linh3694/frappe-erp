@@ -35,6 +35,96 @@ def _mobile_notify_via_redis_stream_only():
     return bool(frappe.utils.cint(frappe.conf.get("MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY") or 0))
 
 
+# ===== Sync sang notification-service (Phase 3) =====
+# App PH device thật chưa register trực tiếp tới notification-service do Nginx chưa proxy
+# /api/notifications/* sang microservice. Để đảm bảo notification-service luôn có Mobile
+# Device Token mới nhất, Frappe gọi sync sau mỗi lần register/unregister.
+
+def _notification_service_url():
+    """Cho phép cấu hình NOTIFICATION_SERVICE_URL ở site_config hoặc env."""
+    return (frappe.conf.get("NOTIFICATION_SERVICE_URL") or "").rstrip("/")
+
+
+def _internal_service_secret():
+    return (frappe.conf.get("INTERNAL_SERVICE_SECRET") or "").strip()
+
+
+def _sync_register_to_notification_service(user_email, payload):
+    """Gửi POST /devices/register-internal — fail không chặn flow chính, chỉ log."""
+    base = _notification_service_url()
+    secret = _internal_service_secret()
+    if not base or not secret:
+        return  # Chưa cấu hình thì im lặng (giống behavior cũ)
+    try:
+        import requests as _requests
+        body = {
+            "userEmail": user_email,
+            "deviceToken": payload.get("device_token"),
+            "platform": payload.get("platform"),
+            "appType": payload.get("app_type"),
+            "deviceId": payload.get("device_id"),
+            "bundleId": payload.get("bundle_id"),
+            "deviceName": payload.get("device_name"),
+            "os": payload.get("os"),
+            "osVersion": payload.get("os_version"),
+            "appVersion": payload.get("app_version"),
+            "language": payload.get("language"),
+            "timezone": payload.get("timezone"),
+        }
+        resp = _requests.post(
+            f"{base}/api/notifications/devices/register-internal",
+            json=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Service-Token": secret,
+                "X-Service-Name": "frappe-erp",
+            },
+            timeout=5,
+        )
+        if 200 <= resp.status_code < 300:
+            frappe.logger().info(
+                f"[NotiSync] register OK user={user_email} app_type={payload.get('app_type')}"
+            )
+        else:
+            frappe.logger().warning(
+                f"[NotiSync] register HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+    except Exception as e:
+        frappe.logger().warning(f"[NotiSync] register lỗi: {str(e)}")
+
+
+def _sync_unregister_to_notification_service(user_email, device_token=None):
+    base = _notification_service_url()
+    secret = _internal_service_secret()
+    if not base or not secret:
+        return
+    try:
+        import requests as _requests
+        body = {"userEmail": user_email}
+        if device_token:
+            body["deviceToken"] = device_token
+        resp = _requests.post(
+            f"{base}/api/notifications/devices/unregister-internal",
+            json=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Service-Token": secret,
+                "X-Service-Name": "frappe-erp",
+            },
+            timeout=5,
+        )
+        if 200 <= resp.status_code < 300:
+            frappe.logger().info(
+                f"[NotiSync] unregister OK user={user_email} token={(device_token or '*')[:24]}"
+            )
+        else:
+            frappe.logger().warning(
+                f"[NotiSync] unregister HTTP {resp.status_code}: {resp.text[:200]}"
+            )
+    except Exception as e:
+        frappe.logger().warning(f"[NotiSync] unregister lỗi: {str(e)}")
+
+
 # ===== MOBILE NOTIFICATION SERVICE =====
 
 def ensure_mobile_device_token_doctype():
@@ -432,6 +522,13 @@ def register_device_token():
         frappe.db.commit()
         frappe.logger().info(f"✅ {message} for user {user}")
 
+        # Sync sang notification-service (Phase 3) — đảm bảo microservice luôn có token mới nhất
+        # kể cả khi app PH device thật chưa register trực tiếp tới notification-service.
+        try:
+            _sync_register_to_notification_service(user, device_data)
+        except Exception as sync_err:
+            frappe.logger().warning(f"[NotiSync] register sync exception: {str(sync_err)}")
+
         return success_response({
             "device_token": device_token,
             "platform": platform,
@@ -464,6 +561,10 @@ def unregister_device_token():
             deleted_count = frappe.db.count("Mobile Device Token", {"user": user})
             frappe.db.delete("Mobile Device Token", {"user": user})
             frappe.db.commit()
+            try:
+                _sync_unregister_to_notification_service(user, None)
+            except Exception as sync_err:
+                frappe.logger().warning(f"[NotiSync] unregister sync exception: {str(sync_err)}")
             return success_response({"deleted_count": deleted_count}, "All device tokens unregistered")
         else:
             # Unregister specific token
@@ -472,6 +573,10 @@ def unregister_device_token():
                 "device_token": device_token
             })
             frappe.db.commit()
+            try:
+                _sync_unregister_to_notification_service(user, device_token)
+            except Exception as sync_err:
+                frappe.logger().warning(f"[NotiSync] unregister sync exception: {str(sync_err)}")
             return success_response({"deleted": bool(deleted)}, "Device token unregistered")
 
     except Exception as e:
