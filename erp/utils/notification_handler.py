@@ -542,10 +542,12 @@ def send_bulk_parent_notifications(
                         "event_timestamp": frappe.utils.now()
                     }
                     
-                    # Set student_id field if doctype has it
-                    if parent_student_id:
+                    # Chỉ ghi cột student_id khi DocType đã có field (tránh OperationalError trên DB cũ)
+                    if parent_student_id and frappe.db.has_column(
+                        "ERP Notification", "student_id"
+                    ):
                         notification_doc_data["student_id"] = parent_student_id
-                    
+
                     notification_doc = get_doc(notification_doc_data)
                     notification_doc.insert(ignore_permissions=True)
                     # FIX: Không commit sau mỗi insert - commit 1 lần ở cuối để tối ưu performance
