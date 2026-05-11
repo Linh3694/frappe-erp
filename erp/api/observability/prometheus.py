@@ -18,7 +18,8 @@ def metrics():
 	Header: Authorization: Bearer <chuỗi> hoặc X-Prometheus-Token: <chuỗi>
 	"""
 
-	token_cfg = frappe.conf.get("prometheus_metrics_token") or frappe.conf.get("otel_metrics_token")
+	token_cfg_raw = frappe.conf.get("prometheus_metrics_token") or frappe.conf.get("otel_metrics_token")
+	token_cfg = (token_cfg_raw or "").strip()
 	if not token_cfg:
 		frappe.throw(
 			frappe._(
@@ -28,9 +29,16 @@ def metrics():
 		)
 
 	hdr = frappe.request.headers
-	auth = hdr.get("Authorization") or ""
-	bearer_ok = auth == f"Bearer {token_cfg}"
-	token_ok = hdr.get("X-Prometheus-Token") == token_cfg
+	auth_raw = (hdr.get("Authorization") or "").strip()
+	token_hdr = (hdr.get("X-Prometheus-Token") or "").strip()
+
+	# Bearer / token do nginx hoặc file credentials Prometheus đôi khi có khoảng trắng thừa.
+	bearer_ok = False
+	prefix = "bearer "
+	if auth_raw.lower().startswith(prefix):
+		bearer_ok = auth_raw[len(prefix) :].strip() == token_cfg
+
+	token_ok = token_hdr == token_cfg
 	if not bearer_ok and not token_ok:
 		frappe.throw(frappe._("Forbidden"), frappe.AuthenticationError)
 
