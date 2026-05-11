@@ -461,12 +461,13 @@ def get_reports_by_class():
     
     if template_id:
         filters["template_id"] = template_id
-            
-    school_year = frappe.form_dict.get("school_year")
+
+    # Đồng bộ với class_id/template_id: GET query string có thể chỉ nằm trong request.args
+    school_year = _get_param("school_year")
     if school_year:
         filters["school_year"] = school_year
-    
-    semester_part = frappe.form_dict.get("semester_part")
+
+    semester_part = _get_param("semester_part")
     if semester_part:
         filters["semester_part"] = semester_part
     

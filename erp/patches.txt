@@ -49,3 +49,6 @@ erp.patches.v1_0.room_physical_code_and_yearly_assignment
 
 # Finance: bypass_supersession trên Order Student (Parent Portal rollback từ đơn con)
 erp.patches.v1_0.backfill_finance_order_student_bypass_supersession
+
+# Bật Track Changes cho mọi DocType app erp (chỉ istable=0)
+erp.patches.v1_0.enable_track_changes_erp_doctypes
