@@ -58,3 +58,6 @@ erp.patches.v1_0.enable_track_changes_erp_doctypes
 
 # Observability: xóa Portal Slow API (slow API → Loki/Grafana)
 erp.patches.v1_0.drop_portal_slow_api_doctype
+
+# Hot APIs P95 9s+: composite index cho Class Log Subject/Student + Class Attendance
+erp.patches.v1_0.optimize_classlog_attendance_indexes

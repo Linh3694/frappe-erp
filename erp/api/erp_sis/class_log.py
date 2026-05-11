@@ -741,12 +741,61 @@ def save_class_log():
             )
         timings_ms["bulk_update"] = round((time.perf_counter() - t_mark) * 1000)
 
+        # ⚡ Bulk INSERT 1 query thay vì N × frappe.get_doc + insert (~100-300ms/record)
+        # SIS Class Log Student không có hooks quan trọng → bypass doc.insert() an toàn
         t_mark = time.perf_counter()
         inserted = 0
-        for values in pending_insert_by_student.values():
-            doc = frappe.get_doc({"doctype": "SIS Class Log Student", **values})
-            doc.insert()
-            inserted += 1
+        if pending_insert_by_student:
+            now_dt = frappe.utils.now_datetime()
+            user_email = frappe.session.user
+            insert_rows_sql = []
+            insert_params = {"now": now_dt, "user": user_email}
+
+            for idx, values in enumerate(pending_insert_by_student.values()):
+                name_val = f"SIS-CLS-LOG-STU-{frappe.generate_hash(length=10).upper()}"
+                p_name = f"name_{idx}"
+                p_sub = f"sub_{idx}"
+                p_sid = f"sid_{idx}"
+                p_csid = f"csid_{idx}"
+                p_hw = f"hw_{idx}"
+                p_be = f"be_{idx}"
+                p_pa = f"pa_{idx}"
+                p_is = f"is_{idx}"
+                p_top = f"top_{idx}"
+                p_cm = f"cm_{idx}"
+                p_val = f"val_{idx}"
+
+                insert_params[p_name] = name_val
+                insert_params[p_sub] = values["subject_id"]
+                insert_params[p_sid] = values["student_id"]
+                insert_params[p_csid] = values.get("class_student_id")
+                insert_params[p_hw] = values.get("homework")
+                insert_params[p_be] = values.get("behavior")
+                insert_params[p_pa] = values.get("participation")
+                insert_params[p_is] = values.get("issues")
+                insert_params[p_top] = values.get("is_top_performance") or 0
+                insert_params[p_cm] = values.get("specific_comment")
+                insert_params[p_val] = values.get("value") or 0
+
+                insert_rows_sql.append(
+                    f"(%({p_name})s, %({p_sub})s, %({p_sid})s, %({p_csid})s, "
+                    f"%({p_hw})s, %({p_be})s, %({p_pa})s, %({p_is})s, "
+                    f"%({p_top})s, %({p_cm})s, %({p_val})s, "
+                    f"%(now)s, %(now)s, %(user)s, %(user)s, 0)"
+                )
+                inserted += 1
+
+            frappe.db.sql(
+                f"""
+                INSERT INTO `tabSIS Class Log Student`
+                    (name, subject_id, student_id, class_student_id,
+                     homework, behavior, participation, issues,
+                     is_top_performance, specific_comment, value,
+                     creation, modified, owner, modified_by, docstatus)
+                VALUES {', '.join(insert_rows_sql)}
+                """,
+                insert_params,
+            )
         timings_ms["inserts_loop"] = round((time.perf_counter() - t_mark) * 1000)
 
         t_mark = time.perf_counter()

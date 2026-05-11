@@ -21,30 +21,31 @@ def _get_body():
 
 
 def _validate_homeroom_teacher_access(class_id):
-    """Validate that current user is homeroom or vice-homeroom teacher for this class"""
+    """
+    Kiểm tra quyền GVCN/phó CN cho lớp.
+    ⚡ Tối ưu: 1 SQL JOIN thay cho frappe.get_all + frappe.get_doc.
+    """
     user = frappe.session.user
-    
-    # Get teacher record(s) for current user
-    teacher_records = frappe.get_all(
-        "SIS Teacher",
-        filters={"user_id": user},
-        fields=["name"]
+
+    # 1 query duy nhất: tìm SIS Teacher của user khớp với (homeroom|vice_homeroom) của lớp
+    rows = frappe.db.sql(
+        """
+        SELECT t.name AS teacher_id
+        FROM `tabSIS Teacher` t
+        INNER JOIN `tabSIS Class` c
+            ON c.homeroom_teacher = t.name OR c.vice_homeroom_teacher = t.name
+        WHERE t.user_id = %s AND c.name = %s
+        LIMIT 1
+        """,
+        (user, class_id),
     )
-    
-    if not teacher_records:
-        frappe.throw(_("Only homeroom or vice-homeroom teachers can manage contact logs"), frappe.PermissionError)
-    
-    teacher_ids = [t.name for t in teacher_records]
-    
-    # Get class document
-    class_doc = frappe.get_doc("SIS Class", class_id)
-    
-    # Check if any teacher ID matches homeroom or vice-homeroom
-    is_homeroom = (class_doc.homeroom_teacher in teacher_ids) or (class_doc.vice_homeroom_teacher in teacher_ids)
-    
-    if not is_homeroom:
-        frappe.throw(_("Only homeroom or vice-homeroom teachers can manage contact logs"), frappe.PermissionError)
-    
+
+    if not rows:
+        frappe.throw(
+            _("Only homeroom or vice-homeroom teachers can manage contact logs"),
+            frappe.PermissionError,
+        )
+
     return True
 
 
@@ -206,31 +207,46 @@ def save_contact_log():
             else:
                 students_to_create.append((student_id, badges, comment))
         
-        # ⚡ Batch UPDATE: Cập nhật tất cả existing logs cùng lúc
+        # ⚡ Batch UPDATE: gom tất cả thành 1 query CASE WHEN (giảm N round-trip → 1)
         now = frappe.utils.now_datetime()
         user = frappe.session.user
-        
-        for (log_id, badges_json, comment, student_id, current_status) in students_to_update:
-            # Dùng SQL trực tiếp thay vì frappe.get_doc + save (tiết kiệm ~50ms/record)
-            new_status = current_status if current_status == 'Sent' else 'Draft'
-            frappe.db.sql("""
+
+        if students_to_update:
+            log_id_list = []
+            badges_cases = []
+            comment_cases = []
+            status_cases = []
+            params = {"now": now, "user": user}
+
+            for idx, (log_id, badges_json, comment, student_id, current_status) in enumerate(students_to_update):
+                new_status = current_status if current_status == 'Sent' else 'Draft'
+                lid_key = f"lid_{idx}"
+                bjs_key = f"bjs_{idx}"
+                cmt_key = f"cmt_{idx}"
+                sts_key = f"sts_{idx}"
+                params[lid_key] = log_id
+                params[bjs_key] = badges_json
+                params[cmt_key] = comment
+                params[sts_key] = new_status
+
+                log_id_list.append(f"%({lid_key})s")
+                badges_cases.append(f"WHEN %({lid_key})s THEN %({bjs_key})s")
+                comment_cases.append(f"WHEN %({lid_key})s THEN %({cmt_key})s")
+                status_cases.append(f"WHEN %({lid_key})s THEN %({sts_key})s")
+
+                log_ids[student_id] = log_id
+                saved_count += 1
+
+            sql = f"""
                 UPDATE `tabSIS Class Log Student`
-                SET badges = %(badges)s,
-                    contact_log_comment = %(comment)s,
-                    contact_log_status = %(status)s,
+                SET badges = CASE name {' '.join(badges_cases)} END,
+                    contact_log_comment = CASE name {' '.join(comment_cases)} END,
+                    contact_log_status = CASE name {' '.join(status_cases)} END,
                     modified = %(now)s,
                     modified_by = %(user)s
-                WHERE name = %(log_id)s
-            """, {
-                "badges": badges_json,
-                "comment": comment,
-                "status": new_status,
-                "now": now,
-                "user": user,
-                "log_id": log_id
-            })
-            log_ids[student_id] = log_id
-            saved_count += 1
+                WHERE name IN ({', '.join(log_id_list)})
+            """
+            frappe.db.sql(sql, params)
         
         # Xử lý students cần tạo mới (nếu có)
         if students_to_create:
@@ -299,31 +315,62 @@ def save_contact_log():
                 SELECT name, student_id FROM `tabSIS Class Student`
                 WHERE class_id = %(class_id)s AND student_id IN %(student_ids)s
             """, {"class_id": class_id, "student_ids": new_student_ids}, as_dict=True)
-            
+
             class_student_map = {r['student_id']: r['name'] for r in class_student_rows}
-            
-            # Tạo student logs cho các student mới
+
+            # ⚡ Bulk INSERT 1 query thay vì N × frappe.get_doc + insert (~100-300ms/student)
+            # Bỏ qua doc.insert() controllers vì chỉ là child-like data — không có hooks quan trọng
+            insert_rows = []
+            insert_params = {
+                "subject_id": default_subject_id,
+                "now": now,
+                "user": user,
+            }
+            row_idx = 0
             for (student_id, badges, comment) in students_to_create:
                 class_student = class_student_map.get(student_id)
                 if not class_student:
-                    frappe.log_error(f"No class student found for student_id={student_id}, class_id={class_id}")
+                    frappe.log_error(
+                        f"No class student found for student_id={student_id}, class_id={class_id}"
+                    )
                     continue
-                
-                student_log = frappe.get_doc({
-                    "doctype": "SIS Class Log Student",
-                    "subject_id": default_subject_id,
-                    "student_id": student_id,
-                    "class_student_id": class_student,
-                    "badges": json.dumps(badges),
-                    "contact_log_comment": comment,
-                    "contact_log_status": "Draft"
-                })
-                student_log.insert()
-                log_ids[student_id] = student_log.name
+
+                # Sinh name theo format DocType: "SIS-CLS-LOG-STU-{#####}"
+                # Dùng frappe.generate_hash để tránh xung đột counter và lock
+                name_val = f"SIS-CLS-LOG-STU-{frappe.generate_hash(length=10).upper()}"
+
+                insert_params[f"name_{row_idx}"] = name_val
+                insert_params[f"sid_{row_idx}"] = student_id
+                insert_params[f"csid_{row_idx}"] = class_student
+                insert_params[f"badges_{row_idx}"] = json.dumps(badges)
+                insert_params[f"comment_{row_idx}"] = comment
+
+                insert_rows.append(
+                    f"(%(name_{row_idx})s, %(subject_id)s, %(sid_{row_idx})s, %(csid_{row_idx})s, "
+                    f"%(badges_{row_idx})s, %(comment_{row_idx})s, 'Draft', "
+                    f"%(now)s, %(now)s, %(user)s, %(user)s, 0)"
+                )
+                log_ids[student_id] = name_val
                 saved_count += 1
-        
+                row_idx += 1
+
+            if insert_rows:
+                frappe.db.sql(
+                    f"""
+                    INSERT INTO `tabSIS Class Log Student`
+                        (name, subject_id, student_id, class_student_id,
+                         badges, contact_log_comment, contact_log_status,
+                         creation, modified, owner, modified_by, docstatus)
+                    VALUES {', '.join(insert_rows)}
+                    """,
+                    insert_params,
+                )
+
         frappe.db.commit()
-        
+
+        # Xoá cache get_contact_log_status để client thấy ngay sau khi lưu
+        _invalidate_contact_log_status_cache(class_id, date)
+
         return success_response(
             message=f"Saved contact logs for {saved_count} students",
             data={
@@ -389,8 +436,11 @@ def send_contact_log():
                 modified_by = %(user)s
             WHERE name IN %(log_ids)s
         """, {"user": user, "now": now, "log_ids": valid_log_ids})
-        
+
         frappe.db.commit()
+
+        # Xoá toàn bộ cache get_contact_log_status của lớp này (chưa biết date của từng log)
+        _invalidate_contact_log_status_cache(class_id)
         
         sent_count = len(valid_log_ids)
         
@@ -672,9 +722,11 @@ def recall_contact_log():
                 
             except Exception as e:
                 frappe.log_error(f"Error recalling contact log {log_id}: {str(e)}")
-        
+
         frappe.db.commit()
-        
+
+        _invalidate_contact_log_status_cache(class_id)
+
         return success_response(
             message=f"Recalled {recalled_count} contact logs",
             data={"recalled_count": recalled_count}
@@ -688,32 +740,63 @@ def recall_contact_log():
         return error_response(message="Failed to recall contact log", code="RECALL_CONTACT_LOG_ERROR")
 
 
+CONTACT_LOG_STATUS_CACHE_PREFIX = "contact_log_status"
+CONTACT_LOG_STATUS_CACHE_TTL = 60  # giây — đủ cho user reload nhanh, vẫn fresh khi có thao tác
+
+
+def _invalidate_contact_log_status_cache(class_id, date=None):
+    """
+    Xoá cache get_contact_log_status sau khi save/send/recall đổi dữ liệu.
+    Nếu date=None thì xoá toàn bộ key của class (dùng SCAN).
+    """
+    try:
+        cache = frappe.cache()
+        if date:
+            cache.delete_value(f"{CONTACT_LOG_STATUS_CACHE_PREFIX}:{class_id}:{date}")
+        else:
+            redis_conn = cache.redis_cache if hasattr(cache, "redis_cache") else cache
+            if hasattr(redis_conn, "scan_iter"):
+                pattern = f"*{CONTACT_LOG_STATUS_CACHE_PREFIX}:{class_id}:*"
+                keys = list(redis_conn.scan_iter(match=pattern, count=100))
+                if keys:
+                    redis_conn.delete(*keys)
+    except Exception as ex:
+        frappe.logger().warning(f"[contact_log] Invalidate status cache failed: {ex}")
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_contact_log_status():
     """
     Get contact log status for all students in a class
     Returns: { student_id: { status, sent_at, viewed_count, ... } }
-    
-    FIX: Query từ TẤT CẢ subjects của ngày đó, không chỉ 1 subject
-    Vì contact_log có thể được lưu ở bất kỳ tiết nào trong ngày
+
+    ⚡ Tối ưu:
+    - Cache 60s (key: contact_log_status:{class_id}:{date}) → giảm DB hit khi user reload
+    - Lọc sớm trong WHERE → DB chỉ trả các row "có dữ liệu", không kéo row trống
+    - Composite index (class_id, log_date) trên SIS Class Log Subject
     """
     try:
-        # Get params from POST body or GET query params
         body = _get_body() or {}
         class_id = body.get('class_id') or frappe.form_dict.get('class_id') or frappe.request.args.get('class_id')
         date = body.get('date') or frappe.form_dict.get('date') or frappe.request.args.get('date')
-        
+
         if not class_id:
             return error_response(message="Missing class_id", code="MISSING_PARAMS")
-        
-        # Validate teacher access
+
         _validate_homeroom_teacher_access(class_id)
-        
-        # Query trực tiếp student logs từ TẤT CẢ subjects của class + date
-        # Không cần qua timetable_instance vì có thể có nhiều subjects trong ngày
-        # Ưu tiên log có contact_log_comment hoặc status = 'Sent'
+
+        # ⚡ Cache lookup
+        cache_key = f"{CONTACT_LOG_STATUS_CACHE_PREFIX}:{class_id}:{date or 'all'}"
+        try:
+            cached = frappe.cache().get_value(cache_key)
+            if cached is not None:
+                return success_response(data=cached, message="Contact log status fetched (cached)")
+        except Exception as cache_err:
+            frappe.logger().warning(f"[contact_log] Cache read failed: {cache_err}")
+
+        # Query: chỉ lấy row CÓ dữ liệu (Sent / có comment / có badges) → giảm rows trả về
         student_logs = frappe.db.sql("""
-            SELECT 
+            SELECT
                 cls.name,
                 cls.student_id,
                 cls.badges,
@@ -724,31 +807,30 @@ def get_contact_log_status():
                 cls.contact_log_recalled_by,
                 cls.contact_log_recalled_at,
                 cls.contact_log_viewed_count
-            FROM `tabSIS Class Log Student` cls
-            JOIN `tabSIS Class Log Subject` sub ON cls.subject_id = sub.name
-            WHERE sub.class_id = %(class_id)s AND sub.log_date = %(date)s
-            ORDER BY 
-                CASE 
+            FROM `tabSIS Class Log Subject` sub
+            JOIN `tabSIS Class Log Student` cls ON cls.subject_id = sub.name
+            WHERE sub.class_id = %(class_id)s
+              AND sub.log_date = %(date)s
+              AND (
+                    cls.contact_log_status IN ('Sent', 'Recalled')
+                 OR (cls.contact_log_comment IS NOT NULL AND cls.contact_log_comment <> '')
+                 OR (cls.badges IS NOT NULL AND cls.badges <> '' AND cls.badges <> '[]')
+              )
+            ORDER BY
+                CASE
                     WHEN cls.contact_log_status = 'Sent' THEN 1
-                    WHEN cls.contact_log_comment IS NOT NULL AND cls.contact_log_comment != '' THEN 2
+                    WHEN cls.contact_log_comment IS NOT NULL AND cls.contact_log_comment <> '' THEN 2
                     WHEN cls.contact_log_status = 'Draft' AND cls.badges IS NOT NULL THEN 3
                     ELSE 4
                 END,
                 cls.contact_log_sent_at DESC
         """, {"class_id": class_id, "date": date}, as_dict=True)
-        
-        if not student_logs:
-            return success_response(data={}, message="No logs found")
-        
-        # Build map: student_id -> status info
-        # Vì có thể có nhiều logs cho cùng 1 student (từ nhiều tiết),
-        # chỉ lấy log có contact_log đầy đủ nhất (đã sort ở trên)
+
         status_map = {}
         for log in student_logs:
-            student_id = log['student_id']
-            # Chỉ lấy record đầu tiên cho mỗi student (đã ưu tiên bởi ORDER BY)
-            if student_id not in status_map:
-                status_map[student_id] = {
+            sid = log['student_id']
+            if sid not in status_map:
+                status_map[sid] = {
                     "log_id": log['name'],
                     "status": log.get('contact_log_status'),
                     "badges": log.get('badges'),
@@ -757,11 +839,16 @@ def get_contact_log_status():
                     "sent_at": log.get('contact_log_sent_at'),
                     "recalled_by": log.get('contact_log_recalled_by'),
                     "recalled_at": log.get('contact_log_recalled_at'),
-                    "viewed_count": log.get('contact_log_viewed_count') or 0
+                    "viewed_count": log.get('contact_log_viewed_count') or 0,
                 }
-        
+
+        try:
+            frappe.cache().set_value(cache_key, status_map, expires_in_sec=CONTACT_LOG_STATUS_CACHE_TTL)
+        except Exception as cache_err:
+            frappe.logger().warning(f"[contact_log] Cache write failed: {cache_err}")
+
         return success_response(data=status_map, message="Contact log status fetched")
-    
+
     except frappe.PermissionError as e:
         return error_response(message=str(e), code="PERMISSION_ERROR")
     except Exception as e:

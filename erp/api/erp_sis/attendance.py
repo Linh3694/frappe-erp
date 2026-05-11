@@ -330,28 +330,22 @@ def get_class_attendance(class_id=None, date=None, period=None, skip_cache=None)
 		
 		frappe.logger().info(f"❌ Cache MISS for attendance {class_id}/{date}/{period} - fetching from DB")
 
+		# ⚡ Tối ưu: gộp 2 nhánh đầu thành 1 query bằng IN (tránh TRIM(period) phá index)
+		# - "period gốc" và "period.strip()" có thể khác nhau do dữ liệu chèn dư khoảng trắng
+		# - period IN (...) vẫn dùng được composite index (class_id, date, period) sau patch
+		period_variants = list({period, str(period).strip()})
 		rows = frappe.get_all(
 			"SIS Class Attendance",
 			filters={
 				"class_id": class_id,
 				"date": date,
-				"period": period,
+				"period": ["in", period_variants],
 			},
 			fields=[
-				"name", "student_id", "student_code", "student_name", "class_id", "date", "period", "status", "remarks",
-			]
+				"name", "student_id", "student_code", "student_name",
+				"class_id", "date", "period", "status", "remarks",
+			],
 		)
-		# Khớp TRIM: Lesson Log dùng tên tiết từ TKB; bản ghi từ Y tế/Schedule có thể khác khoảng trắng
-		if not rows:
-			rows = frappe.db.sql(
-				"""
-				SELECT name, student_id, student_code, student_name, class_id, date, period, status, remarks
-				FROM `tabSIS Class Attendance`
-				WHERE class_id = %(class_id)s AND date = %(date)s AND TRIM(period) = TRIM(%(period)s)
-				""",
-				{"class_id": class_id, "date": date, "period": period},
-				as_dict=True,
-			) or []
 		# Fallback theo số tiết (vd. "TIẾT 8" vs "Tiết 8") — chỉ khi vẫn chưa có dòng
 		if not rows:
 			req_num = _period_num_from_name(period)
@@ -360,7 +354,8 @@ def get_class_attendance(class_id=None, date=None, period=None, skip_cache=None)
 					"SIS Class Attendance",
 					filters={"class_id": class_id, "date": date},
 					fields=[
-						"name", "student_id", "student_code", "student_name", "class_id", "date", "period", "status", "remarks",
+						"name", "student_id", "student_code", "student_name",
+						"class_id", "date", "period", "status", "remarks",
 					],
 				)
 				rows = [r for r in all_rows if _period_num_from_name(r.get("period")) == req_num]
