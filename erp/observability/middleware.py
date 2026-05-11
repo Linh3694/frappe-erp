@@ -62,6 +62,9 @@ def log_api_request_end(**kwargs):
 
 	if any(x in pl for x in ["/health", "/api/ping", "/__pycache__", "/api/client.get_count"]):
 		return
+	# Scrape Prometheus không tính vào RPS dashboard (tránh ~1/30s làm nhiễu).
+	if "erp.api.observability.prometheus.metrics" in path:
+		return
 	if pl.endswith(".js") or pl.endswith(".css"):
 		return
 

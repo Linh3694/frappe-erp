@@ -6,18 +6,73 @@ Provides attendance data query endpoints for Parent Portal and other clients
 import frappe
 from frappe import _
 import json
+import time
+import hashlib
 from datetime import datetime, timedelta
 import pytz
 from erp.common.doctype.erp_time_attendance.erp_time_attendance import normalize_date_to_vn_timezone
 from erp.utils.api_response import success_response, error_response
 
 
+# TTL cache (giây) — chỉ cache cho ngày KHÔNG phải hôm nay (data ngày cũ bất biến)
+_DAY_MAP_CACHE_TTL = 300  # 5 phút
+# Ngưỡng log slow query
+_SLOW_QUERY_MS = 1000
+# Chunk size — IN-list quá lớn làm planner MySQL chọn sai plan
+_CHUNK_SIZE = 200
+
+
+def _build_cache_key(date_str: str, codes_sorted: list[str]) -> str:
+	"""Build cache key từ date + codes (đã sort + lower) — hash để tránh key dài."""
+	codes_blob = ",".join(codes_sorted)
+	digest = hashlib.md5(f"{date_str}|{codes_blob}".encode()).hexdigest()
+	return f"attendance:day_map:{date_str}:{digest}"
+
+
+def _fetch_day_records(codes: list[str], date_obj) -> list[dict]:
+	"""
+	Fetch records từ DB, chunk nếu IN-list lớn.
+	Trả về list dict đã được merge từ tất cả chunks.
+	"""
+	if not codes:
+		return []
+
+	all_records: list[dict] = []
+	for i in range(0, len(codes), _CHUNK_SIZE):
+		chunk = codes[i:i + _CHUNK_SIZE]
+		placeholders = ", ".join(["%s"] * len(chunk))
+		# Order quan trọng cho covering index `idx_date_emp_cover (date, employee_code, ...)`:
+		# date trước → seek 1 lần, sau đó range scan các employee_code cùng ngày → KHÔNG cần row lookup.
+		rows = frappe.db.sql(
+			f"""
+			SELECT employee_code, employee_name,
+			       check_in_time, check_out_time, total_check_ins
+			FROM `tabERP Time Attendance`
+			WHERE date = %s
+			  AND employee_code IN ({placeholders})
+			""",
+			(date_obj, *chunk),
+			as_dict=True,
+		)
+		all_records.extend(rows)
+	return all_records
+
+
 @frappe.whitelist(methods=["POST"], allow_guest=False)
 def get_students_day_map(date=None, codes=None):
 	"""
-	Lấy attendance 1 ngày cho nhiều student — dùng SQL trực tiếp (nhanh).
+	Lấy attendance 1 ngày cho nhiều student — dùng SQL trực tiếp + cache Redis.
 	Body JSON: {date: "YYYY-MM-DD", codes: ["WS..."]}
+
+	Tối ưu p95:
+	- Covering index `(date, employee_code, check_in_time, check_out_time, total_check_ins)`
+	- Bỏ fallback case-insensitive (collation VARCHAR mặc định đã `_ci`)
+	- Cache Redis 5 phút cho ngày KHÔNG phải hôm nay (data bất biến)
+	- Chunk IN-list để tránh planner MySQL chọn sai plan
+	- Slow-query log (>1s)
 	"""
+	t_start = time.perf_counter()
+	cache_hit = False
 	try:
 		# Parse params từ nhiều nguồn (backward compatible)
 		if date is None:
@@ -48,32 +103,64 @@ def get_students_day_map(date=None, codes=None):
 		if len(codes) > 500:
 			return error_response(message="Batch size exceeded (max 500)", code="BATCH_SIZE_EXCEEDED")
 
+		# Normalize codes upfront: strip + dedupe (giữ map về form gốc client gửi)
+		# Collation VARCHAR đã case-insensitive nên không cần upper/lower ở SQL.
+		original_by_norm: dict[str, str] = {}
+		for c in codes:
+			if not isinstance(c, str):
+				continue
+			norm = c.strip()
+			if not norm:
+				continue
+			# Giữ representation đầu tiên gặp (ưu tiên form client gửi)
+			original_by_norm.setdefault(norm.lower(), norm)
+		unique_codes = list(original_by_norm.values())
+
+		if not unique_codes:
+			return success_response(data={}, message="No valid codes provided")
+
 		date_obj = frappe.utils.getdate(date)
+		date_str = str(date_obj)
+		today_str = str(frappe.utils.today())
+		is_historical = date_str < today_str  # ngày cũ → cacheable
 
-		# SQL trực tiếp — không load raw_data (nặng), dùng stored fields
-		placeholders = ", ".join(["%s"] * len(codes))
-		records = frappe.db.sql(f"""
-			SELECT employee_code, employee_name, date,
-			       check_in_time, check_out_time, total_check_ins
-			FROM `tabERP Time Attendance`
-			WHERE employee_code IN ({placeholders})
-			  AND date = %s
-		""", (*codes, date_obj), as_dict=True)
+		# Try cache cho ngày cũ
+		cache_key = None
+		if is_historical:
+			# Sort codes để cache key ổn định bất kể thứ tự client gửi
+			sorted_norms = sorted(original_by_norm.keys())
+			cache_key = _build_cache_key(date_str, sorted_norms)
+			try:
+				cached = frappe.cache().get_value(cache_key)
+				if cached is not None:
+					cache_hit = True
+					return success_response(
+						data=cached,
+						message="Attendance data retrieved successfully (cache)",
+						meta={
+							"date": date,
+							"codes_count": len(unique_codes),
+							"cache": "hit",
+							"elapsed_ms": int((time.perf_counter() - t_start) * 1000),
+						},
+					)
+			except Exception:
+				# Cache fail không được phá API
+				pass
 
-		# Case-insensitive fallback
-		if not records:
-			all_variants = list({c for code in codes for c in (code, code.upper(), code.lower())})
-			placeholders2 = ", ".join(["%s"] * len(all_variants))
-			records = frappe.db.sql(f"""
-				SELECT employee_code, employee_name, date,
-				       check_in_time, check_out_time, total_check_ins
-				FROM `tabERP Time Attendance`
-				WHERE employee_code IN ({placeholders2})
-				  AND date = %s
-			""", (*all_variants, date_obj), as_dict=True)
+		# Fetch từ DB
+		records = _fetch_day_records(unique_codes, date_obj)
 
-		result = {code: {"checkInTime": None, "checkOutTime": None, "totalCheckIns": 0, "employeeName": None} for code in codes}
-		codes_lower_map = {code.lower(): code for code in codes}
+		# Build result map — key theo form gốc client gửi
+		result = {
+			code: {"checkInTime": None, "checkOutTime": None, "totalCheckIns": 0, "employeeName": None}
+			for code in codes  # giữ nguyên codes gốc (kể cả duplicate) cho backward-compat
+		}
+		# Map từ lower-code → list các form gốc client gửi (handle duplicate)
+		original_codes_by_norm: dict[str, list[str]] = {}
+		for c in codes:
+			if isinstance(c, str) and c.strip():
+				original_codes_by_norm.setdefault(c.strip().lower(), []).append(c)
 
 		def _fmt_time(time_obj, rec_date):
 			if not time_obj:
@@ -81,8 +168,8 @@ def get_students_day_map(date=None, codes=None):
 			return datetime.combine(rec_date, time_obj.time()).isoformat()
 
 		for rec in records:
-			matched = codes_lower_map.get(rec.employee_code.lower())
-			if not matched:
+			matched_keys = original_codes_by_norm.get(rec.employee_code.lower())
+			if not matched_keys:
 				continue
 
 			ci = rec.check_in_time
@@ -93,17 +180,40 @@ def get_students_day_map(date=None, codes=None):
 			if cnt <= 1 and ci and co and ci == co:
 				co = None
 
-			result[matched] = {
-				"checkInTime": _fmt_time(ci, rec.date),
-				"checkOutTime": _fmt_time(co, rec.date),
+			payload = {
+				"checkInTime": _fmt_time(ci, date_obj),
+				"checkOutTime": _fmt_time(co, date_obj),
 				"totalCheckIns": cnt,
 				"employeeName": rec.employee_name,
 			}
+			for k in matched_keys:
+				result[k] = payload
+
+		# Cache cho ngày cũ
+		if is_historical and cache_key:
+			try:
+				frappe.cache().set_value(cache_key, result, expires_in_sec=_DAY_MAP_CACHE_TTL)
+			except Exception:
+				pass
+
+		elapsed_ms = int((time.perf_counter() - t_start) * 1000)
+		if elapsed_ms > _SLOW_QUERY_MS:
+			# Log slow query để Loki/Grafana track được
+			frappe.logger("attendance").warning(
+				f"slow_get_students_day_map elapsed_ms={elapsed_ms} "
+				f"date={date_str} codes={len(unique_codes)} found={len(records)}"
+			)
 
 		return success_response(
 			data=result,
 			message="Attendance data retrieved successfully",
-			meta={"date": date, "codes_count": len(codes), "records_found": len(records)},
+			meta={
+				"date": date,
+				"codes_count": len(unique_codes),
+				"records_found": len(records),
+				"cache": "miss" if is_historical else "skip",
+				"elapsed_ms": elapsed_ms,
+			},
 		)
 
 	except Exception as e:

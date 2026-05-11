@@ -8,6 +8,9 @@
 # Performance optimization for Time Attendance
 erp.patches.v1_0.add_time_attendance_index
 
+# Tối ưu lại index Time Attendance: covering (date, employee_code, ...) cho daily map
+erp.patches.v1_0.optimize_time_attendance_indexes
+
 # Khám SK định kỳ: 2 đợt/năm — gán đợt cho dữ liệu cũ
 erp.patches.v1_0.backfill_health_checkup_phase
 
