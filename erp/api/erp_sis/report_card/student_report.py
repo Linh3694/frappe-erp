@@ -847,8 +847,46 @@ def update_report_section():
                     json_data["scores"] = copy.deepcopy(existing_scores)
                 else:
                     json_data["scores"] = payload
+        elif section == "homeroom":
+            # ✅ FIX: DEEP MERGE để tránh mất homeroom comment khi:
+            #   - Snapshot homeroom_comment_options ở template bị tái sinh với key mới
+            #     khiến payload từ FE có set key khác với key cũ trong data_json
+            #   - Auto-save fire khi tab homeroom chỉ vừa mở (commentText chưa prefill xong)
+            #     gửi lên payload với comments rỗng
+            # Logic: chỉ ghi đè field/comment khi value mới có nội dung, giữ nguyên data cũ
+            # khi value mới rỗng/null. Approval info luôn được bảo toàn.
+            existing_homeroom = json_data.get("homeroom")
+            if not isinstance(existing_homeroom, dict):
+                existing_homeroom = {}
+
+            incoming = payload if isinstance(payload, dict) else {}
+
+            # Merge top-level fields: conduct, conduct_year, conduct_ranking, conduct_ranking_year
+            for top_key in ("conduct", "conduct_year", "conduct_ranking", "conduct_ranking_year"):
+                if top_key in incoming:
+                    new_value = incoming.get(top_key)
+                    # Chỉ ghi đè khi giá trị mới không rỗng → tránh xoá data cũ
+                    if new_value not in (None, ""):
+                        existing_homeroom[top_key] = new_value
+
+            # Merge comments dict: chỉ ghi đè theo từng key, giữ key cũ nếu payload không gửi
+            incoming_comments = incoming.get("comments")
+            if isinstance(incoming_comments, dict):
+                existing_comments = existing_homeroom.get("comments")
+                if not isinstance(existing_comments, dict):
+                    existing_comments = {}
+                for comment_key, comment_value in incoming_comments.items():
+                    # Chỉ ghi đè khi value mới có nội dung → tránh wipe data
+                    # do snapshot key mismatch hoặc auto-save chạy với state rỗng
+                    if isinstance(comment_value, str) and comment_value.strip():
+                        existing_comments[comment_key] = comment_value
+                existing_homeroom["comments"] = existing_comments
+
+            # Bảo toàn approval info nếu có (không nằm trong payload)
+            json_data["homeroom"] = existing_homeroom
+
         else:
-            # Other sections (homeroom, etc.)
+            # Other sections (fallback) - overwrite behaviour cho các section chưa định nghĩa
             json_data[section] = payload
 
         # Save
