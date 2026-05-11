@@ -551,7 +551,7 @@ def verify_otp_and_login(phone_number, otp):
         
         # Log successful OTP authentication
         try:
-            from erp.utils.centralized_logger import log_authentication
+            from erp.observability.helpers import log_authentication
             
             # Get IP address
             try:

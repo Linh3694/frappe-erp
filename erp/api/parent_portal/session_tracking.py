@@ -5,7 +5,7 @@ Track app opens, resumes, and user activity for analytics
 
 import frappe
 from frappe import _
-from erp.utils.centralized_logger import log_authentication
+from erp.observability.helpers import log_authentication
 
 
 @frappe.whitelist(allow_guest=False)

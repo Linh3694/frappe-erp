@@ -260,337 +260,337 @@ doc_events = {
 	# Logging hooks for audit trail
 	"File": {
 		"after_insert": [
-			"erp.hooks_handlers.file_logger.log_file_upload"
+			"erp.observability.audit.log_file_upload"
 		],
 		"on_update": [
-			"erp.hooks_handlers.file_logger.log_file_update"
+			"erp.observability.audit.log_file_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.file_logger.log_file_delete"
+			"erp.observability.audit.log_file_delete"
 		]
 	},
 	"Student": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		],
 		"on_cancel": [
-			"erp.hooks_handlers.crud_logger.log_cancel"
+			"erp.observability.audit.log_cancel"
 		]
 	},
 	"Guardian": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Class Student": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Class Attendance": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Event": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Class": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
 			"erp.api.erp_administrative.room.sync_class_room_assignment",
 			"erp.api.erp_administrative.room.sync_class_homeroom_teachers_to_room_pic",
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Teacher": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Subject": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Curriculum": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Actual Subject": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Timetable": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Timetable Subject": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Photo": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS School Year": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Education Stage": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Education Grade": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Academic Program": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Sub Curriculum": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Calendar": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Subject Assignment": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"Feedback": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Student Leave Request": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Announcement": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS News Article": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"Daily Menu": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Bus Route": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Bus Student": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Bus Daily Trip": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	},
 	"SIS Badge": {
 		"after_insert": [
-			"erp.hooks_handlers.crud_logger.log_create"
+			"erp.observability.audit.log_create"
 		],
 		"on_update": [
-			"erp.hooks_handlers.crud_logger.log_update"
+			"erp.observability.audit.log_update"
 		],
 		"on_trash": [
-			"erp.hooks_handlers.crud_logger.log_delete"
+			"erp.observability.audit.log_delete"
 		]
 	}
 }
@@ -658,12 +658,14 @@ whitelisted_methods = [
 	"erp.api.analytics.dashboard_api.get_module_usage",
 	"erp.api.analytics.dashboard_api.get_feedback_ratings",
 	"erp.api.analytics.dashboard_api.get_all_feedback_ratings",
-	"erp.api.analytics.dashboard_api.trigger_analytics_aggregation"
+	"erp.api.analytics.dashboard_api.trigger_analytics_aggregation",
+	"erp.api.observability.prometheus.metrics",
 ]
 
 # Allow guest access for testing
 guest_method_whitelist = [
-	"erp.api.bulk_import.reload_whitelist"
+	"erp.api.bulk_import.reload_whitelist",
+	"erp.api.observability.prometheus.metrics",
 ]
 
 # override_whitelisted_methods = {
@@ -692,11 +694,11 @@ guest_method_whitelist = [
 # ----------------
 before_request = [
 	"erp.utils.auth_middleware.jwt_auth_middleware",
-	"erp.hooks_handlers.api_logger.log_api_request_start"
+	"erp.observability.middleware.log_api_request_start"
 ]
 
 after_request = [
-	"erp.hooks_handlers.api_logger.log_api_request_end",
+	"erp.observability.middleware.log_api_request_end",
 	"erp.utils.module_tracker.track_request_module_usage"
 ]
 

@@ -293,7 +293,7 @@ def microsoft_callback(code, state):
         
         # 🔵 LOG MICROSOFT LOGIN
         try:
-            from erp.utils.centralized_logger import log_authentication
+            from erp.observability.helpers import log_authentication
             ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
             if ip and ',' in ip:
                 ip = ip.split(',')[0].strip()

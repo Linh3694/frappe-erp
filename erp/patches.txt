@@ -52,3 +52,6 @@ erp.patches.v1_0.backfill_finance_order_student_bypass_supersession
 
 # Bật Track Changes cho mọi DocType app erp (chỉ istable=0)
 erp.patches.v1_0.enable_track_changes_erp_doctypes
+
+# Observability: xóa Portal Slow API (slow API → Loki/Grafana)
+erp.patches.v1_0.drop_portal_slow_api_doctype

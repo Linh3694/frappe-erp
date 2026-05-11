@@ -99,7 +99,7 @@ def login(email=None, username=None, password=None, provider="local"):
         
         # 🔵 LOG LOGIN - Backend handles this directly instead of relying on hook
         try:
-            from erp.utils.centralized_logger import log_authentication
+            from erp.observability.helpers import log_authentication
             ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'
             if ip and ',' in ip:
                 ip = ip.split(',')[0].strip()
@@ -182,7 +182,7 @@ def logout():
         # 🔵 LOG LOGOUT - before clearing session
         if user_email and user_email != "Guest":
             try:
-                from erp.utils.centralized_logger import log_authentication
+                from erp.observability.helpers import log_authentication
                 user_doc = frappe.get_doc("User", user_email)
                 
                 ip = frappe.get_request_header('X-Forwarded-For') or frappe.request.remote_addr or 'unknown'

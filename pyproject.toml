@@ -10,6 +10,11 @@ dynamic = ["version"]
 dependencies = [
     # "frappe~=15.0.0" # Installed and managed by bench.
     "Pillow>=9.0.0",
+    "prometheus-client>=0.21.0",
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.27.0",
+    "opentelemetry-instrumentation-requests>=0.48b0",
 ]
 
 [build-system]
