@@ -43,6 +43,57 @@ def _add_days(dt, days):
     return dt + timedelta(days=days)
 
 
+def _batch_timetable_column_period_meta(column_ids):
+    """Một query: lấy period_name / period_priority cho nhiều cột (tránh N+1)."""
+    column_ids = list({c for c in column_ids if c})
+    if not column_ids:
+        return {}
+    rows = frappe.db.sql(
+        """
+        SELECT name, period_name, period_priority
+        FROM `tabSIS Timetable Column`
+        WHERE name IN %(ids)s
+        """,
+        {"ids": tuple(column_ids)},
+        as_dict=True,
+    )
+    return {r["name"]: r for r in rows}
+
+
+def _batch_timetable_column_layout_meta(column_ids):
+    """Meta đầy đủ cho nhánh fallback (start_time, end_time, period_*)."""
+    column_ids = list({c for c in column_ids if c})
+    if not column_ids:
+        return {}
+    rows = frappe.db.sql(
+        """
+        SELECT name, start_time, end_time, period_name, period_type, period_priority
+        FROM `tabSIS Timetable Column`
+        WHERE name IN %(ids)s
+        """,
+        {"ids": tuple(column_ids)},
+        as_dict=True,
+    )
+    return {r["name"]: r for r in rows}
+
+
+def _get_class_education_meta_cached(class_id, class_meta_cache):
+    """Cache meta lớp theo một request — tránh get_doc Class+Grade lặp mỗi ngày."""
+    if class_id in class_meta_cache:
+        return class_meta_cache[class_id]
+    class_doc = frappe.get_doc("SIS Class", class_id)
+    education_grade_id = class_doc.education_grade
+    campus_id = class_doc.campus_id
+    education_grade_doc = frappe.get_doc("SIS Education Grade", education_grade_id)
+    meta = {
+        "education_grade_id": education_grade_id,
+        "campus_id": campus_id,
+        "education_stage_id": education_grade_doc.education_stage_id,
+    }
+    class_meta_cache[class_id] = meta
+    return meta
+
+
 def _get_student_leave_for_date(student_id, date_str):
     """Lấy đơn nghỉ phép của học sinh trong một ngày cụ thể."""
     empty = {
@@ -141,18 +192,23 @@ def _get_student_classes(student_id, school_year_id=None):
         
         logs.append(f"🔍 Looking for classes with filters: {filters}")
         
-        # DEBUG: Try direct SQL query to compare
-        try:
-            sql_result = frappe.db.sql(f"""
-                SELECT name, class_id, school_year_id, docstatus 
-                FROM `tabSIS Class Student` 
-                WHERE student_id = %(student_id)s 
-                AND school_year_id = %(school_year_id)s
-                LIMIT 5
-            """, filters, as_dict=True)
-            logs.append(f"🔍 DEBUG SQL query returned {len(sql_result)} rows: {sql_result}")
-        except Exception as e:
-            logs.append(f"⚠️ DEBUG SQL query failed: {str(e)}")
+        # Chỉ chạy SQL debug khi bật developer_mode (tránh query thừa trên production)
+        if frappe.conf.get("developer_mode"):
+            try:
+                sql_result = frappe.db.sql(
+                    """
+                    SELECT name, class_id, school_year_id, docstatus
+                    FROM `tabSIS Class Student`
+                    WHERE student_id = %(student_id)s
+                    AND school_year_id = %(school_year_id)s
+                    LIMIT 5
+                    """,
+                    filters,
+                    as_dict=True,
+                )
+                logs.append(f"🔍 DEBUG SQL query returned {len(sql_result)} rows: {sql_result}")
+            except Exception as e:
+                logs.append(f"⚠️ DEBUG SQL query failed: {str(e)}")
         
         # Get all class assignments for this student (including drafts)
         class_students = frappe.get_all(
@@ -184,34 +240,117 @@ def _get_student_classes(student_id, school_year_id=None):
         }
 
 
-def _enrich_parent_portal_timetable_row(row, class_id, logs):
-    """Chuẩn hoá một dòng TKB cho Parent Portal (môn, GV, phòng)."""
+def _enrich_parent_portal_timetable_row(row, class_id, logs, enrich_cache=None):
+    """Chuẩn hoá một dòng TKB cho Parent Portal (môn, GV, phòng).
+
+    enrich_cache: dict dùng chung trong một request — giảm get_doc/get_all lặp (TKB tuần).
+    """
+    from erp.api.erp_administrative.room import get_room_for_class_subject
+
     row["class_id"] = class_id
+    use_cache = enrich_cache is not None
 
-    if row.get("subject_id"):
+    def _subject_bundle(sid):
+        if not sid:
+            return None
+        bucket = None
+        if use_cache:
+            bucket = enrich_cache.setdefault("subject_bundles", {})
+            if sid in bucket:
+                return bucket[sid]
         try:
-            subject = frappe.get_doc("SIS Subject", row["subject_id"])
-            row["subject_title"] = subject.title
-
-            if subject.get("timetable_subject_id"):
+            subject = frappe.get_doc("SIS Subject", sid)
+            ts_title = ""
+            tsid = subject.get("timetable_subject_id")
+            if tsid:
                 try:
-                    tt_subject = frappe.get_doc("SIS Timetable Subject", subject.timetable_subject_id)
-                    row["timetable_subject_title"] = tt_subject.title_vn or tt_subject.title_en
+                    if use_cache:
+                        tsb = enrich_cache.setdefault("tt_subjects", {})
+                        if tsid in tsb:
+                            ts_title = tsb[tsid]
+                        else:
+                            tt_subject = frappe.get_doc("SIS Timetable Subject", tsid)
+                            ts_title = (tt_subject.title_vn or tt_subject.title_en) or ""
+                            tsb[tsid] = ts_title
+                    else:
+                        tt_subject = frappe.get_doc("SIS Timetable Subject", tsid)
+                        ts_title = (tt_subject.title_vn or tt_subject.title_en) or ""
                 except Exception:
-                    row["timetable_subject_title"] = ""
-            else:
-                row["timetable_subject_title"] = ""
-
-            try:
-                if subject.get("actual_subject_id"):
-                    actual_subject = frappe.get_doc("SIS Actual Subject", subject.actual_subject_id)
-                    row["curriculum_id"] = actual_subject.curriculum_id or ""
-                else:
-                    row["curriculum_id"] = ""
-            except Exception as curriculum_error:
-                logs.append(f"⚠️ Could not get curriculum from actual subject: {str(curriculum_error)}")
-                row["curriculum_id"] = ""
+                    ts_title = ""
+                    if use_cache:
+                        enrich_cache.setdefault("tt_subjects", {})[tsid] = ""
+            curriculum_id = ""
+            aid = subject.get("actual_subject_id")
+            if aid:
+                try:
+                    if use_cache:
+                        ab = enrich_cache.setdefault("actual_subjects", {})
+                        if aid in ab:
+                            curriculum_id = ab[aid]
+                        else:
+                            actual_subject = frappe.get_doc("SIS Actual Subject", aid)
+                            curriculum_id = actual_subject.curriculum_id or ""
+                            ab[aid] = curriculum_id
+                    else:
+                        actual_subject = frappe.get_doc("SIS Actual Subject", aid)
+                        curriculum_id = actual_subject.curriculum_id or ""
+                except Exception as curriculum_error:
+                    logs.append(f"⚠️ Could not get curriculum from actual subject: {str(curriculum_error)}")
+            bundle = {
+                "title": subject.title or "",
+                "timetable_subject_title": ts_title,
+                "actual_subject_id": aid,
+                "curriculum_id": curriculum_id,
+            }
+            if use_cache:
+                bucket[sid] = bundle
+            return bundle
         except Exception:
+            empty = {
+                "title": "",
+                "timetable_subject_title": "",
+                "actual_subject_id": None,
+                "curriculum_id": "",
+            }
+            if use_cache:
+                enrich_cache.setdefault("subject_bundles", {})[sid] = empty
+            return empty
+
+    def _teacher_display_name(tid):
+        if not tid:
+            return ""
+        tb = enrich_cache.setdefault("teacher_display", {}) if use_cache else None
+        if use_cache and tid in tb:
+            return tb[tid]
+        try:
+            teacher = frappe.get_doc("SIS Teacher", tid)
+            if not teacher.user_id:
+                if use_cache:
+                    tb[tid] = ""
+                else:
+                    logs.append(f"⚠️ Teacher {tid} has no user_id")
+                return ""
+            user = frappe.get_doc("User", teacher.user_id)
+            teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
+            if use_cache:
+                tb[tid] = teacher_name or ""
+            return teacher_name or ""
+        except Exception as e:
+            if use_cache:
+                enrich_cache.setdefault("teacher_display", {})[tid] = ""
+            else:
+                logs.append(f"⚠️ Could not get teacher/display {tid}: {str(e)}")
+            return ""
+
+    actual_subject_id = None
+    if row.get("subject_id"):
+        b = _subject_bundle(row["subject_id"])
+        if b:
+            row["subject_title"] = b["title"]
+            row["timetable_subject_title"] = b["timetable_subject_title"]
+            row["curriculum_id"] = b["curriculum_id"]
+            actual_subject_id = b["actual_subject_id"]
+        else:
             row["subject_title"] = ""
             row["timetable_subject_title"] = ""
             row["curriculum_id"] = ""
@@ -221,33 +360,36 @@ def _enrich_parent_portal_timetable_row(row, class_id, logs):
 
     if row.get("subject_id"):
         try:
-            subject = frappe.get_doc("SIS Subject", row["subject_id"])
-            assignments = frappe.get_all(
-                "SIS Subject Assignment",
-                filters={
-                    "actual_subject_id": subject.actual_subject_id,
-                    "class_id": class_id,
-                },
-                fields=["teacher_id"],
-            )
+            if actual_subject_id:
+                if use_cache:
+                    ab = enrich_cache.setdefault("assignment_teachers", {})
+                    key = (actual_subject_id, class_id)
+                    if key in ab:
+                        assign_teacher_ids = ab[key]
+                    else:
+                        rows = frappe.get_all(
+                            "SIS Subject Assignment",
+                            filters={"actual_subject_id": actual_subject_id, "class_id": class_id},
+                            fields=["teacher_id"],
+                        )
+                        assign_teacher_ids = [r.teacher_id for r in rows if r.teacher_id]
+                        ab[key] = assign_teacher_ids
+                else:
+                    assignments = frappe.get_all(
+                        "SIS Subject Assignment",
+                        filters={
+                            "actual_subject_id": actual_subject_id,
+                            "class_id": class_id,
+                        },
+                        fields=["teacher_id"],
+                    )
+                    assign_teacher_ids = [a.teacher_id for a in assignments if a.teacher_id]
 
-            for assignment in assignments:
-                if assignment.teacher_id:
-                    teacher_ids.append(assignment.teacher_id)
-                    try:
-                        teacher = frappe.get_doc("SIS Teacher", assignment.teacher_id)
-                        if teacher.user_id:
-                            try:
-                                user = frappe.get_doc("User", teacher.user_id)
-                                teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
-                                if teacher_name:
-                                    teacher_names.append(teacher_name)
-                            except Exception as user_e:
-                                logs.append(f"⚠️ Could not get user name for teacher {assignment.teacher_id}: {str(user_e)}")
-                        else:
-                            logs.append(f"⚠️ Teacher {assignment.teacher_id} has no user_id")
-                    except Exception as e:
-                        logs.append(f"⚠️ Could not get teacher {assignment.teacher_id}: {str(e)}")
+                for tid in assign_teacher_ids:
+                    teacher_ids.append(tid)
+                    name = _teacher_display_name(tid)
+                    if name:
+                        teacher_names.append(name)
         except Exception as e:
             logs.append(f"⚠️ Could not get subject assignments for subject {row.get('subject_id')}: {str(e)}")
 
@@ -257,24 +399,25 @@ def _enrich_parent_portal_timetable_row(row, class_id, logs):
             if not tid:
                 continue
             teacher_ids.append(tid)
-            try:
-                teacher = frappe.get_doc("SIS Teacher", tid)
-                if teacher.user_id:
-                    user = frappe.get_doc("User", teacher.user_id)
-                    teacher_name = user.full_name or f"{user.first_name or ''} {user.last_name or ''}".strip()
-                    if teacher_name:
-                        teacher_names.append(teacher_name)
-            except Exception as e:
-                logs.append(f"⚠️ Fallback GV từ {tid_field} {tid}: {str(e)}")
+            name = _teacher_display_name(tid)
+            if name:
+                teacher_names.append(name)
 
     row["teacher_names"] = ", ".join(teacher_names)
     row["teacher_ids"] = teacher_ids
 
     try:
-        from erp.api.erp_administrative.room import get_room_for_class_subject
-
         subject_title_for_room = row.get("timetable_subject_title") or row.get("subject_title") or None
-        room_info = get_room_for_class_subject(class_id, subject_title_for_room)
+        room_key = (class_id, subject_title_for_room if subject_title_for_room is not None else "__none__")
+        if use_cache:
+            rb = enrich_cache.setdefault("rooms", {})
+            if room_key in rb:
+                room_info = rb[room_key]
+            else:
+                room_info = get_room_for_class_subject(class_id, subject_title_for_room)
+                rb[room_key] = room_info
+        else:
+            room_info = get_room_for_class_subject(class_id, subject_title_for_room)
         row["room_id"] = room_info.get("room_id")
         row["room_name"] = room_info.get("room_name")
         row["room_type"] = room_info.get("room_type")
@@ -303,9 +446,16 @@ def _enrich_parent_portal_timetable_row(row, class_id, logs):
         row["teacher_ids"] = []
         if not row.get("room_id"):
             try:
-                from erp.api.erp_administrative.room import get_room_for_class_subject
-
-                room_info = get_room_for_class_subject(class_id, None)
+                room_key_none = (class_id, "__empty_subject__")
+                if use_cache:
+                    rb = enrich_cache.setdefault("rooms", {})
+                    if room_key_none in rb:
+                        room_info = rb[room_key_none]
+                    else:
+                        room_info = get_room_for_class_subject(class_id, None)
+                        rb[room_key_none] = room_info
+                else:
+                    room_info = get_room_for_class_subject(class_id, None)
                 row["room_id"] = room_info.get("room_id")
                 row["room_name"] = room_info.get("room_name")
                 row["room_type"] = room_info.get("room_type")
@@ -331,14 +481,16 @@ def _time_to_str(t):
     return str(t)
 
 
-def _get_class_timetable_for_date(class_id, target_date):
+def _get_class_timetable_for_date(class_id, target_date, enrich_cache=None, class_meta_cache=None):
     """
     Get timetable for a specific class on a specific date
-    
+
     Args:
         class_id: Class document name
         target_date: datetime object for target date
-        
+        enrich_cache: tùy chọn — cache enrich trong một request (TKB tuần)
+        class_meta_cache: dict class_id -> meta campus/stage — tránh load Class+Grade lặp theo ngày
+
     Returns:
         list: List of timetable entries for that date
     """
@@ -380,15 +532,20 @@ def _get_class_timetable_for_date(class_id, target_date):
         all_columns = []
 
         try:
-            # First, get class info and find education_stage through education_grade
-            class_doc = frappe.get_doc("SIS Class", class_id)
-            education_grade_id = class_doc.education_grade
-            campus_id = class_doc.campus_id
-            
-            # Get education_stage from education_grade
-            education_grade_doc = frappe.get_doc("SIS Education Grade", education_grade_id)
-            education_stage_id = education_grade_doc.education_stage_id
-            
+            # Thông tin khối/campus: cache theo lớp trong cùng request (nhiều ngày × cùng lớp)
+            if class_meta_cache is not None:
+                meta_c = _get_class_education_meta_cached(class_id, class_meta_cache)
+                education_grade_id = meta_c["education_grade_id"]
+                campus_id = meta_c["campus_id"]
+                education_stage_id = meta_c["education_stage_id"]
+            else:
+                class_doc = frappe.get_doc("SIS Class", class_id)
+                education_grade_id = class_doc.education_grade
+                campus_id = class_doc.campus_id
+
+                education_grade_doc = frappe.get_doc("SIS Education Grade", education_grade_id)
+                education_stage_id = education_grade_doc.education_stage_id
+
             logs.append(f"📋 Class: {class_id}, Grade: {education_grade_id}, Stage: {education_stage_id}, Campus: {campus_id}")
             
             # Get columns actually used in this instance for this day (study periods)
@@ -453,9 +610,12 @@ def _get_class_timetable_for_date(class_id, target_date):
                 study_columns_from_schedule = [c for c in all_schedule_columns if c.get('period_type') == 'study']
                 logs.append(f"📊 Schedule has {len(study_columns_from_schedule)} study + {len(non_study_columns)} non-study periods")
                 
-                # ⚡ DEBUG: Log all non-study periods to verify
-                for ns in non_study_columns:
-                    logs.append(f"📋 Non-study: '{ns.get('period_name')}' priority={ns.get('period_priority')} time={ns.get('start_time')}-{ns.get('end_time')}")
+                if frappe.conf.get("developer_mode"):
+                    for ns in non_study_columns:
+                        logs.append(
+                            f"📋 Non-study: '{ns.get('period_name')}' priority={ns.get('period_priority')} "
+                            f"time={ns.get('start_time')}-{ns.get('end_time')}"
+                        )
             else:
                 # Không có schedule active → lấy legacy (schedule_id IS NULL)
                 non_study_columns_sql = """
@@ -597,7 +757,8 @@ def _get_class_timetable_for_date(class_id, target_date):
                     if start and end:
                         study_time_slots.add((start, end))
                 
-                logs.append(f"🔍 DEBUG: Study time slots (legacy mode) = {study_time_slots}")
+                if frappe.conf.get("developer_mode"):
+                    logs.append(f"🔍 DEBUG: Study time slots (legacy mode) = {study_time_slots}")
                 
                 # Filter non-study columns - loại bỏ nếu trùng time slot với study period
                 filtered_non_study = []
@@ -606,12 +767,19 @@ def _get_class_timetable_for_date(class_id, target_date):
                     end = time_to_str(col.get('end_time'))
                     
                     if start and end and (start, end) in study_time_slots:
-                        logs.append(f"⏭️ Skipping non-study '{col.get('period_name')}' - overlaps with study period at {start}-{end}")
+                        if frappe.conf.get("developer_mode"):
+                            logs.append(
+                                f"⏭️ Skipping non-study '{col.get('period_name')}' "
+                                f"- overlaps with study period at {start}-{end}"
+                            )
                         continue
                     
                     filtered_non_study.append(col)
                 
-                logs.append(f"🔍 DEBUG: Filtered non-study from {len(non_study_columns)} to {len(filtered_non_study)}")
+                if frappe.conf.get("developer_mode"):
+                    logs.append(
+                        f"🔍 DEBUG: Filtered non-study from {len(non_study_columns)} to {len(filtered_non_study)}"
+                    )
             
             # Combine study and filtered non-study columns
             all_day_columns = study_columns_detail + filtered_non_study
@@ -647,6 +815,10 @@ def _get_class_timetable_for_date(class_id, target_date):
 
             logs.append(f"✅ Found {len(existing_rows)} study period rows for {day_of_week}")
 
+            col_meta_period = _batch_timetable_column_period_meta(
+                [r.get("timetable_column_id") for r in existing_rows],
+            )
+
             # Map từng dòng instance row có môn → theo cột TKB + period_name/priority
             # (Luôn đọc tabSIS Timetable Column — không phụ thuộc legacy_column_info vì schedule mới/cũ
             #  có thể khác ID cột nhưng trùng period_name hoặc trùng hẳn timetable_column_id)
@@ -658,12 +830,7 @@ def _get_class_timetable_for_date(class_id, target_date):
                 col_id = row.get("timetable_column_id")
                 if not col_id:
                     continue
-                meta = frappe.db.get_value(
-                    "SIS Timetable Column",
-                    col_id,
-                    ["period_name", "period_priority"],
-                    as_dict=True,
-                )
+                meta = col_meta_period.get(col_id)
                 if not meta:
                     logs.append(f"⚠️ Không tìm thấy SIS Timetable Column: {col_id}")
                     continue
@@ -783,16 +950,18 @@ def _get_class_timetable_for_date(class_id, target_date):
                         target_date_str,
                     )
                 ]
-                # Enrich fallback rows: lookup start_time/end_time từ timetable_column_id
+                # Enrich fallback rows: một query lấy start_time/end_time từ timetable_column_id
+                fallback_col_ids = [
+                    r.get("timetable_column_id")
+                    for r in all_columns
+                    if r.get("timetable_column_id") and not r.get("start_time")
+                ]
+                layout_by_id = _batch_timetable_column_layout_meta(fallback_col_ids)
                 for row in all_columns:
                     col_id = row.get("timetable_column_id")
                     if col_id and not row.get("start_time"):
                         try:
-                            col_meta = frappe.db.get_value(
-                                "SIS Timetable Column", col_id,
-                                ["start_time", "end_time", "period_name", "period_type", "period_priority"],
-                                as_dict=True,
-                            )
+                            col_meta = layout_by_id.get(col_id)
                             if col_meta:
                                 row["start_time"] = _time_to_str(col_meta.get("start_time"))
                                 row["end_time"] = _time_to_str(col_meta.get("end_time"))
@@ -811,7 +980,7 @@ def _get_class_timetable_for_date(class_id, target_date):
 
         # Enrich with subject titles, teacher names, and room info
         for row in all_columns:
-            _enrich_parent_portal_timetable_row(row, class_id, logs)
+            _enrich_parent_portal_timetable_row(row, class_id, logs, enrich_cache)
 
         # Check for date-specific overrides (from custom table)
         overrides = []
@@ -1098,10 +1267,19 @@ def get_student_timetable_today(student_id=None):
                 "logs": logs
             }
         
+        # Cache trong request: một ngày nhưng có thể nhiều lớp (lớp thường + mixed).
+        enrich_cache = {}
+        class_meta_cache = {}
+
         # Get timetable for each class and combine
         all_entries = []
         for class_id in class_ids:
-            class_result = _get_class_timetable_for_date(class_id, today)
+            class_result = _get_class_timetable_for_date(
+                class_id,
+                today,
+                enrich_cache=enrich_cache,
+                class_meta_cache=class_meta_cache,
+            )
             logs.extend(class_result.get("logs", []))
             
             if class_result.get("success"):
@@ -1323,11 +1501,13 @@ def get_student_timetable_week(student_id=None, week_start=None, week_end=None):
                 frappe.local.form_dict.get('week_end')
             )
 
-        logs.append(f"🔍 DEBUG: Received student_id parameter: '{student_id}' (type: {type(student_id).__name__})")
-        logs.append(f"🔍 DEBUG: Received week_start parameter: '{week_start}' (type: {type(week_start).__name__})")
-        logs.append(f"🔍 DEBUG: Received week_end parameter: '{week_end}' (type: {type(week_end).__name__})")
-        logs.append(f"🔍 DEBUG: frappe.request.args: {dict(frappe.request.args)}")
-        logs.append(f"🔍 DEBUG: frappe.form_dict: {frappe.form_dict}")
+        # Tránh nhồi form_dict/full args vào log production (ảnh hưởng hiệu năng serialization)
+        if frappe.conf.get("developer_mode"):
+            logs.append(f"🔍 DEBUG: Received student_id parameter: '{student_id}' (type: {type(student_id).__name__})")
+            logs.append(f"🔍 DEBUG: Received week_start parameter: '{week_start}' (type: {type(week_start).__name__})")
+            logs.append(f"🔍 DEBUG: Received week_end parameter: '{week_end}' (type: {type(week_end).__name__})")
+            logs.append(f"🔍 DEBUG: frappe.request.args: {dict(frappe.request.args)}")
+            logs.append(f"🔍 DEBUG: frappe.form_dict: {frappe.form_dict}")
 
         # If student_id not provided, try to get from current user
         if not student_id:
@@ -1417,12 +1597,21 @@ def get_student_timetable_week(student_id=None, week_start=None, week_end=None):
                 "logs": logs
             }
         
+        # Cache dùng chung một request: giảm get_doc/phân công GV/phòng trùng lặp (7 ngày × nhiều lớp).
+        enrich_cache = {}
+        class_meta_cache = {}
+
         # Get timetable for each day of the week
         all_entries = []
         current_date = ws
         while current_date <= we:
             for class_id in class_ids:
-                class_result = _get_class_timetable_for_date(class_id, current_date)
+                class_result = _get_class_timetable_for_date(
+                    class_id,
+                    current_date,
+                    enrich_cache=enrich_cache,
+                    class_meta_cache=class_meta_cache,
+                )
                 
                 if class_result.get("success"):
                     entries = class_result.get("entries", [])
