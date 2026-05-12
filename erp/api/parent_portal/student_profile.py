@@ -37,11 +37,6 @@ LEAD_SUBSET_FIELDNAMES = [
     "student_health_insurance_card",
     "student_initial_medical_registration",
     "student_health_notes",
-    "student_account_holder_relationship",
-    "student_bank_account_name",
-    "student_bank_account_number",
-    "student_bank_name",
-    "student_bank_branch",
     "student_study_interruption",
     "student_study_interruption_reason",
     "student_special_characteristics",
@@ -81,10 +76,26 @@ def _json_safe_value(val):
 
 
 def _serialize_lead_subset(doc):
+    """Chuẩn hóa subset lead cho Parent Portal — gồm tối đa 2 tài khoản ngân hàng (child table)."""
     d = doc.as_dict()
     out = {}
     for k in LEAD_SUBSET_FIELDNAMES:
         out[k] = _json_safe_value(d.get(k))
+    bac = []
+    for r in (getattr(doc, "bank_accounts", None) or [])[:2]:
+        bac.append(
+            {
+                "name": getattr(r, "name", None),
+                "account_holder_relationship": (
+                    getattr(r, "account_holder_relationship", None) or ""
+                ),
+                "bank_account_name": (getattr(r, "bank_account_name", None) or ""),
+                "bank_account_number": (getattr(r, "bank_account_number", None) or ""),
+                "bank_name": (getattr(r, "bank_name", None) or ""),
+                "bank_branch": (getattr(r, "bank_branch", None) or ""),
+            }
+        )
+    out["bank_accounts"] = bac[:2]
     return out
 
 

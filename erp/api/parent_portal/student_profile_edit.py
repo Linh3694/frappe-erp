@@ -97,6 +97,15 @@ EDITABLE_LEARNING_FIELDS: tuple[str, ...] = (
     "withdraw_month_year",
 )
 
+# Trường mỗi dòng tai khoan ngan hang tren CRM Lead (child row)
+_BANK_ACCOUNT_FIELDNAMES: tuple[str, ...] = (
+    "account_holder_relationship",
+    "bank_account_name",
+    "bank_account_number",
+    "bank_name",
+    "bank_branch",
+)
+
 # Giới hạn để tránh payload quá lớn / abuse
 _MAX_OPS_PER_BATCH = 400
 
@@ -235,6 +244,73 @@ def _apply_lead_fields(
         changed += 1
     if changed:
         audit_log.append(f"lead_fields:{changed}")
+
+
+def _slot_bank_dict_from_lead_row(lead_doc, slot_idx: int) -> dict[str, str]:
+    """Đọc bank slot logical 0 hoặc 1 từ child table của lead (thiếu dòng → rỗng)."""
+    rows = getattr(lead_doc, "bank_accounts", None) or []
+    if slot_idx < 0 or slot_idx >= len(rows):
+        return {k: "" for k in _BANK_ACCOUNT_FIELDNAMES}
+    r = rows[slot_idx]
+    return {k: (getattr(r, k, None) or "") for k in _BANK_ACCOUNT_FIELDNAMES}
+
+
+def _apply_bank_accounts(
+    lead_doc, items: Any, audit_log: list[str]
+) -> tuple[bool, dict | None]:
+    """Áp thay đổi payload [{ index: 0|1, fields: {...} }]; merge với slot không sửa."""
+
+    if not isinstance(items, list) or not items:
+        return True, None
+
+    slots = [
+        _slot_bank_dict_from_lead_row(lead_doc, 0),
+        _slot_bank_dict_from_lead_row(lead_doc, 1),
+    ]
+
+    touched = False
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw_idx = item.get("index")
+        try:
+            si = int(raw_idx)
+        except (TypeError, ValueError):
+            continue
+        if si not in (0, 1):
+            return False, validation_error_response(
+                "Tai khoan ngan hang chi co vi tri 0 hoac 1",
+                {"bank_accounts": ["index khong hop le"]},
+            )
+        flds = item.get("fields")
+        if not isinstance(flds, dict):
+            continue
+        for fk, fv in flds.items():
+            if fk not in _BANK_ACCOUNT_FIELDNAMES:
+                continue
+            slots[si][fk] = str(fv).strip() if fv is not None else ""
+            touched = True
+
+    if not touched:
+        return True, None
+
+    new_rows = []
+    for slot in slots:
+        if any((slot[k] or "").strip() for k in _BANK_ACCOUNT_FIELDNAMES):
+            new_rows.append(dict(slot))
+
+    if len(new_rows) > 2:
+        return False, validation_error_response(
+            "Toi da 2 tai khoan thanh toan",
+            {"bank_accounts": ["Vuot qua 2 dong"]},
+        )
+
+    lead_doc.set("bank_accounts", [])
+    for row in new_rows:
+        lead_doc.append("bank_accounts", row)
+
+    audit_log.append(f"bank_accounts:{len(items)}")
+    return True, None
 
 
 def _apply_guardian_updates(
@@ -666,6 +742,9 @@ def _count_ops(changes: dict[str, Any]) -> int:
 
     n = 0
     n += len((changes.get("lead") or {}) if isinstance(changes.get("lead"), dict) else {})
+    bac = changes.get("bank_accounts")
+    if isinstance(bac, list):
+        n += len(bac)
     for key in ("guardians", "phones", "learning_history", "siblings"):
         val = changes.get(key)
         if isinstance(val, list):
@@ -799,6 +878,13 @@ def commit_profile_changes():
         # 1. Cập nhật field trên chính CRM Lead
         if isinstance(changes.get("lead"), dict):
             _apply_lead_fields(lead_doc, changes["lead"], audit_log)
+
+        # 1b. Tai khoan ngan hang (child rows theo slot index)
+        ok, err = _apply_bank_accounts(
+            lead_doc, changes.get("bank_accounts"), audit_log
+        )
+        if not ok:
+            raise _CommitFailure(err)
 
         # 2. Cập nhật guardian (và relationship_type)
         ok, err = _apply_guardian_updates(

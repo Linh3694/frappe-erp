@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
+import re
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.api_response import (
     success_response, error_response, list_response,
@@ -28,7 +29,15 @@ GUARDIAN_EXCEL_COLUMN_ALIASES = {
     "guardian_id": ["guardian_id", "guardian code", "guardian_code", "ma_giam_ho", "mã giám hộ"],
     "guardian_name": ["guardian_name", "guardian name", "name", "ho_ten", "họ tên", "ten_giam_ho", "tên giám hộ"],
     "phone_number": ["phone_number", "phone number", "phone", "sdt", "số điện thoại", "so_dien_thoai"],
+    "phone_number_1": ["phone_number_1", "phone_1", "sdt_1", "điện thoại 1"],
+    "phone_number_2": ["phone_number_2", "phone_2", "sdt_2", "điện thoại 2"],
+    "phone_number_3": ["phone_number_3", "phone_3", "sdt_3"],
+    "phone_number_4": ["phone_number_4", "phone_4", "sdt_4"],
     "email": ["email", "e-mail", "guardian_email"],
+    "email_1": ["email_1", "email 1"],
+    "email_2": ["email_2", "email 2"],
+    "email_3": ["email_3", "email 3"],
+    "email_4": ["email_4", "email 4"],
     "id_number": ["id_number", "id number", "cccd", "passport", "so_cccd", "số cccd", "so_cccd_ho_chieu", "số cccd/hộ chiếu"],
     "occupation": ["occupation", "nghe_nghiep", "nghề nghiệp"],
     "position": ["position", "chuc_vu", "chức vụ"],
@@ -203,6 +212,328 @@ def _resolve_guardian_docname(identifier: Optional[str] = None, guardian_code: O
     return None
 
 
+def _serialize_guardian_phones_standalone(rows) -> list:
+    """CRM Guardian Phone rows (dict từ DB hoặc Document child row)."""
+    out = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            pn = row.get("phone_number") or ""
+            prim = row.get("is_primary")
+            out.append({
+                "name": row.get("name"),
+                "phone_number": pn,
+                "is_primary": prim in (1, True),
+            })
+        else:
+            prim = getattr(row, "is_primary", 0)
+            out.append({
+                "name": getattr(row, "name", None),
+                "phone_number": getattr(row, "phone_number", None) or "",
+                "is_primary": prim in (1, True),
+            })
+    return out
+
+
+def _serialize_guardian_emails_standalone(rows) -> list:
+    out = []
+    for row in rows or []:
+        if isinstance(row, dict):
+            ea = row.get("email_address") or ""
+            prim = row.get("is_primary")
+            out.append({
+                "name": row.get("name"),
+                "email_address": ea,
+                "is_primary": prim in (1, True),
+            })
+        else:
+            prim = getattr(row, "is_primary", 0)
+            out.append({
+                "name": getattr(row, "name", None),
+                "email_address": getattr(row, "email_address", None) or "",
+                "is_primary": prim in (1, True),
+            })
+    return out
+
+
+def _hydrate_guardians_with_contact_lists(guardians: list) -> None:
+    """Batch load tab CRM Guardian Phone / Email cho list get_all_guardians."""
+    if not guardians:
+        return
+    names = [g.get("name") for g in guardians if g.get("name")]
+    if not names:
+        return
+    phone_rows = frappe.get_all(
+        "CRM Guardian Phone",
+        filters={"parent": ["in", names]},
+        fields=["name", "parent", "phone_number", "is_primary"],
+        order_by="parent asc, idx asc",
+    )
+    email_rows = frappe.get_all(
+        "CRM Guardian Email",
+        filters={"parent": ["in", names]},
+        fields=["name", "parent", "email_address", "is_primary"],
+        order_by="parent asc, idx asc",
+    )
+    pmap = frappe._dict()
+    for r in phone_rows:
+        pmap.setdefault(r.parent, []).append(
+            {"name": r.name, "phone_number": r.phone_number or "", "is_primary": r.is_primary in (1, True)}
+        )
+    emap = frappe._dict()
+    for r in email_rows:
+        emap.setdefault(r.parent, []).append(
+            {"name": r.name, "email_address": r.email_address or "", "is_primary": r.is_primary in (1, True)}
+        )
+    for g in guardians:
+        k = g.get("name")
+        g["phone_numbers"] = pmap.get(k, []) if k else []
+        g["emails"] = emap.get(k, []) if k else []
+
+
+def guardian_doc_api_payload(doc) -> dict:
+    """Dict thống nhất khi API trả 1 guardian (get/create/update)."""
+    return {
+        "name": doc.name,
+        "guardian_id": doc.guardian_id,
+        "guardian_name": doc.guardian_name,
+        "phone_number": doc.phone_number or "",
+        "email": doc.email if doc.email is not None else "",
+        "phone_numbers": _serialize_guardian_phones_standalone(doc.phone_numbers),
+        "emails": _serialize_guardian_emails_standalone(getattr(doc, "emails", None) or []),
+        "id_number": getattr(doc, "id_number", None),
+        "occupation": getattr(doc, "occupation", None),
+        "position": getattr(doc, "position", None),
+        "workplace": getattr(doc, "workplace", None),
+        "address": getattr(doc, "address", None),
+        "nationality": getattr(doc, "nationality", None),
+        "note": getattr(doc, "note", None),
+        "dob": str(doc.dob) if getattr(doc, "dob", None) else None,
+        "creation": doc.creation.isoformat() if getattr(doc, "creation", None) else None,
+        "modified": doc.modified.isoformat() if getattr(doc, "modified", None) else None,
+    }
+
+
+def _guardian_phone_used_elsewhere_message(formatted: str, exclude_parent: Optional[str]) -> Optional[str]:
+    """Số đã dùng bởi guardian khác (field phẳng hoặc child table)."""
+    if not formatted:
+        return None
+    ex = exclude_parent or ""
+    filters = {"phone_number": formatted}
+    if ex:
+        filters["name"] = ["!=", ex]
+    if frappe.db.exists("CRM Guardian", filters):
+        return f"Số '{formatted}' đã được sử dụng bởi phụ huynh khác"
+    if ex:
+        dup = frappe.db.sql(
+            "SELECT 1 FROM `tabCRM Guardian Phone` WHERE phone_number=%s AND parent!=%s LIMIT 1",
+            (formatted, ex),
+        )
+    else:
+        dup = frappe.db.sql(
+            "SELECT 1 FROM `tabCRM Guardian Phone` WHERE phone_number=%s LIMIT 1",
+            (formatted,),
+        )
+    if dup:
+        return f"Số '{formatted}' đã được sử dụng bởi phụ huynh khác"
+    return None
+
+
+def _build_phone_child_rows_from_payload(data: dict, legacy_phone: str) -> tuple[list, Optional[str]]:
+    """Parse phone_numbers từ JSON + legacy phone_number; format VN; đúng 1 primary."""
+    raw = data.get("phone_numbers")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = []
+    if not isinstance(raw, list):
+        raw = []
+    out = []
+    seen = set()
+    for item in raw:
+        if isinstance(item, dict):
+            p = item.get("phone_number") or item.get("phoneNumber") or ""
+            is_primary = item.get("is_primary") in (1, True, "1", "true")
+        else:
+            p = str(item or "").strip()
+            is_primary = False
+        p = str(p).strip()
+        if not p:
+            continue
+        try:
+            fp = validate_vietnamese_phone_number(p)
+        except ValueError as ve:
+            return [], str(ve)
+        key = fp.replace(" ", "")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"phone_number": fp, "is_primary": 1 if is_primary else 0})
+    if not out and legacy_phone:
+        try:
+            fp = validate_vietnamese_phone_number(legacy_phone)
+            out = [{"phone_number": fp, "is_primary": 1}]
+        except ValueError as ve:
+            return [], str(ve)
+    if not out:
+        return [], None
+    primaries = [i for i, r in enumerate(out) if r["is_primary"]]
+    if len(primaries) != 1:
+        for r in out:
+            r["is_primary"] = 0
+        idx = primaries[0] if primaries else 0
+        out[idx]["is_primary"] = 1
+    return out, None
+
+
+_EMAIL_ROW_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def _build_email_child_rows_from_payload(data: dict, legacy_email: str) -> tuple[list, Optional[str]]:
+    raw = data.get("emails")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            raw = []
+    if not isinstance(raw, list):
+        raw = []
+    out = []
+    seen = set()
+    for item in raw:
+        if isinstance(item, dict):
+            e = item.get("email_address") or item.get("email") or ""
+            is_primary = item.get("is_primary") in (1, True, "1", "true")
+        else:
+            e = str(item or "").strip()
+            is_primary = False
+        e = str(e).strip()
+        if not e:
+            continue
+        if not _EMAIL_ROW_RE.match(e):
+            return [], f"Email không hợp lệ: {e}"
+        low = e.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append({"email_address": e, "is_primary": 1 if is_primary else 0})
+    if not out and legacy_email and str(legacy_email).strip():
+        e = str(legacy_email).strip()
+        if not _EMAIL_ROW_RE.match(e):
+            return [], f"Email không hợp lệ: {e}"
+        out = [{"email_address": e, "is_primary": 1}]
+    if not out:
+        return [], None
+    primaries = [i for i, r in enumerate(out) if r["is_primary"]]
+    if len(primaries) != 1:
+        for r in out:
+            r["is_primary"] = 0
+        idx = primaries[0] if primaries else 0
+        out[idx]["is_primary"] = 1
+    return out, None
+
+
+def _derive_primary_phone_from_rows(rows: list) -> str:
+    if not rows:
+        return ""
+    for r in rows:
+        if r.get("is_primary"):
+            return r.get("phone_number") or ""
+    return rows[0].get("phone_number") or ""
+
+
+def _derive_primary_email_from_rows(rows: list) -> str:
+    if not rows:
+        return ""
+    for r in rows:
+        if r.get("is_primary"):
+            return r.get("email_address") or ""
+    return rows[0].get("email_address") or ""
+
+
+def _bulk_excel_raw_phones(row, column_map: dict) -> list:
+    """Gom SĐT tho tu hang Excel: uu tien phone_number_1..4, fallback phone_number."""
+    vals = []
+    has_index_cols = any(
+        f"phone_number_{i}" in column_map for i in range(1, 5)
+    )
+    if has_index_cols:
+        for i in range(1, 5):
+            v = _read_guardian_excel_value(row, column_map, f"phone_number_{i}")
+            if v:
+                vals.append(v)
+        if not vals and "phone_number" in column_map:
+            v = _read_guardian_excel_value(row, column_map, "phone_number")
+            if v:
+                vals.append(v)
+        return vals
+    if "phone_number" in column_map:
+        v = _read_guardian_excel_value(row, column_map, "phone_number")
+        return [v] if v else []
+    return []
+
+
+def _bulk_excel_raw_emails(row, column_map: dict) -> list:
+    """Gom email tho: uu tien email_1..4, fallback email."""
+    vals = []
+    has_index_cols = any(f"email_{i}" in column_map for i in range(1, 5))
+    if has_index_cols:
+        for i in range(1, 5):
+            v = _read_guardian_excel_value(row, column_map, f"email_{i}")
+            if v:
+                vals.append(str(v).strip())
+        if not vals and "email" in column_map:
+            v = _read_guardian_excel_value(row, column_map, "email")
+            if v:
+                vals.append(str(v).strip())
+        return vals
+    if "email" in column_map:
+        v = _read_guardian_excel_value(row, column_map, "email")
+        return [str(v).strip()] if v else []
+    return []
+
+
+def _bulk_build_phone_child_rows_from_raw_strings(raw_list: list) -> tuple[list, Optional[str]]:
+    out = []
+    seen = set()
+    for raw in raw_list or []:
+        if not raw:
+            continue
+        try:
+            fp = validate_vietnamese_phone_number(raw)
+        except ValueError as ve:
+            return [], str(ve)
+        k = (fp or "").replace(" ", "")
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append({"phone_number": fp, "is_primary": 0})
+    if not out:
+        return [], None
+    out[0]["is_primary"] = 1
+    return out, None
+
+
+def _bulk_build_email_child_rows_from_raw_strings(raw_list: list, email_regex) -> tuple[list, Optional[str]]:
+    out = []
+    seen = set()
+    for raw in raw_list or []:
+        e = str(raw or "").strip()
+        if not e:
+            continue
+        if not email_regex.match(e):
+            return [], f"Invalid email format: {e}"
+        low = e.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append({"email_address": e, "is_primary": 0})
+    if not out:
+        return [], None
+    out[0]["is_primary"] = 1
+    return out, None
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_guardians(page=1, limit=20):
     """Get all guardians with basic information and pagination"""
@@ -245,6 +576,9 @@ def get_all_guardians(page=1, limit=20):
                 g["email"] = ""
             if g.get("dob"):
                 g["dob"] = str(g["dob"])
+
+        _hydrate_guardians_with_contact_lists(guardians)
+
         # Enrich with all family codes per guardian
         try:
             guardian_ids = [g.get("name") for g in guardians if g.get("name")]
@@ -360,23 +694,7 @@ def get_guardian_data():
             )
         
         return single_item_response(
-            data={
-                "name": guardian.name,
-                "guardian_id": guardian.guardian_id,
-                "guardian_name": guardian.guardian_name,
-                "phone_number": guardian.phone_number,
-                "email": guardian.email,
-                "id_number": getattr(guardian, "id_number", None),
-                "occupation": getattr(guardian, "occupation", None),
-                "position": getattr(guardian, "position", None),
-                "workplace": getattr(guardian, "workplace", None),
-                "address": getattr(guardian, "address", None),
-                "nationality": getattr(guardian, "nationality", None),
-                "note": getattr(guardian, "note", None),
-                "dob": str(guardian.dob) if getattr(guardian, "dob", None) else None,
-                "creation": guardian.creation.isoformat() if guardian.creation else None,
-                "modified": guardian.modified.isoformat() if guardian.modified else None
-            },
+            data=guardian_doc_api_payload(guardian),
             message="Guardian fetched successfully"
         )
         
@@ -435,10 +753,19 @@ def create_guardian():
         note = data.get("note") or ""
         dob = data.get("dob") or None
         
+        # Bắt buộc tên trước khi xử lý SĐT / email
+        if not guardian_name:
+            frappe.logger().error(f"Guardian name validation failed: data={data}")
+            alt_name = frappe.local.form_dict.get('guardian_name') or frappe.local.form_dict.get('guardianName')
+            frappe.logger().error(f"Alternative name from form_dict: '{alt_name}'")
+            return validation_error_response(
+                message="Guardian name is required",
+                errors={"guardian_name": ["Required"]}
+            )
+
         # Generate guardian_id if not provided
         # Sử dụng timestamp milliseconds để đảm bảo unique khi nhiều guardian có cùng tên
         if not guardian_id and guardian_name:
-            import re
             import time
             # Create simple ID from name (remove spaces, Vietnamese chars, make lowercase)
             base_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
@@ -454,56 +781,51 @@ def create_guardian():
             unique_suffix = str(int(time.time() * 1000) % 1000000)
             guardian_id = f"{base_id}-{unique_suffix}"
         
-        # Validate and format phone number if provided
-        formatted_phone = None
-        if phone_number:
-            try:
-                formatted_phone = validate_vietnamese_phone_number(phone_number)
-                frappe.logger().info(f"Phone validated and formatted: '{phone_number}' -> '{formatted_phone}'")
-            except ValueError as ve:
-                return validation_error_response(
-                    message=f"Số điện thoại không hợp lệ: {str(ve)}",
-                    errors={"phone_number": [str(ve)]}
-                )
-        
-        frappe.logger().info(f"Extracted values - Name: {guardian_name}, Phone: {formatted_phone}, Email: {email}")
-        
-        # Input validation with detailed debugging
-        if not guardian_name:
-            # Log all available data for debugging
-            frappe.logger().error(f"Guardian name validation failed!")
-            frappe.logger().error(f"Raw request data: {frappe.request.data}")
-            frappe.logger().error(f"Form dict: {frappe.local.form_dict}")
-            frappe.logger().error(f"Parsed data: {data}")
-            frappe.logger().error(f"Guardian name extracted: '{guardian_name}'")
-
-            # Also try to get data directly from form_dict with different keys
-            alt_name = frappe.local.form_dict.get('guardian_name') or frappe.local.form_dict.get('guardianName')
-            frappe.logger().error(f"Alternative name from form_dict: '{alt_name}'")
-
+        # Nhiều SĐT / email (JSON phone_numbers[], emails[])
+        phone_child_rows, phone_parse_err = _build_phone_child_rows_from_payload(data, phone_number or "")
+        if phone_parse_err:
             return validation_error_response(
-                message="Guardian name is required",
-                errors={"guardian_name": ["Required"]}
+                message=str(phone_parse_err),
+                errors={"phone_numbers": [str(phone_parse_err)]},
             )
-        
-        # Check if phone number already exists
-        if formatted_phone:
-            existing_phone = frappe.db.exists("CRM Guardian", {"phone_number": formatted_phone})
-            if existing_phone:
-                return error_response(
-                    message=f"Số điện thoại '{formatted_phone}' đã được sử dụng bởi giám hộ khác",
-                    code="GUARDIAN_PHONE_EXISTS"
-                )
+        email_child_rows, email_parse_err = _build_email_child_rows_from_payload(data, email or "")
+        if email_parse_err:
+            return validation_error_response(
+                message=str(email_parse_err),
+                errors={"emails": [str(email_parse_err)]},
+            )
+        for r in phone_child_rows:
+            clash = _guardian_phone_used_elsewhere_message(r.get("phone_number"), None)
+            if clash:
+                return error_response(message=clash, code="GUARDIAN_PHONE_EXISTS")
+
+        primary_phone_val = ""
+        for r in phone_child_rows:
+            if r.get("is_primary"):
+                primary_phone_val = r.get("phone_number") or ""
+                break
+        if not primary_phone_val and phone_child_rows:
+            primary_phone_val = phone_child_rows[0].get("phone_number") or ""
+
+        primary_email_val = ""
+        for r in email_child_rows:
+            if r.get("is_primary"):
+                primary_email_val = r.get("email_address") or ""
+                break
+        if not primary_email_val and email_child_rows:
+            primary_email_val = email_child_rows[0].get("email_address") or ""
+
+        frappe.logger().info(f"Creating guardian '{guardian_name}': phones={len(phone_child_rows)}, emails={len(email_child_rows)}")
         
         frappe.logger().info(f"Creating guardian with Name: {guardian_name}")
         
-        # Create new guardian with validation bypass
-        guardian_doc = frappe.get_doc({
+        # Create new guardian with validation bypass — kèm phone_numbers / emails nếu có
+        insert_dict = {
             "doctype": "CRM Guardian",
             "guardian_id": guardian_id,
             "guardian_name": guardian_name,
-            "phone_number": formatted_phone or "",
-            "email": email or "",
+            "phone_number": primary_phone_val or "",
+            "email": primary_email_val or "",
             "id_number": id_number,
             "occupation": occupation,
             "position": position,
@@ -511,8 +833,14 @@ def create_guardian():
             "address": address,
             "nationality": nationality,
             "note": note,
-            "dob": dob
-        })
+            "dob": dob,
+        }
+        if phone_child_rows:
+            insert_dict["phone_numbers"] = phone_child_rows
+        if email_child_rows:
+            insert_dict["emails"] = email_child_rows
+
+        guardian_doc = frappe.get_doc(insert_dict)
         
         frappe.logger().info(f"Creating guardian with ID: {guardian_id}, Name: {guardian_name}")
         
@@ -526,8 +854,8 @@ def create_guardian():
         # Force persist critical fields in case of server scripts altering values
         try:
             frappe.db.set_value("CRM Guardian", guardian_doc.name, {
-                "phone_number": guardian_doc.phone_number or (formatted_phone or ""),
-                "email": guardian_doc.email or (email or ""),
+                "phone_number": guardian_doc.phone_number or primary_phone_val or "",
+                "email": guardian_doc.email or primary_email_val or "",
             })
         except Exception as e:
             frappe.logger().error(f"set_value after insert failed: {str(e)}")
@@ -535,23 +863,11 @@ def create_guardian():
         frappe.logger().info(f"Guardian inserted successfully with name: {guardian_doc.name}")
         frappe.db.commit()
         
-        # Return consistent API response format
+        guardian_doc.reload()
+
+        # Return consistent API response format (gồm phone_numbers, emails)
         return single_item_response(
-            data={
-                "name": guardian_doc.name,
-                "guardian_id": guardian_doc.guardian_id,
-                "guardian_name": guardian_doc.guardian_name,
-                "phone_number": guardian_doc.phone_number,
-                "email": guardian_doc.email if guardian_doc.email is not None else (email or ""),
-                "id_number": getattr(guardian_doc, "id_number", None),
-                "occupation": getattr(guardian_doc, "occupation", None),
-                "position": getattr(guardian_doc, "position", None),
-                "workplace": getattr(guardian_doc, "workplace", None),
-                "address": getattr(guardian_doc, "address", None),
-                "nationality": getattr(guardian_doc, "nationality", None),
-                "note": getattr(guardian_doc, "note", None),
-                "dob": str(guardian_doc.dob) if getattr(guardian_doc, "dob", None) else None
-            },
+            data=guardian_doc_api_payload(guardian_doc),
             message="Guardian created successfully"
         )
         
@@ -579,7 +895,8 @@ def update_guardian(
         phone_number = phone_number if phone_number is not None else form.get("phone_number")
         email = email if email is not None else form.get("email")
 
-        # Merge JSON body (if present)
+        # Merge JSON body (if present); giữ nguyên dict để nhận phone_numbers / emails
+        json_data = None
         if frappe.request.data:
             try:
                 body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
@@ -631,26 +948,90 @@ def update_guardian(
                 message="Guardian not found",
                 code="GUARDIAN_NOT_FOUND"
             )
-        
-        # Track if any changes were made
+
+        # Bắt đầu false; block phone_numbers / emails sẽ bật True khi có thay đổi
         changes_made = False
+
+        # Thay child tables khi có key phone_numbers hoặc emails (mảng rỗng = xóa hết)
+        skip_scalar_phone = False
+        skip_scalar_email = False
+        if isinstance(json_data, dict):
+            if "phone_numbers" in json_data:
+                skip_scalar_phone = True
+                if json_data.get("phone_numbers") == []:
+                    phone_child_rows = []
+                    phone_parse_err = None
+                else:
+                    merge_phone = dict(json_data)
+                    if phone_number is not None:
+                        merge_phone["phone_number"] = phone_number
+                    phone_child_rows, phone_parse_err = _build_phone_child_rows_from_payload(
+                        merge_phone,
+                        guardian_doc.phone_number or ""
+                    )
+                if phone_parse_err:
+                    return validation_error_response(
+                        message=str(phone_parse_err),
+                        errors={"phone_numbers": [str(phone_parse_err)]},
+                    )
+                for r in phone_child_rows:
+                    clash = _guardian_phone_used_elsewhere_message(
+                        r.get("phone_number"), guardian_doc.name
+                    )
+                    if clash:
+                        return error_response(message=clash, code="GUARDIAN_PHONE_EXISTS")
+                guardian_doc.set("phone_numbers", [])
+                for r in phone_child_rows:
+                    guardian_doc.append(
+                        "phone_numbers",
+                        {
+                            "phone_number": r.get("phone_number"),
+                            "is_primary": 1 if r.get("is_primary") else 0,
+                        },
+                    )
+                guardian_doc.phone_number = _derive_primary_phone_from_rows(phone_child_rows)
+                changes_made = True
+
+            if "emails" in json_data:
+                skip_scalar_email = True
+                if json_data.get("emails") == []:
+                    email_child_rows = []
+                    email_parse_err = None
+                else:
+                    merge_em = dict(json_data)
+                    if email is not None:
+                        merge_em["email"] = email
+                    email_child_rows, email_parse_err = _build_email_child_rows_from_payload(
+                        merge_em,
+                        guardian_doc.email or ""
+                    )
+                if email_parse_err:
+                    return validation_error_response(
+                        message=str(email_parse_err),
+                        errors={"emails": [str(email_parse_err)]},
+                    )
+                guardian_doc.set("emails", [])
+                for r in email_child_rows:
+                    guardian_doc.append(
+                        "emails",
+                        {
+                            "email_address": r.get("email_address"),
+                            "is_primary": 1 if r.get("is_primary") else 0,
+                        },
+                    )
+                guardian_doc.email = _derive_primary_email_from_rows(email_child_rows)
+                changes_made = True
         
-        # Helper function to normalize values for comparison
-        def normalize_value(val):
-            """Convert None/null/empty to empty string for comparison"""
-            if val is None or val == "null" or val == "":
-                return ""
-            return str(val).strip()
         # Update fields (allow clearing with empty string) - assign unconditionally if key provided
         if guardian_name is not None:
             guardian_doc.guardian_name = guardian_name or ""
             changes_made = True
         
-        if phone_number is not None:
+        if phone_number is not None and not skip_scalar_phone:
             guardian_doc.phone_number = phone_number or ""
             changes_made = True
 
-        if email is not None:
+        if email is not None and not skip_scalar_email:
             guardian_doc.email = email or ""
             changes_made = True
 
@@ -706,21 +1087,7 @@ def update_guardian(
         guardian_doc.reload()
         
         return single_item_response(
-            data={
-                "name": guardian_doc.name,
-                "guardian_id": guardian_doc.guardian_id,
-                "guardian_name": guardian_doc.guardian_name,
-                "phone_number": guardian_doc.phone_number,
-                "email": guardian_doc.email if guardian_doc.email is not None else (email or ""),
-                "id_number": getattr(guardian_doc, "id_number", None),
-                "occupation": getattr(guardian_doc, "occupation", None),
-                "position": getattr(guardian_doc, "position", None),
-                "workplace": getattr(guardian_doc, "workplace", None),
-                "address": getattr(guardian_doc, "address", None),
-                "nationality": getattr(guardian_doc, "nationality", None),
-                "note": getattr(guardian_doc, "note", None),
-                "dob": str(guardian_doc.dob) if getattr(guardian_doc, "dob", None) else None
-            },
+            data=guardian_doc_api_payload(guardian_doc),
             message="Guardian updated successfully"
         )
         
@@ -1113,13 +1480,30 @@ def bulk_import_guardians():
         for g in existing_guardians:
             if g.get("guardian_id"):
                 existing_guardian_ids[str(g["guardian_id"]).strip().lower()] = g["name"]
-            if g.get('phone_number'):
+            if g.get("phone_number"):
                 try:
-                    normalized_phone = validate_vietnamese_phone_number(g['phone_number'])
+                    normalized_phone = validate_vietnamese_phone_number(g["phone_number"])
                     if normalized_phone:
-                        existing_phones[normalized_phone] = g['name']
+                        existing_phones[normalized_phone] = g["name"]
                 except Exception:
                     pass
+
+        phone_rows_existing = frappe.get_all(
+            "CRM Guardian Phone",
+            fields=["parent", "phone_number"],
+            limit_page_length=0,
+        )
+        for pr in phone_rows_existing:
+            try:
+                np = validate_vietnamese_phone_number(pr.get("phone_number") or "")
+                if np:
+                    existing_phones[np] = pr.get("parent")
+            except Exception:
+                pass
+
+        import re as _re_bulk
+
+        email_regex = _re_bulk.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
         success_count = 0
         error_count = 0
@@ -1130,8 +1514,6 @@ def bulk_import_guardians():
             row_number = index + 2
             try:
                 guardian_name = _read_guardian_excel_value(row, column_map, "guardian_name")
-                phone_number = _read_guardian_excel_value(row, column_map, "phone_number")
-                email = _read_guardian_excel_value(row, column_map, "email")
                 guardian_id = _read_guardian_excel_value(row, column_map, "guardian_id")
 
                 if not guardian_name:
@@ -1148,63 +1530,89 @@ def bulk_import_guardians():
                     logs.append(error_msg)
                     continue
 
-                formatted_phone = None
-                if phone_number:
-                    try:
-                        formatted_phone = validate_vietnamese_phone_number(phone_number)
-                        if formatted_phone and formatted_phone in existing_phones:
-                            error_count += 1
-                            error_msg = f"Row {row_number}: Phone number '{phone_number}' already exists (record: {existing_phones[formatted_phone]})"
-                            errors.append(error_msg)
-                            logs.append(error_msg)
-                            continue
-                    except ValueError as ve:
+                raw_phones = _bulk_excel_raw_phones(row, column_map)
+                raw_emails = _bulk_excel_raw_emails(row, column_map)
+
+                phone_child_rows, phone_parse_err = _bulk_build_phone_child_rows_from_raw_strings(
+                    raw_phones
+                )
+                if phone_parse_err:
+                    error_count += 1
+                    error_msg = f"Row {row_number}: Phone validation error: {phone_parse_err}"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+
+                email_child_rows, email_parse_err = _bulk_build_email_child_rows_from_raw_strings(
+                    raw_emails, email_regex
+                )
+                if email_parse_err:
+                    error_count += 1
+                    error_msg = f"Row {row_number}: {email_parse_err}"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+
+                clash = False
+                for pr in phone_child_rows:
+                    fp = pr["phone_number"]
+                    if fp in existing_phones:
                         error_count += 1
-                        error_msg = f"Row {row_number}: Phone validation error: {str(ve)}"
+                        error_msg = (
+                            f"Row {row_number}: Phone number already exists "
+                            f"(record: {existing_phones[fp]})"
+                        )
                         errors.append(error_msg)
                         logs.append(error_msg)
-                        continue
-
-                if email:
-                    import re
-                    email_regex = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
-                    if not email_regex.match(email):
-                        logs.append(f"Row {row_number}: Warning - Invalid email format: {email}")
-                        email = ''
+                        clash = True
+                        break
+                if clash:
+                    continue
 
                 if not guardian_id and guardian_name:
-                    import re
                     import time
-                    # Tao ma tam tu ten va timestamp de tranh trung khi import nhieu dong.
-                    base_id = re.sub(r'[àáạảãâầấậẩẫăằắặẳẵ]', 'a', guardian_name.lower())
-                    base_id = re.sub(r'[èéẹẻẽêềếệểễ]', 'e', base_id)
-                    base_id = re.sub(r'[ìíịỉĩ]', 'i', base_id)
-                    base_id = re.sub(r'[òóọỏõôồốộổỗơờớợởỡ]', 'o', base_id)
-                    base_id = re.sub(r'[ùúụủũưừứựửữ]', 'u', base_id)
-                    base_id = re.sub(r'[ỳýỵỷỹ]', 'y', base_id)
-                    base_id = base_id.replace('đ', 'd')
-                    base_id = re.sub(r'[^a-z0-9]', '-', base_id)
-                    base_id = re.sub(r'-+', '-', base_id).strip('-')
+
+                    base_id = re.sub(
+                        r"[àáạảãâầấậẩẫăằắặẳẵ]", "a", guardian_name.lower()
+                    )
+                    base_id = re.sub(r"[èéẹẻẽêềếệểễ]", "e", base_id)
+                    base_id = re.sub(r"[ìíịỉĩ]", "i", base_id)
+                    base_id = re.sub(r"[òóọỏõôồốộổỗơờớợởỡ]", "o", base_id)
+                    base_id = re.sub(r"[ùúụủũưừứựửữ]", "u", base_id)
+                    base_id = re.sub(r"[ỳýỵỷỹ]", "y", base_id)
+                    base_id = base_id.replace("đ", "d")
+                    base_id = re.sub(r"[^a-z0-9]", "-", base_id)
+                    base_id = re.sub(r"-+", "-", base_id).strip("-")
                     unique_suffix = f"{int(time.time() * 1000) % 100000}-{index}"
                     guardian_id = f"{base_id}-{unique_suffix}"
+
+                primary_phone_val = _derive_primary_phone_from_rows(phone_child_rows)
+                primary_email_val = _derive_primary_email_from_rows(email_child_rows)
 
                 guardian_payload = {
                     "doctype": "CRM Guardian",
                     "guardian_id": guardian_id,
                     "guardian_name": guardian_name,
-                    "phone_number": formatted_phone or '',
-                    "email": email or ''
+                    "phone_number": primary_phone_val or "",
+                    "email": primary_email_val or "",
                 }
+                if phone_child_rows:
+                    guardian_payload["phone_numbers"] = phone_child_rows
+                if email_child_rows:
+                    guardian_payload["emails"] = email_child_rows
+
                 guardian_payload.update(_extract_guardian_profile_updates(row, column_map))
                 guardian_doc = frappe.get_doc(guardian_payload)
-                
+
                 guardian_doc.flags.ignore_validate = True
                 guardian_doc.flags.ignore_permissions = True
                 guardian_doc.flags.ignore_mandatory = True
                 guardian_doc.insert(ignore_permissions=True)
 
-                if formatted_phone:
-                    existing_phones[formatted_phone] = guardian_doc.name
+                for pr in phone_child_rows:
+                    fp = pr["phone_number"]
+                    existing_phones[fp] = guardian_doc.name
+
                 if guardian_id:
                     existing_guardian_ids[guardian_id.lower()] = guardian_doc.name
 
@@ -1285,8 +1693,6 @@ def bulk_update_guardians():
         errors = []
         logs = []
 
-        update_fields = ["guardian_name", "phone_number", "email"] + GUARDIAN_PROFILE_FIELDS
-
         for index, row in df.iterrows():
             row_number = index + 2
             try:
@@ -1309,44 +1715,90 @@ def bulk_update_guardians():
                     logs.append(error_msg)
                     continue
 
-                updates = _extract_guardian_profile_updates(row, column_map, fields=update_fields)
+                profile_updates = _extract_guardian_profile_updates(
+                    row, column_map, fields=GUARDIAN_PROFILE_FIELDS
+                )
+                gn_val = _read_guardian_excel_value(row, column_map, "guardian_name")
+                if gn_val:
+                    profile_updates["guardian_name"] = gn_val
 
-                if "phone_number" in updates:
-                    try:
-                        formatted_phone = validate_vietnamese_phone_number(updates["phone_number"])
-                    except ValueError as ve:
-                        error_count += 1
-                        error_msg = f"Row {row_number}: Phone validation error: {str(ve)}"
-                        errors.append(error_msg)
-                        logs.append(error_msg)
-                        continue
+                raw_phones = _bulk_excel_raw_phones(row, column_map)
+                raw_emails = _bulk_excel_raw_emails(row, column_map)
+                touch_phones = len(raw_phones) > 0
+                touch_emails = len(raw_emails) > 0
 
-                    duplicate_phone = frappe.db.get_value(
-                        "CRM Guardian",
-                        {"phone_number": formatted_phone, "name": ["!=", docname]},
-                        "name"
-                    )
-                    if duplicate_phone:
-                        error_count += 1
-                        error_msg = f"Row {row_number}: Phone number already exists (record: {duplicate_phone})"
-                        errors.append(error_msg)
-                        logs.append(error_msg)
-                        continue
-                    updates["phone_number"] = formatted_phone
-
-                if "email" in updates and updates["email"] and not email_regex.match(updates["email"]):
+                phone_child_rows, phone_err = _bulk_build_phone_child_rows_from_raw_strings(raw_phones)
+                if phone_err:
                     error_count += 1
-                    error_msg = f"Row {row_number}: Invalid email format: {updates['email']}"
+                    error_msg = f"Row {row_number}: Phone validation error: {phone_err}"
                     errors.append(error_msg)
                     logs.append(error_msg)
                     continue
 
-                if not updates:
+                email_child_rows, email_err = _bulk_build_email_child_rows_from_raw_strings(
+                    raw_emails, email_regex
+                )
+                if email_err:
+                    error_count += 1
+                    error_msg = f"Row {row_number}: {email_err}"
+                    errors.append(error_msg)
+                    logs.append(error_msg)
+                    continue
+
+                if touch_phones:
+                    phone_clash = False
+                    for pr in phone_child_rows:
+                        dup_msg = _guardian_phone_used_elsewhere_message(
+                            pr["phone_number"], docname
+                        )
+                        if dup_msg:
+                            error_count += 1
+                            error_msg = f"Row {row_number}: {dup_msg}"
+                            errors.append(error_msg)
+                            logs.append(error_msg)
+                            phone_clash = True
+                            break
+                    if phone_clash:
+                        continue
+
+                if not profile_updates and not touch_phones and not touch_emails:
                     skipped_count += 1
                     logs.append(f"Row {row_number}: Skipped because there is no data to update")
                     continue
 
-                frappe.db.set_value("CRM Guardian", docname, updates)
+                guardian_doc_upd = frappe.get_doc("CRM Guardian", docname)
+                for fk, fv in profile_updates.items():
+                    guardian_doc_upd.set(fk, fv)
+
+                if touch_phones:
+                    guardian_doc_upd.set("phone_numbers", [])
+                    for r in phone_child_rows:
+                        guardian_doc_upd.append(
+                            "phone_numbers",
+                            {
+                                "phone_number": r["phone_number"],
+                                "is_primary": r["is_primary"],
+                            },
+                        )
+                    guardian_doc_upd.phone_number = _derive_primary_phone_from_rows(
+                        phone_child_rows
+                    )
+
+                if touch_emails:
+                    guardian_doc_upd.set("emails", [])
+                    for r in email_child_rows:
+                        guardian_doc_upd.append(
+                            "emails",
+                            {
+                                "email_address": r["email_address"],
+                                "is_primary": r["is_primary"],
+                            },
+                        )
+                    guardian_doc_upd.email = _derive_primary_email_from_rows(email_child_rows)
+
+                guardian_doc_upd.flags.ignore_validate = True
+                guardian_doc_upd.save(ignore_permissions=True)
+
                 success_count += 1
                 logs.append(f"Row {row_number}: Updated guardian '{docname}'")
 

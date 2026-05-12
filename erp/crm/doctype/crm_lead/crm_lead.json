@@ -53,11 +53,8 @@
   "student_health_insurance_card",
   "student_initial_medical_registration",
   "student_health_notes",
-  "student_account_holder_relationship",
-  "student_bank_account_name",
-  "student_bank_account_number",
-  "student_bank_name",
-  "student_bank_branch",
+  "bank_accounts_section",
+  "bank_accounts",
   "registered_address_section",
   "registered_address_province",
   "registered_address_ward",
@@ -101,6 +98,8 @@
   "lead_learning_history",
   "phone_section",
   "phone_numbers",
+  "lead_emails_section",
+  "emails",
   "enrollment_info_section",
   "target_academic_year",
   "target_semester",
@@ -329,29 +328,16 @@
    "label": "Ghi chu suc khoe"
   },
   {
-   "fieldname": "student_account_holder_relationship",
-   "fieldtype": "Data",
-   "label": "Quan he chu tai khoan"
+   "fieldname": "bank_accounts_section",
+   "fieldtype": "Section Break",
+   "label": "Thong tin thanh toan",
+   "collapsible": 1
   },
   {
-   "fieldname": "student_bank_account_name",
-   "fieldtype": "Data",
-   "label": "Ten tai khoan"
-  },
-  {
-   "fieldname": "student_bank_account_number",
-   "fieldtype": "Data",
-   "label": "So tai khoan"
-  },
-  {
-   "fieldname": "student_bank_name",
-   "fieldtype": "Data",
-   "label": "Ngan hang thu huong"
-  },
-  {
-   "fieldname": "student_bank_branch",
-   "fieldtype": "Data",
-   "label": "Chi nhanh"
+   "fieldname": "bank_accounts",
+   "fieldtype": "Table",
+   "label": "Tai khoan ngan hang",
+   "options": "CRM Lead Bank Account"
   },
   {
    "fieldname": "registered_address_section",
@@ -589,6 +575,18 @@
    "label": "Phone Numbers",
    "options": "CRM Lead Phone",
    "reqd": 1
+  },
+  {
+   "fieldname": "lead_emails_section",
+   "fieldtype": "Section Break",
+   "label": "Email lien lac Lead"
+  },
+  {
+   "fieldname": "emails",
+   "fieldtype": "Table",
+   "label": "Emails",
+   "options": "CRM Lead Email",
+   "description": "Nhieu email cho lead / gia dinh — 1 dong primary"
   },
   {
    "fieldname": "enrollment_info_section",

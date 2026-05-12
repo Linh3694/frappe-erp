@@ -41,11 +41,6 @@ _EXPORT_BULK_LEAD_FIELDS = [
     "student_health_insurance_card",
     "student_initial_medical_registration",
     "student_health_notes",
-    "student_account_holder_relationship",
-    "student_bank_account_name",
-    "student_bank_account_number",
-    "student_bank_name",
-    "student_bank_branch",
     "registered_address_province",
     "registered_address_ward",
     "registered_address_street",
@@ -59,6 +54,50 @@ _EXPORT_BULK_LEAD_FIELDS = [
 ]
 
 _BULK_FLOAT_FIELDS = frozenset()
+
+# Cot tai khoan ngan hang TK1 / TK2 (dong bo bulkUpdateStudentColumns.ts)
+_BANK_FIELD_ORDER = (
+    "account_holder_relationship",
+    "bank_account_name",
+    "bank_account_number",
+    "bank_name",
+    "bank_branch",
+)
+
+_BULK_TK_COLUMNS_BY_SLOT = [
+    {
+        "account_holder_relationship": "tk1_quan_he",
+        "bank_account_name": "tk1_ten_tai_khoan",
+        "bank_account_number": "tk1_so_tai_khoan",
+        "bank_name": "tk1_ngan_hang",
+        "bank_branch": "tk1_chi_nhanh",
+    },
+    {
+        "account_holder_relationship": "tk2_quan_he",
+        "bank_account_name": "tk2_ten_tai_khoan",
+        "bank_account_number": "tk2_so_tai_khoan",
+        "bank_name": "tk2_ngan_hang",
+        "bank_branch": "tk2_chi_nhanh",
+    },
+]
+
+_LEGACY_TO_BANK_CHILD = {
+    "student_account_holder_relationship": "account_holder_relationship",
+    "student_bank_account_name": "bank_account_name",
+    "student_bank_account_number": "bank_account_number",
+    "student_bank_name": "bank_name",
+    "student_bank_branch": "bank_branch",
+}
+
+_BULK_LEGACY_BANK_FIELDS = frozenset(_LEGACY_TO_BANK_CHILD.keys())
+
+_EXPORT_BULK_LEAD_FIELDS.extend(
+    col for mp in _BULK_TK_COLUMNS_BY_SLOT for col in mp.values()
+)
+
+_ALL_TK_BANK_COLS = frozenset(
+    col for mp in _BULK_TK_COLUMNS_BY_SLOT for col in mp.values()
+)
 
 
 def _resolve_pic_to_user_name(pic_raw):
@@ -140,11 +179,130 @@ def _set_doc_field_if_changed(doc, field, new_val):
     return True
 
 
+def _bulk_bank_cell_str(raw):
+    """Chuoi cot TK ngan hang — giu leading zero so tai khoan."""
+    if raw is None:
+        return ""
+    return str(raw).strip()
+
+
+def _blank_bank_slot() -> dict[str, str]:
+    return {f: "" for f in _BANK_FIELD_ORDER}
+
+
+def _normalize_bank_accounts_for_compare(doc):
+    """Tuple de so sanh bang con tai khoan."""
+    tup = []
+    for r in (getattr(doc, "bank_accounts", None) or [])[:2]:
+        tup.append(
+            tuple(
+                (_bulk_bank_cell_str(getattr(r, k, None) or "") for k in _BANK_FIELD_ORDER)
+            )
+        )
+    return tup
+
+
+def _extract_bank_accounts_from_import_row(row):
+    """None = bo qua cot ngan hang; list (co the rong) = ghi de child rows."""
+    row = row or {}
+    has_tk = any(col in row for col in _ALL_TK_BANK_COLS)
+    has_legacy = any(lk in row for lk in _BULK_LEGACY_BANK_FIELDS)
+    if not has_tk and not has_legacy:
+        return None
+
+    def tk_slot(slot_idx):
+        cmap = _BULK_TK_COLUMNS_BY_SLOT[slot_idx]
+        if not any(xc in row for xc in cmap.values()):
+            return None
+        out = {}
+        for canon, xc in cmap.items():
+            out[canon] = _bulk_bank_cell_str(row.get(xc)) if xc in row else ""
+        return out
+
+    s0tk = tk_slot(0)
+    s1tk = tk_slot(1)
+
+    merged = []
+
+    slot0 = s0tk
+    if slot0 is None and has_legacy:
+        slot0 = _blank_bank_slot()
+        for leg_col, canon in _LEGACY_TO_BANK_CHILD.items():
+            if leg_col in row:
+                slot0[canon] = _bulk_bank_cell_str(row.get(leg_col))
+
+    if slot0 is not None:
+        merged.append(slot0)
+
+    elif s1tk is not None and not has_legacy:
+        merged.append(_blank_bank_slot())
+
+    if s1tk is not None:
+        merged.append(dict(s1tk))
+
+    out = [{k: (d[k] or "").strip() for k in _BANK_FIELD_ORDER} for d in merged[:2]]
+    # Cat bot dong cuoi rong nhung GIỮ dong dau trong (TK2 có data nhưng TK1 rỗng vẫn hợp lệ).
+    while len(out) > 1 and not any((out[-1][f] or "").strip() for f in _BANK_FIELD_ORDER):
+        out.pop()
+    if not any(any((slot[f] or "").strip() for f in _BANK_FIELD_ORDER) for slot in out):
+        return []
+    return out
+
+
+def _bank_import_matches_doc(doc, new_rows):
+    """Kiem tra bang con tai khoan co khop list import."""
+    cur = _normalize_bank_accounts_for_compare(doc)
+    nxt = []
+    for d in new_rows or []:
+        if not isinstance(d, dict):
+            continue
+        nxt.append(
+            tuple((_bulk_bank_cell_str(d.get(k) or "") for k in _BANK_FIELD_ORDER))
+        )
+    maxlen = max(len(cur), len(nxt))
+    for i in range(maxlen):
+        a = cur[i] if i < len(cur) else tuple("" for _ in _BANK_FIELD_ORDER)
+        b = nxt[i] if i < len(nxt) else tuple("" for _ in _BANK_FIELD_ORDER)
+        if a != b:
+            return False
+    return True
+
+
+def _apply_bulk_bank_accounts_from_row(doc, row):
+    extracted = _extract_bank_accounts_from_import_row(row)
+    if extracted is None:
+        return False
+    if _bank_import_matches_doc(doc, extracted):
+        return False
+    doc.set("bank_accounts", [])
+    for slot in extracted[:2]:
+        doc.append("bank_accounts", {k: slot.get(k, "") for k in _BANK_FIELD_ORDER})
+    return True
+
+
+def _spread_bank_accounts_into_export_row(lead_dict):
+    pname = lead_dict.get("name")
+    if not pname:
+        return
+    rows_child = frappe.get_all(
+        "CRM Lead Bank Account",
+        filters={"parent": pname},
+        fields=list(_BANK_FIELD_ORDER),
+        order_by="idx asc",
+        limit_page_length=2,
+    )
+    for slot_idx, cmap in enumerate(_BULK_TK_COLUMNS_BY_SLOT):
+        ba = rows_child[slot_idx] if slot_idx < len(rows_child) else {}
+        for canon_field, xl_col in cmap.items():
+            v = ba.get(canon_field) if isinstance(ba, dict) else ""
+            lead_dict[xl_col] = _bulk_bank_cell_str(v)
+
+
 def _apply_bulk_student_section_fields(doc, row):
     """Doc row dict: chi cap nhat neu key co trong row."""
     changed = False
-    for field in _EXPORT_BULK_LEAD_FIELDS:
-        if field in (
+    skip_named = frozenset(
+        {
             "name",
             "crm_code",
             "step",
@@ -152,13 +310,18 @@ def _apply_bulk_student_section_fields(doc, row):
             "pic",
             "reject_reason",
             "reject_detail",
-        ):
+        }
+    )
+    for field in _EXPORT_BULK_LEAD_FIELDS:
+        if field in skip_named or field in _ALL_TK_BANK_COLS or field in _BULK_LEGACY_BANK_FIELDS:
             continue
         if field not in row:
             continue
         new_val = _parse_bulk_cell(field, row.get(field))
         if _set_doc_field_if_changed(doc, field, new_val):
             changed = True
+    if _apply_bulk_bank_accounts_from_row(doc, row):
+        changed = True
     return changed
 
 
@@ -339,6 +502,9 @@ def export_step_leads_for_update():
             if em:
                 lead["pic"] = em
             # neu khong co email, giu name (hien thi dang nhap Frappe)
+
+    for lead in leads:
+        _spread_bank_accounts_into_export_row(lead)
 
     all_step_statuses = {s: STEP_STATUSES.get(s, []) for s in CRM_STEPS}
 

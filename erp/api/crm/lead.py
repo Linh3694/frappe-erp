@@ -2,6 +2,7 @@
 CRM Lead API - CRUD Ho So Tuyen Sinh
 """
 
+import re
 import frappe
 from frappe import _
 from erp.utils.api_response import (
@@ -598,8 +599,6 @@ def update_lead():
             "student_place_of_birth", "student_nationality", "student_ethnicity", "student_religion",
             "student_health_insurance_card", "student_initial_medical_registration",
             "student_health_notes",
-            "student_account_holder_relationship", "student_bank_account_name",
-            "student_bank_account_number", "student_bank_name", "student_bank_branch",
             "registered_address_province", "registered_address_ward", "registered_address_street",
             "registered_address_detail",
             "current_address_province", "current_address_ward", "current_address_street",
@@ -617,7 +616,27 @@ def update_lead():
         for field in updatable_fields:
             if field in data:
                 doc.set(field, data[field])
-        
+
+        # Cap nhat bang con tai khoan ngan hang (toi da 2 dong)
+        if "bank_accounts" in data:
+            rows = (data.get("bank_accounts") or [])[:2]
+            doc.set("bank_accounts", [])
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                doc.append(
+                    "bank_accounts",
+                    {
+                        "account_holder_relationship": (
+                            str(r.get("account_holder_relationship") or "").strip()
+                        ),
+                        "bank_account_name": (str(r.get("bank_account_name") or "").strip()),
+                        "bank_account_number": (str(r.get("bank_account_number") or "").strip()),
+                        "bank_name": (str(r.get("bank_name") or "").strip()),
+                        "bank_branch": (str(r.get("bank_branch") or "").strip()),
+                    },
+                )
+
         # Cap nhat phone numbers
         if "phone_numbers" in data:
             doc.set("phone_numbers", [])
@@ -767,6 +786,22 @@ def get_lead_summary():
 
 # === Lead Family / Guardian APIs ===
 
+def _guardian_linked_to_lead(doc, guardian_name):
+    """Kiem tra CRM Guardian co lien ket voi lead (lead_guardians hoac CRM Family Relationship)."""
+    # doc: CRM Lead document
+    for lg in getattr(doc, "lead_guardians", None) or []:
+        if (getattr(lg, "guardian", None) or lg.get("guardian")) == guardian_name:
+            return True
+    if getattr(doc, "linked_family", None):
+        cnt = frappe.db.count(
+            "CRM Family Relationship",
+            {"parent": doc.linked_family, "guardian": guardian_name},
+        )
+        if cnt:
+            return True
+    return False
+
+
 def _get_guardian_phones(guardian_doc):
     """Lay danh sach so dien thoai tu CRM Guardian. Ưu tiên phone_numbers, fallback phone_number."""
     g = guardian_doc
@@ -775,17 +810,48 @@ def _get_guardian_phones(guardian_doc):
     phone_rows = getattr(g, "phone_numbers", None) or []
     if phone_rows:
         for row in phone_rows:
-            pn = row.get("phone_number") or ""
+            pn = getattr(row, "phone_number", None)
+            prim = getattr(row, "is_primary", 0)
+            rn = getattr(row, "name", None)
+            if isinstance(row, dict):
+                pn = row.get("phone_number", pn) or ""
+                prim = row.get("is_primary", prim)
+                rn = row.get("name", rn)
+            else:
+                pn = pn or ""
             if pn:
                 phones.append({
                     "phone_number": pn,
-                    "is_primary": 1 if row.get("is_primary") else 0,
-                    "name": row.get("name"),
+                    "is_primary": 1 if prim else 0,
+                    "name": rn,
                 })
     # Fallback: phone_number cu (1 so, mac dinh la chinh)
     if not phones and getattr(g, "phone_number", None):
         phones.append({"phone_number": g.phone_number, "is_primary": 1})
     return phones
+
+
+def _get_guardian_emails(guardian_doc):
+    """Lay danh sach email tu CRM Guardian. Uu tien child emails, fallback field email."""
+    g = guardian_doc
+    emails = []
+    rows = getattr(g, "emails", None) or []
+    if rows:
+        for row in rows:
+            ea = getattr(row, "email_address", None) or row.get("email_address") or ""
+            if ea:
+                emails.append({
+                    "email_address": ea,
+                    "is_primary": 1 if getattr(row, "is_primary", None) or row.get("is_primary") else 0,
+                    "name": getattr(row, "name", None) or row.get("name"),
+                })
+    if not emails and getattr(g, "email", None):
+        emails.append({
+            "email_address": g.email,
+            "is_primary": 1,
+            "name": None,
+        })
+    return emails
 
 
 def _guardian_to_member_dict(
@@ -794,6 +860,7 @@ def _guardian_to_member_dict(
     """Chuyen CRM Guardian doc thanh dict cho LeadFamilyMember."""
     g = guardian_doc
     phones = _get_guardian_phones(g)
+    emails_list = _get_guardian_emails(g)
     return {
         "guardian": {
             "name": g.name,
@@ -814,6 +881,7 @@ def _guardian_to_member_dict(
         "is_primary_contact": bool(is_primary_contact),
         "display_order": int(display_order) if display_order is not None else 0,
         "phones": phones,
+        "emails": emails_list,
     }
 
 
@@ -907,6 +975,7 @@ def build_lead_family_payload(doc):
             if not g_doc:
                 continue
             phones = _get_guardian_phones(g_doc)
+            emails_m = _get_guardian_emails(g_doc)
             members.append({
                 "guardian": {
                     "name": g_doc.name,
@@ -927,6 +996,7 @@ def build_lead_family_payload(doc):
                 "is_primary_contact": bool(r.get("key_person")),
                 "display_order": int(r.get("display_order") or 0),
                 "phones": phones,
+                "emails": emails_m,
             })
 
     # Che do A: lead_guardians child table (chua co linked_family)
@@ -962,7 +1032,21 @@ def build_lead_family_payload(doc):
                 phones.append({
                     "phone_number": p.get("phone_number", ""),
                     "is_primary": p.get("is_primary", 0),
+                    "name": p.get("name"),
                 })
+            emails_flat = []
+            for er in getattr(doc, "emails", None) or []:
+                ea = getattr(er, "email_address", None) or ""
+                prim = getattr(er, "is_primary", 0)
+                rn = getattr(er, "name", None)
+                if ea:
+                    emails_flat.append({
+                        "email_address": ea,
+                        "is_primary": 1 if prim else 0,
+                        "name": rn,
+                    })
+            if not emails_flat and doc.guardian_email:
+                emails_flat.append({"email_address": doc.guardian_email, "is_primary": 1, "name": None})
             members.append({
                 "guardian": {
                     "name": None,
@@ -983,6 +1067,7 @@ def build_lead_family_payload(doc):
                 "is_primary_contact": True,
                 "display_order": 0,
                 "phones": phones,
+                "emails": emails_flat,
             })
 
     return {
@@ -1216,48 +1301,84 @@ def update_lead_guardian():
     if "guardian_email" in updates and "email" not in updates:
         updates["email"] = updates.get("guardian_email")
 
-    # Cap nhat CRM Guardian truc tiep
+    # Cap nhat CRM Guardian truc tiep — phones / emails uu tien dung helpers giong guardian.py
+    from erp.api.erp_sis.guardian import (
+        _build_phone_child_rows_from_payload,
+        _build_email_child_rows_from_payload,
+        _guardian_phone_used_elsewhere_message,
+        _derive_primary_phone_from_rows,
+        _derive_primary_email_from_rows,
+    )
+
     guardian_fields = (
         "guardian_name", "phone_number", "email", "id_number", "occupation",
-        "position", "workplace", "address", "nationality", "note", "dob"
+        "position", "workplace", "address", "nationality", "note", "dob",
     )
     g_doc = frappe.get_doc("CRM Guardian", guardian_name)
-    # Email: khong gan qua doc trong vong lap — save() cua fieldtype Email co the khong ghi DB
-    email_from_request = str(updates.get("email") or "").strip() if "email" in updates else None
+
+    handled_phones_bulk = False
+    if "phone_numbers" in updates:
+        handled_phones_bulk = True
+        if updates.get("phone_numbers") == []:
+            phone_child_rows = []
+        else:
+            phone_child_rows, perr = _build_phone_child_rows_from_payload(
+                dict(updates),
+                getattr(g_doc, "phone_number", "") or "",
+            )
+            if perr:
+                return validation_error_response(
+                    str(perr), {"phone_numbers": [str(perr)]},
+                )
+        for r in phone_child_rows:
+            clash = _guardian_phone_used_elsewhere_message(r["phone_number"], guardian_name)
+            if clash:
+                return validation_error_response(clash, {"phone_numbers": [clash]})
+        g_doc.set("phone_numbers", [])
+        for r in phone_child_rows:
+            g_doc.append(
+                "phone_numbers",
+                {"phone_number": r["phone_number"], "is_primary": r["is_primary"]},
+            )
+        g_doc.phone_number = _derive_primary_phone_from_rows(phone_child_rows)
+
+    email_handled = False
+    if "emails" in updates:
+        email_handled = True
+        if updates.get("emails") == []:
+            email_child_rows = []
+        else:
+            email_child_rows, eerr = _build_email_child_rows_from_payload(
+                dict(updates),
+                getattr(g_doc, "email", "") or "",
+            )
+            if eerr:
+                return validation_error_response(
+                    str(eerr), {"emails": [str(eerr)]},
+                )
+        g_doc.set("emails", [])
+        for r in email_child_rows:
+            g_doc.append(
+                "emails",
+                {"email_address": r["email_address"], "is_primary": r["is_primary"]},
+            )
+        g_doc.email = _derive_primary_email_from_rows(email_child_rows)
+
+    # Email don le: chi khi FE khong gui mang emails (tranh overwrite sau khi gan bang child)
+    email_from_request = None
+    if not email_handled and "email" in updates:
+        email_from_request = str(updates.get("email") or "").strip()
+
     for k in guardian_fields:
         if k not in updates or k == "email":
             continue
+        if handled_phones_bulk and k == "phone_number":
+            continue
         g_doc.set(k, updates[k])
-    # Cap nhat phone_numbers neu co (danh sach {phone_number, is_primary})
-    if "phone_numbers" in updates:
-        phone_list = updates.get("phone_numbers") or []
-        if isinstance(phone_list, list):
-            from erp.api.erp_sis.guardian import validate_vietnamese_phone_number
-            g_doc.set("phone_numbers", [])
-            has_primary = False
-            for p in phone_list:
-                pn = (p.get("phone_number") or p.get("phone") or "").strip()
-                if not pn:
-                    continue
-                try:
-                    pn = validate_vietnamese_phone_number(pn)
-                except ValueError:
-                    continue
-                is_prim = 1 if p.get("is_primary") else 0
-                if is_prim:
-                    has_primary = True
-                g_doc.append("phone_numbers", {"phone_number": pn, "is_primary": is_prim})
-            # Dam bao co dung 1 so chinh
-            if g_doc.phone_numbers:
-                if not has_primary:
-                    g_doc.phone_numbers[0].is_primary = 1
-                elif sum(1 for r in g_doc.phone_numbers if r.get("is_primary")) > 1:
-                    for i, r in enumerate(g_doc.phone_numbers):
-                        r.is_primary = 1 if i == 0 else 0
     g_doc.flags.ignore_validate = True
     g_doc.save(ignore_permissions=True)
 
-    # Ghi email bang DB (tranh fieldtype Email bi bo qua / reset sau save)
+    # Ghi email bang DB chi khi chi cap nhat field phang (tranh doi vs child)
     if email_from_request is not None:
         frappe.db.set_value("CRM Guardian", guardian_name, "email", email_from_request)
 
@@ -1863,3 +1984,262 @@ def set_guardian_primary_phone():
     g_doc.save(ignore_permissions=True)
     frappe.db.commit()
     return single_item_response({"guardian": guardian_name}, "Da dat so lien lac chinh")
+
+
+# === Guardian Email APIs (nhieu email/guardian, cho phép trùng giữa guardian khác; dedupe trong 1 guardian) ===
+
+_EMAIL_GUARDIAN_ROW_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
+
+def _crm_guardian_try_add_email(guardian_name, email_address):
+    """Them dong email guardian. Tra ve (loi_http_dict, None) hoac (None, payload_body)."""
+    email_address = (email_address or "").strip()
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]}), None
+    if not frappe.db.exists("CRM Guardian", guardian_name):
+        return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}"), None
+    if not email_address:
+        return validation_error_response("Thieu email", {"email_address": ["Bat buoc"]}), None
+    if not _EMAIL_GUARDIAN_ROW_RE.match(email_address):
+        return validation_error_response(
+            "Email khong hop le", {"email_address": ["Sai dinh dang"]},
+        ), None
+
+    g_doc = frappe.get_doc("CRM Guardian", guardian_name)
+    existing = getattr(g_doc, "emails", None) or []
+    if not existing and getattr(g_doc, "email", None):
+        g_doc.append("emails", {"email_address": g_doc.email, "is_primary": 1})
+        g_doc.flags.ignore_validate = True
+        g_doc.save(ignore_permissions=True)
+        g_doc.reload()
+        existing = getattr(g_doc, "emails", None) or []
+
+    low = email_address.lower()
+    for row in existing:
+        addr = getattr(row, "email_address", None) or row.get("email_address")
+        if str(addr or "").strip().lower() == low:
+            return validation_error_response(
+                "Email da ton tai trong ho so guardian nay",
+                {"email_address": ["Trung"]},
+            ), None
+
+    is_first = len(existing) == 0
+    g_doc.append(
+        "emails",
+        {"email_address": email_address, "is_primary": 1 if is_first else 0},
+    )
+    if is_first:
+        g_doc.email = email_address
+    g_doc.flags.ignore_validate = True
+    g_doc.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    new_rows = getattr(g_doc, "emails", None) or []
+    added = None
+    for r in new_rows:
+        adr = getattr(r, "email_address", None) or r.get("email_address")
+        if str(adr or "").lower() == low:
+            added = r
+            break
+    pname = getattr(added, "name", None) if added else None
+    payload = {
+        "guardian": guardian_name,
+        "email": {
+            "email_address": email_address,
+            "is_primary": 1 if is_first else 0,
+            "name": pname,
+        },
+    }
+    return None, payload
+
+
+def _crm_guardian_try_remove_email(guardian_name, email_row_name):
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]}), None
+    if not frappe.db.exists("CRM Guardian", guardian_name):
+        return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}"), None
+    if not email_row_name:
+        return validation_error_response(
+            "Thieu email_row_name (name dong child)",
+            {"email_row_name": ["Bat buoc"]},
+        ), None
+
+    g_doc = frappe.get_doc("CRM Guardian", guardian_name)
+    rows = list(getattr(g_doc, "emails", None) or [])
+    idx = next(
+        (i for i, r in enumerate(rows) if (getattr(r, "name", None) or r.get("name")) == email_row_name),
+        None,
+    )
+    if idx is None:
+        return not_found_response(f"Khong tim thay email {email_row_name}"), None
+
+    was_primary = getattr(rows[idx], "is_primary", None) or rows[idx].get("is_primary")
+    g_doc.remove(rows[idx])
+    if was_primary and g_doc.emails:
+        g_doc.emails[0].is_primary = 1
+        g_doc.email = (
+            getattr(g_doc.emails[0], "email_address", None)
+            or g_doc.emails[0].get("email_address")
+            or ""
+        )
+    elif not g_doc.emails:
+        g_doc.email = ""
+    g_doc.flags.ignore_validate = True
+    g_doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return None, {}
+
+
+def _crm_guardian_try_set_primary_email(guardian_name, email_row_name):
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]}), None
+    if not frappe.db.exists("CRM Guardian", guardian_name):
+        return not_found_response(f"Khong tim thay CRM Guardian {guardian_name}"), None
+    if not email_row_name:
+        return validation_error_response(
+            "Thieu email_row_name",
+            {"email_row_name": ["Bat buoc"]},
+        ), None
+
+    g_doc = frappe.get_doc("CRM Guardian", guardian_name)
+    rows = getattr(g_doc, "emails", None) or []
+    found = any(
+        (getattr(r, "name", None) or r.get("name")) == email_row_name for r in rows
+    )
+    if not found:
+        return not_found_response("Khong tim thay dong email"), None
+
+    for r in rows:
+        rn = getattr(r, "name", None) or r.get("name")
+        r.is_primary = 1 if rn == email_row_name else 0
+
+    prim = None
+    for r in rows:
+        rn = getattr(r, "name", None) or r.get("name")
+        if rn == email_row_name:
+            prim = r
+            break
+    if prim:
+        adr = getattr(prim, "email_address", None) or prim.get("email_address")
+        g_doc.email = adr or ""
+    g_doc.flags.ignore_validate = True
+    g_doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return None, {"guardian": guardian_name}
+
+
+@frappe.whitelist(methods=["POST"])
+def add_guardian_email():
+    """Them email cho Guardian; neu la dong dau thi lam email chinh. Khong chan trung voi guardian khac."""
+    check_crm_permission()
+    data = get_request_data()
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    email_address = (data.get("email_address") or data.get("email") or "").strip()
+    err, payload = _crm_guardian_try_add_email(guardian_name, email_address)
+    if err:
+        return err
+    return single_item_response(payload, "Da them email")
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_guardian_email():
+    """Xoa email khoi Guardian; dong con lai hoac dong dau tien thanh primary."""
+    check_crm_permission()
+    data = get_request_data()
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    email_row_name = data.get("email_row_name") or data.get("email_name") or data.get("name")
+    err, _pl = _crm_guardian_try_remove_email(guardian_name, email_row_name)
+    if err:
+        return err
+    return success_response(message="Da xoa email")
+
+
+@frappe.whitelist(methods=["POST"])
+def set_guardian_primary_email():
+    """Dat primary email trong CRM Guardian."""
+    check_crm_permission()
+    data = get_request_data()
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    email_row_name = data.get("email_row_name") or data.get("email_name") or data.get("name")
+    err, payload = _crm_guardian_try_set_primary_email(guardian_name, email_row_name)
+    if err:
+        return err
+    return single_item_response(payload, "Da dat email lien lac chinh")
+
+
+@frappe.whitelist(methods=["POST"])
+def add_lead_guardian_email():
+    """Giong add_guardian_email nhung bat buoc CRM Lead va guardian phai gan voi lead."""
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    email_address = (data.get("email_address") or data.get("email") or "").strip()
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]})
+    ld = frappe.get_doc("CRM Lead", name)
+    if not _guardian_linked_to_lead(ld, guardian_name):
+        return validation_error_response(
+            "Guardian khong thuoc lead nay", {"guardian": ["Khong lien ket"]}
+        )
+
+    err, payload = _crm_guardian_try_add_email(guardian_name, email_address)
+    if err:
+        return err
+    return single_item_response(payload, "Da them email")
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_lead_guardian_email():
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    email_row_name = data.get("email_row_name") or data.get("email_name") or data.get("name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]})
+
+    ld = frappe.get_doc("CRM Lead", name)
+    if not _guardian_linked_to_lead(ld, guardian_name):
+        return validation_error_response(
+            "Guardian khong thuoc lead nay", {"guardian": ["Khong lien ket"]}
+        )
+
+    err, _pl = _crm_guardian_try_remove_email(guardian_name, email_row_name)
+    if err:
+        return err
+    return success_response(message="Da xoa email")
+
+
+@frappe.whitelist(methods=["POST"])
+def set_primary_lead_guardian_email():
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    email_row_name = data.get("email_row_name") or data.get("email_name") or data.get("name")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+    if not guardian_name:
+        return validation_error_response("Thieu guardian_name", {"guardian_name": ["Bat buoc"]})
+
+    ld = frappe.get_doc("CRM Lead", name)
+    if not _guardian_linked_to_lead(ld, guardian_name):
+        return validation_error_response(
+            "Guardian khong thuoc lead nay", {"guardian": ["Khong lien ket"]}
+        )
+
+    err, payload = _crm_guardian_try_set_primary_email(guardian_name, email_row_name)
+    if err:
+        return err
+    return single_item_response(payload, "Da dat email lien lac chinh")

@@ -10,6 +10,23 @@ import requests
 import json
 from datetime import datetime, timedelta
 
+from erp.api.erp_sis.guardian import (
+    _serialize_guardian_phones_standalone,
+    _serialize_guardian_emails_standalone,
+)
+
+
+def _parent_portal_serialize_guardian_contacts(guardian_doc):
+    """Multi SĐT + email đọc-only cho Parent Portal."""
+    return {
+        "phone_numbers": _serialize_guardian_phones_standalone(
+            getattr(guardian_doc, "phone_numbers", None) or []
+        ),
+        "emails": _serialize_guardian_emails_standalone(
+            getattr(guardian_doc, "emails", None) or []
+        ),
+    }
+
 
 # VIVAS SMS Configuration
 VIVAS_SMS_CONFIG = {
@@ -590,6 +607,10 @@ def verify_otp_and_login(phone_number, otp):
         # Lấy first_login_at từ guardian document
         first_login_at = frappe.db.get_value("CRM Guardian", guardian["name"], "first_login_at")
 
+        guardian_contacts = _parent_portal_serialize_guardian_contacts(
+            frappe.get_doc("CRM Guardian", guardian["name"])
+        )
+
         # Return success response
         return {
             "success": True,
@@ -602,7 +623,8 @@ def verify_otp_and_login(phone_number, otp):
                     "phone_number": guardian["phone_number"],
                     "email": guardian.get("email", ""),
                     "guardian_image": guardian.get("guardian_image", ""),
-                    "first_login_at": str(first_login_at) if first_login_at else None
+                    "first_login_at": str(first_login_at) if first_login_at else None,
+                    **guardian_contacts,
                 },
                 "user": {
                     "email": user_email,
@@ -708,6 +730,10 @@ def phone_login(phone_number):
         comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
         first_login_at = frappe.db.get_value("CRM Guardian", guardian["name"], "first_login_at")
 
+        guardian_contacts = _parent_portal_serialize_guardian_contacts(
+            frappe.get_doc("CRM Guardian", guardian["name"])
+        )
+
         return {
             "success": True,
             "message": "Đăng nhập thành công",
@@ -719,7 +745,8 @@ def phone_login(phone_number):
                     "phone_number": guardian["phone_number"],
                     "email": guardian.get("email", ""),
                     "guardian_image": guardian.get("guardian_image", ""),
-                    "first_login_at": str(first_login_at) if first_login_at else None
+                    "first_login_at": str(first_login_at) if first_login_at else None,
+                    **guardian_contacts,
                 },
                 "user": {
                     "email": user_email,
@@ -791,10 +818,16 @@ def get_guardian_info():
         if guardian.get("first_login_at"):
             guardian["first_login_at"] = str(guardian["first_login_at"])
 
+        g_extra = _parent_portal_serialize_guardian_contacts(
+            frappe.get_doc("CRM Guardian", guardian["name"])
+        )
+        guardian_out = dict(guardian)
+        guardian_out.update(g_extra)
+
         return {
             "success": True,
             "data": {
-                "guardian": guardian,
+                "guardian": guardian_out,
                 "user": {
                     "email": user_email,
                     "full_name": guardian["guardian_name"]
@@ -905,6 +938,7 @@ def get_guardian_comprehensive_data(guardian_name):
                 "email": guardian.email,
                 "guardian_image": getattr(guardian, "guardian_image", None),
                 "first_login_at": str(guardian.first_login_at) if guardian.first_login_at else None,
+                **_parent_portal_serialize_guardian_contacts(guardian),
             },
             "families": [],  # Array of families - supports multiple families
             "students": [],  # Flat list of all students across all families
@@ -1171,8 +1205,11 @@ def get_guardian_comprehensive_data(guardian_name):
                                 "workplace": getattr(other_guardian, "workplace", None),
                                 "address": getattr(other_guardian, "address", None),
                                 "nationality": getattr(other_guardian, "nationality", None),
-                                "dob": str(other_guardian.dob) if getattr(other_guardian, "dob", None) else None,
-                                "guardian_image": getattr(other_guardian, "guardian_image", None)
+                                "dob": str(other_guardian.dob)
+                                if getattr(other_guardian, "dob", None)
+                                else None,
+                                "guardian_image": getattr(other_guardian, "guardian_image", None),
+                                **_parent_portal_serialize_guardian_contacts(other_guardian),
                             }
                             logs.append(f"✅ Retrieved related guardian: {other_guardian.guardian_name}")
                         except Exception as e:
