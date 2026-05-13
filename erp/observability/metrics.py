@@ -13,6 +13,9 @@ _RE_UUID = re.compile(
 	r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}"
 )
 _RE_LONG_NUM_SEGMENT = re.compile(r"/\d{3,}")
+# Ký tự gây lỗi khi Grafana ghép biến multi-value vào `path_group=~"a|b"` (PromQL hầu như
+# chỉ cho \\ \" \n \t trong string), và làm hỏng regex nếu để nguyên (. ^ $ | ? * + ( ) [ ] { } \).
+_RE_PATH_GROUP_LABEL_SAFE = re.compile(r"[\^$.|?*+()\[\]{}\\]")
 
 _DEFAULT_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 
@@ -49,6 +52,8 @@ def normalize_path(path: str) -> str:
 		return "unknown"
 	p = _RE_LONG_NUM_SEGMENT.sub("/{num}", path)
 	p = _RE_UUID.sub("{uuid}", p)
+	# Dùng làm label + matcher `=~` trong Grafana/PromQL (không dùng :regex — tránh \/ invalid).
+	p = _RE_PATH_GROUP_LABEL_SAFE.sub("_", p)
 	if len(p) > 200:
 		return p[:200]
 	return p
