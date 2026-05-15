@@ -2861,8 +2861,14 @@ def remove_room_class():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_available_classes_for_room(room_id: str = None, school_year_id: str = None):
-    """Get classes that can be assigned to a room (not already assigned to other rooms)"""
+def get_available_classes_for_room(room_id: str = None, school_year_id: str = None, for_usage: str = None):
+    """Danh sách lớp có thể gán phòng.
+
+    for_usage (optional, query/body):
+      - homeroom: toàn bộ lớp class_type=regular trong campus+năm (đủ để tìm/chọn; add_room_class vẫn validate).
+      - functional: chỉ class_type=mixed, kèm luật gán phòng như trước.
+      - bỏ trống: giữ hành vi cũ (mọi class_type, lọc availability như bản gốc).
+    """
     try:
         if not room_id:
             form = frappe.local.form_dict or {}
@@ -2906,12 +2912,61 @@ def get_available_classes_for_room(room_id: str = None, school_year_id: str = No
                 {"school_year_id": ["required"]},
             )
 
+        # for_usage: homeroom | functional (optional)
+        if not for_usage:
+            form = frappe.local.form_dict or {}
+            for_usage = form.get("for_usage")
+        if not for_usage and frappe.request and getattr(frappe.request, "args", None):
+            for_usage = frappe.request.args.get("for_usage")
+        if not for_usage and frappe.request and frappe.request.data:
+            try:
+                body = frappe.request.data.decode("utf-8") if isinstance(frappe.request.data, bytes) else frappe.request.data
+                data = json.loads(body or "{}")
+                for_usage = data.get("for_usage")
+            except Exception:
+                pass
+        if for_usage:
+            for_usage = str(for_usage).strip().lower()
+        if for_usage not in (None, "", "homeroom", "functional"):
+            for_usage = None
+
         # Get current campus
         campus_id = get_current_campus_from_context()
 
         filters = {"campus_id": campus_id or "campus-1", "school_year_id": school_year_id}
 
-        # Get all classes for this campus/year
+        # Chế độ lớp chủ nhiệm: đủ mọi lớp regular trong năm/campus (không lọc theo room)
+        if for_usage == "homeroom":
+            filters["class_type"] = "regular"
+            classes_homeroom = frappe.get_all(
+                "SIS Class",
+                fields=[
+                    "name",
+                    "title",
+                    "short_title",
+                    "class_type",
+                    "room",
+                    "education_grade",
+                ],
+                filters=filters,
+                order_by="title asc",
+            )
+            available_classes = []
+            for class_data in classes_homeroom:
+                row = class_data.copy()
+                row["suggested_usage"] = "homeroom"
+                row["suggested_usage_display"] = _("Lớp chủ nhiệm")
+                available_classes.append(row)
+            return success_response(
+                data=available_classes,
+                message="Available classes fetched successfully",
+            )
+
+        if for_usage == "functional":
+            # Lớp chức năng: chỉ mixed
+            filters["class_type"] = "mixed"
+
+        # Get all classes for this campus/year (và mixed nếu for_usage=functional)
         classes = frappe.get_all(
             "SIS Class",
             fields=[
