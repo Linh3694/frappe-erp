@@ -6,6 +6,18 @@ from frappe.model.document import Document
 
 
 class CRMLead(Document):
+    def after_insert(self):
+        """Dong bo Student neu Lead moi duoc tao kem linked_student (hiem)."""
+        from erp.api.crm.lead_student_sync import sync_linked_crm_student_from_lead
+
+        sync_linked_crm_student_from_lead(self)
+
+    def on_update(self):
+        """Moi lan cap nhat Lead: day ho so hoc sinh sang CRM Student da lien ket."""
+        from erp.api.crm.lead_student_sync import sync_linked_crm_student_from_lead
+
+        sync_linked_crm_student_from_lead(self)
+
     def before_save(self):
         """Bootstrap emails child tu guardian_email phang neu chua co dong nao."""
         rows = getattr(self, 'emails', None) or []
