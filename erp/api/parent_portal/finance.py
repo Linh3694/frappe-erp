@@ -8,7 +8,7 @@ API endpoints cho phụ huynh xem khoản phí của học sinh.
 import re
 import frappe
 from frappe import _
-from frappe.utils import nowdate, getdate
+from frappe.utils import nowdate, getdate, flt
 from erp.utils.api_response import (
     error_response, 
     success_response, 
@@ -134,26 +134,46 @@ def _has_sent_fee_notification_for_order_student(order_student_name):
     )
 
 
+def _portal_keep_superseded_order_student_row(item):
+    """
+    Nghiệp vụ đơn kế thừa (superseded): HS chưa đóng trên đơn gốc xử lý qua đơn thay thế;
+    HS đã có thanh toán hoặc đã đóng đủ trên đơn gốc vẫn cần thấy minh chứng trên Parent Portal
+    (sau khi đã có TB phí sent — điều kiện EXISTS ở tầng SQL).
+
+    Giữ dòng thuộc đơn superseded khi: bypass_supersession, hoặc đã có paid_amount > 0 (partial),
+    hoặc payment_status là paid/refunded (tránh lệch legacy).
+    """
+    if int(item.get("bypass_supersession") or 0):
+        return True
+    if flt(item.get("paid_amount")) > 0:
+        return True
+    status = (item.get("payment_status") or "").strip()
+    if status in ("paid", "refunded"):
+        return True
+    return False
+
+
 def _filter_orders_for_parent_portal(order_items):
     """
     Lọc danh sách order items cho hiển thị trên Parent Portal.
-    
-    - Loại mọi dòng thuộc đơn đã bị thay thế (is_superseded), kể cả phí dịch vụ.
-    Tuition orders là các mốc giá thay thế nhau - PHHS chỉ đóng 1 order tuition.
-    - Loại bỏ order tuition có tuition_paid_elsewhere = 1 (đã đóng ở order khác) — dữ liệu legacy
-    - Nếu còn nhiều order tuition chưa đóng, chỉ giữ order mới nhất
-    
-    Non-tuition orders (service, activity, other) cộng dồn bình thường (sau khi đã bỏ đơn superseded).
+
+    - Đơn đã bị thay thế (is_superseded): chỉ ẩn dòng HS chưa có giao dịch (unpaid thuần);
+      HS đã đóng một phần/đủ hoặc có cờ bypass vẫn hiển thị — khớp nghiệp vụ đơn kế thừa.
+    - Tuition orders là các mốc giá thay thế nhau — PHHS chỉ đóng 1 order tuition (dedup phía dưới).
+    - Loại order tuition có tuition_paid_elsewhere = 1 (đã đóng ở order khác) — legacy.
+    - Nếu còn nhiều order tuition chưa đóng, chỉ giữ order mới nhất.
+
+    Non-tuition (service, activity, other) cộng dồn sau bước lọc superseded.
     """
     if not order_items:
         return order_items
 
-    # Đơn superseded: ẩn, trừ khi học sinh có cờ bypass trên Order Student
+    # Đơn superseded: ẩn dòng unpaid thuần; giữ bypass / đã thu / partial — xem _portal_keep_superseded_order_student_row
     order_items = [
         i
         for i in order_items
         if (not int(i.get("is_superseded") or 0))
-        or int(i.get("bypass_supersession") or 0)
+        or _portal_keep_superseded_order_student_row(i)
     ]
 
     non_tuition = [i for i in order_items if i.get('order_type') != 'tuition']
@@ -193,6 +213,7 @@ def _calculate_student_finance_totals(finance_student_id):
             fos.total_amount,
             fos.paid_amount,
             fos.outstanding_amount,
+            fos.payment_status,
             fo.order_type,
             IFNULL(fos.tuition_paid_elsewhere, 0) as tuition_paid_elsewhere,
             IFNULL(fo.is_superseded, 0) as is_superseded,
