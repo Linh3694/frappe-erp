@@ -17,6 +17,32 @@ from erp.utils.api_response import (
 from .utils import _check_admin_permission
 
 
+def _waterfill_excel_paid_into_semesters(order_student_doc):
+    """
+    Import Excel (một cột paid_amount): đối với đóng theo kỳ, lưu tách semester_1_paid / semester_2_paid
+    theo thứ tự kỳ để đồng bộ báo cáo và modal cập nhật — tránh chỉ có paid_amount tổng.
+    """
+    from frappe.utils import flt
+
+    if order_student_doc.payment_scheme_choice != "semester":
+        return
+    total_paid = flt(order_student_doc.paid_amount or 0)
+    if total_paid <= 0:
+        return
+    s1_req = flt(order_student_doc.semester_1_amount or 0)
+    s2_req = flt(order_student_doc.semester_2_amount or 0)
+    if s1_req <= 0 and s2_req <= 0:
+        return
+    cap = s1_req + s2_req
+    to_apply = min(total_paid, cap)
+    rem = to_apply
+    p1 = min(rem, s1_req) if s1_req > 0 else 0.0
+    rem -= p1
+    p2 = min(rem, s2_req) if s2_req > 0 else 0.0
+    order_student_doc.semester_1_paid = p1
+    order_student_doc.semester_2_paid = p2
+
+
 def _calculate_totals_v2(order_student_doc, order_doc, debug=False):
     """
     Tính toán các dòng total/subtotal dựa trên formula.
@@ -372,7 +398,9 @@ def import_simple_amounts():
                 # Cập nhật note
                 if 'note' in row and pd.notna(row['note']):
                     order_student_doc.notes = str(row['note'])
-                
+
+                _waterfill_excel_paid_into_semesters(order_student_doc)
+
                 order_student_doc.save(ignore_permissions=True)
                 success_count += 1
                 
