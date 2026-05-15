@@ -102,6 +102,38 @@ def _get_parent_students(parent_id):
     return student_ids
 
 
+# Chỉ hiện Order Student trên Parent Portal sau khi đã gửi thông báo phí (đồng bộ SQL bên dưới)
+_SQL_ORDER_STUDENT_HAS_SENT_FEE_ANNOUNCEMENT = """
+    AND EXISTS (
+        SELECT 1 FROM `tabSIS Announcement` sa
+        WHERE sa.order_student_id = fos.name
+          AND sa.announcement_type = 'fee_notification'
+          AND sa.`status` = 'sent'
+    )
+"""
+
+
+def _has_sent_fee_notification_for_order_student(order_student_name):
+    """
+    True nếu có ít nhất một SIS Announcement (fee_notification) đã gửi (sent) cho dòng Order Student.
+    Dùng cho API tài liệu — cùng điều kiện với bảng chi tiết / tổng.
+    """
+    if not order_student_name:
+        return False
+    return bool(
+        frappe.db.sql(
+            """
+            SELECT 1 FROM `tabSIS Announcement`
+            WHERE order_student_id = %s
+              AND announcement_type = 'fee_notification'
+              AND `status` = 'sent'
+            LIMIT 1
+            """,
+            (order_student_name,),
+        )
+    )
+
+
 def _filter_orders_for_parent_portal(order_items):
     """
     Lọc danh sách order items cho hiển thị trên Parent Portal.
@@ -153,6 +185,7 @@ def _calculate_student_finance_totals(finance_student_id):
     """
     Tính tổng tài chính cho 1 học sinh, xử lý dedup tuition orders.
     Dùng cho bảng tổng quan (get_all_students_finance).
+    Chỉ tính các dòng Order Student đã có thông báo phí gửi đi (SIS Announcement sent).
     """
     all_items = frappe.db.sql("""
         SELECT 
@@ -170,7 +203,7 @@ def _calculate_student_finance_totals(finance_student_id):
         INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
         WHERE fos.finance_student_id = %s
           AND fo.is_active = 1
-    """, (finance_student_id,), as_dict=True)
+    """ + _SQL_ORDER_STUDENT_HAS_SENT_FEE_ANNOUNCEMENT, (finance_student_id,), as_dict=True)
     
     relevant = _filter_orders_for_parent_portal(all_items)
     
@@ -312,10 +345,11 @@ def get_student_finance(student_id=None):
 def get_student_finance_detail(finance_student_id=None):
     """
     Lấy chi tiết các khoản phí của học sinh trong một năm tài chính.
-    
+    Chỉ trả các khoản đã gửi thông báo phí (SIS Announcement fee_notification, status sent).
+
     Args:
         finance_student_id: ID của SIS Finance Student
-    
+
     Returns:
         Danh sách các khoản phí và chi tiết thanh toán
     """
@@ -396,6 +430,7 @@ def get_student_finance_detail(finance_student_id=None):
             INNER JOIN `tabSIS Finance Order` fo ON fos.order_id = fo.name
             WHERE fos.finance_student_id = %s
               AND fo.is_active = 1
+        """ + _SQL_ORDER_STUDENT_HAS_SENT_FEE_ANNOUNCEMENT + """
             ORDER BY fo.sort_order ASC, fo.creation ASC
         """, (finance_student_id,), as_dict=True)
         
@@ -766,10 +801,11 @@ def get_order_student_documents(order_student_id=None):
     """
     Lấy danh sách tài liệu (Debit Note, Invoice, Receipt) của một order student.
     Dành cho phụ huynh xem tài liệu tài chính.
-    
+    Chỉ cho phép sau khi đã gửi thông báo phí (SIS Announcement fee_notification sent) cho dòng Order Student đó.
+
     Args:
         order_student_id: ID của SIS Finance Order Student
-    
+
     Returns:
         Danh sách documents
     """
@@ -809,6 +845,12 @@ def get_order_student_documents(order_student_id=None):
         
         if order_student[0].student_id not in student_ids:
             return error_response("Không có quyền truy cập tài liệu này", logs=logs)
+
+        if not _has_sent_fee_notification_for_order_student(order_student_id):
+            return error_response(
+                "Khoản phí chưa được thông báo tới phụ huynh hoặc chưa gửi xong",
+                logs=logs,
+            )
         
         # Lấy danh sách tài liệu
         documents = frappe.get_all(
