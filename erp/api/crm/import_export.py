@@ -91,13 +91,12 @@ _LEGACY_TO_BANK_CHILD = {
 
 _BULK_LEGACY_BANK_FIELDS = frozenset(_LEGACY_TO_BANK_CHILD.keys())
 
-_EXPORT_BULK_LEAD_FIELDS.extend(
-    col for mp in _BULK_TK_COLUMNS_BY_SLOT for col in mp.values()
-)
-
 _ALL_TK_BANK_COLS = frozenset(
     col for mp in _BULK_TK_COLUMNS_BY_SLOT for col in mp.values()
 )
+# tk1_/tk2_* chỉ là key trên Excel; dữ liệu lấy từ child `CRM Lead Bank Account` và
+# gộp vào dict qua `_spread_bank_accounts_into_export_row`. Không được đưa vào
+# `frappe.get_all(..., fields=...)` vì không tồn tại như cột varchar trên `tabCRM Lead`.
 
 
 def _resolve_pic_to_user_name(pic_raw):
