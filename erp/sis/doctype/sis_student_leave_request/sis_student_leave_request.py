@@ -33,7 +33,7 @@ class SISStudentLeaveRequest(Document):
 	def validate_parent_student_relationship(self):
 		"""Validate that parent has relationship with the student"""
 		if not frappe.db.exists("CRM Family Relationship", {
-			"parent": self.parent_id,
+			"guardian": self.parent_id,
 			"student": self.student_id
 		}):
 			frappe.throw(_("Phụ huynh không có quyền gửi đơn cho học sinh này"))

@@ -123,7 +123,7 @@ def get_class_leave_requests(class_id=None):
             
             # Check if created by parent (check if owner email is from parent portal)
             owner_email = request.get('owner', '')
-            request['is_created_by_parent'] = '@parent.wellspring.edu.vn' in str(owner_email)
+            request['is_created_by_parent'] = '@parent.wellspring.edu.vn' in str(owner_email).lower()
 
         # Calculate pagination info
         total_pages = (total_count + limit - 1) // limit  # Ceiling division
@@ -234,7 +234,7 @@ def get_leave_request_details(leave_request_id=None):
 
         # Check if created by parent
         owner_email = leave_request.owner or ''
-        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
+        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email).lower()
 
         # Lấy class_id của học sinh (lớp chủ nhiệm) - dùng cho mobile navigate từ notification
         class_id = None
@@ -572,7 +572,7 @@ def update_leave_request():
 
         # Check if within 24 hours (only for teacher-created requests)
         owner_email = leave_request.owner or ''
-        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
+        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email).lower()
         
         if not is_created_by_parent:
             # Teacher/Admin created - check 24h rule
@@ -807,14 +807,14 @@ def create_leave_request():
         family_relationships = frappe.get_all(
             "CRM Family Relationship",
             filters={"student": student_id},
-            fields=["parent"],
+            fields=["guardian"],
             limit=1
         )
         
         if not family_relationships:
             return error_response("Học sinh chưa có phụ huynh được liên kết")
         
-        parent_id = family_relationships[0].parent
+        parent_id = family_relationships[0].guardian
         
         # Create leave request
         leave_request = frappe.get_doc({
@@ -924,7 +924,7 @@ def delete_leave_request():
         
         # Check if created by parent - cannot delete parent-created requests
         owner_email = leave_request.owner or ''
-        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email)
+        is_created_by_parent = '@parent.wellspring.edu.vn' in str(owner_email).lower()
         
         if is_created_by_parent:
             # Parent created - teachers/admins cannot delete
