@@ -4,18 +4,62 @@
 from __future__ import annotations
 
 import calendar
+import re
 from datetime import date, datetime
 
 import frappe
+from frappe.utils import get_datetime, get_system_timezone
+
+
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _as_site_local_date(ref_date) -> date:
+    """
+    Ngày lịch theo timezone site (frappe.utils.get_system_timezone).
+    Chuỗi YYYY-MM-DD giữ nguyên; datetime chuyển sang ngày local site.
+    """
+    if ref_date is None:
+        return frappe.utils.getdate()
+
+    if isinstance(ref_date, date) and not isinstance(ref_date, datetime):
+        return ref_date
+
+    s = str(ref_date).strip()
+    if _DATE_ONLY_RE.match(s[:10]):
+        return date.fromisoformat(s[:10])
+
+    dt = get_datetime(ref_date)
+    if not dt:
+        return frappe.utils.getdate()
+
+    tz_name = get_system_timezone() or "Asia/Ho_Chi_Minh"
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(tz_name)
+        if dt.tzinfo is None:
+            local = dt.replace(tzinfo=tz)
+        else:
+            local = dt.astimezone(tz)
+        return local.date()
+    except Exception:
+        try:
+            import pytz
+
+            tz = pytz.timezone(tz_name)
+            if dt.tzinfo is None:
+                local = tz.localize(dt)
+            else:
+                local = dt.astimezone(tz)
+            return local.date()
+        except Exception:
+            return dt.date() if hasattr(dt, "date") else frappe.utils.getdate(dt)
 
 
 def calendar_month_bounds(ref_date) -> tuple[date, date]:
-    """Đầu/cuối tháng dương lịch của ref_date (theo date object, không UTC shift)."""
-    d = ref_date
-    if isinstance(d, str):
-        d = date.fromisoformat(str(d).strip()[:10])
-    elif isinstance(d, datetime):
-        d = d.date()
+    """Đầu/cuối tháng dương lịch của ref_date (theo timezone site)."""
+    d = _as_site_local_date(ref_date)
     first = d.replace(day=1)
     last_day = calendar.monthrange(d.year, d.month)[1]
     last = d.replace(day=last_day)
@@ -240,11 +284,108 @@ def resolve_student_deduction_and_level(
 
 
 def _as_date(ref_date) -> date:
-    if isinstance(ref_date, date) and not isinstance(ref_date, datetime):
-        return ref_date
-    if isinstance(ref_date, datetime):
-        return ref_date.date()
-    return date.fromisoformat(str(ref_date).strip()[:10])
+    return _as_site_local_date(ref_date)
+
+
+def _class_on_record_sql_fragment() -> str:
+    """Điều kiện lớp xuất hiện trên bản ghi (Class Entry / HS thuộc lớp regular)."""
+    return """
+        (
+            EXISTS (
+                SELECT 1 FROM `tabSIS Discipline Record Class Entry` ce
+                WHERE ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+                    AND ce.class_id = %(class_id)s
+            )
+            OR EXISTS (
+                SELECT 1 FROM `tabSIS Discipline Record Student Entry` se
+                INNER JOIN `tabSIS Class Student` cs
+                    ON cs.student_id = se.student_id
+                    AND cs.class_id = %(class_id)s
+                    AND cs.class_type = 'regular'
+                WHERE se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+            )
+            OR (
+                IFNULL(r.target_student, '') != ''
+                AND EXISTS (
+                    SELECT 1 FROM `tabSIS Class Student` cs
+                    WHERE cs.student_id = r.target_student
+                        AND cs.class_id = %(class_id)s
+                        AND cs.class_type = 'regular'
+                )
+            )
+        )
+    """
+
+
+def count_class_violation_records_in_month(
+    class_id: str,
+    violation_id: str,
+    record_date,
+    *,
+    exclude_record_name: str | None = None,
+) -> int:
+    """Số bản ghi DISTINCT (cùng vi phạm) của lớp trong tháng, tính đến ngày ghi nhận."""
+    first, _last = calendar_month_bounds(record_date)
+    params = {
+        "class_id": class_id,
+        "violation_id": violation_id,
+        "first_day": first,
+        "record_date": _as_date(record_date),
+    }
+    exclude_sql = ""
+    if exclude_record_name:
+        exclude_sql = " AND r.name != %(exclude_name)s "
+        params["exclude_name"] = exclude_record_name
+
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(DISTINCT r.name) AS cnt
+        FROM `tabSIS Discipline Record` r
+        WHERE r.violation = %(violation_id)s
+            AND r.date >= %(first_day)s AND r.date <= %(record_date)s
+            AND {_class_on_record_sql_fragment()}
+            {exclude_sql}
+        """,
+        params,
+        as_dict=True,
+    )
+    return int(row[0]["cnt"]) if row else 0
+
+
+def resolve_class_deduction_and_level(
+    class_id: str,
+    violation_id: str,
+    record_date,
+    *,
+    exclude_record_name: str | None = None,
+    client_deduction_points=None,
+) -> dict:
+    """
+    Tính điểm trừ + applied_level cho một lớp (bậc thang class_points của vi phạm).
+    Không áp rule nâng cấp L1 cross-violation theo tháng (chỉ học sinh).
+    """
+    from erp.api.erp_sis.discipline import (
+        _get_violation_point_tables_for_stats,
+        _match_tier_from_point_rows,
+        _normalize_deduction_points,
+    )
+
+    prior_same = count_class_violation_records_in_month(
+        class_id, violation_id, record_date, exclude_record_name=exclude_record_name
+    )
+    _, class_rows = _get_violation_point_tables_for_stats(violation_id, record_date)
+    tier = _match_tier_from_point_rows(class_rows, prior_same + 1)
+
+    dp = _points_to_deduction(tier.get("points"))
+    if client_deduction_points is not None:
+        dp = _normalize_deduction_points(client_deduction_points)
+
+    return {
+        "deduction_points": dp,
+        "applied_level": str(tier.get("level", "1")),
+        "level_label": tier.get("level_label") or f"Cấp độ {tier.get('level', '1')}",
+        "prior_same_violation_count_month": prior_same,
+    }
 
 
 def enrich_records_with_monthly_student_stats(records: list) -> list:
