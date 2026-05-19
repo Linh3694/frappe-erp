@@ -1509,6 +1509,67 @@ def get_applicable_point_version(violation: str = None, date: str = None):
 
 
 @frappe.whitelist(allow_guest=False)
+def get_student_monthly_discipline_context(
+    student_id: str = None,
+    violation_id: str = None,
+    date: str = None,
+    exclude_record: str = None,
+):
+    """
+    Ngữ cảnh rule nâng cấp theo tháng (form ghi nhận): đếm L1 cross-violation, tier gợi ý.
+    """
+    try:
+        from erp.api.erp_sis.discipline_monthly_escalation import (
+            count_cross_level1_instances_in_month,
+            count_violation_records_in_month,
+            resolve_student_deduction_and_level,
+        )
+
+        data = _get_request_data()
+        student_id = student_id or data.get("student_id")
+        violation_id = violation_id or data.get("violation_id")
+        date = date or data.get("date")
+        exclude_record = exclude_record or data.get("exclude_record") or data.get("name")
+
+        if not student_id or not violation_id or not date:
+            return error_response(
+                message="student_id, violation_id và date là bắt buộc",
+                code="MISSING_REQUIRED_FIELDS",
+            )
+
+        prior_l1 = count_cross_level1_instances_in_month(
+            student_id, date, exclude_record_name=exclude_record
+        )
+        prior_same = count_violation_records_in_month(
+            student_id, violation_id, date, exclude_record_name=exclude_record
+        )
+        resolved = resolve_student_deduction_and_level(
+            student_id,
+            violation_id,
+            date,
+            exclude_record_name=exclude_record,
+        )
+        return success_response(
+            data={
+                "prior_level1_count_month": prior_l1,
+                "prior_same_violation_count_month": prior_same,
+                "suggested_level": resolved.get("applied_level"),
+                "suggested_deduction_points": resolved.get("deduction_points"),
+                "level_label": resolved.get("level_label"),
+                "would_escalate_monthly": resolved.get("escalated_monthly", False),
+                "escalation_highlight": prior_l1 >= 3 and resolved.get("applied_level") == "2",
+            },
+            message="OK",
+        )
+    except Exception as e:
+        frappe.log_error(f"get_student_monthly_discipline_context: {str(e)}")
+        return error_response(
+            message=f"Lỗi: {str(e)}",
+            code="GET_STUDENT_MONTHLY_DISCIPLINE_CONTEXT_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False)
 def get_student_violation_stats(
     student_id: str = None,
     violation_id: str = None,
@@ -2110,10 +2171,17 @@ def _enrich_discipline_records_list(records):
             student_ids_to_fetch = [r["target_student"]]
         has_students = (r.get("target_type") in ("student", "mixed")) and student_ids_to_fetch
 
-        dp_by_sid = {
-            x["student_id"]: _normalize_deduction_points(x.get("deduction_points"))
+        entry_by_sid = {
+            x["student_id"]: x
             for x in (r.get("target_student_entry_rows") or [])
             if x.get("student_id")
+        }
+        dp_by_sid = {
+            sid: _normalize_deduction_points(row.get("deduction_points"))
+            for sid, row in entry_by_sid.items()
+        }
+        applied_level_by_sid = {
+            sid: row.get("applied_level") for sid, row in entry_by_sid.items()
         }
         r.pop("target_student_entry_rows", None)
 
@@ -2121,6 +2189,8 @@ def _enrich_discipline_records_list(records):
             r["target_student"] = student_ids_to_fetch[0]
             st_info = student_display_row(r["target_student"])
             st_info["deduction_points"] = dp_by_sid.get(r["target_student"], "10")
+            if applied_level_by_sid.get(r["target_student"]):
+                st_info["applied_level"] = applied_level_by_sid[r["target_student"]]
             r["target_students"] = [st_info]
             r["student_name"] = st_info.get("student_name") or ""
             r["student_code"] = st_info.get("student_code") or ""
@@ -2131,6 +2201,8 @@ def _enrich_discipline_records_list(records):
             for sid in student_ids_to_fetch:
                 st_row = student_display_row(sid)
                 st_row["deduction_points"] = dp_by_sid.get(sid, "10")
+                if applied_level_by_sid.get(sid):
+                    st_row["applied_level"] = applied_level_by_sid[sid]
                 r["target_students"].append(st_row)
             names = [
                 (st["student_name"] or "") + " (" + (st["student_code"] or "") + ")"
@@ -2147,6 +2219,9 @@ def _enrich_discipline_records_list(records):
             r["student_class_title"] = ""
             r["student_photo_url"] = None
 
+    from erp.api.erp_sis.discipline_monthly_escalation import enrich_records_with_monthly_student_stats
+
+    records = enrich_records_with_monthly_student_stats(records)
     return records
 
 
@@ -2333,7 +2408,7 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             student_entries = frappe.get_all(
                 "SIS Discipline Record Student Entry",
                 filters={"parent": ["in", record_ids]},
-                fields=["parent", "student_id", "deduction_points"],
+                fields=["parent", "student_id", "deduction_points", "applied_level"],
             )
             student_map_ids = {}
             student_entry_rows = {}
@@ -2347,6 +2422,7 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
                     {
                         "student_id": sid,
                         "deduction_points": _normalize_deduction_points(se.get("deduction_points")),
+                        "applied_level": se.get("applied_level"),
                     }
                 )
 
@@ -2709,6 +2785,42 @@ def get_discipline_record_changelog(name: str = None):
         )
 
 
+def _append_discipline_student_entry(doc, student_id, violation_id, record_date, tsp, exclude_record_name=None):
+    """Append dòng HS với điểm/cấp do server tính (rule nâng cấp theo tháng)."""
+    from erp.api.erp_sis.discipline_monthly_escalation import resolve_student_deduction_and_level
+
+    client_dp = None
+    if isinstance(tsp, dict):
+        client_dp = tsp.get(str(student_id))
+    resolved = resolve_student_deduction_and_level(
+        student_id,
+        violation_id,
+        record_date,
+        exclude_record_name=exclude_record_name,
+        client_deduction_points=client_dp,
+    )
+    doc.append(
+        "target_students",
+        {
+            "student_id": student_id,
+            "deduction_points": resolved["deduction_points"],
+            "applied_level": resolved["applied_level"],
+        },
+    )
+    return resolved
+
+
+def _sync_record_severity_from_students(doc):
+    """Gán severity_level header = cấp cao nhất trên các dòng HS (phục vụ báo cáo)."""
+    levels = []
+    for row in doc.get("target_students") or []:
+        lv = getattr(row, "applied_level", None) or row.get("applied_level")
+        if lv in ("1", "2", "3"):
+            levels.append(int(lv))
+    if levels:
+        doc.severity_level = str(max(levels))
+
+
 def _create_discipline_record_core(
     date,
     classification,
@@ -2841,14 +2953,15 @@ def _create_discipline_record_core(
                 dp = _normalize_deduction_points(tcp.get(str(cid)))
                 doc.append("target_classes", {"class_id": cid, "deduction_points": dp})
 
-    # Học sinh: target_students (child table) - luôn append để có dữ liệu đầy đủ
+    # Học sinh: target_students — server tính điểm + applied_level (rule tháng)
     if student_ids:
         for sid in student_ids:
             if isinstance(sid, dict):
                 sid = sid.get("student_id") or sid.get("name")
             if sid:
-                dp = _normalize_deduction_points(tsp.get(str(sid)))
-                doc.append("target_students", {"student_id": sid, "deduction_points": dp})
+                _append_discipline_student_entry(doc, sid, violation, date, tsp)
+
+    _sync_record_severity_from_students(doc)
 
     for img in proof_images or []:
         url = img.get("image") if isinstance(img, dict) else img
@@ -3551,12 +3664,16 @@ def update_discipline_record(
             single_id = student_ids[0] if len(student_ids) == 1 else None
             if single_id and doc.target_type in ("student", "mixed"):
                 doc.target_student = single_id
+            record_date = doc.date
+            viol_id = violation if violation is not None else doc.violation
             for sid in student_ids:
                 if isinstance(sid, dict):
                     sid = sid.get("student_id") or sid.get("name")
                 if sid:
-                    dp = _normalize_deduction_points(tsp.get(str(sid)))
-                    doc.append("target_students", {"student_id": sid, "deduction_points": dp})
+                    _append_discipline_student_entry(
+                        doc, sid, viol_id, record_date, tsp, exclude_record_name=doc.name
+                    )
+            _sync_record_severity_from_students(doc)
         if violation is not None:
             doc.violation = violation
         if form is not None:

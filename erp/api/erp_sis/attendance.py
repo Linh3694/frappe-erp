@@ -5,6 +5,7 @@ from frappe import _
 import requests
 from datetime import datetime
 from erp.utils.api_response import success_response, error_response
+from erp.utils.school_day_utils import is_school_instruction_day
 
 
 ATTENDANCE_STATUSES = {"present", "absent", "late", "excused"}
@@ -1673,6 +1674,21 @@ def is_production_server():
 	return site_config.get("is_production", False)
 
 
+def _homeroom_scheduler_campus_id():
+	"""
+	Campus cho scheduler điểm danh chủ nhiệm — khớp check_homeroom_attendance_status (context hoặc mặc định).
+	"""
+	try:
+		from erp.utils.campus_utils import get_current_campus_from_context
+
+		campus_id = get_current_campus_from_context()
+	except Exception:
+		campus_id = None
+	if not campus_id:
+		campus_id = "CAMPUS-00001"
+	return campus_id
+
+
 # Scheduled job to remind teachers about homeroom attendance
 @frappe.whitelist()
 def remind_homeroom_attendance():
@@ -1694,6 +1710,22 @@ def remind_homeroom_attendance():
 		
 		from datetime import datetime
 		today = datetime.now().strftime('%Y-%m-%d')
+
+		# Chỉ nhắc nhở khi ngày đó có tiết học theo TKB (campus báo cáo chủ nhiệm)
+		sched_campus = _homeroom_scheduler_campus_id()
+		ok_day, day_meta = is_school_instruction_day(today, campus_id=sched_campus)
+		if not ok_day:
+			frappe.logger().info(
+				f"⏭️ Bỏ qua remind_homeroom_attendance ngày {today} — không phải ngày học theo TKB: "
+				f"{day_meta.get('reason')} {day_meta}"
+			)
+			return {
+				"success": True,
+				"message": "Skipped - school day off per timetable",
+				"skipped": True,
+				"skipped_reason": "school_day_off",
+				"school_day_meta": day_meta,
+			}
 		
 		frappe.logger().info(f"📢 Starting homeroom attendance reminder for {today}")
 		
@@ -1832,6 +1864,21 @@ def daily_homeroom_attendance_report():
 		# Get today's date for the report (gửi báo cáo ngày hiện tại)
 		from datetime import datetime
 		today = datetime.now().strftime('%Y-%m-%d')
+
+		sched_campus = _homeroom_scheduler_campus_id()
+		ok_day, day_meta = is_school_instruction_day(today, campus_id=sched_campus)
+		if not ok_day:
+			frappe.logger().info(
+				f"⏭️ Bỏ qua daily_homeroom_attendance_report ngày {today} — không phải ngày học theo TKB: "
+				f"{day_meta.get('reason')} {day_meta}"
+			)
+			return {
+				"success": True,
+				"message": "Skipped - school day off per timetable",
+				"skipped": True,
+				"skipped_reason": "school_day_off",
+				"school_day_meta": day_meta,
+			}
 
 		frappe.logger().info(f"🏫 Starting daily homeroom attendance report for {today}")
 

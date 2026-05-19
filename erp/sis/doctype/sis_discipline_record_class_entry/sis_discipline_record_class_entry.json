@@ -6,7 +6,8 @@
  "engine": "InnoDB",
  "field_order": [
   "class_id",
-  "deduction_points"
+  "deduction_points",
+  "applied_level"
  ],
  "fields": [
   {
@@ -25,6 +26,14 @@
    "label": "Điểm trừ",
    "options": "1\n5\n10\n15",
    "reqd": 1
+  },
+  {
+   "fieldname": "applied_level",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Cấp độ áp dụng",
+   "options": "1\n2\n3",
+   "description": "Cấp độ tier đã áp dụng khi ghi nhận (lớp)."
   }
  ],
  "index_web_pages_for_search": 0,

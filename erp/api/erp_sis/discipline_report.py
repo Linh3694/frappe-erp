@@ -19,6 +19,7 @@ from erp.api.erp_sis.discipline import (
     _normalize_deduction_points,
 )
 from erp.utils.email_service import send_email_via_service
+from erp.utils.school_day_utils import is_school_instruction_day
 
 # Danh sách người nhận theo cấp THCS / THPT (production)
 DISCIPLINE_REPORT_RECIPIENTS_THCS = [
@@ -371,6 +372,31 @@ def _students_line_for_record(record: dict) -> str:
     return ""
 
 
+def _violation_count_display_for_record(record: dict) -> str:
+    """Số lần vi phạm trong tháng (enrich từ discipline_monthly_escalation)."""
+    if record.get("violations_count_display") is not None:
+        return str(record["violations_count_display"])
+    students = record.get("target_students") or []
+    counts = [
+        s.get("violations_total_this_month")
+        for s in students
+        if s.get("violations_total_this_month") is not None
+    ]
+    if counts:
+        return str(max(counts))
+    return "—"
+
+
+def _record_row_highlight_attr(record: dict) -> str:
+    """Tô nền hàng email khi HS đã vượt ngưỡng lặp vi phạm trong tháng."""
+    if record.get("escalation_highlight"):
+        return ' style="background:#fff8e6;"'
+    for st in record.get("target_students") or []:
+        if st.get("escalation_highlight"):
+            return ' style="background:#fff8e6;"'
+    return ""
+
+
 def _html_detail_records_table(records: list, limit: int = 50) -> str:
     """Bảng chi tiết giúp BGH/GVCN thấy rõ lớp nào phát sinh vi phạm trong ngày."""
     subset = records[:limit]
@@ -387,16 +413,19 @@ def _html_detail_records_table(records: list, limit: int = 50) -> str:
         severity = _severity_level_key(r)
         severity_label = f"Mức độ {severity}" if severity != "unknown" else "Không xác định"
         desc = escape_html(r.get("description") or "")
+        viol_count = escape_html(_violation_count_display_for_record(r))
         rt = r.get("record_time") or ""
         time_s = escape_html(str(rt)) if rt else "—"
+        row_style = _record_row_highlight_attr(r)
         rows_html.append(
-            f"<tr>"
+            f"<tr{row_style}>"
             f"<td {cell}>{time_s}</td>"
             f"<td {cell}>{class_line}</td>"
             f"<td {cell}>{student_line}</td>"
             f"<td {cell}>{cls_viol}</td>"
             f"<td {cell}>{viol}</td>"
             f"<td {cell}>{escape_html(severity_label)}</td>"
+            f"<td {cell}>{viol_count}</td>"
             f"<td {cell}>{desc}</td>"
             f"</tr>"
         )
@@ -417,6 +446,7 @@ def _html_detail_records_table(records: list, limit: int = 50) -> str:
         f'<th {head}>Loại vi phạm</th>'
         f'<th {head}>Vi phạm</th>'
         f'<th {head}>Mức độ</th>'
+        f'<th {head}>Số lần VP (tháng)</th>'
         f'<th {head}>Mô tả</th>'
         "</tr></thead>"
         f"<tbody>{''.join(rows_html)}</tbody>"
@@ -615,6 +645,22 @@ def _send_discipline_reports_for_date(report_date: str, force: bool = False):
             "message": "Không phải production server — bỏ qua gửi email kỷ luật.",
             "report_date": report_date,
         }
+
+    # Scheduler / gửi thông thường: chỉ gửi ngày có tiết theo TKB (toàn site — mọi campus)
+    if not force:
+        ok_day, day_meta = is_school_instruction_day(report_date, campus_id=None)
+        if not ok_day:
+            frappe.logger().info(
+                f"[discipline_report] Bỏ qua gửi email ngày {report_date} — không phải ngày học theo TKB: "
+                f"{day_meta.get('reason')} ({day_meta})"
+            )
+            return {
+                "success": True,
+                "skipped": "school_day_off",
+                "message": "Không phải ngày học theo TKB — bỏ qua gửi email kỷ luật.",
+                "report_date": report_date,
+                "school_day_meta": day_meta,
+            }
 
     records = _fetch_discipline_records_for_date(report_date)
     all_count = len(records)
