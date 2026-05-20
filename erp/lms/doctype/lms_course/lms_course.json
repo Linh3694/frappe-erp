@@ -1,0 +1,33 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:LMS-COURSE-{#####}",
+ "creation": "2026-05-19 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "program", "title", "code", "course_state", "column_break_1",
+  "campus_id", "sis_subject_id", "sis_actual_subject_id",
+  "is_blueprint", "blueprint_course_id", "description"
+ ],
+ "fields": [
+  {"fieldname": "program", "fieldtype": "Link", "label": "Program", "options": "LMS Program", "in_list_view": 1},
+  {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "code", "fieldtype": "Data", "label": "Code", "in_list_view": 1},
+  {"fieldname": "course_state", "fieldtype": "Select", "label": "State", "options": "draft\npublished\nconcluded", "default": "draft", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus", "reqd": 1},
+  {"fieldname": "sis_subject_id", "fieldtype": "Link", "label": "SIS Subject", "options": "SIS Subject"},
+  {"fieldname": "sis_actual_subject_id", "fieldtype": "Link", "label": "SIS Actual Subject", "options": "SIS Actual Subject"},
+  {"fieldname": "is_blueprint", "fieldtype": "Check", "label": "Is Blueprint", "default": "0"},
+  {"fieldname": "blueprint_course_id", "fieldtype": "Link", "label": "Blueprint Course", "options": "LMS Course"},
+  {"fieldname": "description", "fieldtype": "Text Editor", "label": "Description"}
+ ],
+ "module": "LMS",
+ "name": "LMS Course",
+ "permissions": [{"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

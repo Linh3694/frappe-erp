@@ -1,0 +1,28 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "autoname": "format:LMS-SEC-{#####}",
+ "creation": "2026-05-19 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "course", "section_name", "sis_class_id", "campus_id",
+  "start_date", "end_date", "enrollment_limit", "auto_sync_enrollment"
+ ],
+ "fields": [
+  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "section_name", "fieldtype": "Data", "label": "Section Name", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "sis_class_id", "fieldtype": "Link", "label": "SIS Class", "options": "SIS Class"},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"},
+  {"fieldname": "start_date", "fieldtype": "Date", "label": "Start Date"},
+  {"fieldname": "end_date", "fieldtype": "Date", "label": "End Date"},
+  {"fieldname": "enrollment_limit", "fieldtype": "Int", "label": "Enrollment Limit"},
+  {"fieldname": "auto_sync_enrollment", "fieldtype": "Check", "label": "Auto Sync Enrollment from SIS", "default": "0"}
+ ],
+ "module": "LMS",
+ "name": "LMS Course Section",
+ "permissions": [{"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

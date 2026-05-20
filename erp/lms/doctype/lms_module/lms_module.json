@@ -1,0 +1,21 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-MOD-{#####}",
+ "creation": "2026-05-19 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["course", "title", "position", "unlock_at", "require_sequential_progress"],
+ "fields": [
+  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "position", "fieldtype": "Int", "label": "Position", "default": "0"},
+  {"fieldname": "unlock_at", "fieldtype": "Datetime", "label": "Unlock At"},
+  {"fieldname": "require_sequential_progress", "fieldtype": "Check", "label": "Require Sequential Progress", "default": "0"}
+ ],
+ "module": "LMS",
+ "name": "LMS Module",
+ "permissions": [{"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}],
+ "sort_field": "position",
+ "sort_order": "ASC",
+ "track_changes": 1
+}

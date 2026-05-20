@@ -1,0 +1,175 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_import": 0,
+ "allow_rename": 0,
+ "autoname": "field:asset_id",
+ "creation": "2026-05-19 10:00:00.000000",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "asset_id",
+  "title",
+  "campus_id",
+  "course",
+  "column_break_1",
+  "status",
+  "filename",
+  "content_type",
+  "file_size",
+  "duration_sec",
+  "section_storage",
+  "raw_object_key",
+  "upload_id",
+  "hls_prefix",
+  "master_playlist",
+  "playback_url",
+  "thumbnail_key",
+  "error_message",
+  "section_audit",
+  "uploaded_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "asset_id",
+   "fieldtype": "Data",
+   "label": "Asset ID",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "LMS Course",
+   "options": "LMS Course"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "draft\nuploading\nprocessing\nready\nfailed",
+   "default": "draft",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "filename",
+   "fieldtype": "Data",
+   "label": "Filename"
+  },
+  {
+   "fieldname": "content_type",
+   "fieldtype": "Data",
+   "label": "Content Type"
+  },
+  {
+   "fieldname": "file_size",
+   "fieldtype": "Int",
+   "label": "File Size (bytes)"
+  },
+  {
+   "fieldname": "duration_sec",
+   "fieldtype": "Int",
+   "label": "Duration (sec)"
+  },
+  {
+   "fieldname": "section_storage",
+   "fieldtype": "Section Break",
+   "label": "Storage"
+  },
+  {
+   "fieldname": "raw_object_key",
+   "fieldtype": "Data",
+   "label": "Raw Object Key"
+  },
+  {
+   "fieldname": "upload_id",
+   "fieldtype": "Data",
+   "label": "Multipart Upload ID",
+   "hidden": 1
+  },
+  {
+   "fieldname": "hls_prefix",
+   "fieldtype": "Data",
+   "label": "HLS Prefix"
+  },
+  {
+   "fieldname": "master_playlist",
+   "fieldtype": "Data",
+   "label": "Master Playlist Key"
+  },
+  {
+   "fieldname": "playback_url",
+   "fieldtype": "Data",
+   "label": "Playback URL",
+   "read_only": 1
+  },
+  {
+   "fieldname": "thumbnail_key",
+   "fieldtype": "Data",
+   "label": "Thumbnail Key"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message"
+  },
+  {
+   "fieldname": "section_audit",
+   "fieldtype": "Section Break",
+   "label": "Audit"
+  },
+  {
+   "fieldname": "uploaded_by",
+   "fieldtype": "Link",
+   "label": "Uploaded By",
+   "options": "User",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-05-19 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "LMS",
+ "name": "LMS Video Asset",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

@@ -156,6 +156,12 @@ permission_query_conditions = {
 	"CRM Lead": "erp.crm.utils.permission_query.crm_lead_query",
 	"CRM Exam": "erp.crm.utils.permission_query.crm_exam_query",
 	"CRM Issue": "erp.crm.utils.permission_query.crm_issue_query",
+	# LMS
+	"LMS Program": "erp.lms.utils.permissions.lms_program_query",
+	"LMS Course": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Course Section": "erp.lms.utils.permissions.lms_course_section_query",
+	"LMS Enrollment": "erp.lms.utils.permissions.lms_enrollment_query",
+	"LMS Video Asset": "erp.lms.utils.permissions.lms_video_asset_query",
 }
 
 has_permission = {
@@ -194,6 +200,12 @@ has_permission = {
 	"CRM Lead": "erp.crm.utils.permission_query.has_crm_permission",
 	"CRM Exam": "erp.crm.utils.permission_query.has_crm_permission",
 	"CRM Issue": "erp.crm.utils.permission_query.has_crm_permission",
+	# LMS
+	"LMS Program": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Course": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Course Section": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Enrollment": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Video Asset": "erp.lms.utils.permissions.has_lms_campus_permission",
 }
 
 # DocType Class
