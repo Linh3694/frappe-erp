@@ -1,0 +1,27 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-ENG-{#####}",
+ "creation": "2026-05-20 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Engagement Score",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "computed_at",
+ "sort_order": "DESC",
+ "track_changes": 0,
+ "field_order": [
+  "student_id", "section", "period", "score", "signals_json", "computed_at", "at_risk"
+ ],
+ "fields": [
+  {"fieldname": "student_id", "fieldtype": "Link", "label": "Student", "options": "CRM Student", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "period", "fieldtype": "Data", "label": "Period", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "score", "fieldtype": "Float", "label": "Score", "default": "0"},
+  {"fieldname": "signals_json", "fieldtype": "JSON", "label": "Signals"},
+  {"fieldname": "computed_at", "fieldtype": "Datetime", "label": "Computed At"},
+  {"fieldname": "at_risk", "fieldtype": "Check", "label": "At Risk", "default": "0"}
+ ]
+}

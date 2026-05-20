@@ -53,9 +53,10 @@ API đầy đủ: [`lms-api.md`](../../../../lms-api.md) (repo root).
 | **1** | ✅ | Course shell, Page, File, Progress %, enrollment sync |
 | **2b** | ✅ | File upload **100% MinIO** `lms-files` (presigned PUT/GET) |
 | **3 FE** | ✅ | Quiz list/detail/taker (HS), builder + chấm (GV) |
-| **4 FE** | ✅ | Discussion forum, thread, moderation, graded |
+| **4 FE** | ✅ | Discussion, Calendar (tuần merge SIS), Groups (GV/HS) |
 | **2** | ✅ | Assignment, Submission, Gradebook, Announcement |
 | **3** | ✅ | Quiz, Question API, Attempt, auto-grade, essay grade, time_limit/shuffle |
 | **4** | ✅ | Discussion, Group, Calendar (merge SIS TKB), Outcome, Mastery unlock |
 | **5** | ✅ | Grade sync SIS, Blueprint sync, LMS Settings |
-| **6** | 📋 | Analytics, Inbox, LTI, Proctoring |
+| **6** | ✅ | Analytics, Inbox, LTI, Notification prefs, Engagement score, cron |
+| **6b** | 📋 | LTI proctoring OIDC đầy đủ |

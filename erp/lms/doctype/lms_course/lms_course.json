@@ -12,7 +12,7 @@
   "is_blueprint", "blueprint_course_id", "description",
   "section_extended", "language", "time_zone", "pace",
   "catalog_visible", "self_enroll", "certificate_template",
-  "default_mastery_scale", "enable_gamification"
+  "default_mastery_scale", "enable_gamification", "engagement_threshold_at_risk"
  ],
  "fields": [
   {"fieldname": "program", "fieldtype": "Link", "label": "Program", "options": "LMS Program", "in_list_view": 1},
@@ -34,7 +34,8 @@
   {"fieldname": "self_enroll", "fieldtype": "Check", "label": "Allow Self Enroll", "default": "0"},
   {"fieldname": "certificate_template", "fieldtype": "Link", "label": "Certificate Template", "options": "LMS Certificate Template"},
   {"fieldname": "default_mastery_scale", "fieldtype": "Link", "label": "Mastery Scale", "options": "LMS Mastery Scale"},
-  {"fieldname": "enable_gamification", "fieldtype": "Check", "label": "Enable Gamification", "default": "0"}
+  {"fieldname": "enable_gamification", "fieldtype": "Check", "label": "Enable Gamification", "default": "0"},
+  {"fieldname": "engagement_threshold_at_risk", "fieldtype": "Float", "label": "Engagement At-Risk Threshold", "default": "30", "description": "Điểm engagement dưới ngưỡng này được đánh dấu at-risk (Phase 6)"}
  ],
  "module": "LMS",
  "name": "LMS Course",

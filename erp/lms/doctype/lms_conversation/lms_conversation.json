@@ -1,0 +1,25 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-CONV-{#####}",
+ "creation": "2026-05-20 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Conversation",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "last_message_at",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "field_order": [
+  "course", "section", "subject", "last_message_at", "participant_users_json"
+ ],
+ "fields": [
+  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section", "in_list_view": 1},
+  {"fieldname": "subject", "fieldtype": "Data", "label": "Subject", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "last_message_at", "fieldtype": "Datetime", "label": "Last Message At"},
+  {"fieldname": "participant_users_json", "fieldtype": "JSON", "label": "Participant Users"}
+ ]
+}

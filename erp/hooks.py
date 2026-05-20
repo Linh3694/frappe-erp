@@ -871,7 +871,14 @@ scheduler_events = {
         "*/15 * * * *": [
             "erp.api.crm.sla_scheduler.check_crm_issue_sla",
             "erp.lms.sync.enrollment_sync.sync_all_sections",
-        ]
+        ],
+        # LMS Phase 6 — engagement score (2:00 AM), digest stub (7:00 AM)
+        "0 2 * * *": [
+            "erp.lms.cron.phase6_tasks.compute_engagement_score",
+        ],
+        "0 7 * * *": [
+            "erp.lms.cron.phase6_tasks.generate_daily_digest",
+        ],
     },
     # Project Management - Auto-expire pending invitations
     # Push Subscription cleanup - Xóa subscriptions không dùng trong 30 ngày

@@ -20,5 +20,16 @@
 | `question.py` | 3 | Question bank, link quiz, `ensure_question_bank` |
 | `file.py` | 2b | MinIO `lms-files` presign + LMS File catalog |
 | `discussion.py` | 4 | Forum, thread, pin/hide, grade participation |
+| `calendar.py` | 4 | Calendar events |
+| `group.py` | 4 | Course groups |
+| `outcome.py` | 4 | Outcomes |
+| `mastery.py` | 4 | Mastery paths |
+| `blueprint.py` | 5 | Blueprint sync |
+| `grade_sync.py` | 5 | Grade sync SIS |
+| `analytics.py` | 6 | Course/campus analytics |
+| `engagement.py` | 6 | Engagement score, async attendance |
+| `inbox.py` | 6 | Course inbox |
+| `notifications.py` | 6 | Notification preferences |
+| `lti.py` | 6 | External tools list/launch |
 
-**Chưa implement (Phase 4–6):** calendar, groups, blueprint FE, grade sync SIS, analytics, LTI, proctoring.
+**Chưa implement:** proctoring API (3b), live/AI (7+), SCORM (8+).

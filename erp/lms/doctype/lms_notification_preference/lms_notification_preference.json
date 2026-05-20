@@ -1,0 +1,28 @@
+{
+ "actions": [],
+ "autoname": "field:user",
+ "creation": "2026-05-20 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Notification Preference",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "field_order": [
+  "user", "channel", "digest_frequency",
+  "quiet_hours_start", "quiet_hours_end", "mute_until", "categories_muted_json"
+ ],
+ "fields": [
+  {"fieldname": "user", "fieldtype": "Link", "label": "User", "options": "User", "reqd": 1, "unique": 1, "in_list_view": 1},
+  {"fieldname": "channel", "fieldtype": "Select", "label": "Channel", "options": "push\nemail\nboth", "default": "both"},
+  {"fieldname": "digest_frequency", "fieldtype": "Select", "label": "Digest Frequency", "options": "instant\ndaily\nweekly", "default": "daily"},
+  {"fieldname": "quiet_hours_start", "fieldtype": "Data", "label": "Quiet Hours Start", "default": "22:00"},
+  {"fieldname": "quiet_hours_end", "fieldtype": "Data", "label": "Quiet Hours End", "default": "07:00"},
+  {"fieldname": "mute_until", "fieldtype": "Date", "label": "Mute Until"},
+  {"fieldname": "categories_muted_json", "fieldtype": "JSON", "label": "Categories Muted"}
+ ]
+}

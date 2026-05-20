@@ -11,7 +11,8 @@ def get_gradebook(section_id: str, user: str | None = None) -> dict:
 	if is_lms_staff(user):
 		require_lms_staff()
 	else:
-		validate_section_enrollment(section_id, user, min_role="student")
+		# Observer được xem gradebook read-only (§8.5)
+		validate_section_enrollment(section_id, user, min_role="observer")
 
 	columns = frappe.get_all(
 		"LMS Grade Column",

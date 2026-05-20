@@ -1,0 +1,22 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-MSG-{#####}",
+ "creation": "2026-05-20 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Message",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "sent_at",
+ "sort_order": "ASC",
+ "track_changes": 0,
+ "field_order": ["conversation", "sender", "body", "sent_at"],
+ "fields": [
+  {"fieldname": "conversation", "fieldtype": "Link", "label": "Conversation", "options": "LMS Conversation", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "sender", "fieldtype": "Link", "label": "Sender", "options": "User", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "body", "fieldtype": "Text", "label": "Body", "reqd": 1},
+  {"fieldname": "sent_at", "fieldtype": "Datetime", "label": "Sent At", "default": "Now", "in_list_view": 1}
+ ]
+}
