@@ -81,17 +81,100 @@ def grade_submission(submission_id: str, score: float, feedback: str | None = No
 	return doc.as_dict()
 
 
+def list_assignments(section_id: str, user: str | None = None) -> list:
+	"""Danh sách bài tập theo section — kèm trạng thái nộp của học sinh."""
+	user = user or frappe.session.user
+	validate_section_enrollment(section_id, user, min_role="observer")
+
+	rows = frappe.get_all(
+		"LMS Assignment",
+		filters={"section": section_id},
+		fields=[
+			"name",
+			"title",
+			"points_possible",
+			"due_at",
+			"lock_at",
+			"modified",
+		],
+		order_by="due_at asc, modified desc",
+	)
+
+	student_id = get_student_id_for_user(user)
+	if student_id and not is_lms_staff(user):
+		for row in rows:
+			sub = frappe.db.get_value(
+				"LMS Submission",
+				{"assignment": row.name, "student_id": student_id},
+				["name", "workflow_state", "score", "submitted_at", "graded_at"],
+				as_dict=True,
+			)
+			row["my_submission"] = sub
+
+	return rows
+
+
+def get_assignment(assignment_id: str, user: str | None = None) -> dict:
+	"""Chi tiết bài tập + submission của học sinh hiện tại."""
+	user = user or frappe.session.user
+	doc = frappe.get_doc("LMS Assignment", assignment_id)
+
+	if doc.section:
+		validate_section_enrollment(doc.section, user, min_role="observer")
+	elif doc.course:
+		from erp.lms.utils.permissions import user_enrolled_in_course
+		if not is_lms_staff(user) and not user_enrolled_in_course(user, doc.course):
+			frappe.throw("Không có quyền", frappe.PermissionError)
+
+	result = doc.as_dict()
+	student_id = get_student_id_for_user(user)
+	if student_id:
+		sub = frappe.db.get_value(
+			"LMS Submission",
+			{"assignment": assignment_id, "student_id": student_id},
+			[
+				"name",
+				"workflow_state",
+				"score",
+				"submitted_at",
+				"graded_at",
+				"body",
+				"attachments_json",
+			],
+			as_dict=True,
+		)
+		if sub and sub.get("attachments_json"):
+			try:
+				sub["attachments"] = json.loads(sub.attachments_json)
+			except (TypeError, json.JSONDecodeError):
+				sub["attachments"] = []
+		result["my_submission"] = sub
+
+	return result
+
+
 def list_submissions(assignment_id: str) -> list:
 	require_lms_staff()
-	return frappe.get_all(
+	rows = frappe.get_all(
 		"LMS Submission",
 		filters={"assignment": assignment_id},
 		fields=[
-			"name", "student_id", "submitted_at", "score",
-			"workflow_state", "graded_at", "grader",
+			"name",
+			"student_id",
+			"submitted_at",
+			"score",
+			"workflow_state",
+			"graded_at",
+			"grader",
+			"body",
 		],
 		order_by="modified desc",
 	)
+	for row in rows:
+		row["student_name"] = frappe.db.get_value(
+			"CRM Student", row.student_id, "student_name"
+		)
+	return rows
 
 
 def _ensure_grade_column_for_assignment(assignment):

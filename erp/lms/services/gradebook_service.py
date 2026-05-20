@@ -2,7 +2,7 @@
 
 import frappe
 
-from erp.lms.utils.enrollment import validate_section_enrollment
+from erp.lms.utils.enrollment import get_student_id_for_user, validate_section_enrollment
 from erp.lms.utils.permissions import is_lms_staff, require_lms_staff
 
 
@@ -54,6 +54,11 @@ def get_gradebook(section_id: str, user: str | None = None) -> dict:
 				"grades": entry_map.get(sid, {}),
 			}
 		)
+
+	# Học sinh chỉ thấy điểm của mình
+	if not is_lms_staff(user):
+		student_id = get_student_id_for_user(user)
+		rows = [r for r in rows if r["student_id"] == student_id] if student_id else []
 
 	groups = frappe.get_all(
 		"LMS Grade Group",

@@ -46,6 +46,34 @@ def grade_submission():
 
 
 @frappe.whitelist(methods=["GET"])
+def list_assignments(section_id=None):
+	try:
+		section_id = section_id or frappe.form_dict.get("section_id")
+		if not section_id:
+			return error_response("section_id bắt buộc", code="VALIDATION_ERROR")
+		rows = assignment_service.list_assignments(section_id)
+		return success_response(data=rows)
+	except frappe.PermissionError:
+		return error_response("Không có quyền", code="FORBIDDEN")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["GET"])
+def get_assignment(assignment_id=None):
+	try:
+		assignment_id = assignment_id or frappe.form_dict.get("assignment_id")
+		if not assignment_id:
+			return error_response("assignment_id bắt buộc", code="VALIDATION_ERROR")
+		data = assignment_service.get_assignment(assignment_id)
+		return single_item_response(data)
+	except frappe.PermissionError:
+		return error_response("Không có quyền", code="FORBIDDEN")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["GET"])
 def list_submissions(assignment_id=None):
 	try:
 		assignment_id = assignment_id or frappe.form_dict.get("assignment_id")
