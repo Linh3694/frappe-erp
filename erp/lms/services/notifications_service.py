@@ -15,7 +15,7 @@ DEFAULT_PREFS = {
 }
 
 
-def _normalize(doc: dict | frappe.Document) -> dict:
+def _normalize(doc) -> dict:
 	cats = doc.get("categories_muted_json") or doc.get("categories_muted") or []
 	if isinstance(cats, str):
 		try:
