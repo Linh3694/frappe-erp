@@ -7,6 +7,25 @@ import frappe
 from erp.lms.utils.permissions import require_lms_staff
 
 
+def ensure_question_bank(course_id: str, title: str | None = None) -> str:
+	"""Ngân hàng câu hỏi mặc định theo course — tạo nếu chưa có."""
+	require_lms_staff()
+	existing = frappe.db.get_value("LMS Question Bank", {"course": course_id}, "name")
+	if existing:
+		return existing
+	campus_id = frappe.db.get_value("LMS Course", course_id, "campus_id")
+	doc = frappe.get_doc(
+		{
+			"doctype": "LMS Question Bank",
+			"course": course_id,
+			"title": title or "Ngân hàng câu hỏi",
+			"campus_id": campus_id,
+		}
+	)
+	doc.insert()
+	return doc.name
+
+
 def create_question(data: dict) -> dict:
 	require_lms_staff()
 	if isinstance(data.get("answers_json"), dict):

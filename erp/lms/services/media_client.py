@@ -73,3 +73,34 @@ def complete_upload(asset_id: str, raw_object_key: str, upload_id: str, parts: l
 			"parts": parts,
 		},
 	)
+
+
+def presign_file_upload(
+	course_id: str,
+	section_id: str,
+	filename: str,
+	content_type: str,
+	file_size: int,
+	file_id: str | None = None,
+) -> dict:
+	"""Presigned PUT → MinIO bucket lms-files."""
+	return _request(
+		"POST",
+		"/api/lms/files/presign-upload",
+		{
+			"courseId": course_id,
+			"sectionId": section_id,
+			"filename": filename,
+			"contentType": content_type,
+			"fileSize": int(file_size),
+			"fileId": file_id,
+		},
+	)
+
+
+def presign_file_download(object_key: str, bucket: str | None = None) -> dict:
+	"""Presigned GET — tải file từ lms-files."""
+	payload = {"objectKey": object_key}
+	if bucket:
+		payload["bucket"] = bucket
+	return _request("POST", "/api/lms/files/presign-download", payload)

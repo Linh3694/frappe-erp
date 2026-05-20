@@ -8,6 +8,34 @@ from erp.lms.services import quiz_service
 from erp.utils.api_response import error_response, single_item_response, success_response
 
 
+@frappe.whitelist(methods=["GET"])
+def list_quizzes(section_id=None):
+	try:
+		section_id = section_id or frappe.form_dict.get("section_id")
+		if not section_id:
+			return error_response("section_id bắt buộc", code="VALIDATION_ERROR")
+		rows = quiz_service.list_quizzes(section_id)
+		return success_response(data=rows)
+	except frappe.PermissionError:
+		return error_response("Không có quyền", code="FORBIDDEN")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["GET"])
+def get_quiz(quiz_id=None):
+	try:
+		quiz_id = quiz_id or frappe.form_dict.get("quiz_id")
+		if not quiz_id:
+			return error_response("quiz_id bắt buộc", code="VALIDATION_ERROR")
+		data = quiz_service.get_quiz(quiz_id)
+		return single_item_response(data)
+	except frappe.PermissionError:
+		return error_response("Không có quyền", code="FORBIDDEN")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
 @frappe.whitelist(methods=["POST"])
 def create_quiz():
 	try:

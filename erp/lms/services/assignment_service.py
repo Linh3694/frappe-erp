@@ -40,13 +40,17 @@ def submit_assignment(assignment_id: str, body=None, attachments=None, user: str
 		if not user_enrolled_in_course(user, assignment.course):
 			frappe.throw("Không enrolled", frappe.PermissionError)
 
+	from erp.lms.services.file_storage_service import normalize_attachments
+
+	normalized_attachments = normalize_attachments(attachments)
+
 	existing = frappe.db.get_value(
 		"LMS Submission",
 		{"assignment": assignment_id, "student_id": student_id},
 	)
 	payload = {
 		"body": body,
-		"attachments_json": json.dumps(attachments or []),
+		"attachments_json": json.dumps(normalized_attachments),
 		"submitted_at": now_datetime(),
 		"workflow_state": SUBMISSION_STATE_SUBMITTED,
 	}
@@ -75,7 +79,7 @@ def grade_submission(submission_id: str, score: float, feedback: str | None = No
 	doc.grader = frappe.session.user
 	doc.workflow_state = SUBMISSION_STATE_GRADED
 	if feedback:
-		doc.body = (doc.body or "") + f"\n\n---\nFeedback: {feedback}"
+		doc.grader_feedback = feedback
 	doc.save(ignore_permissions=True)
 	_sync_submission_to_grade_entry(doc)
 	return doc.as_dict()
@@ -140,14 +144,12 @@ def get_assignment(assignment_id: str, user: str | None = None) -> dict:
 				"graded_at",
 				"body",
 				"attachments_json",
+				"grader_feedback",
 			],
 			as_dict=True,
 		)
-		if sub and sub.get("attachments_json"):
-			try:
-				sub["attachments"] = json.loads(sub.attachments_json)
-			except (TypeError, json.JSONDecodeError):
-				sub["attachments"] = []
+		if sub:
+			_enrich_submission_row(sub)
 		result["my_submission"] = sub
 
 	return result
@@ -167,14 +169,29 @@ def list_submissions(assignment_id: str) -> list:
 			"graded_at",
 			"grader",
 			"body",
+			"attachments_json",
+			"grader_feedback",
 		],
 		order_by="modified desc",
 	)
 	for row in rows:
+		_enrich_submission_row(row)
 		row["student_name"] = frappe.db.get_value(
 			"CRM Student", row.student_id, "student_name"
 		)
 	return rows
+
+
+def _enrich_submission_row(row: dict) -> None:
+	"""Parse attachments_json → attachments[]."""
+	if row.get("attachments_json"):
+		try:
+			parsed = json.loads(row.attachments_json)
+			row["attachments"] = parsed if isinstance(parsed, list) else []
+		except (TypeError, json.JSONDecodeError):
+			row["attachments"] = []
+	else:
+		row["attachments"] = []
 
 
 def _ensure_grade_column_for_assignment(assignment):

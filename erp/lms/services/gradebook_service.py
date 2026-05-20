@@ -100,3 +100,16 @@ def upsert_grade_entry(column_id: str, student_id: str, score: float, excused: i
 		)
 		doc.insert(ignore_permissions=True)
 	return doc.as_dict()
+
+
+def update_grade_column(column_id: str, data: dict) -> dict:
+	"""Cập nhật cột gradebook — muted, title, …"""
+	require_lms_staff()
+	allowed = {"title", "muted", "points_possible", "position", "sync_to_sis"}
+	payload = {k: v for k, v in data.items() if k in allowed}
+	if not payload:
+		frappe.throw("Không có field hợp lệ để cập nhật")
+	doc = frappe.get_doc("LMS Grade Column", column_id)
+	doc.update(payload)
+	doc.save(ignore_permissions=True)
+	return doc.as_dict()

@@ -22,6 +22,11 @@ Domain **Learning Management** — tách biệt SIS/CRM/parent_portal.
 Ví dụ:
 - `erp.api.lms.media.init_upload`
 - `erp.api.lms.media.get_playback_token`
+- `erp.api.lms.file.presign_upload` — MinIO `lms-files`
+- `erp.api.lms.file.get_download_url`
+- `erp.api.lms.file.get_course_file`
+- `erp.api.lms.file.list_course_files`
+- `erp.api.lms.file.create_course_file`
 - `erp.api.lms.internal.transcode_callback`
 - `erp.api.lms.course.get_course`
 - `erp.api.lms.question.create_question`
@@ -46,6 +51,7 @@ API đầy đủ: [`lms-api.md`](../../../../lms-api.md) (repo root).
 |-------|------------|----------|
 | **0** | ✅ | Video Asset, media API, webhook, playback token JWT |
 | **1** | ✅ | Course shell, Page, File, Progress %, enrollment sync |
+| **2b** | ✅ | File upload **100% MinIO** `lms-files` (presigned PUT/GET) |
 | **2** | ✅ | Assignment, Submission, Gradebook, Announcement |
 | **3** | ✅ | Quiz, Question API, Attempt, auto-grade, essay grade, time_limit/shuffle |
 | **4** | ✅ | Discussion, Group, Calendar (merge SIS TKB), Outcome, Mastery unlock |

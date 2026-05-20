@@ -8,6 +8,22 @@ from erp.lms.services import question_service
 from erp.utils.api_response import error_response, paginated_response, single_item_response, success_response
 
 
+@frappe.whitelist(methods=["GET", "POST"])
+def ensure_question_bank():
+	"""Lấy hoặc tạo question bank theo course."""
+	try:
+		fd = frappe.form_dict
+		if frappe.request.method == "POST":
+			fd = frappe.request.json or fd
+		course_id = fd.get("course_id") or fd.get("course")
+		if not course_id:
+			return error_response("course_id bắt buộc", code="VALIDATION_ERROR")
+		bank_id = question_service.ensure_question_bank(course_id, fd.get("title"))
+		return success_response(data={"bank_id": bank_id})
+	except Exception as exc:
+		return error_response(str(exc))
+
+
 @frappe.whitelist(methods=["POST"])
 def create_question():
 	try:

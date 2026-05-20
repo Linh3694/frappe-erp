@@ -28,7 +28,8 @@
   "graded_at",
   "grader",
   "body",
-  "attachments_json"
+  "attachments_json",
+  "grader_feedback"
  ],
  "fields": [
   {
@@ -90,6 +91,11 @@
    "fieldname": "attachments_json",
    "fieldtype": "Small Text",
    "label": "Attachments (JSON)"
+  },
+  {
+   "fieldname": "grader_feedback",
+   "fieldtype": "Small Text",
+   "label": "Grader Feedback"
   }
  ]
 }

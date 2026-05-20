@@ -23,6 +23,75 @@ def create_quiz(data: dict) -> dict:
 	return doc.as_dict()
 
 
+def list_quizzes(section_id: str, user: str | None = None) -> list:
+	"""Danh sách quiz theo section — kèm attempt của học sinh."""
+	user = user or frappe.session.user
+	validate_section_enrollment(section_id, user, min_role="observer")
+
+	rows = frappe.get_all(
+		"LMS Quiz",
+		filters={"section": section_id},
+		fields=[
+			"name",
+			"title",
+			"time_limit",
+			"allowed_attempts",
+			"shuffle_questions",
+			"show_correct_answers",
+			"modified",
+		],
+		order_by="modified desc",
+	)
+
+	student_id = get_student_id_for_user(user)
+	if student_id and not is_lms_staff(user):
+		for row in rows:
+			_enrich_quiz_attempt_summary(row, quiz_id=row.name, student_id=student_id)
+
+	return rows
+
+
+def get_quiz(quiz_id: str, user: str | None = None) -> dict:
+	"""Chi tiết quiz — GV thấy câu hỏi; HS thấy metadata + attempt."""
+	user = user or frappe.session.user
+	doc = frappe.get_doc("LMS Quiz", quiz_id)
+
+	if doc.section:
+		validate_section_enrollment(doc.section, user, min_role="observer")
+	elif doc.course:
+		from erp.lms.utils.permissions import user_enrolled_in_course
+
+		if not is_lms_staff(user) and not user_enrolled_in_course(user, doc.course):
+			frappe.throw("Không có quyền", frappe.PermissionError)
+
+	result = doc.as_dict()
+	staff = is_lms_staff(user)
+
+	if staff:
+		result["questions"] = _load_quiz_questions_raw(quiz_id)
+	else:
+		student_id = get_student_id_for_user(user)
+		if student_id:
+			_enrich_quiz_attempt_summary(result, quiz_id=quiz_id, student_id=student_id)
+			in_progress = frappe.db.get_value(
+				"LMS Quiz Attempt",
+				{"quiz": quiz_id, "student_id": student_id, "workflow_state": "in_progress"},
+				["name", "started_at", "expires_at"],
+				as_dict=True,
+			)
+			result["in_progress_attempt"] = in_progress
+			attempts = frappe.get_all(
+				"LMS Quiz Attempt",
+				filters={"quiz": quiz_id, "student_id": student_id},
+				fields=["name", "workflow_state", "score", "started_at", "finished_at"],
+				order_by="started_at desc",
+				limit=20,
+			)
+			result["my_attempts"] = attempts
+
+	return result
+
+
 def start_attempt(quiz_id: str, user: str | None = None) -> dict:
 	user = user or frappe.session.user
 	student_id = get_student_id_for_user(user)
@@ -32,6 +101,14 @@ def start_attempt(quiz_id: str, user: str | None = None) -> dict:
 	quiz = frappe.get_doc("LMS Quiz", quiz_id)
 	if quiz.section:
 		validate_section_enrollment(quiz.section, user, min_role="student")
+
+	# Tiếp tục attempt đang làm dở
+	existing_id = frappe.db.get_value(
+		"LMS Quiz Attempt",
+		{"quiz": quiz_id, "student_id": student_id, "workflow_state": "in_progress"},
+	)
+	if existing_id:
+		return _build_attempt_payload(frappe.get_doc("LMS Quiz Attempt", existing_id), quiz)
 
 	attempt_count = frappe.db.count("LMS Quiz Attempt", {"quiz": quiz_id, "student_id": student_id})
 	if quiz.allowed_attempts and quiz.allowed_attempts > 0 and attempt_count >= quiz.allowed_attempts:
@@ -61,13 +138,48 @@ def start_attempt(quiz_id: str, user: str | None = None) -> dict:
 	doc.question_order_json = json.dumps([q["question_id"] for q in raw_questions])
 	doc.save(ignore_permissions=True)
 
+	return _build_attempt_payload(doc, quiz, raw_questions)
+
+
+def _build_attempt_payload(attempt, quiz, raw_questions: list | None = None) -> dict:
+	"""Payload start/resume attempt cho Portal."""
+	if raw_questions is None:
+		raw_questions = _load_questions_for_attempt(attempt)
 	questions = [_serialize_question_for_student(q, quiz) for q in raw_questions]
 	return {
-		"attempt": doc.as_dict(),
+		"attempt": attempt.as_dict(),
 		"questions": questions,
 		"time_limit_minutes": quiz.time_limit or 0,
-		"expires_at": expires_at,
+		"expires_at": attempt.expires_at,
 	}
+
+
+def _enrich_quiz_attempt_summary(row: dict, quiz_id: str, student_id: str) -> None:
+	"""Gắn thống kê attempt cho học sinh."""
+	quiz = frappe.get_doc("LMS Quiz", quiz_id)
+	attempts = frappe.get_all(
+		"LMS Quiz Attempt",
+		filters={"quiz": quiz_id, "student_id": student_id},
+		fields=["name", "workflow_state", "score", "finished_at"],
+		order_by="started_at desc",
+	)
+	row["attempt_count"] = len(attempts)
+	row["my_attempts"] = attempts
+	latest = attempts[0] if attempts else None
+	row["latest_attempt"] = latest
+	allowed = int(quiz.allowed_attempts or 0)
+	if allowed > 0:
+		row["attempts_remaining"] = max(0, allowed - len(attempts))
+		row["can_start"] = row["attempts_remaining"] > 0 and not frappe.db.exists(
+			"LMS Quiz Attempt",
+			{"quiz": quiz_id, "student_id": student_id, "workflow_state": "in_progress"},
+		)
+	else:
+		row["attempts_remaining"] = None
+		row["can_start"] = not frappe.db.exists(
+			"LMS Quiz Attempt",
+			{"quiz": quiz_id, "student_id": student_id, "workflow_state": "in_progress"},
+		)
 
 
 def submit_attempt(attempt_id: str, responses: dict, user: str | None = None) -> dict:
