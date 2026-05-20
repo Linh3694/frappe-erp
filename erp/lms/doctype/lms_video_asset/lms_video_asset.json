@@ -28,6 +28,10 @@
   "playback_url",
   "thumbnail_key",
   "error_message",
+  "section_extended",
+  "default_captions_track",
+  "transcript_id",
+  "chapters_json",
   "section_audit",
   "uploaded_by"
  ],
@@ -133,6 +137,30 @@
    "fieldname": "error_message",
    "fieldtype": "Small Text",
    "label": "Error Message"
+  },
+  {
+   "fieldname": "section_extended",
+   "fieldtype": "Section Break",
+   "label": "Captions & Chapters (Phase 7+)",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "default_captions_track",
+   "fieldtype": "Link",
+   "label": "Default Captions Track",
+   "options": "LMS Caption Track"
+  },
+  {
+   "fieldname": "transcript_id",
+   "fieldtype": "Link",
+   "label": "Transcript",
+   "options": "LMS Transcript"
+  },
+  {
+   "fieldname": "chapters_json",
+   "fieldtype": "JSON",
+   "label": "Chapters JSON",
+   "description": "[{ title, start_sec }]"
   },
   {
    "fieldname": "section_audit",

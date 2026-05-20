@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:LMS-QUES-{#####}",
+ "name": "LMS Question",
+ "field_order": [
+  "bank",
+  "question_type",
+  "points",
+  "prompt_html",
+  "answers_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "bank",
+   "fieldtype": "Link",
+   "label": "Question Bank",
+   "options": "LMS Question Bank",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "question_type",
+   "fieldtype": "Select",
+   "label": "Question Type",
+   "options": "multiple_choice\ntrue_false\nshort_answer\nessay\nmatching\nnumerical",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "points",
+   "fieldtype": "Float",
+   "label": "Points",
+   "default": "1"
+  },
+  {
+   "fieldname": "prompt_html",
+   "fieldtype": "Text Editor",
+   "label": "Prompt HTML"
+  },
+  {
+   "fieldname": "answers_json",
+   "fieldtype": "Small Text",
+   "label": "Answers (JSON)"
+  }
+ ]
+}

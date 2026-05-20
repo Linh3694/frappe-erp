@@ -1,0 +1,136 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:LMS-QUIZ-{#####}",
+ "name": "LMS Quiz",
+ "field_order": [
+  "course",
+  "section",
+  "title",
+  "column_break_1",
+  "time_limit",
+  "allowed_attempts",
+  "shuffle_questions",
+  "show_correct_answers",
+  "is_high_stakes",
+  "campus_id",
+  "description",
+  "section_extended",
+  "survey_mode",
+  "late_policy_id",
+  "randomize_pool_count",
+  "accommodations_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "LMS Course",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section",
+   "fieldtype": "Link",
+   "label": "Section",
+   "options": "LMS Course Section"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "time_limit",
+   "fieldtype": "Int",
+   "label": "Time Limit (minutes)"
+  },
+  {
+   "fieldname": "allowed_attempts",
+   "fieldtype": "Int",
+   "label": "Allowed Attempts",
+   "default": "1"
+  },
+  {
+   "fieldname": "shuffle_questions",
+   "fieldtype": "Check",
+   "label": "Shuffle Questions",
+   "default": "0"
+  },
+  {
+   "fieldname": "show_correct_answers",
+   "fieldtype": "Select",
+   "label": "Show Correct Answers",
+   "options": "after_submit\nafter_due\nnever",
+   "default": "after_due"
+  },
+  {
+   "fieldname": "is_high_stakes",
+   "fieldtype": "Check",
+   "label": "Is High Stakes",
+   "default": "0"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Description"
+  },
+  {
+   "fieldname": "section_extended",
+   "fieldtype": "Section Break",
+   "label": "Extended (Phase 7+)",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "survey_mode",
+   "fieldtype": "Check",
+   "label": "Survey Mode (no grade)",
+   "default": "0"
+  },
+  {
+   "fieldname": "late_policy_id",
+   "fieldtype": "Link",
+   "label": "Late Policy",
+   "options": "LMS Late Policy"
+  },
+  {
+   "fieldname": "randomize_pool_count",
+   "fieldtype": "Int",
+   "label": "Random Pool Count",
+   "description": "Số câu random từ bank (0 = tất cả)"
+  },
+  {
+   "fieldname": "accommodations_json",
+   "fieldtype": "JSON",
+   "label": "Accommodations JSON"
+  }
+ ]
+}

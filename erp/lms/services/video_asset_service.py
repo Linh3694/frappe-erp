@@ -2,9 +2,13 @@
 
 import json
 import uuid
+from datetime import timedelta
 
+import jwt
 import frappe
+from frappe.utils import get_datetime, get_timestamp, now_datetime
 
+from erp.lms.config import get_media_internal_secret, get_media_public_url
 from erp.lms.constants import (
 	VIDEO_STATUS_DRAFT,
 	VIDEO_STATUS_PROCESSING,
@@ -15,6 +19,9 @@ from erp.lms.constants import (
 from erp.lms.services import media_client
 from erp.lms.utils.permissions import require_lms_staff, user_can_access_video_asset
 from erp.utils.campus_utils import get_current_campus_from_context
+
+# TTL token phát HLS (giờ)
+PLAYBACK_TOKEN_TTL_HOURS = 4
 
 
 def create_video_asset(
@@ -131,3 +138,43 @@ def get_video_asset_for_user(asset_id: str, user: str | None = None) -> dict:
 	if not user_can_access_video_asset(user, asset_id):
 		frappe.throw("Không có quyền xem video", frappe.PermissionError)
 	return frappe.get_doc("LMS Video Asset", asset_id).as_dict()
+
+
+def get_playback_token(asset_id: str, user: str | None = None) -> dict:
+	"""JWT ngắn hạn cho HLS playback — enrollment đã kiểm tra."""
+	user = user or frappe.session.user
+	if not user_can_access_video_asset(user, asset_id):
+		frappe.throw("Không có quyền xem video", frappe.PermissionError)
+
+	doc = frappe.get_doc("LMS Video Asset", asset_id)
+	if doc.status != VIDEO_STATUS_READY:
+		frappe.throw("Video chưa sẵn sàng phát")
+
+	secret = get_media_internal_secret()
+	if not secret:
+		frappe.throw("lms_media_internal_secret chưa cấu hình trong site_config")
+
+	expires_at = get_datetime(now_datetime()) + timedelta(hours=PLAYBACK_TOKEN_TTL_HOURS)
+	payload = {
+		"asset_id": doc.asset_id or asset_id,
+		"user": user,
+		"exp": int(get_timestamp(expires_at)),
+	}
+	token = jwt.encode(payload, secret, algorithm="HS256")
+	if isinstance(token, bytes):
+		token = token.decode()
+
+	playback_url = doc.playback_url or ""
+	if playback_url:
+		sep = "&" if "?" in playback_url else "?"
+		signed_url = f"{playback_url}{sep}token={token}"
+	else:
+		public_base = get_media_public_url()
+		signed_url = f"{public_base}/lms-hls/{doc.asset_id or asset_id}/master.m3u8?token={token}" if public_base else ""
+
+	return {
+		"token": token,
+		"playback_url": signed_url,
+		"expires_at": expires_at,
+		"asset_id": asset_id,
+	}

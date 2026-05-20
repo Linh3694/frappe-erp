@@ -12,7 +12,7 @@
   {"fieldname": "module", "fieldtype": "Link", "label": "Module", "options": "LMS Module", "reqd": 1, "in_list_view": 1},
   {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1, "in_list_view": 1},
   {"fieldname": "position", "fieldtype": "Int", "label": "Position", "default": "0"},
-  {"fieldname": "item_type", "fieldtype": "Select", "label": "Item Type", "options": "page\nvideo\nassignment\nquiz\nfile\nexternal_url\ndiscussion\nsubheader\ntext", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "item_type", "fieldtype": "Select", "label": "Item Type", "options": "page\nvideo\nassignment\nquiz\nfile\nexternal_url\ndiscussion\nsubheader\ntext\nscorm\nh5p\nlti_tool\nlive_session\nsurvey\npeer_review", "reqd": 1, "in_list_view": 1},
   {"fieldname": "published", "fieldtype": "Check", "label": "Published", "default": "0"},
   {"fieldname": "video_asset", "fieldtype": "Link", "label": "Video Asset", "options": "LMS Video Asset"},
   {"fieldname": "external_url", "fieldtype": "Data", "label": "External URL"},

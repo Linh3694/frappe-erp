@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:LMS-CRPR-{#####}",
+ "name": "LMS Course Progress",
+ "field_order": [
+  "student_id",
+  "section",
+  "percent_complete",
+  "last_activity_at",
+  "mastery_unlocked_modules_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section",
+   "fieldtype": "Link",
+   "label": "Section",
+   "options": "LMS Course Section",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "percent_complete",
+   "fieldtype": "Float",
+   "label": "Percent Complete",
+   "default": "0"
+  },
+  {
+   "fieldname": "last_activity_at",
+   "fieldtype": "Datetime",
+   "label": "Last Activity At"
+  },
+  {
+   "fieldname": "mastery_unlocked_modules_json",
+   "fieldtype": "JSON",
+   "label": "Mastery Unlocked Modules"
+  }
+ ]
+}

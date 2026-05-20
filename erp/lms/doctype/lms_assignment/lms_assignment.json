@@ -1,0 +1,140 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:LMS-ASGN-{#####}",
+ "name": "LMS Assignment",
+ "field_order": [
+  "course",
+  "section",
+  "title",
+  "column_break_1",
+  "points_possible",
+  "due_at",
+  "lock_at",
+  "allowed_attempts",
+  "group_assignment",
+  "campus_id",
+  "description",
+  "submission_types",
+  "section_extended",
+  "late_policy_id",
+  "peer_review_required",
+  "originality_check_required",
+  "accommodations_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "LMS Course",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section",
+   "fieldtype": "Link",
+   "label": "Section",
+   "options": "LMS Course Section"
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "points_possible",
+   "fieldtype": "Float",
+   "label": "Points Possible",
+   "default": "0"
+  },
+  {
+   "fieldname": "due_at",
+   "fieldtype": "Datetime",
+   "label": "Due At"
+  },
+  {
+   "fieldname": "lock_at",
+   "fieldtype": "Datetime",
+   "label": "Lock At"
+  },
+  {
+   "fieldname": "allowed_attempts",
+   "fieldtype": "Int",
+   "label": "Allowed Attempts",
+   "default": "-1"
+  },
+  {
+   "fieldname": "group_assignment",
+   "fieldtype": "Check",
+   "label": "Group Assignment",
+   "default": "0"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Description"
+  },
+  {
+   "fieldname": "submission_types",
+   "fieldtype": "Small Text",
+   "label": "Submission Types (JSON)"
+  },
+  {
+   "fieldname": "section_extended",
+   "fieldtype": "Section Break",
+   "label": "Extended (Phase 7+)",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "late_policy_id",
+   "fieldtype": "Link",
+   "label": "Late Policy",
+   "options": "LMS Late Policy"
+  },
+  {
+   "fieldname": "peer_review_required",
+   "fieldtype": "Check",
+   "label": "Peer Review Required",
+   "default": "0"
+  },
+  {
+   "fieldname": "originality_check_required",
+   "fieldtype": "Check",
+   "label": "Originality Check (AI)",
+   "default": "0"
+  },
+  {
+   "fieldname": "accommodations_json",
+   "fieldtype": "JSON",
+   "label": "Accommodations JSON"
+  }
+ ]
+}

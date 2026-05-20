@@ -7,7 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "section", "student_id", "user", "role", "status",
-  "campus_id", "sis_sync_version", "last_synced_at"
+  "campus_id", "sis_sync_version", "last_synced_at",
+  "section_extended", "accommodations_json", "parent_observer_note"
  ],
  "fields": [
   {"fieldname": "section", "fieldtype": "Link", "label": "Course Section", "options": "LMS Course Section", "reqd": 1, "in_list_view": 1},
@@ -17,7 +18,10 @@
   {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "active\ninactive", "default": "active", "reqd": 1},
   {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"},
   {"fieldname": "sis_sync_version", "fieldtype": "Data", "label": "SIS Sync Version"},
-  {"fieldname": "last_synced_at", "fieldtype": "Datetime", "label": "Last Synced At"}
+  {"fieldname": "last_synced_at", "fieldtype": "Datetime", "label": "Last Synced At"},
+  {"fieldname": "section_extended", "fieldtype": "Section Break", "label": "Extended (Phase 7+)", "collapsible": 1},
+  {"fieldname": "accommodations_json", "fieldtype": "JSON", "label": "Accommodations JSON", "description": "extra_time_min, large_font, ..."},
+  {"fieldname": "parent_observer_note", "fieldtype": "Small Text", "label": "Parent Observer Note"}
  ],
  "module": "LMS",
  "name": "LMS Enrollment",

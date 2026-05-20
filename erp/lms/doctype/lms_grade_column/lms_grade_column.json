@@ -1,0 +1,135 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:LMS-GCOL-{#####}",
+ "name": "LMS Grade Column",
+ "field_order": [
+  "section",
+  "title",
+  "position",
+  "column_break_1",
+  "points_possible",
+  "column_type",
+  "assignment",
+  "quiz",
+  "discussion",
+  "sync_to_sis",
+  "muted",
+  "finalized",
+  "finalized_at",
+  "finalized_by",
+  "campus_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "section",
+   "fieldtype": "Link",
+   "label": "Section",
+   "options": "LMS Course Section",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "position",
+   "fieldtype": "Int",
+   "label": "Position",
+   "default": "0"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "points_possible",
+   "fieldtype": "Float",
+   "label": "Points Possible",
+   "default": "0"
+  },
+  {
+   "fieldname": "column_type",
+   "fieldtype": "Select",
+   "label": "Column Type",
+   "options": "assignment\nquiz\nmanual\ndiscussion",
+   "default": "manual",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "assignment",
+   "fieldtype": "Link",
+   "label": "Assignment",
+   "options": "LMS Assignment"
+  },
+  {
+   "fieldname": "quiz",
+   "fieldtype": "Link",
+   "label": "Quiz",
+   "options": "LMS Quiz"
+  },
+  {
+   "fieldname": "discussion",
+   "fieldtype": "Link",
+   "label": "Discussion",
+   "options": "LMS Discussion"
+  },
+  {
+   "fieldname": "sync_to_sis",
+   "fieldtype": "Check",
+   "label": "Sync to SIS",
+   "default": "0"
+  },
+  {
+   "fieldname": "muted",
+   "fieldtype": "Check",
+   "label": "Muted",
+   "default": "0"
+  },
+  {
+   "fieldname": "finalized",
+   "fieldtype": "Check",
+   "label": "Finalized",
+   "default": "0"
+  },
+  {
+   "fieldname": "finalized_at",
+   "fieldtype": "Datetime",
+   "label": "Finalized At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "finalized_by",
+   "fieldtype": "Link",
+   "label": "Finalized By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus"
+  }
+ ]
+}

@@ -1,0 +1,57 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:LMS-CPRG-{#####}",
+ "name": "LMS Content Progress",
+ "field_order": [
+  "student_id",
+  "module_item",
+  "completed",
+  "last_position"
+ ],
+ "fields": [
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "module_item",
+   "fieldtype": "Link",
+   "label": "Module Item",
+   "options": "LMS Module Item",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "completed",
+   "fieldtype": "Check",
+   "label": "Completed",
+   "default": "0"
+  },
+  {
+   "fieldname": "last_position",
+   "fieldtype": "Int",
+   "label": "Last Position",
+   "default": "0"
+  }
+ ]
+}

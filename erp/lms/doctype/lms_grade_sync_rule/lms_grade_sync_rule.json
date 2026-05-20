@@ -1,0 +1,44 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-GSR-{#####}",
+ "creation": "2026-05-20 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Grade Sync Rule",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "field_order": [
+  "grade_column", "section", "campus_id", "active", "column_break_1",
+  "target_type", "requires_approval", "force_override_allowed",
+  "section_report_card", "sis_actual_subject_id", "report_card_score_field",
+  "school_year", "semester_part",
+  "section_class_log", "class_log_field", "class_log_score_id",
+  "section_homeroom", "homeroom_class_log_score_id", "score_scale_note"
+ ],
+ "fields": [
+  {"fieldname": "grade_column", "fieldtype": "Link", "label": "Grade Column", "options": "LMS Grade Column", "reqd": 1, "unique": 1, "in_list_view": 1},
+  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section", "fetch_from": "grade_column.section", "read_only": 1, "in_list_view": 1},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus", "in_list_view": 1},
+  {"fieldname": "active", "fieldtype": "Check", "label": "Active", "default": "1", "in_list_view": 1},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "target_type", "fieldtype": "Select", "label": "Target Type", "options": "report_card_component\nclass_log_student\nhomeroom_score", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "requires_approval", "fieldtype": "Check", "label": "Requires Approval", "default": "1"},
+  {"fieldname": "force_override_allowed", "fieldtype": "Check", "label": "Allow Force Override", "default": "0"},
+  {"fieldname": "section_report_card", "fieldtype": "Section Break", "label": "Report Card", "depends_on": "eval:doc.target_type=='report_card_component'"},
+  {"fieldname": "sis_actual_subject_id", "fieldtype": "Link", "label": "SIS Actual Subject", "options": "SIS Actual Subject"},
+  {"fieldname": "report_card_score_field", "fieldtype": "Select", "label": "Score Field", "options": "final_average\nhs1_average\nhs2_average\nhs3_average\nsemester1_average", "default": "final_average"},
+  {"fieldname": "school_year", "fieldtype": "Link", "label": "School Year", "options": "SIS School Year"},
+  {"fieldname": "semester_part", "fieldtype": "Select", "label": "Semester", "options": "Mid Term 1\nEnd Term 1\nMid Term 2\nEnd Term 2"},
+  {"fieldname": "section_class_log", "fieldtype": "Section Break", "label": "Class Log", "depends_on": "eval:doc.target_type=='class_log_student'"},
+  {"fieldname": "class_log_field", "fieldtype": "Select", "label": "Class Log Field", "options": "homework\nbehavior\nparticipation"},
+  {"fieldname": "class_log_score_id", "fieldtype": "Link", "label": "Class Log Score", "options": "SIS Class Log Score"},
+  {"fieldname": "section_homeroom", "fieldtype": "Section Break", "label": "Homeroom", "depends_on": "eval:doc.target_type=='homeroom_score'"},
+  {"fieldname": "homeroom_class_log_score_id", "fieldtype": "Link", "label": "Homeroom Score Type", "options": "SIS Class Log Score"},
+  {"fieldname": "score_scale_note", "fieldtype": "Small Text", "label": "Score Scale", "description": "LMS điểm % chuyển thang 10 cho Report Card: score * 10 / points_possible", "read_only": 1, "default": "Auto scale to 0-10"}
+ ]
+}

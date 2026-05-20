@@ -1,0 +1,33 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-CAL-{#####}",
+ "creation": "2026-05-20 14:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Calendar Event",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "start",
+ "sort_order": "ASC",
+ "track_changes": 1,
+ "field_order": [
+  "course", "section", "title", "event_type", "start", "end", "all_day",
+  "column_break_1", "reference_doctype", "reference_name", "campus_id", "description"
+ ],
+ "fields": [
+  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section", "in_list_view": 1},
+  {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "event_type", "fieldtype": "Select", "label": "Event Type", "options": "due\nquiz\nassignment\nlive\ncustom", "default": "custom", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "start", "fieldtype": "Datetime", "label": "Start", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "end", "fieldtype": "Datetime", "label": "End"},
+  {"fieldname": "all_day", "fieldtype": "Check", "label": "All Day", "default": "0"},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "reference_doctype", "fieldtype": "Link", "label": "Reference DocType", "options": "DocType"},
+  {"fieldname": "reference_name", "fieldtype": "Dynamic Link", "label": "Reference", "options": "reference_doctype"},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"},
+  {"fieldname": "description", "fieldtype": "Small Text", "label": "Description"}
+ ]
+}

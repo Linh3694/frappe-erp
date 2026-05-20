@@ -82,3 +82,19 @@ def get_video_asset(asset_id=None):
 		return error_response("Không có quyền", code="FORBIDDEN")
 	except Exception as exc:
 		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["GET"])
+def get_playback_token(asset_id=None):
+	"""JWT signed URL cho HLS playback."""
+	try:
+		asset_id = asset_id or frappe.form_dict.get("asset_id")
+		if not asset_id:
+			return error_response("asset_id bắt buộc", code="VALIDATION_ERROR")
+		data = video_asset_service.get_playback_token(asset_id)
+		return single_item_response(data, message="Playback token issued")
+	except frappe.PermissionError:
+		return error_response("Không có quyền", code="FORBIDDEN")
+	except Exception as exc:
+		frappe.log_error(title="LMS get_playback_token", message=frappe.get_traceback())
+		return error_response(str(exc))

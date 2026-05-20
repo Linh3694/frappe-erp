@@ -1,5 +1,6 @@
 # Webhook / internal — lms-media-service, Nginx auth_request
 
+import jwt
 import frappe
 
 from erp.lms.config import get_media_internal_secret
@@ -24,6 +25,22 @@ def _validate_internal_token():
 		frappe.throw("Unauthorized", frappe.AuthenticationError)
 
 
+def _resolve_playback_from_jwt(token: str) -> tuple[str, str] | None:
+	"""Decode JWT playback token — trả (asset_id, user) hoặc None."""
+	secret = get_media_internal_secret()
+	if not secret or not token:
+		return None
+	try:
+		payload = jwt.decode(token, secret, algorithms=["HS256"])
+		asset_id = payload.get("asset_id")
+		user = payload.get("user")
+		if asset_id and user:
+			return asset_id, user
+	except jwt.PyJWTError:
+		return None
+	return None
+
+
 @frappe.whitelist(methods=["POST"])
 def transcode_callback():
 	"""
@@ -46,17 +63,32 @@ def transcode_callback():
 def validate_playback():
 	"""
 	Kiểm tra quyền phát video — Nginx auth_request hoặc media service.
-	Query/body: asset_id, user_id (optional — mặc định session user nếu có).
+	Query/body: asset_id, user_id (optional), token (JWT playback).
 	"""
 	try:
-		_validate_internal_token()
 		payload = frappe.request.json or frappe.form_dict
+		playback_token = (
+			payload.get("token")
+			or frappe.form_dict.get("token")
+			or frappe.get_request_header("X-Playback-Token")
+		)
+
 		asset_id = payload.get("asset_id") or payload.get("assetId")
 		user_id = payload.get("user_id") or payload.get("userId") or frappe.session.user
+
+		jwt_resolved = False
+		if playback_token:
+			resolved = _resolve_playback_from_jwt(playback_token)
+			if resolved:
+				asset_id, user_id = resolved
+				jwt_resolved = True
 
 		if not asset_id:
 			frappe.local.response.http_status_code = 400
 			return error_response("asset_id bắt buộc")
+
+		if not jwt_resolved:
+			_validate_internal_token()
 
 		if user_id and user_id != "Guest":
 			allowed = user_can_access_video_asset(user_id, asset_id)

@@ -162,6 +162,21 @@ permission_query_conditions = {
 	"LMS Course Section": "erp.lms.utils.permissions.lms_course_section_query",
 	"LMS Enrollment": "erp.lms.utils.permissions.lms_enrollment_query",
 	"LMS Video Asset": "erp.lms.utils.permissions.lms_video_asset_query",
+	"LMS Page": "erp.lms.utils.permissions.lms_course_query",
+	"LMS File": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Assignment": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Grade Column": "erp.lms.utils.permissions.lms_course_section_query",
+	"LMS Grade Group": "erp.lms.utils.permissions.lms_course_section_query",
+	"LMS Announcement": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Quiz": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Question Bank": "erp.lms.utils.permissions.lms_program_query",
+	"LMS Discussion": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Group": "erp.lms.utils.permissions.lms_course_section_query",
+	"LMS Calendar Event": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Outcome": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Mastery Rule": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Grade Sync Rule": "erp.lms.utils.permissions.lms_course_section_query",
+	"LMS Blueprint Course": "erp.lms.utils.permissions.lms_course_query",
 }
 
 has_permission = {
@@ -206,6 +221,23 @@ has_permission = {
 	"LMS Course Section": "erp.lms.utils.permissions.has_lms_campus_permission",
 	"LMS Enrollment": "erp.lms.utils.permissions.has_lms_campus_permission",
 	"LMS Video Asset": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Page": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS File": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Assignment": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Grade Column": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Grade Group": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Announcement": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Quiz": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Question Bank": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Discussion": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Group": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Calendar Event": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Outcome": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Mastery Rule": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Grade Sync Rule": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Grade Sync Log": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Blueprint Course": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Blueprint Sync Log": "erp.lms.utils.permissions.has_lms_campus_permission",
 }
 
 # DocType Class
@@ -837,7 +869,8 @@ scheduler_events = {
         ],
         # CRM Issue SLA — canh bao sap qua / qua han (15 phut: tranh bo lo Warning voi SLA ngan)
         "*/15 * * * *": [
-            "erp.api.crm.sla_scheduler.check_crm_issue_sla"
+            "erp.api.crm.sla_scheduler.check_crm_issue_sla",
+            "erp.lms.sync.enrollment_sync.sync_all_sections",
         ]
     },
     # Project Management - Auto-expire pending invitations

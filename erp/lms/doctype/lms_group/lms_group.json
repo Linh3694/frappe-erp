@@ -1,0 +1,22 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-GRP-{#####}",
+ "creation": "2026-05-20 14:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Group",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "field_order": ["section", "group_name", "max_members", "campus_id"],
+ "fields": [
+  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "group_name", "fieldtype": "Data", "label": "Group Name", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "max_members", "fieldtype": "Int", "label": "Max Members", "default": "4"},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"}
+ ]
+}

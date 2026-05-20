@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:LMS-QATT-{#####}",
+ "name": "LMS Quiz Attempt",
+ "field_order": [
+  "quiz",
+  "student_id",
+  "workflow_state",
+  "column_break_1",
+  "started_at",
+  "expires_at",
+  "finished_at",
+  "score",
+  "responses_json",
+  "question_order_json",
+  "feedback"
+ ],
+ "fields": [
+  {
+   "fieldname": "quiz",
+   "fieldtype": "Link",
+   "label": "Quiz",
+   "options": "LMS Quiz",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "workflow_state",
+   "fieldtype": "Select",
+   "label": "Workflow State",
+   "options": "in_progress\nsubmitted\ngraded",
+   "default": "in_progress",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started At"
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Expires At"
+  },
+  {
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "label": "Finished At"
+  },
+  {
+   "fieldname": "score",
+   "fieldtype": "Float",
+   "label": "Score"
+  },
+  {
+   "fieldname": "responses_json",
+   "fieldtype": "Small Text",
+   "label": "Responses (JSON)"
+  },
+  {
+   "fieldname": "question_order_json",
+   "fieldtype": "Small Text",
+   "label": "Question Order (JSON)"
+  },
+  {
+   "fieldname": "feedback",
+   "fieldtype": "Small Text",
+   "label": "Feedback"
+  }
+ ]
+}

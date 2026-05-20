@@ -1,0 +1,27 @@
+{
+ "actions": [],
+ "creation": "2026-05-20 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "module": "LMS",
+ "name": "LMS Settings",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "field_order": ["enable_grade_sync", "campus_overrides_json"],
+ "fields": [
+  {
+   "fieldname": "enable_grade_sync",
+   "fieldtype": "Check",
+   "label": "Enable Grade Sync (global)",
+   "default": "0"
+  },
+  {
+   "fieldname": "campus_overrides_json",
+   "fieldtype": "JSON",
+   "label": "Campus Overrides",
+   "description": "{\"campus-id\": {\"enable_grade_sync\": true}}"
+  }
+ ]
+}

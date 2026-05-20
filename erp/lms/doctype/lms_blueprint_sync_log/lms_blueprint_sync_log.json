@@ -1,0 +1,28 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-BPSL-{#####}",
+ "creation": "2026-05-20 16:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Blueprint Sync Log",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "synced_at",
+ "sort_order": "DESC",
+ "track_changes": 0,
+ "field_order": [
+  "blueprint_course", "child_course", "child_section", "status",
+  "synced_at", "synced_by", "diff_json"
+ ],
+ "fields": [
+  {"fieldname": "blueprint_course", "fieldtype": "Link", "label": "Blueprint", "options": "LMS Blueprint Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "child_course", "fieldtype": "Link", "label": "Child Course", "options": "LMS Course", "in_list_view": 1},
+  {"fieldname": "child_section", "fieldtype": "Link", "label": "Child Section", "options": "LMS Course Section"},
+  {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "success\npartial\nfailed", "default": "success", "in_list_view": 1},
+  {"fieldname": "synced_at", "fieldtype": "Datetime", "label": "Synced At", "in_list_view": 1},
+  {"fieldname": "synced_by", "fieldtype": "Link", "label": "Synced By", "options": "User"},
+  {"fieldname": "diff_json", "fieldtype": "JSON", "label": "Diff JSON"}
+ ]
+}

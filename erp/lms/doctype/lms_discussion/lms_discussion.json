@@ -1,0 +1,31 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-DISC-{#####}",
+ "creation": "2026-05-20 14:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Discussion",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "field_order": [
+  "course", "section", "title", "column_break_1",
+  "graded", "points_possible", "due_at", "locked", "campus_id", "description"
+ ],
+ "fields": [
+  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section", "in_list_view": 1},
+  {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "graded", "fieldtype": "Check", "label": "Graded", "default": "0"},
+  {"fieldname": "points_possible", "fieldtype": "Float", "label": "Points Possible", "default": "0"},
+  {"fieldname": "due_at", "fieldtype": "Datetime", "label": "Due At"},
+  {"fieldname": "locked", "fieldtype": "Check", "label": "Locked", "default": "0"},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"},
+  {"fieldname": "description", "fieldtype": "Text Editor", "label": "Description"}
+ ]
+}

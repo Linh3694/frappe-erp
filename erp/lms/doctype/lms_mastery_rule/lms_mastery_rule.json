@@ -1,0 +1,29 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-MST-{#####}",
+ "creation": "2026-05-20 14:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Mastery Rule",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "field_order": [
+  "course", "section", "module", "outcome", "quiz",
+  "mastery_threshold", "next_module", "campus_id"
+ ],
+ "fields": [
+  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section"},
+  {"fieldname": "module", "fieldtype": "Link", "label": "Module", "options": "LMS Module", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "outcome", "fieldtype": "Link", "label": "Outcome", "options": "LMS Outcome"},
+  {"fieldname": "quiz", "fieldtype": "Link", "label": "Quiz", "options": "LMS Quiz"},
+  {"fieldname": "mastery_threshold", "fieldtype": "Float", "label": "Mastery Threshold (%)", "default": "80", "reqd": 1},
+  {"fieldname": "next_module", "fieldtype": "Link", "label": "Next Module", "options": "LMS Module", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"}
+ ]
+}

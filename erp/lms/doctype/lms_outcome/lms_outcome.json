@@ -1,0 +1,28 @@
+{
+ "actions": [],
+ "autoname": "format:LMS-OUT-{#####}",
+ "creation": "2026-05-20 14:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "module": "LMS",
+ "name": "LMS Outcome",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "field_order": [
+  "course", "title", "mastery_points", "sis_sub_curriculum_id",
+  "sis_criteria_id", "description", "campus_id"
+ ],
+ "fields": [
+  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "mastery_points", "fieldtype": "Float", "label": "Mastery Points", "default": "1"},
+  {"fieldname": "sis_sub_curriculum_id", "fieldtype": "Link", "label": "SIS Sub Curriculum", "options": "SIS Sub Curriculum"},
+  {"fieldname": "sis_criteria_id", "fieldtype": "Link", "label": "SIS Evaluation Criteria", "options": "SIS Curriculum Evaluation Criteria"},
+  {"fieldname": "description", "fieldtype": "Small Text", "label": "Description"},
+  {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"}
+ ]
+}

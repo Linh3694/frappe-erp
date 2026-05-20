@@ -9,7 +9,10 @@
  "field_order": [
   "program", "title", "code", "course_state", "column_break_1",
   "campus_id", "sis_subject_id", "sis_actual_subject_id",
-  "is_blueprint", "blueprint_course_id", "description"
+  "is_blueprint", "blueprint_course_id", "description",
+  "section_extended", "language", "time_zone", "pace",
+  "catalog_visible", "self_enroll", "certificate_template",
+  "default_mastery_scale", "enable_gamification"
  ],
  "fields": [
   {"fieldname": "program", "fieldtype": "Link", "label": "Program", "options": "LMS Program", "in_list_view": 1},
@@ -22,7 +25,16 @@
   {"fieldname": "sis_actual_subject_id", "fieldtype": "Link", "label": "SIS Actual Subject", "options": "SIS Actual Subject"},
   {"fieldname": "is_blueprint", "fieldtype": "Check", "label": "Is Blueprint", "default": "0"},
   {"fieldname": "blueprint_course_id", "fieldtype": "Link", "label": "Blueprint Course", "options": "LMS Course"},
-  {"fieldname": "description", "fieldtype": "Text Editor", "label": "Description"}
+  {"fieldname": "description", "fieldtype": "Text Editor", "label": "Description"},
+  {"fieldname": "section_extended", "fieldtype": "Section Break", "label": "Extended (Phase 7+)", "collapsible": 1},
+  {"fieldname": "language", "fieldtype": "Select", "label": "Language", "options": "vi\nen\nbilingual", "default": "vi"},
+  {"fieldname": "time_zone", "fieldtype": "Data", "label": "Time Zone", "default": "Asia/Ho_Chi_Minh"},
+  {"fieldname": "pace", "fieldtype": "Select", "label": "Pace", "options": "self\ninstructor\nhybrid", "default": "instructor"},
+  {"fieldname": "catalog_visible", "fieldtype": "Check", "label": "Catalog Visible", "default": "0"},
+  {"fieldname": "self_enroll", "fieldtype": "Check", "label": "Allow Self Enroll", "default": "0"},
+  {"fieldname": "certificate_template", "fieldtype": "Link", "label": "Certificate Template", "options": "LMS Certificate Template"},
+  {"fieldname": "default_mastery_scale", "fieldtype": "Link", "label": "Mastery Scale", "options": "LMS Mastery Scale"},
+  {"fieldname": "enable_gamification", "fieldtype": "Check", "label": "Enable Gamification", "default": "0"}
  ],
  "module": "LMS",
  "name": "LMS Course",
