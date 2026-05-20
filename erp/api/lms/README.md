@@ -16,7 +16,9 @@
 | `assignment.py` | 2 | Assignment submit/grade |
 | `gradebook.py` | 2 | Gradebook grid |
 | `announcement.py` | 2 | Announcements |
-| `quiz.py` | 3 | Quiz attempt, auto-grade, essay grade |
-| `question.py` | 3 | Question bank CRUD, link quiz |
+| `quiz.py` | 3 | Quiz CRUD list/get, attempt, resume, auto-grade |
+| `question.py` | 3 | Question bank, link quiz, `ensure_question_bank` |
+| `file.py` | 2b | MinIO `lms-files` presign + LMS File catalog |
+| `discussion.py` | 4 | Forum, thread, pin/hide, grade participation |
 
-**Chưa implement (Phase 4–6):** discussions, calendar, blueprint, grade sync SIS, analytics, LTI, proctoring.
+**Chưa implement (Phase 4–6):** calendar, groups, blueprint FE, grade sync SIS, analytics, LTI, proctoring.

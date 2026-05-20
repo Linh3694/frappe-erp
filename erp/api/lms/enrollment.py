@@ -85,6 +85,11 @@ def list_enrollments(section=None):
 			order_by="modified desc",
 			limit=500,
 		)
+		for row in rows:
+			if row.student_id:
+				row["student_name"] = frappe.db.get_value(
+					"CRM Student", row.student_id, "student_name"
+				)
 		return success_response(data=rows)
 	except Exception as exc:
 		return error_response(str(exc))

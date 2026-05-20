@@ -32,7 +32,7 @@ def list_discussions(course_id: str = None, section_id: str = None, user: str | 
 	else:
 		frappe.throw("course_id hoặc section_id bắt buộc")
 
-	return frappe.get_all(
+	rows = frappe.get_all(
 		"LMS Discussion",
 		filters=filters,
 		fields=[
@@ -42,6 +42,12 @@ def list_discussions(course_id: str = None, section_id: str = None, user: str | 
 		order_by="modified desc",
 		limit=100,
 	)
+	for row in rows:
+		row["entry_count"] = frappe.db.count(
+			"LMS Discussion Entry",
+			{"discussion": row.name, "hidden": 0},
+		)
+	return rows
 
 
 def get_discussion(discussion_id: str, user: str | None = None) -> dict:
@@ -110,6 +116,12 @@ def list_entries(discussion_id: str, user: str | None = None) -> list:
 		entries = [e for e in entries if not e.hidden]
 	for e in entries:
 		e["author_name"] = frappe.db.get_value("User", e.author, "full_name") or e.author
+		sid = get_student_id_for_user(e.author)
+		if sid:
+			e["student_id"] = sid
+			e["student_name"] = (
+				frappe.db.get_value("CRM Student", sid, "student_name") or e["author_name"]
+			)
 	return entries
 
 

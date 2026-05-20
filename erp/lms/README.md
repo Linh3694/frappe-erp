@@ -52,6 +52,8 @@ API đầy đủ: [`lms-api.md`](../../../../lms-api.md) (repo root).
 | **0** | ✅ | Video Asset, media API, webhook, playback token JWT |
 | **1** | ✅ | Course shell, Page, File, Progress %, enrollment sync |
 | **2b** | ✅ | File upload **100% MinIO** `lms-files` (presigned PUT/GET) |
+| **3 FE** | ✅ | Quiz list/detail/taker (HS), builder + chấm (GV) |
+| **4 FE** | ✅ | Discussion forum, thread, moderation, graded |
 | **2** | ✅ | Assignment, Submission, Gradebook, Announcement |
 | **3** | ✅ | Quiz, Question API, Attempt, auto-grade, essay grade, time_limit/shuffle |
 | **4** | ✅ | Discussion, Group, Calendar (merge SIS TKB), Outcome, Mastery unlock |
