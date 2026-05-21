@@ -134,7 +134,9 @@ def delete_page():
 @frappe.whitelist(methods=["GET"])
 def get_page(page_id=None):
 	try:
-		page_id = page_id or frappe.form_dict.get("page_id")
+		page_id = _first_param("page_id", "pageId", kwarg=page_id)
+		if not page_id:
+			return error_response("page_id bắt buộc", code="VALIDATION_ERROR")
 		result = content_service.get_page(page_id)
 		return single_item_response(result)
 	except frappe.PermissionError:
