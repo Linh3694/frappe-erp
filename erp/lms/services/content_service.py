@@ -42,7 +42,7 @@ def get_module_tree(
 	user = user or frappe.session.user
 	resolved = resolve_section_id(section_id, course_id)
 	if not resolved:
-		frappe.throw("Không tìm thấy section cho khóa học", frappe.ValidationError)
+		frappe.throw("Không tìm thấy section cho khóa học")
 	section_id = resolved
 	validate_section_enrollment(section_id, user, min_role="observer")
 
