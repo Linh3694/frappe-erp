@@ -1,12 +1,13 @@
 """Nghiệp vụ LMS Video Asset."""
 
 import json
+import time
 import uuid
 from datetime import timedelta
 
 import jwt
 import frappe
-from frappe.utils import get_datetime, get_timestamp, now_datetime
+from frappe.utils import get_datetime, now_datetime
 
 from erp.lms.config import get_hls_playback_base, get_media_internal_secret, get_media_public_url
 from erp.lms.constants import (
@@ -24,10 +25,17 @@ from erp.utils.campus_utils import get_current_campus_from_context
 PLAYBACK_TOKEN_TTL_HOURS = 4
 
 
+def _datetime_to_unix(dt) -> int:
+	"""Chuyển datetime → unix seconds — KHÔNG dùng get_timestamp (chỉ lấy ngày, mất giờ)."""
+	if hasattr(dt, "timestamp"):
+		return int(dt.timestamp())
+	return int(time.mktime(dt.timetuple()))
+
+
 def _resolve_hls_manifest_url(doc) -> str:
 	"""URL master.m3u8 — ưu tiên proxy media-service khi bucket MinIO private."""
 	playback_base = get_hls_playback_base()
-	asset_key = doc.asset_id or doc.name
+	asset_key = doc.name
 	if playback_base:
 		return f"{playback_base}/{asset_key}/master.m3u8"
 
@@ -205,10 +213,11 @@ def get_playback_token(asset_id: str, user: str | None = None) -> dict:
 		frappe.throw("lms_media_internal_secret chưa cấu hình trong site_config")
 
 	expires_at = get_datetime(now_datetime()) + timedelta(hours=PLAYBACK_TOKEN_TTL_HOURS)
+	asset_key = doc.name
 	payload = {
-		"asset_id": doc.asset_id or asset_id,
+		"asset_id": asset_key,
 		"user": user,
-		"exp": int(get_timestamp(expires_at)),
+		"exp": _datetime_to_unix(expires_at),
 	}
 	token = jwt.encode(payload, secret, algorithm="HS256")
 	if isinstance(token, bytes):
