@@ -6,12 +6,23 @@ from erp.lms.services import content_service
 from erp.utils.api_response import error_response, single_item_response, success_response
 
 
+def _normalize_id(value) -> str | None:
+	"""Chuẩn hóa query param — bỏ chuỗi rỗng."""
+	if value is None:
+		return None
+	text = str(value).strip()
+	return text or None
+
+
 @frappe.whitelist(methods=["GET"])
 def get_module_tree(section_id=None, course_id=None):
 	try:
 		fd = frappe.form_dict
-		section_id = section_id or fd.get("section_id")
-		course_id = course_id or fd.get("course_id")
+		section_id = _normalize_id(section_id or fd.get("section_id"))
+		# course_id hoặc alias course (URL blueprint thường chỉ có course)
+		course_id = _normalize_id(
+			course_id or fd.get("course_id") or fd.get("course")
+		)
 		if not section_id and not course_id:
 			return error_response(
 				"section_id hoặc course_id bắt buộc",

@@ -38,6 +38,9 @@ from .helpers import (
     get_subject_approval_from_data_json,
     set_subject_approval_in_data_json,
     detect_board_type_for_subject,
+    clear_approval_rejection_metadata,
+    is_pending_reapproval,
+    REJECTION_METADATA_KEYS,
     
     # Counters
     compute_approval_counters,
@@ -69,6 +72,9 @@ __all__ = [
     "get_subject_approval_from_data_json",
     "set_subject_approval_in_data_json",
     "detect_board_type_for_subject",
+    "clear_approval_rejection_metadata",
+    "is_pending_reapproval",
+    "REJECTION_METADATA_KEYS",
     "compute_approval_counters",
     "update_report_counters",
     "check_user_is_level_1_approver",

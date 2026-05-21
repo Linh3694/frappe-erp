@@ -131,6 +131,50 @@ def add_approval_history(report, level: str, user: str, action: str, comment: st
 # SUBJECT APPROVAL DATA_JSON HELPERS
 # =============================================================================
 
+# Metadata trả về lưu trong data_json.{section}.approval
+REJECTION_METADATA_KEYS = (
+    "rejection_reason",
+    "rejected_from_level",
+    "rejected_by",
+    "rejected_at",
+)
+
+# Trạng thái coi là đã qua L2 — metadata trả về không còn ý nghĩa workflow
+L2_PASSED_CLEAR_REJECTION_STATUSES = (
+    ApprovalStatus.LEVEL_2_APPROVED,
+    ApprovalStatus.REVIEWED,
+    ApprovalStatus.PUBLISHED,
+)
+
+# Trạng thái thực sự đang chờ duyệt lại sau khi bị trả về
+PENDING_REAPPROVAL_STATUSES = (
+    ApprovalStatus.SUBMITTED,
+    ApprovalStatus.LEVEL_1_APPROVED,
+    ApprovalStatus.REJECTED,
+)
+
+
+def clear_approval_rejection_metadata(approval_info: dict) -> dict:
+    """Xóa metadata trả về khỏi approval (in-place)."""
+    if not approval_info:
+        return approval_info
+    for key in REJECTION_METADATA_KEYS:
+        approval_info.pop(key, None)
+    return approval_info
+
+
+def is_pending_reapproval(approval: dict) -> bool:
+    """
+    Môn đang thực sự chờ duyệt lại (L1/L2), không phải metadata cũ sau khi đã L2+.
+    """
+    if not approval:
+        return False
+    if not (approval.get("rejection_reason") and approval.get("rejected_from_level")):
+        return False
+    status = approval.get("status") or ApprovalStatus.DRAFT
+    return status in PENDING_REAPPROVAL_STATUSES
+
+
 def get_subject_approval_from_data_json(data_json: dict, section: str, subject_id: str) -> dict:
     """
     Lấy approval info từ data_json cho một môn cụ thể.

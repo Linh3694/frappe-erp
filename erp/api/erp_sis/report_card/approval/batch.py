@@ -40,6 +40,8 @@ from ..approval_helpers.helpers import (
     add_approval_history,
     send_report_card_notification,
     sync_data_json_with_db,
+    clear_approval_rejection_metadata,
+    L2_PASSED_CLEAR_REJECTION_STATUSES,
 )
 
 
@@ -198,7 +200,16 @@ def submit_class_reports():
                     subject_approval = get_subject_approval_from_data_json(data_json, section, subject_id)
                     current_subject_status = subject_approval.get("status", "draft")
                     
-                    if current_subject_status not in ["draft", "entry", "rejected"]:
+                    # Cho phép gửi lại sau L3 trả về (status level_1_approved + metadata trả về)
+                    allow_resubmit = current_subject_status in ["draft", "entry", "rejected"]
+                    if (
+                        not allow_resubmit
+                        and current_subject_status == "level_1_approved"
+                        and subject_approval.get("rejection_reason")
+                        and subject_approval.get("rejected_from_level")
+                    ):
+                        allow_resubmit = True
+                    if not allow_resubmit:
                         skipped_count += 1
                         continue
                     
@@ -209,9 +220,11 @@ def submit_class_reports():
                         "board_type": section
                     }
                     
-                    if current_subject_status == "rejected":
-                        new_approval["rejection_reason"] = None
-                        new_approval["rejected_from_level"] = None
+                    # Xóa metadata trả về khi GV gửi lại (kể cả L3 reject → level_1_approved)
+                    if subject_approval.get("rejection_reason") or current_subject_status in (
+                        "rejected", "level_1_approved"
+                    ):
+                        clear_approval_rejection_metadata(new_approval)
                     
                     data_json = set_subject_approval_in_data_json(data_json, section, subject_id, new_approval)
                     
@@ -228,9 +241,11 @@ def submit_class_reports():
                             "submitted_at": str(now),
                             "submitted_by": user
                         }
-                        if current_section_status == "rejected":
-                            new_approval["rejection_reason"] = None
-                            new_approval["rejected_from_level"] = None
+                        homeroom_approval = get_subject_approval_from_data_json(data_json, "homeroom", None)
+                        if homeroom_approval.get("rejection_reason") or current_section_status in (
+                            "rejected", "level_1_approved"
+                        ):
+                            clear_approval_rejection_metadata(new_approval)
                         
                         data_json = set_subject_approval_in_data_json(data_json, "homeroom", None, new_approval)
                 
@@ -648,6 +663,9 @@ def approve_class_reports():
                     new_approval["status"] = next_status
                     new_approval[f"level_{pending_level[-1]}_approved_at"] = str(now)
                     new_approval[f"level_{pending_level[-1]}_approved_by"] = user
+                    # L2 duyệt xong (hoặc L1 skip L2) → xóa metadata trả về, tránh GHOST ở L3
+                    if next_status in L2_PASSED_CLEAR_REJECTION_STATUSES:
+                        clear_approval_rejection_metadata(new_approval)
                     
                     data_json = set_subject_approval_in_data_json(data_json, board_type, subject_id, new_approval)
                     frappe.logger().info(f"[APPROVE] Auto-detected board_type={board_type} for subject {subject_id}")
@@ -662,6 +680,8 @@ def approve_class_reports():
                     if pending_level == "level_1" and next_status == "level_2_approved":
                         new_approval["level_2_approved_at"] = str(now)
                         new_approval["level_2_approved_by"] = user
+                    if next_status in L2_PASSED_CLEAR_REJECTION_STATUSES:
+                        clear_approval_rejection_metadata(new_approval)
                     
                     data_json = set_subject_approval_in_data_json(data_json, "homeroom", None, new_approval)
                 

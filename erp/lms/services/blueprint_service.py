@@ -61,6 +61,9 @@ def list_blueprints() -> list:
 			limit_page_length=1,
 		)
 		section_id = sections[0] if sections else None
+		# Khóa mẫu đăng ký thủ công có thể thiếu section — tự tạo để mở module builder
+		if not section_id:
+			section_id = _ensure_template_section(row.template_course)
 		child_count = frappe.db.count(
 			"LMS Course",
 			{"blueprint_course_id": row.template_course},
@@ -131,10 +134,48 @@ def create_blueprint_template(
 	}
 
 
+def _ensure_template_section(template_course_id: str) -> str:
+	"""Đảm bảo khóa mẫu có ít nhất một section — module builder cần section_id."""
+	existing = frappe.get_all(
+		"LMS Course Section",
+		filters={"course": template_course_id},
+		pluck="name",
+		order_by="creation asc",
+		limit_page_length=1,
+	)
+	if existing:
+		return existing[0]
+
+	from erp.utils.campus_utils import get_current_campus_from_context
+
+	campus_id = (
+		frappe.db.get_value("LMS Course", template_course_id, "campus_id")
+		or get_current_campus_from_context()
+	)
+	section = frappe.get_doc(
+		{
+			"doctype": "LMS Course Section",
+			"course": template_course_id,
+			"section_name": "Blueprint Template",
+			"campus_id": campus_id,
+			"auto_sync_enrollment": 0,
+		}
+	)
+	section.insert(ignore_permissions=True)
+	_ensure_teacher_enrollment(
+		section.name,
+		template_course_id,
+		campus_id,
+		frappe.session.user,
+	)
+	return section.name
+
+
 def register_blueprint(template_course_id: str, sync_settings: dict | None = None) -> dict:
 	"""Đăng ký khóa mẫu blueprint."""
 	require_lms_staff()
 	frappe.db.set_value("LMS Course", template_course_id, "is_blueprint", 1)
+	_ensure_template_section(template_course_id)
 
 	existing = frappe.db.get_value("LMS Blueprint Course", {"template_course": template_course_id})
 	if existing:

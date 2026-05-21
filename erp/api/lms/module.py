@@ -10,7 +10,15 @@ from erp.utils.api_response import error_response, single_item_response, success
 def create_module():
 	try:
 		require_lms_staff()
-		data = frappe.request.json or frappe.form_dict
+		data = dict(frappe.request.json or frappe.form_dict)
+		course = data.get("course") or data.get("course_id")
+		if not course:
+			return error_response(
+				"course hoặc course_id bắt buộc",
+				code="VALIDATION_ERROR",
+			)
+		data["course"] = course
+		data.pop("course_id", None)
 		doc = frappe.get_doc({"doctype": "LMS Module", **data})
 		doc.insert()
 		return single_item_response(doc.as_dict(), message="Module created")
