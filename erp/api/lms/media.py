@@ -38,11 +38,15 @@ def init_upload():
 		if not asset_id:
 			return error_response("asset_id bắt buộc", code="VALIDATION_ERROR")
 
+		file_size = data.get("file_size")
+		if file_size is not None:
+			file_size = int(file_size)
+
 		result = video_asset_service.start_upload(
 			asset_id=asset_id,
 			filename=data.get("filename"),
 			content_type=data.get("content_type"),
-			file_size=data.get("file_size"),
+			file_size=file_size,
 		)
 		return success_response(data=result, message="Upload initialized")
 	except Exception as exc:

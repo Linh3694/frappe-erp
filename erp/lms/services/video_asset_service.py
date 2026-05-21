@@ -52,6 +52,8 @@ def create_video_asset(
 
 def start_upload(asset_id: str, filename: str, content_type: str, file_size: int) -> dict:
 	require_lms_staff()
+	if not file_size or int(file_size) <= 0:
+		frappe.throw("file_size bắt buộc và phải > 0")
 	doc = frappe.get_doc("LMS Video Asset", asset_id)
 	if doc.status not in (VIDEO_STATUS_DRAFT, VIDEO_STATUS_FAILED, VIDEO_STATUS_UPLOADING):
 		frappe.throw(f"Không thể upload khi status={doc.status}")
@@ -70,6 +72,10 @@ def start_upload(asset_id: str, filename: str, content_type: str, file_size: int
 	doc.raw_object_key = media_data.get("rawObjectKey")
 	doc.upload_id = media_data.get("uploadId")
 	doc.save(ignore_permissions=True)
+
+	# Alias cho frontend — media service trả `parts`, không phải `partUrls`
+	if media_data.get("parts") and not media_data.get("partUrls"):
+		media_data = {**media_data, "partUrls": media_data["parts"]}
 
 	return {
 		"asset": doc.as_dict(),
