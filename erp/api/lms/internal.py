@@ -41,14 +41,18 @@ def _resolve_playback_from_jwt(token: str) -> tuple[str, str] | None:
 	return None
 
 
-@frappe.whitelist(methods=["POST"])
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 def transcode_callback():
 	"""
 	Webhook sau transcode — gọi từ lms-media-service.
-	Auth: Authorization: token <api_key>:<api_secret> (User API Key trong Frappe).
+	Auth: X-Internal-Token (cùng lms_media_internal_secret) hoặc API Key Frappe.
 	URL: /api/method/erp.api.lms.internal.transcode_callback
 	"""
 	try:
+		# Guest phải có internal token; API Key đã login thì bỏ qua
+		if frappe.session.user == "Guest":
+			_validate_internal_token()
+
 		payload = frappe.request.json or frappe.form_dict
 		data = video_asset_service.apply_transcode_callback(payload)
 		return success_response(data=data, message="Transcode callback processed")
