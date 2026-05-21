@@ -5,6 +5,7 @@ import json
 import frappe
 
 from erp.lms.services import video_asset_service
+from erp.lms.utils.request_params import first_param
 from erp.utils.api_response import error_response, success_response, single_item_response
 
 
@@ -92,8 +93,9 @@ def get_video_asset(asset_id=None):
 def list_video_assets():
 	"""Danh sách video asset theo course — picker Module Builder."""
 	try:
-		course = frappe.form_dict.get("course") or frappe.form_dict.get("course_id")
-		include_draft = frappe.form_dict.get("include_draft", "1") != "0"
+		course = first_param("course", "course_id", "courseId")
+		include_draft = first_param("include_draft") or "1"
+		include_draft = include_draft != "0"
 		data = video_asset_service.list_video_assets(course=course, include_draft=include_draft)
 		return success_response(data=data)
 	except frappe.PermissionError:
@@ -106,7 +108,7 @@ def list_video_assets():
 def get_playback_token(asset_id=None):
 	"""JWT signed URL cho HLS playback."""
 	try:
-		asset_id = asset_id or frappe.form_dict.get("asset_id")
+		asset_id = first_param("asset_id", "assetId", kwarg=asset_id)
 		if not asset_id:
 			return error_response("asset_id bắt buộc", code="VALIDATION_ERROR")
 		data = video_asset_service.get_playback_token(asset_id)
