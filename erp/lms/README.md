@@ -37,7 +37,8 @@ Ví dụ:
 {
   "lms_media_service_url": "http://172.16.20.21:5020",
   "lms_media_internal_secret": "same-as-lms-media-service-INTERNAL_SERVICE_SECRET",
-  "lms_media_public_url": "https://media.lms.wellspring.edu.vn"
+  "lms_media_public_url": "https://media.lms.wellspring.edu.vn",
+  "lms_hls_playback_base": "https://media.lms.wellspring.edu.vn/api/lms/hls"
 }
 ```
 

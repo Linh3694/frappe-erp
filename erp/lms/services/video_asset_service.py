@@ -8,7 +8,7 @@ import jwt
 import frappe
 from frappe.utils import get_datetime, get_timestamp, now_datetime
 
-from erp.lms.config import get_media_internal_secret, get_media_public_url
+from erp.lms.config import get_hls_playback_base, get_media_internal_secret, get_media_public_url
 from erp.lms.constants import (
 	VIDEO_STATUS_DRAFT,
 	VIDEO_STATUS_PROCESSING,
@@ -22,6 +22,29 @@ from erp.utils.campus_utils import get_current_campus_from_context
 
 # TTL token phát HLS (giờ)
 PLAYBACK_TOKEN_TTL_HOURS = 4
+
+
+def _resolve_hls_manifest_url(doc) -> str:
+	"""URL master.m3u8 — ưu tiên proxy media-service khi bucket MinIO private."""
+	playback_base = get_hls_playback_base()
+	asset_key = doc.asset_id or doc.name
+	if playback_base:
+		return f"{playback_base}/{asset_key}/master.m3u8"
+
+	if doc.playback_url:
+		return doc.playback_url.split("?")[0]
+
+	public_base = get_media_public_url()
+	if not public_base:
+		return ""
+
+	if doc.master_playlist:
+		return f"{public_base}/lms-hls/{str(doc.master_playlist).lstrip('/')}"
+
+	if doc.hls_prefix:
+		return f"{public_base}/lms-hls/{doc.hls_prefix}master.m3u8"
+
+	return f"{public_base}/lms-hls/hls/{asset_key}/master.m3u8"
 
 
 def create_video_asset(
@@ -191,13 +214,12 @@ def get_playback_token(asset_id: str, user: str | None = None) -> dict:
 	if isinstance(token, bytes):
 		token = token.decode()
 
-	playback_url = doc.playback_url or ""
-	if playback_url:
-		sep = "&" if "?" in playback_url else "?"
-		signed_url = f"{playback_url}{sep}token={token}"
-	else:
-		public_base = get_media_public_url()
-		signed_url = f"{public_base}/lms-hls/{doc.asset_id or asset_id}/master.m3u8?token={token}" if public_base else ""
+	manifest_url = _resolve_hls_manifest_url(doc)
+	if not manifest_url:
+		frappe.throw("Chưa cấu hình URL phát HLS (lms_hls_playback_base hoặc lms_media_public_url)")
+
+	sep = "&" if "?" in manifest_url else "?"
+	signed_url = f"{manifest_url}{sep}token={token}"
 
 	return {
 		"token": token,

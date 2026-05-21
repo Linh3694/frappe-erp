@@ -111,6 +111,15 @@ def get_media_public_url() -> str:
 	).rstrip("/")
 
 
+def get_hls_playback_base() -> str:
+	"""URL public HLS qua media-service proxy — VD https://media.lms.../api/lms/hls"""
+	return (
+		frappe.conf.get("lms_hls_playback_base")
+		or os.environ.get("LMS_HLS_PLAYBACK_BASE")
+		or ""
+	).rstrip("/")
+
+
 def get_ai_service_url() -> str:
 	return (
 		frappe.conf.get("lms_ai_service_url")
