@@ -7,12 +7,20 @@ from erp.utils.api_response import error_response, single_item_response, success
 
 
 @frappe.whitelist(methods=["GET"])
-def get_module_tree(section_id=None):
+def get_module_tree(section_id=None, course_id=None):
 	try:
-		section_id = section_id or frappe.form_dict.get("section_id")
-		if not section_id:
-			return error_response("section_id bắt buộc", code="VALIDATION_ERROR")
-		data = content_service.get_module_tree(section_id)
+		fd = frappe.form_dict
+		section_id = section_id or fd.get("section_id")
+		course_id = course_id or fd.get("course_id")
+		if not section_id and not course_id:
+			return error_response(
+				"section_id hoặc course_id bắt buộc",
+				code="VALIDATION_ERROR",
+			)
+		data = content_service.get_module_tree(
+			section_id or "",
+			course_id=course_id,
+		)
 		return success_response(data=data)
 	except frappe.PermissionError:
 		return error_response("Không có quyền", code="FORBIDDEN")

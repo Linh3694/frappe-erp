@@ -8,6 +8,27 @@ from frappe.utils import now_datetime
 from erp.lms.utils.permissions import require_lms_staff
 
 
+def _ensure_teacher_enrollment(section_id: str, course_id: str, campus_id: str, user: str):
+	"""Enrollment teacher cho user hiện tại — tránh lỗi quyền khi soạn blueprint."""
+	if not user or user == "Guest":
+		return
+	if frappe.db.exists(
+		"LMS Enrollment",
+		{"section": section_id, "user": user, "status": "active"},
+	):
+		return
+	frappe.get_doc(
+		{
+			"doctype": "LMS Enrollment",
+			"section": section_id,
+			"user": user,
+			"role": "teacher",
+			"status": "active",
+			"campus_id": campus_id,
+		}
+	).insert(ignore_permissions=True)
+
+
 DEFAULT_SYNC_SETTINGS = {
 	"modules": True,
 	"pages": True,
@@ -98,6 +119,9 @@ def create_blueprint_template(
 		}
 	)
 	section.insert(ignore_permissions=True)
+
+	# Gán người tạo làm GV trên section mẫu — mở module builder trên portal
+	_ensure_teacher_enrollment(section.name, course.name, campus_id, frappe.session.user)
 
 	blueprint = register_blueprint(course.name, sync_settings=sync_settings)
 	return {

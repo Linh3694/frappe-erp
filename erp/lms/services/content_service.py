@@ -7,9 +7,43 @@ from erp.lms.utils.enrollment import get_student_id_for_user, validate_section_e
 from erp.lms.utils.permissions import is_lms_staff, require_lms_staff
 
 
-def get_module_tree(section_id: str, user: str | None = None) -> dict:
+def resolve_section_id(section_id: str | None = None, course_id: str | None = None) -> str | None:
+	"""
+	Chuẩn hóa section_id — URL đôi khi truyền LMS Course id vào :sectionId (blueprint).
+	"""
+	if section_id and frappe.db.exists("LMS Course Section", section_id):
+		return section_id
+
+	course_candidate = None
+	if section_id and frappe.db.exists("LMS Course", section_id):
+		course_candidate = section_id
+	elif course_id and frappe.db.exists("LMS Course", course_id):
+		course_candidate = course_id
+
+	if course_candidate:
+		sections = frappe.get_all(
+			"LMS Course Section",
+			filters={"course": course_candidate},
+			pluck="name",
+			order_by="creation asc",
+			limit_page_length=1,
+		)
+		return sections[0] if sections else None
+
+	return None
+
+
+def get_module_tree(
+	section_id: str,
+	user: str | None = None,
+	course_id: str | None = None,
+) -> dict:
 	"""Cây module + items + trạng thái hoàn thành cho user."""
 	user = user or frappe.session.user
+	resolved = resolve_section_id(section_id, course_id)
+	if not resolved:
+		frappe.throw("Không tìm thấy section cho khóa học", frappe.ValidationError)
+	section_id = resolved
 	validate_section_enrollment(section_id, user, min_role="observer")
 
 	course_id = frappe.db.get_value("LMS Course Section", section_id, "course")
