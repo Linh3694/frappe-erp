@@ -74,11 +74,11 @@ def complete_upload():
 		return error_response(str(exc))
 
 
-@frappe.whitelist(methods=["GET"])
+@frappe.whitelist(methods=["GET", "POST"])
 def get_video_asset(asset_id=None):
 	"""Chi tiết video asset + playback URL (nếu ready)."""
 	try:
-		asset_id = asset_id or frappe.form_dict.get("asset_id")
+		asset_id = first_param("asset_id", "assetId", "name", kwarg=asset_id)
 		if not asset_id:
 			return error_response("asset_id bắt buộc", code="VALIDATION_ERROR")
 		data = video_asset_service.get_video_asset_for_user(asset_id)
@@ -104,7 +104,7 @@ def list_video_assets():
 		return error_response(str(exc))
 
 
-@frappe.whitelist(methods=["GET"])
+@frappe.whitelist(methods=["GET", "POST"])
 def get_playback_token(asset_id=None):
 	"""JWT signed URL cho HLS playback."""
 	try:

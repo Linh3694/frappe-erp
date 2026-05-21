@@ -30,15 +30,28 @@ def safe_json_body() -> dict:
 
 
 def first_param(*keys: str, kwarg: str | None = None) -> str | None:
-	"""Đọc param từ kwargs, form_dict, JSON body, request.args."""
+	"""Đọc param từ kwargs, form_dict, request.args, query_string."""
 	n = normalize_id(kwarg)
 	if n:
 		return n
 	sources = []
 	if frappe.form_dict:
 		sources.append(frappe.form_dict)
-	if getattr(frappe.local, "request", None) and getattr(frappe.request, "args", None):
-		sources.append(frappe.request.args)
+	req = getattr(frappe.local, "request", None)
+	if req:
+		if getattr(req, "args", None):
+			sources.append(req.args)
+		# Fallback trực tiếp từ query string (một số proxy/nginx làm lệch form_dict)
+		qs = getattr(req, "query_string", b"") or b""
+		if qs:
+			try:
+				from urllib.parse import parse_qs
+
+				for key, vals in parse_qs(qs.decode("utf-8", errors="ignore")).items():
+					if vals:
+						sources.append({key: vals[0]})
+			except Exception:
+				pass
 	body = safe_json_body()
 	if body:
 		sources.append(body)
