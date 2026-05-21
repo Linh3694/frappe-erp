@@ -10,19 +10,49 @@ def _normalize_id(value) -> str | None:
 	"""Chuẩn hóa query param — bỏ chuỗi rỗng."""
 	if value is None:
 		return None
+	if isinstance(value, (list, tuple)):
+		for item in value:
+			n = _normalize_id(item)
+			if n:
+				return n
+		return None
 	text = str(value).strip()
 	return text or None
 
 
-@frappe.whitelist(methods=["GET"])
+def _first_param(*keys: str, kwarg: str | None = None) -> str | None:
+	"""Đọc param từ kwargs, form_dict, JSON body, request.args (GET đôi khi lệch form_dict)."""
+	n = _normalize_id(kwarg)
+	if n:
+		return n
+	sources = []
+	if frappe.form_dict:
+		sources.append(frappe.form_dict)
+	if getattr(frappe.local, "request", None) and getattr(frappe.request, "args", None):
+		sources.append(frappe.request.args)
+	body = getattr(getattr(frappe.local, "request", None), "json", None) or {}
+	if isinstance(body, dict):
+		sources.append(body)
+	for key in keys:
+		for src in sources:
+			try:
+				val = src.get(key) if hasattr(src, "get") else None
+			except Exception:
+				val = None
+			n = _normalize_id(val)
+			if n:
+				return n
+	return None
+
+
+@frappe.whitelist(methods=["GET", "POST"])
 def get_module_tree(section_id=None, course_id=None):
 	try:
-		fd = frappe.form_dict
-		section_id = _normalize_id(section_id or fd.get("section_id"))
-		# course_id hoặc alias course (URL blueprint thường chỉ có course)
-		course_id = _normalize_id(
-			course_id or fd.get("course_id") or fd.get("course")
-		)
+		section_id = _first_param("section_id", "sectionId", kwarg=section_id)
+		course_id = _first_param("course_id", "course", "courseId", kwarg=course_id)
+		# :sectionId trên portal có thể là LMS Course id (blueprint)
+		if section_id and not course_id and frappe.db.exists("LMS Course", section_id):
+			course_id = section_id
 		if not section_id and not course_id:
 			return error_response(
 				"section_id hoặc course_id bắt buộc",

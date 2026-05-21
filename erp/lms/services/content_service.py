@@ -28,7 +28,14 @@ def resolve_section_id(section_id: str | None = None, course_id: str | None = No
 			order_by="creation asc",
 			limit_page_length=1,
 		)
-		return sections[0] if sections else None
+		if sections:
+			return sections[0]
+		# Khóa blueprint có thể chưa có section (đăng ký thủ công)
+		if frappe.db.get_value("LMS Course", course_candidate, "is_blueprint"):
+			from erp.lms.services.blueprint_service import _ensure_template_section
+
+			return _ensure_template_section(course_candidate)
+		return None
 
 	return None
 
