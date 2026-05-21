@@ -105,6 +105,32 @@ def create_page():
 		return error_response(str(exc))
 
 
+@frappe.whitelist(methods=["POST", "PUT"])
+def update_page():
+	try:
+		data = frappe.request.json or frappe.form_dict
+		page_id = data.get("page_id") or data.get("name")
+		if not page_id:
+			return error_response("page_id bắt buộc", code="VALIDATION_ERROR")
+		result = content_service.update_page(page_id, data)
+		return single_item_response(result, message="Page updated")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["POST", "DELETE"])
+def delete_page():
+	try:
+		data = frappe.request.json or frappe.form_dict
+		page_id = data.get("page_id") or data.get("name") or frappe.form_dict.get("page_id")
+		if not page_id:
+			return error_response("page_id bắt buộc", code="VALIDATION_ERROR")
+		result = content_service.delete_page(page_id)
+		return success_response(data=result, message="Page deleted")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
 @frappe.whitelist(methods=["GET"])
 def get_page(page_id=None):
 	try:

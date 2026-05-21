@@ -85,6 +85,20 @@ def get_video_asset(asset_id=None):
 
 
 @frappe.whitelist(methods=["GET"])
+def list_video_assets():
+	"""Danh sách video asset theo course — picker Module Builder."""
+	try:
+		course = frappe.form_dict.get("course") or frappe.form_dict.get("course_id")
+		include_draft = frappe.form_dict.get("include_draft", "1") != "0"
+		data = video_asset_service.list_video_assets(course=course, include_draft=include_draft)
+		return success_response(data=data)
+	except frappe.PermissionError:
+		return error_response("Không có quyền", code="FORBIDDEN")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["GET"])
 def get_playback_token(asset_id=None):
 	"""JWT signed URL cho HLS playback."""
 	try:

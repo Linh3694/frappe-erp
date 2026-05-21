@@ -140,6 +140,27 @@ def get_video_asset_for_user(asset_id: str, user: str | None = None) -> dict:
 	return frappe.get_doc("LMS Video Asset", asset_id).as_dict()
 
 
+def list_video_assets(course: str | None = None, include_draft: bool = True) -> list:
+	"""Danh sách video asset cho picker Module Builder."""
+	require_lms_staff()
+	filters = {}
+	if course:
+		filters["course"] = course
+	rows = frappe.get_all(
+		"LMS Video Asset",
+		filters=filters,
+		fields=[
+			"name", "title", "course", "status", "duration_sec",
+			"filename", "asset_id", "modified",
+		],
+		order_by="modified desc",
+		limit_page_length=200,
+	)
+	if not include_draft:
+		rows = [r for r in rows if r.status == VIDEO_STATUS_READY]
+	return rows
+
+
 def get_playback_token(asset_id: str, user: str | None = None) -> dict:
 	"""JWT ngắn hạn cho HLS playback — enrollment đã kiểm tra."""
 	user = user or frappe.session.user
