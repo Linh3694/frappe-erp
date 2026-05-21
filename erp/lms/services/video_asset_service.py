@@ -30,7 +30,7 @@ def create_video_asset(
 	filename=None,
 	content_type=None,
 	file_size=None,
-) -> frappe.Document:
+):
 	require_lms_staff()
 	campus_id = get_current_campus_from_context()
 	doc = frappe.get_doc(
