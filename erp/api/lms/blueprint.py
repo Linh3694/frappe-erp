@@ -7,19 +7,6 @@ from erp.utils.api_response import error_response, single_item_response, success
 
 
 @frappe.whitelist(methods=["POST"])
-def register_blueprint():
-	try:
-		data = frappe.request.json or frappe.form_dict
-		result = blueprint_service.register_blueprint(
-			template_course_id=data.get("template_course_id"),
-			sync_settings=data.get("sync_settings"),
-		)
-		return single_item_response(result, message="Blueprint registered")
-	except Exception as exc:
-		return error_response(str(exc))
-
-
-@frappe.whitelist(methods=["POST"])
 def sync_to_sections():
 	try:
 		data = frappe.request.json or frappe.form_dict
