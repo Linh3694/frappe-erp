@@ -161,3 +161,9 @@ def set_current_user_campus(campus):
     """Set current user's selected campus"""
     from ..doctype.sis_user_campus_preference.sis_user_campus_preference import SISUserCampusPreference
     return SISUserCampusPreference.set_current_campus(campus)
+
+
+def create_user_campus_preference(doc, method=None):
+    """Hook User.after_insert — tạo campus preference khi user mới được tạo."""
+    from ..doctype.sis_user_campus_preference.sis_user_campus_preference import SISUserCampusPreference
+    SISUserCampusPreference.get_or_create_preference(doc.name)

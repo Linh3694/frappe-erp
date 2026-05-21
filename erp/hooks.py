@@ -258,7 +258,8 @@ has_permission = {
 doc_events = {
 	"User": {
 		"after_insert": [
-			"erp.common.user_hooks.trigger_user_webhooks"
+			"erp.common.user_hooks.trigger_user_webhooks",
+			"erp.sis.utils.campus_permissions.create_user_campus_preference",
 		],
 		"on_update": [
 			"erp.common.user_hooks.trigger_user_webhooks"
