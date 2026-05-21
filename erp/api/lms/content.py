@@ -20,6 +20,18 @@ def _normalize_id(value) -> str | None:
 	return text or None
 
 
+def _safe_json_body() -> dict:
+	"""Chỉ parse JSON khi Content-Type đúng — tránh 415 trên GET."""
+	req = getattr(frappe.local, "request", None)
+	if not req or not getattr(req, "is_json", False):
+		return {}
+	try:
+		data = req.get_json(silent=True)
+	except Exception:
+		return {}
+	return data if isinstance(data, dict) else {}
+
+
 def _first_param(*keys: str, kwarg: str | None = None) -> str | None:
 	"""Đọc param từ kwargs, form_dict, JSON body, request.args (GET đôi khi lệch form_dict)."""
 	n = _normalize_id(kwarg)
@@ -30,8 +42,8 @@ def _first_param(*keys: str, kwarg: str | None = None) -> str | None:
 		sources.append(frappe.form_dict)
 	if getattr(frappe.local, "request", None) and getattr(frappe.request, "args", None):
 		sources.append(frappe.request.args)
-	body = getattr(getattr(frappe.local, "request", None), "json", None) or {}
-	if isinstance(body, dict):
+	body = _safe_json_body()
+	if body:
 		sources.append(body)
 	for key in keys:
 		for src in sources:
