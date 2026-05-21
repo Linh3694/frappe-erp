@@ -18,6 +18,7 @@ def list_courses():
 			per_page=per_page,
 			course_state=frappe.form_dict.get("course_state"),
 			program=frappe.form_dict.get("program"),
+			exclude_blueprint=bool(int(frappe.form_dict.get("exclude_blueprint") or 0)),
 		)
 		return paginated_response(rows, page, total, per_page)
 	except Exception as exc:

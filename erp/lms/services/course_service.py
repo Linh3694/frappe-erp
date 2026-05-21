@@ -7,13 +7,19 @@ from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import paginated_response
 
 
-def list_courses(page=1, per_page=20, course_state=None, program=None):
+def list_courses(page=1, per_page=20, course_state=None, program=None, exclude_blueprint=False):
 	user = frappe.session.user
 	filters = {}
 	if course_state:
 		filters["course_state"] = course_state
 	if program:
 		filters["program"] = program
+	if exclude_blueprint:
+		# Loại khóa mẫu — theo cờ is_blueprint và danh sách LMS Blueprint Course
+		filters["is_blueprint"] = 0
+		template_ids = frappe.get_all("LMS Blueprint Course", pluck="template_course")
+		if template_ids:
+			filters["name"] = ["not in", template_ids]
 
 	if is_lms_staff(user):
 		campus_id = get_current_campus_from_context()
@@ -49,6 +55,8 @@ def list_courses(page=1, per_page=20, course_state=None, program=None):
 			"course_state",
 			"campus_id",
 			"program",
+			"is_blueprint",
+			"blueprint_course_id",
 			"modified",
 		],
 		order_by="modified desc",
@@ -106,6 +114,9 @@ def get_course_detail(course_id: str) -> dict:
 
 def create_course(data: dict) -> dict:
 	require_lms_staff()
+	data = dict(data or {})
+	# Khóa thật — không cho tạo nhầm thành khóa mẫu từ API course
+	data["is_blueprint"] = 0
 	doc = frappe.get_doc({"doctype": "LMS Course", **data})
 	if not doc.campus_id:
 		doc.campus_id = get_current_campus_from_context()
