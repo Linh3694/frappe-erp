@@ -10,6 +10,11 @@ LMS_STAFF_ROLES = frozenset(
 		"SIS Manager",
 		"SIS Teacher",
 		"Academic Admin",
+		# Role LMS chuẩn (Desk)
+		"LMS Teacher",
+		"LMS TA",
+		"LMS Designer",
+		"LMS Admin",
 	}
 )
 

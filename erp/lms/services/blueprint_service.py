@@ -16,6 +16,97 @@ DEFAULT_SYNC_SETTINGS = {
 }
 
 
+def list_blueprints() -> list:
+	"""Danh sách blueprint đã đăng ký."""
+	require_lms_staff()
+	rows = frappe.get_all(
+		"LMS Blueprint Course",
+		fields=["name", "template_course", "modified"],
+		order_by="modified desc",
+	)
+	result = []
+	for row in rows:
+		course = frappe.db.get_value(
+			"LMS Course",
+			row.template_course,
+			["title", "code", "course_state", "is_blueprint"],
+			as_dict=True,
+		)
+		sections = frappe.get_all(
+			"LMS Course Section",
+			filters={"course": row.template_course},
+			pluck="name",
+			order_by="creation asc",
+			limit_page_length=1,
+		)
+		section_id = sections[0] if sections else None
+		child_count = frappe.db.count(
+			"LMS Course",
+			{"blueprint_course_id": row.template_course},
+		)
+		result.append(
+			{
+				"blueprint_id": row.name,
+				"template_course": row.template_course,
+				"template_section_id": section_id,
+				"title": (course or {}).get("title"),
+				"code": (course or {}).get("code"),
+				"course_state": (course or {}).get("course_state"),
+				"child_course_count": child_count,
+				"modified": row.modified,
+			}
+		)
+	return result
+
+
+def create_blueprint_template(
+	title: str,
+	code: str | None = None,
+	program: str | None = None,
+	sync_settings: dict | None = None,
+) -> dict:
+	"""
+	Tạo khóa mẫu blueprint: LMS Course + section template + đăng ký LMS Blueprint Course.
+	"""
+	require_lms_staff()
+	if not title or not str(title).strip():
+		frappe.throw("title bắt buộc")
+
+	from erp.utils.campus_utils import get_current_campus_from_context
+
+	campus_id = get_current_campus_from_context()
+	course = frappe.get_doc(
+		{
+			"doctype": "LMS Course",
+			"title": str(title).strip(),
+			"code": (code or "").strip(),
+			"course_state": "draft",
+			"is_blueprint": 1,
+			"program": program,
+			"campus_id": campus_id,
+		}
+	)
+	course.insert(ignore_permissions=True)
+
+	section = frappe.get_doc(
+		{
+			"doctype": "LMS Course Section",
+			"course": course.name,
+			"section_name": "Blueprint Template",
+			"campus_id": campus_id,
+			"auto_sync_enrollment": 0,
+		}
+	)
+	section.insert(ignore_permissions=True)
+
+	blueprint = register_blueprint(course.name, sync_settings=sync_settings)
+	return {
+		"course": course.as_dict(),
+		"section": section.as_dict(),
+		"blueprint": blueprint,
+	}
+
+
 def register_blueprint(template_course_id: str, sync_settings: dict | None = None) -> dict:
 	"""Đăng ký khóa mẫu blueprint."""
 	require_lms_staff()

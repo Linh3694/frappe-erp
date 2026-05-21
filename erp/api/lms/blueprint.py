@@ -35,6 +35,33 @@ def sync_to_sections():
 
 
 @frappe.whitelist(methods=["GET"])
+def list_blueprints():
+	try:
+		rows = blueprint_service.list_blueprints()
+		return success_response(data=rows)
+	except Exception as exc:
+		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["POST"])
+def create_blueprint_template():
+	try:
+		data = frappe.request.json or frappe.form_dict
+		title = data.get("title")
+		if not title:
+			return error_response("title bắt buộc", code="VALIDATION_ERROR")
+		result = blueprint_service.create_blueprint_template(
+			title=title,
+			code=data.get("code"),
+			program=data.get("program"),
+			sync_settings=data.get("sync_settings"),
+		)
+		return single_item_response(result, message="Blueprint template created")
+	except Exception as exc:
+		return error_response(str(exc))
+
+
+@frappe.whitelist(methods=["GET"])
 def list_sync_logs():
 	try:
 		fd = frappe.form_dict
