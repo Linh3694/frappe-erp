@@ -1,4 +1,0 @@
-frappe
-sis
-parent_portal
-erp
