@@ -1,0 +1,41 @@
+{
+    "frappe": {
+        "resolution": {
+            "commit_hash": null,
+            "branch": null
+        },
+        "required": [],
+        "idx": 1,
+        "version": "15.74.2"
+    },
+    "parent_portal": {
+        "is_repo": true,
+        "resolution": {
+            "commit_hash": "4adc447293e3a03b23819d4e5c0cd1829bcb32b5",
+            "branch": "main"
+        },
+        "required": [],
+        "idx": 2,
+        "version": "0.0.1"
+    },
+    "erp": {
+        "is_repo": true,
+        "resolution": {
+            "commit_hash": "ce7035935b7dcb994d61ae39d26fb3d265e05962",
+            "branch": "develop"
+        },
+        "required": [],
+        "idx": 3,
+        "version": "0.0.1"
+    },
+    "sis": {
+        "is_repo": true,
+        "resolution": {
+            "commit_hash": "d238df5237c8342ed79788505e4b97378ac29f07",
+            "branch": "main"
+        },
+        "required": [],
+        "idx": 4,
+        "version": "0.0.1"
+    }
+}

@@ -1,0 +1,293 @@
+# ================== Upstreams ==================
+upstream sis_app {
+    ip_hash;
+    server 172.16.20.110:8000 max_fails=3 fail_timeout=10s;
+}
+upstream sis_socketio {
+    ip_hash;
+    server 172.16.20.110:9000 max_fails=3 fail_timeout=10s;
+}
+upstream ticket_service {
+    ip_hash;
+    server 172.16.20.113:5001 max_fails=3 fail_timeout=10s;
+}
+upstream inventory_service {
+    ip_hash;
+    server 172.16.20.113:5010 max_fails=3 fail_timeout=10s;
+}
+
+upstream attendance_service {
+    ip_hash;
+    server 172.16.20.114:5001 max_fails=3 fail_timeout=10s;
+}
+
+upstream pdf_service {
+    ip_hash;
+    server 172.16.20.113:5020 max_fails=3 fail_timeout=10s;
+}
+upstream email_service {
+    ip_hash;
+    server 172.16.20.113:5030 max_fails=3 fail_timeout=10s;
+}
+
+# ================== AI Agent Service ==================
+upstream ai_agent_service {
+    ip_hash;
+    server 172.16.20.115:9000 max_fails=3 fail_timeout=10s;
+}
+
+
+# ================== WebSocket helper ==================
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# ================== SIS DOMAIN ==================
+server {
+    listen 80;
+    server_name admin.sis.wellspring.edu.vn;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 80;
+    server_name admin.sis.wellspring.edu.vn;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name admin.sis.wellspring.edu.vn;
+
+    ssl_certificate     /etc/letsencrypt/live/admin.sis.wellspring.edu.vn/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/admin.sis.wellspring.edu.vn/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location /assets/ {
+        alias /var/www/sis_assets/;
+        try_files $uri =404;
+        access_log off;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+    # Avatar images: disable caching to ensure updates reflect immediately on mobile
+    location ^~ /files/Avatar/ {
+        alias /var/www/frappe_files/;
+        try_files $uri @frappe_fallback;
+        access_log off;
+        expires -1;
+        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
+        add_header X-Cache-Bypass "avatar" always;
+    }
+
+    location /files/ {
+        # Serve files directly from NFS mount
+        alias /var/www/frappe_files/;
+        try_files $uri @frappe_fallback;
+        
+        # Caching and performance
+        access_log off;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        
+        # Security headers
+        add_header X-Content-Type-Options nosniff;
+        add_header X-Frame-Options DENY;
+    }
+    
+    # Fallback to Frappe app nếu file không có trên disk
+    location @frappe_fallback {
+        proxy_pass http://sis_app;
+        proxy_set_header Host admin.sis.wellspring.edu.vn;   
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 120s;
+    }
+    location = /api/method/erp.api.erp_common_user.microsoft_auth.microsoft_webhook {
+        default_type text/plain;
+
+   # Echo nguyên validationToken (đúng như Microsoft gửi)
+   #       if ($arg_validationToken) { return 200 $arg_validationToken; }
+
+   # Reachability tests
+   #      if ($request_method = HEAD)    { return 200 ""; }
+   #      if ($request_method = OPTIONS) { return 200 ""; }
+   #      if ($request_method = GET)     { return 200 ""; }
+
+  # Notifications thật -> Frappe
+        proxy_pass http://sis_app;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+    # Web app
+    location / {
+        proxy_pass http://sis_app;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+
+    # Socket.IO
+    location /socket.io/ {
+        proxy_pass http://sis_socketio;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_read_timeout 300s;
+    }
+# Ticket Service
+    location /api/ticket/ {
+        proxy_pass http://ticket_service;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+
+# Inventory Service
+    location /api/inventory/ {
+        proxy_pass http://inventory_service;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+    }
+
+    # WebSocket for Ticket Service
+    location /ws {
+        proxy_pass http://ticket_service;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+# Attendance Service
+    location /api/attendance/ {
+        # Handle CORS preflight requests
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, Accept, X-Requested-With, X-Frappe-Token, x-frappe-token' always;
+            add_header 'Access-Control-Max-Age' '86400' always;
+            add_header 'Content-Length' '0' always;
+            return 204;
+        }
+
+        proxy_pass http://attendance_service;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+
+        # Add CORS headers to responses from backend
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Authorization, Accept, X-Requested-With, X-Frappe-Token, x-frappe-token' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+    }
+
+# AI Agent Service
+    location /api/ai/ {
+        # Rewrite để bỏ prefix /api/ai
+        rewrite ^/api/ai/(.*) /api/$1 break;
+
+        proxy_pass http://ai_agent_service;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        
+        # ⚠️ IMPORTANT: FastAPI CORS middleware handles CORS
+        # DO NOT add CORS headers here to avoid duplication
+    }
+
+    # AI Agent Health Check
+    location = /api/ai/health {
+        rewrite ^/api/ai/(.*) /$1 break;
+        proxy_pass http://ai_agent_service;
+        proxy_set_header Host $host;
+        proxy_read_timeout 10s;
+    }
+
+
+# PDF Service
+    location /api/pdfs/ {
+        proxy_pass http://pdf_service;
+        proxy_http_version 1.1;
+        # Forward headers
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 120s;
+        client_max_body_size 100M;
+    }
+
+# Email Service
+    location /api/email/ {
+        proxy_pass http://email_service/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Authorization $http_authorization;
+        proxy_cache_bypass $http_upgrade;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+        client_max_body_size 100M;
+    }
+
+# Email Service Webhook (Microsoft Graph Notifications)
+    location /api/email/webhooks/microsoft-graph {
+        proxy_pass http://email_service/webhooks/microsoft-graph;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+        # Microsoft Graph requires fast response
+        proxy_buffering off;
+        client_max_body_size 10M;
+    }
+
+    # Legacy webhook URL (backward compatibility)
+    location /webhooks/microsoft-graph {
+        proxy_pass http://email_service/webhooks/microsoft-graph;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+        # Microsoft Graph requires fast response
+        proxy_buffering off;
+        client_max_body_size 10M;
+    }
+}
