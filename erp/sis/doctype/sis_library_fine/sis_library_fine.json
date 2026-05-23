@@ -1,0 +1,129 @@
+{
+ "actions": [],
+ "allow_import": 0,
+ "autoname": "format:FN-{YYYY}-{####}",
+ "creation": "2025-01-01 00:00:00.000000",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "transaction_id",
+  "book_copy_id",
+  "borrower_id",
+  "fine_type",
+  "total_amount",
+  "paid_amount",
+  "payment_date",
+  "status",
+  "waive_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "transaction_id",
+   "fieldtype": "Link",
+   "label": "Phiếu mượn",
+   "options": "SIS Library Transaction",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "book_copy_id",
+   "fieldtype": "Data",
+   "label": "Mã bản sao",
+   "reqd": 0,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "borrower_id",
+   "fieldtype": "Data",
+   "label": "Mã người mượn",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "fine_type",
+   "fieldtype": "Select",
+   "label": "Loại phạt",
+   "options": "overdue\nlost\ndamaged",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Số tiền phạt",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "paid_amount",
+   "fieldtype": "Currency",
+   "label": "Đã thanh toán",
+   "reqd": 0,
+   "in_list_view": 0
+  },
+  {
+   "fieldname": "payment_date",
+   "fieldtype": "Date",
+   "label": "Ngày thanh toán",
+   "reqd": 0,
+   "in_list_view": 0
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "pending\npaid\nwaived",
+   "reqd": 1,
+   "default": "pending",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "waive_reason",
+   "fieldtype": "Text",
+   "label": "Lý do miễn phạt",
+   "reqd": 0
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2025-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Library Fine",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Library",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
