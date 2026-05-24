@@ -2592,15 +2592,18 @@ def list_transactions():
     if (resp := _require_library_role()):
         return resp
 
-    params = frappe.form_dict
-    status = params.get("status") or ""
-    borrower_id = params.get("borrower_id") or ""
-    borrower_type = params.get("borrower_type") or ""
-    search = params.get("search") or ""
-    from_date = params.get("from_date") or ""
-    to_date = params.get("to_date") or ""
-    page = int(params.get("page") or 1)
-    page_size = min(int(params.get("page_size") or 20), 100)
+    args = frappe.request.args if frappe.request else {}
+    def _p(key):
+        return args.get(key) or frappe.form_dict.get(key) or ""
+
+    status = _p("status")
+    borrower_id = _p("borrower_id")
+    borrower_type = _p("borrower_type")
+    search = _p("search")
+    from_date = _p("from_date")
+    to_date = _p("to_date")
+    page = int(_p("page") or 1)
+    page_size = min(int(_p("page_size") or 20), 100)
     offset = (page - 1) * page_size
 
     filters = {}
