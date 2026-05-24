@@ -2664,7 +2664,8 @@ def get_transaction():
     if (resp := _require_library_role()):
         return resp
 
-    tx_id = frappe.form_dict.get("id") or ""
+    data = _get_json_payload()
+    tx_id = data.get("id") or ""
     if not tx_id:
         return validation_error_response(message="Thiếu id", errors={"id": ["required"]})
 
