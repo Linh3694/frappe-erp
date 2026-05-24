@@ -2665,7 +2665,13 @@ def get_transaction():
         return resp
 
     data = _get_json_payload()
-    tx_id = data.get("id") or ""
+    tx_id = (
+        data.get("transaction_id")
+        or data.get("id")
+        or frappe.form_dict.get("transaction_id")
+        or frappe.form_dict.get("id")
+        or ""
+    )
     if not tx_id:
         return validation_error_response(message="Thiếu id", errors={"id": ["required"]})
 
