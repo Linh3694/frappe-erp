@@ -2432,11 +2432,11 @@ def _validate_borrower(borrower_id: str, borrower_type: str):
     """Validate borrower exists. Returns (docname, name) or (None, None)."""
     if borrower_type == "student":
         if frappe.db.exists("CRM Student", borrower_id):
-            name = frappe.db.get_value("CRM Student", borrower_id, "full_name") or borrower_id
+            name = frappe.db.get_value("CRM Student", borrower_id, "student_name") or borrower_id
             return borrower_id, name
         docname = frappe.db.get_value("CRM Student", {"student_code": borrower_id}, "name")
         if docname:
-            name = frappe.db.get_value("CRM Student", docname, "full_name") or docname
+            name = frappe.db.get_value("CRM Student", docname, "student_name") or docname
             return docname, name
         return None, None
     else:
