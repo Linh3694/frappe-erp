@@ -887,8 +887,10 @@ def list_book_copies():
         filters: Dict[str, Any] = {}
         or_filters = None
         
-        if status and status in STATUS_MAP:
-            filters["status"] = status
+        if status:
+            status_lower = status.strip().lower()
+            if status_lower in STATUS_MAP:
+                filters["status"] = status_lower
         if title_id:
             filters["title_id"] = title_id
             
