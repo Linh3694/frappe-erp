@@ -2637,7 +2637,7 @@ def list_transactions():
             start=offset,
         )
 
-        # Attach items count per transaction
+        # Attach items count, due date, and overdue days per transaction
         for row in rows:
             row["id"] = row.pop("name")
             item_count = frappe.db.count(
@@ -2645,6 +2645,32 @@ def list_transactions():
                 filters={"parent": row["id"]},
             )
             row["item_count"] = item_count
+
+            # Fetch the first item's due date
+            due_date = frappe.db.get_value(
+                TRANSACTION_ITEM_DTYPE,
+                {"parent": row["id"]},
+                "due_date",
+            )
+            row["due_date"] = str(due_date) if due_date else None
+
+            # Calculate overdue days
+            overdue_days = 0
+            if row["status"] in ["borrowing", "overdue", "partial_return"]:
+                items = frappe.get_all(
+                    TRANSACTION_ITEM_DTYPE,
+                    filters={"parent": row["id"], "status": ["!=", "returned"]},
+                    fields=["due_date"],
+                )
+                today = getdate(nowdate())
+                for item in items:
+                    if item.due_date:
+                        item_due = getdate(item.due_date)
+                        if item_due < today:
+                            delta = (today - item_due).days
+                            if delta > overdue_days:
+                                overdue_days = delta
+            row["overdue_days"] = overdue_days
 
         return success_response(
             data={"items": rows, "total": total},
