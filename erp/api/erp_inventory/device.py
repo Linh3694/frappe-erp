@@ -31,10 +31,39 @@ from erp.api.erp_inventory.inventory_helpers import (
 )
 
 
-def _get_device_doc(device_id: str, device_type: str = None):
-	if not frappe.db.exists("ERP Inventory Device", device_id):
+def _resolve_device_name(device_id: str, device_type: str = None):
+	"""Map name / legacy_mongo_id / serial → ERP Inventory Device.name."""
+	key = (device_id or "").strip()
+	if not key:
 		return None
-	doc = frappe.get_doc("ERP Inventory Device", device_id)
+	if frappe.db.exists("ERP Inventory Device", key):
+		return key
+	name = frappe.db.get_value("ERP Inventory Device", {"legacy_mongo_id": key}, "name")
+	if name:
+		return name
+	if device_type:
+		name = frappe.db.get_value(
+			"ERP Inventory Device",
+			{"serial": key, "device_type": device_type},
+			"name",
+		)
+		if name:
+			return name
+	return frappe.db.get_value("ERP Inventory Device", {"serial": key}, "name")
+
+
+def _get_device_doc(device_id: str, device_type: str = None):
+	if not device_id:
+		return None
+	key = str(device_id).strip()
+	# PK Frappe là duy nhất — tra theo name không cần lọc device_type
+	if frappe.db.exists("ERP Inventory Device", key):
+		return frappe.get_doc("ERP Inventory Device", key)
+
+	name = _resolve_device_name(key, device_type)
+	if not name:
+		return None
+	doc = frappe.get_doc("ERP Inventory Device", name)
 	if device_type and doc.device_type != device_type:
 		return None
 	return doc
