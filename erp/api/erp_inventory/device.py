@@ -194,9 +194,19 @@ def get_devices(
 	"""
 	try:
 		dt = normalize_device_type(device_type)
-		# Đọc page/limit từ form_dict trước, fallback về kwarg để không bị Frappe nuốt
-		page_raw = read_api_param("page", "page_num", "pageNum", fallback=page)
-		limit_raw = read_api_param("limit", "page_size", "pageSize", fallback=limit)
+		# Đọc page/limit từ form_dict TRƯỚC (chứa giá trị thực từ query string),
+		# fallback về kwarg nếu form_dict không có. `page` là tên reserved của Frappe
+		# → kwarg có thể bị nuốt khi route qua HTTP → bắt buộc phải lấy từ form_dict.
+		def _read_from_form(key: str, default):
+			val = None
+			if frappe.form_dict:
+				val = frappe.form_dict.get(key)
+			if val is None and getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
+				val = frappe.request.args.get(key)
+			return val if val is not None else default
+
+		page_raw = _read_from_form("page", page)
+		limit_raw = _read_from_form("limit", limit)
 		page = max(1, cint(page_raw) or 1)
 		limit = max(1, cint(limit_raw) or 20)
 		params = {
