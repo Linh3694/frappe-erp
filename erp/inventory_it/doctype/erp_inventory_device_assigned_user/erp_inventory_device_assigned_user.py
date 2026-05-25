@@ -2,5 +2,5 @@
 import frappe
 from frappe.model.document import Document
 
-class ErpInventoryDeviceAssignedUser(Document):
+class ERPInventoryDeviceAssignedUser(Document):
 	pass

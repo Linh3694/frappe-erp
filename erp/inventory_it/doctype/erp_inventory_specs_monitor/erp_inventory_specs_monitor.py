@@ -2,5 +2,5 @@
 import frappe
 from frappe.model.document import Document
 
-class ErpInventorySpecsMonitor(Document):
+class ERPInventorySpecsMonitor(Document):
 	pass
