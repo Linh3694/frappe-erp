@@ -7,7 +7,16 @@ from datetime import datetime
 from frappe.utils import now_datetime
 
 from erp.utils.api_response import error_response, not_found_response, validation_error_response
-from erp.api.erp_inventory.inventory_helpers import parse_request_data
+from erp.api.erp_inventory.inventory_helpers import parse_request_data, read_api_param, normalize_device_type
+from erp.api.erp_inventory.device import _resolve_device_name
+
+
+def _read_activity_payload(data):
+	"""Đọc entity/type từ body — hỗ trợ cả camelCase và snake_case."""
+	entity_type = data.get("entityType") or data.get("entity_type")
+	entity_id = data.get("entityId") or data.get("entity_id")
+	act_type = data.get("type")
+	return entity_type, entity_id, act_type
 
 
 def _datetime_to_iso(val):
@@ -40,28 +49,27 @@ def activity_to_fe(doc):
 	}
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_activities(entity_type=None, entity_id=None):
 	"""Lấy lịch sử hoạt động của 1 thiết bị cụ thể.
 
 	BẮT BUỘC phải có entity_id để tránh leak activity của thiết bị khác.
 	"""
 	try:
-		entity_type = (entity_type or frappe.form_dict.get("entity_type") or "").strip()
-		entity_id = (entity_id or frappe.form_dict.get("entity_id") or "").strip()
+		entity_type = read_api_param("entity_type", "entityType", fallback=entity_type)
+		entity_id = read_api_param("entity_id", "entityId", fallback=entity_id)
 
-		# Guard: nếu thiếu entity_id, trả về list rỗng thay vì leak toàn bộ activities
 		if not entity_id:
 			return []
 
-		filters = {"entity": entity_id}
-		if entity_type:
-			filters["entity_type"] = entity_type
+		resolved_entity = _resolve_device_name(entity_id, normalize_device_type(entity_type) or None)
+		if not resolved_entity:
+			return []
 
-		# limit_page_length=0 → bỏ giới hạn mặc định 20 record của Frappe
+		# Chỉ lọc theo entity (Link Device) — entity_type là metadata, dễ lệch sau migrate
 		rows = frappe.get_all(
 			"ERP Inventory Activity Log",
-			filters=filters,
+			filters={"entity": resolved_entity},
 			fields=[
 				"name",
 				"entity_type",
@@ -83,16 +91,18 @@ def get_activities(entity_type=None, entity_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def add_activity():
 	try:
 		data = parse_request_data()
-		entity_type = data.get("entityType")
-		entity_id = data.get("entityId")
-		act_type = data.get("type")
+		entity_type, entity_id, act_type = _read_activity_payload(data)
+		entity_type = normalize_device_type(entity_type)
 		description = (data.get("description") or "").strip()
 		if not entity_type or not entity_id:
 			return validation_error_response(_("entityType và entityId là bắt buộc"), {})
+		resolved_entity = _resolve_device_name(entity_id, entity_type)
+		if not resolved_entity:
+			return validation_error_response(_("Không tìm thấy thiết bị"), {"entityId": ["not_found"]})
 		if act_type not in ("repair", "update"):
 			return validation_error_response(_("type phải là repair hoặc update"), {})
 		if not description:
@@ -103,7 +113,7 @@ def add_activity():
 			{
 				"doctype": "ERP Inventory Activity Log",
 				"entity_type": entity_type,
-				"entity": entity_id,
+				"entity": resolved_entity,
 				"type": act_type,
 				"description": description,
 				"details": (data.get("details") or "").strip(),
