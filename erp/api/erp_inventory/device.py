@@ -194,9 +194,10 @@ def get_devices(
 	"""
 	try:
 		dt = normalize_device_type(device_type)
-		# Đọc page/limit từ form_dict TRƯỚC (chứa giá trị thực từ query string),
-		# fallback về kwarg nếu form_dict không có. `page` là tên reserved của Frappe
-		# → kwarg có thể bị nuốt khi route qua HTTP → bắt buộc phải lấy từ form_dict.
+		# Đọc TẤT CẢ param từ form_dict TRƯỚC (chứa giá trị thực từ query string),
+		# fallback về kwarg nếu form_dict không có. Một số tên (page, search, type, ...)
+		# là reserved trong Frappe → kwarg có thể bị nuốt khi route qua HTTP →
+		# bắt buộc phải lấy từ form_dict cho an toàn.
 		def _read_from_form(key: str, default):
 			val = None
 			if frappe.form_dict:
@@ -209,6 +210,19 @@ def get_devices(
 		limit_raw = _read_from_form("limit", limit)
 		page = max(1, cint(page_raw) or 1)
 		limit = max(1, cint(limit_raw) or 20)
+
+		# Đọc lại các filter từ form_dict — đề phòng Frappe nuốt tên kwarg
+		search = _read_from_form("search", search)
+		status = _read_from_form("status", status)
+		manufacturer = _read_from_form("manufacturer", manufacturer)
+		type = _read_from_form("type", type)
+		releaseYear = _read_from_form("releaseYear", releaseYear)
+		assigned = _read_from_form("assigned", assigned)
+		room = _read_from_form("room", room)
+		imei1 = _read_from_form("imei1", imei1)
+		imei2 = _read_from_form("imei2", imei2)
+		phoneNumber = _read_from_form("phoneNumber", phoneNumber)
+
 		params = {
 			"search": search,
 			"status": status,
