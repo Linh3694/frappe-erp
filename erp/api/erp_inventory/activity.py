@@ -7,8 +7,22 @@ from datetime import datetime
 from frappe.utils import now_datetime
 
 from erp.utils.api_response import error_response, not_found_response, validation_error_response
-from erp.api.erp_inventory.inventory_helpers import parse_request_data, read_api_param, normalize_device_type
+from erp.api.erp_inventory.inventory_helpers import (
+	parse_request_data,
+	read_api_param,
+	normalize_device_type,
+	normalize_api_param,
+)
 from erp.api.erp_inventory.device import _resolve_device_name
+
+
+def _read_activity_id(activity_id=None):
+	"""Đọc activity_id từ kwargs / query / JSON body."""
+	data = parse_request_data()
+	resolved = read_api_param("activity_id", "activityId", fallback=activity_id)
+	if not resolved and data:
+		resolved = normalize_api_param(data.get("activity_id") or data.get("activityId"))
+	return resolved
 
 
 def _read_activity_payload(data):
@@ -129,11 +143,13 @@ def add_activity():
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def update_activity(activity_id=None):
 	try:
 		data = parse_request_data()
-		activity_id = activity_id or data.get("activity_id")
+		activity_id = _read_activity_id(activity_id)
+		if not activity_id:
+			return validation_error_response(_("activity_id là bắt buộc"), {"activity_id": ["required"]})
 		if not frappe.db.exists("ERP Inventory Activity Log", activity_id):
 			return not_found_response(_("Activity not found"))
 		doc = frappe.get_doc("ERP Inventory Activity Log", activity_id)
@@ -151,10 +167,12 @@ def update_activity(activity_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def delete_activity(activity_id=None):
 	try:
-		activity_id = activity_id or frappe.form_dict.get("activity_id")
+		activity_id = _read_activity_id(activity_id)
+		if not activity_id:
+			return validation_error_response(_("activity_id là bắt buộc"), {"activity_id": ["required"]})
 		if not frappe.db.exists("ERP Inventory Activity Log", activity_id):
 			return not_found_response(_("Activity not found"))
 		frappe.delete_doc("ERP Inventory Activity Log", activity_id, ignore_permissions=False)
