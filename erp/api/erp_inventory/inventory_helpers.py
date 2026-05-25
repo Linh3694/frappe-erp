@@ -55,6 +55,43 @@ def parse_request_data():
 	return data
 
 
+def normalize_api_param(value) -> Optional[str]:
+	"""Chuẩn hoá tham số GET/POST — Frappe đôi khi trả list nếu param bị lặp."""
+	if value is None:
+		return None
+	if isinstance(value, (list, tuple)):
+		value = value[0] if value else None
+	if value is None:
+		return None
+	text = str(value).strip()
+	return text or None
+
+
+def read_api_param(*keys: str, fallback=None) -> Optional[str]:
+	"""Đọc tham số API từ kwargs / form_dict / query string."""
+	if fallback is not None:
+		normalized = normalize_api_param(fallback)
+		if normalized:
+			return normalized
+
+	sources = []
+	if frappe.form_dict:
+		sources.append(frappe.form_dict)
+	if getattr(frappe, "request", None) and getattr(frappe.request, "args", None):
+		sources.append(frappe.request.args)
+
+	for key in keys:
+		for source in sources:
+			try:
+				if key in source:
+					normalized = normalize_api_param(source.get(key))
+					if normalized:
+						return normalized
+			except Exception:
+				continue
+	return None
+
+
 def normalize_device_type(device_type: Optional[str]) -> str:
 	dt = (device_type or "").strip().lower()
 	# Fallback: đọc từ form_dict / request args nếu Frappe không pass kwargs đúng

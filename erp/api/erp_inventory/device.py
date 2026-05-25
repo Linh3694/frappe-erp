@@ -24,6 +24,8 @@ from erp.api.erp_inventory.inventory_helpers import (
 	normalize_device_type,
 	paginated_devices_response,
 	parse_request_data,
+	read_api_param,
+	normalize_api_param,
 	resolve_room_link,
 	resolve_user_link,
 	sync_assigned_users,
@@ -53,20 +55,8 @@ def _resolve_device_name(device_id: str, device_type: str = None):
 	return frappe.db.get_value("ERP Inventory Device", {"serial": key}, "name")
 
 
-def _normalize_param(value):
-	"""Chuẩn hoá tham số GET/POST — Frappe đôi khi trả list nếu param bị lặp."""
-	if value is None:
-		return None
-	if isinstance(value, (list, tuple)):
-		value = value[0] if value else None
-	if value is None:
-		return None
-	text = str(value).strip()
-	return text or None
-
-
 def _get_device_doc(device_id: str, device_type: str = None):
-	device_id = _normalize_param(device_id)
+	device_id = normalize_api_param(device_id)
 	if not device_id:
 		return None
 	# PK Frappe là duy nhất — tra theo name không cần lọc device_type
@@ -151,13 +141,18 @@ def get_devices(device_type=None, page=1, limit=20, search=None, status=None, ma
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_device_by_id(device_type=None, device_id=None):
 	try:
-		dt = normalize_device_type(device_type)
-		raw_id = device_id or frappe.form_dict.get("device_id") or frappe.form_dict.get("id")
-		device_id = _normalize_param(raw_id)
-		doc = _get_device_doc(device_id, dt)
+		resolved_type = read_api_param("device_type", fallback=device_type)
+		dt = normalize_device_type(resolved_type)
+		resolved_id = read_api_param("device_id", "id", fallback=device_id)
+		if not resolved_id:
+			return validation_error_response(
+				_("Thiếu device_id"),
+				{"device_id": ["required"]},
+			)
+		doc = _get_device_doc(resolved_id, dt)
 		if not doc:
 			return not_found_response(_("Không tìm thấy thiết bị"))
 		return single_item_response(device_doc_to_fe(doc))
