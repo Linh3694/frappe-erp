@@ -3031,7 +3031,10 @@ def list_transactions():
     offset = (page - 1) * page_size
 
     filters = {}
-    if status:
+    if status == "borrowing":
+        # Trả một phần vẫn còn sách chưa trả → hiển thị cùng tab Đang mượn
+        filters["status"] = ["in", ["borrowing", "partial_return"]]
+    elif status:
         filters["status"] = status
     if borrower_type:
         filters["borrower_type"] = borrower_type
@@ -3366,7 +3369,10 @@ def _daily_transaction_trend(from_date: str, to_date: str, status: Any = None) -
     params: List[Any] = [from_date, to_date]
     status_clause = ""
     if status == "returned":
-        status_clause = " AND status IN ('returned', 'partial_return')"
+        status_clause = " AND status = 'returned'"
+    elif status == "borrowing":
+        # Trả một phần vẫn còn sách chưa trả → tính vào đang mượn
+        status_clause = " AND status IN ('borrowing', 'partial_return')"
     elif status:
         status_clause = " AND status = %s"
         params.append(status)
@@ -3381,6 +3387,40 @@ def _daily_transaction_trend(from_date: str, to_date: str, status: Any = None) -
         ORDER BY borrow_date
         """,
         params,
+        as_dict=True,
+    )
+    return _merge_daily_trend(rows, dates)
+
+
+def _daily_total_fine_trend(from_date: str, to_date: str) -> List[Dict[str, Any]]:
+    """Chuỗi tổng tiền phạt theo ngày — cộng phạt chưa thu + đã thu."""
+    pending = _daily_fine_trend(from_date, to_date, pending=True)
+    paid = _daily_fine_trend(from_date, to_date, pending=False)
+    return [
+        {
+            "date": point.get("date"),
+            "value": float(point.get("value") or 0) + float(paid[idx].get("value") or 0),
+        }
+        for idx, point in enumerate(pending)
+    ]
+
+
+def _daily_lost_damaged_trend(from_date: str, to_date: str) -> List[Dict[str, Any]]:
+    """Đếm sách mất/hỏng theo ngày trả — dùng sparkline KPI."""
+    dates = _report_date_series(from_date, to_date)
+    if not dates:
+        return []
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT date_returned AS date, COUNT(*) AS value
+        FROM `tab{TRANSACTION_ITEM_DTYPE}`
+        WHERE status IN ('lost', 'damaged')
+          AND date_returned BETWEEN %s AND %s
+        GROUP BY date_returned
+        ORDER BY date_returned
+        """,
+        [from_date, to_date],
         as_dict=True,
     )
     return _merge_daily_trend(rows, dates)
@@ -3529,7 +3569,10 @@ def get_library_borrow_report():
 
     try:
         total_transactions = frappe.db.count(TRANSACTION_DTYPE, tx_filters)
-        borrowing_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "borrowing"})
+        borrowing_count = frappe.db.count(
+            TRANSACTION_DTYPE,
+            {**tx_filters, "status": ["in", ["borrowing", "partial_return"]]},
+        )
         overdue_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "overdue"})
         returned_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "returned"})
         partial_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "partial_return"})
@@ -3561,6 +3604,29 @@ def get_library_borrow_report():
             paid_fine_filters["creation"] = ["between", [from_date, to_date]]
         pending_fines_count = frappe.db.count(FINE_DTYPE, pending_fine_filters)
         paid_fines_count = frappe.db.count(FINE_DTYPE, paid_fine_filters)
+        total_fines = float(pending_fines or 0) + float(paid_fines or 0)
+
+        lost_damaged_date_clause = ""
+        lost_damaged_params: List[Any] = []
+        if from_date and to_date:
+            lost_damaged_date_clause = "AND date_returned BETWEEN %s AND %s"
+            lost_damaged_params.extend([from_date, to_date])
+        elif from_date:
+            lost_damaged_date_clause = "AND date_returned >= %s"
+            lost_damaged_params.append(from_date)
+        elif to_date:
+            lost_damaged_date_clause = "AND date_returned <= %s"
+            lost_damaged_params.append(to_date)
+
+        lost_damaged_count = frappe.db.sql(
+            f"""
+            SELECT COUNT(*)
+            FROM `tab{TRANSACTION_ITEM_DTYPE}`
+            WHERE status IN ('lost', 'damaged')
+            {lost_damaged_date_clause}
+            """,
+            lost_damaged_params,
+        )[0][0]
 
         trends = {}
         if from_date and to_date:
@@ -3571,6 +3637,8 @@ def get_library_borrow_report():
                 "returned": _daily_transaction_trend(from_date, to_date, "returned"),
                 "pending_fines": _daily_fine_trend(from_date, to_date, pending=True),
                 "paid_fines": _daily_fine_trend(from_date, to_date, pending=False),
+                "total_fines": _daily_total_fine_trend(from_date, to_date),
+                "lost_damaged": _daily_lost_damaged_trend(from_date, to_date),
             }
 
         top_books_raw = _fetch_top_books_raw(from_date, to_date)
@@ -3586,8 +3654,10 @@ def get_library_borrow_report():
                     "partial_return": partial_count,
                     "pending_fines_total": float(pending_fines or 0),
                     "paid_fines_total": float(paid_fines or 0),
+                    "total_fines_total": total_fines,
                     "pending_fines_count": pending_fines_count,
                     "paid_fines_count": paid_fines_count,
+                    "lost_damaged_count": int(lost_damaged_count or 0),
                 },
                 "trends": trends,
                 "top_books": top_books,
