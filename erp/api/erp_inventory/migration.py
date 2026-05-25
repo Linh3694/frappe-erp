@@ -133,10 +133,27 @@ def _get_migration_counts():
 @frappe.whitelist(allow_guest=False)
 def run_full_sync(sync_files=1):
 	"""
-	Đồng bộ toàn bộ: gọi inventory-service → import DB → copy file handover/report.
-	Một nút trên FE, không cần export/import Excel thủ công.
+	Đồng bộ toàn bộ Inventory IT vào Frappe.
+	Mặc định đọc trực tiếp MongoDB (không cần inventory-service HTTP).
+	Cấu hình inventory_migration_source = "http" nếu muốn gọi Node API.
 	"""
 	require_migration_role()
+	source = (
+		frappe.conf.get("inventory_migration_source")
+		or frappe.get_site_config().get("inventory_migration_source")
+		or "mongodb"
+	).lower()
+
+	if source == "http":
+		return _run_full_sync_http(sync_files)
+
+	from erp.api.erp_inventory.migration_mongo import run_full_sync_from_mongodb
+
+	return run_full_sync_from_mongodb(sync_files=cint_safe(sync_files) != 0)
+
+
+def _run_full_sync_http(sync_files=1):
+	"""Đồng bộ qua HTTP inventory-service (legacy)."""
 	logs = []
 	steps = {}
 	all_errors = []
@@ -209,6 +226,7 @@ def run_full_sync(sync_files=1):
 		return success_response(
 			data={
 				"ok": ok,
+				"source": "http",
 				"counts": counts,
 				"steps": steps,
 				"errors": all_errors[:100],
