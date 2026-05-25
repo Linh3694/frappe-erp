@@ -455,6 +455,25 @@ def import_lookups_excel():
     )
 
 
+def _borrow_counts_by_title_ids(title_ids: List[str]) -> Dict[str, int]:
+    """Đếm tổng lượt mượn theo đầu sách (gộp qua mã bản sao)."""
+    if not title_ids:
+        return {}
+
+    rows = frappe.db.sql(
+        """
+        SELECT c.title_id, COUNT(*) AS borrow_count
+        FROM `tabSIS Library Transaction Item` ti
+        INNER JOIN `tabSIS Library Book Copy` c ON c.generated_code = ti.book_copy_id
+        WHERE c.title_id IN %(title_ids)s
+        GROUP BY c.title_id
+        """,
+        {"title_ids": tuple(title_ids)},
+        as_dict=True,
+    )
+    return {row.title_id: int(row.borrow_count) for row in rows}
+
+
 @frappe.whitelist(allow_guest=False)
 def list_titles():
     """
@@ -527,6 +546,15 @@ def list_titles():
             query_params["or_filters"] = or_filters
             
         data = frappe.get_all(TITLE_DTYPE, **query_params)
+
+        # Bổ sung số lượt mượn và chuẩn hóa boolean từ Frappe (0/1)
+        title_ids = [row["id"] for row in data]
+        borrow_counts = _borrow_counts_by_title_ids(title_ids)
+        for row in data:
+            row["is_new_book"] = bool(row.get("is_new_book"))
+            row["is_featured_book"] = bool(row.get("is_featured_book"))
+            row["is_audio_book"] = bool(row.get("is_audio_book"))
+            row["borrow_count"] = borrow_counts.get(row["id"], 0)
         
         # Lấy tổng số - dùng frappe.get_all với pluck='name' để đếm
         count_params = {"filters": filters, "pluck": "name"}
@@ -3207,6 +3235,122 @@ def update_fine():
         return error_response(message="Không cập nhật được phiếu phạt", code="FINE_UPDATE_ERROR")
 
 
+def _report_date_series(from_date: str, to_date: str) -> List[str]:
+    """Sinh danh sách ngày liên tiếp trong khoảng báo cáo."""
+    if not from_date or not to_date:
+        return []
+    current = getdate(from_date)
+    end = getdate(to_date)
+    dates: List[str] = []
+    while current <= end:
+        dates.append(str(current))
+        current += timedelta(days=1)
+    return dates
+
+
+def _merge_daily_trend(rows: List[Dict[str, Any]], dates: List[str]) -> List[Dict[str, Any]]:
+    """Ghép kết quả GROUP BY ngày với chuỗi ngày đầy đủ (thiếu ngày = 0)."""
+    by_date = {str(row.get("date")): float(row.get("value") or 0) for row in rows}
+    return [{"date": d, "value": by_date.get(d, 0)} for d in dates]
+
+
+def _daily_transaction_trend(from_date: str, to_date: str, status: Any = None) -> List[Dict[str, Any]]:
+    """Đếm phiếu mượn theo borrow_date — dùng sparkline KPI."""
+    dates = _report_date_series(from_date, to_date)
+    if not dates:
+        return []
+
+    params: List[Any] = [from_date, to_date]
+    status_clause = ""
+    if status == "returned":
+        status_clause = " AND status IN ('returned', 'partial_return')"
+    elif status:
+        status_clause = " AND status = %s"
+        params.append(status)
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT borrow_date AS date, COUNT(*) AS value
+        FROM `tab{TRANSACTION_DTYPE}`
+        WHERE borrow_date BETWEEN %s AND %s
+        {status_clause}
+        GROUP BY borrow_date
+        ORDER BY borrow_date
+        """,
+        params,
+        as_dict=True,
+    )
+    return _merge_daily_trend(rows, dates)
+
+
+def _daily_fine_trend(from_date: str, to_date: str, *, pending: bool) -> List[Dict[str, Any]]:
+    """Chuỗi phạt theo ngày — pending: tổng amount; paid: paid_amount theo payment_date."""
+    dates = _report_date_series(from_date, to_date)
+    if not dates:
+        return []
+
+    if pending:
+        rows = frappe.db.sql(
+            f"""
+            SELECT DATE(creation) AS date, COALESCE(SUM(total_amount), 0) AS value
+            FROM `tab{FINE_DTYPE}`
+            WHERE status = 'pending' AND DATE(creation) BETWEEN %s AND %s
+            GROUP BY DATE(creation)
+            ORDER BY DATE(creation)
+            """,
+            [from_date, to_date],
+            as_dict=True,
+        )
+    else:
+        rows = frappe.db.sql(
+            f"""
+            SELECT COALESCE(payment_date, DATE(creation)) AS date,
+                   COALESCE(SUM(paid_amount), 0) AS value
+            FROM `tab{FINE_DTYPE}`
+            WHERE status = 'paid'
+              AND COALESCE(payment_date, DATE(creation)) BETWEEN %s AND %s
+            GROUP BY COALESCE(payment_date, DATE(creation))
+            ORDER BY COALESCE(payment_date, DATE(creation))
+            """,
+            [from_date, to_date],
+            as_dict=True,
+        )
+    return _merge_daily_trend(rows, dates)
+
+
+def _normalize_book_title_key(title: Any) -> str:
+    """Chuẩn hoá tên sách để gom các dòng trùng book_title."""
+    return str(title or "").strip().casefold()
+
+
+def _merge_top_books_by_title(rows: List[Dict[str, Any]], limit: int = 10) -> List[Dict[str, Any]]:
+    """Gom top sách theo book_title — mỗi lần mượn +1 vào cùng đầu sách."""
+    merged: Dict[str, Dict[str, Any]] = {}
+    for row in rows or []:
+        title = str(row.get("book_title") or "").strip()
+        key = _normalize_book_title_key(title)
+        if not key:
+            continue
+
+        borrow_count = int(row.get("borrow_count") or 0)
+        if key not in merged:
+            merged[key] = {
+                "title_id": row.get("title_id") or "",
+                "library_code": row.get("library_code") or "",
+                "book_title": title,
+                "borrow_count": borrow_count,
+            }
+            continue
+
+        merged[key]["borrow_count"] += borrow_count
+        if not merged[key]["title_id"] and row.get("title_id"):
+            merged[key]["title_id"] = row["title_id"]
+        if not merged[key]["library_code"] and row.get("library_code"):
+            merged[key]["library_code"] = row["library_code"]
+
+    return sorted(merged.values(), key=lambda item: item["borrow_count"], reverse=True)[:limit]
+
+
 @frappe.whitelist(allow_guest=False)
 def get_library_borrow_report():
     """Báo cáo mượn/trả theo khoảng thời gian."""
@@ -3252,6 +3396,24 @@ def get_library_borrow_report():
             f"SELECT COALESCE(SUM(paid_amount), 0) FROM `tabSIS Library Fine` WHERE status = 'paid' {fine_date_clause}",
             fine_params,
         )[0][0]
+        pending_fine_filters: Dict[str, Any] = {"status": "pending"}
+        paid_fine_filters: Dict[str, Any] = {"status": "paid"}
+        if from_date and to_date:
+            pending_fine_filters["creation"] = ["between", [from_date, to_date]]
+            paid_fine_filters["creation"] = ["between", [from_date, to_date]]
+        pending_fines_count = frappe.db.count(FINE_DTYPE, pending_fine_filters)
+        paid_fines_count = frappe.db.count(FINE_DTYPE, paid_fine_filters)
+
+        trends = {}
+        if from_date and to_date:
+            trends = {
+                "total_transactions": _daily_transaction_trend(from_date, to_date),
+                "borrowing": _daily_transaction_trend(from_date, to_date, "borrowing"),
+                "overdue": _daily_transaction_trend(from_date, to_date, "overdue"),
+                "returned": _daily_transaction_trend(from_date, to_date, "returned"),
+                "pending_fines": _daily_fine_trend(from_date, to_date, pending=True),
+                "paid_fines": _daily_fine_trend(from_date, to_date, pending=False),
+            }
 
         date_clause = ""
         params: List[Any] = []
@@ -3265,19 +3427,34 @@ def get_library_borrow_report():
             date_clause = "AND t.borrow_date <= %s"
             params.append(to_date)
 
-        top_books = frappe.db.sql(
+        # Gom theo ti.book_title — mỗi lần mượn +1 vào cùng tên sách
+        top_books_raw = frappe.db.sql(
             f"""
-            SELECT ti.book_copy_id, ti.book_title, COUNT(*) AS borrow_count
-            FROM `tabSIS Library Transaction Item` ti
-            INNER JOIN `tabSIS Library Transaction` t ON t.name = ti.parent
-            WHERE 1=1 {date_clause}
-            GROUP BY ti.book_copy_id, ti.book_title
+            SELECT
+                MAX(title_id) AS title_id,
+                MAX(library_code) AS library_code,
+                MAX(book_title) AS book_title,
+                COUNT(*) AS borrow_count
+            FROM (
+                SELECT
+                    TRIM(LOWER(COALESCE(ti.book_title, ''))) AS title_key,
+                    TRIM(COALESCE(ti.book_title, '')) AS book_title,
+                    COALESCE(bc.title_id, '') AS title_id,
+                    COALESCE(lt.library_code, '') AS library_code
+                FROM `tabSIS Library Transaction Item` ti
+                INNER JOIN `tabSIS Library Transaction` t ON t.name = ti.parent
+                LEFT JOIN `tab{COPY_DTYPE}` bc ON bc.generated_code = ti.book_copy_id
+                LEFT JOIN `tab{TITLE_DTYPE}` lt ON lt.name = bc.title_id
+                WHERE TRIM(COALESCE(ti.book_title, '')) != '' {date_clause}
+            ) items
+            GROUP BY title_key
             ORDER BY borrow_count DESC
             LIMIT 10
             """,
             params,
             as_dict=True,
         )
+        top_books = _merge_top_books_by_title(top_books_raw, limit=10)
 
         top_overdue_borrowers = frappe.db.sql(
             f"""
@@ -3302,7 +3479,10 @@ def get_library_borrow_report():
                     "partial_return": partial_count,
                     "pending_fines_total": float(pending_fines or 0),
                     "paid_fines_total": float(paid_fines or 0),
+                    "pending_fines_count": pending_fines_count,
+                    "paid_fines_count": paid_fines_count,
                 },
+                "trends": trends,
                 "top_books": top_books,
                 "top_overdue_borrowers": top_overdue_borrowers,
             },
