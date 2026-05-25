@@ -1,0 +1,34 @@
+{
+ "doctype": "DocType",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "ram",
+  "storage",
+  "display"
+ ],
+ "fields": [
+  {
+   "fieldname": "ram",
+   "fieldtype": "Data",
+   "label": "RAM"
+  },
+  {
+   "fieldname": "storage",
+   "fieldtype": "Data",
+   "label": "Storage"
+  },
+  {
+   "fieldname": "display",
+   "fieldtype": "Data",
+   "label": "Display",
+   "in_list_view": 1
+  }
+ ],
+ "name": "ERP Inventory Specs Monitor",
+ "module": "Inventory IT"
+}

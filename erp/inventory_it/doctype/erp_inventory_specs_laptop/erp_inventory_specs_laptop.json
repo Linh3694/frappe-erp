@@ -1,0 +1,41 @@
+{
+ "doctype": "DocType",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "processor",
+  "ram",
+  "storage",
+  "display"
+ ],
+ "fields": [
+  {
+   "fieldname": "processor",
+   "fieldtype": "Data",
+   "label": "Processor",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "ram",
+   "fieldtype": "Data",
+   "label": "RAM",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "storage",
+   "fieldtype": "Data",
+   "label": "Storage"
+  },
+  {
+   "fieldname": "display",
+   "fieldtype": "Data",
+   "label": "Display"
+  }
+ ],
+ "name": "ERP Inventory Specs Laptop",
+ "module": "Inventory IT"
+}

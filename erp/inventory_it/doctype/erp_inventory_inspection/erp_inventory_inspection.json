@@ -1,0 +1,153 @@
+{
+ "doctype": "DocType",
+ "autoname": "format:INV-IN-{#####}",
+ "engine": "InnoDB",
+ "track_changes": 1,
+ "field_order": [
+  "device",
+  "device_type",
+  "inspector",
+  "inspection_date",
+  "overall_assessment",
+  "passed",
+  "recommendations",
+  "technical_conclusion",
+  "follow_up_recommendation",
+  "sections",
+  "report_file_url",
+  "report_file",
+  "legacy_mongo_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "options": "ERP Inventory Device",
+   "label": "Thiết bị",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "device_type",
+   "fieldtype": "Data",
+   "label": "Device Type Snapshot",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "inspector",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Inspector",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "inspection_date",
+   "fieldtype": "Datetime",
+   "label": "Inspection Date",
+   "default": "Now",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "overall_assessment",
+   "fieldtype": "Small Text",
+   "label": "Overall Assessment"
+  },
+  {
+   "fieldname": "passed",
+   "fieldtype": "Check",
+   "label": "Passed",
+   "default": "1"
+  },
+  {
+   "fieldname": "recommendations",
+   "fieldtype": "Small Text",
+   "label": "Recommendations"
+  },
+  {
+   "fieldname": "technical_conclusion",
+   "fieldtype": "Small Text",
+   "label": "Technical Conclusion"
+  },
+  {
+   "fieldname": "follow_up_recommendation",
+   "fieldtype": "Small Text",
+   "label": "Follow Up Recommendation"
+  },
+  {
+   "fieldname": "sections",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Inspection Section",
+   "label": "Sections"
+  },
+  {
+   "fieldname": "report_file_url",
+   "fieldtype": "Data",
+   "label": "Report File URL"
+  },
+  {
+   "fieldname": "report_file",
+   "fieldtype": "Attach",
+   "label": "Report File"
+  },
+  {
+   "fieldname": "legacy_mongo_id",
+   "fieldtype": "Data",
+   "label": "Legacy Mongo ID",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS IT",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Administrative",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Teacher",
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "name": "ERP Inventory Inspection",
+ "module": "Inventory IT"
+}

@@ -1,0 +1,125 @@
+{
+ "doctype": "DocType",
+ "autoname": "format:INV-AL-{#####}",
+ "engine": "InnoDB",
+ "track_changes": 1,
+ "field_order": [
+  "entity_type",
+  "entity",
+  "type",
+  "description",
+  "details",
+  "date",
+  "updated_by",
+  "legacy_mongo_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "entity_type",
+   "fieldtype": "Data",
+   "label": "Entity Type",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "entity",
+   "fieldtype": "Link",
+   "options": "ERP Inventory Device",
+   "label": "Entity",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "type",
+   "fieldtype": "Select",
+   "label": "Type",
+   "options": "repair\nupdate",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "details",
+   "fieldtype": "Small Text",
+   "label": "Details"
+  },
+  {
+   "fieldname": "date",
+   "fieldtype": "Datetime",
+   "label": "Date",
+   "default": "Now",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "updated_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Updated By"
+  },
+  {
+   "fieldname": "legacy_mongo_id",
+   "fieldtype": "Data",
+   "label": "Legacy Mongo ID",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS IT",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Administrative",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Teacher",
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "name": "ERP Inventory Activity Log",
+ "module": "Inventory IT"
+}

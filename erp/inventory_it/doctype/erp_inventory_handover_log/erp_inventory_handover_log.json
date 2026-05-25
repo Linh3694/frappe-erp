@@ -1,0 +1,161 @@
+{
+ "doctype": "DocType",
+ "autoname": "format:INV-HO-{#####}",
+ "engine": "InnoDB",
+ "track_changes": 1,
+ "field_order": [
+  "device",
+  "action",
+  "user",
+  "fullname_snapshot",
+  "job_title_snapshot",
+  "start_date",
+  "end_date",
+  "notes",
+  "assigned_by",
+  "revoked_by",
+  "revoked_reasons",
+  "document_file_url",
+  "document_file",
+  "legacy_mongo_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "options": "ERP Inventory Device",
+   "label": "Thiết bị",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "label": "Hành động",
+   "options": "assigned\nrevoked",
+   "default": "assigned",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "fullname_snapshot",
+   "fieldtype": "Data",
+   "label": "Fullname Snapshot"
+  },
+  {
+   "fieldname": "job_title_snapshot",
+   "fieldtype": "Data",
+   "label": "Job Title Snapshot"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Datetime",
+   "label": "Start Date",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Datetime",
+   "label": "End Date"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "assigned_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Assigned By"
+  },
+  {
+   "fieldname": "revoked_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Revoked By"
+  },
+  {
+   "fieldname": "revoked_reasons",
+   "fieldtype": "Small Text",
+   "label": "Revoked Reasons (JSON)"
+  },
+  {
+   "fieldname": "document_file_url",
+   "fieldtype": "Data",
+   "label": "Document File URL"
+  },
+  {
+   "fieldname": "document_file",
+   "fieldtype": "Attach",
+   "label": "Document File"
+  },
+  {
+   "fieldname": "legacy_mongo_id",
+   "fieldtype": "Data",
+   "label": "Legacy Mongo ID",
+   "read_only": 1
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS IT",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Administrative",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Teacher",
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "name": "ERP Inventory Handover Log",
+ "module": "Inventory IT"
+}

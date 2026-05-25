@@ -1,0 +1,268 @@
+{
+ "doctype": "DocType",
+ "autoname": "format:INV-DEV-{#####}",
+ "engine": "InnoDB",
+ "allow_import": 1,
+ "allow_copy": 1,
+ "track_changes": 1,
+ "title_field": "name_display",
+ "field_order": [
+  "basic_section",
+  "device_type",
+  "device_subtype",
+  "name_display",
+  "manufacturer",
+  "serial",
+  "release_year",
+  "column_break_1",
+  "room",
+  "status",
+  "broken_reason",
+  "broken_description",
+  "legacy_section",
+  "legacy_mongo_id",
+  "holder_section",
+  "current_holder_user",
+  "current_holder_fullname",
+  "current_holder_jobtitle",
+  "current_holder_department",
+  "assigned_section",
+  "assigned_users",
+  "specs_section",
+  "specs_laptop",
+  "specs_monitor",
+  "specs_printer",
+  "specs_projector",
+  "specs_phone",
+  "specs_tool"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "device_type",
+   "fieldtype": "Select",
+   "label": "Loại thiết bị",
+   "options": "laptop\nmonitor\nprinter\nprojector\nphone\ntool",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "device_subtype",
+   "fieldtype": "Data",
+   "label": "Phân loại chi tiết",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "name_display",
+   "fieldtype": "Data",
+   "label": "Tên thiết bị",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "manufacturer",
+   "fieldtype": "Data",
+   "label": "Hãng sản xuất",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "serial",
+   "fieldtype": "Data",
+   "label": "Serial",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "release_year",
+   "fieldtype": "Int",
+   "label": "Năm sản xuất"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "options": "ERP Administrative Room",
+   "label": "Phòng",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Active\nStandby\nBroken\nPendingDocumentation",
+   "default": "Standby",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "broken_reason",
+   "fieldtype": "Data",
+   "label": "Lý do hỏng"
+  },
+  {
+   "fieldname": "broken_description",
+   "fieldtype": "Small Text",
+   "label": "Mô tả hỏng"
+  },
+  {
+   "fieldname": "legacy_section",
+   "fieldtype": "Section Break",
+   "label": "Legacy Migration",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "legacy_mongo_id",
+   "fieldtype": "Data",
+   "label": "Legacy Mongo ID",
+   "unique": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "holder_section",
+   "fieldtype": "Section Break",
+   "label": "Người sử dụng hiện tại"
+  },
+  {
+   "fieldname": "current_holder_user",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "User"
+  },
+  {
+   "fieldname": "current_holder_fullname",
+   "fieldtype": "Data",
+   "label": "Fullname"
+  },
+  {
+   "fieldname": "current_holder_jobtitle",
+   "fieldtype": "Data",
+   "label": "Job Title"
+  },
+  {
+   "fieldname": "current_holder_department",
+   "fieldtype": "Data",
+   "label": "Department"
+  },
+  {
+   "fieldname": "assigned_section",
+   "fieldtype": "Section Break",
+   "label": "Assigned Users"
+  },
+  {
+   "fieldname": "assigned_users",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Device Assigned User",
+   "label": "Assigned Users"
+  },
+  {
+   "fieldname": "specs_section",
+   "fieldtype": "Section Break",
+   "label": "Thông số kỹ thuật"
+  },
+  {
+   "fieldname": "specs_laptop",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Specs Laptop",
+   "label": "Specs Laptop",
+   "depends_on": "eval:doc.device_type=='laptop'"
+  },
+  {
+   "fieldname": "specs_monitor",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Specs Monitor",
+   "label": "Specs Monitor",
+   "depends_on": "eval:doc.device_type=='monitor'"
+  },
+  {
+   "fieldname": "specs_printer",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Specs Printer",
+   "label": "Specs Printer",
+   "depends_on": "eval:doc.device_type=='printer'"
+  },
+  {
+   "fieldname": "specs_projector",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Specs Projector",
+   "label": "Specs Projector",
+   "depends_on": "eval:doc.device_type=='projector'"
+  },
+  {
+   "fieldname": "specs_phone",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Specs Phone",
+   "label": "Specs Phone",
+   "depends_on": "eval:doc.device_type=='phone'"
+  },
+  {
+   "fieldname": "specs_tool",
+   "fieldtype": "Table",
+   "options": "ERP Inventory Specs Tool",
+   "label": "Specs Tool",
+   "depends_on": "eval:doc.device_type=='tool'"
+  }
+ ],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS IT",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Administrative",
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "SIS Teacher",
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "name": "ERP Inventory Device",
+ "module": "Inventory IT"
+}

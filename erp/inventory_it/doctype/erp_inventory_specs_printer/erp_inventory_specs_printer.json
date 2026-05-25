@@ -1,0 +1,40 @@
+{
+ "doctype": "DocType",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "ip",
+  "ram",
+  "storage",
+  "display"
+ ],
+ "fields": [
+  {
+   "fieldname": "ip",
+   "fieldtype": "Data",
+   "label": "IP",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "ram",
+   "fieldtype": "Data",
+   "label": "RAM"
+  },
+  {
+   "fieldname": "storage",
+   "fieldtype": "Data",
+   "label": "Storage"
+  },
+  {
+   "fieldname": "display",
+   "fieldtype": "Data",
+   "label": "Display"
+  }
+ ],
+ "name": "ERP Inventory Specs Printer",
+ "module": "Inventory IT"
+}

@@ -1,0 +1,59 @@
+{
+ "doctype": "DocType",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "imei1",
+  "imei2",
+  "phone_number",
+  "processor",
+  "ram",
+  "storage",
+  "display"
+ ],
+ "fields": [
+  {
+   "fieldname": "imei1",
+   "fieldtype": "Data",
+   "label": "IMEI 1",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "imei2",
+   "fieldtype": "Data",
+   "label": "IMEI 2"
+  },
+  {
+   "fieldname": "phone_number",
+   "fieldtype": "Data",
+   "label": "Phone Number"
+  },
+  {
+   "fieldname": "processor",
+   "fieldtype": "Data",
+   "label": "Processor"
+  },
+  {
+   "fieldname": "ram",
+   "fieldtype": "Data",
+   "label": "RAM"
+  },
+  {
+   "fieldname": "storage",
+   "fieldtype": "Data",
+   "label": "Storage"
+  },
+  {
+   "fieldname": "display",
+   "fieldtype": "Data",
+   "label": "Display"
+  }
+ ],
+ "name": "ERP Inventory Specs Phone",
+ "module": "Inventory IT"
+}

@@ -1,0 +1,37 @@
+{
+ "doctype": "DocType",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "istable": 1,
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "fullname_snapshot",
+  "assigned_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "fullname_snapshot",
+   "fieldtype": "Data",
+   "label": "Fullname Snapshot",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "assigned_at",
+   "fieldtype": "Datetime",
+   "label": "Assigned At"
+  }
+ ],
+ "name": "ERP Inventory Device Assigned User",
+ "module": "Inventory IT"
+}
