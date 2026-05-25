@@ -10,6 +10,7 @@ from frappe.utils import cint, now_datetime
 from erp.utils.api_response import (
 	error_response,
 	not_found_response,
+	single_item_response,
 	success_response,
 	validation_error_response,
 )
@@ -52,15 +53,27 @@ def _resolve_device_name(device_id: str, device_type: str = None):
 	return frappe.db.get_value("ERP Inventory Device", {"serial": key}, "name")
 
 
+def _normalize_param(value):
+	"""Chuẩn hoá tham số GET/POST — Frappe đôi khi trả list nếu param bị lặp."""
+	if value is None:
+		return None
+	if isinstance(value, (list, tuple)):
+		value = value[0] if value else None
+	if value is None:
+		return None
+	text = str(value).strip()
+	return text or None
+
+
 def _get_device_doc(device_id: str, device_type: str = None):
+	device_id = _normalize_param(device_id)
 	if not device_id:
 		return None
-	key = str(device_id).strip()
 	# PK Frappe là duy nhất — tra theo name không cần lọc device_type
-	if frappe.db.exists("ERP Inventory Device", key):
-		return frappe.get_doc("ERP Inventory Device", key)
+	if frappe.db.exists("ERP Inventory Device", device_id):
+		return frappe.get_doc("ERP Inventory Device", device_id)
 
-	name = _resolve_device_name(key, device_type)
+	name = _resolve_device_name(device_id, device_type)
 	if not name:
 		return None
 	doc = frappe.get_doc("ERP Inventory Device", name)
@@ -142,11 +155,12 @@ def get_devices(device_type=None, page=1, limit=20, search=None, status=None, ma
 def get_device_by_id(device_type=None, device_id=None):
 	try:
 		dt = normalize_device_type(device_type)
-		device_id = device_id or frappe.form_dict.get("device_id")
+		raw_id = device_id or frappe.form_dict.get("device_id") or frappe.form_dict.get("id")
+		device_id = _normalize_param(raw_id)
 		doc = _get_device_doc(device_id, dt)
 		if not doc:
 			return not_found_response(_("Không tìm thấy thiết bị"))
-		return device_doc_to_fe(doc)
+		return single_item_response(device_doc_to_fe(doc))
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "erp_inventory.get_device_by_id")
 		return error_response(str(e))
