@@ -73,3 +73,6 @@ erp.lms.patches.normalize_module_positions
 
 # Thư viện: migration phiếu mượn từ dữ liệu legacy
 erp.patches.v1_0.migrate_legacy_borrows_to_transactions
+
+# Thư viện: backfill mã học sinh / mã nhân viên trên phiếu mượn
+erp.patches.v1_0.backfill_library_transaction_borrower_codes

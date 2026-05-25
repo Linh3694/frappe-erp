@@ -9,6 +9,8 @@
  "field_order": [
   "borrower_id",
   "borrower_name",
+  "student_code",
+  "employee_code",
   "borrower_type",
   "class_or_dept",
   "borrow_date",
@@ -31,6 +33,22 @@
    "label": "Tên người mượn",
    "reqd": 0,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "reqd": 0,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee_code",
+   "fieldtype": "Data",
+   "label": "Mã nhân viên",
+   "reqd": 0,
+   "in_list_view": 1,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "borrower_type",

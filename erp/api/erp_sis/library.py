@@ -2525,25 +2525,58 @@ def upload_file_for_intro():
 # LIBRARY TRANSACTION (Mượn Trả)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _get_user_employee_code(user_id: str) -> str:
+    """Lấy mã nhân viên từ User (custom field employee_code)."""
+    if not user_id:
+        return ""
+    try:
+        return (frappe.db.get_value("User", user_id, "employee_code") or "").strip()
+    except Exception:
+        return ""
+
+
 def _validate_borrower(borrower_id: str, borrower_type: str):
-    """Validate borrower exists. Returns (docname, name) or (None, None)."""
+    """Validate borrower exists. Returns (docname, name, student_code, employee_code)."""
     if borrower_type == "student":
         if frappe.db.exists("CRM Student", borrower_id):
-            name = frappe.db.get_value("CRM Student", borrower_id, "student_name") or borrower_id
-            return borrower_id, name
+            info = frappe.db.get_value(
+                "CRM Student", borrower_id, ["student_name", "student_code"], as_dict=True
+            )
+            student_code = (info.get("student_code") or "").strip()
+            return borrower_id, info.get("student_name") or borrower_id, student_code, ""
         docname = frappe.db.get_value("CRM Student", {"student_code": borrower_id}, "name")
         if docname:
-            name = frappe.db.get_value("CRM Student", docname, "student_name") or docname
-            return docname, name
-        return None, None
+            info = frappe.db.get_value(
+                "CRM Student", docname, ["student_name", "student_code"], as_dict=True
+            )
+            student_code = (info.get("student_code") or borrower_id).strip()
+            return docname, info.get("student_name") or docname, student_code, ""
+        return None, None, None, None
+
+    user_id = None
+    teacher_docname = None
+    if frappe.db.exists("SIS Teacher", borrower_id):
+        teacher_docname = borrower_id
+        user_id = frappe.db.get_value("SIS Teacher", borrower_id, "user_id")
+    elif frappe.db.exists("User", borrower_id):
+        user_id = borrower_id
+        teacher_docname = frappe.db.get_value("SIS Teacher", {"user_id": borrower_id}, "name")
     else:
-        if frappe.db.exists("SIS Teacher", borrower_id):
-            name = frappe.db.get_value("SIS Teacher", borrower_id, "full_name") or borrower_id
-            return borrower_id, name
-        if frappe.db.exists("User", borrower_id):
-            name = frappe.db.get_value("User", borrower_id, "full_name") or borrower_id
-            return borrower_id, name
-        return None, None
+        # Cho phép tra cứu nhân viên theo employee_code
+        try:
+            user_id = frappe.db.get_value("User", {"employee_code": borrower_id}, "name")
+        except Exception:
+            user_id = None
+        if user_id:
+            teacher_docname = frappe.db.get_value("SIS Teacher", {"user_id": user_id}, "name")
+
+    if not user_id:
+        return None, None, None, None
+
+    name = frappe.db.get_value("User", user_id, "full_name") or user_id
+    employee_code = _get_user_employee_code(user_id) or (borrower_id or "").strip()
+    docname = teacher_docname or user_id
+    return docname, name, "", employee_code
 
 
 def _log_library_activity(book_copy_docname: str, action: str, note: str = ""):
@@ -2674,7 +2707,7 @@ def _create_transaction_internal(
     loan_days = int(settings.get("default_loan_days") or DEFAULT_LOAN_DAYS)
     borrow_date = _parse_date(borrow_date) if borrow_date else nowdate()
 
-    borrower_docname, borrower_name = _validate_borrower(borrower_id, borrower_type)
+    borrower_docname, borrower_name, student_code, employee_code = _validate_borrower(borrower_id, borrower_type)
     if not borrower_docname:
         return not_found_response(message=f"Không tìm thấy người mượn: {borrower_id}", code="BORROWER_NOT_FOUND")
 
@@ -2736,6 +2769,8 @@ def _create_transaction_internal(
                 "doctype": TRANSACTION_DTYPE,
                 "borrower_id": borrower_docname,
                 "borrower_name": borrower_name,
+                "student_code": student_code if borrower_type == "student" else "",
+                "employee_code": employee_code if borrower_type == "staff" else "",
                 "borrower_type": borrower_type,
                 "class_or_dept": class_or_dept,
                 "borrow_date": borrow_date,
@@ -2953,11 +2988,17 @@ def list_transactions():
 
     or_filters = {}
     if borrower_id:
-        or_filters = {"borrower_id": ["like", f"%{borrower_id}%"]}
+        or_filters = {
+            "borrower_id": ["like", f"%{borrower_id}%"],
+            "student_code": ["like", f"%{borrower_id}%"],
+            "employee_code": ["like", f"%{borrower_id}%"],
+        }
     if search:
         or_filters = {
             "borrower_id": ["like", f"%{search}%"],
             "borrower_name": ["like", f"%{search}%"],
+            "student_code": ["like", f"%{search}%"],
+            "employee_code": ["like", f"%{search}%"],
             "name": ["like", f"%{search}%"],
         }
 
@@ -2968,8 +3009,8 @@ def list_transactions():
             filters=filters,
             or_filters=or_filters if or_filters else None,
             fields=[
-                "name", "borrower_id", "borrower_name", "borrower_type",
-                "class_or_dept", "borrow_date", "status", "note",
+                "name", "borrower_id", "borrower_name", "student_code", "employee_code",
+                "borrower_type", "class_or_dept", "borrow_date", "status", "note",
                 "creation", "modified",
             ],
             order_by="borrow_date desc, creation desc",
@@ -3061,6 +3102,8 @@ def get_transaction():
                 "id": tx.name,
                 "borrower_id": tx.borrower_id,
                 "borrower_name": tx.borrower_name,
+                "student_code": tx.student_code or "",
+                "employee_code": tx.employee_code or "",
                 "borrower_type": tx.borrower_type,
                 "class_or_dept": tx.class_or_dept,
                 "borrow_date": str(tx.borrow_date) if tx.borrow_date else None,
@@ -3458,10 +3501,14 @@ def get_library_borrow_report():
 
         top_overdue_borrowers = frappe.db.sql(
             f"""
-            SELECT t.borrower_id, t.borrower_name, COUNT(*) AS overdue_count
+            SELECT
+                t.borrower_id,
+                t.borrower_name,
+                COALESCE(NULLIF(t.student_code, ''), NULLIF(t.employee_code, ''), t.borrower_id) AS borrower_code,
+                COUNT(*) AS overdue_count
             FROM `tabSIS Library Transaction` t
             WHERE t.status = 'overdue' {date_clause}
-            GROUP BY t.borrower_id, t.borrower_name
+            GROUP BY t.borrower_id, t.borrower_name, borrower_code
             ORDER BY overdue_count DESC
             LIMIT 10
             """,
