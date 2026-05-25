@@ -31,9 +31,6 @@ SETTINGS_DTYPE = "SIS Library Settings"
 DEFAULT_LOAN_DAYS = 20  # Fallback khi chưa có SIS Library Settings
 DEFAULT_LIBRARY_SETTINGS = {
     "default_loan_days": 20,
-    "overdue_fine_per_day": 5000,
-    "lost_fine_amount": 200000,
-    "damaged_fine_amount": 100000,
     "max_books_per_student": 0,
 }
 
@@ -113,9 +110,6 @@ def _get_library_settings() -> Dict[str, Any]:
     try:
         doc = frappe.get_single(SETTINGS_DTYPE)
         settings["default_loan_days"] = int(doc.default_loan_days or settings["default_loan_days"])
-        settings["overdue_fine_per_day"] = float(doc.overdue_fine_per_day or settings["overdue_fine_per_day"])
-        settings["lost_fine_amount"] = float(doc.lost_fine_amount or settings["lost_fine_amount"])
-        settings["damaged_fine_amount"] = float(doc.damaged_fine_amount or settings["damaged_fine_amount"])
         settings["max_books_per_student"] = int(doc.max_books_per_student or 0)
     except Exception as ex:
         frappe.log_error(f"_get_library_settings failed: {ex}")
@@ -125,9 +119,6 @@ def _get_library_settings() -> Dict[str, Any]:
 def _serialize_library_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "default_loan_days": int(settings.get("default_loan_days") or DEFAULT_LOAN_DAYS),
-        "overdue_fine_per_day": float(settings.get("overdue_fine_per_day") or 0),
-        "lost_fine_amount": float(settings.get("lost_fine_amount") or 0),
-        "damaged_fine_amount": float(settings.get("damaged_fine_amount") or 0),
         "max_books_per_student": int(settings.get("max_books_per_student") or 0),
     }
 
@@ -155,12 +146,6 @@ def update_library_settings():
         doc = frappe.get_single(SETTINGS_DTYPE)
         if "default_loan_days" in data:
             doc.default_loan_days = int(data["default_loan_days"] or DEFAULT_LOAN_DAYS)
-        if "overdue_fine_per_day" in data:
-            doc.overdue_fine_per_day = float(data["overdue_fine_per_day"] or 0)
-        if "lost_fine_amount" in data:
-            doc.lost_fine_amount = float(data["lost_fine_amount"] or 0)
-        if "damaged_fine_amount" in data:
-            doc.damaged_fine_amount = float(data["damaged_fine_amount"] or 0)
         if "max_books_per_student" in data:
             doc.max_books_per_student = int(data["max_books_per_student"] or 0)
         doc.save(ignore_permissions=True)
@@ -973,6 +958,11 @@ def import_titles_excel():
     )
 
 
+def _is_available_copy_status(status: str | None) -> bool:
+    """Status trống/NULL coi như available — đồng bộ UI mượn sách."""
+    return (status or "available").strip().lower() == "available"
+
+
 def _build_copy_search_or_filters(search: str) -> List[List[Any]]:
     """Or-filters tìm bản sao — ưu tiên mã bản sao / mã quy ước."""
     search_term = f"%{search.strip()}%"
@@ -1022,26 +1012,28 @@ def list_book_copies():
         page = int(frappe.request.args.get("page") or frappe.form_dict.get("page") or 1)
         page_size = int(frappe.request.args.get("page_size") or frappe.form_dict.get("page_size") or 20)
         
-        filters: Dict[str, Any] | List[List[Any]] = {}
+        filters: Dict[str, Any] = {}
         or_filters = None
-        
-        if status:
-            status_lower = status.strip().lower()
-            if status_lower in STATUS_MAP:
-                # Status trống coi như available — đồng bộ UI quản lý bản sao
-                if status_lower == "available":
-                    filters = [["status", "in", ["available", ""]]]
-                else:
-                    filters = {"status": status_lower}
-        if title_id:
-            if isinstance(filters, list):
-                filters.append(["title_id", "=", title_id])
+        filter_available_in_python = False
+        status_lower = (status or "").strip().lower()
+
+        if status_lower in STATUS_MAP:
+            # Lọc available sau query — tránh lệch NULL/'' và xung đột list-filters + or_filters
+            if status_lower == "available":
+                filter_available_in_python = True
             else:
-                filters["title_id"] = title_id
+                filters["status"] = status_lower
+        if title_id:
+            filters["title_id"] = title_id
             
         # Search by generated_code, isbn, book_title, linked title, ...
         if search and search.strip():
             or_filters = _build_copy_search_or_filters(search)
+
+        # Autocomplete mượn sách: lấy dư rồi lọc available để không bị thiếu kết quả
+        fetch_page_size = page_size
+        if filter_available_in_python:
+            fetch_page_size = min(page_size * 10, 200)
 
         query_params = {
             "filters": filters,
@@ -1074,8 +1066,8 @@ def list_book_copies():
                 "cataloging_agency",
                 "storage_location",
             ],
-            "limit_start": (page - 1) * page_size,
-            "limit_page_length": page_size,
+            "limit_start": 0 if filter_available_in_python else (page - 1) * page_size,
+            "limit_page_length": fetch_page_size,
             "order_by": "modified desc",
         }
         
@@ -1083,6 +1075,11 @@ def list_book_copies():
             query_params["or_filters"] = or_filters
             
         copies = frappe.get_all(COPY_DTYPE, **query_params)
+
+        if filter_available_in_python:
+            copies = [c for c in copies if _is_available_copy_status(c.get("status"))]
+            offset = (page - 1) * page_size
+            copies = copies[offset : offset + page_size]
         
         # Enrich with title info
         for copy in copies:
@@ -1094,15 +1091,17 @@ def list_book_copies():
                 except Exception:
                     pass
         
-        # Lấy tổng số - dùng frappe.get_all với pluck='name' để đếm
-        count_params = {"filters": filters, "pluck": "name"}
+        # Lấy tổng số — available lọc sau query để khớp NULL/'' 
+        count_params: Dict[str, Any] = {"filters": filters, "fields": ["name", "status"]}
         if or_filters:
             count_params["or_filters"] = or_filters
             
         total_count = frappe.get_all(COPY_DTYPE, **count_params)
+        if filter_available_in_python:
+            total_count = [c for c in total_count if _is_available_copy_status(c.get("status"))]
         total = len(total_count)
                     
-        return list_response(data={"items": copies, "total": total}, message="Fetched copies")
+        return success_response(data={"items": copies, "total": total}, message="Fetched copies")
     except Exception as ex:
         frappe.log_error(f"list_book_copies failed: {ex}")
         return error_response(message="Không lấy được bản sao", code="COPY_LIST_ERROR")
@@ -1466,6 +1465,23 @@ def _get_copy_by_identifier(identifier: str):
     except frappe.DoesNotExistError:
         doc = frappe.get_doc(COPY_DTYPE, {"generated_code": identifier})
     return doc
+
+
+def _sync_copy_after_return(copy_doc, new_status: str, today):
+    """Đồng bộ trạng thái bản sao sau khi trả / báo mất / hư hỏng."""
+    if new_status == "returned":
+        copy_doc.status = "available"
+    elif new_status == "lost":
+        copy_doc.status = "lost"
+    elif new_status == "damaged":
+        copy_doc.status = "damaged"
+    else:
+        return
+
+    copy_doc.borrower_id = None
+    copy_doc.borrower_name = None
+    copy_doc.return_date = today
+    copy_doc.overdue_days = 0
 
 
 @frappe.whitelist(allow_guest=False)
@@ -2677,21 +2693,38 @@ def _create_fine_if_needed(
         frappe.log_error(f"_create_fine_if_needed failed: {ex}")
 
 
-def _resolve_return_fine_amount(new_status: str, fine_amount, matched_item, settings: Dict[str, Any]):
-    """Tính tiền phạt khi trả sách."""
-    if fine_amount and float(fine_amount) > 0:
-        return float(fine_amount), new_status if new_status in {"lost", "damaged"} else "overdue"
+def _get_book_copy_cover_price(book_copy_id: str) -> float:
+    """Lấy giá bìa từ bản sao sách."""
+    if not book_copy_id:
+        return 0
+    try:
+        price = frappe.db.get_value(COPY_DTYPE, {"generated_code": book_copy_id}, "cover_price")
+        return float(price or 0)
+    except Exception:
+        return 0
 
-    if new_status == "lost":
-        return float(settings.get("lost_fine_amount") or 0), "lost"
-    if new_status == "damaged":
-        return float(settings.get("damaged_fine_amount") or 0), "damaged"
+
+def _resolve_return_fine_amount(new_status: str, fine_amount, matched_item, book_copy_id: str):
+    """Tính tiền phạt khi trả sách — mặc định theo giá bìa sách."""
+    # Thủ thư nhập số tiền (kể cả 0 để miễn phạt)
+    if fine_amount is not None and fine_amount != "":
+        amount = float(fine_amount)
+        if amount <= 0:
+            return 0, None
+        fine_type = new_status if new_status in {"lost", "damaged"} else "overdue"
+        return amount, fine_type
+
+    cover_price = _get_book_copy_cover_price(book_copy_id)
+
+    if new_status in {"lost", "damaged"}:
+        if cover_price > 0:
+            return cover_price, new_status
+        return 0, None
 
     if matched_item.due_date and getdate(matched_item.due_date) < getdate(nowdate()):
-        overdue_days = (getdate(nowdate()) - getdate(matched_item.due_date)).days
-        per_day = float(settings.get("overdue_fine_per_day") or 0)
-        if overdue_days > 0 and per_day > 0:
-            return overdue_days * per_day, "overdue"
+        if cover_price > 0:
+            return cover_price, "overdue"
+
     return 0, None
 
 
@@ -2840,7 +2873,6 @@ def _create_transaction_internal(
 def _return_items_internal(tx_id: str, return_items: List[Dict[str, Any]]):
     """Logic trả sách — dùng chung cho return_transaction_items và return_copy."""
     VALID_RETURN_STATUSES = {"returned", "lost", "damaged"}
-    settings = _get_library_settings()
 
     try:
         tx = frappe.get_doc(TRANSACTION_DTYPE, tx_id)
@@ -2875,7 +2907,7 @@ def _return_items_internal(tx_id: str, return_items: List[Dict[str, Any]]):
             errors.append(f"{book_copy_id}: đã ở trạng thái {matched.status}")
             continue
 
-        resolved_amount, fine_type = _resolve_return_fine_amount(new_status, fine_amount, matched, settings)
+        resolved_amount, fine_type = _resolve_return_fine_amount(new_status, fine_amount, matched, book_copy_id)
 
         matched.status = new_status
         matched.date_returned = today
@@ -2883,19 +2915,12 @@ def _return_items_internal(tx_id: str, return_items: List[Dict[str, Any]]):
         matched.fine_amount = resolved_amount
 
         try:
-            copy_doc = frappe.get_doc(COPY_DTYPE, {"generated_code": book_copy_id})
-            if new_status == "returned":
-                copy_doc.status = "available"
-                copy_doc.borrower_id = None
-                copy_doc.borrower_name = None
-                copy_doc.return_date = today
-                copy_doc.overdue_days = 0
-            elif new_status == "lost":
-                copy_doc.status = "lost"
-            elif new_status == "damaged":
-                copy_doc.status = "damaged"
+            copy_doc = _get_copy_by_identifier(book_copy_id)
+            _sync_copy_after_return(copy_doc, new_status, today)
             copy_doc.save(ignore_permissions=True)
             _log_library_activity(copy_doc.name, "return", f"Trả qua phiếu {tx.name}: {new_status}")
+        except frappe.DoesNotExistError:
+            errors.append(f"{book_copy_id}: không tìm thấy bản sao")
         except Exception as ex:
             frappe.log_error(f"_return_items_internal: sync copy {book_copy_id} failed: {ex}")
 
@@ -3117,6 +3142,7 @@ def get_transaction():
         tx = frappe.get_doc(TRANSACTION_DTYPE, tx_id)
         items = []
         for item in tx.items:
+            cover_price = _get_book_copy_cover_price(item.book_copy_id)
             items.append({
                 "id": item.name,
                 "book_copy_id": item.book_copy_id,
@@ -3126,6 +3152,7 @@ def get_transaction():
                 "date_returned": str(item.date_returned) if item.date_returned else None,
                 "status": item.status,
                 "fine_amount": item.fine_amount or 0,
+                "cover_price": cover_price or None,
                 "note": item.note or "",
             })
         return success_response(
@@ -3243,6 +3270,8 @@ def create_fine():
         return validation_error_response(message="Thiếu borrower_id", errors={"borrower_id": ["required"]})
     if fine_type not in {"overdue", "lost", "damaged"}:
         return validation_error_response(message="fine_type không hợp lệ", errors={"fine_type": ["invalid"]})
+    if not total_amount or float(total_amount) <= 0:
+        total_amount = _get_book_copy_cover_price(book_copy_id)
     if not total_amount or float(total_amount) <= 0:
         return validation_error_response(message="Số tiền phạt phải lớn hơn 0", errors={"total_amount": ["invalid"]})
 

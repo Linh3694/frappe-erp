@@ -24,9 +24,6 @@
  ],
  "field_order": [
   "default_loan_days",
-  "overdue_fine_per_day",
-  "lost_fine_amount",
-  "damaged_fine_amount",
   "max_books_per_student"
  ],
  "fields": [
@@ -36,24 +33,6 @@
    "fieldtype": "Int",
    "label": "Số ngày mượn mặc định",
    "reqd": 1
-  },
-  {
-   "default": "5000",
-   "fieldname": "overdue_fine_per_day",
-   "fieldtype": "Currency",
-   "label": "Phạt quá hạn / ngày"
-  },
-  {
-   "default": "200000",
-   "fieldname": "lost_fine_amount",
-   "fieldtype": "Currency",
-   "label": "Phạt mất sách mặc định"
-  },
-  {
-   "default": "100000",
-   "fieldname": "damaged_fine_amount",
-   "fieldtype": "Currency",
-   "label": "Phạt hư hỏng mặc định"
   },
   {
    "default": "0",
