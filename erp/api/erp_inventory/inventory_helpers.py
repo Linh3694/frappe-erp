@@ -57,8 +57,21 @@ def parse_request_data():
 
 def normalize_device_type(device_type: Optional[str]) -> str:
 	dt = (device_type or "").strip().lower()
+	# Fallback: đọc từ form_dict / request args nếu Frappe không pass kwargs đúng
+	if not dt:
+		try:
+			form_dt = (frappe.form_dict.get("device_type") if frappe.form_dict else "") or ""
+			dt = str(form_dt).strip().lower()
+		except Exception:
+			dt = ""
+	if not dt and frappe.request:
+		try:
+			args_dt = frappe.request.args.get("device_type") if hasattr(frappe.request, "args") else ""
+			dt = (args_dt or "").strip().lower()
+		except Exception:
+			pass
 	if dt not in DEVICE_TYPES:
-		frappe.throw(_("Loại thiết bị không hợp lệ: {0}").format(device_type))
+		frappe.throw(_("Loại thiết bị không hợp lệ: {0}").format(device_type or dt or "None"))
 	return dt
 
 
