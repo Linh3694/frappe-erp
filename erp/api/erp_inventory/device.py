@@ -188,11 +188,17 @@ def get_devices(
 	"""Danh sách thiết bị có phân trang — tương đương GET /api/inventory/{type}s.
 
 	Hỗ trợ server-side filter để FE phân trang đúng tổng số bản ghi sau filter.
+
+	LƯU Ý: `page` là tên reserved của Frappe (dùng cho desk routing) — kwarg có thể
+	bị nuốt mất khi gọi qua HTTP. Phải đọc explicit từ form_dict/query args để chắc chắn.
 	"""
 	try:
 		dt = normalize_device_type(device_type)
-		page = max(1, cint(page) or 1)
-		limit = max(1, cint(limit) or 20)
+		# Đọc page/limit từ form_dict trước, fallback về kwarg để không bị Frappe nuốt
+		page_raw = read_api_param("page", "page_num", "pageNum", fallback=page)
+		limit_raw = read_api_param("limit", "page_size", "pageSize", fallback=limit)
+		page = max(1, cint(page_raw) or 1)
+		limit = max(1, cint(limit_raw) or 20)
 		params = {
 			"search": search,
 			"status": status,
