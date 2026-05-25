@@ -10,38 +10,61 @@ from erp.api.erp_inventory.inventory_helpers import parse_request_data
 
 
 def activity_to_fe(doc):
+	"""Map ERP Inventory Activity Log doc → shape FE (Mongo-compatible)."""
 	return {
-		"_id": doc.name,
-		"entityType": doc.entity_type,
-		"entityId": doc.entity,
-		"type": doc.type,
-		"description": doc.description,
-		"details": doc.details or "",
-		"date": doc.date.isoformat() if doc.date else None,
-		"updatedBy": doc.updated_by or "Hệ thống",
-		"createdAt": doc.creation.isoformat() if doc.creation else None,
-		"updatedAt": doc.modified.isoformat() if doc.modified else None,
+		"_id": doc.get("name"),
+		"entityType": doc.get("entity_type"),
+		"entityId": doc.get("entity"),
+		"type": doc.get("type"),
+		"description": doc.get("description"),
+		"details": doc.get("details") or "",
+		"date": doc.get("date").isoformat() if doc.get("date") else None,
+		"updatedBy": doc.get("updated_by") or "Hệ thống",
+		"createdAt": doc.get("creation").isoformat() if doc.get("creation") else None,
+		"updatedAt": doc.get("modified").isoformat() if doc.get("modified") else None,
 	}
 
 
 @frappe.whitelist(allow_guest=False)
 def get_activities(entity_type=None, entity_id=None):
+	"""Lấy lịch sử hoạt động của 1 thiết bị cụ thể.
+
+	BẮT BUỘC phải có entity_id để tránh leak activity của thiết bị khác.
+	"""
 	try:
-		entity_type = entity_type or frappe.form_dict.get("entity_type")
-		entity_id = entity_id or frappe.form_dict.get("entity_id")
-		filters = {}
+		entity_type = (entity_type or frappe.form_dict.get("entity_type") or "").strip()
+		entity_id = (entity_id or frappe.form_dict.get("entity_id") or "").strip()
+
+		# Guard: nếu thiếu entity_id, trả về list rỗng thay vì leak toàn bộ activities
+		if not entity_id:
+			return []
+
+		filters = {"entity": entity_id}
 		if entity_type:
 			filters["entity_type"] = entity_type
-		if entity_id:
-			filters["entity"] = entity_id
-		names = frappe.get_all(
+
+		# limit_page_length=0 → bỏ giới hạn mặc định 20 record của Frappe
+		rows = frappe.get_all(
 			"ERP Inventory Activity Log",
 			filters=filters,
-			pluck="name",
+			fields=[
+				"name",
+				"entity_type",
+				"entity",
+				"type",
+				"description",
+				"details",
+				"date",
+				"updated_by",
+				"creation",
+				"modified",
+			],
 			order_by="date desc",
+			limit_page_length=0,
 		)
-		return [activity_to_fe(frappe.get_doc("ERP Inventory Activity Log", n)) for n in names]
+		return [activity_to_fe(r) for r in rows]
 	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "erp_inventory.activity.get_activities")
 		return error_response(str(e))
 
 
