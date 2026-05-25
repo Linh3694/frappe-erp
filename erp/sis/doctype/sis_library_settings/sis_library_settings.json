@@ -1,0 +1,66 @@
+{
+ "actions": [],
+ "creation": "2025-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "module": "Sis",
+ "name": "SIS Library Settings",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "SIS Library",
+   "write": 1
+  }
+ ],
+ "field_order": [
+  "default_loan_days",
+  "overdue_fine_per_day",
+  "lost_fine_amount",
+  "damaged_fine_amount",
+  "max_books_per_student"
+ ],
+ "fields": [
+  {
+   "default": "20",
+   "fieldname": "default_loan_days",
+   "fieldtype": "Int",
+   "label": "Số ngày mượn mặc định",
+   "reqd": 1
+  },
+  {
+   "default": "5000",
+   "fieldname": "overdue_fine_per_day",
+   "fieldtype": "Currency",
+   "label": "Phạt quá hạn / ngày"
+  },
+  {
+   "default": "200000",
+   "fieldname": "lost_fine_amount",
+   "fieldtype": "Currency",
+   "label": "Phạt mất sách mặc định"
+  },
+  {
+   "default": "100000",
+   "fieldname": "damaged_fine_amount",
+   "fieldtype": "Currency",
+   "label": "Phạt hư hỏng mặc định"
+  },
+  {
+   "default": "0",
+   "description": "0 = không giới hạn",
+   "fieldname": "max_books_per_student",
+   "fieldtype": "Int",
+   "label": "Giới hạn sách / học sinh"
+  }
+ ]
+}

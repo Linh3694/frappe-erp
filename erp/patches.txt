@@ -70,3 +70,6 @@ erp.patches.v1_0.optimize_classlog_attendance_indexes
 
 # LMS Module Builder: chuẩn hóa position module/items
 erp.lms.patches.normalize_module_positions
+
+# Thư viện: migration phiếu mượn từ dữ liệu legacy
+erp.patches.v1_0.migrate_legacy_borrows_to_transactions

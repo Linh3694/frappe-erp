@@ -26,8 +26,16 @@ BOOK_INTRO_DTYPE = "SIS Library Book Introduction"
 TRANSACTION_DTYPE = "SIS Library Transaction"
 TRANSACTION_ITEM_DTYPE = "SIS Library Transaction Item"
 FINE_DTYPE = "SIS Library Fine"
+SETTINGS_DTYPE = "SIS Library Settings"
 
-DEFAULT_LOAN_DAYS = 20  # Số ngày mượn mặc định (hardcode, cấu hình sau)
+DEFAULT_LOAN_DAYS = 20  # Fallback khi chưa có SIS Library Settings
+DEFAULT_LIBRARY_SETTINGS = {
+    "default_loan_days": 20,
+    "overdue_fine_per_day": 5000,
+    "lost_fine_amount": 200000,
+    "damaged_fine_amount": 100000,
+    "max_books_per_student": 0,
+}
 
 VALID_LOOKUP_TYPES = {
     "convention",      # Mã quy ước: code (mã đặc biệt), storage (nơi lưu trữ), language (ngôn ngữ)
@@ -97,6 +105,74 @@ def _parse_date(date_value):
     return str(date_value)
 
 
+def _get_library_settings() -> Dict[str, Any]:
+    """Đọc cấu hình thư viện từ Single DocType, fallback về default."""
+    settings = dict(DEFAULT_LIBRARY_SETTINGS)
+    if not frappe.db.exists("DocType", SETTINGS_DTYPE):
+        return settings
+    try:
+        doc = frappe.get_single(SETTINGS_DTYPE)
+        settings["default_loan_days"] = int(doc.default_loan_days or settings["default_loan_days"])
+        settings["overdue_fine_per_day"] = float(doc.overdue_fine_per_day or settings["overdue_fine_per_day"])
+        settings["lost_fine_amount"] = float(doc.lost_fine_amount or settings["lost_fine_amount"])
+        settings["damaged_fine_amount"] = float(doc.damaged_fine_amount or settings["damaged_fine_amount"])
+        settings["max_books_per_student"] = int(doc.max_books_per_student or 0)
+    except Exception as ex:
+        frappe.log_error(f"_get_library_settings failed: {ex}")
+    return settings
+
+
+def _serialize_library_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "default_loan_days": int(settings.get("default_loan_days") or DEFAULT_LOAN_DAYS),
+        "overdue_fine_per_day": float(settings.get("overdue_fine_per_day") or 0),
+        "lost_fine_amount": float(settings.get("lost_fine_amount") or 0),
+        "damaged_fine_amount": float(settings.get("damaged_fine_amount") or 0),
+        "max_books_per_student": int(settings.get("max_books_per_student") or 0),
+    }
+
+
+@frappe.whitelist(allow_guest=False)
+def get_library_settings():
+    if (resp := _require_library_role()):
+        return resp
+    try:
+        return success_response(
+            data=_serialize_library_settings(_get_library_settings()),
+            message="Fetched library settings",
+        )
+    except Exception as ex:
+        frappe.log_error(f"get_library_settings failed: {ex}")
+        return error_response(message="Không lấy được cấu hình thư viện", code="LIB_SETTINGS_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def update_library_settings():
+    if (resp := _require_library_role()):
+        return resp
+    data = _get_json_payload()
+    try:
+        doc = frappe.get_single(SETTINGS_DTYPE)
+        if "default_loan_days" in data:
+            doc.default_loan_days = int(data["default_loan_days"] or DEFAULT_LOAN_DAYS)
+        if "overdue_fine_per_day" in data:
+            doc.overdue_fine_per_day = float(data["overdue_fine_per_day"] or 0)
+        if "lost_fine_amount" in data:
+            doc.lost_fine_amount = float(data["lost_fine_amount"] or 0)
+        if "damaged_fine_amount" in data:
+            doc.damaged_fine_amount = float(data["damaged_fine_amount"] or 0)
+        if "max_books_per_student" in data:
+            doc.max_books_per_student = int(data["max_books_per_student"] or 0)
+        doc.save(ignore_permissions=True)
+        return success_response(
+            data=_serialize_library_settings(_get_library_settings()),
+            message="Cập nhật cấu hình thư viện thành công",
+        )
+    except Exception as ex:
+        frappe.log_error(f"update_library_settings failed: {ex}")
+        return error_response(message="Không cập nhật được cấu hình thư viện", code="LIB_SETTINGS_UPDATE_ERROR")
+
+
 @frappe.whitelist(allow_guest=False)
 def get_library_summary():
     if (resp := _require_library_role()):
@@ -104,8 +180,12 @@ def get_library_summary():
     try:
         total_titles = frappe.db.count(TITLE_DTYPE)
         total_copies = frappe.db.count(COPY_DTYPE)
-        total_borrowed = frappe.db.count(COPY_DTYPE, {"status": "borrowed"})
-        total_overdue = frappe.db.count(COPY_DTYPE, {"status": "overdue"})
+        total_borrowed = frappe.db.count(
+            TRANSACTION_DTYPE,
+            {"status": ["in", ["borrowing", "partial_return"]]},
+        )
+        total_overdue = frappe.db.count(TRANSACTION_DTYPE, {"status": "overdue"})
+        total_pending_fines = frappe.db.count(FINE_DTYPE, {"status": "pending"})
 
         return success_response(
             data={
@@ -113,6 +193,7 @@ def get_library_summary():
                 "total_copies": total_copies,
                 "total_borrowed": total_borrowed,
                 "total_overdue": total_overdue,
+                "total_pending_fines": total_pending_fines,
             },
             message="Library summary fetched",
         )
@@ -1245,6 +1326,7 @@ def import_copies_excel():
 
 @frappe.whitelist(allow_guest=False)
 def borrow_multiple():
+    """Legacy API — delegate sang transaction layer."""
     if (resp := _require_library_role()):
         return resp
     data = _get_json_payload()
@@ -1253,57 +1335,50 @@ def borrow_multiple():
     if not student_id or not borrowed_books:
         return validation_error_response(message="Thiếu dữ liệu mượn", errors={"student_id": ["required"], "borrowed_books": ["required"]})
 
-    student_docname = _validate_student(student_id)
-    if not student_docname:
-        return not_found_response(message="Không tìm thấy học sinh", code="STUDENT_NOT_FOUND")
-
-    updated = 0
-    errors: List[str] = []
-    for item in borrowed_books:
-        code = item.get("book_code")
-        if not code:
-            continue
-        try:
-            doc = frappe.get_doc(COPY_DTYPE, {"generated_code": code})
-            if doc.status != "available":
-                errors.append(f"{code}: trạng thái hiện tại không cho mượn ({doc.status})")
-                continue
-            doc.status = "borrowed"
-            doc.borrower_id = student_docname
-            doc.borrowed_date = nowdate()
-            doc.return_date = None
-            doc.overdue_days = 0
-            doc.save(ignore_permissions=True)
-
-            # log activity
-            frappe.get_doc(
-                {
-                    "doctype": ACTIVITY_DTYPE,
-                    "book_copy": doc.name,
-                    "action": "borrow",
-                    "performed_by": frappe.session.user,
-                    "performed_at": now(),
-                    "note": f"Borrowed by {student_docname}",
-                }
-            ).insert(ignore_permissions=True)
-            updated += 1
-        except Exception as ex:
-            errors.append(f"{code}: {ex}")
-
+    book_codes = [item.get("book_code") for item in borrowed_books if item.get("book_code")]
+    result = _create_transaction_internal(
+        borrower_id=student_id,
+        borrower_type="student",
+        book_codes=book_codes,
+        note="Legacy borrow_multiple",
+    )
+    if isinstance(result, dict) and result.get("success") is False:
+        return result
     return success_response(
-        data={"success_count": updated, "total_count": len(borrowed_books), "errors": errors},
+        data={
+            "success_count": result.get("success_count", 0),
+            "total_count": len(borrowed_books),
+            "errors": result.get("errors", []),
+        },
         message="Xử lý mượn sách xong",
     )
 
 
 @frappe.whitelist(allow_guest=False)
 def return_copy():
+    """Legacy API — delegate sang transaction layer nếu có phiếu mượn."""
     if (resp := _require_library_role()):
         return resp
     data = _get_json_payload()
-    code = data.get("book_code")
+    code = (data.get("book_code") or "").strip()
     if not code:
         return validation_error_response(message="Thiếu mã bản sao", errors={"book_code": ["required"]})
+
+    tx_id = _find_active_transaction_for_copy(code)
+    if tx_id:
+        result = _return_items_internal(
+            tx_id,
+            [{"book_copy_id": code, "status": "returned", "note": "Legacy return_copy"}],
+        )
+        if isinstance(result, dict) and result.get("is_error_response"):
+            return result
+        if result.get("success_count", 0) == 0:
+            return validation_error_response(
+                message=result.get("errors", ["Không trả được sách"])[0],
+                errors={"book_code": result.get("errors", [])},
+            )
+        return success_response(data=True, message="Đã trả sách")
+
     try:
         doc = frappe.get_doc(COPY_DTYPE, {"generated_code": code})
         if doc.status not in {"borrowed", "overdue"}:
@@ -1312,20 +1387,12 @@ def return_copy():
                 errors={"status": [doc.status]},
             )
         doc.status = "available"
+        doc.borrower_id = None
+        doc.borrower_name = None
         doc.return_date = nowdate()
         doc.overdue_days = 0
         doc.save(ignore_permissions=True)
-
-        frappe.get_doc(
-            {
-                "doctype": ACTIVITY_DTYPE,
-                "book_copy": doc.name,
-                "action": "return",
-                "performed_by": frappe.session.user,
-                "performed_at": now(),
-                "note": "Returned",
-            }
-        ).insert(ignore_permissions=True)
+        _log_library_activity(doc.name, "return", "Legacy return_copy (no transaction)")
         return success_response(data=True, message="Đã trả sách")
     except Exception as ex:
         frappe.log_error(f"return_copy failed: {ex}")
@@ -2442,7 +2509,6 @@ def _validate_borrower(borrower_id: str, borrower_type: str):
             return docname, name
         return None, None
     else:
-        # staff — tìm theo SIS Teacher hoặc User
         if frappe.db.exists("SIS Teacher", borrower_id):
             name = frappe.db.get_value("SIS Teacher", borrower_id, "full_name") or borrower_id
             return borrower_id, name
@@ -2450,6 +2516,91 @@ def _validate_borrower(borrower_id: str, borrower_type: str):
             name = frappe.db.get_value("User", borrower_id, "full_name") or borrower_id
             return borrower_id, name
         return None, None
+
+
+def _log_library_activity(book_copy_docname: str, action: str, note: str = ""):
+    """Ghi log hoạt động mượn/trả."""
+    try:
+        frappe.get_doc(
+            {
+                "doctype": ACTIVITY_DTYPE,
+                "book_copy": book_copy_docname,
+                "action": action,
+                "performed_by": frappe.session.user,
+                "performed_at": now(),
+                "note": note,
+            }
+        ).insert(ignore_permissions=True)
+    except Exception as ex:
+        frappe.log_error(f"_log_library_activity failed: {ex}")
+
+
+def _find_active_transaction_for_copy(book_copy_id: str):
+    """Tìm phiếu mượn đang mở chứa bản sao."""
+    return frappe.db.get_value(
+        TRANSACTION_ITEM_DTYPE,
+        {
+            "book_copy_id": book_copy_id,
+            "status": ["in", ["borrowing", "overdue"]],
+        },
+        "parent",
+    )
+
+
+def _create_fine_if_needed(
+    transaction_id: str,
+    book_copy_id: str,
+    borrower_id: str,
+    fine_type: str,
+    total_amount,
+):
+    """Tạo phiếu phạt nếu chưa có pending cho cùng transaction + bản sao."""
+    amount = float(total_amount or 0)
+    if amount <= 0:
+        return
+    existing = frappe.db.exists(
+        FINE_DTYPE,
+        {
+            "transaction_id": transaction_id,
+            "book_copy_id": book_copy_id,
+            "status": "pending",
+        },
+    )
+    if existing:
+        return
+    try:
+        frappe.get_doc(
+            {
+                "doctype": FINE_DTYPE,
+                "transaction_id": transaction_id,
+                "book_copy_id": book_copy_id,
+                "borrower_id": borrower_id,
+                "fine_type": fine_type,
+                "total_amount": amount,
+                "paid_amount": 0,
+                "status": "pending",
+            }
+        ).insert(ignore_permissions=True)
+    except Exception as ex:
+        frappe.log_error(f"_create_fine_if_needed failed: {ex}")
+
+
+def _resolve_return_fine_amount(new_status: str, fine_amount, matched_item, settings: Dict[str, Any]):
+    """Tính tiền phạt khi trả sách."""
+    if fine_amount and float(fine_amount) > 0:
+        return float(fine_amount), new_status if new_status in {"lost", "damaged"} else "overdue"
+
+    if new_status == "lost":
+        return float(settings.get("lost_fine_amount") or 0), "lost"
+    if new_status == "damaged":
+        return float(settings.get("damaged_fine_amount") or 0), "damaged"
+
+    if matched_item.due_date and getdate(matched_item.due_date) < getdate(nowdate()):
+        overdue_days = (getdate(nowdate()) - getdate(matched_item.due_date)).days
+        per_day = float(settings.get("overdue_fine_per_day") or 0)
+        if overdue_days > 0 and per_day > 0:
+            return overdue_days * per_day, "overdue"
+    return 0, None
 
 
 def _sync_transaction_status(transaction_doc):
@@ -2461,53 +2612,62 @@ def _sync_transaction_status(transaction_doc):
     if not active:
         transaction_doc.status = "returned"
     elif active == statuses:
-        # Tất cả chưa trả
         today = getdate(nowdate())
         any_overdue = any(
-            item.due_date and getdate(item.due_date) < today and item.status == "borrowing"
+            item.due_date
+            and getdate(item.due_date) < today
+            and item.status in {"borrowing", "overdue"}
             for item in transaction_doc.items
         )
         transaction_doc.status = "overdue" if any_overdue else "borrowing"
     else:
-        transaction_doc.status = "partial_return"
+        today = getdate(nowdate())
+        open_items = [
+            item for item in transaction_doc.items if item.status not in {"returned", "lost", "damaged"}
+        ]
+        any_overdue = any(
+            item.due_date and getdate(item.due_date) < today and item.status in {"borrowing", "overdue"}
+            for item in open_items
+        )
+        transaction_doc.status = "overdue" if any_overdue else "partial_return"
 
 
-@frappe.whitelist(allow_guest=False)
-def create_transaction():
-    """Tạo phiếu mượn mới.
-
-    Body:
-      borrower_id   str  — mã học sinh / nhân viên
-      borrower_type str  — student | staff
-      borrow_date   str  — YYYY-MM-DD (mặc định hôm nay)
-      book_codes    list — danh sách generated_code của bản sao
-      note          str  — ghi chú
-      class_or_dept str  — lớp / phòng ban
-    """
-    if (resp := _require_library_role()):
-        return resp
-
-    data = _get_json_payload()
-    borrower_id = (data.get("borrower_id") or "").strip()
-    borrower_type = (data.get("borrower_type") or "student").strip()
-    book_codes = data.get("book_codes") or []
-    note = data.get("note") or ""
-    class_or_dept = data.get("class_or_dept") or ""
-    raw_date = data.get("borrow_date")
-    borrow_date = _parse_date(raw_date) if raw_date else nowdate()
-
-    if not borrower_id:
-        return validation_error_response(message="Thiếu mã người mượn", errors={"borrower_id": ["required"]})
-    if borrower_type not in {"student", "staff"}:
-        return validation_error_response(message="borrower_type phải là student hoặc staff", errors={"borrower_type": ["invalid"]})
-    if not book_codes:
-        return validation_error_response(message="Cần ít nhất 1 bản sao", errors={"book_codes": ["required"]})
+def _create_transaction_internal(
+    borrower_id: str,
+    borrower_type: str = "student",
+    book_codes: List[str] | None = None,
+    note: str = "",
+    class_or_dept: str = "",
+    borrow_date=None,
+):
+    """Logic tạo phiếu mượn — dùng chung cho create_transaction và borrow_multiple."""
+    book_codes = book_codes or []
+    settings = _get_library_settings()
+    loan_days = int(settings.get("default_loan_days") or DEFAULT_LOAN_DAYS)
+    borrow_date = _parse_date(borrow_date) if borrow_date else nowdate()
 
     borrower_docname, borrower_name = _validate_borrower(borrower_id, borrower_type)
     if not borrower_docname:
         return not_found_response(message=f"Không tìm thấy người mượn: {borrower_id}", code="BORROWER_NOT_FOUND")
 
-    due_date_obj = getdate(borrow_date) + timedelta(days=DEFAULT_LOAN_DAYS)
+    if borrower_type == "student":
+        max_books = int(settings.get("max_books_per_student") or 0)
+        if max_books > 0:
+            active_count = frappe.db.count(
+                TRANSACTION_DTYPE,
+                {
+                    "borrower_id": borrower_docname,
+                    "borrower_type": "student",
+                    "status": ["in", ["borrowing", "overdue", "partial_return"]],
+                },
+            )
+            if active_count + len(book_codes) > max_books:
+                return validation_error_response(
+                    message=f"Học sinh chỉ được mượn tối đa {max_books} sách",
+                    errors={"book_codes": ["max_limit"]},
+                )
+
+    due_date_obj = getdate(borrow_date) + timedelta(days=loan_days)
     due_date_str = due_date_obj.strftime("%Y-%m-%d")
 
     items = []
@@ -2521,14 +2681,16 @@ def create_transaction():
             if copy_doc.status != "available":
                 errors.append(f"{code}: không khả dụng (đang ở trạng thái {copy_doc.status})")
                 continue
-            items.append({
-                "doctype": TRANSACTION_ITEM_DTYPE,
-                "book_copy_id": code,
-                "book_title": copy_doc.book_title or "",
-                "book_type": copy_doc.special_code or "",
-                "due_date": due_date_str,
-                "status": "borrowing",
-            })
+            items.append(
+                {
+                    "doctype": TRANSACTION_ITEM_DTYPE,
+                    "book_copy_id": code,
+                    "book_title": copy_doc.book_title or "",
+                    "book_type": copy_doc.special_code or "",
+                    "due_date": due_date_str,
+                    "status": "borrowing",
+                }
+            )
         except frappe.DoesNotExistError:
             errors.append(f"{code}: không tìm thấy bản sao")
         except Exception as ex:
@@ -2541,20 +2703,21 @@ def create_transaction():
         )
 
     try:
-        tx = frappe.get_doc({
-            "doctype": TRANSACTION_DTYPE,
-            "borrower_id": borrower_docname,
-            "borrower_name": borrower_name,
-            "borrower_type": borrower_type,
-            "class_or_dept": class_or_dept,
-            "borrow_date": borrow_date,
-            "status": "borrowing",
-            "note": note,
-            "items": items,
-        })
+        tx = frappe.get_doc(
+            {
+                "doctype": TRANSACTION_DTYPE,
+                "borrower_id": borrower_docname,
+                "borrower_name": borrower_name,
+                "borrower_type": borrower_type,
+                "class_or_dept": class_or_dept,
+                "borrow_date": borrow_date,
+                "status": "borrowing",
+                "note": note,
+                "items": items,
+            }
+        )
         tx.insert(ignore_permissions=True)
 
-        # Cập nhật BookCopy status → borrowed
         for item in tx.items:
             try:
                 copy_doc = frappe.get_doc(COPY_DTYPE, {"generated_code": item.book_copy_id})
@@ -2565,21 +2728,163 @@ def create_transaction():
                 copy_doc.return_date = None
                 copy_doc.overdue_days = 0
                 copy_doc.save(ignore_permissions=True)
+                _log_library_activity(copy_doc.name, "borrow", f"Mượn qua phiếu {tx.name}")
             except Exception as ex:
-                frappe.log_error(f"create_transaction: sync copy {item.book_copy_id} failed: {ex}")
+                frappe.log_error(f"_create_transaction_internal: sync copy {item.book_copy_id} failed: {ex}")
 
-        return success_response(
-            data={
-                "id": tx.name,
-                "success_count": len(tx.items),
-                "total_count": len(book_codes),
-                "errors": errors,
-            },
-            message="Tạo phiếu mượn thành công",
-        )
+        return {
+            "id": tx.name,
+            "success_count": len(tx.items),
+            "total_count": len(book_codes),
+            "errors": errors,
+        }
     except Exception as ex:
-        frappe.log_error(f"create_transaction failed: {ex}")
+        frappe.log_error(f"_create_transaction_internal failed: {ex}")
         return error_response(message="Không tạo được phiếu mượn", code="TX_CREATE_ERROR")
+
+
+def _return_items_internal(tx_id: str, return_items: List[Dict[str, Any]]):
+    """Logic trả sách — dùng chung cho return_transaction_items và return_copy."""
+    VALID_RETURN_STATUSES = {"returned", "lost", "damaged"}
+    settings = _get_library_settings()
+
+    try:
+        tx = frappe.get_doc(TRANSACTION_DTYPE, tx_id)
+    except frappe.DoesNotExistError:
+        return not_found_response(message="Không tìm thấy phiếu mượn", code="TX_NOT_FOUND")
+
+    errors = []
+    updated = 0
+    today = nowdate()
+
+    for ret in return_items:
+        book_copy_id = (ret.get("book_copy_id") or "").strip()
+        new_status = (ret.get("status") or "returned").strip()
+        item_note = ret.get("note") or ""
+        fine_amount = ret.get("fine_amount")
+
+        if new_status not in VALID_RETURN_STATUSES:
+            errors.append(f"{book_copy_id}: status không hợp lệ ({new_status})")
+            continue
+
+        matched = None
+        for item in tx.items:
+            if item.book_copy_id == book_copy_id:
+                matched = item
+                break
+
+        if not matched:
+            errors.append(f"{book_copy_id}: không thuộc phiếu mượn này")
+            continue
+
+        if matched.status not in {"borrowing", "overdue"}:
+            errors.append(f"{book_copy_id}: đã ở trạng thái {matched.status}")
+            continue
+
+        resolved_amount, fine_type = _resolve_return_fine_amount(new_status, fine_amount, matched, settings)
+
+        matched.status = new_status
+        matched.date_returned = today
+        matched.note = item_note
+        matched.fine_amount = resolved_amount
+
+        try:
+            copy_doc = frappe.get_doc(COPY_DTYPE, {"generated_code": book_copy_id})
+            if new_status == "returned":
+                copy_doc.status = "available"
+                copy_doc.borrower_id = None
+                copy_doc.borrower_name = None
+                copy_doc.return_date = today
+                copy_doc.overdue_days = 0
+            elif new_status == "lost":
+                copy_doc.status = "lost"
+            elif new_status == "damaged":
+                copy_doc.status = "damaged"
+            copy_doc.save(ignore_permissions=True)
+            _log_library_activity(copy_doc.name, "return", f"Trả qua phiếu {tx.name}: {new_status}")
+        except Exception as ex:
+            frappe.log_error(f"_return_items_internal: sync copy {book_copy_id} failed: {ex}")
+
+        if fine_type and resolved_amount > 0:
+            _create_fine_if_needed(tx.name, book_copy_id, tx.borrower_id, fine_type, resolved_amount)
+
+        updated += 1
+
+    _sync_transaction_status(tx)
+    tx.save(ignore_permissions=True)
+    return {"success_count": updated, "errors": errors}
+
+
+def sync_overdue_status():
+    """Đồng bộ trạng thái quá hạn — gọi từ cron hoặc thủ công."""
+    today = getdate(nowdate())
+    overdue_items = frappe.db.sql(
+        """
+        SELECT name, parent, book_copy_id, due_date
+        FROM `tabSIS Library Transaction Item`
+        WHERE status = 'borrowing' AND due_date IS NOT NULL AND due_date < %s
+        """,
+        today,
+        as_dict=True,
+    )
+
+    tx_ids = set()
+    for item in overdue_items:
+        frappe.db.set_value(TRANSACTION_ITEM_DTYPE, item.name, "status", "overdue", update_modified=False)
+        tx_ids.add(item.parent)
+        try:
+            copy_doc = frappe.get_doc(COPY_DTYPE, {"generated_code": item.book_copy_id})
+            copy_doc.status = "overdue"
+            delta = (today - getdate(item.due_date)).days
+            copy_doc.overdue_days = max(delta, 0)
+            copy_doc.save(ignore_permissions=True)
+        except Exception as ex:
+            frappe.log_error(f"sync_overdue_status: copy {item.book_copy_id} failed: {ex}")
+
+    for tx_id in tx_ids:
+        try:
+            tx = frappe.get_doc(TRANSACTION_DTYPE, tx_id)
+            _sync_transaction_status(tx)
+            tx.save(ignore_permissions=True)
+        except Exception as ex:
+            frappe.log_error(f"sync_overdue_status: tx {tx_id} failed: {ex}")
+
+    frappe.db.commit()
+    return len(overdue_items)
+
+
+@frappe.whitelist(allow_guest=False)
+def create_transaction():
+    """Tạo phiếu mượn mới."""
+    if (resp := _require_library_role()):
+        return resp
+
+    data = _get_json_payload()
+    borrower_id = (data.get("borrower_id") or "").strip()
+    borrower_type = (data.get("borrower_type") or "student").strip()
+    book_codes = data.get("book_codes") or []
+    note = data.get("note") or ""
+    class_or_dept = data.get("class_or_dept") or ""
+    raw_date = data.get("borrow_date")
+
+    if not borrower_id:
+        return validation_error_response(message="Thiếu mã người mượn", errors={"borrower_id": ["required"]})
+    if borrower_type not in {"student", "staff"}:
+        return validation_error_response(message="borrower_type phải là student hoặc staff", errors={"borrower_type": ["invalid"]})
+    if not book_codes:
+        return validation_error_response(message="Cần ít nhất 1 bản sao", errors={"book_codes": ["required"]})
+
+    result = _create_transaction_internal(
+        borrower_id=borrower_id,
+        borrower_type=borrower_type,
+        book_codes=book_codes,
+        note=note,
+        class_or_dept=class_or_dept,
+        borrow_date=raw_date,
+    )
+    if isinstance(result, dict) and result.get("success") is False:
+        return result
+    return success_response(data=result, message="Tạo phiếu mượn thành công")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -2611,10 +2916,12 @@ def list_transactions():
         filters["status"] = status
     if borrower_type:
         filters["borrower_type"] = borrower_type
-    if from_date:
+    if from_date and to_date:
+        filters["borrow_date"] = ["between", [from_date, to_date]]
+    elif from_date:
         filters["borrow_date"] = [">=", from_date]
-    if to_date:
-        filters.setdefault("borrow_date", ["<=", to_date])
+    elif to_date:
+        filters["borrow_date"] = ["<=", to_date]
 
     or_filters = {}
     if borrower_id:
@@ -2746,13 +3053,7 @@ def get_transaction():
 
 @frappe.whitelist(allow_guest=False)
 def return_transaction_items():
-    """Trả sách cho một phiếu mượn.
-
-    Body:
-      transaction_id  str
-      items           list of { book_copy_id, status, note, fine_amount }
-        status: returned | lost | damaged
-    """
+    """Trả sách cho một phiếu mượn."""
     if (resp := _require_library_role()):
         return resp
 
@@ -2765,73 +3066,10 @@ def return_transaction_items():
     if not return_items:
         return validation_error_response(message="Cần ít nhất 1 bản sao để trả", errors={"items": ["required"]})
 
-    VALID_RETURN_STATUSES = {"returned", "lost", "damaged"}
-
-    try:
-        tx = frappe.get_doc(TRANSACTION_DTYPE, tx_id)
-    except frappe.DoesNotExistError:
-        return not_found_response(message="Không tìm thấy phiếu mượn", code="TX_NOT_FOUND")
-
-    errors = []
-    updated = 0
-    today = nowdate()
-
-    for ret in return_items:
-        book_copy_id = (ret.get("book_copy_id") or "").strip()
-        new_status = (ret.get("status") or "returned").strip()
-        item_note = ret.get("note") or ""
-        fine_amount = ret.get("fine_amount") or 0
-
-        if new_status not in VALID_RETURN_STATUSES:
-            errors.append(f"{book_copy_id}: status không hợp lệ ({new_status})")
-            continue
-
-        # Tìm item trong transaction
-        matched = None
-        for item in tx.items:
-            if item.book_copy_id == book_copy_id:
-                matched = item
-                break
-
-        if not matched:
-            errors.append(f"{book_copy_id}: không thuộc phiếu mượn này")
-            continue
-
-        if matched.status not in {"borrowing", "overdue"}:
-            errors.append(f"{book_copy_id}: đã ở trạng thái {matched.status}")
-            continue
-
-        matched.status = new_status
-        matched.date_returned = today
-        matched.note = item_note
-        matched.fine_amount = fine_amount
-
-        # Cập nhật BookCopy
-        try:
-            copy_doc = frappe.get_doc(COPY_DTYPE, {"generated_code": book_copy_id})
-            if new_status == "returned":
-                copy_doc.status = "available"
-                copy_doc.borrower_id = None
-                copy_doc.borrower_name = None
-                copy_doc.return_date = today
-            elif new_status == "lost":
-                copy_doc.status = "lost"
-            elif new_status == "damaged":
-                copy_doc.status = "damaged"
-            copy_doc.save(ignore_permissions=True)
-        except Exception as ex:
-            frappe.log_error(f"return_transaction_items: sync copy {book_copy_id} failed: {ex}")
-
-        updated += 1
-
-    # Cập nhật status tổng của transaction
-    _sync_transaction_status(tx)
-    tx.save(ignore_permissions=True)
-
-    return success_response(
-        data={"success_count": updated, "errors": errors},
-        message="Cập nhật trả sách thành công",
-    )
+    result = _return_items_internal(tx_id, return_items)
+    if isinstance(result, dict) and result.get("success") is False:
+        return result
+    return success_response(data=result, message="Cập nhật trả sách thành công")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -2967,3 +3205,109 @@ def update_fine():
     except Exception as ex:
         frappe.log_error(f"update_fine failed: {ex}")
         return error_response(message="Không cập nhật được phiếu phạt", code="FINE_UPDATE_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_library_borrow_report():
+    """Báo cáo mượn/trả theo khoảng thời gian."""
+    if (resp := _require_library_role()):
+        return resp
+
+    args = frappe.request.args if frappe.request else {}
+    from_date = args.get("from_date") or frappe.form_dict.get("from_date") or ""
+    to_date = args.get("to_date") or frappe.form_dict.get("to_date") or ""
+
+    tx_filters = {}
+    if from_date and to_date:
+        tx_filters["borrow_date"] = ["between", [from_date, to_date]]
+    elif from_date:
+        tx_filters["borrow_date"] = [">=", from_date]
+    elif to_date:
+        tx_filters["borrow_date"] = ["<=", to_date]
+
+    try:
+        total_transactions = frappe.db.count(TRANSACTION_DTYPE, tx_filters)
+        borrowing_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "borrowing"})
+        overdue_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "overdue"})
+        returned_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "returned"})
+        partial_count = frappe.db.count(TRANSACTION_DTYPE, {**tx_filters, "status": "partial_return"})
+
+        fine_date_clause = ""
+        fine_params: List[Any] = []
+        if from_date and to_date:
+            fine_date_clause = "AND creation BETWEEN %s AND %s"
+            fine_params.extend([from_date, to_date])
+        elif from_date:
+            fine_date_clause = "AND creation >= %s"
+            fine_params.append(from_date)
+        elif to_date:
+            fine_date_clause = "AND creation <= %s"
+            fine_params.append(to_date)
+
+        pending_fines = frappe.db.sql(
+            f"SELECT COALESCE(SUM(total_amount), 0) FROM `tabSIS Library Fine` WHERE status = 'pending' {fine_date_clause}",
+            fine_params,
+        )[0][0]
+        paid_fines = frappe.db.sql(
+            f"SELECT COALESCE(SUM(paid_amount), 0) FROM `tabSIS Library Fine` WHERE status = 'paid' {fine_date_clause}",
+            fine_params,
+        )[0][0]
+
+        date_clause = ""
+        params: List[Any] = []
+        if from_date and to_date:
+            date_clause = "AND t.borrow_date BETWEEN %s AND %s"
+            params.extend([from_date, to_date])
+        elif from_date:
+            date_clause = "AND t.borrow_date >= %s"
+            params.append(from_date)
+        elif to_date:
+            date_clause = "AND t.borrow_date <= %s"
+            params.append(to_date)
+
+        top_books = frappe.db.sql(
+            f"""
+            SELECT ti.book_copy_id, ti.book_title, COUNT(*) AS borrow_count
+            FROM `tabSIS Library Transaction Item` ti
+            INNER JOIN `tabSIS Library Transaction` t ON t.name = ti.parent
+            WHERE 1=1 {date_clause}
+            GROUP BY ti.book_copy_id, ti.book_title
+            ORDER BY borrow_count DESC
+            LIMIT 10
+            """,
+            params,
+            as_dict=True,
+        )
+
+        top_overdue_borrowers = frappe.db.sql(
+            f"""
+            SELECT t.borrower_id, t.borrower_name, COUNT(*) AS overdue_count
+            FROM `tabSIS Library Transaction` t
+            WHERE t.status = 'overdue' {date_clause}
+            GROUP BY t.borrower_id, t.borrower_name
+            ORDER BY overdue_count DESC
+            LIMIT 10
+            """,
+            params,
+            as_dict=True,
+        )
+
+        return success_response(
+            data={
+                "summary": {
+                    "total_transactions": total_transactions,
+                    "borrowing": borrowing_count,
+                    "overdue": overdue_count,
+                    "returned": returned_count,
+                    "partial_return": partial_count,
+                    "pending_fines_total": float(pending_fines or 0),
+                    "paid_fines_total": float(paid_fines or 0),
+                },
+                "top_books": top_books,
+                "top_overdue_borrowers": top_overdue_borrowers,
+            },
+            message="Fetched library borrow report",
+        )
+    except Exception as ex:
+        frappe.log_error(f"get_library_borrow_report failed: {ex}")
+        return error_response(message="Không lấy được báo cáo mượn trả", code="LIB_REPORT_ERROR")
