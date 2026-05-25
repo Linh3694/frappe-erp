@@ -3,11 +3,12 @@
 
 import json
 import os
+import shutil
 from datetime import datetime
 
 import frappe
 from frappe import _
-from frappe.utils import get_site_path, now_datetime
+from frappe.utils import get_bench_path, get_site_path, now_datetime
 
 from erp.utils.api_response import error_response, not_found_response, success_response, validation_error_response
 from erp.api.erp_inventory.inventory_helpers import normalize_device_type, parse_request_data
@@ -78,56 +79,101 @@ def upload_handover_report(device_type=None):
 
 @frappe.whitelist(allow_guest=False)
 def register_legacy_files(folder="handovers"):
-	"""
-	Đăng ký file đã rsync vào sites/<site>/public/files/inventory/{folder}/.
-	Gọi sau khi chạy scripts/migrate_inventory_files.sh
-	"""
+	"""Đăng ký file đã copy vào sites/<site>/public/files/inventory/{folder}/."""
 	try:
-		base = os.path.join(get_site_path("public", "files", "inventory", folder))
-		if not os.path.isdir(base):
-			return error_response(_("Thư mục không tồn tại: {0}").format(base))
-
-		created = 0
-		updated = 0
-		for fname in os.listdir(base):
-			fpath = os.path.join(base, fname)
-			if not os.path.isfile(fpath):
-				continue
-			file_url = f"/files/inventory/{folder}/{fname}"
-			existing = frappe.db.get_value("File", {"file_url": file_url}, "name")
-			if not existing:
-				frappe.get_doc(
-					{
-						"doctype": "File",
-						"file_name": fname,
-						"file_url": file_url,
-						"is_private": 0,
-						"folder": f"Home/inventory/{folder}",
-					}
-				).insert(ignore_permissions=True)
-				created += 1
-
-			# Cập nhật handover log theo tên file (legacy path)
-			logs = frappe.get_all(
-				"ERP Inventory Handover Log",
-				filters=[
-					["document_file_url", "like", f"%{fname}"],
-				],
-				pluck="name",
-			)
-			for log_name in logs:
-				log_doc = frappe.get_doc("ERP Inventory Handover Log", log_name)
-				log_doc.document_file_url = file_url
-				log_doc.document_file = file_url
-				log_doc.save(ignore_permissions=True)
-				updated += 1
-
+		result = register_legacy_files_internal(folder)
 		frappe.db.commit()
-		return success_response(
-			data={"created_files": created, "updated_handover_logs": updated, "folder": folder},
-			message=_("Đã đăng ký file legacy"),
-		)
+		return success_response(data=result, message=_("Đã đăng ký file legacy"))
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(frappe.get_traceback(), "erp_inventory.register_legacy_files")
 		return error_response(str(e))
+
+
+def _inventory_uploads_path():
+	"""Đường dẫn thư mục uploads của inventory-service trên server."""
+	cfg = frappe.conf.get("inventory_uploads_path") or frappe.get_site_config().get("inventory_uploads_path")
+	if cfg:
+		return cfg.rstrip("/")
+	return os.path.join(get_bench_path(), "inventory-service", "uploads")
+
+
+def copy_legacy_upload_files():
+	"""Copy file handover/report từ inventory-service sang Frappe public files."""
+	source_base = _inventory_uploads_path()
+	target_base = os.path.join(get_site_path("public", "files", "inventory"))
+	mapping = [("Handovers", "handovers"), ("reports", "reports")]
+	copied = 0
+	warnings = []
+
+	os.makedirs(target_base, exist_ok=True)
+	for src_folder, dst_folder in mapping:
+		src = os.path.join(source_base, src_folder)
+		dst = os.path.join(target_base, dst_folder)
+		os.makedirs(dst, exist_ok=True)
+		if not os.path.isdir(src):
+			warnings.append(_("Không tìm thấy thư mục nguồn: {0}").format(src))
+			continue
+		for fname in os.listdir(src):
+			spath = os.path.join(src, fname)
+			if not os.path.isfile(spath):
+				continue
+			dpath = os.path.join(dst, fname)
+			shutil.copy2(spath, dpath)
+			copied += 1
+
+	return {"copied_files": copied, "source": source_base, "target": target_base, "warnings": warnings}
+
+
+def register_legacy_files_internal(folder="handovers"):
+	"""Đăng ký File doc + cập nhật handover log theo tên file."""
+	base = os.path.join(get_site_path("public", "files", "inventory", folder))
+	if not os.path.isdir(base):
+		frappe.throw(_("Thư mục không tồn tại: {0}").format(base))
+
+	created = 0
+	updated = 0
+	for fname in os.listdir(base):
+		fpath = os.path.join(base, fname)
+		if not os.path.isfile(fpath):
+			continue
+		file_url = f"/files/inventory/{folder}/{fname}"
+		existing = frappe.db.get_value("File", {"file_url": file_url}, "name")
+		if not existing:
+			frappe.get_doc(
+				{
+					"doctype": "File",
+					"file_name": fname,
+					"file_url": file_url,
+					"is_private": 0,
+					"folder": f"Home/inventory/{folder}",
+				}
+			).insert(ignore_permissions=True)
+			created += 1
+
+		logs = frappe.get_all(
+			"ERP Inventory Handover Log",
+			filters=[["document_file_url", "like", f"%{fname}"]],
+			pluck="name",
+		)
+		for log_name in logs:
+			log_doc = frappe.get_doc("ERP Inventory Handover Log", log_name)
+			log_doc.document_file_url = file_url
+			log_doc.document_file = file_url
+			log_doc.save(ignore_permissions=True)
+			updated += 1
+
+	return {"created_files": created, "updated_handover_logs": updated, "folder": folder}
+
+
+def sync_legacy_files_full():
+	"""Copy file vật lý + đăng ký File doc (handovers + reports)."""
+	copy_result = copy_legacy_upload_files()
+	register_handovers = register_legacy_files_internal("handovers")
+	register_reports = register_legacy_files_internal("reports")
+	frappe.db.commit()
+	return {
+		**copy_result,
+		"handovers": register_handovers,
+		"reports": register_reports,
+	}

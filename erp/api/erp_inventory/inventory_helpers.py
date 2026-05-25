@@ -10,6 +10,14 @@ from frappe.utils import cint, get_fullname, get_datetime, now_datetime
 
 DEVICE_TYPES = ("laptop", "monitor", "printer", "projector", "phone", "tool")
 VALID_STATUSES = ("Active", "Standby", "Broken", "PendingDocumentation")
+MIGRATION_ROLES = ("System Manager", "SIS IT")
+
+
+def require_migration_role():
+	"""Chỉ IT / System Manager được chạy migration."""
+	roles = frappe.get_roles(frappe.session.user)
+	if not any(r in roles for r in MIGRATION_ROLES):
+		frappe.throw(_("Chỉ System Manager hoặc SIS IT được thực hiện migration"), frappe.PermissionError)
 
 POPULATED_KEY = {
 	"laptop": "populatedLaptops",
