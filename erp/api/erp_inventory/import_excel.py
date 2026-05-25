@@ -21,6 +21,7 @@ from erp.api.erp_inventory.inventory_helpers import (
 	sync_assigned_users,
 	sync_current_holder_from_assigned,
 )
+from erp.api.erp_inventory.migration import _require_migration_role
 
 
 def _save_uploaded_excel_temp(file_data, filename="import.xlsx"):
@@ -72,6 +73,7 @@ def import_devices_full(device_type=None, file_url=None):
 	file_url: URL file đã upload lên Frappe File hoặc multipart upload trực tiếp.
 	"""
 	try:
+		_require_migration_role()
 		dt = normalize_device_type(device_type)
 		data = parse_request_data()
 
@@ -261,6 +263,7 @@ def import_devices_full(device_type=None, file_url=None):
 @frappe.whitelist(allow_guest=False)
 def import_inspections_full(file_url=None):
 	try:
+		_require_migration_role()
 		data = parse_request_data()
 		file_path = None
 		files = frappe.request.files if frappe.request else None
@@ -328,6 +331,7 @@ def import_inspections_full(file_url=None):
 @frappe.whitelist(allow_guest=False)
 def import_activities_full(file_url=None):
 	try:
+		_require_migration_role()
 		files = frappe.request.files if frappe.request else None
 		if not files or "file" not in files:
 			return validation_error_response(_("Không có file"), {"file": ["required"]})
