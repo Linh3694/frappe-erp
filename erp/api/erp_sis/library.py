@@ -973,11 +973,40 @@ def import_titles_excel():
     )
 
 
+def _build_copy_search_or_filters(search: str) -> List[List[Any]]:
+    """Or-filters tìm bản sao — ưu tiên mã bản sao / mã quy ước."""
+    search_term = f"%{search.strip()}%"
+    or_filters: List[List[Any]] = [
+        ["generated_code", "like", search_term],
+        ["special_code", "like", search_term],
+        ["isbn", "like", search_term],
+        ["book_title", "like", search_term],
+        ["document_identifier", "like", search_term],
+        ["classification_sign", "like", search_term],
+        ["storage_location", "like", search_term],
+    ]
+
+    # Nhiều bản sao chỉ link title_id — book_title có thể trống
+    title_ids = frappe.get_all(
+        TITLE_DTYPE,
+        or_filters=[
+            ["title", "like", search_term],
+            ["library_code", "like", search_term],
+            ["authors", "like", search_term],
+        ],
+        pluck="name",
+    )
+    if title_ids:
+        or_filters.append(["title_id", "in", title_ids])
+
+    return or_filters
+
+
 @frappe.whitelist(allow_guest=False)
 def list_book_copies():
     """
     List book copies with optional filters.
-    - search: tìm kiếm theo mã sách, ISBN, tên sách
+    - search: tìm kiếm theo mã sách, ISBN, tên sách, đầu sách liên kết
     - status: filter by status (available, borrowed, reserved, overdue)
     - title_id: filter by title (đầu sách)
     - page: trang hiện tại (bắt đầu từ 1)
@@ -993,24 +1022,26 @@ def list_book_copies():
         page = int(frappe.request.args.get("page") or frappe.form_dict.get("page") or 1)
         page_size = int(frappe.request.args.get("page_size") or frappe.form_dict.get("page_size") or 20)
         
-        filters: Dict[str, Any] = {}
+        filters: Dict[str, Any] | List[List[Any]] = {}
         or_filters = None
         
         if status:
             status_lower = status.strip().lower()
             if status_lower in STATUS_MAP:
-                filters["status"] = status_lower
+                # Status trống coi như available — đồng bộ UI quản lý bản sao
+                if status_lower == "available":
+                    filters = [["status", "in", ["available", ""]]]
+                else:
+                    filters = {"status": status_lower}
         if title_id:
-            filters["title_id"] = title_id
+            if isinstance(filters, list):
+                filters.append(["title_id", "=", title_id])
+            else:
+                filters["title_id"] = title_id
             
-        # Search by generated_code, isbn, or book_title
+        # Search by generated_code, isbn, book_title, linked title, ...
         if search and search.strip():
-            search_term = f"%{search.strip()}%"
-            or_filters = [
-                ["generated_code", "like", search_term],
-                ["isbn", "like", search_term],
-                ["book_title", "like", search_term],
-            ]
+            or_filters = _build_copy_search_or_filters(search)
 
         query_params = {
             "filters": filters,
@@ -3366,7 +3397,12 @@ def _normalize_book_title_key(title: Any) -> str:
     return str(title or "").strip().casefold()
 
 
-def _merge_top_books_by_title(rows: List[Dict[str, Any]], limit: int = 10) -> List[Dict[str, Any]]:
+def _merge_top_books_by_title(
+    rows: List[Dict[str, Any]],
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> tuple[List[Dict[str, Any]], int]:
     """Gom top sách theo book_title — mỗi lần mượn +1 vào cùng đầu sách."""
     merged: Dict[str, Dict[str, Any]] = {}
     for row in rows or []:
@@ -3391,7 +3427,57 @@ def _merge_top_books_by_title(rows: List[Dict[str, Any]], limit: int = 10) -> Li
         if not merged[key]["library_code"] and row.get("library_code"):
             merged[key]["library_code"] = row["library_code"]
 
-    return sorted(merged.values(), key=lambda item: item["borrow_count"], reverse=True)[:limit]
+    sorted_items = sorted(merged.values(), key=lambda item: item["borrow_count"], reverse=True)
+    total = len(sorted_items)
+    if limit is None:
+        return sorted_items, total
+    return sorted_items[offset : offset + limit], total
+
+
+def _build_borrow_date_clause(from_date: str = "", to_date: str = "") -> tuple[str, List[Any]]:
+    """Tạo mệnh đề lọc borrow_date cho query top sách/người mượn."""
+    date_clause = ""
+    params: List[Any] = []
+    if from_date and to_date:
+        date_clause = "AND t.borrow_date BETWEEN %s AND %s"
+        params.extend([from_date, to_date])
+    elif from_date:
+        date_clause = "AND t.borrow_date >= %s"
+        params.append(from_date)
+    elif to_date:
+        date_clause = "AND t.borrow_date <= %s"
+        params.append(to_date)
+    return date_clause, params
+
+
+def _fetch_top_books_raw(from_date: str = "", to_date: str = "") -> List[Dict[str, Any]]:
+    """Lấy danh sách sách mượn thô trước khi gom theo book_title."""
+    date_clause, params = _build_borrow_date_clause(from_date, to_date)
+    return frappe.db.sql(
+        f"""
+        SELECT
+            MAX(title_id) AS title_id,
+            MAX(library_code) AS library_code,
+            MAX(book_title) AS book_title,
+            COUNT(*) AS borrow_count
+        FROM (
+            SELECT
+                TRIM(LOWER(COALESCE(ti.book_title, ''))) AS title_key,
+                TRIM(COALESCE(ti.book_title, '')) AS book_title,
+                COALESCE(bc.title_id, '') AS title_id,
+                COALESCE(lt.library_code, '') AS library_code
+            FROM `tabSIS Library Transaction Item` ti
+            INNER JOIN `tabSIS Library Transaction` t ON t.name = ti.parent
+            LEFT JOIN `tab{COPY_DTYPE}` bc ON bc.generated_code = ti.book_copy_id
+            LEFT JOIN `tab{TITLE_DTYPE}` lt ON lt.name = bc.title_id
+            WHERE TRIM(COALESCE(ti.book_title, '')) != '' {date_clause}
+        ) items
+        GROUP BY title_key
+        ORDER BY borrow_count DESC
+        """,
+        params,
+        as_dict=True,
+    )
 
 
 @frappe.whitelist(allow_guest=False)
@@ -3458,63 +3544,8 @@ def get_library_borrow_report():
                 "paid_fines": _daily_fine_trend(from_date, to_date, pending=False),
             }
 
-        date_clause = ""
-        params: List[Any] = []
-        if from_date and to_date:
-            date_clause = "AND t.borrow_date BETWEEN %s AND %s"
-            params.extend([from_date, to_date])
-        elif from_date:
-            date_clause = "AND t.borrow_date >= %s"
-            params.append(from_date)
-        elif to_date:
-            date_clause = "AND t.borrow_date <= %s"
-            params.append(to_date)
-
-        # Gom theo ti.book_title — mỗi lần mượn +1 vào cùng tên sách
-        top_books_raw = frappe.db.sql(
-            f"""
-            SELECT
-                MAX(title_id) AS title_id,
-                MAX(library_code) AS library_code,
-                MAX(book_title) AS book_title,
-                COUNT(*) AS borrow_count
-            FROM (
-                SELECT
-                    TRIM(LOWER(COALESCE(ti.book_title, ''))) AS title_key,
-                    TRIM(COALESCE(ti.book_title, '')) AS book_title,
-                    COALESCE(bc.title_id, '') AS title_id,
-                    COALESCE(lt.library_code, '') AS library_code
-                FROM `tabSIS Library Transaction Item` ti
-                INNER JOIN `tabSIS Library Transaction` t ON t.name = ti.parent
-                LEFT JOIN `tab{COPY_DTYPE}` bc ON bc.generated_code = ti.book_copy_id
-                LEFT JOIN `tab{TITLE_DTYPE}` lt ON lt.name = bc.title_id
-                WHERE TRIM(COALESCE(ti.book_title, '')) != '' {date_clause}
-            ) items
-            GROUP BY title_key
-            ORDER BY borrow_count DESC
-            LIMIT 10
-            """,
-            params,
-            as_dict=True,
-        )
-        top_books = _merge_top_books_by_title(top_books_raw, limit=10)
-
-        top_overdue_borrowers = frappe.db.sql(
-            f"""
-            SELECT
-                t.borrower_id,
-                t.borrower_name,
-                COALESCE(NULLIF(t.student_code, ''), NULLIF(t.employee_code, ''), t.borrower_id) AS borrower_code,
-                COUNT(*) AS overdue_count
-            FROM `tabSIS Library Transaction` t
-            WHERE t.status = 'overdue' {date_clause}
-            GROUP BY t.borrower_id, t.borrower_name, borrower_code
-            ORDER BY overdue_count DESC
-            LIMIT 10
-            """,
-            params,
-            as_dict=True,
-        )
+        top_books_raw = _fetch_top_books_raw(from_date, to_date)
+        top_books, _ = _merge_top_books_by_title(top_books_raw, limit=100)
 
         return success_response(
             data={
@@ -3531,10 +3562,105 @@ def get_library_borrow_report():
                 },
                 "trends": trends,
                 "top_books": top_books,
-                "top_overdue_borrowers": top_overdue_borrowers,
             },
             message="Fetched library borrow report",
         )
     except Exception as ex:
         frappe.log_error(f"get_library_borrow_report failed: {ex}")
         return error_response(message="Không lấy được báo cáo mượn trả", code="LIB_REPORT_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_library_top_books():
+    """Top sách mượn nhiều nhất — có phân trang."""
+    if (resp := _require_library_role()):
+        return resp
+
+    args = frappe.request.args if frappe.request else {}
+
+    def _p(key):
+        return args.get(key) or frappe.form_dict.get(key) or ""
+
+    from_date = _p("from_date")
+    to_date = _p("to_date")
+    page = max(int(_p("page") or 1), 1)
+    page_size = min(max(int(_p("page_size") or 10), 1), 100)
+    offset = (page - 1) * page_size
+
+    try:
+        top_books_raw = _fetch_top_books_raw(from_date, to_date)
+        items, total = _merge_top_books_by_title(top_books_raw, limit=page_size, offset=offset)
+        return success_response(
+            data={"items": items, "total": total},
+            message="Fetched top books",
+        )
+    except Exception as ex:
+        frappe.log_error(f"get_library_top_books failed: {ex}")
+        return error_response(message="Không lấy được top sách mượn", code="LIB_TOP_BOOKS_ERROR")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_library_top_borrowers():
+    """Top người mượn sách nhiều nhất — lọc theo đối tượng, có phân trang."""
+    if (resp := _require_library_role()):
+        return resp
+
+    args = frappe.request.args if frappe.request else {}
+
+    def _p(key):
+        return args.get(key) or frappe.form_dict.get(key) or ""
+
+    from_date = _p("from_date")
+    to_date = _p("to_date")
+    borrower_type = (_p("borrower_type") or "student").strip()
+    page = max(int(_p("page") or 1), 1)
+    page_size = min(max(int(_p("page_size") or 10), 1), 100)
+    offset = (page - 1) * page_size
+
+    if borrower_type not in {"student", "staff"}:
+        return validation_error_response(
+            message="borrower_type phải là student hoặc staff",
+            errors={"borrower_type": ["invalid"]},
+        )
+
+    try:
+        date_clause, params = _build_borrow_date_clause(from_date, to_date)
+        type_clause = "AND t.borrower_type = %s"
+        query_params = [*params, borrower_type]
+
+        total = frappe.db.sql(
+            f"""
+            SELECT COUNT(*) FROM (
+                SELECT t.borrower_id
+                FROM `tabSIS Library Transaction` t
+                WHERE 1=1 {date_clause} {type_clause}
+                GROUP BY t.borrower_id
+            ) ranked
+            """,
+            query_params,
+        )[0][0]
+
+        items = frappe.db.sql(
+            f"""
+            SELECT
+                t.borrower_id,
+                t.borrower_name,
+                COALESCE(NULLIF(t.student_code, ''), NULLIF(t.employee_code, ''), t.borrower_id) AS borrower_code,
+                COUNT(*) AS borrow_count
+            FROM `tabSIS Library Transaction` t
+            WHERE 1=1 {date_clause} {type_clause}
+            GROUP BY t.borrower_id, t.borrower_name, borrower_code
+            ORDER BY borrow_count DESC
+            LIMIT %s OFFSET %s
+            """,
+            [*query_params, page_size, offset],
+            as_dict=True,
+        )
+
+        return success_response(
+            data={"items": items, "total": int(total or 0)},
+            message="Fetched top borrowers",
+        )
+    except Exception as ex:
+        frappe.log_error(f"get_library_top_borrowers failed: {ex}")
+        return error_response(message="Không lấy được top người mượn", code="LIB_TOP_BORROWERS_ERROR")
