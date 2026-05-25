@@ -11,6 +11,11 @@ from erp.api.erp_inventory.inventory_helpers import parse_request_data
 
 def activity_to_fe(doc):
 	"""Map ERP Inventory Activity Log doc → shape FE (Mongo-compatible)."""
+	updated_by_user = doc.get("updated_by")
+	updated_by_label = "Hệ thống"
+	if updated_by_user and frappe.db.exists("User", updated_by_user):
+		updated_by_label = frappe.db.get_value("User", updated_by_user, "full_name") or updated_by_user
+
 	return {
 		"_id": doc.get("name"),
 		"entityType": doc.get("entity_type"),
@@ -19,7 +24,7 @@ def activity_to_fe(doc):
 		"description": doc.get("description"),
 		"details": doc.get("details") or "",
 		"date": doc.get("date").isoformat() if doc.get("date") else None,
-		"updatedBy": doc.get("updated_by") or "Hệ thống",
+		"updatedBy": updated_by_label,
 		"createdAt": doc.get("creation").isoformat() if doc.get("creation") else None,
 		"updatedAt": doc.get("modified").isoformat() if doc.get("modified") else None,
 	}
@@ -83,6 +88,7 @@ def add_activity():
 		if not description:
 			return validation_error_response(_("description là bắt buộc"), {})
 
+		# updated_by là Link User — luôn dùng session user, không nhận full_name từ FE
 		doc = frappe.get_doc(
 			{
 				"doctype": "ERP Inventory Activity Log",
@@ -92,7 +98,7 @@ def add_activity():
 				"description": description,
 				"details": (data.get("details") or "").strip(),
 				"date": data.get("date") or now_datetime(),
-				"updated_by": data.get("updatedBy") or frappe.session.user,
+				"updated_by": frappe.session.user,
 			}
 		)
 		doc.insert(ignore_permissions=False)
