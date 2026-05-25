@@ -97,9 +97,98 @@ def _search_device_names(device_type: str, search: str) -> list:
 	return names or []
 
 
+def _filter_names_by_assigned(device_type: str, value: str) -> list:
+	"""Lọc thiết bị theo tên người được giao (fullname snapshot hoặc User.full_name)."""
+	like = f"%{value}%"
+	names = frappe.db.sql(
+		"""
+		SELECT DISTINCT d.name
+		FROM `tabERP Inventory Device` d
+		INNER JOIN `tabERP Inventory Device Assigned User` au ON au.parent = d.name
+		LEFT JOIN `tabUser` u ON u.name = au.user
+		WHERE d.device_type = %(dt)s
+		  AND (
+			au.fullname_snapshot LIKE %(like)s
+			OR u.full_name LIKE %(like)s
+		  )
+		""",
+		{"dt": device_type, "like": like},
+		pluck="name",
+	)
+	return list(set(names or []))
+
+
+def _filter_names_by_room(device_type: str, value: str) -> list:
+	"""Lọc thiết bị theo tên phòng (title_vn / short_title / physical_code)."""
+	like = f"%{value}%"
+	names = frappe.db.sql(
+		"""
+		SELECT DISTINCT d.name
+		FROM `tabERP Inventory Device` d
+		INNER JOIN `tabERP Administrative Room` r ON r.name = d.room
+		WHERE d.device_type = %(dt)s
+		  AND (
+			r.title_vn LIKE %(like)s
+			OR r.short_title LIKE %(like)s
+			OR r.physical_code LIKE %(like)s
+		  )
+		""",
+		{"dt": device_type, "like": like},
+		pluck="name",
+	)
+	return list(set(names or []))
+
+
+def _filter_names_by_phone_spec(device_type: str, imei1=None, imei2=None, phone_number=None) -> list:
+	"""Lọc phone theo IMEI/số điện thoại trong bảng specs_phone."""
+	if device_type != "phone":
+		return None
+	clauses = ["d.device_type = %(dt)s"]
+	params = {"dt": device_type}
+	if imei1:
+		clauses.append("sp.imei1 LIKE %(imei1)s")
+		params["imei1"] = f"%{imei1}%"
+	if imei2:
+		clauses.append("sp.imei2 LIKE %(imei2)s")
+		params["imei2"] = f"%{imei2}%"
+	if phone_number:
+		clauses.append("sp.phone_number LIKE %(pn)s")
+		params["pn"] = f"%{phone_number}%"
+	if len(clauses) == 1:
+		return None
+	names = frappe.db.sql(
+		f"""
+		SELECT DISTINCT d.name
+		FROM `tabERP Inventory Device` d
+		INNER JOIN `tabERP Inventory Specs Phone` sp ON sp.parent = d.name
+		WHERE {" AND ".join(clauses)}
+		""",
+		params,
+		pluck="name",
+	)
+	return list(set(names or []))
+
+
 @frappe.whitelist(allow_guest=False)
-def get_devices(device_type=None, page=1, limit=20, search=None, status=None, manufacturer=None, type=None, releaseYear=None):
-	"""Danh sách thiết bị có phân trang — tương đương GET /api/inventory/{type}s."""
+def get_devices(
+	device_type=None,
+	page=1,
+	limit=20,
+	search=None,
+	status=None,
+	manufacturer=None,
+	type=None,
+	releaseYear=None,
+	assigned=None,
+	room=None,
+	imei1=None,
+	imei2=None,
+	phoneNumber=None,
+):
+	"""Danh sách thiết bị có phân trang — tương đương GET /api/inventory/{type}s.
+
+	Hỗ trợ server-side filter để FE phân trang đúng tổng số bản ghi sau filter.
+	"""
 	try:
 		dt = normalize_device_type(device_type)
 		page = max(1, cint(page) or 1)
@@ -113,22 +202,53 @@ def get_devices(device_type=None, page=1, limit=20, search=None, status=None, ma
 		}
 		filters, search_term = build_device_filters(dt, params)
 
+		# Lọc thêm theo child-table (assigned/room/imei/phone) — giao tập kết quả
+		extra_name_sets = []
+		if assigned:
+			extra_name_sets.append(set(_filter_names_by_assigned(dt, assigned)))
+		if room:
+			extra_name_sets.append(set(_filter_names_by_room(dt, room)))
+		phone_names = _filter_names_by_phone_spec(dt, imei1=imei1, imei2=imei2, phone_number=phoneNumber)
+		if phone_names is not None:
+			extra_name_sets.append(set(phone_names))
+
+		# Lấy danh sách name thoả mãn filter cơ bản (status/manufacturer/...) + search
 		if search_term:
-			name_list = _search_device_names(dt, search_term)
-			total = len(name_list)
-			start = (page - 1) * limit
-			page_names = name_list[start : start + limit]
+			base_names = _search_device_names(dt, search_term)
+			# Áp dụng filter cơ bản trên kết quả search
+			if base_names and len(filters) > 1:
+				keep = set(
+					frappe.get_all(
+						"ERP Inventory Device",
+						filters=filters + [["name", "in", base_names]],
+						pluck="name",
+						limit_page_length=0,
+					)
+				)
+				base_names = [n for n in base_names if n in keep]
 		else:
-			total = frappe.db.count("ERP Inventory Device", filters=filters)
-			page_names = frappe.get_all(
+			base_names = frappe.get_all(
 				"ERP Inventory Device",
 				filters=filters,
-				fields=["name"],
 				order_by="modified desc",
-				start=(page - 1) * limit,
-				page_length=limit,
 				pluck="name",
+				limit_page_length=0,
 			)
+
+		# Giao với các extra filter (assigned/room/phone)
+		if extra_name_sets:
+			final_set = set(base_names) if extra_name_sets else None
+			if final_set is None:
+				final_set = set(base_names)
+			for s in extra_name_sets:
+				final_set &= s
+			final_names = [n for n in base_names if n in final_set]
+		else:
+			final_names = base_names
+
+		total = len(final_names)
+		start = (page - 1) * limit
+		page_names = final_names[start : start + limit]
 
 		devices = []
 		for name in page_names:
