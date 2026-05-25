@@ -3,10 +3,20 @@
 
 import frappe
 from frappe import _
+from datetime import datetime
 from frappe.utils import now_datetime
 
 from erp.utils.api_response import error_response, not_found_response, validation_error_response
 from erp.api.erp_inventory.inventory_helpers import parse_request_data
+
+
+def _datetime_to_iso(val):
+	"""Chuẩn hoá datetime — frappe.get_all trả str, Document trả datetime."""
+	if not val:
+		return None
+	if isinstance(val, datetime):
+		return val.isoformat()
+	return str(val)
 
 
 def activity_to_fe(doc):
@@ -23,10 +33,10 @@ def activity_to_fe(doc):
 		"type": doc.get("type"),
 		"description": doc.get("description"),
 		"details": doc.get("details") or "",
-		"date": doc.get("date").isoformat() if doc.get("date") else None,
+		"date": _datetime_to_iso(doc.get("date")),
 		"updatedBy": updated_by_label,
-		"createdAt": doc.get("creation").isoformat() if doc.get("creation") else None,
-		"updatedAt": doc.get("modified").isoformat() if doc.get("modified") else None,
+		"createdAt": _datetime_to_iso(doc.get("creation")),
+		"updatedAt": _datetime_to_iso(doc.get("modified")),
 	}
 
 
