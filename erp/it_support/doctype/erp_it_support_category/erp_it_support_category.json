@@ -1,0 +1,98 @@
+{
+ "actions": [],
+ "allow_copy": 1,
+ "allow_import": 1,
+ "autoname": "format:IT-CAT-{#####}",
+ "creation": "2026-05-26 10:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "ticket_code_prefix",
+  "support_role",
+  "team_leaders"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên danh mục",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Sinh mã ticket: PREFIX-0001 (VD: OVR → OVR-0001).",
+   "fieldname": "ticket_code_prefix",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Prefix mã ticket",
+   "reqd": 1
+  },
+  {
+   "description": "Role trong ERP IT Support Team Member để auto-assign (Overall, Camera System, ...).",
+   "fieldname": "support_role",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Support role",
+   "reqd": 1
+  },
+  {
+   "description": "Team leader danh mục (role SIS IT).",
+   "fieldname": "team_leaders",
+   "fieldtype": "Table",
+   "label": "Team Leader",
+   "options": "ERP IT Support Category Team Leader"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-26 10:00:00.000000",
+ "module": "IT Support",
+ "name": "ERP IT Support Category",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS IT",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

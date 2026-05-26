@@ -1,0 +1,289 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "autoname": "format:IT-{####}",
+ "creation": "2026-05-26 10:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "ticket_code",
+  "status",
+  "priority",
+  "category",
+  "description",
+  "notes",
+  "cancellation_reason",
+  "creator_section",
+  "creator_email",
+  "creator_fullname",
+  "creator_avatar",
+  "creator_department",
+  "creator_jobtitle",
+  "assignment_section",
+  "assigned_to",
+  "assigned_to_fullname",
+  "accepted_at",
+  "closed_at",
+  "feedback_section",
+  "feedback_rating",
+  "feedback_comment",
+  "feedback_badges",
+  "email_section",
+  "email_id",
+  "email_message_id",
+  "waiting_for_customer_email_sent",
+  "meta_section",
+  "source",
+  "sla_deadline",
+  "escalate_level",
+  "attachments_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tiêu đề",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ticket_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã ticket",
+   "read_only": 1
+  },
+  {
+   "default": "Assigned",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trạng thái",
+   "options": "Assigned\nProcessing\nWaiting for Customer\nDone\nClosed\nCancelled",
+   "reqd": 1
+  },
+  {
+   "default": "Medium",
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Độ ưu tiên",
+   "options": "Low\nMedium\nHigh\nUrgent"
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Danh mục",
+   "options": "ERP IT Support Category",
+   "reqd": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Mô tả",
+   "reqd": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú nội bộ"
+  },
+  {
+   "fieldname": "cancellation_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do hủy"
+  },
+  {
+   "fieldname": "creator_section",
+   "fieldtype": "Section Break",
+   "label": "Người tạo"
+  },
+  {
+   "fieldname": "creator_email",
+   "fieldtype": "Data",
+   "label": "Email người tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "creator_fullname",
+   "fieldtype": "Data",
+   "label": "Họ tên người tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "creator_avatar",
+   "fieldtype": "Data",
+   "label": "Avatar URL"
+  },
+  {
+   "fieldname": "creator_department",
+   "fieldtype": "Data",
+   "label": "Phòng ban"
+  },
+  {
+   "fieldname": "creator_jobtitle",
+   "fieldtype": "Data",
+   "label": "Chức danh"
+  },
+  {
+   "fieldname": "assignment_section",
+   "fieldtype": "Section Break",
+   "label": "Phân công"
+  },
+  {
+   "fieldname": "assigned_to",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Người xử lý",
+   "options": "User"
+  },
+  {
+   "fieldname": "assigned_to_fullname",
+   "fieldtype": "Data",
+   "label": "Tên người xử lý"
+  },
+  {
+   "fieldname": "accepted_at",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm chấp nhận xử lý"
+  },
+  {
+   "fieldname": "closed_at",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm đóng"
+  },
+  {
+   "fieldname": "feedback_section",
+   "fieldtype": "Section Break",
+   "label": "Đánh giá"
+  },
+  {
+   "default": "0",
+   "fieldname": "feedback_rating",
+   "fieldtype": "Int",
+   "label": "Điểm đánh giá (1-5)"
+  },
+  {
+   "fieldname": "feedback_comment",
+   "fieldtype": "Small Text",
+   "label": "Nhận xét đánh giá"
+  },
+  {
+   "fieldname": "feedback_badges",
+   "fieldtype": "JSON",
+   "label": "Badge đánh giá"
+  },
+  {
+   "fieldname": "email_section",
+   "fieldtype": "Section Break",
+   "label": "Email thread"
+  },
+  {
+   "fieldname": "email_id",
+   "fieldtype": "Data",
+   "label": "Email ID (dedupe)",
+   "unique": 1
+  },
+  {
+   "fieldname": "email_message_id",
+   "fieldtype": "Data",
+   "label": "Email Message-ID"
+  },
+  {
+   "default": "0",
+   "fieldname": "waiting_for_customer_email_sent",
+   "fieldtype": "Check",
+   "label": "Đã gửi mail Waiting for Customer"
+  },
+  {
+   "fieldname": "meta_section",
+   "fieldtype": "Section Break",
+   "label": "Metadata"
+  },
+  {
+   "default": "web",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Nguồn",
+   "options": "web\nemail\nmobile\napi"
+  },
+  {
+   "fieldname": "sla_deadline",
+   "fieldtype": "Datetime",
+   "label": "SLA deadline"
+  },
+  {
+   "default": "0",
+   "fieldname": "escalate_level",
+   "fieldtype": "Int",
+   "label": "Mức escalate"
+  },
+  {
+   "fieldname": "attachments_json",
+   "fieldtype": "JSON",
+   "label": "Đính kèm (JSON)"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-26 10:00:00.000000",
+ "module": "IT Support",
+ "name": "ERP IT Support Ticket",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS IT",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 0,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS User",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

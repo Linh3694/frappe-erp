@@ -177,6 +177,8 @@ permission_query_conditions = {
 	"LMS Mastery Rule": "erp.lms.utils.permissions.lms_course_query",
 	"LMS Grade Sync Rule": "erp.lms.utils.permissions.lms_course_section_query",
 	"LMS Blueprint Course": "erp.lms.utils.permissions.lms_course_query",
+	# IT Support ticket
+	"ERP IT Support Ticket": "erp.it_support.permissions.it_support_ticket_query",
 }
 
 has_permission = {
@@ -238,6 +240,8 @@ has_permission = {
 	"LMS Grade Sync Log": "erp.lms.utils.permissions.has_lms_campus_permission",
 	"LMS Blueprint Course": "erp.lms.utils.permissions.has_lms_campus_permission",
 	"LMS Blueprint Sync Log": "erp.lms.utils.permissions.has_lms_campus_permission",
+	# IT Support ticket
+	"ERP IT Support Ticket": "erp.it_support.permissions.has_it_support_ticket_permission",
 }
 
 # DocType Class
@@ -711,6 +715,9 @@ whitelisted_methods = [
 guest_method_whitelist = [
 	"erp.api.bulk_import.reload_whitelist",
 	"erp.api.observability.prometheus.metrics",
+	# IT Support — email-service (Phase 1 HTTP, cần X-IT-Support-Key nếu cấu hình)
+	"erp.api.erp_it_support.email_ticket.create_from_email",
+	"erp.api.erp_it_support.email_ticket.get_ticket_info_for_email",
 ]
 
 # override_whitelisted_methods = {
