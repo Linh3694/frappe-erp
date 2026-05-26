@@ -1,7 +1,11 @@
 # Copyright (c) 2026, Wellspring International School and contributors
 # Migrate dữ liệu MongoDB ticket-service → Frappe (idempotent + dry-run)
 #
-# Chạy: bench --site <site> execute erp.api.erp_it_support.migration_mongo.run --kwargs '{"dry_run": 1}'
+# Chạy (dry-run — tự đọc MONGODB_URI từ ticket-service/config.env nếu có):
+#   bench --site <site> execute erp.api.erp_it_support.migration_mongo.run --kwargs '{"dry_run": 1}'
+#
+# Hoặc truyền trực tiếp:
+#   bench --site <site> execute erp.api.erp_it_support.migration_mongo.run --kwargs '{"dry_run": 1, "mongo_uri": "mongodb://host:27017/wellspring_tickets"}'
 
 from __future__ import annotations
 
@@ -35,6 +39,142 @@ MONGO_CATEGORY_MAP = {
 	"Account": "Account",
 	"Email Ticket": "Email Ticket",
 }
+
+
+def _parse_env_file(path: str) -> dict:
+	"""Đọc file KEY=VALUE (config.env ticket-service) — không cần python-dotenv."""
+	out = {}
+	if not path or not os.path.isfile(path):
+		return out
+	try:
+		with open(path, encoding="utf-8") as fh:
+			for line in fh:
+				line = line.strip()
+				if not line or line.startswith("#") or "=" not in line:
+					continue
+				key, _, val = line.partition("=")
+				key = key.strip()
+				val = val.strip().strip('"').strip("'")
+				if key:
+					out[key] = val
+	except Exception:
+		frappe.logger().warning(f"migration_mongo: không đọc được {path}", exc_info=True)
+	return out
+
+
+def _ticket_service_config_candidates() -> list:
+	"""Các đường dẫn config.env ticket-service trên dev/prod."""
+	candidates = []
+	bench_path = frappe.utils.get_bench_path()
+	site_path = frappe.utils.get_site_path()
+	app_root = os.path.dirname(bench_path)  # thường /srv/app
+
+	for p in (
+		frappe.conf.get("TICKET_SERVICE_CONFIG_PATH"),
+		os.environ.get("TICKET_SERVICE_CONFIG_PATH"),
+		os.path.join(app_root, "ticket-service", "config.env"),
+		os.path.join(bench_path, "ticket-service", "config.env"),
+		os.path.join(bench_path, "apps", "ticket-service", "config.env"),
+		os.path.join(site_path, "..", "..", "ticket-service", "config.env"),
+		"/srv/app/ticket-service/config.env",
+		"/srv/app/frappe-backend/ticket-service/config.env",
+	):
+		if p:
+			candidates.append(os.path.abspath(os.path.expanduser(str(p))))
+	# unique, giữ thứ tự
+	seen = set()
+	unique = []
+	for p in candidates:
+		if p not in seen:
+			seen.add(p)
+			unique.append(p)
+	return unique
+
+
+def _build_mongo_uri_from_parts(env: dict) -> str:
+	"""Ghép URI từ MONGODB_HOST/PORT/DATABASE như ticket-service config/database.js."""
+	host = (env.get("MONGODB_HOST") or "").strip()
+	port = (env.get("MONGODB_PORT") or "27017").strip()
+	db = (env.get("MONGODB_DATABASE") or env.get("MONGODB_DB") or "wellspring_tickets").strip()
+	user = (env.get("MONGODB_USER") or "").strip()
+	password = (env.get("MONGODB_PASSWORD") or "").strip()
+	if not host:
+		return ""
+	if user and password:
+		return f"mongodb://{user}:{password}@{host}:{port}/{db}?authSource=admin"
+	return f"mongodb://{host}:{port}/{db}"
+
+
+def _resolve_mongo_config(mongo_uri: str = "", mongo_db: str = "") -> tuple:
+	"""
+	Tìm Mongo URI + DB name — ưu tiên kwargs → site_config → env → ticket-service/config.env.
+	"""
+	# Gộp env từ ticket-service config files
+	file_env = {}
+	config_source = None
+	for cfg_path in _ticket_service_config_candidates():
+		parsed = _parse_env_file(cfg_path)
+		if parsed:
+			file_env = parsed
+			config_source = cfg_path
+			break
+
+	def pick(*keys):
+		for k in keys:
+			if mongo_uri and k.endswith("URI"):
+				continue
+			val = (frappe.conf.get(k) or os.environ.get(k) or file_env.get(k) or "").strip()
+			if val:
+				return val, k
+		return "", ""
+
+	uri = (mongo_uri or "").strip()
+	uri_source = "kwargs.mongo_uri" if uri else ""
+
+	if not uri:
+		uri, key = pick("TICKET_MONGO_URI", "MONGODB_URI", "MONGO_URI")
+		if uri:
+			uri_source = key
+
+	if not uri:
+		uri = _build_mongo_uri_from_parts({**file_env, **dict(os.environ)})
+		if uri:
+			uri_source = config_source or "MONGODB_HOST/PORT"
+
+	db_name = (mongo_db or "").strip()
+	if not db_name:
+		db_name, _ = pick("TICKET_MONGO_DB", "MONGODB_DATABASE", "MONGODB_DB")
+	if not db_name:
+		db_name = "wellspring_tickets"
+
+	# Nếu URI có path /dbname thì ưu tiên làm db_name
+	if uri and "/" in uri.rsplit("@", 1)[-1]:
+		tail = uri.rsplit("@", 1)[-1]
+		if "/" in tail:
+			path_part = tail.split("/", 1)[1].split("?")[0].strip()
+			if path_part:
+				db_name = path_part
+
+	return uri, db_name, uri_source, config_source
+
+
+def _resolve_uploads_root(uploads_root: str = "") -> str:
+	if (uploads_root or "").strip():
+		return os.path.abspath(uploads_root.strip())
+	if (frappe.conf.get("TICKET_UPLOADS_ROOT") or os.environ.get("TICKET_UPLOADS_ROOT") or "").strip():
+		return os.path.abspath(
+			(frappe.conf.get("TICKET_UPLOADS_ROOT") or os.environ.get("TICKET_UPLOADS_ROOT")).strip()
+		)
+	bench_path = frappe.utils.get_bench_path()
+	app_root = os.path.dirname(bench_path)
+	for p in (
+		os.path.join(app_root, "ticket-service", "uploads"),
+		os.path.join(bench_path, "ticket-service", "uploads"),
+		"/srv/app/ticket-service/uploads",
+	):
+		if os.path.isdir(p):
+			return p
+	return os.path.join(app_root, "ticket-service", "uploads")
 
 
 def _get_mongo_client(mongo_uri: str):
@@ -308,31 +448,46 @@ def run(
 	mongo_uri: str = "",
 	uploads_root: str = "",
 	limit: int = 0,
+	mongo_db: str = "",
 ):
 	"""
 	Entry point bench execute.
 	dry_run=1 — chỉ log, không ghi DB.
+	mongo_uri — tùy chọn; mặc định đọc ticket-service/config.env (MONGODB_URI).
 	"""
 	dry = bool(int(dry_run)) if isinstance(dry_run, (int, str)) else bool(dry_run)
-	uri = mongo_uri or frappe.conf.get("TICKET_MONGO_URI") or os.environ.get("TICKET_MONGO_URI", "")
-	if not uri:
-		frappe.throw("Thiếu TICKET_MONGO_URI (site_config hoặc --kwargs)")
+	uri, db_name, uri_source, config_path = _resolve_mongo_config(mongo_uri, mongo_db)
 
-	root = uploads_root or frappe.conf.get("TICKET_UPLOADS_ROOT") or ""
-	if not root:
-		# Mặc định: frappe-backend/ticket-service/uploads
-		bench_path = frappe.utils.get_bench_path()
-		root = os.path.join(os.path.dirname(bench_path), "ticket-service", "uploads")
-		if not os.path.isdir(root):
-			root = os.path.join(bench_path, "ticket-service", "uploads")
+	if not uri:
+		searched = _ticket_service_config_candidates()
+		frappe.throw(
+			"Thiếu MongoDB URI. Cách 1 — thêm vào site_config.json: "
+			'"TICKET_MONGO_URI": "mongodb://<host>:27017/wellspring_tickets". '
+			"Cách 2 — truyền --kwargs "
+			'\'{"dry_run": 1, "mongo_uri": "mongodb://<host>:27017/wellspring_tickets"}\'. '
+			f"Đã tìm config.env tại: {searched}"
+		)
+
+	root = _resolve_uploads_root(uploads_root)
 
 	client = _get_mongo_client(uri)
-	db_name = frappe.conf.get("TICKET_MONGO_DB") or os.environ.get("TICKET_MONGO_DB", "ticket-service")
 	db = client[db_name]
 
-	_log(f"Bắt đầu migrate (dry_run={dry}) DB={db_name}", dry)
+	_log(f"Bắt đầu migrate (dry_run={dry}) mongo_db={db_name} uri_source={uri_source}", dry)
+	if config_path:
+		_log(f"Đọc config ticket-service: {config_path}", dry)
+	_log(f"Uploads root: {root} (exists={os.path.isdir(root)})", dry)
+
 	team_stats = migrate_support_team(db, dry_run=dry)
 	ticket_stats = migrate_tickets(db, root, dry_run=dry, limit=int(limit or 0))
-	result = {"team": team_stats, "tickets": ticket_stats, "dry_run": dry}
+	result = {
+		"team": team_stats,
+		"tickets": ticket_stats,
+		"dry_run": dry,
+		"mongo_db": db_name,
+		"uri_source": uri_source,
+		"config_path": config_path,
+		"uploads_root": root,
+	}
 	_log(f"Hoàn tất: {json.dumps(result)}", dry)
 	return result
