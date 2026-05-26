@@ -440,12 +440,18 @@ def create_device(device_type=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def update_device(device_type=None, device_id=None):
 	try:
-		dt = normalize_device_type(device_type)
 		data = parse_request_data()
-		device_id = device_id or data.get("device_id") or data.get("id")
+		dt = normalize_device_type(
+			read_api_param("device_type", "deviceType", fallback=device_type)
+			or normalize_api_param(data.get("device_type") or data.get("deviceType"))
+		)
+		device_id = (
+			read_api_param("device_id", "deviceId", "id", fallback=device_id)
+			or normalize_api_param(data.get("device_id") or data.get("deviceId") or data.get("id"))
+		)
 		doc = _get_device_doc(device_id, dt)
 		if not doc:
 			return not_found_response(_("Không tìm thấy thiết bị"))

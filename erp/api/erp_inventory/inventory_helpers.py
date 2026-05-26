@@ -94,7 +94,7 @@ def read_api_param(*keys: str, fallback=None) -> Optional[str]:
 
 def normalize_device_type(device_type: Optional[str]) -> str:
 	dt = (device_type or "").strip().lower()
-	# Fallback: đọc từ form_dict / request args nếu Frappe không pass kwargs đúng
+	# Fallback: đọc từ form_dict / query string nếu Frappe không pass kwargs đúng
 	if not dt:
 		try:
 			form_dt = (frappe.form_dict.get("device_type") if frappe.form_dict else "") or ""
@@ -105,6 +105,15 @@ def normalize_device_type(device_type: Optional[str]) -> str:
 		try:
 			args_dt = frappe.request.args.get("device_type") if hasattr(frappe.request, "args") else ""
 			dt = (args_dt or "").strip().lower()
+		except Exception:
+			pass
+	# Fallback: đọc từ JSON body (POST application/json — form_dict thường không có device_type)
+	if not dt:
+		try:
+			data = parse_request_data()
+			body_dt = normalize_api_param(data.get("device_type") or data.get("deviceType"))
+			if body_dt:
+				dt = body_dt.lower()
 		except Exception:
 			pass
 	if dt not in DEVICE_TYPES:
