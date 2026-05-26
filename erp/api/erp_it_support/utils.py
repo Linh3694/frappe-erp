@@ -283,6 +283,149 @@ def _history_to_dict(row) -> dict:
 	}
 
 
+# Fields tối thiểu cho list view — tránh N+1 khi serialize hàng loạt
+_LIST_TICKET_FIELDS = [
+	"name",
+	"title",
+	"description",
+	"ticket_code",
+	"status",
+	"priority",
+	"category",
+	"notes",
+	"cancellation_reason",
+	"creator_email",
+	"creator_fullname",
+	"creator_avatar",
+	"creator_department",
+	"creator_jobtitle",
+	"assigned_to",
+	"assigned_to_fullname",
+	"feedback_rating",
+	"feedback_comment",
+	"feedback_badges",
+	"attachments_json",
+	"source",
+	"email_id",
+	"accepted_at",
+	"closed_at",
+	"creation",
+	"modified",
+]
+
+
+def _bulk_serialize_tickets(rows: list) -> list:
+	"""Serialize hàng loạt ticket từ `frappe.get_all` rows — không gọi `get_doc` (tránh N+1).
+
+	Pre-fetch category title + assignee user info bằng IN-clause query một lần duy nhất.
+	"""
+	if not rows:
+		return []
+
+	cat_names = sorted({r.get("category") for r in rows if r.get("category")})
+	cat_map = {}
+	if cat_names:
+		cat_rows = frappe.get_all(
+			CATEGORY_DOCTYPE,
+			filters={"name": ["in", cat_names]},
+			fields=["name", "title"],
+		)
+		cat_map = {r.get("name"): (r.get("title") or r.get("name") or "") for r in cat_rows}
+
+	user_ids = sorted({r.get("assigned_to") for r in rows if r.get("assigned_to")})
+	user_map = {}
+	if user_ids:
+		user_fields = ["name", "full_name", "email", "user_image", "department"]
+		has_job_title = False
+		try:
+			has_job_title = frappe.get_meta("User").has_field("job_title")
+		except Exception:
+			has_job_title = False
+		if has_job_title:
+			user_fields.append("job_title")
+		user_rows = frappe.get_all(
+			"User",
+			filters={"name": ["in", user_ids]},
+			fields=user_fields,
+		)
+		user_map = {r.get("name"): r for r in user_rows}
+
+	out = []
+	for r in rows:
+		cat_title = cat_map.get(r.get("category")) or r.get("category") or ""
+		creator = {
+			"_id": r.get("creator_email") or "",
+			"fullname": r.get("creator_fullname") or "",
+			"email": r.get("creator_email") or "",
+			"avatarUrl": r.get("creator_avatar") or "",
+			"department": r.get("creator_department") or "",
+			"jobTitle": r.get("creator_jobtitle") or "",
+		}
+		assigned = None
+		assignee_id = r.get("assigned_to")
+		if assignee_id:
+			u = user_map.get(assignee_id)
+			if u:
+				assigned = {
+					"_id": assignee_id,
+					"fullname": u.get("full_name") or assignee_id,
+					"email": u.get("email") or "",
+					"avatarUrl": u.get("user_image") or "",
+					"department": u.get("department") or "",
+					"jobTitle": u.get("job_title") or "",
+				}
+			else:
+				# Fallback khi User không tồn tại — dùng fullname đã lưu trên ticket
+				assigned = {
+					"_id": assignee_id,
+					"fullname": r.get("assigned_to_fullname") or assignee_id,
+					"email": "",
+					"avatarUrl": "",
+					"department": "",
+					"jobTitle": "",
+				}
+
+		feedback = None
+		if (r.get("feedback_rating") or 0) > 0:
+			badges = _parse_json_field(r.get("feedback_badges"))
+			feedback = {
+				"assignedTo": assignee_id,
+				"rating": r.get("feedback_rating"),
+				"comment": r.get("feedback_comment") or "",
+				"badges": badges,
+			}
+
+		attachments = _parse_json_field(r.get("attachments_json"))
+		if attachments and not isinstance(attachments[0], dict):
+			attachments = []
+
+		out.append(
+			{
+				"_id": r.get("name"),
+				"title": r.get("title") or "",
+				"description": r.get("description") or "",
+				"ticketCode": r.get("ticket_code") or r.get("name"),
+				"status": r.get("status") or "Assigned",
+				"creator": creator,
+				"creatorEmail": r.get("creator_email") or "",
+				"assignedTo": assigned,
+				"priority": r.get("priority") or "Medium",
+				"category": cat_title,
+				"notes": r.get("notes") or "",
+				"cancellationReason": r.get("cancellation_reason") or "",
+				"feedback": feedback,
+				"closedAt": r.get("closed_at"),
+				"createdAt": r.get("creation"),
+				"updatedAt": r.get("modified"),
+				"acceptedAt": r.get("accepted_at"),
+				"source": r.get("source") or "web",
+				"emailId": r.get("email_id") or "",
+				"attachments": attachments,
+			}
+		)
+	return out
+
+
 def _ticket_to_dict(doc, include_relations=False) -> dict:
 	"""Chuyển DocType → payload FE (giữ shape Mongo cũ)."""
 	cat_title = _category_title(doc)

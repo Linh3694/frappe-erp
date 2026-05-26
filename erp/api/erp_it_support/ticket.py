@@ -25,7 +25,9 @@ from erp.api.erp_it_support.utils import (
 	FEEDBACK_BADGES,
 	HISTORY_DOCTYPE,
 	SUBTASK_DOCTYPE,
+	_LIST_TICKET_FIELDS,
 	_append_history,
+	_bulk_serialize_tickets,
 	_can_read_ticket,
 	_creator_profile_from_session,
 	_is_it_staff,
@@ -86,13 +88,13 @@ def get_my_tickets():
 		email = _session_email()
 		if not email:
 			return success_response({"tickets": []}, "OK")
-		names = frappe.get_all(
+		rows = frappe.get_all(
 			DOCTYPE,
 			filters={"creator_email": email},
-			pluck="name",
+			fields=_LIST_TICKET_FIELDS,
 			order_by="modified desc",
 		)
-		tickets = [_ticket_to_dict(frappe.get_doc(DOCTYPE, n)) for n in names]
+		tickets = _bulk_serialize_tickets(rows)
 		return success_response({"tickets": tickets}, "OK")
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "it_support.get_my_tickets")
@@ -104,8 +106,13 @@ def get_all_tickets():
 	try:
 		if not _is_it_staff():
 			return forbidden_response(_("Chỉ đội IT mới xem được tất cả ticket"))
-		names = frappe.get_all(DOCTYPE, pluck="name", order_by="modified desc", limit=2000)
-		tickets = [_ticket_to_dict(frappe.get_doc(DOCTYPE, n)) for n in names]
+		rows = frappe.get_all(
+			DOCTYPE,
+			fields=_LIST_TICKET_FIELDS,
+			order_by="modified desc",
+			limit=2000,
+		)
+		tickets = _bulk_serialize_tickets(rows)
 		return success_response({"tickets": tickets}, "OK")
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "it_support.get_all_tickets")
