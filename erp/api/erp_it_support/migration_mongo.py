@@ -180,9 +180,11 @@ def _resolve_uploads_root(uploads_root: str = "") -> str:
 def _get_mongo_client(mongo_uri: str):
 	try:
 		from pymongo import MongoClient
-	except ImportError as e:
-		frappe.throw("Cần cài pymongo: thêm vào pyproject.toml và bench setup requirements")
-	raise e
+	except ImportError:
+		frappe.throw(
+			"Thiếu package pymongo. Chạy: bench setup requirements "
+			"hoặc: ./env/bin/pip install pymongo"
+		)
 	return MongoClient(mongo_uri)
 
 
