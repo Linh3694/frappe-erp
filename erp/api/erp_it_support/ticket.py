@@ -304,6 +304,67 @@ def assign_ticket():
 		return error_response(str(e))
 
 
+def _resolve_frappe_user_ref(user_ref: str) -> tuple[str, str]:
+	"""Map User.name hoặc email → (User.name, full_name)."""
+	assigned = (user_ref or "").strip()
+	if not assigned:
+		return "", ""
+	if frappe.db.exists("User", assigned):
+		full_name = frappe.db.get_value("User", assigned, "full_name") or assigned
+		return assigned, full_name
+	resolved = frappe.db.get_value("User", {"email": assigned}, "name") or assigned
+	full_name = frappe.db.get_value("User", resolved, "full_name") or resolved
+	return resolved, full_name
+
+
+@frappe.whitelist(allow_guest=False)
+def reassign_ticket():
+	"""Chuyển ticket cho nhân viên IT khác (mobile admin)."""
+	try:
+		data = _parse_json_body()
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		assignee_ref = (data.get("assignedTo") or data.get("assigned_to") or "").strip()
+		if not ticket_id:
+			return not_found_response(_("Không tìm thấy ticket"))
+		if not assignee_ref:
+			return validation_error_response(_("Thiếu người được giao"))
+		if not _is_it_staff():
+			return forbidden_response(_("Chỉ đội IT mới chuyển ticket"))
+
+		assignee_user, assignee_name = _resolve_frappe_user_ref(assignee_ref)
+		if not assignee_user or not frappe.db.exists("User", assignee_user):
+			return validation_error_response(_("Không tìm thấy người dùng"))
+
+		doc = frappe.get_doc(DOCTYPE, ticket_id)
+		previous_assignee = doc.assigned_to
+		doc.assigned_to = assignee_user
+		doc.assigned_to_fullname = assignee_name
+		if not doc.accepted_at:
+			doc.accepted_at = now_datetime()
+		if doc.status == "Assigned":
+			doc.status = "Processing"
+		doc.save(ignore_permissions=True)
+
+		_append_history(
+			doc.name,
+			_("Chuyển xử lý từ {0} sang {1}").format(
+				previous_assignee or _("Chưa giao"),
+				assignee_name,
+			),
+		)
+		frappe.db.commit()
+		try:
+			if assignee_user != previous_assignee:
+				_notify_it_assignment_changed(doc, assignee_user)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "it_support.reassign_ticket.notify")
+		return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
+	except Exception as e:
+		frappe.db.rollback()
+		frappe.log_error(frappe.get_traceback(), "it_support.reassign_ticket")
+		return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False)
 def cancel_ticket():
 	try:
