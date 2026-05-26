@@ -868,6 +868,116 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
             message="Error updating family members",
             code="UPDATE_FAMILY_ERROR"
         )
+def _resolve_guardian_phone(guardian_id, scalar_phone, phone_map):
+    """SĐT giám hộ: ưu tiên child table CRM Guardian Phone, fallback trường phẳng."""
+    if guardian_id and phone_map.get(guardian_id):
+        return phone_map[guardian_id]
+    return (scalar_phone or "").strip() or None
+
+
+def _enrich_families_with_members(families):
+    """
+    Gắn students[] / guardians[] (có relationship_types) cho danh sách gia đình.
+    Batch query — tránh N+1 khi list V2 cần mã HS, SĐT, quan hệ.
+    """
+    if not families:
+        return families
+
+    family_names = [f.get("name") for f in families if f.get("name")]
+    empty_members = {"students": [], "guardians": []}
+    if not family_names:
+        for family in families:
+            family.update(empty_members)
+        return families
+
+    rows = frappe.db.sql(
+        """
+        SELECT
+            fr.parent AS family_id,
+            fr.student AS student_id,
+            fr.guardian AS guardian_id,
+            fr.relationship_type,
+            s.student_code,
+            s.student_name,
+            g.guardian_name,
+            g.phone_number AS guardian_phone_scalar
+        FROM `tabCRM Family Relationship` fr
+        LEFT JOIN `tabCRM Student` s ON fr.student = s.name
+        LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
+        WHERE fr.parent IN %(family_names)s
+        ORDER BY fr.parent ASC, s.student_name ASC, g.guardian_name ASC
+        """,
+        {"family_names": tuple(family_names)},
+        as_dict=True,
+    ) or []
+
+    guardian_ids = list({row.get("guardian_id") for row in rows if row.get("guardian_id")})
+    phone_map = {}
+    if guardian_ids:
+        phone_rows = frappe.db.sql(
+            """
+            SELECT parent, phone_number, is_primary
+            FROM `tabCRM Guardian Phone`
+            WHERE parent IN %(guardian_ids)s
+              AND phone_number IS NOT NULL
+              AND phone_number != ''
+            ORDER BY parent ASC, is_primary DESC, name ASC
+            """,
+            {"guardian_ids": tuple(guardian_ids)},
+            as_dict=True,
+        ) or []
+        for phone_row in phone_rows:
+            parent = phone_row.get("parent")
+            phone_value = (phone_row.get("phone_number") or "").strip()
+            if not parent or not phone_value:
+                continue
+            if parent not in phone_map or phone_row.get("is_primary") in (1, True):
+                phone_map[parent] = phone_value
+
+    students_by_family = {}
+    guardians_by_family = {}
+
+    for row in rows:
+        family_id = row.get("family_id")
+        if not family_id:
+            continue
+
+        student_id = row.get("student_id")
+        if student_id:
+            family_students = students_by_family.setdefault(family_id, {})
+            if student_id not in family_students:
+                family_students[student_id] = {
+                    "student_code": row.get("student_code") or "",
+                    "student_name": row.get("student_name") or "",
+                }
+
+        guardian_id = row.get("guardian_id")
+        if guardian_id:
+            family_guardians = guardians_by_family.setdefault(family_id, {})
+            if guardian_id not in family_guardians:
+                family_guardians[guardian_id] = {
+                    "guardian_name": row.get("guardian_name") or "",
+                    "phone_number": _resolve_guardian_phone(
+                        guardian_id,
+                        row.get("guardian_phone_scalar"),
+                        phone_map,
+                    ),
+                    "relationship_types": [],
+                }
+            rel_type = (row.get("relationship_type") or "").strip()
+            if rel_type:
+                rel_list = family_guardians[guardian_id]["relationship_types"]
+                if rel_type not in rel_list:
+                    rel_list.append(rel_type)
+
+    for family in families:
+        family_id = family.get("name")
+        family["students"] = list(students_by_family.get(family_id, {}).values())
+        family["guardians"] = list(guardians_by_family.get(family_id, {}).values())
+
+    return families
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_families():
     """Get all families without pagination - always returns full dataset"""
@@ -897,6 +1007,8 @@ def get_all_families():
             GROUP BY f.name, f.family_code, f.creation, f.modified
             ORDER BY f.family_code ASC
         """, as_dict=True)
+        
+        families = _enrich_families_with_members(families)
         
         frappe.logger().info(f"Total families fetched: {len(families)}")
         
