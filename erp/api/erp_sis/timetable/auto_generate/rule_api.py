@@ -83,9 +83,11 @@ def create_rule_set(**kwargs):
 		rules = data.get("rules")
 		if not rules and data.get("use_default_rules"):
 			rules = _default_rule_rows()
-		val_errors = validate_rule_rows(rules or [])
-		if val_errors:
-			return error_response("; ".join(val_errors))
+		# Seed 27 rule mặc định chưa có instance — bỏ qua validation lúc tạo
+		if not data.get("use_default_rules"):
+			val_errors = validate_rule_rows(rules or [])
+			if val_errors:
+				return error_response("; ".join(val_errors))
 		for row in rules or []:
 			doc.append("rules", row)
 		doc.insert(ignore_permissions=True)
