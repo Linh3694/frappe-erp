@@ -61,6 +61,13 @@ def create_from_email():
 		title = (data.get("title") or data.get("subject") or "").strip()
 		description = (data.get("description") or data.get("plainContent") or "").strip()
 		creator_email = (data.get("creatorEmail") or data.get("from") or "").strip().lower()
+		# Display name từ email-service (fallback khi User không tồn tại trong Frappe)
+		creator_fullname_fallback = (
+			data.get("creatorFullname")
+			or data.get("creator_fullname")
+			or data.get("fromName")
+			or ""
+		).strip()
 		priority = (data.get("priority") or "Medium").strip()
 		files = data.get("files") or data.get("attachments") or []
 
@@ -85,12 +92,8 @@ def create_from_email():
 		if not category_doc:
 			return validation_error_response(_("Chưa cấu hình danh mục Email Ticket"))
 
-		creator_user = frappe.db.get_value("User", {"email": creator_email}, "name")
-		creator_fullname = creator_email.split("@")[0] if creator_email else "Email User"
-		creator_dept = ""
-		if creator_user:
-			creator_fullname = frappe.db.get_value("User", creator_user, "full_name") or creator_fullname
-			creator_dept = frappe.db.get_value("User", creator_user, "department") or ""
+		# Lookup User → profile đầy đủ (avatar, jobtitle, department) như web
+		creator = _creator_profile_from_email(creator_email, creator_fullname_fallback)
 
 		pic = _resolve_pic_from_category_role("Email Ticket")
 		row = {
@@ -102,9 +105,11 @@ def create_from_email():
 			"status": "Assigned",
 			"source": "email",
 			"email_id": email_id or None,
-			"creator_email": creator_email,
-			"creator_fullname": creator_fullname,
-			"creator_department": creator_dept,
+			"creator_email": creator["email"],
+			"creator_fullname": creator["fullname"],
+			"creator_avatar": creator["avatar"],
+			"creator_department": creator["department"],
+			"creator_jobtitle": creator["jobtitle"],
 		}
 		if pic:
 			row["assigned_to"] = pic
@@ -187,6 +192,60 @@ def get_ticket_info_for_email(ticket_id=None):
 		return success_response(ticket_info_for_email(doc), "OK")
 	except Exception as e:
 		return error_response(str(e))
+
+
+def backfill_creator_profiles(dry_run: int = 0):
+	"""Backfill creator_avatar / creator_jobtitle cho ticket cũ tạo từ email.
+
+	Chạy bằng:
+	    bench --site <site> execute erp.api.erp_it_support.email_ticket.backfill_creator_profiles
+	    bench --site <site> execute erp.api.erp_it_support.email_ticket.backfill_creator_profiles --kwargs '{"dry_run": 1}'
+	"""
+	dry = bool(int(dry_run or 0))
+	tickets = frappe.get_all(
+		DOCTYPE,
+		filters={"source": "email"},
+		fields=[
+			"name",
+			"creator_email",
+			"creator_avatar",
+			"creator_jobtitle",
+			"creator_department",
+			"creator_fullname",
+		],
+	)
+	stats = {"checked": len(tickets), "updated": 0, "skipped_no_user": 0, "already_full": 0}
+	for t in tickets:
+		em = (t.get("creator_email") or "").strip().lower()
+		if not em:
+			stats["skipped_no_user"] += 1
+			continue
+		if t.get("creator_avatar") and t.get("creator_jobtitle"):
+			stats["already_full"] += 1
+			continue
+		profile = _creator_profile_from_email(em, t.get("creator_fullname") or "")
+		if not profile.get("avatar") and not profile.get("jobtitle"):
+			stats["skipped_no_user"] += 1
+			continue
+		if dry:
+			stats["updated"] += 1
+			continue
+		frappe.db.set_value(
+			DOCTYPE,
+			t["name"],
+			{
+				"creator_fullname": profile["fullname"],
+				"creator_avatar": profile["avatar"] or t.get("creator_avatar") or "",
+				"creator_department": profile["department"] or t.get("creator_department") or "",
+				"creator_jobtitle": profile["jobtitle"] or t.get("creator_jobtitle") or "",
+			},
+			update_modified=False,
+		)
+		stats["updated"] += 1
+	if not dry:
+		frappe.db.commit()
+	frappe.logger().info(f"[it_support.backfill_creator_profiles] {stats}")
+	return stats
 
 
 # Phase 2: Redis stream consumer `support_ticket_inbound` — placeholder
