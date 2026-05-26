@@ -1,0 +1,53 @@
+"""Helper dùng chung cho verbs — không import frappe."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Tuple
+
+
+def req_map(inp: Any) -> Dict[Tuple[str, str], Any]:
+	return {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+
+
+def teacher_class_subjects(inp: Any) -> Dict[str, List[Tuple[str, str]]]:
+	out: Dict[str, List[Tuple[str, str]]] = {}
+	for c in inp.classes:
+		grade = c.education_grade_id
+		for ts_id in inp.grade_subjects.get(grade, []):
+			key_a = f"{c.name}|{ts_id}"
+			for t_id in inp.class_subject_teachers.get(key_a, []):
+				out.setdefault(t_id, []).append((c.name, ts_id))
+	return out
+
+
+def class_subject_weekdays(inp: Any) -> Dict[Tuple[str, str], set]:
+	out: Dict[Tuple[str, str], set] = {}
+	for a in inp.assignments:
+		key = (a.class_id, a.timetable_subject_id)
+		allowed = set(a.weekdays) if a.weekdays else set(inp.working_days)
+		if key not in out:
+			out[key] = set()
+		out[key].update(allowed)
+	return out
+
+
+def num_periods(inp: Any) -> int:
+	return len(inp.periods)
+
+
+def sorted_periods(inp: Any):
+	return sorted(inp.periods, key=lambda x: x.period_priority)
+
+
+def instances(params: dict) -> list:
+	return params.get("instances") or []
+
+
+def resolve_room_id(inp: Any, class_info, ts_id: str, rmap) -> str:
+	grade = class_info.education_grade_id
+	req = rmap.get((grade, ts_id))
+	if req and req.room_type_required:
+		for r in inp.rooms:
+			if r.room_type == req.room_type_required:
+				return r.name
+	return class_info.room_id or ""

@@ -1,0 +1,56 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_rename": 0,
+ "autoname": "hash",
+ "beta": 0,
+ "creation": "2026-05-26 00:00:00.000000",
+ "custom": 0,
+ "description": "Slot GV không dạy (child table của SIS Teacher)",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "day_of_week",
+  "timetable_column_id",
+  "reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "day_of_week",
+   "fieldtype": "Select",
+   "label": "Day Of Week",
+   "options": "mon\ntue\nwed\nthu\nfri\nsat\nsun",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "timetable_column_id",
+   "fieldtype": "Link",
+   "label": "Timetable Column",
+   "options": "SIS Timetable Column",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Data",
+   "label": "Reason",
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Teacher Unavailability",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

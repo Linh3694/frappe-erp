@@ -34,7 +34,9 @@ class TeacherInfo:
 	name: str
 	user_id: str
 	max_periods_per_day: int = 8
+	max_periods_per_week: int = 24
 	max_consecutive_periods: int = 4
+	unavailable_slots: List[tuple] = field(default_factory=list)  # (day, period_idx)
 
 
 @dataclass
@@ -53,7 +55,9 @@ class SubjectRequirement:
 	periods_per_week: int
 	max_periods_per_day: int = 2
 	prefer_consecutive: bool = False
+	force_pair: bool = False
 	room_type_required: Optional[str] = None
+	is_heavy: bool = False
 
 
 @dataclass
@@ -63,6 +67,20 @@ class TeacherAssignment:
 	class_id: str
 	timetable_subject_id: str
 	weekdays: List[str]  # ["mon","tue",...] hoặc [] = tất cả
+
+
+@dataclass
+class PinnedSlotInfo:
+	name: str = ""
+	session_id: str = ""
+	class_id: Optional[str] = None
+	day_of_week: str = ""
+	timetable_column_id: str = ""
+	timetable_subject_id: Optional[str] = None
+	teacher_id: Optional[str] = None
+	room_id: Optional[str] = None
+	is_blocking: bool = False
+	note: str = ""
 
 
 @dataclass
@@ -84,6 +102,7 @@ class TimetableInput:
 	rooms: List[RoomInfo] = field(default_factory=list)
 	requirements: List[SubjectRequirement] = field(default_factory=list)
 	assignments: List[TeacherAssignment] = field(default_factory=list)
+	pinned_slots: List[PinnedSlotInfo] = field(default_factory=list)
 	soft_rules: SoftRules = field(default_factory=SoftRules)
 	working_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
 	solver_time_limit: int = 120
@@ -92,6 +111,8 @@ class TimetableInput:
 	class_grade_map: Dict[str, str] = field(default_factory=dict)
 	grade_subjects: Dict[str, List[str]] = field(default_factory=dict)
 	class_subject_teachers: Dict[str, List[str]] = field(default_factory=dict)
+	column_period_index: Dict[str, int] = field(default_factory=dict)
+	subject_is_heavy: Dict[str, bool] = field(default_factory=dict)
 
 
 class TimetableDataCollector:
@@ -109,6 +130,7 @@ class TimetableDataCollector:
 		inp.rooms = self._get_rooms()
 		inp.requirements = self._get_requirements()
 		inp.assignments = self._get_assignments()
+		inp.pinned_slots = self._get_pinned_slots()
 		inp.soft_rules = self._parse_soft_rules()
 		inp.working_days = self._get_working_days()
 		inp.solver_time_limit = self.session.solver_time_limit or 120
@@ -189,7 +211,7 @@ class TimetableDataCollector:
 		return [PeriodInfo(**r) for r in rows]
 
 	def _get_teachers(self) -> Dict[str, TeacherInfo]:
-		"""Lấy GV theo campus, kèm scheduling config."""
+		"""Lấy GV theo campus, kèm scheduling config + unavailability."""
 		rows = frappe.db.sql("""
 			SELECT name, user_id,
 				   COALESCE(max_periods_per_day, 8) as max_periods_per_day,
@@ -197,7 +219,39 @@ class TimetableDataCollector:
 			FROM `tabSIS Teacher`
 			WHERE campus_id = %(campus_id)s
 		""", {"campus_id": self.session.campus_id}, as_dict=True)
-		return {r["name"]: TeacherInfo(**r) for r in rows}
+
+		if frappe.db.has_column("SIS Teacher", "max_periods_per_week"):
+			rows = frappe.db.sql("""
+				SELECT name, user_id,
+					   COALESCE(max_periods_per_day, 8) as max_periods_per_day,
+					   COALESCE(max_periods_per_week, 24) as max_periods_per_week,
+					   COALESCE(max_consecutive_periods, 4) as max_consecutive_periods
+				FROM `tabSIS Teacher`
+				WHERE campus_id = %(campus_id)s
+			""", {"campus_id": self.session.campus_id}, as_dict=True)
+
+		teachers = {r["name"]: TeacherInfo(**r) for r in rows}
+
+		# Child table unavailability (nếu DocType/field đã migrate)
+		if frappe.db.table_exists("tabSIS Teacher Unavailability"):
+			unavail_rows = frappe.db.sql("""
+				SELECT parent as teacher_id, day_of_week, timetable_column_id
+				FROM `tabSIS Teacher Unavailability`
+				WHERE parent IN %(ids)s
+			""", {"ids": list(teachers.keys()) or [""]}, as_dict=True)
+
+			period_map = {p.name: i for i, p in enumerate(
+				sorted(self._get_periods(), key=lambda x: x.period_priority)
+			)}
+			for row in unavail_rows:
+				t = teachers.get(row["teacher_id"])
+				if not t:
+					continue
+				p_idx = period_map.get(row["timetable_column_id"])
+				if p_idx is not None:
+					t.unavailable_slots.append((row["day_of_week"], p_idx))
+
+		return teachers
 
 	def _get_rooms(self) -> List[RoomInfo]:
 		"""Lấy phòng theo campus."""
@@ -210,7 +264,12 @@ class TimetableDataCollector:
 
 	def _get_requirements(self) -> List[SubjectRequirement]:
 		"""Lấy requirements từ session (grade x timetable_subject -> periods_per_week)."""
-		rows = frappe.db.sql("""
+		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
+		has_is_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
+		force_pair_sql = "COALESCE(r.force_pair, 0) as force_pair," if has_force_pair else "0 as force_pair,"
+		is_heavy_sql = "COALESCE(ts.is_heavy, 0) as is_heavy" if has_is_heavy else "0 as is_heavy"
+
+		rows = frappe.db.sql(f"""
 			SELECT
 				r.timetable_subject_id,
 				ts.title_vn as timetable_subject_title,
@@ -218,7 +277,9 @@ class TimetableDataCollector:
 				r.periods_per_week,
 				r.max_periods_per_day,
 				r.prefer_consecutive,
-				r.room_type_required
+				{force_pair_sql}
+				r.room_type_required,
+				{is_heavy_sql}
 			FROM `tabSIS Timetable Generation Requirement` r
 			JOIN `tabSIS Timetable Subject` ts ON ts.name = r.timetable_subject_id
 			WHERE r.session_id = %(session_id)s
@@ -232,7 +293,9 @@ class TimetableDataCollector:
 			periods_per_week=r["periods_per_week"],
 			max_periods_per_day=r["max_periods_per_day"] or 2,
 			prefer_consecutive=bool(r["prefer_consecutive"]),
+			force_pair=bool(r.get("force_pair")),
 			room_type_required=r["room_type_required"] or None,
+			is_heavy=bool(r.get("is_heavy")),
 		) for r in rows]
 
 	def _get_assignments(self) -> List[TeacherAssignment]:
@@ -282,6 +345,20 @@ class TimetableDataCollector:
 
 		return assignments
 
+	def _get_pinned_slots(self) -> List[PinnedSlotInfo]:
+		"""Lấy tiết cố định của session (nếu DocType đã migrate)."""
+		if not frappe.db.table_exists("tabSIS Timetable Pinned Slot"):
+			return []
+
+		rows = frappe.db.sql("""
+			SELECT name, session_id, class_id, day_of_week, timetable_column_id,
+				   timetable_subject_id, teacher_id, room_id, is_blocking, note
+			FROM `tabSIS Timetable Pinned Slot`
+			WHERE session_id = %(session_id)s
+		""", {"session_id": self.session.name}, as_dict=True)
+
+		return [PinnedSlotInfo(**r) for r in rows]
+
 	def _parse_soft_rules(self) -> SoftRules:
 		"""Parse soft rules JSON từ session."""
 		if not self.session.soft_rules:
@@ -317,10 +394,16 @@ class TimetableDataCollector:
 		# class -> grade
 		inp.class_grade_map = {c.name: c.education_grade_id for c in inp.classes}
 
+		# column -> period index
+		for i, p in enumerate(sorted(inp.periods, key=lambda x: x.period_priority)):
+			inp.column_period_index[p.name] = i
+
 		# grade -> [timetable_subject_ids] (từ requirements)
 		grade_subjects: Dict[str, List[str]] = {}
+		inp.subject_is_heavy = {}
 		for req in inp.requirements:
 			grade_subjects.setdefault(req.education_grade_id, []).append(req.timetable_subject_id)
+			inp.subject_is_heavy[req.timetable_subject_id] = req.is_heavy
 		inp.grade_subjects = grade_subjects
 
 		# (class_id, timetable_subject_id) -> [teacher_ids]

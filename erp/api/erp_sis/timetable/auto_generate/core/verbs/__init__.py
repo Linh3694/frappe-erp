@@ -1,0 +1,23 @@
+"""Verb implementations — import để registry populate."""
+
+from . import (  # noqa: F401
+	no_overlap,
+	exact_count_per_week,
+	at_most_per_scope,
+	consecutive_required,
+	forbidden_at_slots,
+	pinned_to_slot,
+	attribute_match,
+	max_consecutive,
+	prefer_slot_range,
+	spread_across_days,
+	avoid_gap,
+	avoid_single_visit,
+	balance_workload,
+	allow_only_at_slots,
+	forbidden_on_day,
+	exclude_subject,
+	sync_class_pair,
+	order_before_same_day,
+	at_most_simultaneous,
+)

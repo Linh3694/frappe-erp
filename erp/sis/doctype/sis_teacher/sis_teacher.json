@@ -25,7 +25,10 @@
   "is_manager",
   "scheduling_section",
   "max_periods_per_day",
-  "max_consecutive_periods"
+  "max_periods_per_week",
+  "max_consecutive_periods",
+  "unavailability_section",
+  "unavailability"
  ],
  "fields": [
   {
@@ -90,11 +93,30 @@
    "description": "Số tiết tối đa GV dạy trong 1 ngày (mặc định 8)"
   },
   {
+   "fieldname": "max_periods_per_week",
+   "fieldtype": "Int",
+   "label": "Max Periods Per Week",
+   "default": 24,
+   "description": "Số tiết tối đa GV dạy trong 1 tuần (mặc định 24)"
+  },
+  {
    "fieldname": "max_consecutive_periods",
    "fieldtype": "Int",
    "label": "Max Consecutive Periods",
    "default": 4,
    "description": "Số tiết liên tiếp tối đa trước khi nghỉ (mặc định 4)"
+  },
+  {
+   "fieldname": "unavailability_section",
+   "fieldtype": "Section Break",
+   "label": "Unavailability",
+   "description": "Các slot GV không dạy (dùng cho auto-gen TKB)"
+  },
+  {
+   "fieldname": "unavailability",
+   "fieldtype": "Table",
+   "label": "Unavailability",
+   "options": "SIS Teacher Unavailability"
   }
  ],
  "index_web_pages_for_search": 1,

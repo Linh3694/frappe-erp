@@ -21,7 +21,9 @@
   "title_en",
   "campus_id",
   "education_stage_id",
-  "curriculum_id"
+  "curriculum_id",
+  "scheduling_section",
+  "is_heavy"
  ],
  "fields": [
   {
@@ -63,6 +65,18 @@
    "label": "Curriculum",
    "options": "SIS Curriculum",
    "reqd": 0
+  },
+  {
+   "fieldname": "scheduling_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduling"
+  },
+  {
+   "fieldname": "is_heavy",
+   "fieldtype": "Check",
+   "label": "Heavy Subject",
+   "default": 0,
+   "description": "Môn nặng — ưu tiên xếp buổi sáng / tiết đầu khi gen TKB"
   }
  ],
  "index_web_pages_for_search": 1,

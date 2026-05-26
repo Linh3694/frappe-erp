@@ -45,13 +45,27 @@ class ModelBuilder:
 		self._setup_indexes()
 
 	def build(self) -> SolverModel:
-		"""Build toàn bộ model."""
-		self._create_variables()
-		self._add_hard_constraints()
-		self._add_soft_constraints()
+		"""Build qua core runner S+V+O (thay hardcode trực tiếp)."""
+		from .core.runner import build_and_solve
+		from .core.default_rules import build_default_rule_set
+
+		solver, builder, _, ctx = build_and_solve(self.inp, build_default_rule_set())
+		self._last_solver = solver
+		self.solver_model = SolverModel(
+			model=ctx.model,
+			input=self.inp,
+			x=ctx.x,
+			period_index_map=ctx.period_index_map,
+			room_index_map=ctx.room_index_map,
+			room_list=ctx.room_list,
+		)
+		self._rule_builder = builder
 		return self.solver_model
 
-	# ── Setup ──────────────────────────────────────────
+	def extract_solution(self, solver) -> List[Dict]:
+		if hasattr(self, "_rule_builder"):
+			return self._rule_builder.extract_solution(solver)
+		return self._extract_solution_impl(solver)
 
 	def _setup_indexes(self):
 		sm = self.solver_model
@@ -87,8 +101,14 @@ class ModelBuilder:
 		self._constraint_one_subject_per_slot()
 		self._constraint_required_periods()
 		self._constraint_max_periods_per_day_subject()
-		# Teacher conflict (HC3) chuyển thành soft:
-		# TKB phải fill đủ tiết trước, GV thiếu thì tuyển thêm sau
+		self._constraint_teacher_no_conflict()
+		self._constraint_teacher_weekday_availability()
+		self._constraint_max_periods_per_day_teacher()
+		self._constraint_max_periods_per_week_teacher()
+		self._constraint_max_consecutive_teacher()
+		self._constraint_teacher_unavailable()
+		self._constraint_pinned_slots()
+		self._constraint_force_pair()
 
 	def _constraint_one_subject_per_slot(self):
 		"""HC1: Mỗi lớp chỉ học 1 môn mỗi tiết."""
@@ -117,20 +137,9 @@ class ModelBuilder:
 		for req in inp.requirements:
 			req_map[(req.education_grade_id, req.timetable_subject_id)] = req
 
-		num_slots = len(inp.periods) * len(inp.working_days)
-
 		for c in inp.classes:
 			grade = c.education_grade_id
 			subjects = inp.grade_subjects.get(grade, [])
-
-			total_required = sum(
-				(req_map.get((grade, ts_id)) or SubjectRequirement(
-					timetable_subject_id=ts_id, timetable_subject_title="", education_grade_id=grade,
-					periods_per_week=0)).periods_per_week
-				for ts_id in subjects
-			)
-			# Nếu tổng vượt capacity thì dùng <= (best effort)
-			use_exact = total_required <= num_slots
 
 			for ts_id in subjects:
 				req = req_map.get((grade, ts_id))
@@ -145,10 +154,8 @@ class ModelBuilder:
 							week_vars.append(sm.x[key])
 
 				if week_vars:
-					if use_exact:
-						self.model.Add(sum(week_vars) == req.periods_per_week)
-					else:
-						self.model.Add(sum(week_vars) <= req.periods_per_week)
+					# Luôn bắt buộc đúng số tiết; validate_session chặn vượt capacity
+					self.model.Add(sum(week_vars) == req.periods_per_week)
 
 	def _constraint_teacher_no_conflict(self):
 		"""HC3: Mỗi GV chỉ dạy 1 lớp mỗi tiết."""
@@ -288,6 +295,126 @@ class ModelBuilder:
 					if window_vars:
 						self.model.Add(sum(window_vars) <= max_consec)
 
+	def _constraint_max_periods_per_week_teacher(self):
+		"""HC10: Max tiết/tuần cho GV."""
+		inp = self.inp
+		sm = self.solver_model
+
+		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
+		for c in inp.classes:
+			grade = c.education_grade_id
+			for ts_id in inp.grade_subjects.get(grade, []):
+				key_a = f"{c.name}|{ts_id}"
+				for t_id in inp.class_subject_teachers.get(key_a, []):
+					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
+
+		for t_id, cs_list in teacher_class_subjects.items():
+			teacher_info = inp.teachers.get(t_id)
+			if not teacher_info:
+				continue
+			max_per_week = teacher_info.max_periods_per_week or 24
+			week_vars = []
+			for (c_id, ts_id) in cs_list:
+				for day in inp.working_days:
+					for p_idx in range(len(inp.periods)):
+						key = (c_id, ts_id, day, p_idx)
+						if key in sm.x:
+							week_vars.append(sm.x[key])
+			if week_vars:
+				self.model.Add(sum(week_vars) <= max_per_week)
+
+	def _constraint_teacher_unavailable(self):
+		"""HC11: GV không dạy ở slot bận."""
+		inp = self.inp
+		sm = self.solver_model
+
+		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
+		for c in inp.classes:
+			grade = c.education_grade_id
+			for ts_id in inp.grade_subjects.get(grade, []):
+				key_a = f"{c.name}|{ts_id}"
+				for t_id in inp.class_subject_teachers.get(key_a, []):
+					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
+
+		for t_id, cs_list in teacher_class_subjects.items():
+			teacher_info = inp.teachers.get(t_id)
+			if not teacher_info or not teacher_info.unavailable_slots:
+				continue
+			for day, p_idx in teacher_info.unavailable_slots:
+				for (c_id, ts_id) in cs_list:
+					key = (c_id, ts_id, day, p_idx)
+					if key in sm.x:
+						self.model.Add(sm.x[key] == 0)
+
+	def _constraint_pinned_slots(self):
+		"""HC12: Tiết cố định / slot bị khóa."""
+		inp = self.inp
+		sm = self.solver_model
+		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+
+		for pin in inp.pinned_slots:
+			p_idx = inp.column_period_index.get(pin.timetable_column_id)
+			if p_idx is None:
+				continue
+			target_classes = [
+				c for c in inp.classes
+				if not pin.class_id or c.name == pin.class_id
+			]
+			for c in target_classes:
+				grade = c.education_grade_id
+				subjects = inp.grade_subjects.get(grade, [])
+
+				if pin.is_blocking:
+					for ts_id in subjects:
+						key = (c.name, ts_id, pin.day_of_week, p_idx)
+						if key in sm.x:
+							self.model.Add(sm.x[key] == 0)
+					continue
+
+				if pin.timetable_subject_id:
+					pin_key = (c.name, pin.timetable_subject_id, pin.day_of_week, p_idx)
+					if pin_key in sm.x:
+						self.model.Add(sm.x[pin_key] == 1)
+					for ts_id in subjects:
+						if ts_id == pin.timetable_subject_id:
+							continue
+						key = (c.name, ts_id, pin.day_of_week, p_idx)
+						if key in sm.x:
+							self.model.Add(sm.x[key] == 0)
+
+	def _constraint_force_pair(self):
+		"""HC13: Môn force_pair phải xếp theo cặp tiết liên tiếp trong cùng buổi."""
+		inp = self.inp
+		sm = self.solver_model
+		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		num_periods = len(inp.periods)
+		half = num_periods // 2 or num_periods
+
+		for c in inp.classes:
+			grade = c.education_grade_id
+			for ts_id in inp.grade_subjects.get(grade, []):
+				req = req_map.get((grade, ts_id))
+				if not req or not req.force_pair:
+					continue
+				for day in inp.working_days:
+					for half_start, half_end in [(0, half), (half, num_periods)]:
+						session_slots = list(range(half_start, half_end))
+						if not session_slots:
+							continue
+						k = 0
+						while k + 1 < len(session_slots):
+							p_a, p_b = session_slots[k], session_slots[k + 1]
+							key_a = (c.name, ts_id, day, p_a)
+							key_b = (c.name, ts_id, day, p_b)
+							if key_a in sm.x and key_b in sm.x:
+								self.model.Add(sm.x[key_a] == sm.x[key_b])
+							k += 2
+						if len(session_slots) % 2 == 1:
+							last_p = session_slots[-1]
+							key_last = (c.name, ts_id, day, last_p)
+							if key_last in sm.x:
+								self.model.Add(sm.x[key_last] == 0)
+
 	# ── Soft Constraints ──────────────────────────────
 
 	def _add_soft_constraints(self):
@@ -303,6 +430,17 @@ class ModelBuilder:
 
 		if soft.subject_pair_exclusions:
 			objectives.extend(self._soft_subject_pair_exclusions(soft.subject_pair_exclusions))
+
+		if soft.teacher_gap_minimization > 0:
+			objectives.extend(self._soft_teacher_gap_minimization(soft.teacher_gap_minimization))
+
+		if soft.workload_balance > 0:
+			objectives.extend(self._soft_workload_balance(soft.workload_balance))
+
+		if soft.homeroom_preference > 0:
+			objectives.extend(self._soft_homeroom_preference(soft.homeroom_preference))
+
+		objectives.extend(self._soft_heavy_subjects_morning())
 
 		if objectives:
 			self.model.Maximize(sum(objectives))
@@ -425,6 +563,58 @@ class ModelBuilder:
 
 		return objectives
 
+	def _soft_homeroom_preference(self, weight: int) -> List:
+		"""Ưu tiên fill tiết ở lớp có phòng chủ nhiệm (môn không yêu cầu phòng đặc biệt)."""
+		inp = self.inp
+		sm = self.solver_model
+		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		bonuses = []
+
+		for c in inp.classes:
+			if not c.room_id:
+				continue
+			grade = c.education_grade_id
+			for ts_id in inp.grade_subjects.get(grade, []):
+				req = req_map.get((grade, ts_id))
+				if req and req.room_type_required:
+					continue
+				for day in inp.working_days:
+					for p_idx in range(len(inp.periods)):
+						key = (c.name, ts_id, day, p_idx)
+						if key in sm.x:
+							bonuses.append(sm.x[key] * (weight // 10))
+		return bonuses
+
+	def _soft_heavy_subjects_morning(self) -> List:
+		"""Môn nặng ưu tiên tiết đầu — penalty tăng theo period index."""
+		inp = self.inp
+		sm = self.solver_model
+		weight = 6
+		penalties = []
+		num_periods = len(inp.periods)
+
+		for c in inp.classes:
+			grade = c.education_grade_id
+			for ts_id in inp.grade_subjects.get(grade, []):
+				if not inp.subject_is_heavy.get(ts_id):
+					continue
+				for day in inp.working_days:
+					for p_idx in range(num_periods):
+						key = (c.name, ts_id, day, p_idx)
+						if key in sm.x:
+							penalties.append(sm.x[key] * (-weight * p_idx))
+		return penalties
+
+	def _resolve_room_id(self, class_info, ts_id: str, req_map) -> str:
+		"""Chọn phòng homeroom hoặc phòng khớp room_type_required."""
+		grade = class_info.education_grade_id
+		req = req_map.get((grade, ts_id))
+		if req and req.room_type_required:
+			for r in self.inp.rooms:
+				if r.room_type == req.room_type_required:
+					return r.name
+		return class_info.room_id or ""
+
 	def _soft_subject_time_preferences(self, preferences: List[Dict]) -> List:
 		"""Ưu tiên xếp môn vào khung giờ nhất định."""
 		inp = self.inp
@@ -507,12 +697,24 @@ class ModelBuilder:
 
 		return penalties
 
-	def extract_solution(self, solver) -> List[Dict]:
-		"""Trích xuất solution thành danh sách slot."""
+	def _extract_solution_impl(self, solver) -> List[Dict]:
+		"""Trích xuất solution thành danh sách slot (legacy fallback)."""
 		inp = self.inp
 		sm = self.solver_model
 		sorted_periods = sorted(inp.periods, key=lambda x: x.period_priority)
+		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
 		results = []
+
+		# Map pinned slot -> room/teacher override
+		pin_lookup = {}
+		for pin in inp.pinned_slots:
+			p_idx = inp.column_period_index.get(pin.timetable_column_id)
+			if p_idx is None:
+				continue
+			target_classes = [c.name for c in inp.classes if not pin.class_id or c.name == pin.class_id]
+			for c_id in target_classes:
+				key = (c_id, pin.day_of_week, p_idx, pin.timetable_subject_id or "")
+				pin_lookup[key] = pin
 
 		for c in inp.classes:
 			grade = c.education_grade_id
@@ -521,9 +723,13 @@ class ModelBuilder:
 					for p_idx, period in enumerate(sorted_periods):
 						key = (c.name, ts_id, day, p_idx)
 						if key in sm.x and solver.Value(sm.x[key]) == 1:
-							# Tìm teachers cho (class, subject)
 							key_a = f"{c.name}|{ts_id}"
 							teacher_ids = inp.class_subject_teachers.get(key_a, [])
+
+							pin = pin_lookup.get((c.name, day, p_idx, ts_id)) or pin_lookup.get((c.name, day, p_idx, ""))
+							room_id = pin.room_id if pin and pin.room_id else self._resolve_room_id(c, ts_id, req_map)
+							if pin and pin.teacher_id:
+								teacher_ids = [pin.teacher_id]
 
 							results.append({
 								"class_id": c.name,
@@ -531,7 +737,7 @@ class ModelBuilder:
 								"timetable_column_id": period.name,
 								"timetable_subject_id": ts_id,
 								"teacher_ids": teacher_ids,
-								"room_id": c.room_id,
+								"room_id": room_id,
 								"period_priority": period.period_priority,
 							})
 

@@ -76,3 +76,6 @@ erp.patches.v1_0.migrate_legacy_borrows_to_transactions
 
 # Thư viện: backfill mã học sinh / mã nhân viên trên phiếu mượn
 erp.patches.v1_0.backfill_library_transaction_borrower_codes
+
+# TKB auto-generate: seed Rule Set mặc định (S+V+O)
+erp.patches.v1_0.seed_default_timetable_rule_set

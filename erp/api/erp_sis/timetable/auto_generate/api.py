@@ -69,7 +69,10 @@ def create_session(**kwargs):
 		if not all([title, school_year_id, education_stage_id, schedule_id]):
 			return error_response("Thiếu thông tin bắt buộc: title, school_year, education_stage, schedule")
 
-		doc = frappe.get_doc({
+		from .rule_loader import get_default_rule_set_id
+
+		default_rule_set_id = get_default_rule_set_id(campus_id)
+		session_data = {
 			"doctype": "SIS Timetable Generation Session",
 			"title": title,
 			"campus_id": campus_id,
@@ -79,7 +82,11 @@ def create_session(**kwargs):
 			"class_ids": json.dumps(class_ids) if isinstance(class_ids, list) else class_ids,
 			"solver_time_limit": int(solver_time_limit),
 			"status": "Configuring",
-		})
+		}
+		if frappe.db.has_column("SIS Timetable Generation Session", "rule_set_id"):
+			session_data["rule_set_id"] = data.get("rule_set_id") or default_rule_set_id
+			session_data["rule_overrides"] = json.dumps(data.get("rule_overrides") or {})
+		doc = frappe.get_doc(session_data)
 		doc.insert(ignore_permissions=True)
 		frappe.db.commit()
 
@@ -152,11 +159,16 @@ def update_session(**kwargs):
 		if doc.status not in ("Configuring", "Completed", "Failed"):
 			return error_response(f"Không thể sửa session ở trạng thái {doc.status}")
 
-		updatable = ["title", "soft_rules", "class_ids", "solver_time_limit", "optimization_priority"]
+		updatable = [
+			"title", "soft_rules", "class_ids", "solver_time_limit",
+			"optimization_priority",
+		]
+		if frappe.db.has_column("SIS Timetable Generation Session", "rule_set_id"):
+			updatable.extend(["rule_set_id", "rule_overrides"])
 		for field in updatable:
 			value = data.get(field)
 			if value is not None:
-				if field in ("soft_rules", "class_ids") and isinstance(value, (dict, list)):
+				if field in ("soft_rules", "class_ids", "rule_overrides") and isinstance(value, (dict, list)):
 					value = json.dumps(value)
 				doc.set(field, value)
 
@@ -409,15 +421,8 @@ def validate_session(**kwargs):
 		collector = TimetableDataCollector(session_id)
 		inp = collector.collect()
 
-		warnings = _validate_input_data(inp)
-
-		errors = []
-		if not inp.classes:
-			errors.append("Không tìm thấy lớp nào trong phạm vi đã chọn")
-		if not inp.periods:
-			errors.append("Không tìm thấy tiết học nào trong schedule đã chọn")
-		if not inp.requirements:
-			errors.append("Chưa có yêu cầu số tiết/tuần nào")
+		from .validation import validate_timetable_input
+		errors, warnings = validate_timetable_input(inp)
 
 		return single_item_response({
 			"is_valid": len(errors) == 0,
@@ -452,6 +457,14 @@ def generate(**kwargs):
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		if session.status not in ("Configuring", "Completed", "Failed"):
 			return error_response(f"Không thể chạy solver ở trạng thái {session.status}")
+
+		from .data_collector import TimetableDataCollector
+		from .validation import validate_timetable_input
+
+		inp = TimetableDataCollector(session_id).collect()
+		val_errors, val_warnings = validate_timetable_input(inp)
+		if val_errors:
+			return error_response("Dữ liệu không hợp lệ: " + "; ".join(val_errors[:5]))
 
 		if run_async:
 			# Background job (cần ortools cài trong bench virtualenv)
@@ -740,41 +753,51 @@ def discard_session(**kwargs):
 		return error_response(str(e))
 
 
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def diagnose_infeasibility(**kwargs):
+	"""Phân tích rule mâu thuẫn khi solver INFEASIBLE."""
+	try:
+		data = _get_json_data()
+		session_id = data.get("session_id")
+		if not session_id:
+			return error_response("Thiếu session_id")
+		from .data_collector import TimetableDataCollector
+		from .rule_loader import load_rule_set
+		from .core.diagnostics import diagnose_infeasibility as _diag
+
+		inp = TimetableDataCollector(session_id).collect()
+		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
+		rs = None
+		if getattr(session, "rule_set_id", None):
+			rs = load_rule_set(session.rule_set_id, session.rule_overrides)
+		suspects = _diag(inp, rs)
+		return single_item_response({"suspects": suspects})
+	except Exception as e:
+		return error_response(str(e))
+
+
+# ════════════════════════════════════════════════════════
+# Rule Set / Verbs (P1)
+# ════════════════════════════════════════════════════════
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def list_verbs(**kwargs):
+	"""Danh sách verb đã đăng ký (metadata cho UI builder)."""
+	try:
+		from .core.registry import list_verbs as _list
+		return single_item_response({"verbs": _list()})
+	except Exception as e:
+		return error_response(str(e))
+
+
 # ════════════════════════════════════════════════════════
 # Helpers
 # ════════════════════════════════════════════════════════
 
 def _validate_input_data(inp) -> list:
-	"""Kiểm tra dữ liệu đầu vào, trả về danh sách cảnh báo. Không cần ortools."""
-	warnings = []
-
-	for c in inp.classes:
-		grade = c.education_grade_id
-		for ts_id in inp.grade_subjects.get(grade, []):
-			key_a = f"{c.name}|{ts_id}"
-			teachers = inp.class_subject_teachers.get(key_a, [])
-			if not teachers:
-				req = next((r for r in inp.requirements
-							if r.education_grade_id == grade and r.timetable_subject_id == ts_id), None)
-				subject_name = req.timetable_subject_title if req else ts_id
-				warnings.append(f"Lớp {c.title} chưa có GV phân công cho môn {subject_name}")
-
-	num_periods = len(inp.periods)
-	num_days = len(inp.working_days)
-	max_slots_per_week = num_periods * num_days
-
-	for c in inp.classes:
-		grade = c.education_grade_id
-		total_required = sum(
-			r.periods_per_week for r in inp.requirements
-			if r.education_grade_id == grade
-		)
-		if total_required > max_slots_per_week:
-			warnings.append(
-				f"Lớp {c.title}: tổng yêu cầu {total_required} tiết/tuần "
-				f"vượt khả năng {max_slots_per_week} slot ({num_periods} tiết x {num_days} ngày)"
-			)
-
+	"""Deprecated — dùng validation.validate_timetable_input."""
+	from .validation import validate_timetable_input
+	_, warnings = validate_timetable_input(inp)
 	return warnings
 
 
@@ -816,5 +839,19 @@ def _format_session(doc) -> Dict:
 			result["solver_stats"] = json.loads(doc.solver_stats) if isinstance(doc.solver_stats, str) else doc.solver_stats
 		except (json.JSONDecodeError, TypeError):
 			result["solver_stats"] = None
+
+	if frappe.db.has_column("SIS Timetable Generation Session", "rule_set_id"):
+		result["rule_set_id"] = getattr(doc, "rule_set_id", None) or None
+		if getattr(doc, "rule_overrides", None):
+			try:
+				result["rule_overrides"] = (
+					json.loads(doc.rule_overrides)
+					if isinstance(doc.rule_overrides, str)
+					else doc.rule_overrides
+				)
+			except (json.JSONDecodeError, TypeError):
+				result["rule_overrides"] = {}
+		else:
+			result["rule_overrides"] = {}
 
 	return result

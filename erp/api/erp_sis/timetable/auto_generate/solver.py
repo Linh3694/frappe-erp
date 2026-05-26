@@ -12,6 +12,7 @@ from datetime import datetime
 import frappe
 
 from .data_collector import TimetableDataCollector, TimetableInput
+from .validation import validate_timetable_input
 
 
 @dataclass
@@ -41,9 +42,11 @@ class TimetableSolver:
 			collector = TimetableDataCollector(self.session_id)
 			inp = collector.collect()
 
-			# Validate input
-			warnings = self._validate_input(inp)
-			result.warnings = warnings
+			val_errors, val_warnings = validate_timetable_input(inp)
+			result.warnings = val_warnings
+			if val_errors:
+				result.errors.extend(val_errors)
+				return result
 
 			if not inp.classes:
 				result.errors.append("Không tìm thấy lớp nào trong phạm vi đã chọn")
@@ -57,47 +60,36 @@ class TimetableSolver:
 				result.errors.append("Chưa có yêu cầu số tiết/tuần nào (Requirements matrix trống)")
 				return result
 
-			# Lazy import ortools (chỉ cần khi thực sự chạy solver)
+			# Build model + solve (core runner; verb loop thay ModelBuilder trực tiếp ở bản sau)
+			from .core.runner import solve_with_rules
+			from .rule_loader import load_rule_set
+
+			rule_set = None
+			session = frappe.get_doc("SIS Timetable Generation Session", self.session_id)
+			if getattr(session, "rule_set_id", None):
+				try:
+					rule_set = load_rule_set(session.rule_set_id, session.rule_overrides)
+				except Exception:
+					rule_set = None
+			if rule_set is None:
+				from .core.default_rules import build_default_rule_set
+				rule_set = build_default_rule_set("default")
+
+			solver, builder, status_name, solver_model = solve_with_rules(inp, rule_set)
+
 			from ortools.sat.python import cp_model
-			from .model_builder import ModelBuilder
 
-			# Log thống kê input
-			num_slots = len(inp.periods) * len(inp.working_days)
-			grade_totals = {}
-			for req in inp.requirements:
-				grade_totals.setdefault(req.education_grade_id, 0)
-				grade_totals[req.education_grade_id] += req.periods_per_week
-			for grade, total in grade_totals.items():
-				if total > num_slots:
-					result.warnings.append(
-						f"Khối {grade}: tổng {total} tiết/tuần > {num_slots} slot khả dụng → solver sẽ xếp best-effort"
-					)
-				frappe.logger().info(f"[Solver] Grade {grade}: {total}/{num_slots} tiết/tuần")
+			frappe.logger().info(
+				f"[Solver] {len(inp.classes)} lớp, {len(inp.periods)} tiết/ngày, "
+				f"{len(inp.working_days)} ngày, rule_set={getattr(session, 'rule_set_id', None)}"
+			)
 
-			frappe.logger().info(f"[Solver] {len(inp.classes)} lớp, {len(inp.periods)} tiết/ngày, "
-								f"{len(inp.working_days)} ngày, {len(inp.requirements)} requirements, "
-								f"{len(inp.assignments)} assignments")
-
-			# Build model
-			builder = ModelBuilder(inp)
-			solver_model = builder.build()
-
-			# Solve
-			solver = cp_model.CpSolver()
-			solver.parameters.max_time_in_seconds = inp.solver_time_limit
-			solver.parameters.num_workers = 4
-			solver.parameters.log_search_progress = False
-
-			status = solver.Solve(solver_model.model)
-
-			result.num_variables = solver_model.model.Proto().variables.__len__()
-			result.num_constraints = solver_model.model.Proto().constraints.__len__()
+			result.num_variables = solver_model.model.Proto().variables.__len__() if hasattr(solver_model, "model") else 0
+			result.num_constraints = solver_model.model.Proto().constraints.__len__() if hasattr(solver_model, "model") else 0
 			result.solve_time_ms = solver.WallTime() * 1000
-
-			status_name = solver.StatusName(status)
 			result.status = status_name
 
-			if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+			if status_name in ("OPTIMAL", "FEASIBLE"):
 				result.success = True
 				solution = builder.extract_solution(solver)
 				result.total_slots = len(solution)
@@ -106,14 +98,14 @@ class TimetableSolver:
 				# Lưu vào draft table
 				self._save_results(solution)
 
-				if status == cp_model.FEASIBLE:
+				if status_name == "FEASIBLE":
 					result.warnings.append(
 						"Solver tìm được lời giải khả thi nhưng chưa tối ưu "
 						"(hết thời gian trước khi tìm được lời giải tốt nhất)"
 					)
 			else:
 				result.errors.append(f"Solver không tìm được lời giải: {status_name}")
-				if status == cp_model.INFEASIBLE:
+				if status_name == "INFEASIBLE":
 					result.errors.append(
 						"Các ràng buộc mâu thuẫn nhau. Kiểm tra: "
 						"(1) Tổng số tiết yêu cầu có vượt số slot/tuần? "
@@ -126,42 +118,6 @@ class TimetableSolver:
 			frappe.log_error(f"Timetable solver error for session {self.session_id}: {str(e)}")
 
 		return result
-
-	def _validate_input(self, inp: TimetableInput) -> List[str]:
-		"""Kiểm tra dữ liệu đầu vào, trả về danh sách cảnh báo."""
-		warnings = []
-
-		# Kiểm tra assignment cho mỗi (class, subject)
-		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
-				key_a = f"{c.name}|{ts_id}"
-				teachers = inp.class_subject_teachers.get(key_a, [])
-				if not teachers:
-					# Tìm tên cho warning
-					req = next((r for r in inp.requirements
-								if r.education_grade_id == grade and r.timetable_subject_id == ts_id), None)
-					subject_name = req.timetable_subject_title if req else ts_id
-					warnings.append(f"Lớp {c.title} chưa có GV phân công cho môn {subject_name}")
-
-		# Kiểm tra tổng số tiết
-		num_periods = len(inp.periods)
-		num_days = len(inp.working_days)
-		max_slots_per_week = num_periods * num_days
-
-		for c in inp.classes:
-			grade = c.education_grade_id
-			total_required = sum(
-				r.periods_per_week for r in inp.requirements
-				if r.education_grade_id == grade
-			)
-			if total_required > max_slots_per_week:
-				warnings.append(
-					f"Lớp {c.title}: tổng yêu cầu {total_required} tiết/tuần "
-					f"vượt khả năng {max_slots_per_week} slot ({num_periods} tiết x {num_days} ngày)"
-				)
-
-		return warnings
 
 	def _save_results(self, solution: List[Dict]):
 		"""Lưu kết quả vào tabSIS_TKB_Gen_Result (raw SQL)."""

@@ -25,6 +25,7 @@
   "max_periods_per_day",
   "scheduling_section",
   "prefer_consecutive",
+  "force_pair",
   "column_break_scheduling",
   "room_type_required"
  ],
@@ -89,6 +90,13 @@
    "label": "Prefer Consecutive (Tiết đôi)",
    "default": 0,
    "description": "Ưu tiên xếp 2 tiết liên tiếp khi số tiết >= 2"
+  },
+  {
+   "fieldname": "force_pair",
+   "fieldtype": "Check",
+   "label": "Force Pair (Bắt buộc tiết đôi)",
+   "default": 0,
+   "description": "Bắt buộc xếp theo cặp 2 tiết liên tiếp trong cùng buổi (hard constraint)"
   },
   {
    "fieldname": "column_break_scheduling",

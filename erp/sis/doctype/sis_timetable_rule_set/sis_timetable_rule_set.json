@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "allow_copy": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-RULESET-{#####}",
+ "beta": 1,
+ "creation": "2026-05-26 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title_vn",
+  "title_en",
+  "campus_id",
+  "column_break_1",
+  "is_default",
+  "description",
+  "rules_section",
+  "rules"
+ ],
+ "fields": [
+  {
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "label": "Title (VN)",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "label": "Title (EN)"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "is_default",
+   "fieldtype": "Check",
+   "label": "Default Rule Set",
+   "default": "0"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "rules_section",
+   "fieldtype": "Section Break",
+   "label": "Rules (S+V+O)"
+  },
+  {
+   "fieldname": "rules",
+   "fieldtype": "Table",
+   "label": "Rules",
+   "options": "SIS Timetable Rule"
+  }
+ ],
+ "links": [],
+ "modified": "2026-05-26 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Timetable Rule Set",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1},
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "SIS Manager", "share": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "title_vn",
+ "track_changes": 1
+}

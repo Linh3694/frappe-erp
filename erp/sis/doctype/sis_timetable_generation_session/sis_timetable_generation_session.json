@@ -31,6 +31,9 @@
   "optimization_priority",
   "soft_rules_section",
   "soft_rules",
+  "rule_set_section",
+  "rule_set_id",
+  "rule_overrides",
   "status_section",
   "status",
   "column_break_status",
@@ -139,6 +142,24 @@
    "fieldtype": "JSON",
    "label": "Soft Rules",
    "description": "JSON chứa các ràng buộc mềm: subject pair exclusions, time preferences, weights..."
+  },
+  {
+   "fieldname": "rule_set_section",
+   "fieldtype": "Section Break",
+   "label": "Rule Set (S+V+O)"
+  },
+  {
+   "fieldname": "rule_set_id",
+   "fieldtype": "Link",
+   "label": "Rule Set",
+   "options": "SIS Timetable Rule Set",
+   "description": "Bộ rule data-driven; để trống dùng ModelBuilder P0 mặc định"
+  },
+  {
+   "fieldname": "rule_overrides",
+   "fieldtype": "JSON",
+   "label": "Rule Overrides",
+   "description": "Override per-rule: {\"rule_id\": {\"enabled\": false, \"weight\": 10}}"
   },
   {
    "fieldname": "status_section",
