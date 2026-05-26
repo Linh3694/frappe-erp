@@ -359,12 +359,14 @@ def migrate_support_team(db, dry_run: bool = False) -> dict:
 			continue
 		try:
 			frappe.get_doc(doc).insert(ignore_permissions=True)
+			if not dry_run:
+				frappe.db.commit()
 			stats["created"] += 1
 		except Exception as e:
 			stats["errors"] += 1
+			if not dry_run:
+				frappe.db.rollback()
 			_log(f"Error team member {frappe_user}: {e}", dry_run)
-	if not dry_run:
-		frappe.db.commit()
 	return stats
 
 
@@ -547,14 +549,15 @@ def migrate_tickets(
 				).insert(ignore_permissions=True)
 				stats["subtasks"] += 1
 
+			if not dry_run:
+				frappe.db.commit()
 			stats["created"] += 1
 		except Exception as e:
 			stats["errors"] += 1
-			frappe.db.rollback()
+			if not dry_run:
+				frappe.db.rollback()
 			_log(f"Error ticket {ticket_code}: {e}", dry_run)
 
-	if not dry_run:
-		frappe.db.commit()
 	return stats
 
 
