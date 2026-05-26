@@ -18,6 +18,8 @@ from erp.api.erp_it_support.utils import (
 	_merge_attachments,
 	_parse_json_body,
 	_resolve_category_doc,
+	_resolve_ticket_name,
+	_ticket_id_from_request,
 	_resolve_pic_from_category_role,
 	_ticket_to_dict,
 	ticket_info_for_email,
@@ -176,8 +178,9 @@ def get_ticket_info_for_email(ticket_id=None):
 	try:
 		if not _verify_internal_request():
 			return error_response(_("Unauthorized"), code="UNAUTHORIZED")
-		tid = ticket_id or frappe.form_dict.get("ticket_id")
-		if not tid or not frappe.db.exists(DOCTYPE, tid):
+		data = _parse_json_body()
+		tid = _resolve_ticket_name(_ticket_id_from_request(data, ticket_id))
+		if not tid:
 			return not_found_response(_("Ticket not found"))
 		doc = frappe.get_doc(DOCTYPE, tid)
 		return success_response(ticket_info_for_email(doc), "OK")

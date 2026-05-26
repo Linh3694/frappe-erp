@@ -34,6 +34,8 @@ from erp.api.erp_it_support.utils import (
 	_load_subtasks,
 	_merge_attachments,
 	_parse_json_body,
+	_resolve_ticket_name,
+	_ticket_id_from_request,
 	_resolve_category_doc,
 	_resolve_pic_from_category_role,
 	_save_uploaded_attachments,
@@ -110,11 +112,12 @@ def get_all_tickets():
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_ticket(ticket_id=None, name=None):
 	try:
-		tid = ticket_id or name or (frappe.form_dict.get("ticket_id") or frappe.form_dict.get("name"))
-		if not tid or not frappe.db.exists(DOCTYPE, tid):
+		data = _parse_json_body()
+		tid = _resolve_ticket_name(_ticket_id_from_request(data, ticket_id, name))
+		if not tid:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, tid)
 		if not _can_read_ticket(doc):
@@ -198,8 +201,8 @@ def create_ticket():
 def update_ticket():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		if not _can_read_ticket(doc):
@@ -259,8 +262,8 @@ def delete_ticket():
 		if not _is_it_staff():
 			return forbidden_response(_("Chỉ đội IT mới xóa ticket"))
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		frappe.delete_doc(DOCTYPE, ticket_id, ignore_permissions=True)
 		frappe.db.commit()
@@ -275,8 +278,8 @@ def assign_ticket():
 	"""Nhận ticket (assign to me)."""
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		if not _is_it_staff():
@@ -305,9 +308,9 @@ def assign_ticket():
 def cancel_ticket():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
 		cancel_reason = (data.get("cancelReason") or data.get("cancellation_reason") or "").strip()
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		email = _session_email()
@@ -336,8 +339,8 @@ def cancel_ticket():
 def reopen_ticket():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		if doc.creator_email != _session_email() and not _is_it_staff():
@@ -365,7 +368,7 @@ def reopen_ticket():
 def accept_feedback():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
 		rating = int(data.get("rating") or 0)
 		comment = (data.get("comment") or "").strip()
 		badges = data.get("badges") or []
@@ -376,7 +379,7 @@ def accept_feedback():
 				badges = []
 		if rating < 1 or rating > 5:
 			return validation_error_response(_("Đánh giá phải từ 1 đến 5 sao"))
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		if doc.creator_email != _session_email():
@@ -415,10 +418,11 @@ def accept_feedback():
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_feedback_stats(email=None):
 	try:
-		em = (email or frappe.form_dict.get("email") or "").strip()
+		data = _parse_json_body()
+		em = (email or data.get("email") or frappe.form_dict.get("email") or "").strip()
 		if not em:
 			return validation_error_response(_("Thiếu email"))
 		user_name = frappe.db.get_value("User", {"email": em}, "name")
@@ -498,11 +502,12 @@ def _parse_badges(raw):
 # --- Subtasks ---
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_subtasks(ticket_id=None):
 	try:
-		tid = ticket_id or frappe.form_dict.get("ticket_id")
-		if not tid or not frappe.db.exists(DOCTYPE, tid):
+		data = _parse_json_body()
+		tid = _resolve_ticket_name(_ticket_id_from_request(data, ticket_id))
+		if not tid:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, tid)
 		if not _can_read_ticket(doc):
@@ -516,9 +521,9 @@ def get_subtasks(ticket_id=None):
 def create_subtask():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
 		title = (data.get("title") or "").strip()
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		if not title:
 			return validation_error_response(_("Thiếu tiêu đề subtask"))
@@ -565,7 +570,9 @@ def update_subtask():
 		if not sub_id or not frappe.db.exists(SUBTASK_DOCTYPE, sub_id):
 			return not_found_response(_("Không tìm thấy subtask"))
 		st = frappe.get_doc(SUBTASK_DOCTYPE, sub_id)
-		tid = ticket_id or st.ticket
+		tid = _resolve_ticket_name(_ticket_id_from_request(data, ticket_id)) or st.ticket
+		if not tid:
+			return not_found_response(_("Không tìm thấy ticket"))
 		tdoc = frappe.get_doc(DOCTYPE, tid)
 		if not _is_it_staff() and tdoc.assigned_to != frappe.session.user:
 			return forbidden_response(_("Không có quyền"))
@@ -604,8 +611,8 @@ def delete_subtask():
 def get_comments():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		if not _can_read_ticket(doc):
@@ -620,9 +627,11 @@ def get_comments():
 def send_comment():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name") or frappe.form_dict.get("ticket_id")
+		ticket_id = _resolve_ticket_name(
+			_ticket_id_from_request(data, data.get("ticket_id") or data.get("name") or frappe.form_dict.get("ticket_id"))
+		)
 		text = (data.get("text") or frappe.form_dict.get("text") or "").strip()
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		if not _can_read_ticket(doc):
@@ -758,8 +767,8 @@ def send_comment():
 def get_history():
 	try:
 		data = _parse_json_body()
-		ticket_id = data.get("ticket_id") or data.get("name")
-		if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
+		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
 		if not _can_read_ticket(doc):

@@ -82,6 +82,29 @@ def _parse_json_body() -> dict:
 	return data
 
 
+def _ticket_id_from_request(data=None, ticket_id=None, name=None) -> str:
+	"""Gom ticket_id từ kwargs, JSON body và form_dict (GET/POST)."""
+	data = data or {}
+	return (
+		(ticket_id or "").strip()
+		or (name or "").strip()
+		or str(data.get("ticket_id") or data.get("ticketId") or data.get("name") or "").strip()
+		or str(frappe.form_dict.get("ticket_id") or frappe.form_dict.get("name") or "").strip()
+	)
+
+
+def _resolve_ticket_name(ref: Optional[str]) -> Optional[str]:
+	"""Map mã ticket (name hoặc ticket_code) → doc name Frappe."""
+	key = (ref or "").strip()
+	if not key:
+		return None
+	if frappe.db.exists(DOCTYPE, key):
+		return key
+	# FE có thể gửi ticketCode thay vì name (migrate Mongo giữ OVR-0001, ...)
+	doc_name = frappe.db.get_value(DOCTYPE, {"ticket_code": key}, "name")
+	return doc_name or None
+
+
 def _session_email() -> str:
 	return (frappe.db.get_value("User", frappe.session.user, "email") or "").strip()
 
