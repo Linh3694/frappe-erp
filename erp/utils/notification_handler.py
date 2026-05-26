@@ -315,7 +315,8 @@ def send_bulk_parent_notifications(
     body: str,
     icon: Optional[str] = None,
     actions: Optional[List] = None,
-    data: Optional[Dict] = None
+    data: Optional[Dict] = None,
+    skip_push: bool = False,
 ) -> Dict:
     """
     Unified push notification sender
@@ -334,6 +335,7 @@ def send_bulk_parent_notifications(
         icon: Icon URL (optional)
         actions: Action buttons (optional)
         data: Additional data to include in notification (optional)
+        skip_push: True = chỉ tạo notification list, không gửi push (dùng cho attendance stale)
     
     Returns:
         {
@@ -447,6 +449,8 @@ def send_bulk_parent_notifications(
         
         frappe.logger().info(f"📤 [Notification Handler] Sending {len(parent_emails)} notifications via Frappe")
         frappe.logger().info(f"   Type: {recipient_type}")
+        if skip_push:
+            frappe.logger().info(f"   skip_push=True — chỉ tạo notification list, không gửi push")
 
         # Send notifications using local Frappe functions
         try:
@@ -506,6 +510,10 @@ def send_bulk_parent_notifications(
             # Resolve title/body 1 lần (cùng 1 noti cho tất cả parents)
             final_title_str = get_notification_text(notification_title)
             final_body_str = get_notification_text(notification_body)
+
+            event_timestamp = data.get("timestamp") if data else None
+            if not event_timestamp:
+                event_timestamp = frappe.utils.now()
             
             # Phase C.1+C.2: Collect targets cho Expo BATCH push (gửi 1 lần sau loop)
             expo_targets = []  # [{email, data}]
@@ -523,6 +531,9 @@ def send_bulk_parent_notifications(
                     if parent_student_id:
                         parent_merged_data["student_id"] = parent_student_id
                         frappe.logger().info(f"📧 [Bulk Handler] Set student_id={parent_student_id} for {parent_email}")
+                    if skip_push:
+                        parent_merged_data["push_skipped"] = True
+                        parent_merged_data["push_skip_reason"] = "stale_event"
                     
                     # Create notification record directly to avoid role validation issues
                     from frappe import get_doc
@@ -539,7 +550,7 @@ def send_bulk_parent_notifications(
                         "status": "sent",
                         "delivery_status": "pending",
                         "sent_at": frappe.utils.now(),
-                        "event_timestamp": frappe.utils.now()
+                        "event_timestamp": event_timestamp,
                     }
                     
                     # Chỉ ghi cột student_id khi DocType đã có field (tránh OperationalError trên DB cũ)
@@ -570,33 +581,35 @@ def send_bulk_parent_notifications(
                     unread_count = get_unread_count(parent_email)
                     emit_unread_count_update(parent_email, unread_count)
 
-                    # Send VAPID push only (skip_expo=True) — Expo sẽ gửi BATCH 1 lần ở dưới
-                    # Tránh gọi Expo N lần cho N parents (mỗi lần ~10s timeout)
-                    try:
-                        from erp.api.parent_portal.push_notification import send_push_notification
+                    # Push: bỏ qua nếu event stale (attendance); list vẫn được tạo ở trên
+                    if not skip_push:
+                        # Send VAPID push only (skip_expo=True) — Expo sẽ gửi BATCH 1 lần ở dưới
+                        # Tránh gọi Expo N lần cho N parents (mỗi lần ~10s timeout)
+                        try:
+                            from erp.api.parent_portal.push_notification import send_push_notification
 
-                        push_result = send_push_notification(
-                            user_email=parent_email,
-                            title=final_title_str,
-                            body=final_body_str,
-                            icon="/icon.png",
-                            data=parent_merged_data,
-                            tag=recipient_type,
-                            skip_expo=True,  # Phase C.1: gửi Expo BATCH ở cuối
-                        )
+                            push_result = send_push_notification(
+                                user_email=parent_email,
+                                title=final_title_str,
+                                body=final_body_str,
+                                icon="/icon.png",
+                                data=parent_merged_data,
+                                tag=recipient_type,
+                                skip_expo=True,  # Phase C.1: gửi Expo BATCH ở cuối
+                            )
 
-                        devices_sent = push_result.get('devices_sent', 0)
-                        if devices_sent > 0:
-                            frappe.logger().debug(f"✅ [Bulk Push] VAPID OK for {parent_email}: {devices_sent} device(s)")
+                            devices_sent = push_result.get('devices_sent', 0)
+                            if devices_sent > 0:
+                                frappe.logger().debug(f"✅ [Bulk Push] VAPID OK for {parent_email}: {devices_sent} device(s)")
 
-                    except Exception as push_error:
-                        frappe.logger().error(f"💥 [Bulk Push] VAPID exception for {parent_email}: {str(push_error)}")
-                    
-                    # Collect target để gửi Expo BATCH 1 lần sau loop
-                    expo_targets.append({
-                        "email": parent_email,
-                        "data": parent_merged_data,
-                    })
+                        except Exception as push_error:
+                            frappe.logger().error(f"💥 [Bulk Push] VAPID exception for {parent_email}: {str(push_error)}")
+                        
+                        # Collect target để gửi Expo BATCH 1 lần sau loop
+                        expo_targets.append({
+                            "email": parent_email,
+                            "data": parent_merged_data,
+                        })
                     
                     success_count += 1
                     results.append({

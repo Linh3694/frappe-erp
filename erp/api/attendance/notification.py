@@ -52,12 +52,9 @@ def publish_attendance_notification(
 			timestamp = frappe.utils.get_datetime(timestamp)
 			frappe.logger().info(f"📢 [Attendance Notif] Parsed timestamp: {timestamp}")
 
-		# RE-CHECK STALE EVENT khi worker pick up job
-		# Nguyên nhân: HiKvision device có thể buffer event tới 30+ phút (mất mạng / retry)
-		# rồi flush hàng loạt → lúc backend nhận được, event đã quá cũ
-		# Nếu push noti ngay sẽ làm phụ huynh nhầm tưởng con vừa check-in
-		# (vd thấy "đã đến trường lúc 07:38" lúc 08:05).
-		# Dùng cùng threshold với hikvision.py (mặc định 30 phút, có thể giảm qua site_config).
+		# Event stale: chỉ skip push, vẫn tạo ERP Notification (notification list)
+		# HiKvision có thể buffer event 30+ phút → push realtime gây hiểu nhầm cho phụ huynh
+		skip_push = False
 		try:
 			from erp.api.attendance.hikvision import (
 				is_historical_attendance,
@@ -65,14 +62,14 @@ def publish_attendance_notification(
 				_increment_daily_counter,
 			)
 			if timestamp and is_historical_attendance(timestamp):
+				skip_push = True
 				threshold = get_historical_attendance_threshold_minutes()
-				_increment_daily_counter("attendance:stale_skipped:count")
+				_increment_daily_counter("attendance:stale_push_skipped:count")
 				frappe.logger().warning(
-					f"⏭️ [Attendance Notif] SKIP stale event for {employee_code} - "
-					f"event_time={timestamp} > {threshold}min ago "
-					f"(suspected device buffer/queue delay)"
+					f"⏭️ [Attendance Notif] SKIP PUSH (stale) for {employee_code} - "
+					f"event_time={timestamp} > {threshold}min ago - "
+					f"vẫn tạo notification list"
 				)
-				return
 		except ImportError:
 			pass
 		except Exception as stale_err:
@@ -114,7 +111,8 @@ def publish_attendance_notification(
 				check_in_time=check_in_time,
 				check_out_time=check_out_time,
 				total_check_ins=total_check_ins,
-				date=date
+				date=date,
+				skip_push=skip_push,
 			)
 		else:
 			# Send notification to staff member
@@ -126,7 +124,8 @@ def publish_attendance_notification(
 				check_in_time=check_in_time,
 				check_out_time=check_out_time,
 				total_check_ins=total_check_ins,
-				date=date
+				date=date,
+				skip_push=skip_push,
 			)
 
 		# Cache đã được update trong should_skip_due_to_debounce_with_lock (atomic)
@@ -183,7 +182,8 @@ def send_student_attendance_notification(
 	check_in_time,
 	check_out_time,
 	total_check_ins,
-	date
+	date,
+	skip_push=False,
 ):
 	"""
 	Send attendance notification to student's guardians using unified handler
@@ -268,7 +268,8 @@ def send_student_attendance_notification(
 			},
 			title=title,
 			body=message,
-			data=notification_data
+			data=notification_data,
+			skip_push=skip_push,
 		)
 
 		frappe.logger().info(f"✅ [Student Attendance] send_bulk_parent_notifications result for {employee_code}: {result}")
@@ -288,7 +289,8 @@ def send_staff_attendance_notification(
 	check_in_time,
 	check_out_time,
 	total_check_ins,
-	date
+	date,
+	skip_push=False,
 ):
 	"""
 	Send attendance notification to staff member
@@ -338,7 +340,11 @@ def send_staff_attendance_notification(
 			"isCheckIn": is_check_in
 		}
 		
-		# Create notification record directly to avoid role validation issues
+		if skip_push:
+			notification_data["push_skipped"] = True
+			notification_data["push_skip_reason"] = "stale_event"
+
+		# Luôn tạo ERP Notification; push chỉ gửi khi event còn fresh
 		try:
 			from frappe import get_doc
 			notification_doc = get_doc({
@@ -361,6 +367,12 @@ def send_staff_attendance_notification(
 			frappe.logger().info(f"✅ Created notification directly: {notification_doc.name}")
 		except Exception as create_error:
 			frappe.logger().error(f"❌ Failed to create notification directly: {str(create_error)}")
+			return
+
+		if skip_push:
+			frappe.logger().info(
+				f"⏭️ [Staff Attendance] SKIP PUSH (stale) for {staff_email} - notification list đã tạo"
+			)
 			return
 		
 		# Skip realtime notification for attendance to avoid duplicate push notifications

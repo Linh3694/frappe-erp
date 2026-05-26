@@ -700,16 +700,16 @@ def get_historical_attendance_threshold_minutes():
 def is_historical_attendance(attendance_timestamp, threshold_minutes=None):
 	"""
 	Check if attendance timestamp is historical (older than threshold).
-	Used to determine if notification should be skipped for newly connected devices
-	that are syncing old data.
+	Used to determine if push notification should be skipped for delayed/buffered events.
+	Notification list (ERP Notification) vẫn được tạo bình thường.
 	
 	Args:
 		attendance_timestamp: The parsed attendance timestamp (datetime)
 		threshold_minutes: Optional threshold in minutes. If None, uses system config.
 	
 	Returns:
-		True if attendance is historical and should be silently synced
-		False if attendance is recent and should trigger notification
+		True if push should be skipped (event older than threshold)
+		False if event is recent and push should be sent
 	"""
 	if not attendance_timestamp:
 		return False
@@ -921,10 +921,8 @@ def process_single_attendance_event(event_data):
 		INVALID_TIME_PERIOD_SUB_EVENT = 7
 		if sub_event_type == INVALID_TIME_PERIOD_SUB_EVENT:
 			logger.debug("skip notif Invalid Time subEvent=7 employee=%s", employee_code)
-		elif not is_historical_attendance(parsed_timestamp):
-			# Đẩy notification sang RQ queue 'short' để worker xử lý nền
-			# enqueue_after_commit=True đảm bảo job chỉ chạy sau khi DB transaction commit
-			# → request HiKvision trả 200 trong < 100ms thay vì chờ 5-60s
+		else:
+			# Luôn enqueue notification; worker skip push nếu event stale, vẫn tạo notification list
 			try:
 				frappe.enqueue(
 					"erp.api.attendance.notification.publish_attendance_notification",

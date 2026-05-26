@@ -28,8 +28,6 @@ from erp.api.attendance.hikvision import (
 	get_buffer_length,
 	parse_attendance_timestamp,
 	format_vn_time,
-	is_historical_attendance,
-	get_historical_attendance_threshold_minutes,
 	get_hikvision_logger
 )
 from erp.common.doctype.erp_time_attendance.erp_time_attendance import (
@@ -387,7 +385,8 @@ def process_employee_events(key, events, logger, existing_name=None):
 		
 		if has_invalid_time_period:
 			logger.info(f"⏭️ [SKIP NOTIFICATION] Invalid Time Period event detected for {employee_code}")
-		elif not is_historical_attendance(latest_timestamp):
+		else:
+			# Luôn enqueue notification; worker quyết định skip push nếu event stale
 			should_notify = True
 		
 		notification_data = None
