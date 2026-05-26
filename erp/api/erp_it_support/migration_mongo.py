@@ -123,11 +123,38 @@ def _database_name_from_uri(uri: str) -> str:
 	return ""
 
 
+def _mongo_host_from_uri(uri: str) -> str:
+	try:
+		return (urlparse(uri.strip()).hostname or "").strip()
+	except Exception:
+		return ""
+
+
+def _is_valid_mongo_uri(uri: str) -> bool:
+	"""URI phải có scheme mongodb* và hostname không rỗng."""
+	u = (uri or "").strip()
+	if not u.startswith("mongodb"):
+		return False
+	return bool(_mongo_host_from_uri(u))
+
+
+def _mask_mongo_uri(uri: str) -> str:
+	"""Ẩn password trong URI khi log."""
+	try:
+		p = urlparse(uri)
+		host = p.hostname or "?"
+		port = f":{p.port}" if p.port else ""
+		db = (p.path or "").strip("/") or "?"
+		return f"mongodb://***@{host}{port}/{db}"
+	except Exception:
+		return "mongodb://***"
+
+
 def _resolve_mongo_config(mongo_uri: str = "", mongo_db: str = "") -> tuple:
 	"""
-	Tìm Mongo URI + DB name — ưu tiên kwargs → site_config → env → ticket-service/config.env.
+	Tìm Mongo URI + DB name.
+	Ưu tiên: kwargs → ticket-service/config.env → site_config (chỉ nếu URI hợp lệ).
 	"""
-	# Gộp env từ ticket-service config files
 	file_env = {}
 	config_source = None
 	for cfg_path in _ticket_service_config_candidates():
@@ -137,35 +164,60 @@ def _resolve_mongo_config(mongo_uri: str = "", mongo_db: str = "") -> tuple:
 			config_source = cfg_path
 			break
 
-	def pick(*keys):
+	candidates = []
+
+	kw = (mongo_uri or "").strip()
+	if kw:
+		candidates.append(("kwargs.mongo_uri", kw))
+
+	if file_env:
+		furi = (file_env.get("MONGODB_URI") or file_env.get("MONGO_URI") or "").strip()
+		if furi:
+			label = f"{config_source}:MONGODB_URI" if config_source else "config.env:MONGODB_URI"
+			candidates.append((label, furi))
+		built = _build_mongo_uri_from_parts(file_env)
+		if built:
+			label = f"{config_source}:MONGODB_HOST/PORT" if config_source else "config.env:HOST/PORT"
+			candidates.append((label, built))
+
+	for key in ("TICKET_MONGO_URI", "MONGODB_URI", "MONGO_URI"):
+		val = (frappe.conf.get(key) or os.environ.get(key) or "").strip()
+		if val:
+			src = "site_config" if frappe.conf.get(key) else key
+			candidates.append((src, val))
+
+	uri = ""
+	uri_source = ""
+	invalid = []
+	for src, cand in candidates:
+		if _is_valid_mongo_uri(cand):
+			uri = cand.strip()
+			uri_source = src
+			break
+		invalid.append(f"{src}={_mask_mongo_uri(cand) if cand.startswith('mongodb') else cand!r}")
+
+	if not uri:
+		msg = "Không có MongoDB URI hợp lệ (thiếu hostname). "
+		if invalid:
+			msg += "Đã thử: " + "; ".join(invalid) + ". "
+		msg += (
+			"Sửa site_config TICKET_MONGO_URI hoặc truyền --kwargs "
+			'\'{"mongo_uri": "mongodb://<host>:27017/wellspring_tickets"}\'. '
+			f"config.env ticket-service: {config_source or 'không tìm thấy'}"
+		)
+		frappe.throw(msg)
+
+	def pick_db(*keys):
 		for k in keys:
-			if mongo_uri and k.endswith("URI"):
-				continue
-			val = (frappe.conf.get(k) or os.environ.get(k) or file_env.get(k) or "").strip()
-			if val:
-				return val, k
-		return "", ""
+			val = (
+				(mongo_db or "").strip()
+				or (frappe.conf.get(k) or os.environ.get(k) or file_env.get(k) or "").strip()
+			)
+			if val and re.match(r"^[A-Za-z0-9_\-]+$", val):
+				return val
+		return ""
 
-	uri = (mongo_uri or "").strip()
-	uri_source = "kwargs.mongo_uri" if uri else ""
-
-	if not uri:
-		uri, key = pick("TICKET_MONGO_URI", "MONGODB_URI", "MONGO_URI")
-		if uri:
-			uri_source = key
-
-	if not uri:
-		uri = _build_mongo_uri_from_parts({**file_env, **dict(os.environ)})
-		if uri:
-			uri_source = config_source or "MONGODB_HOST/PORT"
-
-	db_name = (mongo_db or "").strip()
-	if not db_name:
-		db_name, _ = pick("TICKET_MONGO_DB", "MONGODB_DATABASE", "MONGODB_DB")
-	if not db_name:
-		db_name = "wellspring_tickets"
-
-	# Ưu tiên db name trong URI (parse đúng cả mongodb:// không có @)
+	db_name = pick_db("TICKET_MONGO_DB", "MONGODB_DATABASE", "MONGODB_DB") or "wellspring_tickets"
 	uri_db = _database_name_from_uri(uri)
 	if uri_db:
 		db_name = uri_db
@@ -173,7 +225,7 @@ def _resolve_mongo_config(mongo_uri: str = "", mongo_db: str = "") -> tuple:
 	return uri, db_name, uri_source, config_source
 
 
-def _resolve_uploads_root(uploads_root: str = "") -> str:
+def _resolve_uploads_root(uploads_root: str = "", config_path: str | None = None) -> str:
 	if (uploads_root or "").strip():
 		return os.path.abspath(uploads_root.strip())
 	if (frappe.conf.get("TICKET_UPLOADS_ROOT") or os.environ.get("TICKET_UPLOADS_ROOT") or "").strip():
@@ -182,14 +234,54 @@ def _resolve_uploads_root(uploads_root: str = "") -> str:
 		)
 	bench_path = frappe.utils.get_bench_path()
 	app_root = os.path.dirname(bench_path)
+	candidates = []
+	if config_path:
+		svc_root = os.path.dirname(os.path.abspath(config_path))
+		candidates.append(os.path.join(svc_root, "uploads"))
 	for p in (
 		os.path.join(app_root, "ticket-service", "uploads"),
+		os.path.join(bench_path, "apps", "ticket-service", "uploads"),
 		os.path.join(bench_path, "ticket-service", "uploads"),
 		"/srv/app/ticket-service/uploads",
+		"/srv/app/frappe-backend/ticket-service/uploads",
 	):
-		if os.path.isdir(p):
-			return p
+		candidates.append(p)
+	for p in candidates:
+		if p and os.path.isdir(p):
+			return os.path.abspath(p)
+	# Fallback — vẫn trả path mặc định để log; copy file sẽ skip nếu không tồn tại
+	if config_path:
+		return os.path.join(os.path.dirname(os.path.abspath(config_path)), "uploads")
 	return os.path.join(app_root, "ticket-service", "uploads")
+
+
+def _pick_mongo_collection(db, *preferred_names):
+	"""Chọn collection Mongo — mongoose có thể pluralize tên model."""
+	names = {n.lower(): n for n in db.list_collection_names()}
+	for pref in preferred_names:
+		key = pref.lower()
+		if key in names:
+			return db[names[key]]
+	# fuzzy: supportteammember*
+	for actual in db.list_collection_names():
+		low = actual.lower()
+		for pref in preferred_names:
+			if pref.lower() in low or low in pref.lower():
+				return db[actual]
+	return db[preferred_names[0]]
+
+
+def _verify_mongo_connection(client, uri: str, db_name: str):
+	"""Ping Mongo trước khi migrate — báo lỗi rõ nếu host/URI sai."""
+	try:
+		client.admin.command("ping")
+		client[db_name].list_collection_names()
+	except Exception as exc:
+		frappe.throw(
+			f"Không kết nối được MongoDB ({_mask_mongo_uri(uri)}, db={db_name}): {exc}. "
+			"Kiểm tra TICKET_MONGO_URI trong site_config hoặc MONGODB_* trong ticket-service/config.env. "
+			"Nếu site_config sai, xóa/sửa TICKET_MONGO_URI hoặc truyền --kwargs mongo_uri."
+		)
 
 
 def _get_mongo_client(mongo_uri: str):
@@ -216,6 +308,9 @@ def _mongo_user_email(db, user_id) -> Optional[str]:
 			pass
 	row = db.users.find_one({"_id": uid}) or db.Users.find_one({"_id": uid})
 	if not row:
+		users_coll = _pick_mongo_collection(db, "users", "Users")
+		row = users_coll.find_one({"_id": uid})
+	if not row:
 		return None
 	return (row.get("email") or "").strip().lower()
 
@@ -234,7 +329,7 @@ def _log(msg: str, dry_run: bool = False):
 
 def migrate_support_team(db, dry_run: bool = False) -> dict:
 	stats = {"created": 0, "skipped": 0, "errors": 0}
-	coll = db.supportteammembers if "supportteammembers" in db.list_collection_names() else db.SupportTeamMember
+	coll = _pick_mongo_collection(db, "SupportTeamMember", "supportteammembers", "support_team_members")
 	for row in coll.find({}):
 		email = (row.get("email") or "").strip().lower()
 		user_id = row.get("userId") or row.get("user")
@@ -297,7 +392,7 @@ def migrate_tickets(
 	limit: int = 0,
 ) -> dict:
 	stats = {"created": 0, "skipped": 0, "errors": 0, "comments": 0, "history": 0, "subtasks": 0}
-	coll = db.tickets if "tickets" in db.list_collection_names() else db.Ticket
+	coll = _pick_mongo_collection(db, "Ticket", "tickets")
 	cursor = coll.find({}).sort("createdAt", 1)
 	if limit:
 		cursor = cursor.limit(int(limit))
@@ -485,12 +580,16 @@ def run(
 			f"Đã tìm config.env tại: {searched}"
 		)
 
-	root = _resolve_uploads_root(uploads_root)
+	root = _resolve_uploads_root(uploads_root, config_path)
 
 	client = _get_mongo_client(uri)
+	_verify_mongo_connection(client, uri, db_name)
 	db = client[db_name]
 
-	_log(f"Bắt đầu migrate (dry_run={dry}) mongo_db={db_name} uri_source={uri_source}", dry)
+	_log(
+		f"Bắt đầu migrate (dry_run={dry}) mongo_db={db_name} uri={_mask_mongo_uri(uri)} uri_source={uri_source}",
+		dry,
+	)
 	if config_path:
 		_log(f"Đọc config ticket-service: {config_path}", dry)
 	_log(f"Uploads root: {root} (exists={os.path.isdir(root)})", dry)
