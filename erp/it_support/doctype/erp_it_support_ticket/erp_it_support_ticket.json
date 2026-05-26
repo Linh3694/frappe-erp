@@ -35,8 +35,6 @@
   "waiting_for_customer_email_sent",
   "meta_section",
   "source",
-  "sla_deadline",
-  "escalate_level",
   "attachments_json"
  ],
  "fields": [
@@ -210,17 +208,6 @@
    "options": "web\nemail\nmobile\napi"
   },
   {
-   "fieldname": "sla_deadline",
-   "fieldtype": "Datetime",
-   "label": "SLA deadline"
-  },
-  {
-   "default": "0",
-   "fieldname": "escalate_level",
-   "fieldtype": "Int",
-   "label": "Mức escalate"
-  },
-  {
    "fieldname": "attachments_json",
    "fieldtype": "JSON",
    "label": "Đính kèm (JSON)"
@@ -228,7 +215,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-26 10:00:00.000000",
+ "modified": "2026-05-26 12:00:00.000000",
  "module": "IT Support",
  "name": "ERP IT Support Ticket",
  "owner": "Administrator",

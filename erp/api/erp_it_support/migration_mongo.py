@@ -469,10 +469,7 @@ def migrate_tickets(
 			"feedback_comment": feedback.get("comment") or "",
 			"feedback_badges": json.dumps(badges, separators=(",", ":")) if badges else None,
 			"attachments_json": json.dumps(frappe_attachments, separators=(",", ":")) if frappe_attachments else None,
-			"escalate_level": row.get("escalateLevel") or 0,
 		}
-		if row.get("sla"):
-			doc_dict["sla_deadline"] = get_datetime(row["sla"])
 		if row.get("acceptedAt"):
 			doc_dict["accepted_at"] = get_datetime(row["acceptedAt"])
 		if row.get("closedAt"):
