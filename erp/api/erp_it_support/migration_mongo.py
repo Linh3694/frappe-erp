@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import frappe
 from frappe.utils import get_datetime, get_files_path
@@ -105,6 +107,22 @@ def _build_mongo_uri_from_parts(env: dict) -> str:
 	return f"mongodb://{host}:{port}/{db}"
 
 
+def _database_name_from_uri(uri: str) -> str:
+	"""Lấy tên DB từ MongoDB URI (mongodb://host:port/dbname)."""
+	if not uri:
+		return ""
+	try:
+		parsed = urlparse(uri.strip())
+		# path dạng /wellspring_tickets hoặc /wellspring_tickets/
+		segment = (parsed.path or "").strip("/").split("/")[0].strip()
+		# Chỉ chấp nhận tên DB hợp lệ (không chứa / : @ ...)
+		if segment and re.match(r"^[A-Za-z0-9_\-]+$", segment):
+			return segment
+	except Exception:
+		pass
+	return ""
+
+
 def _resolve_mongo_config(mongo_uri: str = "", mongo_db: str = "") -> tuple:
 	"""
 	Tìm Mongo URI + DB name — ưu tiên kwargs → site_config → env → ticket-service/config.env.
@@ -147,13 +165,10 @@ def _resolve_mongo_config(mongo_uri: str = "", mongo_db: str = "") -> tuple:
 	if not db_name:
 		db_name = "wellspring_tickets"
 
-	# Nếu URI có path /dbname thì ưu tiên làm db_name
-	if uri and "/" in uri.rsplit("@", 1)[-1]:
-		tail = uri.rsplit("@", 1)[-1]
-		if "/" in tail:
-			path_part = tail.split("/", 1)[1].split("?")[0].strip()
-			if path_part:
-				db_name = path_part
+	# Ưu tiên db name trong URI (parse đúng cả mongodb:// không có @)
+	uri_db = _database_name_from_uri(uri)
+	if uri_db:
+		db_name = uri_db
 
 	return uri, db_name, uri_source, config_source
 
