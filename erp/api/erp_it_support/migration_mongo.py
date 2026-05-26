@@ -482,6 +482,9 @@ def migrate_tickets(
 
 		if dry_run:
 			stats["created"] += 1
+			stats["comments"] += len(row.get("messages") or [])
+			stats["history"] += len(row.get("history") or [])
+			stats["subtasks"] += len(row.get("subTasks") or [])
 			continue
 
 		try:
