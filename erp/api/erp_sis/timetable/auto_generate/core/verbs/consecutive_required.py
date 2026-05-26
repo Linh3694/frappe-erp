@@ -13,18 +13,13 @@ class ConsecutiveRequired(Verb):
 		num = ctx.num_periods
 		half = num // 2 or num
 
-		pair_subjects = set(subject_set) if subject_set else set()
-		if params.get("source") == "requirement.force_pair":
-			for c in inp.classes:
-				g = c.education_grade_id
-				for ts_id in inp.grade_subjects.get(g, []):
-					req = rmap.get((g, ts_id))
-					if req and req.force_pair:
-						pair_subjects.add(ts_id)
-
+		# Chỉ lấy môn từ instances — user chọn thủ công trong Rule Set Builder
+		pair_subjects: set = set()
 		for inst in instances(params):
 			if inst.get("subject"):
 				pair_subjects.add(inst["subject"])
+		if not pair_subjects:
+			return
 
 		for c in inp.classes:
 			g = c.education_grade_id

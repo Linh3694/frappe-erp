@@ -77,6 +77,15 @@ def test_teacher_not_on_day_in_catalog():
 	entry = get_catalog_entry("teacher_not_on_day")
 	assert entry is not None
 	assert entry["parameterized"] is True
+	assert entry.get("subject_label_vn") == "Giáo viên"
+	assert entry.get("instance_required") is True
+
+
+def test_subject_pair_periods_manual_only():
+	entry = get_catalog_entry("subject_pair_periods")
+	assert entry is not None
+	assert "requirement.force_pair" not in str(entry.get("default_params", {}))
+	assert entry["default_params"].get("size") == 2
 
 
 def test_forbidden_at_slots_has_instance_schema():

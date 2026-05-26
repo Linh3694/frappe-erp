@@ -15,6 +15,7 @@ from .core.rule_catalog import get_catalog_entry, list_rule_catalog
 from .core.registry import list_verbs
 from .core.verb_schemas import get_verb_schema
 from .rule_loader import load_rule_set
+from .rule_set_validation import validate_rule_rows
 
 
 def _json() -> Dict:
@@ -82,6 +83,9 @@ def create_rule_set(**kwargs):
 		rules = data.get("rules")
 		if not rules and data.get("use_default_rules"):
 			rules = _default_rule_rows()
+		val_errors = validate_rule_rows(rules or [])
+		if val_errors:
+			return error_response("; ".join(val_errors))
 		for row in rules or []:
 			doc.append("rules", row)
 		doc.insert(ignore_permissions=True)
@@ -123,6 +127,9 @@ def update_rule_set(**kwargs):
 			if data.get(field) is not None:
 				doc.set(field, data.get(field))
 		if "rules" in data:
+			val_errors = validate_rule_rows(data.get("rules") or [])
+			if val_errors:
+				return error_response("; ".join(val_errors))
 			doc.rules = []
 			for row in data.get("rules") or []:
 				doc.append("rules", row)
@@ -308,6 +315,10 @@ def _rule_to_dict(r) -> Dict[str, Any]:
 		"description": r.description,
 		"parameterized": catalog.get("parameterized", False),
 		"object_kind": catalog.get("object_kind", "None"),
+		"subject_label_vn": catalog.get("subject_label_vn"),
+		"object_label_vn": catalog.get("object_label_vn"),
+		"instance_required": catalog.get("instance_required", False),
+		"help_text_vn": catalog.get("help_text_vn"),
 		"params_schema": verb_schema.get("params_schema"),
 		"instance_schema": verb_schema.get("instance_schema"),
 	}

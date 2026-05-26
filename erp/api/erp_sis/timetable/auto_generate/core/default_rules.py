@@ -22,7 +22,7 @@ DEFAULT_RULE_SPECS = [
 	("avoid_single_period_visit", "soft", "avoid_single_visit", "teacher", {}, {}, 8, "Tránh 1 tiết/buổi"),
 	("prefer_home_room", "soft", "attribute_match", "assignment", {}, {"require": "room==home_room"}, 3, "Phòng chủ nhiệm"),
 	("balance_workload_across_week", "soft", "balance_workload", "teacher", {}, {}, 4, "Cân bằng tiết/tuần"),
-	("subject_pair_periods", "hard", "consecutive_required", "subject", {}, {"size": 2, "source": "requirement.force_pair"}, 5, "Cặp tiết bắt buộc"),
+	("subject_pair_periods", "hard", "consecutive_required", "subject", {}, {"size": 2, "no_break": True}, 5, "Cặp tiết bắt buộc"),
 	("pinned_slot", "hard", "allow_only_at_slots", "subject", {}, {}, 5, "Môn chỉ ở slots chọn"),
 	("teacher_not_at_slot", "hard", "forbidden_at_slots", "teacher", {}, {"source": "instances"}, 5, "GV không dạy slot"),
 	("teacher_not_on_day", "hard", "forbidden_on_day", "teacher", {}, {"source": "instances"}, 5, "GV không dạy cả ngày"),

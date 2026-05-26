@@ -34,7 +34,6 @@ VERB_SCHEMAS: Dict[str, dict] = {
 			"fields": [
 				{"name": "size", "type": "int", "label": "Kích thước cặp", "default": 2},
 				{"name": "no_break", "type": "bool", "label": "Không vắt break", "default": True},
-				{"name": "source", "type": "text", "label": "Nguồn", "optional": True},
 			],
 		},
 		"instance_schema": {
@@ -75,6 +74,7 @@ VERB_SCHEMAS: Dict[str, dict] = {
 						{"value": "instances", "label": "Instance thủ công"},
 					],
 					"default": "instances",
+					"ui_hidden": True,
 				},
 			],
 		},

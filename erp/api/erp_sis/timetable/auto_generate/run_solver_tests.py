@@ -42,6 +42,7 @@ def main() -> int:
 	modules = [
 		"core.tests.test_p3_schema",
 		"core.tests.test_runner_basic",
+		"core.tests.test_consecutive_required",
 	]
 	total_p = total_f = 0
 	for m in modules:

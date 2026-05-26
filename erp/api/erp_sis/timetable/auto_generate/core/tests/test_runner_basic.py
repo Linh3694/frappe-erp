@@ -3,7 +3,7 @@
 from core.default_rules import build_default_rule_set
 from core.registry import list_verbs
 from core.runner import build_and_solve
-from core.tests.conftest import tiny_input
+from core.tests.fixtures import tiny_input
 
 
 def test_registry_has_19_verbs():
