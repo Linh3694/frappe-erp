@@ -11,9 +11,30 @@ from erp.utils.api_response import error_response, not_found_response, validatio
 from erp.api.erp_inventory.inventory_helpers import (
 	device_doc_to_fe,
 	parse_request_data,
+	read_api_param,
+	normalize_api_param,
+	normalize_device_type,
+	datetime_to_iso,
 	resolve_user_link,
 	user_to_fe,
 )
+from erp.api.erp_inventory.device import _resolve_device_name
+
+
+def _read_inspection_id(inspection_id=None):
+	"""Đọc inspection_id từ kwargs / query / JSON body."""
+	data = parse_request_data()
+	resolved = read_api_param("inspection_id", "inspectionId", fallback=inspection_id)
+	if not resolved and data:
+		resolved = normalize_api_param(data.get("inspection_id") or data.get("inspectionId"))
+	return resolved
+
+
+def _resolve_inspection_device_id(device_id, device_type=None):
+	raw = normalize_api_param(device_id)
+	if not raw:
+		return None
+	return _resolve_device_name(raw, normalize_device_type(device_type) or None)
 
 
 SECTION_DEFAULTS = {
@@ -89,12 +110,16 @@ def inspection_to_fe(doc, populate_device=True):
 	device_data = None
 	if populate_device and doc.device and frappe.db.exists("ERP Inventory Device", doc.device):
 		device_data = device_doc_to_fe(frappe.get_doc("ERP Inventory Device", doc.device), include_history=False)
+	inspector_name = ""
+	if doc.inspector and frappe.db.exists("User", doc.inspector):
+		inspector_name = frappe.db.get_value("User", doc.inspector, "full_name") or doc.inspector
 	return {
 		"_id": doc.name,
 		"deviceId": doc.device,
 		"deviceType": doc.device_type,
 		"inspectorId": doc.inspector,
-		"inspectionDate": doc.inspection_date.isoformat() if doc.inspection_date else None,
+		"inspectorName": inspector_name,
+		"inspectionDate": datetime_to_iso(doc.inspection_date),
 		"results": _sections_to_results(doc.sections),
 		"overallAssessment": doc.overall_assessment or "",
 		"passed": bool(doc.passed),
@@ -104,22 +129,28 @@ def inspection_to_fe(doc, populate_device=True):
 		"report": {
 			"fileName": (doc.report_file_url or "").split("/")[-1] if doc.report_file_url else "",
 			"filePath": doc.report_file_url or "",
-			"createdAt": doc.modified.isoformat() if doc.modified else None,
+			"createdAt": datetime_to_iso(doc.modified),
 		},
 		"deviceId_populated": device_data,
 	}
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_inspections(deviceId=None, inspectorId=None, startDate=None, endDate=None):
 	try:
 		filters = {}
-		if deviceId:
-			filters["device"] = deviceId
-		if inspectorId:
-			filters["inspector"] = inspectorId
-		if startDate and endDate:
-			filters["inspection_date"] = ["between", [startDate, endDate]]
+		device_id = read_api_param("deviceId", "device_id", fallback=deviceId)
+		if device_id:
+			resolved = _resolve_inspection_device_id(device_id)
+			if resolved:
+				filters["device"] = resolved
+		inspector_id = read_api_param("inspectorId", "inspector_id", fallback=inspectorId)
+		if inspector_id:
+			filters["inspector"] = resolve_user_link(inspector_id) or inspector_id
+		start_date = read_api_param("startDate", "start_date", fallback=startDate)
+		end_date = read_api_param("endDate", "end_date", fallback=endDate)
+		if start_date and end_date:
+			filters["inspection_date"] = ["between", [start_date, end_date]]
 
 		names = frappe.get_all("ERP Inventory Inspection", filters=filters, pluck="name", order_by="inspection_date desc")
 		data = []
@@ -132,10 +163,12 @@ def get_inspections(deviceId=None, inspectorId=None, startDate=None, endDate=Non
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_inspection_by_id(inspection_id=None):
 	try:
-		inspection_id = inspection_id or frappe.form_dict.get("inspection_id")
+		inspection_id = _read_inspection_id(inspection_id)
+		if not inspection_id:
+			return validation_error_response(_("inspection_id là bắt buộc"), {"inspection_id": ["required"]})
 		if not frappe.db.exists("ERP Inventory Inspection", inspection_id):
 			return not_found_response(_("Inspection not found"))
 		doc = frappe.get_doc("ERP Inventory Inspection", inspection_id)
@@ -144,13 +177,20 @@ def get_inspection_by_id(inspection_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_latest_inspection_by_device(device_id=None):
 	try:
-		device_id = device_id or frappe.form_dict.get("device_id")
+		device_id = read_api_param("device_id", "deviceId", fallback=device_id)
+		if not device_id:
+			data = parse_request_data()
+			device_id = normalize_api_param(data.get("device_id") or data.get("deviceId"))
+		resolved_device = _resolve_inspection_device_id(device_id)
+		if not resolved_device:
+			return {"message": "No inspection found", "data": None}
+
 		rows = frappe.get_all(
 			"ERP Inventory Inspection",
-			filters={"device": device_id},
+			filters={"device": resolved_device},
 			fields=["name"],
 			order_by="inspection_date desc",
 			limit=1,
@@ -163,26 +203,30 @@ def get_latest_inspection_by_device(device_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def create_inspection():
 	try:
 		data = parse_request_data()
-		device_id = data.get("deviceId")
-		device_type = data.get("deviceType") or ""
+		device_id = normalize_api_param(data.get("deviceId") or data.get("device_id"))
+		device_type = normalize_device_type(data.get("deviceType") or data.get("device_type"))
 		if not device_id:
 			return validation_error_response(_("deviceId required"), {"deviceId": ["required"]})
+
+		resolved_device = _resolve_inspection_device_id(device_id, device_type)
+		if not resolved_device:
+			return validation_error_response(_("Không tìm thấy thiết bị"), {"deviceId": ["not_found"]})
+
+		if not device_type:
+			device_type = frappe.db.get_value("ERP Inventory Device", resolved_device, "device_type") or ""
 
 		inspector = resolve_user_link(frappe.session.user) or frappe.session.user
 		if data.get("inspectorId"):
 			inspector = resolve_user_link(data.get("inspectorId")) or inspector
 
-		if not device_type and frappe.db.exists("ERP Inventory Device", device_id):
-			device_type = frappe.db.get_value("ERP Inventory Device", device_id, "device_type")
-
 		doc = frappe.get_doc(
 			{
 				"doctype": "ERP Inventory Inspection",
-				"device": device_id,
+				"device": resolved_device,
 				"device_type": device_type,
 				"inspector": inspector,
 				"inspection_date": data.get("inspectionDate") or now_datetime(),
@@ -204,11 +248,13 @@ def create_inspection():
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def update_inspection(inspection_id=None):
 	try:
 		data = parse_request_data()
-		inspection_id = inspection_id or data.get("inspection_id")
+		inspection_id = _read_inspection_id(inspection_id)
+		if not inspection_id:
+			return validation_error_response(_("inspection_id là bắt buộc"), {"inspection_id": ["required"]})
 		if not frappe.db.exists("ERP Inventory Inspection", inspection_id):
 			return not_found_response(_("Inspection not found"))
 		doc = frappe.get_doc("ERP Inventory Inspection", inspection_id)
@@ -238,10 +284,12 @@ def update_inspection(inspection_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def delete_inspection(inspection_id=None):
 	try:
-		inspection_id = inspection_id or frappe.form_dict.get("inspection_id")
+		inspection_id = _read_inspection_id(inspection_id)
+		if not inspection_id:
+			return validation_error_response(_("inspection_id là bắt buộc"), {"inspection_id": ["required"]})
 		if not frappe.db.exists("ERP Inventory Inspection", inspection_id):
 			return not_found_response(_("Inspection not found"))
 		frappe.delete_doc("ERP Inventory Inspection", inspection_id, ignore_permissions=False)

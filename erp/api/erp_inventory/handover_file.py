@@ -11,24 +11,38 @@ from frappe import _
 from frappe.utils import get_bench_path, get_site_path, now_datetime
 
 from erp.utils.api_response import error_response, not_found_response, success_response, validation_error_response
-from erp.api.erp_inventory.inventory_helpers import normalize_device_type, parse_request_data
+from erp.api.erp_inventory.inventory_helpers import (
+	normalize_device_type,
+	read_api_param,
+	normalize_api_param,
+)
+from erp.api.erp_inventory.device import _resolve_device_name
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def upload_handover_report(device_type=None):
 	"""Upload BBBG — tương đương POST /api/inventory/{type}s/upload."""
 	try:
-		dt = normalize_device_type(device_type)
+		form = frappe.form_dict
+		dt = normalize_device_type(
+			read_api_param("device_type", "deviceType", fallback=device_type)
+			or normalize_api_param(form.get("device_type") or form.get("deviceType"))
+		)
+		device_id = (
+			form.get(f"{dt}Id")
+			or form.get("device_id")
+			or form.get("deviceId")
+			or form.get("laptopId")
+		)
+		device_id = _resolve_device_name(normalize_api_param(device_id), dt)
+		if not device_id or not frappe.db.exists("ERP Inventory Device", device_id):
+			return not_found_response(_("Không tìm thấy thiết bị"))
+
 		files = frappe.request.files
 		if not files or "file" not in files:
 			return validation_error_response(_("Không có file được tải lên"), {"file": ["required"]})
 
-		form = frappe.form_dict
-		device_id = form.get(f"{dt}Id") or form.get("device_id") or form.get("laptopId")
 		username = form.get("username") or frappe.db.get_value("User", frappe.session.user, "full_name") or "Unknown"
-
-		if not device_id or not frappe.db.exists("ERP Inventory Device", device_id):
-			return not_found_response(_("Không tìm thấy thiết bị"))
 
 		ext = os.path.splitext(files["file"].filename)[1] or ".pdf"
 		date_str = datetime.now().strftime("%Y-%m-%d")

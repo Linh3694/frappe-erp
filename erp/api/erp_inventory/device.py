@@ -72,6 +72,21 @@ def _get_device_doc(device_id: str, device_type: str = None):
 	return doc
 
 
+def _read_device_request_params(device_type=None, device_id=None, data=None):
+	"""Đọc device_type / device_id từ kwargs, query string hoặc JSON body."""
+	if data is None:
+		data = parse_request_data()
+	dt_raw = read_api_param("device_type", "deviceType", fallback=device_type)
+	if not dt_raw and data:
+		dt_raw = normalize_api_param(data.get("device_type") or data.get("deviceType"))
+	dt = normalize_device_type(dt_raw)
+
+	id_raw = read_api_param("device_id", "deviceId", "id", fallback=device_id)
+	if not id_raw and data:
+		id_raw = normalize_api_param(data.get("device_id") or data.get("deviceId") or data.get("id"))
+	return dt, id_raw, data
+
+
 def _search_device_names(device_type: str, search: str) -> list:
 	"""Tìm theo tên/serial/manufacturer/người được giao."""
 	like = f"%{search}%"
@@ -443,15 +458,7 @@ def create_device(device_type=None):
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def update_device(device_type=None, device_id=None):
 	try:
-		data = parse_request_data()
-		dt = normalize_device_type(
-			read_api_param("device_type", "deviceType", fallback=device_type)
-			or normalize_api_param(data.get("device_type") or data.get("deviceType"))
-		)
-		device_id = (
-			read_api_param("device_id", "deviceId", "id", fallback=device_id)
-			or normalize_api_param(data.get("device_id") or data.get("deviceId") or data.get("id"))
-		)
+		dt, device_id, data = _read_device_request_params(device_type, device_id)
 		doc = _get_device_doc(device_id, dt)
 		if not doc:
 			return not_found_response(_("Không tìm thấy thiết bị"))
@@ -513,12 +520,10 @@ def delete_device(device_type=None, device_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def assign_device(device_type=None, device_id=None):
 	try:
-		dt = normalize_device_type(device_type)
-		data = parse_request_data()
-		device_id = device_id or data.get("device_id")
+		dt, device_id, data = _read_device_request_params(device_type, device_id)
 		assigned_to = data.get("assignedTo") or data.get("assigned_to")
 		reason = data.get("reason") or ""
 		doc = _get_device_doc(device_id, dt)
@@ -574,13 +579,14 @@ def assign_device(device_type=None, device_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def revoke_device(device_type=None, device_id=None):
 	try:
-		dt = normalize_device_type(device_type)
-		data = parse_request_data()
-		device_id = device_id or data.get("device_id")
+		dt, device_id, data = _read_device_request_params(device_type, device_id)
 		reasons = data.get("reasons") or []
+		# FE cũ có thể gửi reason (string) thay vì reasons (array)
+		if not reasons and data.get("reason"):
+			reasons = [data.get("reason")]
 		status = data.get("status") or "Standby"
 		doc = _get_device_doc(device_id, dt)
 		if not doc:
@@ -614,12 +620,10 @@ def revoke_device(device_type=None, device_id=None):
 		return error_response(str(e))
 
 
-@frappe.whitelist(allow_guest=False)
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def update_device_status(device_type=None, device_id=None):
 	try:
-		dt = normalize_device_type(device_type)
-		data = parse_request_data()
-		device_id = device_id or data.get("device_id")
+		dt, device_id, data = _read_device_request_params(device_type, device_id)
 		status = data.get("status")
 		if status not in VALID_STATUSES:
 			return validation_error_response(_("Trạng thái không hợp lệ"), {"status": ["invalid"]})
