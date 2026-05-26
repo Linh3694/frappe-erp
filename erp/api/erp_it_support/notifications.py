@@ -10,10 +10,55 @@ from frappe import _
 
 from erp.api.erp_it_support.utils import (
 	DOCTYPE,
+	TEAM_DOCTYPE,
 	_category_title,
 	_session_email,
 	_ticket_to_dict,
 )
+
+
+def _normalize_email(value: Optional[str]) -> str:
+	return (value or "").strip().lower()
+
+
+def _get_assignee_email(doc) -> str:
+	"""Lấy email của assignee theo User name."""
+	if not doc.assigned_to:
+		return ""
+	return _normalize_email(frappe.db.get_value("User", doc.assigned_to, "email"))
+
+
+def _get_support_team_emails() -> list:
+	"""Email của tất cả member IT đang active — fan-out theo legacy."""
+	rows = frappe.get_all(
+		TEAM_DOCTYPE,
+		filters={"is_active": 1},
+		fields=["email"],
+	)
+	emails = set()
+	for r in rows:
+		em = _normalize_email(r.get("email"))
+		if em and "@" in em:
+			emails.add(em)
+	return list(emails)
+
+
+def _collect_status_recipients(doc, sender_email: str = "", *, include_creator: bool = False) -> list:
+	"""Recipients chuẩn cho fan-out status: assignee + IT support team, loại sender."""
+	recipients = set()
+	ae = _get_assignee_email(doc)
+	if ae:
+		recipients.add(ae)
+	for em in _get_support_team_emails():
+		recipients.add(em)
+	if include_creator:
+		ce = _normalize_email(doc.creator_email)
+		if ce:
+			recipients.add(ce)
+	sender = _normalize_email(sender_email)
+	if sender:
+		recipients.discard(sender)
+	return [em for em in recipients if em]
 
 
 def _notification_channel() -> str:
@@ -108,11 +153,20 @@ def _it_send_emails_on_ticket_create(doc):
 			)
 
 
-def _notify_it_status_changed(doc, old_status: str, new_status: str, message_extras: Optional[dict] = None):
-	"""Đổi trạng thái — notify creator."""
-	creator = (doc.creator_email or "").strip()
-	if not creator:
-		return
+def _notify_it_status_changed(
+	doc,
+	old_status: str,
+	new_status: str,
+	message_extras: Optional[dict] = None,
+	*,
+	actor_email: str = "",
+):
+	"""Đổi trạng thái — notify creator + assignee + support team (parity legacy fan-out).
+
+	- Creator luôn nhận khi đổi trạng thái (creator-driven UX hiện tại).
+	- Assignee + IT support team nhận thêm để theo dõi (loại actor).
+	- Status final (Done/Closed/Cancelled): bật email cho cả nhóm support; ngược lại chỉ push.
+	"""
 	code = doc.ticket_code or doc.name
 	title = (doc.title or "").strip() or code
 	body = _("Ticket {0} chuyển sang «{1}»").format(f"#{code}", new_status)
@@ -121,13 +175,34 @@ def _notify_it_status_changed(doc, old_status: str, new_status: str, message_ext
 		"ticket_status_changed",
 		{"oldStatus": old_status, "newStatus": new_status, **(message_extras or {})},
 	)
-	_emit_it_unified(
-		creator,
-		_("Cập nhật ticket IT"),
-		body,
-		pdata,
-		notification_type="it_support_ticket_status",
-	)
+
+	creator = _normalize_email(doc.creator_email)
+	actor = _normalize_email(actor_email)
+
+	if creator and creator != actor:
+		_emit_it_unified(
+			creator,
+			_("Cập nhật ticket IT"),
+			body,
+			pdata,
+			notification_type="it_support_ticket_status",
+		)
+
+	# Status final → fan-out có email cho assignee + support team
+	final_states = ("Done", "Closed", "Cancelled")
+	include_email_for_team = new_status in final_states
+
+	for em in _collect_status_recipients(doc, sender_email=actor):
+		if em == creator:
+			continue
+		_emit_it_unified(
+			em,
+			_("Cập nhật ticket IT"),
+			body,
+			pdata,
+			notification_type="it_support_ticket_status",
+			include_email=include_email_for_team,
+		)
 
 
 def _notify_it_assignment_changed(doc, assignee_user: str):
@@ -202,23 +277,58 @@ def _is_staff_sender(email: str) -> bool:
 	return any(r in roles for r in ("System Manager", "SIS IT", "SIS BOD"))
 
 
-def _notify_it_feedback(doc):
-	"""Đánh giá mới — notify assignee."""
-	if not doc.assigned_to:
-		return
-	assignee_email = frappe.db.get_value("User", doc.assigned_to, "email")
-	if not assignee_email:
-		return
+def _notify_it_feedback(doc, actor_email: str = ""):
+	"""Đánh giá mới — notify assignee (chính), creator (xác nhận) + IT support team theo dõi.
+
+	Bật email cho assignee + creator để lưu hồ sơ; team chỉ push (tránh spam mailbox).
+	"""
 	code = doc.ticket_code or doc.name
 	rating = doc.feedback_rating or 0
-	_emit_it_unified(
-		assignee_email,
-		_("Đánh giá ticket IT"),
-		_("Ticket {0} được đánh giá {1}/5 sao").format(f"#{code}", rating),
-		_it_ticket_payload(doc, "ticket_feedback", {"rating": rating}),
-		notification_type="it_support_ticket_feedback",
-		include_email=False,
-	)
+	body = _("Ticket {0} được đánh giá {1}/5 sao").format(f"#{code}", rating)
+	payload = _it_ticket_payload(doc, "ticket_feedback", {"rating": rating})
+
+	actor = _normalize_email(actor_email)
+	notified = set()
+
+	# Assignee — bật email để lưu hồ sơ đánh giá
+	assignee_email = _get_assignee_email(doc)
+	if assignee_email and assignee_email != actor:
+		_emit_it_unified(
+			assignee_email,
+			_("Đánh giá ticket IT"),
+			body,
+			payload,
+			notification_type="it_support_ticket_feedback",
+			include_email=True,
+		)
+		notified.add(assignee_email)
+
+	# Creator (người vừa đánh giá xong) → push xác nhận, không email
+	creator = _normalize_email(doc.creator_email)
+	if creator and creator != actor and creator not in notified:
+		_emit_it_unified(
+			creator,
+			_("Đánh giá ticket IT"),
+			_("Cảm ơn bạn đã đánh giá ticket {0}").format(f"#{code}"),
+			payload,
+			notification_type="it_support_ticket_feedback",
+			include_email=False,
+		)
+		notified.add(creator)
+
+	# IT support team — push để team thấy reputation update
+	for em in _get_support_team_emails():
+		if em == actor or em in notified:
+			continue
+		_emit_it_unified(
+			em,
+			_("Đánh giá ticket IT"),
+			body,
+			payload,
+			notification_type="it_support_ticket_feedback",
+			include_email=False,
+		)
+		notified.add(em)
 
 
 def _emit_it_new_message_realtime(doc, message_data: dict, sender_email: str):

@@ -15,6 +15,7 @@ from erp.api.erp_it_support.notifications import _it_send_emails_on_ticket_creat
 from erp.api.erp_it_support.utils import (
 	DOCTYPE,
 	_append_history,
+	_creator_profile_from_email,
 	_merge_attachments,
 	_parse_json_body,
 	_resolve_category_doc,

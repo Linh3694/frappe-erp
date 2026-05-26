@@ -243,7 +243,7 @@ def update_ticket():
 		if doc.status != old_status:
 			_append_history(doc.name, _("Đổi trạng thái: {0} → {1}").format(old_status, doc.status))
 			try:
-				_notify_it_status_changed(doc, old_status, doc.status)
+				_notify_it_status_changed(doc, old_status, doc.status, actor_email=_session_email())
 			except Exception:
 				frappe.log_error(frappe.get_traceback(), "it_support.update_ticket.notify")
 		elif is_creator or is_staff:
@@ -387,7 +387,13 @@ def cancel_ticket():
 		_append_history(doc.name, _("Hủy ticket"), detail=cancel_reason)
 		frappe.db.commit()
 		try:
-			_notify_it_status_changed(doc, old_status, "Cancelled")
+			_notify_it_status_changed(
+				doc,
+				old_status,
+				"Cancelled",
+				{"cancellationReason": cancel_reason},
+				actor_email=email,
+			)
 		except Exception:
 			pass
 		return success_response(_ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name)), "OK")
@@ -416,7 +422,7 @@ def reopen_ticket():
 		_append_history(doc.name, _("Mở lại ticket"))
 		frappe.db.commit()
 		try:
-			_notify_it_status_changed(doc, old_status, doc.status)
+			_notify_it_status_changed(doc, old_status, doc.status, actor_email=_session_email())
 		except Exception:
 			pass
 		return success_response({"success": True, "ticket": _ticket_to_dict(frappe.get_doc(DOCTYPE, doc.name))}, "OK")
@@ -462,8 +468,9 @@ def accept_feedback():
 		_append_history(doc.name, _("Chấp nhận kết quả — {0} sao").format(rating))
 		frappe.db.commit()
 		try:
-			_notify_it_feedback(doc)
-			_notify_it_status_changed(doc, old_status, "Closed")
+			actor = _session_email()
+			_notify_it_feedback(doc, actor_email=actor)
+			_notify_it_status_changed(doc, old_status, "Closed", actor_email=actor)
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "it_support.accept_feedback.notify")
 		return success_response(
@@ -787,6 +794,7 @@ def send_comment():
 					old_status,
 					new_status,
 					{"messageContent": text, "messageSender": ufn},
+					actor_email=email,
 				)
 			except Exception:
 				pass

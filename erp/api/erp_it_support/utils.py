@@ -480,6 +480,45 @@ def _creator_profile_from_session() -> dict:
 	}
 
 
+def _creator_profile_from_email(email: str, fallback_fullname: str = "") -> dict:
+	"""Lookup User theo email → profile đầy đủ cho ticket tạo từ email.
+
+	Nếu không tồn tại User trong Frappe (email từ ngoài / chưa được sync):
+	- fullname: ưu tiên `fallback_fullname` (display name email-service truyền), fallback split email.
+	- avatar/department/jobtitle: rỗng.
+	"""
+	em = (email or "").strip().lower()
+	profile = {
+		"email": em,
+		"fullname": (fallback_fullname or "").strip() or (em.split("@")[0] if em else "Email User"),
+		"avatar": "",
+		"department": "",
+		"jobtitle": "",
+	}
+	if not em:
+		return profile
+
+	user_name = frappe.db.get_value("User", {"email": em}, "name")
+	if not user_name:
+		return profile
+
+	row = frappe.db.get_value(
+		"User",
+		user_name,
+		["full_name", "user_image", "department"],
+		as_dict=True,
+	) or {}
+	profile["fullname"] = row.get("full_name") or profile["fullname"]
+	profile["avatar"] = row.get("user_image") or ""
+	profile["department"] = row.get("department") or ""
+	try:
+		if frappe.get_meta("User").has_field("job_title"):
+			profile["jobtitle"] = frappe.db.get_value("User", user_name, "job_title") or ""
+	except Exception:
+		pass
+	return profile
+
+
 def _team_member_to_dict(doc) -> dict:
 	roles = _parse_json_field(doc.roles_json)
 	return {
