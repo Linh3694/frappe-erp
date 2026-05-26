@@ -105,7 +105,36 @@ def _storage_locations_for_title_ids(title_ids: List[str]) -> Dict[str, List[str
     return {tid: sorted(by_title[tid]) for tid in title_ids}
 
 
-def _transform_title_to_public(doc, storage_location: List[str] | None = None) -> Dict[str, Any]:
+def _publish_years_for_title_ids(title_ids: List[str]) -> Dict[str, str]:
+    # Tổng hợp năm xuất bản unique từ book copy theo title_id
+    if not title_ids:
+        return {}
+    by_title: Dict[str, set] = {tid: set() for tid in title_ids}
+    copies = frappe.get_all(
+        COPY_DTYPE,
+        filters={"title_id": ("in", title_ids)},
+        fields=["title_id", "publish_year"],
+    )
+    for row in copies:
+        tid = row.get("title_id")
+        if not tid or tid not in by_title:
+            continue
+        year = row.get("publish_year")
+        if year:
+            by_title[tid].add(int(year))
+    result: Dict[str, str] = {}
+    for tid in title_ids:
+        years = sorted(by_title[tid])
+        if years:
+            result[tid] = ", ".join(str(y) for y in years)
+    return result
+
+
+def _transform_title_to_public(
+    doc,
+    storage_location: List[str] | None = None,
+    publish_year: str | None = None,
+) -> Dict[str, Any]:
     """Transform title document sang format cho public API."""
     # Parse authors từ JSON string
     authors = []
@@ -140,6 +169,9 @@ def _transform_title_to_public(doc, storage_location: List[str] | None = None) -
     if storage_location is None:
         storage_location = _storage_locations_for_title_ids([doc.name]).get(doc.name, [])
 
+    if publish_year is None:
+        publish_year = _publish_years_for_title_ids([doc.name]).get(doc.name)
+
     return {
         "_id": doc.name,
         "libraryId": doc.name,
@@ -158,7 +190,7 @@ def _transform_title_to_public(doc, storage_location: List[str] | None = None) -
         "description": description,
         "introduction": introduction,
         "audioBook": audio_book,
-        "publishYear": getattr(doc, 'publish_year', None),
+        "publishYear": publish_year or None,
         "storageLocation": storage_location,
         "createdAt": str(doc.creation) if hasattr(doc, 'creation') else None,
         "modifiedAt": str(doc.modified) if hasattr(doc, 'modified') else None,
@@ -246,6 +278,7 @@ def list_public_titles(limit: int = 20, page: int = 1):
         
         title_ids = [t.name for t in titles]
         loc_map = _storage_locations_for_title_ids(title_ids)
+        year_map = _publish_years_for_title_ids(title_ids)
         
         # Transform data
         result = []
@@ -255,7 +288,9 @@ def list_public_titles(limit: int = 20, page: int = 1):
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
                 result.append(
                     _transform_title_to_public(
-                        doc, storage_location=loc_map.get(title_dict.name, [])
+                        doc,
+                        storage_location=loc_map.get(title_dict.name, []),
+                        publish_year=year_map.get(title_dict.name),
                     )
                 )
             except:
@@ -276,6 +311,7 @@ def list_public_titles(limit: int = 20, page: int = 1):
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "publishYear": year_map.get(title_dict.name),
                     "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
@@ -351,6 +387,7 @@ def list_featured_titles(limit: int = 4):
             order_by="modified desc",
         )
         loc_map = _storage_locations_for_title_ids([t.name for t in titles])
+        year_map = _publish_years_for_title_ids([t.name for t in titles])
         
         # Transform data
         result = []
@@ -359,7 +396,9 @@ def list_featured_titles(limit: int = 4):
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
                 result.append(
                     _transform_title_to_public(
-                        doc, storage_location=loc_map.get(title_dict.name, [])
+                        doc,
+                        storage_location=loc_map.get(title_dict.name, []),
+                        publish_year=year_map.get(title_dict.name),
                     )
                 )
             except:
@@ -377,6 +416,7 @@ def list_featured_titles(limit: int = 4):
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "publishYear": year_map.get(title_dict.name),
                     "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
@@ -416,6 +456,7 @@ def list_new_titles(limit: int = 4):
             order_by="modified desc",
         )
         loc_map = _storage_locations_for_title_ids([t.name for t in titles])
+        year_map = _publish_years_for_title_ids([t.name for t in titles])
         
         # Transform data
         result = []
@@ -424,7 +465,9 @@ def list_new_titles(limit: int = 4):
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
                 result.append(
                     _transform_title_to_public(
-                        doc, storage_location=loc_map.get(title_dict.name, [])
+                        doc,
+                        storage_location=loc_map.get(title_dict.name, []),
+                        publish_year=year_map.get(title_dict.name),
                     )
                 )
             except:
@@ -441,6 +484,7 @@ def list_new_titles(limit: int = 4):
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "publishYear": year_map.get(title_dict.name),
                     "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
@@ -480,6 +524,7 @@ def list_audio_titles(limit: int = 4):
             order_by="modified desc",
         )
         loc_map = _storage_locations_for_title_ids([t.name for t in titles])
+        year_map = _publish_years_for_title_ids([t.name for t in titles])
         
         # Transform data
         result = []
@@ -488,7 +533,9 @@ def list_audio_titles(limit: int = 4):
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
                 result.append(
                     _transform_title_to_public(
-                        doc, storage_location=loc_map.get(title_dict.name, [])
+                        doc,
+                        storage_location=loc_map.get(title_dict.name, []),
+                        publish_year=year_map.get(title_dict.name),
                     )
                 )
             except:
@@ -505,6 +552,7 @@ def list_audio_titles(limit: int = 4):
                     "isAudioBook": True,
                     "borrowCount": 0,
                     "rating": 4,
+                    "publishYear": year_map.get(title_dict.name),
                     "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
@@ -608,7 +656,9 @@ def list_related_titles(
         
         # Lấy top N sách
         top_titles = [t[1] for t in scored_titles[:limit]]
-        loc_map = _storage_locations_for_title_ids([t.name for t in top_titles])
+        title_ids = [t.name for t in top_titles]
+        loc_map = _storage_locations_for_title_ids(title_ids)
+        year_map = _publish_years_for_title_ids(title_ids)
         
         # Transform data
         result = []
@@ -617,7 +667,9 @@ def list_related_titles(
                 doc = frappe.get_cached_doc(TITLE_DTYPE, title_dict.name)
                 result.append(
                     _transform_title_to_public(
-                        doc, storage_location=loc_map.get(title_dict.name, [])
+                        doc,
+                        storage_location=loc_map.get(title_dict.name, []),
+                        publish_year=year_map.get(title_dict.name),
                     )
                 )
             except:
@@ -634,6 +686,7 @@ def list_related_titles(
                     "isAudioBook": bool(title_dict.is_audio_book),
                     "borrowCount": 0,
                     "rating": 4,
+                    "publishYear": year_map.get(title_dict.name),
                     "storageLocation": loc_map.get(title_dict.name, []),
                 })
         
