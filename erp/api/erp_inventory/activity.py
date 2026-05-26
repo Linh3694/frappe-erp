@@ -3,7 +3,6 @@
 
 import frappe
 from frappe import _
-from datetime import datetime
 from frappe.utils import now_datetime
 
 from erp.utils.api_response import error_response, not_found_response, validation_error_response
@@ -12,6 +11,7 @@ from erp.api.erp_inventory.inventory_helpers import (
 	read_api_param,
 	normalize_device_type,
 	normalize_api_param,
+	datetime_to_iso,
 )
 from erp.api.erp_inventory.device import _resolve_device_name
 
@@ -33,15 +33,6 @@ def _read_activity_payload(data):
 	return entity_type, entity_id, act_type
 
 
-def _datetime_to_iso(val):
-	"""Chuẩn hoá datetime — frappe.get_all trả str, Document trả datetime."""
-	if not val:
-		return None
-	if isinstance(val, datetime):
-		return val.isoformat()
-	return str(val)
-
-
 def activity_to_fe(doc):
 	"""Map ERP Inventory Activity Log doc → shape FE (Mongo-compatible)."""
 	updated_by_user = doc.get("updated_by")
@@ -56,10 +47,10 @@ def activity_to_fe(doc):
 		"type": doc.get("type"),
 		"description": doc.get("description"),
 		"details": doc.get("details") or "",
-		"date": _datetime_to_iso(doc.get("date")),
+		"date": datetime_to_iso(doc.get("date")),
 		"updatedBy": updated_by_label,
-		"createdAt": _datetime_to_iso(doc.get("creation")),
-		"updatedAt": _datetime_to_iso(doc.get("modified")),
+		"createdAt": datetime_to_iso(doc.get("creation")),
+		"updatedAt": datetime_to_iso(doc.get("modified")),
 	}
 
 

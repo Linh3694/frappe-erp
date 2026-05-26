@@ -2,6 +2,7 @@
 # Helper dùng chung cho module Inventory IT
 
 import json
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import frappe
@@ -11,6 +12,15 @@ from frappe.utils import cint, get_fullname, get_datetime, now_datetime
 DEVICE_TYPES = ("laptop", "monitor", "printer", "projector", "phone", "tool")
 VALID_STATUSES = ("Active", "Standby", "Broken", "PendingDocumentation")
 MIGRATION_ROLES = ("System Manager", "SIS IT")
+
+
+def datetime_to_iso(val):
+	"""Chuẩn hoá datetime — frappe.get_all trả str, Document trả datetime."""
+	if not val:
+		return None
+	if isinstance(val, datetime):
+		return val.isoformat()
+	return str(val)
 
 
 def require_migration_role():
@@ -265,8 +275,8 @@ def get_assignment_history(device_name: str) -> List[Dict[str, Any]]:
 			"userName": r.fullname_snapshot or "",
 			"fullname": r.fullname_snapshot or "",
 			"jobTitle": r.job_title_snapshot or "",
-			"startDate": r.start_date.isoformat() if r.start_date else None,
-			"endDate": r.end_date.isoformat() if r.end_date else None,
+			"startDate": datetime_to_iso(r.start_date),
+			"endDate": datetime_to_iso(r.end_date),
 			"notes": r.notes or "",
 			"assignedBy": user_to_fe(r.assigned_by),
 			"revokedBy": user_to_fe(r.revoked_by),
@@ -311,8 +321,8 @@ def device_doc_to_fe(doc, include_history: bool = True) -> Dict[str, Any]:
 		"room": room_to_fe(doc.room),
 		"currentHolder": current_holder,
 		"specs": specs,
-		"createdAt": doc.creation.isoformat() if doc.creation else None,
-		"updatedAt": doc.modified.isoformat() if doc.modified else None,
+		"createdAt": datetime_to_iso(doc.creation),
+		"updatedAt": datetime_to_iso(doc.modified),
 	}
 	if doc.device_type == "phone" and doc.specs_phone:
 		row = doc.specs_phone[0]
