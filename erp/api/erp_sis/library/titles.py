@@ -459,6 +459,21 @@ def _parse_bool_value(value) -> bool:
     return val in {"có", "co", "true", "1", "yes", "x", "✓", "✔"}
 
 
+def _load_existing_title_dedupe_keys() -> tuple[set[str], set[str]]:
+    """Preload mã định danh và tên sách hiện có để skip trùng khi import Excel."""
+    rows = frappe.get_all(TITLE_DTYPE, fields=["library_code", "title"])
+    existing_codes: set[str] = set()
+    existing_titles: set[str] = set()
+    for row in rows:
+        code = (row.get("library_code") or "").strip()
+        if code:
+            existing_codes.add(code.lower())
+        title = (row.get("title") or "").strip()
+        if title:
+            existing_titles.add(title.lower())
+    return existing_codes, existing_titles
+
+
 @frappe.whitelist(allow_guest=False)
 def import_titles_excel():
     """
@@ -482,29 +497,45 @@ def import_titles_excel():
     rows = _import_excel_to_rows(frappe.request.files["file"].stream.read())
     created = 0
     errors: List[str] = []
-    
+    skipped: List[Dict[str, Any]] = []
+    existing_codes, existing_titles = _load_existing_title_dedupe_keys()
+    seen_codes: set[str] = set()
+    seen_titles: set[str] = set()
+
     for idx, row in enumerate(rows, start=2):
         # Đọc các trường với nhiều tên có thể
         title = str(row.get("title") or row.get("Tên sách") or row.get("Tên đầu sách") or "").strip()
         if not title:
             errors.append(f"Dòng {idx}: thiếu tên sách")
             continue
-        
+
         library_code = str(row.get("library_code") or row.get("Mã định danh") or row.get("Mã đầu sách") or "").strip()
-        
+        title_key = title.lower()
+        code_key = library_code.lower() if library_code else ""
+
+        # Skip nếu trùng mã định danh (DB hoặc trong cùng file Excel)
+        if library_code and (code_key in existing_codes or code_key in seen_codes):
+            skipped.append({"row": idx, "reason": f"Mã định danh '{library_code}' đã tồn tại"})
+            continue
+
+        # Skip nếu trùng tên sách (DB hoặc trong cùng file Excel)
+        if title_key in existing_titles or title_key in seen_titles:
+            skipped.append({"row": idx, "reason": f"Tên sách '{title}' đã tồn tại"})
+            continue
+
         # Tác giả - hỗ trợ nhiều tác giả phân cách bằng dấu phẩy
         authors_raw = str(row.get("authors") or row.get("Tác giả") or "").strip()
         authors = [a.strip() for a in authors_raw.split(",") if a.strip()] if authors_raw else []
-        
+
         category = str(row.get("category") or row.get("Thể loại") or row.get("Chủ đề") or "").strip()
         language = str(row.get("language") or row.get("Ngôn ngữ") or "").strip()
         document_type = str(row.get("document_type") or row.get("Phân loại tài liệu") or "").strip()
         series_name = str(row.get("series_name") or row.get("Tùng thư") or "").strip()
-        
+
         is_new_book = _parse_bool_value(row.get("is_new_book") or row.get("Sách mới"))
         is_featured_book = _parse_bool_value(row.get("is_featured_book") or row.get("Nổi bật"))
         is_audio_book = _parse_bool_value(row.get("is_audio_book") or row.get("Sách nói"))
-        
+
         try:
             doc = frappe.get_doc(
                 {
@@ -523,11 +554,22 @@ def import_titles_excel():
             )
             doc.insert(ignore_permissions=True)
             created += 1
+            seen_titles.add(title_key)
+            existing_titles.add(title_key)
+            if code_key:
+                seen_codes.add(code_key)
+                existing_codes.add(code_key)
         except Exception as ex:
             errors.append(f"Dòng {idx}: {ex}")
 
     return success_response(
-        data={"success_count": created, "total_count": len(rows), "errors": errors},
+        data={
+            "success_count": created,
+            "skipped_count": len(skipped),
+            "skipped": skipped,
+            "total_count": len(rows),
+            "errors": errors,
+        },
         message="Đã import đầu sách",
     )
 
