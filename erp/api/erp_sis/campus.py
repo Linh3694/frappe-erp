@@ -39,6 +39,36 @@ def _resolve_request_user() -> str:
 	return user
 
 
+def _resolve_str_param(name: str, value=None) -> str | None:
+	"""Đọc tham số string từ argument, form_dict hoặc JSON body (Frappe POST)."""
+	if value:
+		return str(value)
+	value = frappe.form_dict.get(name)
+	if value:
+		return str(value)
+	try:
+		if hasattr(frappe.request, "json") and frappe.request.json:
+			raw = frappe.request.json.get(name)
+			if raw:
+				return str(raw)
+	except Exception:
+		pass
+	try:
+		if frappe.request and frappe.request.data:
+			import json
+			body = frappe.request.data
+			if isinstance(body, bytes):
+				body = body.decode("utf-8")
+			if body:
+				data = json.loads(body)
+				raw = data.get(name)
+				if raw:
+					return str(raw)
+	except Exception:
+		pass
+	return None
+
+
 def _campus_row(campus_doc) -> dict:
 	return {
 		"name": campus_doc.name,
@@ -145,9 +175,13 @@ def get_current_campus():
 
 
 @frappe.whitelist(allow_guest=False)
-def set_current_campus(campus):
+def set_current_campus(campus=None):
 	"""Đặt campus hiện tại cho user."""
 	try:
+		campus = _resolve_str_param("campus", campus)
+		if not campus:
+			return error_response(_("Campus is required"))
+
 		if set_current_user_campus(campus):
 			campus_doc = frappe.get_doc("SIS Campus", campus)
 			return success_response(
@@ -164,9 +198,13 @@ def set_current_campus(campus):
 
 
 @frappe.whitelist(allow_guest=False)
-def set_default_campus(campus, user=None):
+def set_default_campus(campus=None, user=None):
 	"""Đặt campus mặc định cho user (admin quản lý user hoặc chính user đó)."""
 	try:
+		campus = _resolve_str_param("campus", campus)
+		user = _resolve_str_param("user", user)
+		if not campus:
+			return error_response(_("Campus is required"))
 		if not user:
 			user = frappe.session.user
 
