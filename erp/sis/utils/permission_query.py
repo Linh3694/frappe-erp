@@ -42,6 +42,11 @@ def get_campus_permission_query(doctype, user):
     if user == "Administrator":
         return ""
 
+    # Feature flag canary rollout — campus_pq_enabled_doctypes: ["SIS Bus Route", ...] hoặc "*"
+    enabled = frappe.conf.get("campus_pq_enabled_doctypes", "*")
+    if enabled != "*" and doctype not in enabled:
+        return ""
+
     # Check if doctype has campus_id field
     try:
         meta = frappe.get_meta(doctype)
@@ -222,3 +227,157 @@ def sis_class_log_student_query(user):
 def sis_homeroom_score_record_query(user):
     """Permission query for SIS Homeroom Score Record"""
     return get_campus_permission_query("SIS Homeroom Score Record", user)
+
+
+# --- DocTypes bổ sung (campus_id, chưa có permission_query trước Phase 1) ---
+
+def sis_announcement_query(user):
+    return get_campus_permission_query("SIS Announcement", user)
+
+
+def sis_award_category_query(user):
+    return get_campus_permission_query("SIS Award Category", user)
+
+
+def sis_award_record_query(user):
+    return get_campus_permission_query("SIS Award Record", user)
+
+
+def sis_bulk_import_job_query(user):
+    return get_campus_permission_query("SIS Bulk Import Job", user)
+
+
+def sis_bus_daily_trip_query(user):
+    return get_campus_permission_query("SIS Bus Daily Trip", user)
+
+
+def sis_bus_daily_trip_archive_query(user):
+    return get_campus_permission_query("SIS Bus Daily Trip Archive", user)
+
+
+def sis_bus_driver_query(user):
+    return get_campus_permission_query("SIS Bus Driver", user)
+
+
+def sis_bus_monitor_query(user):
+    return get_campus_permission_query("SIS Bus Monitor", user)
+
+
+def sis_bus_pickup_point_query(user):
+    return get_campus_permission_query("SIS Bus Pickup Point", user)
+
+
+def sis_bus_route_query(user):
+    return get_campus_permission_query("SIS Bus Route", user)
+
+
+def sis_bus_student_query(user):
+    return get_campus_permission_query("SIS Bus Student", user)
+
+
+def sis_bus_transportation_query(user):
+    return get_campus_permission_query("SIS Bus Transportation", user)
+
+
+def sis_class_attendance_query(user):
+    return get_campus_permission_query("SIS Class Attendance", user)
+
+
+def sis_contact_log_view_query(user):
+    return get_campus_permission_query("SIS Contact Log View", user)
+
+
+def sis_event_date_time_query(user):
+    return get_campus_permission_query("SIS Event Date Time", user)
+
+
+def sis_finance_student_query(user):
+    return get_campus_permission_query("SIS Finance Student", user)
+
+
+def sis_finance_year_query(user):
+    return get_campus_permission_query("SIS Finance Year", user)
+
+
+def sis_health_checkup_session_query(user):
+    return get_campus_permission_query("SIS Health Checkup Session", user)
+
+
+def sis_news_article_query(user):
+    return get_campus_permission_query("SIS News Article", user)
+
+
+def sis_news_tag_query(user):
+    return get_campus_permission_query("SIS News Tag", user)
+
+
+def sis_re_enrollment_query(user):
+    return get_campus_permission_query("SIS Re-enrollment", user)
+
+
+def sis_re_enrollment_config_query(user):
+    return get_campus_permission_query("SIS Re-enrollment Config", user)
+
+
+def sis_report_card_approval_config_query(user):
+    return get_campus_permission_query("SIS Report Card Approval Config", user)
+
+
+def sis_report_card_comment_title_query(user):
+    return get_campus_permission_query("SIS Report Card Comment Title", user)
+
+
+def sis_report_card_evaluation_criteria_query(user):
+    return get_campus_permission_query("SIS Report Card Evaluation Criteria", user)
+
+
+def sis_report_card_evaluation_scale_query(user):
+    return get_campus_permission_query("SIS Report Card Evaluation Scale", user)
+
+
+def sis_report_card_form_query(user):
+    return get_campus_permission_query("SIS Report Card Form", user)
+
+
+def sis_report_card_homeroom_comment_query(user):
+    return get_campus_permission_query("SIS Report Card Homeroom Comment", user)
+
+
+def sis_report_card_template_query(user):
+    return get_campus_permission_query("SIS Report Card Template", user)
+
+
+def sis_schedule_query(user):
+    return get_campus_permission_query("SIS Schedule", user)
+
+
+def sis_scholarship_period_query(user):
+    return get_campus_permission_query("SIS Scholarship Period", user)
+
+
+def sis_student_health_checkup_query(user):
+    return get_campus_permission_query("SIS Student Health Checkup", user)
+
+
+def sis_student_leave_request_query(user):
+    return get_campus_permission_query("SIS Student Leave Request", user)
+
+
+def sis_student_report_card_query(user):
+    return get_campus_permission_query("SIS Student Report Card", user)
+
+
+def sis_student_subject_query(user):
+    return get_campus_permission_query("SIS Student Subject", user)
+
+
+def sis_subject_department_query(user):
+    return get_campus_permission_query("SIS Subject Department", user)
+
+
+def sis_timetable_generation_session_query(user):
+    return get_campus_permission_query("SIS Timetable Generation Session", user)
+
+
+def sis_timetable_rule_set_query(user):
+    return get_campus_permission_query("SIS Timetable Rule Set", user)

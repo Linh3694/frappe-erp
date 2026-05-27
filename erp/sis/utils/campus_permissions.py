@@ -81,7 +81,8 @@ def get_campus_filter(doctype, user=None):
 
 
 def assign_campus_role_to_user(user, campus, role_type="staff"):
-    """Assign campus role to a user"""
+    """Gán role campus cho user. role_type dự phòng cho phân cấp staff/manager/admin sau này."""
+    _ = role_type  # Chưa triển khai phân cấp — giữ tham số để tương thích API
     campus_doc = frappe.get_doc("SIS Campus", campus)
     role_name = campus_doc.get_campus_role_name()
     
@@ -167,3 +168,53 @@ def create_user_campus_preference(doc, method=None):
     """Hook User.after_insert — tạo campus preference khi user mới được tạo."""
     from ..doctype.sis_user_campus_preference.sis_user_campus_preference import SISUserCampusPreference
     SISUserCampusPreference.get_or_create_preference(doc.name)
+
+
+def _campus_id_from_role_name(role_name: str) -> str | None:
+    """Resolve campus_id từ tên role Campus {title}."""
+    if not role_name.startswith("Campus "):
+        return None
+    campus_title = role_name.replace("Campus ", "").strip()
+    campus = (
+        frappe.db.get_value("SIS Campus", {"title_en": campus_title}, "name")
+        or frappe.db.get_value("SIS Campus", {"title_vn": campus_title}, "name")
+    )
+    return campus
+
+
+def sync_user_campus_permissions_from_roles(user: str) -> dict:
+    """
+    Đồng bộ User Permission với Role Campus * hiện tại của user.
+    Gọi sau assign_user_roles để CRM và SIS dùng chung nguồn truth.
+    """
+    user_roles = frappe.get_roles(user)
+    campus_roles = [r for r in user_roles if r.startswith("Campus ")]
+    expected_campuses = set()
+    for role in campus_roles:
+        cid = _campus_id_from_role_name(role)
+        if cid:
+            expected_campuses.add(cid)
+
+    existing = frappe.get_all(
+        "User Permission",
+        filters={"user": user, "allow": "SIS Campus"},
+        fields=["name", "for_value"],
+    )
+    existing_campuses = {row.for_value for row in existing}
+
+    created = 0
+    removed = 0
+
+    for campus in expected_campuses - existing_campuses:
+        create_user_campus_permissions(user, campus)
+        created += 1
+
+    for campus in existing_campuses - expected_campuses:
+        frappe.db.delete("User Permission", {
+            "user": user,
+            "allow": "SIS Campus",
+            "for_value": campus,
+        })
+        removed += 1
+
+    return {"created": created, "removed": removed, "campuses": list(expected_campuses)}

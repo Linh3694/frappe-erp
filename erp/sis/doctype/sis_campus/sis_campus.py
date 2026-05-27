@@ -14,8 +14,8 @@ class SISCampus(Document):
         """Update campus role when campus is updated"""
         self.update_campus_role()
     
-    def before_cancel(self):
-        """Handle role cleanup before campus deletion"""
+    def on_trash(self):
+        """Dọn role và User Permission khi xóa campus"""
         self.cleanup_campus_role()
     
     def create_campus_role(self):
@@ -50,12 +50,17 @@ class SISCampus(Document):
                 role_doc.save()
     
     def cleanup_campus_role(self):
-        """Clean up campus role when campus is deleted"""
+        """Dọn role và User Permission khi xóa campus"""
         role_name = self.get_campus_role_name()
+        # Xóa User Permission liên quan campus này
+        frappe.db.delete("User Permission", {
+            "allow": "SIS Campus",
+            "for_value": self.name,
+        })
         if frappe.db.exists("Role", role_name):
-            # Remove role from all users first
+            # Xóa role khỏi tất cả user trước
             frappe.db.delete("Has Role", {"role": role_name})
-            # Delete the role
+            # Xóa role
             frappe.delete_doc("Role", role_name, ignore_permissions=True)
     
     def get_campus_role_name(self):

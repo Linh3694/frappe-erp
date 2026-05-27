@@ -4,6 +4,8 @@
 import frappe
 from frappe import _
 
+from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
+
 
 def get_campus_id_from_user_roles(user_email=None):
     """
@@ -304,6 +306,15 @@ def get_current_campus_from_context():
             except Exception as e:
                 frappe.logger().error(f"Error parsing request body for campus_id: {str(e)}")
 
+        # Đọc campus từ header X-Campus-Id (FE interceptor)
+        try:
+            campus_id_from_header = frappe.get_request_header("X-Campus-Id")
+            if campus_id_from_header and validate_user_campus_access(user, campus_id_from_header):
+                frappe.logger().info(f"User {user} campus from X-Campus-Id header: {campus_id_from_header}")
+                return campus_id_from_header
+        except Exception as e:
+            frappe.logger().error(f"Error getting campus_id from X-Campus-Id header: {str(e)}")
+
         # Fall back to user's default campus from roles
         frappe.logger().info(f"No campus_id in context, falling back to user roles for user: {user}")
         role_based_campus = get_campus_id_from_user_roles(user)
@@ -324,18 +335,41 @@ def get_current_campus_from_context():
             except (ValueError, IndexError) as e:
                 frappe.logger().error(f"Error mapping campus: {str(e)}")
 
-        # Final fallback: try to get first available campus or default to CAMPUS-00001
+        # Fallback an toàn: log shadow mode trước khi trả campus mặc định
+        allow_fallback = frappe.conf.get("allow_campus_fallback", True)
+        user_campuses = get_user_campuses(user)
+        if user_campuses:
+            frappe.logger().info(f"Using first user campus from roles: {user_campuses[0]}")
+            return user_campuses[0]
+
+        # Ghi log mỗi khi nhánh fallback cứng được kích hoạt (audit caller)
+        import traceback
+        request_path = "N/A"
+        try:
+            if frappe.local.request:
+                request_path = getattr(frappe.local.request, "path", None) or str(frappe.local.request)
+        except Exception:
+            pass
+        frappe.log_error(
+            title="campus_fallback_triggered",
+            message=(
+                f"path={request_path} user={user}\n"
+                f"stack={''.join(traceback.format_stack(limit=8))}"
+            ),
+        )
+
+        if not allow_fallback:
+            frappe.throw(_("No campus context available"), frappe.PermissionError)
+
+        # Final fallback: campus đầu tiên trong DB hoặc CAMPUS-00001 (chỉ khi allow_campus_fallback=True)
         try:
             first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
             if first_campus:
-                frappe.logger().info(f"Using first available campus: {first_campus}")
+                frappe.logger().info(f"Using first available campus (fallback): {first_campus}")
                 return first_campus
-            else:
-                frappe.logger().warning("No campuses found in database")
         except Exception as e:
             frappe.logger().error(f"Error getting first campus: {str(e)}")
 
-        # Hard fallback to known campus if database query fails
         frappe.logger().info("Using hard fallback campus: CAMPUS-00001")
         return "CAMPUS-00001"
 

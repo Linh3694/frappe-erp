@@ -74,11 +74,7 @@ def has_crm_permission(doc, ptype, user):
 
 
 def _get_user_campus_ids(user):
-    """Lay danh sach campus_id cua user"""
-    campus_ids = frappe.db.get_all(
-        "User Permission",
-        filters={"user": user, "allow": "SIS Campus"},
-        fields=["for_value"],
-        pluck="for_value"
-    )
-    return campus_ids or []
+    """Lấy danh sách campus_id của user — nguồn truth thống nhất qua Role Campus *"""
+    from erp.sis.utils.campus_permissions import get_user_campuses
+
+    return get_user_campuses(user) or []

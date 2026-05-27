@@ -574,6 +574,10 @@ def assign_user_roles(user_email=None, roles=None):
         
         user_doc.flags.ignore_permissions = True
         user_doc.save()
+
+        # Đồng bộ User Permission với Role Campus * (CRM + Desk list view)
+        from erp.sis.utils.campus_permissions import sync_user_campus_permissions_from_roles
+        sync_user_campus_permissions_from_roles(user_email)
         
         # Return the actual roles after save
         final_roles = frappe.get_roles(user_email)

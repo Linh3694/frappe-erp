@@ -79,3 +79,6 @@ erp.patches.v1_0.backfill_library_transaction_borrower_codes
 
 # TKB auto-generate: seed Rule Set mặc định (S+V+O)
 erp.patches.v1_0.seed_default_timetable_rule_set
+
+# Campus: backfill Role Campus * + User Permission cho user chưa có campus role
+erp.patches.v1_0.backfill_campus_roles

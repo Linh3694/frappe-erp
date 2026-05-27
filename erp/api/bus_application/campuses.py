@@ -18,9 +18,16 @@ def get_campuses():
         if not user_email or user_email == 'Guest':
             return error_response("Authentication required", code="AUTH_REQUIRED")
 
-        # Get campuses - filter based on user permissions or show all for bus monitors
+        # Chỉ trả campus user có quyền truy cập (theo Role Campus *)
+        from erp.sis.utils.campus_permissions import get_user_campuses
+
+        user_campuses = get_user_campuses(user_email)
+        if not user_campuses:
+            return list_response([], "Campuses retrieved successfully")
+
         campuses = frappe.get_all(
             "SIS Campus",
+            filters={"name": ["in", user_campuses]},
             fields=["name", "title_vn", "title_en", "short_title"],
             order_by="title_vn asc"
         )

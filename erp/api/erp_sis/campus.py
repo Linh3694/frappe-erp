@@ -116,6 +116,9 @@ def get_campuses(only_user: bool = True):
 
 			return list_response(fallback_rows, "Campuses fetched successfully")
 
+		if "System Manager" not in frappe.get_roles(user):
+			frappe.throw(_("Only System Manager can list all campuses"))
+
 		rows = frappe.get_all(
 			"SIS Campus",
 			fields=["name", "title_vn", "title_en", "short_title"],
@@ -158,6 +161,69 @@ def set_current_campus(campus):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Set Current Campus Error")
 		return error_response(_("Error setting current campus: {0}").format(str(e)))
+
+
+@frappe.whitelist(allow_guest=False)
+def set_default_campus(campus, user=None):
+	"""Đặt campus mặc định cho user (admin quản lý user hoặc chính user đó)."""
+	try:
+		if not user:
+			user = frappe.session.user
+
+		if user != frappe.session.user and "System Manager" not in frappe.get_roles():
+			frappe.throw(_("You don't have permission to set default campus for other users"))
+
+		from erp.sis.doctype.sis_user_campus_preference.sis_user_campus_preference import (
+			SISUserCampusPreference,
+		)
+		from erp.sis.utils.campus_permissions import get_user_campuses
+
+		user_campuses = get_user_campuses(user)
+		if campus not in user_campuses:
+			frappe.throw(_("User {0} doesn't have access to campus {1}").format(user, campus))
+
+		preference = SISUserCampusPreference.get_or_create_preference(user)
+		preference.default_campus = campus
+		if not preference.current_campus:
+			preference.current_campus = campus
+		preference.flags.ignore_permissions = True
+		preference.save()
+
+		campus_doc = frappe.get_doc("SIS Campus", campus)
+		return success_response(
+			data={"campus": _campus_row(campus_doc), "user": user},
+			message=f"Đã đặt campus mặc định: {campus_doc.title_vn}",
+		)
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Set Default Campus Error")
+		return error_response(_("Error setting default campus: {0}").format(str(e)))
+
+
+@frappe.whitelist(allow_guest=False)
+def get_user_campus_preference(user=None):
+	"""Lấy campus preference của user (current + default)."""
+	try:
+		if not user:
+			user = frappe.session.user
+		if user != frappe.session.user and "System Manager" not in frappe.get_roles():
+			frappe.throw(_("You don't have permission to view campus preference for other users"))
+
+		from erp.sis.doctype.sis_user_campus_preference.sis_user_campus_preference import (
+			SISUserCampusPreference,
+		)
+
+		preference = SISUserCampusPreference.get_or_create_preference(user)
+		return success_response(
+			data={
+				"user": user,
+				"current_campus": preference.current_campus,
+				"default_campus": preference.default_campus,
+			},
+			message="User campus preference fetched",
+		)
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get User Campus Preference Error")
+		return error_response(_("Error getting user campus preference: {0}").format(str(e)))
 
 
 @frappe.whitelist(allow_guest=False)
