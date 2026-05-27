@@ -13,7 +13,7 @@ class SISUserCampusPreference(Document):
     
     def validate_campus_access(self):
         """Validate that user has access to current and default campuses"""
-        from ..utils.campus_permissions import get_user_campuses
+        from erp.sis.utils.campus_permissions import get_user_campuses
         
         user_campuses = get_user_campuses(self.user)
         
