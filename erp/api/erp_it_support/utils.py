@@ -65,7 +65,25 @@ FEEDBACK_BADGES = (
 ACTIVE_ASSIGN_STATUSES = ("Assigned", "Processing")
 
 
+def _form_field(key: str, data: dict = None, default: str = "") -> str:
+	"""Đọc field từ JSON body hoặc form_dict (multipart mobile)."""
+	data = data or {}
+	val = data.get(key)
+	if val is None:
+		val = frappe.form_dict.get(key)
+	if isinstance(val, (list, tuple)):
+		val = val[0] if val else None
+	if val is None:
+		return default
+	return str(val).strip()
+
+
 def _parse_json_body() -> dict:
+	# Multipart / urlencoded: đọc form_dict trực tiếp (RN mobile gửi FormData)
+	content_type = (getattr(frappe.request, "content_type", None) or "").lower()
+	if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+		return dict(frappe.local.form_dict or {})
+
 	raw = frappe.request.data
 	if raw:
 		try:

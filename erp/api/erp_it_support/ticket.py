@@ -35,6 +35,7 @@ from erp.api.erp_it_support.utils import (
 	_load_messages,
 	_load_subtasks,
 	_merge_attachments,
+	_form_field,
 	_parse_json_body,
 	_resolve_ticket_name,
 	_ticket_id_from_request,
@@ -140,9 +141,9 @@ def create_ticket():
 	"""Tạo ticket — hỗ trợ multipart attachments."""
 	try:
 		data = _parse_json_body()
-		title = (data.get("title") or frappe.form_dict.get("title") or "").strip()
-		description = (data.get("description") or frappe.form_dict.get("description") or "").strip()
-		category_raw = (data.get("category") or frappe.form_dict.get("category") or "").strip()
+		title = _form_field("title", data)
+		description = _form_field("description", data)
+		category_raw = _form_field("category", data)
 		if not title or not description or not category_raw:
 			return validation_error_response(
 				_("Thiếu title, description hoặc category"),
@@ -152,8 +153,8 @@ def create_ticket():
 		if not category_doc:
 			return validation_error_response(_("Danh mục không hợp lệ"), {"category": ["invalid"]})
 
-		priority = (data.get("priority") or "Medium").strip()
-		notes = (data.get("notes") or "").strip()
+		priority = _form_field("priority", data, "Medium")
+		notes = _form_field("notes", data)
 		profile = _creator_profile_from_session()
 		pic = _resolve_pic_from_category_role(category_raw)
 
@@ -165,7 +166,7 @@ def create_ticket():
 			"priority": priority,
 			"notes": notes,
 			"status": "Assigned",
-			"source": (data.get("source") or "web").strip(),
+			"source": _form_field("source", data, "web"),
 			"creator_email": profile["email"],
 			"creator_fullname": profile["fullname"],
 			"creator_avatar": profile["avatar"],
