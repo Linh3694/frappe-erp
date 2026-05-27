@@ -29,6 +29,7 @@ from erp.api.erp_it_support.utils import (
 	_append_history,
 	_bulk_serialize_tickets,
 	_can_read_ticket,
+	_can_delete_it_ticket,
 	_creator_profile_from_session,
 	_is_it_staff,
 	_load_history,
@@ -273,8 +274,8 @@ def update_ticket():
 @frappe.whitelist(allow_guest=False)
 def delete_ticket():
 	try:
-		if not _is_it_staff():
-			return forbidden_response(_("Chỉ đội IT mới xóa ticket"))
+		if not _can_delete_it_ticket():
+			return forbidden_response(_("Chỉ System Manager, SIS IT hoặc SIS BOD mới xóa được ticket"))
 		data = _parse_json_body()
 		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
 		if not ticket_id:

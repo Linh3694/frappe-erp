@@ -24,6 +24,8 @@ CATEGORY_DOCTYPE = "ERP IT Support Category"
 TEAM_DOCTYPE = "ERP IT Support Team Member"
 
 _STAFF_ROLES = ("System Manager", "SIS IT", "SIS BOD")
+# Role được phép xóa ticket IT (admin list — thường ticket đã Cancelled)
+_DELETE_IT_TICKET_ROLES = ("System Manager", "SIS IT", "SIS BOD")
 
 # Map category FE (Mongo) → support role
 CATEGORY_TO_ROLE = {
@@ -140,6 +142,14 @@ def _session_email() -> str:
 def _is_it_staff() -> bool:
 	roles = frappe.get_roles(frappe.session.user) or []
 	return any(r in roles for r in _STAFF_ROLES)
+
+
+def _can_delete_it_ticket() -> bool:
+	"""System Manager / SIS IT / SIS BOD được xóa ticket (API admin)."""
+	if frappe.session.user == "Administrator":
+		return True
+	roles = frappe.get_roles(frappe.session.user) or []
+	return any(r in roles for r in _DELETE_IT_TICKET_ROLES)
 
 
 def _user_dict(user_id: Optional[str]) -> Optional[dict]:

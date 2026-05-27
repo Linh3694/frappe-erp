@@ -37,6 +37,9 @@ def has_it_support_ticket_permission(doc, ptype, user):
 	if user == "Administrator":
 		return True
 	roles = frappe.get_roles(user) or []
+	# Xóa ticket: staff IT — không lọc campus (System Manager thường quản trị đa campus)
+	if ptype == "delete":
+		return any(r in roles for r in _STAFF_ROLES)
 	if any(r in roles for r in _STAFF_ROLES):
 		# Staff vẫn phải thuộc campus của ticket
 		doc_campus = getattr(doc, "campus_id", None)
