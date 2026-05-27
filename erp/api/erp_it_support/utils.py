@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from typing import Any, Dict, List, Optional
 
 import frappe
@@ -595,6 +596,23 @@ def _load_history(ticket_id: str) -> list:
 		order_by="creation asc",
 	)
 	return [_history_to_dict(r) for r in rows]
+
+
+def _purge_it_ticket_related(ticket_id: str) -> None:
+	"""Xóa comment/history/subtask liên kết trước khi xóa ticket (tránh lỗi Link Restrict)."""
+	for child_doctype in (COMMENT_DOCTYPE, HISTORY_DOCTYPE, SUBTASK_DOCTYPE):
+		for row in frappe.get_all(child_doctype, filters={"ticket": ticket_id}, pluck="name"):
+			frappe.delete_doc(child_doctype, row, ignore_permissions=True, force=True)
+
+	# Dọn thư mục upload theo name hoặc ticket_code (nếu có)
+	codes = {ticket_id}
+	ticket_code = frappe.db.get_value(DOCTYPE, ticket_id, "ticket_code")
+	if ticket_code:
+		codes.add(ticket_code)
+	for code in codes:
+		folder = os.path.join(get_files_path(), "it_support", code)
+		if os.path.isdir(folder):
+			shutil.rmtree(folder, ignore_errors=True)
 
 
 def _save_uploaded_attachments(ticket_code: str) -> list:

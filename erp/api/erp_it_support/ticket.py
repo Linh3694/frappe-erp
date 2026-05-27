@@ -36,6 +36,7 @@ from erp.api.erp_it_support.utils import (
 	_load_messages,
 	_load_subtasks,
 	_merge_attachments,
+	_purge_it_ticket_related,
 	_form_field,
 	_parse_json_body,
 	_resolve_ticket_name,
@@ -280,7 +281,8 @@ def delete_ticket():
 		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
 		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
-		frappe.delete_doc(DOCTYPE, ticket_id, ignore_permissions=True)
+		_purge_it_ticket_related(ticket_id)
+		frappe.delete_doc(DOCTYPE, ticket_id, ignore_permissions=True, force=True)
 		frappe.db.commit()
 		return success_response({"success": True}, "OK")
 	except Exception as e:
