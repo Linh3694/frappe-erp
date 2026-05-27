@@ -1,4 +1,1 @@
-# Scripts module
-
-from . import cleanup_orphaned_teacher_timetable
-from . import cleanup_teacher_by_assignment
+# Scripts module — không import submodules ở đây (tránh phụ thuộc frappe khi chạy CLI).
