@@ -354,6 +354,84 @@ def _validate_parent_student_access(parent_id, student_ids):
 	return True
 
 
+def _get_student_display_name(student_id):
+	"""Lấy tên hiển thị của học sinh để báo lỗi theo từng HS."""
+	return frappe.db.get_value("CRM Student", student_id, "student_name") or student_id
+
+
+def _format_overlap_dates(overlapping_dates):
+	"""Chuyển danh sách ngày overlap sang định dạng DD/MM."""
+	dates_formatted = []
+	for date_str in overlapping_dates:
+		try:
+			date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+			dates_formatted.append(date_obj.strftime('%d/%m'))
+		except Exception:
+			dates_formatted.append(date_str)
+	return dates_formatted
+
+
+def _validate_students_for_leave_batch(students, start_date, end_date):
+	"""Validate tất cả học sinh trước khi tạo đơn batch.
+
+	Returns:
+		(errors, student_campuses): errors là list message; student_campuses map student_id -> campus_id
+	"""
+	errors = []
+	student_campuses = {}
+
+	for student_id in students:
+		student_name = _get_student_display_name(student_id)
+
+		overlap_check = _check_overlapping_leave_requests(student_id, start_date, end_date)
+		if overlap_check['has_overlap']:
+			dates_str_vi = ", ".join(_format_overlap_dates(overlap_check['overlapping_dates']))
+			frappe.logger().warning(
+				f"⚠️ Student {student_id} has overlapping leave requests on dates: {dates_str_vi}"
+			)
+			errors.append(f"{student_name}: Ngày {dates_str_vi} đã có đơn xin nghỉ phép.")
+			continue
+
+		student_campus = frappe.db.get_value("CRM Student", student_id, "campus_id")
+		if not student_campus:
+			errors.append(f"{student_name}: Không tìm thấy thông tin campus.")
+			continue
+
+		student_campuses[student_id] = student_campus
+
+	return errors, student_campuses
+
+
+def _read_leave_request_documents():
+	"""Đọc file đính kèm một lần trước vòng lặp tạo đơn."""
+	document_files = []
+	if not frappe.request.files:
+		return document_files
+
+	for file_key, file_obj in frappe.request.files.items():
+		if file_key.startswith('documents'):
+			document_files.append({
+				"file_name": file_obj.filename,
+				"content": file_obj.stream.read(),
+			})
+
+	return document_files
+
+
+def _attach_documents_to_leave_request(leave_request_name, document_files):
+	"""Gắn file đính kèm vào đơn nghỉ phép."""
+	for doc in document_files:
+		file_doc = frappe.get_doc({
+			"doctype": "File",
+			"file_name": doc["file_name"],
+			"attached_to_doctype": "SIS Student Leave Request",
+			"attached_to_name": leave_request_name,
+			"content": doc["content"],
+			"is_private": 1,
+		})
+		file_doc.insert(ignore_permissions=True)
+
+
 @frappe.whitelist()
 def submit_leave_request():
 	"""Submit leave request for multiple students"""
@@ -420,41 +498,20 @@ def submit_leave_request():
 			
 			return error_response(error_msg)
 
+		# Validate tất cả HS trước — không insert nếu có lỗi
+		validation_errors, student_campuses = _validate_students_for_leave_batch(
+			students, data['start_date'], data['end_date']
+		)
+		if validation_errors:
+			return error_response("\n".join(validation_errors))
+
+		document_files = _read_leave_request_documents()
 		created_requests = []
 
-		# Create separate request for each student
-		for student_id in students:
-			# Check for overlapping leave requests
-			# This prevents duplicate/overlapping leave records for the same student
-			overlap_check = _check_overlapping_leave_requests(student_id, data['start_date'], data['end_date'])
-			if overlap_check['has_overlap']:
-				# Format overlapping dates (Vietnamese + English) - DD/MM format only
-				overlapping_dates = overlap_check['overlapping_dates']
-				# Convert from YYYY-MM-DD to DD/MM format
-				dates_formatted = []
-				for date_str in overlapping_dates:
-					try:
-						date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-						dates_formatted.append(date_obj.strftime('%d/%m'))
-					except:
-						dates_formatted.append(date_str)
-				
-				dates_str_vi = ", ".join(dates_formatted)  # e.g. "06/11, 07/11, 08/11"
-				
-				frappe.logger().warning(f"⚠️ Student {student_id} has overlapping leave requests on dates: {dates_str_vi}")
-				
-				# Song ngữ error message
-				error_msg_vi = f"Ngày {dates_str_vi} đã có đơn xin nghỉ phép."
-				
-				return error_response(error_msg_vi)
-			
-			# Get student campus
-			student_campus = frappe.db.get_value("CRM Student", student_id, "campus_id")
-			if not student_campus:
-				continue
-
-			# Create leave request
-			try:
+		try:
+			# Tạo đơn riêng cho từng học sinh sau khi validate pass
+			for student_id in students:
+				student_campus = student_campuses[student_id]
 				leave_request = frappe.get_doc({
 					"doctype": "SIS Student Leave Request",
 					"student_id": student_id,
@@ -467,34 +524,27 @@ def submit_leave_request():
 					"description": data.get('description', ''),
 					"submitted_at": datetime.now()
 				})
-				
-				# Bypass permissions but allow validation to run (to populate student_name, parent_name, student_code)
+
+				# Bypass permissions nhưng vẫn chạy validation (populate student_name, ...)
 				leave_request.flags.ignore_permissions = True
 				leave_request.insert()
-			except Exception as e:
-				frappe.logger().error(f"❌ Error creating leave request for student {student_id}: {str(e)}")
-				error_detail = str(e)
-				return error_response(f"Lỗi khi tạo đơn: {error_detail}")
 
-			# Attach files if any
-			if frappe.request.files:
-				for file_key, file_obj in frappe.request.files.items():
-					if file_key.startswith('documents'):
-						file_doc = frappe.get_doc({
-							"doctype": "File",
-							"file_name": file_obj.filename,
-							"attached_to_doctype": "SIS Student Leave Request",
-							"attached_to_name": leave_request.name,
-							"content": file_obj.stream.read(),
-							"is_private": 1
-						})
-						file_doc.insert(ignore_permissions=True)
+				if document_files:
+					_attach_documents_to_leave_request(leave_request.name, document_files)
 
-			created_requests.append({
-				"id": leave_request.name,
-				"student_id": student_id,
-				"student_name": leave_request.student_name
-			})
+				created_requests.append({
+					"id": leave_request.name,
+					"student_id": student_id,
+					"student_name": leave_request.student_name
+				})
+		except Exception as e:
+			frappe.db.rollback()
+			frappe.logger().error(f"❌ Error creating leave requests batch: {str(e)}")
+			return error_response(f"Lỗi khi tạo đơn: {str(e)}")
+
+		if len(created_requests) != len(students):
+			frappe.db.rollback()
+			return error_response("Không thể tạo đầy đủ đơn nghỉ phép cho tất cả học sinh.")
 
 		# Transform reason to Vietnamese for notification
 		reason_mapping = {

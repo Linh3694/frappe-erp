@@ -209,7 +209,9 @@ def create_ticket():
 def update_ticket():
 	try:
 		data = _parse_json_body()
-		ticket_id = _resolve_ticket_name(_ticket_id_from_request(data, data.get("ticket_id"), data.get("name")))
+		ticket_id = _resolve_ticket_name(
+			_ticket_id_from_request(data, _form_field("ticket_id", data), _form_field("name", data))
+		)
 		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)
@@ -220,20 +222,24 @@ def update_ticket():
 		is_staff = _is_it_staff()
 		is_creator = doc.creator_email == _session_email()
 
-		if data.get("title"):
-			doc.title = data.get("title").strip()
-		if data.get("description"):
-			doc.description = data.get("description").strip()
-		if data.get("notes") is not None:
-			doc.notes = (data.get("notes") or "").strip()
-		if data.get("priority"):
-			doc.priority = data.get("priority").strip()
-		if data.get("category"):
-			cat = _resolve_category_doc(data.get("category"))
+		title = _form_field("title", data)
+		if title:
+			doc.title = title
+		description = _form_field("description", data)
+		if description:
+			doc.description = description
+		if "notes" in data:
+			doc.notes = _form_field("notes", data)
+		priority = _form_field("priority", data)
+		if priority:
+			doc.priority = priority
+		category_raw = _form_field("category", data)
+		if category_raw:
+			cat = _resolve_category_doc(category_raw)
 			if cat:
 				doc.category = cat
 
-		new_status = (data.get("status") or "").strip()
+		new_status = _form_field("status", data)
 		if new_status and new_status != doc.status:
 			if not is_staff:
 				return forbidden_response(_("Chỉ đội IT mới đổi trạng thái"))
@@ -704,9 +710,9 @@ def send_comment():
 	try:
 		data = _parse_json_body()
 		ticket_id = _resolve_ticket_name(
-			_ticket_id_from_request(data, data.get("ticket_id") or data.get("name") or frappe.form_dict.get("ticket_id"))
+			_ticket_id_from_request(data, _form_field("ticket_id", data) or _form_field("name", data))
 		)
-		text = (data.get("text") or frappe.form_dict.get("text") or "").strip()
+		text = _form_field("text", data)
 		if not ticket_id:
 			return not_found_response(_("Không tìm thấy ticket"))
 		doc = frappe.get_doc(DOCTYPE, ticket_id)

@@ -66,11 +66,13 @@ ACTIVE_ASSIGN_STATUSES = ("Assigned", "Processing")
 
 
 def _form_field(key: str, data: dict = None, default: str = "") -> str:
-	"""Đọc field từ JSON body hoặc form_dict (multipart mobile)."""
+	"""Đọc field từ JSON body, form_dict hoặc request.form (multipart)."""
 	data = data or {}
 	val = data.get(key)
 	if val is None:
 		val = frappe.form_dict.get(key)
+	if val is None and frappe.request and getattr(frappe.request, "form", None):
+		val = frappe.request.form.get(key)
 	if isinstance(val, (list, tuple)):
 		val = val[0] if val else None
 	if val is None:
@@ -79,9 +81,13 @@ def _form_field(key: str, data: dict = None, default: str = "") -> str:
 
 
 def _parse_json_body() -> dict:
-	# Multipart / urlencoded: đọc form_dict trực tiếp (RN mobile gửi FormData)
 	content_type = (getattr(frappe.request, "content_type", None) or "").lower()
-	if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
+	# Multipart: text fields nằm ở request.form (không phải form_dict) — pattern parent_portal/leave.py
+	if "multipart/form-data" in content_type:
+		if frappe.request and getattr(frappe.request, "form", None):
+			return dict(frappe.request.form)
+		return dict(frappe.local.form_dict or {})
+	if "application/x-www-form-urlencoded" in content_type:
 		return dict(frappe.local.form_dict or {})
 
 	raw = frappe.request.data
@@ -94,8 +100,12 @@ def _parse_json_body() -> dict:
 			else:
 				data = json.loads(raw)
 		except (json.JSONDecodeError, TypeError, ValueError):
+			if frappe.request and getattr(frappe.request, "form", None):
+				return dict(frappe.request.form)
 			data = dict(frappe.local.form_dict or {})
 	else:
+		if frappe.request and getattr(frappe.request, "form", None):
+			return dict(frappe.request.form)
 		data = dict(frappe.local.form_dict or {})
 	return data
 
