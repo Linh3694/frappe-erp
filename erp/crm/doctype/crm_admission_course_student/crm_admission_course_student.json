@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "course_id",
+  "campus_id",
   "crm_lead_id",
   "status",
   "regular_class",
@@ -20,6 +21,14 @@
    "label": "Khoá học",
    "options": "CRM Admission Course",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "crm_lead_id",

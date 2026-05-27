@@ -82,3 +82,6 @@ erp.patches.v1_0.seed_default_timetable_rule_set
 
 # Campus: backfill Role Campus * + User Permission cho user chưa có campus role
 erp.patches.v1_0.backfill_campus_roles
+
+# Campus Phase 2: backfill campus_id cho ~85 DocType (đợt 0-6)
+erp.patches.v1_0.backfill_phase2_campus_id

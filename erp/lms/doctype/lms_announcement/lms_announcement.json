@@ -20,6 +20,7 @@
  "name": "LMS Announcement",
  "field_order": [
   "course",
+  "campus_id",
   "section",
   "title",
   "posted_at",
@@ -34,6 +35,14 @@
    "options": "LMS Course",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "section",

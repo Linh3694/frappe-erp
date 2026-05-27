@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "campus_id",
   "teacher_id",
   "timetable_instance_id",
   "day_of_week",
@@ -31,6 +32,14 @@
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Basic Information"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "teacher_id",

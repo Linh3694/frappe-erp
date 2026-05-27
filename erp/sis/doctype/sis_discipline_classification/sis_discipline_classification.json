@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "title",
+  "campus_id",
   "column_break_1",
   "campus",
   "enabled"
@@ -21,6 +22,14 @@
    "label": "Tiêu đề",
    "reqd": 1,
    "unique": 0
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "column_break_1",

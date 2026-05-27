@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "room",
+  "campus_id",
   "category",
   "quantity",
   "condition"
@@ -17,15 +18,23 @@
    "fieldname": "room",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Ph\u00f2ng",
+   "label": "Phòng",
    "options": "ERP Administrative Room",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "category",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Danh m\u1ee5c thi\u1ebft b\u1ecb",
+   "label": "Danh mục thiết bị",
    "options": "ERP Administrative Facility Equipment Category",
    "reqd": 1
   },
@@ -34,14 +43,14 @@
    "fieldname": "quantity",
    "fieldtype": "Int",
    "in_list_view": 1,
-   "label": "S\u1ed1 l\u01b0\u1ee3ng",
+   "label": "Số lượng",
    "non_negative": 1,
    "reqd": 1
   },
   {
    "fieldname": "condition",
    "fieldtype": "Small Text",
-   "label": "Hi\u1ec7n tr\u1ea1ng"
+   "label": "Hiện trạng"
   }
  ],
  "index_web_pages_for_search": 1,

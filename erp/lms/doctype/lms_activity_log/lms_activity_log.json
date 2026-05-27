@@ -5,24 +5,98 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "user", "course", "section", "verb", "object_type", "object_id",
-  "timestamp", "column_break_1", "caliper_event_type", "caliper_payload_json"
+  "user",
+  "campus_id",
+  "course",
+  "section",
+  "verb",
+  "object_type",
+  "object_id",
+  "timestamp",
+  "column_break_1",
+  "caliper_event_type",
+  "caliper_payload_json"
  ],
  "fields": [
-  {"fieldname": "user", "fieldtype": "Link", "label": "User", "options": "User", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "in_list_view": 1},
-  {"fieldname": "section", "fieldtype": "Link", "label": "Section", "options": "LMS Course Section"},
-  {"fieldname": "verb", "fieldtype": "Data", "label": "Verb", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "object_type", "fieldtype": "Data", "label": "Object Type"},
-  {"fieldname": "object_id", "fieldtype": "Data", "label": "Object ID"},
-  {"fieldname": "timestamp", "fieldtype": "Datetime", "label": "Timestamp", "reqd": 1, "default": "Now"},
-  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
-  {"fieldname": "caliper_event_type", "fieldtype": "Data", "label": "Caliper Event Type"},
-  {"fieldname": "caliper_payload_json", "fieldtype": "JSON", "label": "Caliper Payload"}
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "LMS Course",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section",
+   "fieldtype": "Link",
+   "label": "Section",
+   "options": "LMS Course Section"
+  },
+  {
+   "fieldname": "verb",
+   "fieldtype": "Data",
+   "label": "Verb",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "object_type",
+   "fieldtype": "Data",
+   "label": "Object Type"
+  },
+  {
+   "fieldname": "object_id",
+   "fieldtype": "Data",
+   "label": "Object ID"
+  },
+  {
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "label": "Timestamp",
+   "reqd": 1,
+   "default": "Now"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "caliper_event_type",
+   "fieldtype": "Data",
+   "label": "Caliper Event Type"
+  },
+  {
+   "fieldname": "caliper_payload_json",
+   "fieldtype": "JSON",
+   "label": "Caliper Payload"
+  }
  ],
  "module": "LMS",
  "name": "LMS Activity Log",
- "permissions": [{"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}],
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
+ ],
  "sort_field": "timestamp",
  "sort_order": "DESC",
  "track_changes": 0

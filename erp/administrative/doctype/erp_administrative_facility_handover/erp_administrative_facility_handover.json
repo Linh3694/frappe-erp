@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "room",
+  "campus_id",
   "school_year_id",
   "yearly_assignment_id",
   "display_title_snapshot",
@@ -36,9 +37,17 @@
    "fieldname": "room",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Ph\u00f2ng",
+   "label": "Phòng",
    "options": "ERP Administrative Room",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "school_year_id",
@@ -86,7 +95,7 @@
    "fieldname": "direction",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Chi\u1ec1u lu\u1ed3ng",
+   "label": "Chiều luồng",
    "options": "outgoing\nincoming",
    "reqd": 1
   },
@@ -95,7 +104,7 @@
    "fieldname": "handover_type",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Lo\u1ea1i b\u00e0n giao",
+   "label": "Loại bàn giao",
    "options": "class\nresponsible_user",
    "reqd": 1
   },
@@ -103,14 +112,14 @@
    "fieldname": "class_id",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "L\u1edbp",
+   "label": "Lớp",
    "options": "SIS Class"
   },
   {
    "fieldname": "responsible_user",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Ng\u01b0\u1eddi ph\u1ee5 tr\u00e1ch",
+   "label": "Người phụ trách",
    "options": "User"
   },
   {
@@ -118,62 +127,62 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Tr\u1ea1ng th\u00e1i",
+   "label": "Trạng thái",
    "options": "Pending\nConfirmed\nAccepted\nRejected",
    "reqd": 1
   },
   {
    "fieldname": "note",
    "fieldtype": "Long Text",
-   "label": "Ghi ch\u00fa ng\u01b0\u1eddi g\u1eedi (ki\u1ec3m k\u00ea)"
+   "label": "Ghi chú người gửi (kiểm kê)"
   },
   {
    "fieldname": "facility_snapshot",
    "fieldtype": "Long Text",
-   "label": "Snapshot thi\u1ebft b\u1ecb CSVC (JSON)"
+   "label": "Snapshot thiết bị CSVC (JSON)"
   },
   {
    "fieldname": "it_snapshot",
    "fieldtype": "Long Text",
-   "label": "Snapshot thi\u1ebft b\u1ecb IT (JSON)"
+   "label": "Snapshot thiết bị IT (JSON)"
   },
   {
    "fieldname": "sent_by",
    "fieldtype": "Link",
-   "label": "Ng\u01b0\u1eddi g\u1eedi",
+   "label": "Người gửi",
    "options": "User"
   },
   {
    "fieldname": "sent_on",
    "fieldtype": "Datetime",
-   "label": "Th\u1eddi gian g\u1eedi"
+   "label": "Thời gian gửi"
   },
   {
    "fieldname": "confirmed_by",
    "fieldtype": "Link",
-   "label": "Ng\u01b0\u1eddi x\u00e1c nh\u1eadn",
+   "label": "Người xác nhận",
    "options": "User"
   },
   {
    "fieldname": "confirmed_on",
    "fieldtype": "Datetime",
-   "label": "Th\u1eddi gian x\u00e1c nh\u1eadn"
+   "label": "Thời gian xác nhận"
   },
   {
    "fieldname": "reviewed_by",
    "fieldtype": "Link",
-   "label": "Ng\u01b0\u1eddi duy\u1ec7t (ki\u1ec3m k\u00ea)",
+   "label": "Người duyệt (kiểm kê)",
    "options": "User"
   },
   {
    "fieldname": "reviewed_on",
    "fieldtype": "Datetime",
-   "label": "Th\u1eddi gian duy\u1ec7t"
+   "label": "Thời gian duyệt"
   },
   {
    "fieldname": "review_note",
    "fieldtype": "Long Text",
-   "label": "Ghi ch\u00fa duy\u1ec7t / l\u00fd do t\u1eeb ch\u1ed1i"
+   "label": "Ghi chú duyệt / lý do từ chối"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -9,6 +9,7 @@
  "engine": "InnoDB",
  "field_order": [
   "title_id",
+  "campus_id",
   "generated_code",
   "special_code",
   "status",
@@ -48,6 +49,14 @@
    "label": "Đầu sách",
    "options": "SIS Library Title",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "generated_code",

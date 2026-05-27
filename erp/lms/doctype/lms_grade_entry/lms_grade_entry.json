@@ -20,6 +20,7 @@
  "name": "LMS Grade Entry",
  "field_order": [
   "column",
+  "campus_id",
   "student_id",
   "score",
   "excused",
@@ -33,6 +34,14 @@
    "options": "LMS Grade Column",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "student_id",

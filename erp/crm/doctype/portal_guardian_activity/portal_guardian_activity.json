@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "guardian",
+  "campus_id",
   "guardian_name",
   "activity_date",
   "column_break_1",
@@ -32,6 +33,14 @@
    "options": "CRM Guardian",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "guardian_name",

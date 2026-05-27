@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_info_section",
+  "campus_id",
   "feedback_type",
   "guardian",
   "column_break_1",
@@ -68,6 +69,14 @@
    "fieldname": "basic_info_section",
    "fieldtype": "Section Break",
    "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "feedback_type",
@@ -395,7 +404,7 @@
    "share": 1,
    "write": 1
   },
-   {
+  {
    "create": 1,
    "delete": 0,
    "email": 1,
@@ -407,7 +416,7 @@
    "share": 1,
    "write": 1
   },
-     {
+  {
    "create": 1,
    "delete": 0,
    "email": 1,
@@ -437,4 +446,3 @@
  "states": [],
  "track_changes": 1
 }
-

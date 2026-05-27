@@ -381,3 +381,128 @@ def sis_timetable_generation_session_query(user):
 
 def sis_timetable_rule_set_query(user):
     return get_campus_permission_query("SIS Timetable Rule Set", user)
+
+def sis_health_examination_query(user):
+	"""Permission query for SIS Health Examination."""
+	return get_campus_permission_query("SIS Health Examination", user)
+
+def sis_daily_health_visit_query(user):
+	"""Permission query for SIS Daily Health Visit."""
+	return get_campus_permission_query("SIS Daily Health Visit", user)
+
+def sis_health_report_query(user):
+	"""Permission query for SIS Health Report."""
+	return get_campus_permission_query("SIS Health Report", user)
+
+def sis_scholarship_application_query(user):
+	"""Permission query for SIS Scholarship Application."""
+	return get_campus_permission_query("SIS Scholarship Application", user)
+
+def sis_scholarship_recommendation_query(user):
+	"""Permission query for SIS Scholarship Recommendation."""
+	return get_campus_permission_query("SIS Scholarship Recommendation", user)
+
+def sis_timetable_pinned_slot_query(user):
+	"""Permission query for SIS Timetable Pinned Slot."""
+	return get_campus_permission_query("SIS Timetable Pinned Slot", user)
+
+def sis_event_attendance_query(user):
+	"""Permission query for SIS Event Attendance."""
+	return get_campus_permission_query("SIS Event Attendance", user)
+
+def sis_bus_daily_trip_student_query(user):
+	"""Permission query for SIS Bus Daily Trip Student."""
+	return get_campus_permission_query("SIS Bus Daily Trip Student", user)
+
+def sis_bus_route_student_query(user):
+	"""Permission query for SIS Bus Route Student."""
+	return get_campus_permission_query("SIS Bus Route Student", user)
+
+def sis_menu_registration_query(user):
+	"""Permission query for SIS Menu Registration."""
+	return get_campus_permission_query("SIS Menu Registration", user)
+
+def sis_menu_registration_period_query(user):
+	"""Permission query for SIS Menu Registration Period."""
+	return get_campus_permission_query("SIS Menu Registration Period", user)
+
+def sis_teacher_education_stage_query(user):
+	"""Permission query for SIS Teacher Education Stage."""
+	return get_campus_permission_query("SIS Teacher Education Stage", user)
+
+def sis_finance_order_query(user):
+	"""Permission query for SIS Finance Order."""
+	return get_campus_permission_query("SIS Finance Order", user)
+
+def sis_finance_order_student_query(user):
+	"""Permission query for SIS Finance Order Student."""
+	return get_campus_permission_query("SIS Finance Order Student", user)
+
+def sis_finance_order_item_query(user):
+	"""Permission query for SIS Finance Order Item."""
+	return get_campus_permission_query("SIS Finance Order Item", user)
+
+def sis_finance_send_batch_query(user):
+	"""Permission query for SIS Finance Send Batch."""
+	return get_campus_permission_query("SIS Finance Send Batch", user)
+
+def sis_finance_collection_log_query(user):
+	"""Permission query for SIS Finance Collection Log."""
+	return get_campus_permission_query("SIS Finance Collection Log", user)
+
+def sis_finance_debit_note_history_query(user):
+	"""Permission query for SIS Finance Debit Note History."""
+	return get_campus_permission_query("SIS Finance Debit Note History", user)
+
+def sis_finance_student_document_query(user):
+	"""Permission query for SIS Finance Student Document."""
+	return get_campus_permission_query("SIS Finance Student Document", user)
+
+def sis_library_book_copy_query(user):
+	"""Permission query for SIS Library Book Copy."""
+	return get_campus_permission_query("SIS Library Book Copy", user)
+
+def sis_library_transaction_query(user):
+	"""Permission query for SIS Library Transaction."""
+	return get_campus_permission_query("SIS Library Transaction", user)
+
+def sis_library_title_query(user):
+	"""Permission query for SIS Library Title."""
+	return get_campus_permission_query("SIS Library Title", user)
+
+def sis_library_event_query(user):
+	"""Permission query for SIS Library Event."""
+	return get_campus_permission_query("SIS Library Event", user)
+
+def sis_discipline_record_query(user):
+	"""Permission query for SIS Discipline Record."""
+	return get_campus_permission_query("SIS Discipline Record", user)
+
+def sis_discipline_classification_query(user):
+	"""Permission query for SIS Discipline Classification."""
+	return get_campus_permission_query("SIS Discipline Classification", user)
+
+def sis_discipline_form_query(user):
+	"""Permission query for SIS Discipline Form."""
+	return get_campus_permission_query("SIS Discipline Form", user)
+
+def sis_discipline_time_query(user):
+	"""Permission query for SIS Discipline Time."""
+	return get_campus_permission_query("SIS Discipline Time", user)
+
+def sis_discipline_violation_query(user):
+	"""Permission query for SIS Discipline Violation."""
+	return get_campus_permission_query("SIS Discipline Violation", user)
+
+def sis_first_aid_query(user):
+	"""Permission query for SIS First Aid."""
+	return get_campus_permission_query("SIS First Aid", user)
+
+def sis_medicine_query(user):
+	"""Permission query for SIS Medicine."""
+	return get_campus_permission_query("SIS Medicine", user)
+
+def sis_disease_classification_query(user):
+	"""Permission query for SIS Disease Classification."""
+	return get_campus_permission_query("SIS Disease Classification", user)
+

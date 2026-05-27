@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "room",
+  "campus_id",
   "school_year_id",
   "activity_date",
   "activity_type",
@@ -23,9 +24,17 @@
    "fieldname": "room",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Ph\u00f2ng",
+   "label": "Phòng",
    "options": "ERP Administrative Room",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "school_year_id",
@@ -42,48 +51,48 @@
    "fieldname": "activity_type",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Lo\u1ea1i s\u1ef1 ki\u1ec7n",
+   "label": "Loại sự kiện",
    "options": "handover_sent\nhandover_confirmed\nhandover_rejected\ninventory_submitted\ninventory_accepted\ninventory_rejected\nuser_assigned\nuser_removed\nequipment_added\nequipment_updated\nequipment_removed\nrepair_reported\nrepair_completed\nassignment_title_changed\nbuilding_moved",
    "reqd": 1
   },
   {
    "fieldname": "user",
    "fieldtype": "Link",
-   "label": "Ng\u01b0\u1eddi th\u1ef1c hi\u1ec7n",
+   "label": "Người thực hiện",
    "options": "User"
   },
   {
    "fieldname": "user_name",
    "fieldtype": "Data",
-   "label": "H\u1ecd t\u00ean ng\u01b0\u1eddi th\u1ef1c hi\u1ec7n",
+   "label": "Họ tên người thực hiện",
    "read_only": 1
   },
   {
    "fieldname": "target_user",
    "fieldtype": "Link",
-   "label": "Ng\u01b0\u1eddi li\u00ean quan",
+   "label": "Người liên quan",
    "options": "User"
   },
   {
    "fieldname": "target_user_name",
    "fieldtype": "Data",
-   "label": "H\u1ecd t\u00ean ng\u01b0\u1eddi li\u00ean quan",
+   "label": "Họ tên người liên quan",
    "read_only": 1
   },
   {
    "fieldname": "reference_doctype",
    "fieldtype": "Data",
-   "label": "DocType tham chi\u1ebfu"
+   "label": "DocType tham chiếu"
   },
   {
    "fieldname": "reference_name",
    "fieldtype": "Data",
-   "label": "T\u00ean b\u1ea3n ghi tham chi\u1ebfu"
+   "label": "Tên bản ghi tham chiếu"
   },
   {
    "fieldname": "note",
    "fieldtype": "Long Text",
-   "label": "Ghi ch\u00fa"
+   "label": "Ghi chú"
   }
  ],
  "grid_page_length": 50,

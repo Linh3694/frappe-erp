@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "route_id",
+  "campus_id",
   "student_id",
   "class_student_id",
   "weekday",
@@ -34,6 +35,14 @@
    "options": "SIS Bus Route",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "student_id",

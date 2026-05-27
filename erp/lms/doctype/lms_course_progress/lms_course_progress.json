@@ -20,6 +20,7 @@
  "name": "LMS Course Progress",
  "field_order": [
   "student_id",
+  "campus_id",
   "section",
   "percent_complete",
   "last_activity_at",
@@ -33,6 +34,14 @@
    "options": "CRM Student",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "section",

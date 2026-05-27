@@ -20,6 +20,7 @@
  "name": "LMS Submission",
  "field_order": [
   "assignment",
+  "campus_id",
   "student_id",
   "workflow_state",
   "column_break_1",
@@ -39,6 +40,14 @@
    "options": "LMS Assignment",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "student_id",

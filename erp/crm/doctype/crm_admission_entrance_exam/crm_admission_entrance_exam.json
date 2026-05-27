@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "exam_name",
+  "campus_id",
   "school_year_id",
   "exam_date",
   "exam_time",
@@ -20,6 +21,14 @@
    "in_list_view": 1,
    "label": "Tên kỳ khảo sát",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "school_year_id",

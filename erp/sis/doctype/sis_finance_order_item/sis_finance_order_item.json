@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "campus_id",
   "order_id",
   "finance_student_id",
   "student_name",
@@ -49,6 +50,14 @@
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "order_id",
@@ -280,4 +289,3 @@
  "title_field": "student_name",
  "track_changes": 1
 }
-

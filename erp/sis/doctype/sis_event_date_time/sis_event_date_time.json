@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "event_id",
+  "campus_id",
   "event_date",
   "start_time",
   "end_time",
@@ -33,6 +34,14 @@
    "options": "SIS Event",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "event_date",

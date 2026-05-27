@@ -5,8 +5,9 @@
  "creation": "2026-04-10 12:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
-  "field_order": [
+ "field_order": [
   "title",
+  "campus_id",
   "ticket_code",
   "status",
   "priority",
@@ -45,14 +46,22 @@
    "fieldname": "title",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Ti\u00eau \u0111\u1ec1",
+   "label": "Tiêu đề",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "ticket_code",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "M\u00e3 ticket",
+   "label": "Mã ticket",
    "read_only": 1
   },
   {
@@ -60,7 +69,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Tr\u1ea1ng th\u00e1i",
+   "label": "Trạng thái",
    "options": "Open\nAssigned\nIn Progress\nDone\nResolved\nClosed\nCancelled",
    "reqd": 1
   },
@@ -69,14 +78,14 @@
    "fieldname": "priority",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "\u0110\u1ed9 \u01b0u ti\u00ean",
+   "label": "Độ ưu tiên",
    "options": "Low\nMedium\nHigh\nCritical"
   },
   {
    "fieldname": "category",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Danh m\u1ee5c",
+   "label": "Danh mục",
    "options": "ERP Administrative Support Category",
    "reqd": 1
   },
@@ -84,83 +93,83 @@
    "default": "0",
    "fieldname": "is_event_facility",
    "fieldtype": "Check",
-   "label": "Y\u00eau c\u1ea7u CSVC cho s\u1ef1 ki\u1ec7n"
+   "label": "Yêu cầu CSVC cho sự kiện"
   },
   {
    "fieldname": "event_building_id",
    "fieldtype": "Link",
-   "label": "T\u00f2a nh\u00e0 (s\u1ef1 ki\u1ec7n)",
+   "label": "Tòa nhà (sự kiện)",
    "options": "ERP Administrative Building"
   },
   {
    "fieldname": "event_room_id",
    "fieldtype": "Link",
-   "label": "Ph\u00f2ng (s\u1ef1 ki\u1ec7n)",
+   "label": "Phòng (sự kiện)",
    "options": "ERP Administrative Room"
   },
   {
    "fieldname": "event_start_time",
    "fieldtype": "Datetime",
-   "label": "B\u1eaft \u0111\u1ea7u s\u1ef1 ki\u1ec7n"
+   "label": "Bắt đầu sự kiện"
   },
   {
    "fieldname": "event_end_time",
    "fieldtype": "Datetime",
-   "label": "K\u1ebft th\u00fac s\u1ef1 ki\u1ec7n"
+   "label": "Kết thúc sự kiện"
   },
   {
    "fieldname": "area_title",
    "fieldtype": "Data",
-   "label": "Khu v\u1ef1c (\u0111\u1ec3 ph\u00e2n c\u00f4ng PIC)"
+   "label": "Khu vực (để phân công PIC)"
   },
   {
    "fieldname": "room_id",
    "fieldtype": "Link",
-   "label": "Ph\u00f2ng (kh\u00f4ng ph\u1ea3i s\u1ef1 ki\u1ec7n)",
+   "label": "Phòng (không phải sự kiện)",
    "options": "ERP Administrative Room"
   },
   {
    "fieldname": "related_equipment_id",
    "fieldtype": "Link",
-   "label": "Thi\u1ebft b\u1ecb li\u00ean quan (d\u00f2ng CSVC ph\u00f2ng)",
+   "label": "Thiết bị liên quan (dòng CSVC phòng)",
    "options": "ERP Administrative Room Facility Equipment"
   },
   {
    "fieldname": "related_equipment_ids",
    "fieldtype": "JSON",
-   "label": "Danh s\u00e1ch d\u00f2ng CSVC ph\u00f2ng (m\u1ea3ng name)"
+   "label": "Danh sách dòng CSVC phòng (mảng name)"
   },
   {
    "fieldname": "related_student_ids",
    "fieldtype": "JSON",
-   "label": "H\u1ecdc sinh li\u00ean quan (m\u1ea3ng student_id)"
+   "label": "Học sinh liên quan (mảng student_id)"
   },
   {
    "fieldname": "description",
    "fieldtype": "Text Editor",
-   "label": "M\u00f4 t\u1ea3",
+   "label": "Mô tả",
    "reqd": 1
   },
   {
    "fieldname": "attachment",
    "fieldtype": "Attach",
-   "label": "\u0110\u00ednh k\u00e8m"
+   "label": "Đính kèm"
   },
   {
    "fieldname": "creator_section",
    "fieldtype": "Section Break",
-   "label": "Ng\u01b0\u1eddi t\u1ea1o"
+   "label": "Người tạo"
   },
   {
    "fieldname": "creator_email",
    "fieldtype": "Data",
-   "label": "Email ng\u01b0\u1eddi t\u1ea1o",
+   "label": "Email người tạo",
    "read_only": 1
   },
   {
    "fieldname": "creator_fullname",
    "fieldtype": "Data",
-   "label": "H\u1ecd t\u00ean ng\u01b0\u1eddi t\u1ea1o",
+   "label": "Họ tên người tạo",
    "read_only": 1
   },
   {
@@ -171,65 +180,65 @@
   {
    "fieldname": "creator_department",
    "fieldtype": "Data",
-   "label": "Ph\u00f2ng ban"
+   "label": "Phòng ban"
   },
   {
    "fieldname": "assignment_section",
    "fieldtype": "Section Break",
-   "label": "Ph\u00e2n c\u00f4ng"
+   "label": "Phân công"
   },
   {
    "fieldname": "assigned_to",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Ng\u01b0\u1eddi x\u1eed l\u00fd",
+   "label": "Người xử lý",
    "options": "User"
   },
   {
    "fieldname": "assigned_to_fullname",
    "fieldtype": "Data",
-   "label": "T\u00ean ng\u01b0\u1eddi x\u1eed l\u00fd"
+   "label": "Tên người xử lý"
   },
   {
    "fieldname": "notes",
    "fieldtype": "Small Text",
-   "label": "Ghi ch\u00fa n\u1ed9i b\u1ed9"
+   "label": "Ghi chú nội bộ"
   },
   {
    "fieldname": "cancellation_reason",
    "fieldtype": "Small Text",
-   "label": "L\u00fd do \u0111\u00f3ng"
+   "label": "Lý do đóng"
   },
   {
    "fieldname": "feedback_section",
    "fieldtype": "Section Break",
-   "label": "\u0110\u00e1nh gi\u00e1"
+   "label": "Đánh giá"
   },
   {
    "default": "0",
    "fieldname": "feedback_rating",
    "fieldtype": "Int",
-   "label": "\u0110i\u1ec3m \u0111\u00e1nh gi\u00e1 (0-5)"
+   "label": "Điểm đánh giá (0-5)"
   },
   {
    "fieldname": "feedback_comment",
    "fieldtype": "Small Text",
-   "label": "Nh\u1eadn x\u00e9t \u0111\u00e1nh gi\u00e1"
+   "label": "Nhận xét đánh giá"
   },
   {
    "fieldname": "feedback_badges",
    "fieldtype": "JSON",
-   "label": "Badge \u0111\u00e1nh gi\u00e1"
+   "label": "Badge đánh giá"
   },
   {
    "fieldname": "closed_at",
    "fieldtype": "Datetime",
-   "label": "Th\u1eddi \u0111i\u1ec3m \u0111\u00f3ng"
+   "label": "Thời điểm đóng"
   },
   {
    "fieldname": "accepted_at",
    "fieldtype": "Datetime",
-   "label": "Th\u1eddi \u0111i\u1ec3m ch\u1ea5p nh\u1eadn x\u1eed l\u00fd"
+   "label": "Thời điểm chấp nhận xử lý"
   }
  ],
  "index_web_pages_for_search": 1,

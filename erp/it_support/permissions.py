@@ -7,19 +7,28 @@ _STAFF_ROLES = ("System Manager", "SIS IT", "SIS BOD")
 
 
 def it_support_ticket_query(user):
-	"""Lọc danh sách ticket: staff xem tất cả; user thường chỉ ticket của mình."""
+	"""Lọc ticket: staff theo campus; user thường chỉ ticket của mình (cùng campus)."""
 	if not user:
 		user = frappe.session.user
 	if user == "Administrator":
 		return ""
+
+	from erp.sis.utils.permission_query import get_campus_permission_query
+
+	campus_filter = get_campus_permission_query("ERP IT Support Ticket", user)
 	roles = frappe.get_roles(user) or []
+
 	if any(r in roles for r in _STAFF_ROLES):
-		return ""
+		return campus_filter
+
 	email = frappe.db.get_value("User", user, "email") or ""
 	conds = [f"`tabERP IT Support Ticket`.assigned_to = {frappe.db.escape(user)}"]
 	if email:
 		conds.append(f"`tabERP IT Support Ticket`.creator_email = {frappe.db.escape(email)}")
-	return f"({' OR '.join(conds)})"
+	user_cond = f"({' OR '.join(conds)})"
+	if campus_filter:
+		return f"({user_cond}) AND ({campus_filter})"
+	return user_cond
 
 
 def has_it_support_ticket_permission(doc, ptype, user):
@@ -29,6 +38,11 @@ def has_it_support_ticket_permission(doc, ptype, user):
 		return True
 	roles = frappe.get_roles(user) or []
 	if any(r in roles for r in _STAFF_ROLES):
+		# Staff vẫn phải thuộc campus của ticket
+		if getattr(doc, "campus_id", None):
+			from erp.sis.utils.campus_permissions import get_user_campuses
+			if doc.campus_id not in (get_user_campuses(user) or []):
+				return False
 		return True
 	email = (frappe.db.get_value("User", user, "email") or "").strip()
 	if ptype in ("read", "write", "create"):

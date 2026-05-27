@@ -141,3 +141,60 @@ def _get_crm_student_for_user(user: str) -> str | None:
 			return student
 	# Fallback: User name trùng student code (hiếm)
 	return frappe.db.get_value("CRM Student", {"student_code": user}, "name")
+
+def lms_announcement_query(user):
+	"""Permission query for LMS Announcement."""
+	return lms_campus_query(user, "LMS Announcement")
+
+def lms_submission_query(user):
+	"""Permission query for LMS Submission."""
+	return lms_campus_query(user, "LMS Submission")
+
+def lms_grade_entry_query(user):
+	"""Permission query for LMS Grade Entry."""
+	return lms_campus_query(user, "LMS Grade Entry")
+
+def lms_quiz_attempt_query(user):
+	"""Permission query for LMS Quiz Attempt."""
+	return lms_campus_query(user, "LMS Quiz Attempt")
+
+def lms_course_progress_query(user):
+	"""Permission query for LMS Course Progress."""
+	return lms_campus_query(user, "LMS Course Progress")
+
+def lms_content_progress_query(user):
+	"""Permission query for LMS Content Progress."""
+	return lms_campus_query(user, "LMS Content Progress")
+
+def lms_engagement_score_query(user):
+	"""Permission query for LMS Engagement Score."""
+	return lms_campus_query(user, "LMS Engagement Score")
+
+def lms_group_membership_query(user):
+	"""Permission query for LMS Group Membership."""
+	return lms_campus_query(user, "LMS Group Membership")
+
+def lms_grade_sync_log_query(user):
+	"""Permission query for LMS Grade Sync Log."""
+	return lms_campus_query(user, "LMS Grade Sync Log")
+
+def lms_activity_log_query(user):
+	"""Permission query for LMS Activity Log."""
+	return lms_campus_query(user, "LMS Activity Log")
+
+def lms_conversation_query(user):
+	"""Permission query for LMS Conversation."""
+	return lms_campus_query(user, "LMS Conversation")
+
+def lms_module_query(user):
+	"""Permission query for LMS Module."""
+	return lms_campus_query(user, "LMS Module")
+
+def lms_external_tool_query(user):
+	"""Permission query for LMS External Tool."""
+	return lms_campus_query(user, "LMS External Tool")
+
+def lms_blueprint_sync_log_query(user):
+	"""Permission query for LMS Blueprint Sync Log."""
+	return lms_campus_query(user, "LMS Blueprint Sync Log")
+

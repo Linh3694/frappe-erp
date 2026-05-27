@@ -7,29 +7,120 @@
  "module": "LMS",
  "name": "LMS Grade Sync Log",
  "permissions": [
-  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
  ],
  "sort_field": "creation",
  "sort_order": "DESC",
  "track_changes": 0,
  "field_order": [
-  "rule", "grade_column", "student_id", "score_sent", "status",
-  "column_break_1", "sis_document", "previous_sis_value", "error_message",
-  "pushed_at", "pushed_by", "approved_at", "approved_by"
+  "rule",
+  "campus_id",
+  "grade_column",
+  "student_id",
+  "score_sent",
+  "status",
+  "column_break_1",
+  "sis_document",
+  "previous_sis_value",
+  "error_message",
+  "pushed_at",
+  "pushed_by",
+  "approved_at",
+  "approved_by"
  ],
  "fields": [
-  {"fieldname": "rule", "fieldtype": "Link", "label": "Rule", "options": "LMS Grade Sync Rule", "in_list_view": 1},
-  {"fieldname": "grade_column", "fieldtype": "Link", "label": "Grade Column", "options": "LMS Grade Column", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "student_id", "fieldtype": "Link", "label": "Student", "options": "CRM Student", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "score_sent", "fieldtype": "Float", "label": "Score Sent", "in_list_view": 1},
-  {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "pending_approval\nsuccess\nconflict\nfailed\nskipped", "default": "pending_approval", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
-  {"fieldname": "sis_document", "fieldtype": "Data", "label": "SIS Document"},
-  {"fieldname": "previous_sis_value", "fieldtype": "Small Text", "label": "Previous SIS Value"},
-  {"fieldname": "error_message", "fieldtype": "Small Text", "label": "Error"},
-  {"fieldname": "pushed_at", "fieldtype": "Datetime", "label": "Pushed At"},
-  {"fieldname": "pushed_by", "fieldtype": "Link", "label": "Pushed By", "options": "User"},
-  {"fieldname": "approved_at", "fieldtype": "Datetime", "label": "Approved At"},
-  {"fieldname": "approved_by", "fieldtype": "Link", "label": "Approved By", "options": "User"}
+  {
+   "fieldname": "rule",
+   "fieldtype": "Link",
+   "label": "Rule",
+   "options": "LMS Grade Sync Rule",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "grade_column",
+   "fieldtype": "Link",
+   "label": "Grade Column",
+   "options": "LMS Grade Column",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "score_sent",
+   "fieldtype": "Float",
+   "label": "Score Sent",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "pending_approval\nsuccess\nconflict\nfailed\nskipped",
+   "default": "pending_approval",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sis_document",
+   "fieldtype": "Data",
+   "label": "SIS Document"
+  },
+  {
+   "fieldname": "previous_sis_value",
+   "fieldtype": "Small Text",
+   "label": "Previous SIS Value"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error"
+  },
+  {
+   "fieldname": "pushed_at",
+   "fieldtype": "Datetime",
+   "label": "Pushed At"
+  },
+  {
+   "fieldname": "pushed_by",
+   "fieldtype": "Link",
+   "label": "Pushed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved At"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User"
+  }
  ]
 }

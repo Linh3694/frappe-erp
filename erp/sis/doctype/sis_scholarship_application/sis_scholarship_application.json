@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "campus_id",
   "scholarship_period_id",
   "student_id",
   "student_name",
@@ -75,6 +76,14 @@
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Thông tin học sinh"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "scholarship_period_id",

@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "note_info",
+  "campus_id",
   "lead",
   "category",
   "cb_note_1",
@@ -34,6 +35,14 @@
   {
    "fieldname": "note_info",
    "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "lead",

@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "lead",
+  "campus_id",
   "old_step",
   "new_step",
   "old_status",
@@ -34,6 +35,14 @@
    "options": "CRM Lead",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "old_step",

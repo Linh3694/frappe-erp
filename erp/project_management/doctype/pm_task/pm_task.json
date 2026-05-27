@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
+  "campus_id",
   "project_id",
   "requirement_id",
   "title",
@@ -36,6 +37,14 @@
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "project_id",
@@ -169,4 +178,3 @@
  "title_field": "title",
  "track_changes": 1
 }
-

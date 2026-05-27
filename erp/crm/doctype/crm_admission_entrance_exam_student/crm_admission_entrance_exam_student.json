@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "entrance_exam_id",
+  "campus_id",
   "crm_lead_id",
   "status",
   "exam_result",
@@ -22,6 +23,14 @@
    "label": "Kỳ khảo sát",
    "options": "CRM Admission Entrance Exam",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "crm_lead_id",

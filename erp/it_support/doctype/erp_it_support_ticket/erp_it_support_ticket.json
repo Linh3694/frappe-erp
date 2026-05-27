@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "title",
+  "campus_id",
   "ticket_code",
   "status",
   "priority",
@@ -44,6 +45,14 @@
    "in_list_view": 1,
    "label": "Tiêu đề",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "ticket_code",

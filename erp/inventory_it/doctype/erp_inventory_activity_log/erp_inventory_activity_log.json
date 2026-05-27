@@ -5,6 +5,7 @@
  "track_changes": 1,
  "field_order": [
   "entity_type",
+  "campus_id",
   "entity",
   "type",
   "description",
@@ -20,6 +21,14 @@
    "label": "Entity Type",
    "reqd": 1,
    "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
    "in_standard_filter": 1
   },
   {

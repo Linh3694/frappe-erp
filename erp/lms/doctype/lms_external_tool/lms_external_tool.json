@@ -7,21 +7,80 @@
  "module": "LMS",
  "name": "LMS External Tool",
  "permissions": [
-  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1
+  }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
  "track_changes": 1,
  "field_order": [
-  "course", "title", "launch_url", "client_id", "deployment_id", "placement", "enabled"
+  "course",
+  "campus_id",
+  "title",
+  "launch_url",
+  "client_id",
+  "deployment_id",
+  "placement",
+  "enabled"
  ],
  "fields": [
-  {"fieldname": "course", "fieldtype": "Link", "label": "Course", "options": "LMS Course", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1, "in_list_view": 1},
-  {"fieldname": "launch_url", "fieldtype": "Data", "label": "Launch URL", "reqd": 1},
-  {"fieldname": "client_id", "fieldtype": "Data", "label": "Client ID"},
-  {"fieldname": "deployment_id", "fieldtype": "Data", "label": "Deployment ID"},
-  {"fieldname": "placement", "fieldtype": "Select", "label": "Placement", "options": "module_item\nproctoring", "default": "module_item"},
-  {"fieldname": "enabled", "fieldtype": "Check", "label": "Enabled", "default": "1", "in_list_view": 1}
+  {
+   "fieldname": "course",
+   "fieldtype": "Link",
+   "label": "Course",
+   "options": "LMS Course",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "launch_url",
+   "fieldtype": "Data",
+   "label": "Launch URL",
+   "reqd": 1
+  },
+  {
+   "fieldname": "client_id",
+   "fieldtype": "Data",
+   "label": "Client ID"
+  },
+  {
+   "fieldname": "deployment_id",
+   "fieldtype": "Data",
+   "label": "Deployment ID"
+  },
+  {
+   "fieldname": "placement",
+   "fieldtype": "Select",
+   "label": "Placement",
+   "options": "module_item\nproctoring",
+   "default": "module_item"
+  },
+  {
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled",
+   "default": "1",
+   "in_list_view": 1
+  }
  ]
 }

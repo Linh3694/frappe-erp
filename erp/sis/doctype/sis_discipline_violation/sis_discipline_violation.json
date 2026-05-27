@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "title",
+  "campus_id",
   "classification",
   "severity_level",
   "column_break_1",
@@ -28,6 +29,14 @@
    "length": 500,
    "reqd": 1,
    "unique": 0
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "classification",

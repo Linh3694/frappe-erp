@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "event_id",
+  "campus_id",
   "crm_lead_id",
   "status",
   "promotion_selections"
@@ -19,6 +20,14 @@
    "label": "Sự kiện",
    "options": "CRM Admission Event",
    "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "crm_lead_id",

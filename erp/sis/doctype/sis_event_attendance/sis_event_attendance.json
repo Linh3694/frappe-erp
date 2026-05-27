@@ -17,8 +17,9 @@
  "engine": "InnoDB",
  "field_order": [
   "event_information",
+  "campus_id",
   "event_id",
-  "attendance_date", 
+  "attendance_date",
   "student_information",
   "student_id",
   "status",
@@ -31,6 +32,14 @@
    "fieldname": "event_information",
    "fieldtype": "Section Break",
    "label": "Event Information"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "event_id",

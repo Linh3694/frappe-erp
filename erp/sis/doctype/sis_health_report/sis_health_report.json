@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_info_section",
+  "campus_id",
   "student_id",
   "student_name",
   "student_code",
@@ -31,6 +32,14 @@
    "fieldname": "basic_info_section",
    "fieldtype": "Section Break",
    "label": "Thông tin học sinh"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "student_id",

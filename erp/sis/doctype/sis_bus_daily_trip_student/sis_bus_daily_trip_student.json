@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "daily_trip_id",
+  "campus_id",
   "student_id",
   "class_student_id",
   "student_image",
@@ -40,6 +41,14 @@
    "options": "SIS Bus Daily Trip",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "student_id",

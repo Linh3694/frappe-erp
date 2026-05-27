@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "issue_info",
+  "campus_id",
   "issue_code",
   "title",
   "issue_module",
@@ -50,6 +51,14 @@
    "fieldtype": "Section Break"
   },
   {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
+  },
+  {
    "description": "Tu dong: PREFIX-00001 theo module",
    "fieldname": "issue_code",
    "fieldtype": "Data",
@@ -61,7 +70,7 @@
    "fieldname": "title",
    "fieldtype": "Data",
    "in_list_view": 1,
-  "label": "Title"
+   "label": "Title"
   },
   {
    "fieldname": "issue_module",
@@ -103,7 +112,7 @@
   },
   {
    "fieldname": "occurred_at",
-  "fieldtype": "Date",
+   "fieldtype": "Date",
    "label": "Occurred At",
    "reqd": 1
   },
@@ -250,14 +259,14 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-  "options": "Cho duyet\nTiep nhan\nDang xu ly\nHoan thanh\nDong",
+   "options": "Cho duyet\nTiep nhan\nDang xu ly\nHoan thanh\nDong",
    "reqd": 1
   },
   {
    "fieldname": "result",
    "fieldtype": "Select",
    "label": "Result",
-  "options": "\nHai long\nChua hai long"
+   "options": "\nHai long\nChua hai long"
   },
   {
    "fieldname": "process_section",

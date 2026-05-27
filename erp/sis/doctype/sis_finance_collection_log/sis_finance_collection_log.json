@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "section_basic",
+  "campus_id",
   "order_student_id",
   "activity_type",
   "outcome",
@@ -32,6 +33,14 @@
    "fieldname": "section_basic",
    "fieldtype": "Section Break",
    "label": "Thông tin"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "order_student_id",

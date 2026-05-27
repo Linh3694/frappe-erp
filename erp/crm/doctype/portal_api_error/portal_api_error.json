@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "error_info_section",
+  "campus_id",
   "error_id",
   "api_endpoint",
   "error_type",
@@ -44,6 +45,14 @@
    "fieldname": "error_info_section",
    "fieldtype": "Section Break",
    "label": "Error Information"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "error_id",

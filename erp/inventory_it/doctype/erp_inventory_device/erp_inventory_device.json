@@ -8,6 +8,7 @@
  "title_field": "name_display",
  "field_order": [
   "basic_section",
+  "campus_id",
   "device_type",
   "device_subtype",
   "name_display",
@@ -41,6 +42,14 @@
    "fieldname": "basic_section",
    "fieldtype": "Section Break",
    "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
   },
   {
    "fieldname": "device_type",

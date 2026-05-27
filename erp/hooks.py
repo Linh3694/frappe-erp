@@ -206,7 +206,7 @@ permission_query_conditions = {
 	"LMS Assignment": "erp.lms.utils.permissions.lms_course_query",
 	"LMS Grade Column": "erp.lms.utils.permissions.lms_course_section_query",
 	"LMS Grade Group": "erp.lms.utils.permissions.lms_course_section_query",
-	"LMS Announcement": "erp.lms.utils.permissions.lms_course_query",
+	"LMS Announcement": "erp.lms.utils.permissions.lms_announcement_query",
 	"LMS Quiz": "erp.lms.utils.permissions.lms_course_query",
 	"LMS Question Bank": "erp.lms.utils.permissions.lms_program_query",
 	"LMS Discussion": "erp.lms.utils.permissions.lms_course_query",
@@ -218,6 +218,88 @@ permission_query_conditions = {
 	"LMS Blueprint Course": "erp.lms.utils.permissions.lms_course_query",
 	# IT Support ticket
 	"ERP IT Support Ticket": "erp.it_support.permissions.it_support_ticket_query",
+	"SIS Health Examination": "erp.sis.utils.permission_query.sis_health_examination_query",
+	"SIS Daily Health Visit": "erp.sis.utils.permission_query.sis_daily_health_visit_query",
+	"SIS Health Report": "erp.sis.utils.permission_query.sis_health_report_query",
+	"SIS Scholarship Application": "erp.sis.utils.permission_query.sis_scholarship_application_query",
+	"SIS Scholarship Recommendation": "erp.sis.utils.permission_query.sis_scholarship_recommendation_query",
+	"SIS Timetable Pinned Slot": "erp.sis.utils.permission_query.sis_timetable_pinned_slot_query",
+	"SIS Event Attendance": "erp.sis.utils.permission_query.sis_event_attendance_query",
+	"Feedback": "erp.utils.campus_permission_query.feedback_query",
+	"SIS Bus Daily Trip Student": "erp.sis.utils.permission_query.sis_bus_daily_trip_student_query",
+	"SIS Bus Route Student": "erp.sis.utils.permission_query.sis_bus_route_student_query",
+	"SIS Menu Registration": "erp.sis.utils.permission_query.sis_menu_registration_query",
+	"SIS Menu Registration Period": "erp.sis.utils.permission_query.sis_menu_registration_period_query",
+	"SIS Teacher Education Stage": "erp.sis.utils.permission_query.sis_teacher_education_stage_query",
+	"SIS Finance Order": "erp.sis.utils.permission_query.sis_finance_order_query",
+	"SIS Finance Order Student": "erp.sis.utils.permission_query.sis_finance_order_student_query",
+	"SIS Finance Order Item": "erp.sis.utils.permission_query.sis_finance_order_item_query",
+	"SIS Finance Send Batch": "erp.sis.utils.permission_query.sis_finance_send_batch_query",
+	"SIS Finance Collection Log": "erp.sis.utils.permission_query.sis_finance_collection_log_query",
+	"SIS Finance Debit Note History": "erp.sis.utils.permission_query.sis_finance_debit_note_history_query",
+	"SIS Finance Student Document": "erp.sis.utils.permission_query.sis_finance_student_document_query",
+	"SIS Library Book Copy": "erp.sis.utils.permission_query.sis_library_book_copy_query",
+	"SIS Library Transaction": "erp.sis.utils.permission_query.sis_library_transaction_query",
+	"SIS Library Title": "erp.sis.utils.permission_query.sis_library_title_query",
+	"SIS Library Event": "erp.sis.utils.permission_query.sis_library_event_query",
+	"CRM Guardian": "erp.crm.utils.permission_query.crm_guardian_query",
+	"CRM Family": "erp.crm.utils.permission_query.crm_family_query",
+	"CRM Admission Course": "erp.crm.utils.permission_query.crm_admission_course_query",
+	"CRM Admission Course Student": "erp.crm.utils.permission_query.crm_admission_course_student_query",
+	"CRM Admission Entrance Exam": "erp.crm.utils.permission_query.crm_admission_entrance_exam_query",
+	"CRM Admission Entrance Exam Student": "erp.crm.utils.permission_query.crm_admission_entrance_exam_student_query",
+	"CRM Admission Event": "erp.crm.utils.permission_query.crm_admission_event_query",
+	"CRM Admission Event Student": "erp.crm.utils.permission_query.crm_admission_event_student_query",
+	"CRM Exam Score": "erp.crm.utils.permission_query.crm_exam_score_query",
+	"CRM Lead Note": "erp.crm.utils.permission_query.crm_lead_note_query",
+	"CRM Lead Step History": "erp.crm.utils.permission_query.crm_lead_step_history_query",
+	"Portal API Error": "erp.utils.campus_permission_query.portal_api_error_query",
+	"Portal Guardian Activity": "erp.utils.campus_permission_query.portal_guardian_activity_query",
+	"LMS Submission": "erp.lms.utils.permissions.lms_submission_query",
+	"LMS Grade Entry": "erp.lms.utils.permissions.lms_grade_entry_query",
+	"LMS Quiz Attempt": "erp.lms.utils.permissions.lms_quiz_attempt_query",
+	"LMS Course Progress": "erp.lms.utils.permissions.lms_course_progress_query",
+	"LMS Content Progress": "erp.lms.utils.permissions.lms_content_progress_query",
+	"LMS Engagement Score": "erp.lms.utils.permissions.lms_engagement_score_query",
+	"LMS Group Membership": "erp.lms.utils.permissions.lms_group_membership_query",
+	"LMS Grade Sync Log": "erp.lms.utils.permissions.lms_grade_sync_log_query",
+	"LMS Activity Log": "erp.lms.utils.permissions.lms_activity_log_query",
+	"LMS Conversation": "erp.lms.utils.permissions.lms_conversation_query",
+	"LMS Module": "erp.lms.utils.permissions.lms_module_query",
+	"LMS External Tool": "erp.lms.utils.permissions.lms_external_tool_query",
+	"LMS Blueprint Sync Log": "erp.lms.utils.permissions.lms_blueprint_sync_log_query",
+	"ERP Administrative Room Yearly Assignment": "erp.utils.campus_permission_query.erp_administrative_room_yearly_assignment_query",
+	"ERP Administrative Ticket": "erp.utils.campus_permission_query.erp_administrative_ticket_query",
+	"ERP Administrative Facility Handover": "erp.utils.campus_permission_query.erp_administrative_facility_handover_query",
+	"ERP Administrative Inventory Check": "erp.utils.campus_permission_query.erp_administrative_inventory_check_query",
+	"ERP Administrative Room Activity Log": "erp.utils.campus_permission_query.erp_administrative_room_activity_log_query",
+	"ERP Administrative Room Facility Equipment": "erp.utils.campus_permission_query.erp_administrative_room_facility_equipment_query",
+	"ERP Inventory Device": "erp.utils.campus_permission_query.erp_inventory_device_query",
+	"ERP Inventory Inspection": "erp.utils.campus_permission_query.erp_inventory_inspection_query",
+	"ERP Inventory Handover Log": "erp.utils.campus_permission_query.erp_inventory_handover_log_query",
+	"ERP Inventory Activity Log": "erp.utils.campus_permission_query.erp_inventory_activity_log_query",
+	"PM Task": "erp.utils.campus_permission_query.pm_task_query",
+	"PM Meeting": "erp.utils.campus_permission_query.pm_meeting_query",
+	"PM Project Member": "erp.utils.campus_permission_query.pm_project_member_query",
+	"PM Resource": "erp.utils.campus_permission_query.pm_resource_query",
+	"PM Requirement": "erp.utils.campus_permission_query.pm_requirement_query",
+	"PM Change Log": "erp.utils.campus_permission_query.pm_change_log_query",
+	"PM Project Invitation": "erp.utils.campus_permission_query.pm_project_invitation_query",
+	"SIS Discipline Record": "erp.sis.utils.permission_query.sis_discipline_record_query",
+	"SIS Discipline Classification": "erp.sis.utils.permission_query.sis_discipline_classification_query",
+	"SIS Discipline Form": "erp.sis.utils.permission_query.sis_discipline_form_query",
+	"SIS Discipline Time": "erp.sis.utils.permission_query.sis_discipline_time_query",
+	"SIS Discipline Violation": "erp.sis.utils.permission_query.sis_discipline_violation_query",
+	"SIS First Aid": "erp.sis.utils.permission_query.sis_first_aid_query",
+	"SIS Medicine": "erp.sis.utils.permission_query.sis_medicine_query",
+	"SIS Disease Classification": "erp.sis.utils.permission_query.sis_disease_classification_query",
+	# Pre-Phase-2 gap (đã có campus_id)
+	"ERP Administrative Room": "erp.utils.campus_permission_query.erp_administrative_room_query",
+	"ERP Administrative Building": "erp.utils.campus_permission_query.erp_administrative_building_query",
+	"ERP Administrative Academic Year Closure": "erp.utils.campus_permission_query.erp_administrative_academic_year_closure_query",
+	"CRM PIC Config": "erp.utils.campus_permission_query.crm_pic_config_query",
+	"CRM Student": "erp.utils.campus_permission_query.crm_student_query",
+	"PM Project": "erp.utils.campus_permission_query.pm_project_query",
 }
 
 has_permission = {
@@ -320,6 +402,86 @@ has_permission = {
 	"LMS Blueprint Sync Log": "erp.lms.utils.permissions.has_lms_campus_permission",
 	# IT Support ticket
 	"ERP IT Support Ticket": "erp.it_support.permissions.has_it_support_ticket_permission",
+	"SIS Health Examination": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Daily Health Visit": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Health Report": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Scholarship Application": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Scholarship Recommendation": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Timetable Pinned Slot": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Event Attendance": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"Feedback": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"SIS Bus Daily Trip Student": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Bus Route Student": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Menu Registration": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Menu Registration Period": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Teacher Education Stage": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Finance Order": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Finance Order Student": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Finance Order Item": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Finance Send Batch": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Finance Collection Log": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Finance Debit Note History": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Finance Student Document": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Library Book Copy": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Library Transaction": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Library Title": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Library Event": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"CRM Guardian": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Family": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Admission Course": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Admission Course Student": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Admission Entrance Exam": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Admission Entrance Exam Student": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Admission Event": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Admission Event Student": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Exam Score": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Lead Note": "erp.crm.utils.permission_query.has_crm_permission",
+	"CRM Lead Step History": "erp.crm.utils.permission_query.has_crm_permission",
+	"Portal API Error": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"Portal Guardian Activity": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"LMS Submission": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Grade Entry": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Quiz Attempt": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Course Progress": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Content Progress": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Engagement Score": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Group Membership": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Activity Log": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Conversation": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS Module": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"LMS External Tool": "erp.lms.utils.permissions.has_lms_campus_permission",
+	"ERP Administrative Room Yearly Assignment": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Administrative Ticket": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Administrative Facility Handover": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Administrative Inventory Check": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Administrative Room Activity Log": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Administrative Room Facility Equipment": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Inventory Device": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Inventory Inspection": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Inventory Handover Log": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Inventory Activity Log": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Task": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Meeting": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Project Member": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Resource": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Requirement": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Change Log": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Project Invitation": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"SIS Discipline Record": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Discipline Classification": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Discipline Form": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Discipline Time": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Discipline Violation": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS First Aid": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Medicine": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Disease Classification": "erp.sis.utils.campus_permissions.has_campus_permission",
+	# Pre-Phase-2 gap (đã có campus_id)
+	"ERP Administrative Room": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Administrative Building": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Administrative Academic Year Closure": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"CRM PIC Config": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"CRM Student": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"PM Project": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 }
 
 # DocType Class
@@ -622,6 +784,7 @@ doc_events = {
 		]
 	},
 	"Feedback": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
 		"after_insert": [
 			"erp.observability.audit.log_create"
 		],
@@ -719,7 +882,250 @@ doc_events = {
 		"on_trash": [
 			"erp.observability.audit.log_delete"
 		]
-	}
+	},
+	"SIS Student Timetable": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Teacher Timetable": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Timetable Override": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Event Date Time": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Announcement": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Issue": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP IT Support Ticket": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Health Examination": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Daily Health Visit": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Health Report": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Scholarship Application": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Scholarship Recommendation": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Timetable Pinned Slot": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Event Attendance": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Bus Daily Trip Student": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Bus Route Student": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Menu Registration": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Menu Registration Period": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Teacher Education Stage": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Finance Order": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Finance Order Student": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Finance Order Item": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Finance Send Batch": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Finance Collection Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Finance Debit Note History": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Finance Student Document": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Library Book Copy": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Library Transaction": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Library Title": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Library Event": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Guardian": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Family": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Admission Course": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Admission Course Student": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Admission Entrance Exam": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Admission Entrance Exam Student": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Admission Event": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Admission Event Student": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Exam Score": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Lead Note": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"CRM Lead Step History": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"Portal API Error": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"Portal Guardian Activity": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Submission": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Grade Entry": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Quiz Attempt": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Course Progress": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Content Progress": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Engagement Score": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Group Membership": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Grade Sync Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Activity Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Conversation": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Module": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS External Tool": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"LMS Blueprint Sync Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Administrative Room Yearly Assignment": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Administrative Ticket": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Administrative Facility Handover": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Administrative Inventory Check": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Administrative Room Activity Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Administrative Room Facility Equipment": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Inventory Device": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Inventory Inspection": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Inventory Handover Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Inventory Activity Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Task": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Meeting": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Project Member": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Resource": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Requirement": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Change Log": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Project Invitation": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Discipline Record": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Discipline Classification": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Discipline Form": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Discipline Time": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Discipline Violation": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS First Aid": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Medicine": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Disease Classification": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
 }
 
 # Scheduled Tasks

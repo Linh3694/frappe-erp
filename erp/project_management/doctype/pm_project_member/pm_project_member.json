@@ -17,6 +17,7 @@
  "engine": "InnoDB",
  "field_order": [
   "project_id",
+  "campus_id",
   "user_id",
   "role",
   "joined_at"
@@ -29,6 +30,14 @@
    "options": "PM Project",
    "reqd": 1,
    "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
    "in_standard_filter": 1
   },
   {
@@ -97,4 +106,3 @@
  "states": [],
  "track_changes": 1
 }
-
