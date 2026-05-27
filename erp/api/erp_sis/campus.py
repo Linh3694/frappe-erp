@@ -40,33 +40,62 @@ def _resolve_request_user() -> str:
 
 
 def _resolve_str_param(name: str, value=None) -> str | None:
-	"""Đọc tham số string từ argument, form_dict hoặc JSON body (Frappe POST)."""
-	if value:
-		return str(value)
-	value = frappe.form_dict.get(name)
-	if value:
-		return str(value)
+	"""Đọc tham số string từ argument, form_dict, query, form hoặc body (JSON/urlencoded)."""
+	if value not in (None, ""):
+		return str(value).strip() or None
+
+	candidates: list = []
+
+	def _append(val):
+		if val is None:
+			return
+		if isinstance(val, (list, tuple)):
+			for item in val:
+				_append(item)
+			return
+		text = str(val).strip()
+		if text:
+			candidates.append(text)
+
 	try:
-		if hasattr(frappe.request, "json") and frappe.request.json:
-			raw = frappe.request.json.get(name)
-			if raw:
-				return str(raw)
+		_append(frappe.form_dict.get(name))
 	except Exception:
 		pass
+
 	try:
-		if frappe.request and frappe.request.data:
-			import json
-			body = frappe.request.data
-			if isinstance(body, bytes):
-				body = body.decode("utf-8")
-			if body:
-				data = json.loads(body)
-				raw = data.get(name)
-				if raw:
-					return str(raw)
+		if frappe.local and getattr(frappe.local, "form_dict", None):
+			_append(frappe.local.form_dict.get(name))
 	except Exception:
 		pass
-	return None
+
+	try:
+		req = getattr(frappe.local, "request", None) or frappe.request
+		if req:
+			if getattr(req, "args", None):
+				_append(req.args.get(name))
+			if getattr(req, "form", None):
+				_append(req.form.get(name))
+	except Exception:
+		pass
+
+	try:
+		req = getattr(frappe.local, "request", None) or frappe.request
+		if req and req.data:
+			raw_body = req.data
+			if isinstance(raw_body, bytes):
+				raw_body = raw_body.decode("utf-8")
+			raw_body = (raw_body or "").strip()
+			if raw_body.startswith("{"):
+				import json
+				_append(json.loads(raw_body).get(name))
+			elif "=" in raw_body:
+				from urllib.parse import parse_qs
+				parsed = parse_qs(raw_body, keep_blank_values=False)
+				_append(parsed.get(name))
+	except Exception:
+		pass
+
+	return candidates[0] if candidates else None
 
 
 def _campus_row(campus_doc) -> dict:
