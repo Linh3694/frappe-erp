@@ -77,19 +77,11 @@ def get_all_students(include_all_campuses=0):
         frappe.logger().info(f"get_all_students called with: include_all_campuses={include_all_campuses}")
 
         if include_all_campuses:
-            # Get filter for all user's campuses
             from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
             filters = get_campus_filter_for_all_user_campuses()
         else:
-            # Get current user's campus information from roles
-            campus_id = get_current_campus_from_context()
-
-            if not campus_id:
-                # Fallback to default if no campus found
-                campus_id = "campus-1"
-
-            # Apply campus filtering for data isolation
-            filters = {"campus_id": campus_id}
+            from erp.utils.campus_utils import get_campus_filter_for_api
+            filters = get_campus_filter_for_api()
         
         # Always fetch all students - no pagination
         students = frappe.get_all(

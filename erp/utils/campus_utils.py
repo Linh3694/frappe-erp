@@ -193,6 +193,67 @@ def get_campus_filter_for_all_user_campuses(user_email=None):
         return {"campus_id": ""}
 
 
+def get_active_campus_id(user=None):
+    """
+    Campus đang active để lọc dữ liệu khi user switch campus trên FE.
+    Thứ tự: X-Campus-Id / request body > SIS User Campus Preference > 1 campus role duy nhất.
+    """
+    user = user or frappe.session.user
+    if user == "Administrator":
+        return None
+
+    # HTTP request — FE gửi X-Campus-Id sau khi đổi campus
+    try:
+        if getattr(frappe.local, "request", None):
+            campus = get_current_campus_from_context()
+            if campus and validate_user_campus_access(user, campus):
+                return campus
+    except Exception:
+        pass
+
+    # Preference đã lưu (reload trang vẫn giữ campus)
+    try:
+        from erp.sis.doctype.sis_user_campus_preference.sis_user_campus_preference import (
+            SISUserCampusPreference,
+        )
+
+        pref = SISUserCampusPreference.get_current_campus()
+        if pref and validate_user_campus_access(user, pref):
+            return pref
+    except Exception:
+        pass
+
+    campus_ids = get_all_campus_ids_from_user_roles(user)
+    if len(campus_ids) == 1:
+        return campus_ids[0]
+    return None
+
+
+def get_campus_filter_for_api(user_email=None, include_all_campuses=0):
+    """
+    Filter campus cho API list — mặc định campus đang chọn, không phải tất cả campus của user.
+    include_all_campuses=1: chỉ dùng khi nghiệp vụ cần xem cross-campus (report tổng hợp).
+    """
+    if int(include_all_campuses or 0):
+        return get_campus_filter_for_all_user_campuses(user_email)
+
+    active = get_active_campus_id(user_email)
+    if active:
+        return {"campus_id": active}
+
+    return get_campus_filter_for_all_user_campuses(user_email)
+
+
+def resolve_campus_param(campus=None):
+    """Resolve tham số campus từ API — fallback campus đang active."""
+    if campus:
+        return campus
+    active = get_active_campus_id()
+    if active:
+        return active
+    return get_current_campus_from_context()
+
+
 def validate_user_campus_access(user_email, campus_id):
     """
     Check if user has access to specific campus_id

@@ -20,24 +20,10 @@ def get_all_evaluation_scales(page=1, limit=20, include_all_campuses=0):
 
         frappe.logger().info(f"get_all_evaluation_scales called with page: {page}, limit: {limit}, include_all_campuses: {include_all_campuses}")
 
-        if include_all_campuses:
-            # Get filter for all user's campuses
-            from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
-            filters = get_campus_filter_for_all_user_campuses()
-            frappe.logger().info(f"Using all user campuses filter: {filters}")
-        else:
-            # Get current user's campus information from roles
-            campus_id = get_current_campus_from_context()
+        from erp.utils.campus_utils import get_campus_filter_for_api
 
-            if not campus_id:
-                # Fallback to default if no campus found
-                campus_id = "campus-1"
-                frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
-
-            frappe.logger().info(f"Using campus_id: {campus_id}")
-
-            # Apply campus filtering for data isolation
-            filters = {"campus_id": campus_id}
+        filters = get_campus_filter_for_api(include_all_campuses=include_all_campuses)
+        frappe.logger().info(f"Campus filters: {filters}")
 
         frappe.logger().info(f"Final filters applied: {filters}")
 

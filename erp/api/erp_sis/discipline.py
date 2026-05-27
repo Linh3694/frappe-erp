@@ -272,14 +272,17 @@ def get_discipline_classifications(campus: str = None):
     Lấy danh sách phân loại kỷ luật theo campus
     """
     try:
+        from erp.utils.campus_utils import resolve_campus_param
+
         filters = {"enabled": 1}
+        campus = resolve_campus_param(campus)
         if campus:
-            filters["campus"] = campus
+            filters["campus_id"] = campus
 
         classifications = frappe.get_all(
             "SIS Discipline Classification",
             filters=filters,
-            fields=["name", "title", "campus", "enabled", "creation", "modified"],
+            fields=["name", "title", "campus", "campus_id", "enabled", "creation", "modified"],
             order_by="title asc",
         )
 
@@ -434,14 +437,17 @@ def delete_discipline_classification(name: str = None):
 def get_discipline_forms(campus: str = None):
     """Lấy danh sách hình thức kỷ luật theo campus"""
     try:
+        from erp.utils.campus_utils import resolve_campus_param
+
         filters = {"enabled": 1}
+        campus = resolve_campus_param(campus)
         if campus:
-            filters["campus"] = campus
+            filters["campus_id"] = campus
 
         forms = frappe.get_all(
             "SIS Discipline Form",
             filters=filters,
-            fields=["name", "title", "campus", "enabled", "creation", "modified"],
+            fields=["name", "title", "campus", "campus_id", "enabled", "creation", "modified"],
             order_by="title asc",
         )
 
@@ -566,14 +572,17 @@ def delete_discipline_form(name: str = None):
 def get_discipline_times(campus: str = None):
     """Lấy danh sách khai báo thời gian kỷ luật theo campus"""
     try:
+        from erp.utils.campus_utils import resolve_campus_param
+
         filters = {"enabled": 1}
+        campus = resolve_campus_param(campus)
         if campus:
-            filters["campus"] = campus
+            filters["campus_id"] = campus
 
         times = frappe.get_all(
             "SIS Discipline Time",
             filters=filters,
-            fields=["name", "title", "campus", "enabled", "creation", "modified"],
+            fields=["name", "title", "campus", "campus_id", "enabled", "creation", "modified"],
             order_by="title asc",
         )
 
@@ -749,9 +758,12 @@ def get_discipline_violations(campus: str = None, include_points: str = None):
         campus = campus or data.get("campus")
         include_points = include_points if include_points is not None else data.get("include_points", "0")
 
+        from erp.utils.campus_utils import resolve_campus_param
+
         filters = {"enabled": 1}
+        campus = resolve_campus_param(campus)
         if campus:
-            filters["campus"] = campus
+            filters["campus_id"] = campus
 
         violations = frappe.get_all(
             "SIS Discipline Violation",
@@ -762,6 +774,7 @@ def get_discipline_violations(campus: str = None, include_points: str = None):
                 "classification",
                 "severity_level",
                 "campus",
+                "campus_id",
                 "enabled",
                 "creation",
                 "modified",
@@ -2404,12 +2417,11 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
         date_to = (req.get("date_to") or "").strip()
 
         filters = {}
+        from erp.utils.campus_utils import resolve_campus_param
+
+        campus = resolve_campus_param(campus or req.get("campus"))
         if campus:
-            filters["campus"] = campus
-        else:
-            campus_id = get_current_campus_from_context()
-            if campus_id:
-                filters["campus"] = campus_id
+            filters["campus_id"] = campus
 
         campus_for_search = filters.get("campus")
         owner_for_search = None
@@ -2540,12 +2552,11 @@ def get_discipline_records_for_export(
             )
 
         filters = {"date": ["between", [date_from, date_to]]}
-        if campus:
-            filters["campus"] = campus
-        else:
-            campus_id = get_current_campus_from_context()
-            if campus_id:
-                filters["campus"] = campus_id
+        from erp.utils.campus_utils import resolve_campus_param
+
+        campus_resolved = resolve_campus_param(campus or req.get("campus"))
+        if campus_resolved:
+            filters["campus_id"] = campus_resolved
 
         records = frappe.get_all(
             doctype="SIS Discipline Record",

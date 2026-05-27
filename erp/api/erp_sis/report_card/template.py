@@ -65,11 +65,9 @@ def get_all_templates(
         offset = (page - 1) * limit
 
         # Build filters
-        if include_all_campuses:
-            from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
-            filters = get_campus_filter_for_all_user_campuses()
-        else:
-            filters = {"campus_id": get_current_campus_id()}
+        from erp.utils.campus_utils import get_campus_filter_for_api
+
+        filters = get_campus_filter_for_api(include_all_campuses=include_all_campuses)
 
         # Optional filters
         if school_year:

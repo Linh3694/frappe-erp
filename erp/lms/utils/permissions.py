@@ -27,9 +27,16 @@ def _get_user_campus_ids(user: str) -> list:
 
 
 def lms_campus_query(user: str, doctype: str) -> str:
-	"""Filter DocType có campus_id."""
+	"""Filter DocType có campus_id — theo campus đang chọn."""
 	if "System Manager" in frappe.get_roles(user):
 		return ""
+
+	from erp.utils.campus_utils import get_active_campus_id
+
+	active = get_active_campus_id(user)
+	if active:
+		return f"`tab{doctype}`.campus_id = '{active}'"
+
 	campus_ids = _get_user_campus_ids(user)
 	if not campus_ids:
 		return "1=0"
@@ -60,10 +67,16 @@ def lms_video_asset_query(user):
 def has_lms_campus_permission(doc, ptype, user):
 	if "System Manager" in frappe.get_roles(user):
 		return True
-	if not getattr(doc, "campus_id", None):
+	doc_campus = getattr(doc, "campus_id", None)
+	if not doc_campus:
 		return True
+	from erp.utils.campus_utils import get_active_campus_id
+
+	active = get_active_campus_id(user)
+	if active:
+		return doc_campus == active
 	campus_ids = _get_user_campus_ids(user)
-	return doc.campus_id in campus_ids
+	return doc_campus in campus_ids
 
 
 def is_lms_staff(user: str | None = None) -> bool:

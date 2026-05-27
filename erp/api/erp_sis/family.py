@@ -1573,6 +1573,15 @@ def search_families(search_term=None, page=1, limit=20):
         # Build search terms (use parameterized queries)
         where_clauses = ["1=1"]  # Base condition
         params = []
+
+        campus_id = get_current_campus_from_context()
+        if campus_id:
+            # Lọc family có student hoặc campus_id trùng campus đang chọn
+            where_clauses.append(
+                "(f.campus_id = %s OR s.campus_id = %s OR g.campus_id = %s)"
+            )
+            params.extend([campus_id, campus_id, campus_id])
+
         if search_term and str(search_term).strip():
             like = f"%{str(search_term).strip()}%"
             where_clauses.append("(LOWER(f.family_code) LIKE LOWER(%s) OR LOWER(s.student_name) LIKE LOWER(%s) OR LOWER(g.guardian_name) LIKE LOWER(%s))")

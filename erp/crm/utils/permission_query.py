@@ -72,10 +72,16 @@ def has_crm_permission(doc, ptype, user):
 	if not any(role in user_roles for role in allowed_roles):
 		return False
 
-	# Lọc theo campus khi document đã có campus_id
-	if getattr(doc, "campus_id", None):
+	# Lọc theo campus đang chọn (không phải tất cả campus role)
+	doc_campus = getattr(doc, "campus_id", None)
+	if doc_campus:
+		from erp.utils.campus_utils import get_active_campus_id
+
+		active = get_active_campus_id(user)
+		if active:
+			return doc_campus == active
 		campus_ids = _get_user_campus_ids(user)
-		if campus_ids and doc.campus_id not in campus_ids:
+		if campus_ids and doc_campus not in campus_ids:
 			return False
 
 	return True

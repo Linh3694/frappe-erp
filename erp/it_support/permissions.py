@@ -39,9 +39,16 @@ def has_it_support_ticket_permission(doc, ptype, user):
 	roles = frappe.get_roles(user) or []
 	if any(r in roles for r in _STAFF_ROLES):
 		# Staff vẫn phải thuộc campus của ticket
-		if getattr(doc, "campus_id", None):
+		doc_campus = getattr(doc, "campus_id", None)
+		if doc_campus:
+			from erp.utils.campus_utils import get_active_campus_id
+
+			active = get_active_campus_id(user)
+			if active:
+				return doc_campus == active
 			from erp.sis.utils.campus_permissions import get_user_campuses
-			if doc.campus_id not in (get_user_campuses(user) or []):
+
+			if doc_campus not in (get_user_campuses(user) or []):
 				return False
 		return True
 	email = (frappe.db.get_value("User", user, "email") or "").strip()

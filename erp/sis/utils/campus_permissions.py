@@ -41,42 +41,53 @@ def has_campus_permission(doc, ptype="read", user=None):
     """Check if user has permission to access a document based on campus_id"""
     if not user:
         user = frappe.session.user
-    
+
     if user == "Administrator":
         return True
-    
-    # Check if document has campus_id field
-    if not hasattr(doc, "campus_id") or not doc.campus_id:
-        return True  # Allow access if no campus restriction
-    
-    # Get user's accessible campuses
+
+    doc_campus = getattr(doc, "campus_id", None) or getattr(doc, "campus", None)
+    if not doc_campus:
+        # Record chưa backfill campus — cho phép tạm thời; PQ list vẫn lọc theo campus_id
+        return True
+
+    from erp.utils.campus_utils import get_active_campus_id
+
+    active = get_active_campus_id(user)
+    if active:
+        return doc_campus == active
+
     user_campuses = get_user_campuses(user)
-    
-    # Check if document's campus is in user's accessible campuses
-    return doc.campus_id in user_campuses
+    return doc_campus in user_campuses
 
 
 def get_campus_filter(doctype, user=None):
-    """Get filter conditions for campus-based access"""
+    """Get filter conditions for campus-based access — theo campus đang chọn, không phải tất cả campus role."""
     if not user:
         user = frappe.session.user
-        
+
     if user == "Administrator":
         return {}  # No filter for Administrator
-    
-    # Check if doctype has campus_id field
+
     meta = frappe.get_meta(doctype)
     has_campus_field = any(field.fieldname == "campus_id" for field in meta.fields)
-    
+
     if not has_campus_field:
         return {}  # No campus filter for doctypes without campus_id
-    
-    # Get user's accessible campuses
+
+    from erp.utils.campus_utils import get_active_campus_id
+
+    active = get_active_campus_id(user)
+    if active:
+        return {"campus_id": active}
+
     user_campuses = get_user_campuses(user)
-    
+
     if not user_campuses:
         return {"campus_id": ""}  # Return impossible condition if no campus access
-    
+
+    if len(user_campuses) == 1:
+        return {"campus_id": user_campuses[0]}
+
     return {"campus_id": ["in", user_campuses]}
 
 

@@ -16,18 +16,10 @@ def campus_doctype_query(doctype: str, user: str) -> str:
 
 
 def has_campus_doctype_permission(doc, ptype, user):
-	"""Kiểm tra quyền theo campus_id."""
-	if user == "Administrator" or "System Manager" in frappe.get_roles(user):
-		return True
-	if not getattr(doc, "campus_id", None):
-		return True
-	campus_filter = get_campus_filter(doc.doctype, user)
-	if not campus_filter or "campus_id" not in campus_filter:
-		return False
-	cfid = campus_filter["campus_id"]
-	if isinstance(cfid, list) and cfid[0] == "in":
-		return doc.campus_id in cfid[1]
-	return doc.campus_id == cfid
+	"""Kiểm tra quyền theo campus_id — campus đang active."""
+	from erp.sis.utils.campus_permissions import has_campus_permission
+
+	return has_campus_permission(doc, ptype, user)
 
 
 # --- Wrapper cụ thể (generator có thể bổ sung thêm) ---

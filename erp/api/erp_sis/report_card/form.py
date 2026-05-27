@@ -58,11 +58,9 @@ def get_all_forms(page: int = 1, limit: int = 50, include_all_campuses: int = 0)
         offset = (page - 1) * limit
         include_all_campuses = int(include_all_campuses or 0)
         
-        if include_all_campuses:
-            from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
-            filters = get_campus_filter_for_all_user_campuses()
-        else:
-            filters = {"campus_id": get_current_campus_id()}
+        from erp.utils.campus_utils import get_campus_filter_for_api
+
+        filters = get_campus_filter_for_api(include_all_campuses=include_all_campuses)
             
         rows = frappe.get_all(
             "SIS Report Card Form",

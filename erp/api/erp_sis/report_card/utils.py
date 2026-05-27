@@ -36,17 +36,11 @@ def get_request_payload() -> Dict[str, Any]:
 
 def get_current_campus_id() -> str:
     """
-    Lấy campus ID hiện tại từ context.
-    
-    Returns:
-        Campus ID string, fallback về "campus-1" nếu không có
+    Lấy campus ID đang active từ context / preference.
     """
-    from erp.utils.campus_utils import get_current_campus_from_context
-    
-    campus_id = get_current_campus_from_context()
-    if not campus_id:
-        campus_id = "campus-1"
-    return campus_id
+    from erp.utils.campus_utils import get_active_campus_id, get_current_campus_from_context
+
+    return get_active_campus_id() or get_current_campus_from_context() or ""
 
 
 def parse_json_field(value: Any, default: Any = None) -> Any:
