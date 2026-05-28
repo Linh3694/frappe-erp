@@ -386,12 +386,55 @@ def get_device_statistics(device_type=None):
 		standby = frappe.db.count("ERP Inventory Device", {"device_type": dt, "status": "Standby"})
 		broken = frappe.db.count("ERP Inventory Device", {"device_type": dt, "status": "Broken"})
 		pending = frappe.db.count("ERP Inventory Device", {"device_type": dt, "status": "PendingDocumentation"})
+
+		# Sparkline 30 ngày — 1 query GROUP BY thay vì 30 lần count
+		today = frappe.utils.getdate()
+		start_date = frappe.utils.add_days(today, -29)
+		additions_rows = frappe.db.sql(
+			"""
+			SELECT DATE(creation) AS day, COUNT(*) AS cnt
+			FROM `tabERP Inventory Device`
+			WHERE device_type = %s AND DATE(creation) >= %s
+			GROUP BY DATE(creation)
+			ORDER BY day ASC
+			""",
+			(dt, start_date),
+			as_dict=True,
+		)
+		count_by_day = {str(r.day): int(r.cnt) for r in additions_rows}
+		additions_30d = []
+		for i in range(29, -1, -1):
+			d = frappe.utils.add_days(today, -i)
+			key = str(d)
+			additions_30d.append({"date": key, "value": count_by_day.get(key, 0)})
+
+		# Tuổi thiết bị cũ nhất — ưu tiên release_year, fallback creation
+		oldest_row = frappe.db.sql(
+			"""
+			SELECT MIN(release_year) AS yr, MIN(creation) AS first_at
+			FROM `tabERP Inventory Device`
+			WHERE device_type = %s
+			""",
+			dt,
+			as_dict=True,
+		)
+		oldest_age_years = None
+		if oldest_row and oldest_row[0]:
+			yr = oldest_row[0].yr
+			if yr:
+				oldest_age_years = round(today.year - int(yr), 1)
+			elif oldest_row[0].first_at:
+				first = frappe.utils.getdate(oldest_row[0].first_at)
+				oldest_age_years = round((today - first).days / 365.25, 1)
+
 		return {
 			"total": total,
 			"active": active,
 			"standby": standby,
 			"broken": broken,
 			"pendingDocumentation": pending,
+			"additions_30d": additions_30d,
+			"oldest_device_age_years": oldest_age_years,
 		}
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "erp_inventory.get_device_statistics")
