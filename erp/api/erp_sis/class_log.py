@@ -23,6 +23,30 @@ def _extract_period_number(period_name):
     return int(match.group()) if match else None
 
 
+def _period_name_matches(requested_period, stored_period):
+    """Khớp tên tiết yêu cầu với bản ghi DB — exact, trim, hoặc cùng số tiết."""
+    if not requested_period or stored_period is None:
+        return False
+    req = str(requested_period)
+    stored = str(stored_period)
+    if stored in {req, req.strip()} or stored.strip() in {req, req.strip()}:
+        return True
+    req_num = _extract_period_number(req)
+    if req_num is None:
+        return False
+    return _extract_period_number(stored) == req_num
+
+
+def _find_subject_log_for_period(subject_by_period, period):
+    """Tìm subject log theo tên tiết — fallback số tiết giống get_class_log."""
+    if period in subject_by_period:
+        return subject_by_period[period]
+    for log_period, log in subject_by_period.items():
+        if _period_name_matches(period, log_period):
+            return log
+    return None
+
+
 def _parse_valid_from(vf):
     """Parse valid_from từ Timetable Instance Row để so sánh dedup."""
     if not vf:
@@ -915,18 +939,17 @@ def batch_get_class_logs():
         
         timetable_instance = inst_row[0]['name']
         
-        # Batch query: Get all subject logs for these periods at once
+        # Batch query toàn bộ tiết trong ngày — map theo tên/số tiết (tránh lệch key batch vs get_class_log)
         subject_logs = frappe.get_all(
             "SIS Class Log Subject",
             filters={
                 "timetable_instance_id": timetable_instance,
                 "log_date": date,
-                "period": ["in", periods]
             },
             fields=["name", "period", "class_id", "general_comment", "lesson_name", "lesson_score", "is_practise_test", "homework_assignment"]
         )
         
-        # Build map: period -> subject
+        # Build map: period -> subject (key gốc từ DB)
         subject_by_period = {log['period']: log for log in subject_logs}
         
         # Batch query: Get all student logs for these subjects at once
@@ -972,7 +995,7 @@ def batch_get_class_logs():
         # Build result structure for each period
         result = {}
         for period in periods:
-            subject = subject_by_period.get(period)
+            subject = _find_subject_log_for_period(subject_by_period, period)
             
             if subject:
                 # We have logs for this period

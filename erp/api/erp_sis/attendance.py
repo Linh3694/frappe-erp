@@ -6,6 +6,7 @@ import requests
 from datetime import datetime
 from erp.utils.api_response import success_response, error_response
 from erp.utils.school_day_utils import is_school_instruction_day
+from erp.api.erp_sis.utils.cache_utils import clear_attendance_cache
 
 
 ATTENDANCE_STATUSES = {"present", "absent", "late", "excused"}
@@ -15,6 +16,30 @@ def _period_num_from_name(period_name):
 	"""Lấy số tiết đầu tiên trong chuỗi (đồng bộ logic với class_log)."""
 	match = re.search(r"\d+", period_name or "")
 	return int(match.group()) if match else None
+
+
+def _period_name_matches(requested_period, stored_period):
+	"""Khớp tên tiết yêu cầu với bản ghi DB — exact, trim, hoặc cùng số tiết."""
+	if not requested_period or stored_period is None:
+		return False
+	req = str(requested_period)
+	stored = str(stored_period)
+	if stored in {req, req.strip()} or stored.strip() in {req, req.strip()}:
+		return True
+	req_num = _period_num_from_name(req)
+	if req_num is None:
+		return False
+	return _period_num_from_name(stored) == req_num
+
+
+def _map_attendance_rows_by_periods(all_rows, periods):
+	"""Gán bản ghi điểm danh vào từng tiết yêu cầu — đồng bộ get_class_attendance."""
+	result = {p: [] for p in periods}
+	for req_period in periods:
+		for row in all_rows or []:
+			if _period_name_matches(req_period, row.get("period")):
+				result[req_period].append(row)
+	return result
 
 
 def invalidate_class_attendance_cache(class_id, date_str, period):
@@ -771,13 +796,12 @@ def batch_get_class_attendance(class_id=None, date=None, periods=None):
 		frappe.logger().info(f"❌ Cache MISS for batch_attendance {class_id}/{date} - fetching from DB")
 		frappe.logger().info(f"🔍 [Backend] batch_get_class_attendance: class={class_id}, date={date}, periods={len(periods)}")
 		
-		# Batch query all periods at once
+		# Batch query toàn bộ tiết trong ngày — map theo tên/số tiết (tránh lệch "Tiết 11" vs DB)
 		rows = frappe.get_all(
 			"SIS Class Attendance",
 			filters={
 				"class_id": class_id,
 				"date": date,
-				"period": ["in", periods]
 			},
 			fields=[
 				"name", "student_id", "student_code", "student_name", 
@@ -785,15 +809,7 @@ def batch_get_class_attendance(class_id=None, date=None, periods=None):
 			]
 		)
 		
-		# Group by period
-		result = {}
-		for period in periods:
-			result[period] = []
-		
-		for row in rows:
-			period = row.get('period')
-			if period in result:
-				result[period].append(row)
+		result = _map_attendance_rows_by_periods(rows, periods)
 		
 		frappe.logger().info(f"✅ [Backend] batch_get_class_attendance: Found {len(rows)} total records across {len(periods)} periods")
 		
@@ -962,40 +978,12 @@ def save_class_attendance(items=None, overwrite=None):
 		except Exception as notif_error:
 			frappe.logger().warning(f"Mobile notification failed: {notif_error}")
 
-		# ⚡ CACHE: Clear attendance cache after save (both single and batch)
+		# ⚡ CACHE: Xóa cache điểm danh (single + batch) qua helper chuẩn — tránh stale attendance_batch
 		try:
-			cache = frappe.cache()
+			unique_class_dates = set((item['class_id'], item['date']) for item in valid_items)
 			cache_cleared = 0
-			
-			# Get unique class/date/period combinations
-			cleared_keys = set()
-			for item in valid_items:
-				class_id = item['class_id']
-				date = item['date']
-				period = item['period']
-				
-				# Clear single period cache using delete_value (same method as set_value)
-				single_key = f"attendance:{class_id}:{date}:{period}"
-				if single_key not in cleared_keys:
-					cache.delete_value(single_key)
-					cleared_keys.add(single_key)
-					cache_cleared += 1
-					frappe.logger().info(f"🗑️ Cleared cache key: {single_key}")
-			
-			# Also try to clear using Redis directly for batch patterns
-			try:
-				redis_conn = cache.redis_cache if hasattr(cache, 'redis_cache') else None
-				if redis_conn and hasattr(redis_conn, 'scan_iter'):
-					unique_class_dates = set((item['class_id'], item['date']) for item in valid_items)
-					for class_id, date in unique_class_dates:
-						batch_pattern = f"*attendance_batch:{class_id}:{date}:*"
-						batch_keys = list(redis_conn.scan_iter(match=batch_pattern, count=100))
-						if batch_keys:
-							redis_conn.delete(*batch_keys)
-							cache_cleared += len(batch_keys)
-			except Exception as redis_error:
-				frappe.logger().warning(f"Redis batch clear failed: {redis_error}")
-
+			for class_id, date in unique_class_dates:
+				cache_cleared += clear_attendance_cache(class_id, date)
 			frappe.logger().info(f"✅ Cleared {cache_cleared} attendance cache keys after save")
 		except Exception as cache_error:
 			frappe.logger().warning(f"Cache clear failed: {cache_error}")
