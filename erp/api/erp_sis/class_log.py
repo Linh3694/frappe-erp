@@ -828,10 +828,30 @@ def save_class_log():
 
         t_mark = time.perf_counter()
         try:
-            clear_class_log_cache(class_id, date)
-            frappe.logger().info(
-                f"✅ Cleared class_log cache after save: {class_id}/{date}/{period or 'none'}"
+            # Lấy class_id/log_date/period từ subject doc — tránh body thiếu date khi save theo timetable_instance
+            subject_row = frappe.db.get_value(
+                "SIS Class Log Subject",
+                subject_id,
+                ["class_id", "log_date", "period"],
+                as_dict=True,
             )
+            clear_class = (subject_row or {}).get("class_id") or class_id
+            clear_date = (subject_row or {}).get("log_date") or date
+            clear_period = (subject_row or {}).get("period") or period
+            if clear_date:
+                clear_date = str(clear_date)[:10]
+            if clear_class and clear_date:
+                cache_cleared = clear_class_log_cache(clear_class, clear_date)
+                # Xóa cache API đơn theo tiết (deterministic — không phụ thuộc scan_iter)
+                single_key = f"class_log:{clear_class}:{clear_date}:{clear_period or 'none'}"
+                frappe.cache().delete_value(single_key)
+                frappe.logger().info(
+                    f"✅ Cleared class_log cache after save: {clear_class}/{clear_date}/{clear_period or 'none'} ({cache_cleared} keys)"
+                )
+            else:
+                frappe.logger().warning(
+                    f"⚠️ Skip class_log cache clear — missing class_id/date (subject_id={subject_id})"
+                )
         except Exception as cache_error:
             frappe.logger().warning(f"Cache clear failed: {cache_error}")
         timings_ms["cache_clear"] = round((time.perf_counter() - t_mark) * 1000)
