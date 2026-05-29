@@ -21,6 +21,7 @@ from erp.api.erp_inventory.inventory_helpers import (
 	apply_specs_to_doc,
 	build_device_filters,
 	device_doc_to_fe,
+	get_user_job_title,
 	normalize_device_type,
 	paginated_devices_response,
 	parse_request_data,
@@ -591,7 +592,7 @@ def assign_device(device_type=None, device_id=None):
 			log_doc.save(ignore_permissions=True)
 
 		fullname = frappe.db.get_value("User", new_user, "full_name") or new_user
-		job_title = frappe.db.get_value("User", new_user, "job_title") or frappe.db.get_value("User", new_user, "designation") or "Không xác định"
+		job_title = get_user_job_title(new_user) or "Không xác định"
 
 		frappe.get_doc(
 			{

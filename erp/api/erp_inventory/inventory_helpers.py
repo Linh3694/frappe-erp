@@ -145,6 +145,19 @@ def resolve_user_link(user_hint: Optional[str]) -> Optional[str]:
 	return None
 
 
+def get_user_job_title(user_name: Optional[str]) -> str:
+	"""Lấy chức danh User — User chuẩn Frappe có thể không có cột designation trên DB."""
+	if not user_name:
+		return ""
+	user_meta = frappe.get_meta("User")
+	job_title = ""
+	if user_meta.has_field("job_title"):
+		job_title = frappe.db.get_value("User", user_name, "job_title") or ""
+	if not job_title and user_meta.has_field("designation"):
+		job_title = frappe.db.get_value("User", user_name, "designation") or ""
+	return job_title or ""
+
+
 def resolve_room_link(room_key: Optional[str]) -> Optional[str]:
 	"""Map physical_code / title / name → ERP Administrative Room.name."""
 	key = (room_key or "").strip()
@@ -168,9 +181,7 @@ def user_to_fe(user_name: Optional[str]) -> Optional[Dict[str, Any]]:
 		["name", "email", "full_name", "user_image", "department"],
 		as_dict=True,
 	)
-	job_title = frappe.db.get_value("User", user_name, "job_title") or frappe.db.get_value(
-		"User", user_name, "designation"
-	)
+	job_title = get_user_job_title(user_name)
 	return {
 		"_id": u.name,
 		"fullname": u.full_name or u.name,
@@ -379,9 +390,7 @@ def sync_current_holder_from_assigned(doc):
 		last = doc.assigned_users[-1]
 		doc.current_holder_user = last.user
 		doc.current_holder_fullname = last.fullname_snapshot or frappe.db.get_value("User", last.user, "full_name")
-		doc.current_holder_jobtitle = frappe.db.get_value("User", last.user, "job_title") or frappe.db.get_value(
-			"User", last.user, "designation"
-		)
+		doc.current_holder_jobtitle = get_user_job_title(last.user)
 		doc.current_holder_department = frappe.db.get_value("User", last.user, "department") or ""
 	else:
 		doc.current_holder_user = None
