@@ -47,6 +47,101 @@ def _find_subject_log_for_period(subject_by_period, period):
     return None
 
 
+def _lesson_log_status_lookup_key(class_id, date, period):
+    """Key map trạng thái sổ đầu bài — khớp buildLessonCellKey trên FE."""
+    return f"{date}|{period}|{class_id}"
+
+
+def _is_subject_log_complete(subject):
+    """Sổ đầu bài đủ thông tin tiết — logic khớp isClassLogComplete trên FE."""
+    if not subject:
+        return False
+    if subject.get("is_practise_test") in (1, True):
+        return True
+    lesson_name = (subject.get("lesson_name") or "").strip()
+    lesson_score = subject.get("lesson_score")
+    score = str(lesson_score).strip() if lesson_score is not None else ""
+    return bool(lesson_name and score)
+
+
+def _batch_lesson_log_status_for_items(items):
+    """
+    Tính is_complete cho danh sách (class_id, date, period).
+    Trả về dict lookup_key -> { is_complete: bool }.
+    """
+    if not items:
+        return {}
+
+    normalized = []
+    seen = set()
+    for raw in items:
+        class_id = raw.get("class_id")
+        date = raw.get("date")
+        period = raw.get("period")
+        if not class_id or not date or not period:
+            continue
+        key = _lesson_log_status_lookup_key(class_id, date, period)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"class_id": class_id, "date": date, "period": period})
+
+    if not normalized:
+        return {}
+
+    class_dates = list({(i["class_id"], i["date"]) for i in normalized})
+    instance_by_class_date = {}
+
+    for class_id, date in class_dates:
+        inst_row = frappe.get_all(
+            "SIS Timetable Instance",
+            filters={
+                "class_id": class_id,
+                "start_date": ["<=", date],
+                "end_date": [">=", date],
+            },
+            fields=["name"],
+            limit=1,
+        )
+        instance_by_class_date[(class_id, date)] = inst_row[0]["name"] if inst_row else None
+
+    instance_ids = [v for v in instance_by_class_date.values() if v]
+    dates = list({i["date"] for i in normalized})
+
+    logs_by_instance_date = {}
+    if instance_ids and dates:
+        subject_logs = frappe.get_all(
+            "SIS Class Log Subject",
+            filters={
+                "timetable_instance_id": ["in", instance_ids],
+                "log_date": ["in", dates],
+            },
+            fields=["timetable_instance_id", "log_date", "period", "lesson_name", "lesson_score", "is_practise_test"],
+        )
+        for log in subject_logs:
+            inst_id = log.get("timetable_instance_id")
+            log_date = str(log.get("log_date") or "")
+            bucket_key = (inst_id, log_date)
+            if bucket_key not in logs_by_instance_date:
+                logs_by_instance_date[bucket_key] = {}
+            period_key = log.get("period")
+            if period_key is not None:
+                logs_by_instance_date[bucket_key][period_key] = log
+
+    result = {}
+    for item in normalized:
+        class_id = item["class_id"]
+        date = item["date"]
+        period = item["period"]
+        lookup = _lesson_log_status_lookup_key(class_id, date, period)
+        inst_id = instance_by_class_date.get((class_id, date))
+        subject_by_period = logs_by_instance_date.get((inst_id, date), {}) if inst_id else {}
+        subject = _find_subject_log_for_period(subject_by_period, period)
+        result[lookup] = {"is_complete": _is_subject_log_complete(subject)}
+
+    return result
+
+
 def _parse_valid_from(vf):
     """Parse valid_from từ Timetable Instance Row để so sánh dedup."""
     if not vf:
@@ -879,6 +974,76 @@ def save_class_log():
         frappe.db.rollback()
         frappe.log_error(f"save_class_log error: {str(e)}")
         return error_response(message="Failed to save class log", code="SAVE_CLASS_LOG_ERROR")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def batch_get_lesson_log_status():
+    """
+    Trạng thái sổ đầu bài nhẹ cho lưới TKB — không trả roster học sinh.
+
+    POST body:
+    {
+        "items": [
+            {"class_id": "CLASS-001", "date": "2025-10-10", "period": "Tiết 1"},
+            ...
+        ]
+    }
+
+    Returns:
+    {
+        "2025-10-10|Tiết 1|CLASS-001": { "is_complete": true },
+        ...
+    }
+    """
+    import hashlib
+
+    try:
+        body = _get_body() or {}
+        items = body.get("items") or []
+
+        if not items or not isinstance(items, list):
+            return error_response(message="items must be a non-empty array", code="INVALID_ITEMS")
+
+        items_hash = hashlib.md5(
+            json.dumps(sorted(
+                [
+                    f"{i.get('date')}|{i.get('period')}|{i.get('class_id')}"
+                    for i in items
+                    if i.get("class_id") and i.get("date") and i.get("period")
+                ]
+            )).encode()
+        ).hexdigest()[:12]
+        cache_key = f"lesson_log_status_batch:{items_hash}"
+
+        try:
+            cached_data = frappe.cache().get_value(cache_key)
+            if cached_data is not None:
+                return success_response(
+                    data=cached_data,
+                    message="Lesson log status fetched (cached)",
+                )
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache read failed: {cache_error}")
+
+        start = time.time()
+        result = _batch_lesson_log_status_for_items(items)
+        elapsed = (time.time() - start) * 1000
+        frappe.logger().info(
+            f"batch_get_lesson_log_status: {len(result)} keys in {elapsed:.0f}ms"
+        )
+
+        try:
+            frappe.cache().set_value(cache_key, result, expires_in_sec=600)
+        except Exception as cache_error:
+            frappe.logger().warning(f"Cache write failed: {cache_error}")
+
+        return success_response(data=result, message="Lesson log status fetched successfully")
+    except Exception as e:
+        frappe.log_error(f"batch_get_lesson_log_status error: {str(e)}")
+        return error_response(
+            message=f"Failed to fetch lesson log status: {str(e)}",
+            code="BATCH_LESSON_LOG_STATUS_ERROR",
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
