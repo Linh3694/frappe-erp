@@ -56,6 +56,7 @@ def get_teachers_with_assignment_summary(search_term=None):
                 t.name as teacher_id,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
                 t.user_id,
+                u.user_image as avatar_url,
 
                 -- Aggregations
                 COUNT(DISTINCT sa.class_id) as total_classes,

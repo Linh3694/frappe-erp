@@ -88,199 +88,164 @@ def search_classes(search_term: str = None):
         )
 
 
+def _resolve_get_all_classes_school_year_id(school_year_id: str = None):
+    """Lấy school_year_id từ tham số / query / form / body."""
+    if school_year_id:
+        return school_year_id
+    try:
+        if hasattr(frappe.request, "args") and frappe.request.args:
+            school_year_id = frappe.request.args.get("school_year_id")
+            if school_year_id:
+                return school_year_id
+    except Exception:
+        pass
+
+    form = frappe.local.form_dict or {}
+    school_year_id = form.get("school_year_id")
+    if school_year_id:
+        return school_year_id
+
+    if frappe.request and frappe.request.data:
+        try:
+            body = (
+                frappe.request.data.decode("utf-8")
+                if isinstance(frappe.request.data, bytes)
+                else frappe.request.data
+            )
+            data = json.loads(body or "{}")
+            return data.get("school_year_id")
+        except Exception:
+            pass
+    return None
+
+
+def _build_teacher_info_from_join(
+    teacher_doc_name,
+    user_id,
+    user_full_name,
+    user_email=None,
+    user_image=None,
+):
+    """Tạo dict homeroom_teacher_info từ cột JOIN — đủ cho FE list/card."""
+    if not user_id:
+        return None
+    display = user_full_name or teacher_doc_name or user_id
+    return {
+        "name": teacher_doc_name or user_id,
+        "user_id": user_id,
+        "email": user_email,
+        "full_name": user_full_name,
+        "teacher_name": display,
+        "user_image": user_image,
+    }
+
+
+def _strip_join_columns_from_class_row(cls: dict):
+    """Xóa cột tạm từ SQL JOIN trước khi trả API."""
+    for key in [
+        "homeroom_teacher_user_id",
+        "homeroom_teacher_user_full_name",
+        "homeroom_teacher_user_email",
+        "homeroom_teacher_user_image",
+        "vice_homeroom_teacher_user_id",
+        "vice_homeroom_teacher_user_full_name",
+        "vice_homeroom_teacher_user_email",
+        "vice_homeroom_teacher_user_image",
+    ]:
+        cls.pop(key, None)
+
+
+def _fetch_all_classes_with_teachers(campus_id: str, school_year_id: str = None):
+    """
+    ⚡ Một query JOIN thay vì N+1 enrich từng lớp (dùng cho get_all_classes).
+    """
+    params = {"campus_id": campus_id or "campus-1"}
+    school_year_filter = ""
+    if school_year_id:
+        school_year_filter = "AND c.school_year_id = %(school_year_id)s"
+        params["school_year_id"] = school_year_id
+
+    sql = """
+        SELECT
+            c.name,
+            c.title,
+            c.short_title,
+            c.campus_id,
+            c.school_year_id,
+            c.education_grade,
+            c.academic_program,
+            c.homeroom_teacher,
+            c.vice_homeroom_teacher,
+            c.room,
+            c.class_type,
+            c.creation,
+            c.modified,
+            t1.user_id AS homeroom_teacher_user_id,
+            u1.full_name AS homeroom_teacher_user_full_name,
+            u1.email AS homeroom_teacher_user_email,
+            u1.user_image AS homeroom_teacher_user_image,
+            t2.user_id AS vice_homeroom_teacher_user_id,
+            u2.full_name AS vice_homeroom_teacher_user_full_name,
+            u2.email AS vice_homeroom_teacher_user_email,
+            u2.user_image AS vice_homeroom_teacher_user_image
+        FROM `tabSIS Class` c
+        LEFT JOIN `tabSIS Teacher` t1 ON c.homeroom_teacher = t1.name
+        LEFT JOIN `tabUser` u1 ON t1.user_id = u1.name
+        LEFT JOIN `tabSIS Teacher` t2 ON c.vice_homeroom_teacher = t2.name
+        LEFT JOIN `tabUser` u2 ON t2.user_id = u2.name
+        WHERE c.campus_id = %(campus_id)s
+        {school_year_filter}
+        ORDER BY c.title ASC
+    """.format(school_year_filter=school_year_filter)
+
+    rows = frappe.db.sql(sql, params, as_dict=True)
+    enhanced = []
+
+    for row in rows:
+        cls = dict(row)
+        if cls.get("homeroom_teacher"):
+            cls["homeroom_teacher_info"] = _build_teacher_info_from_join(
+                cls.get("homeroom_teacher"),
+                cls.get("homeroom_teacher_user_id"),
+                cls.get("homeroom_teacher_user_full_name"),
+                cls.get("homeroom_teacher_user_email"),
+                cls.get("homeroom_teacher_user_image"),
+            )
+        if cls.get("vice_homeroom_teacher"):
+            cls["vice_homeroom_teacher_info"] = _build_teacher_info_from_join(
+                cls.get("vice_homeroom_teacher"),
+                cls.get("vice_homeroom_teacher_user_id"),
+                cls.get("vice_homeroom_teacher_user_full_name"),
+                cls.get("vice_homeroom_teacher_user_email"),
+                cls.get("vice_homeroom_teacher_user_image"),
+            )
+        _strip_join_columns_from_class_row(cls)
+        enhanced.append(cls)
+
+    return enhanced
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_classes(school_year_id: str = None, campus_id: str = None):
     """List all classes with optional filter by school_year_id and campus_id."""
     try:
-        # Get current user's campus information from roles/JWT
         if not campus_id:
             campus_id = get_current_campus_from_context()
 
-        # If campus cannot be resolved, don't hard-fallback to a fixed campus
-        # Allow showing classes across campuses to avoid returning empty lists on mobile
+        campus_id = campus_id or "campus-1"
+        school_year_id = _resolve_get_all_classes_school_year_id(school_year_id)
 
-        # Apply campus filtering for data isolation
-        filters = {"campus_id": (campus_id or "campus-1")}
-        
-        # accept school_year_id from query/form/body
-        if not school_year_id:
-            # Check query parameters first
-            try:
-                if hasattr(frappe.request, 'args') and frappe.request.args:
-                    school_year_id = frappe.request.args.get('school_year_id')
-            except Exception:
-                pass
-
-            # Check form data
-            if not school_year_id:
-                form = frappe.local.form_dict or {}
-                school_year_id = form.get("school_year_id")
-
-            # Check request body
-            if not school_year_id and frappe.request and frappe.request.data:
-                try:
-                    body = frappe.request.data.decode('utf-8') if isinstance(frappe.request.data, bytes) else frappe.request.data
-                    data = json.loads(body or '{}')
-                    school_year_id = data.get('school_year_id')
-                except Exception:
-                    pass
-
-        if school_year_id:
-            filters["school_year_id"] = school_year_id
-
-        frappe.logger().info(f"Final filters: {filters}")
-
-        classes = frappe.get_all(
-            "SIS Class",
-            fields=[
-                "name",
-                "title",
-                "short_title",
-                "campus_id",
-                "school_year_id",
-                "education_grade",
-                "academic_program",
-                "homeroom_teacher",
-                "vice_homeroom_teacher",
-                "room",
-                "class_type",
-                "creation",
-                "modified",
-            ],
-            filters=filters,
-            order_by="title asc"
+        frappe.logger().info(
+            f"get_all_classes campus_id={campus_id} school_year_id={school_year_id}"
         )
 
-        frappe.logger().info(f"Found {len(classes)} classes with filters: {filters}")
+        enhanced_classes = _fetch_all_classes_with_teachers(campus_id, school_year_id)
 
-        # Enhance classes with teacher information
-        enhanced_classes = []
-        for class_data in classes:
-            enhanced_class = class_data.copy()
-
-            # Get homeroom teacher details
-            if class_data.get("homeroom_teacher"):
-                teacher_info = frappe.get_all(
-                    "SIS Teacher",
-                    fields=["user_id"],
-                    filters={"name": class_data["homeroom_teacher"]},
-                    limit=1
-                )
-
-                if teacher_info:
-                    teacher = teacher_info[0]
-                    if teacher.get("user_id"):
-                        # Get user information
-                        user_info = frappe.get_all(
-                            "User",
-                            fields=[
-                                "name",
-                                "email",
-                                "full_name",
-                                "first_name",
-                                "last_name",
-                                "user_image"
-                            ],
-                            filters={"name": teacher["user_id"]},
-                            limit=1
-                        )
-
-                        if user_info:
-                            enhanced_class["homeroom_teacher_info"] = enrich_teacher_info(
-                                teacher["user_id"],
-                                class_data["homeroom_teacher"]
-                            )
-
-                        # Try to get employee information from Employee doctype (if available)
-                        try:
-                            employee_info = frappe.get_all(
-                                "Employee",
-                                fields=[
-                                    "employee_number",
-                                    "employee_name",
-                                    "designation",
-                                    "department"
-                                ],
-                                filters={"user_id": teacher["user_id"]},
-                                limit=1
-                            )
-
-                            if employee_info and enhanced_class.get("homeroom_teacher_info"):
-                                employee = employee_info[0]
-                                enhanced_class["homeroom_teacher_info"].update({
-                                    "employee_code": employee.get("employee_number"),
-                                    "employee_name": employee.get("employee_name"),
-                                    "designation": employee.get("designation"),
-                                    "department": employee.get("department")
-                                })
-                        except Exception:
-                            # Employee doctype might not exist or be accessible
-                            pass
-
-            # Get vice homeroom teacher details
-            if class_data.get("vice_homeroom_teacher"):
-                teacher_info = frappe.get_all(
-                    "SIS Teacher",
-                    fields=["user_id"],
-                    filters={"name": class_data["vice_homeroom_teacher"]},
-                    limit=1
-                )
-
-                if teacher_info:
-                    teacher = teacher_info[0]
-                    if teacher.get("user_id"):
-                        # Get user information
-                        user_info = frappe.get_all(
-                            "User",
-                            fields=[
-                                "name",
-                                "email",
-                                "full_name",
-                                "first_name",
-                                "last_name",
-                                "user_image"
-                            ],
-                            filters={"name": teacher["user_id"]},
-                            limit=1
-                        )
-
-                        if user_info:
-                            enhanced_class["vice_homeroom_teacher_info"] = enrich_teacher_info(
-                                teacher["user_id"],
-                                class_data["vice_homeroom_teacher"]
-                            )
-
-                        # Try to get employee information from Employee doctype (if available)
-                        try:
-                            employee_info = frappe.get_all(
-                                "Employee",
-                                fields=[
-                                    "employee_number",
-                                    "employee_name",
-                                    "designation",
-                                    "department"
-                                ],
-                                filters={"user_id": teacher["user_id"]},
-                                limit=1
-                            )
-
-                            if employee_info and enhanced_class.get("vice_homeroom_teacher_info"):
-                                employee = employee_info[0]
-                                enhanced_class["vice_homeroom_teacher_info"].update({
-                                    "employee_code": employee.get("employee_number"),
-                                    "employee_name": employee.get("employee_name"),
-                                    "designation": employee.get("designation"),
-                                    "department": employee.get("department")
-                                })
-                        except Exception:
-                            # Employee doctype might not exist or be accessible
-                            pass
-
-            enhanced_classes.append(enhanced_class)
+        frappe.logger().info(f"Found {len(enhanced_classes)} classes (JOIN)")
 
         return success_response(
             data=enhanced_classes,
-            message="Classes fetched successfully"
+            message="Classes fetched successfully",
         )
     except Exception as e:
         frappe.log_error(f"Error fetching classes: {str(e)}")
