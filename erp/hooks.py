@@ -1339,10 +1339,10 @@ scheduler_events = {
             "erp.api.erp_sis.attendance.remind_homeroom_attendance",
             "erp.api.erp_sis.attendance.daily_homeroom_attendance_report"
         ],
-        # Báo cáo kỷ luật THCS/THPT — 17:00 hàng ngày (email; non-production khi đang thử nghiệm)
-        "0 17 * * *": [
-            "erp.api.erp_sis.discipline_report.daily_discipline_email_report"
-        ],
+        # TẠM TẮT — hết năm học; bật lại sau khi sửa logic (discipline_report)
+        # "0 17 * * *": [
+        #     "erp.api.erp_sis.discipline_report.daily_discipline_email_report"
+        # ],
         # Aggregate Parent Portal Analytics lúc 23:00 hàng ngày
         "0 23 * * *": [
             "erp.api.analytics.portal_analytics.aggregate_portal_analytics"
