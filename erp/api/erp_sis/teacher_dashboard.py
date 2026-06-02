@@ -296,6 +296,108 @@ def get_teacher_classes_optimized():
         return error_response(f"Error fetching teacher classes: {str(e)}")
 
 
+def _resolve_teacher_name(teacher_id):
+	"""Map user email / SIS Teacher name → doc name."""
+	if not teacher_id:
+		return None
+	if frappe.db.exists("SIS Teacher", teacher_id):
+		return teacher_id
+	return frappe.db.get_value("SIS Teacher", {"user_id": teacher_id}, "name")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_teacher_timetable_context(teacher_id=None):
+	"""
+	Context nhẹ cho TKB giáo viên — thay get_all_subject_assignments (~944KB).
+
+	Returns education_stages GV được phân công + default stage.
+	"""
+	try:
+		teacher_user_id = (
+			teacher_id
+			or frappe.local.form_dict.get("teacher_id")
+			or frappe.request.args.get("teacher_id")
+			or frappe.session.user
+		)
+		if not teacher_user_id:
+			return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
+
+		cache_key = f"teacher_timetable_ctx:{teacher_user_id}"
+		try:
+			cached = frappe.cache().get_value(cache_key)
+			if cached:
+				return success_response(data=cached, message="Teacher timetable context (cached)")
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache read failed: {cache_error}")
+
+		teacher_name = _resolve_teacher_name(teacher_user_id)
+		campus_id = get_current_campus_from_context() or "campus-1"
+
+		stage_rows = []
+		if teacher_name:
+			stage_rows = frappe.db.sql(
+				"""
+				SELECT DISTINCT es.name, es.title_vn, es.title_en, es.short_title
+				FROM `tabSIS Education Stage` es
+				WHERE es.name IN (
+					SELECT DISTINCT eg.education_stage_id
+					FROM `tabSIS Subject Assignment` sa
+					INNER JOIN `tabSIS Class` c ON sa.class_id = c.name
+					INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+					WHERE sa.teacher_id = %(teacher_name)s
+						AND sa.campus_id = %(campus_id)s
+						AND eg.education_stage_id IS NOT NULL
+					UNION
+					SELECT DISTINCT tes.education_stage_id
+					FROM `tabSIS Teacher Education Stage` tes
+					WHERE tes.teacher_id = %(teacher_name)s
+						AND IFNULL(tes.is_active, 1) = 1
+						AND tes.education_stage_id IS NOT NULL
+				)
+				ORDER BY es.title_vn ASC, es.name ASC
+				""",
+				{"teacher_name": teacher_name, "campus_id": campus_id},
+				as_dict=True,
+			)
+
+		if not stage_rows:
+			stage_rows = frappe.get_all(
+				"SIS Education Stage",
+				fields=["name", "title_vn", "title_en", "short_title"],
+				order_by="title_vn asc",
+			)
+
+		education_stages = [
+			{
+				"name": row.name,
+				"title_vn": row.get("title_vn"),
+				"title_en": row.get("title_en"),
+				"short_title": row.get("short_title"),
+			}
+			for row in stage_rows
+			if row.get("name")
+		]
+
+		default_education_stage = education_stages[0]["name"] if education_stages else None
+
+		result = {
+			"teacher_name": teacher_name,
+			"teacher_user_id": teacher_user_id,
+			"education_stages": education_stages,
+			"default_education_stage": default_education_stage,
+		}
+
+		try:
+			frappe.cache().set_value(cache_key, result, expires_in_sec=1800)
+		except Exception as cache_error:
+			frappe.logger().warning(f"Cache write failed: {cache_error}")
+
+		return success_response(data=result, message="Teacher timetable context fetched successfully")
+	except Exception as e:
+		frappe.log_error(f"get_teacher_timetable_context error: {str(e)}")
+		return error_response(f"Error fetching teacher timetable context: {str(e)}")
+
+
 @frappe.whitelist(allow_guest=False)
 def get_teacher_week_optimized():
     """
