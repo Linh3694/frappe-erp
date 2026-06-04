@@ -1424,6 +1424,139 @@ def get_responsible_user_handover_status():
         return error_response(str(e))
 
 
+def _teacher_class_list_for_facility(user, school_year_id):
+    """Lớp CN + lớp giảng dạy của GV — hub CSVC giảng dạy."""
+    from erp.api.erp_sis.sis_class import get_teacher_classes
+
+    res = get_teacher_classes(teacher_user_id=user, school_year_id=school_year_id)
+    if not res or not res.get("success"):
+        return []
+    data = res.get("data") or {}
+    return (data.get("homeroom_classes") or []) + (data.get("teaching_classes") or [])
+
+
+def _room_display_title(room_id):
+    """Tên hiển thị phòng ERP."""
+    if not room_id:
+        return ""
+    rv = frappe.db.get_value(
+        "ERP Administrative Room",
+        room_id,
+        ["title_vn", "short_title", "physical_code", "name"],
+        as_dict=True,
+    )
+    if not rv:
+        return room_id
+    return (
+        (rv.get("short_title") or "").strip()
+        or (rv.get("title_vn") or "").strip()
+        or (rv.get("physical_code") or "").strip()
+        or rv.get("name")
+        or room_id
+    )
+
+
+@frappe.whitelist(allow_guest=False)
+def get_teacher_handed_over_rooms():
+    """
+    Hub CSVC (Lớp & Giảng dạy): phòng đã có bàn giao cho GV (lớp CN + giảng dạy + phòng chức năng PIC).
+    """
+    try:
+        data = _parse_json_body()
+        school_year_id = (data.get("school_year_id") or "").strip() or _active_school_year_id_api()
+        user = frappe.session.user
+        if not school_year_id:
+            return validation_error_response(_("Thiếu năm học"), {"school_year_id": ["required"]})
+
+        rows = []
+        seen = set()
+
+        for cls in _teacher_class_list_for_facility(user, school_year_id):
+            class_id = cls.get("name")
+            room_id = cls.get("room")
+            if not class_id or not room_id:
+                continue
+            key = ("class", class_id, room_id)
+            if key in seen:
+                continue
+            inner = _handover_payload_for_class(class_id)
+            if not inner.get("has_handover"):
+                continue
+            seen.add(key)
+            handover = inner.get("handover") or {}
+            rows.append(
+                {
+                    "room_id": room_id,
+                    "room_title": _room_display_title(room_id),
+                    "handover_type": "class",
+                    "handover_status": handover.get("status"),
+                    "class_id": class_id,
+                    "class_title": (cls.get("title") or cls.get("short_title") or class_id),
+                    "room_type": frappe.db.get_value("ERP Administrative Room", room_id, "room_type"),
+                }
+            )
+
+        function_rooms = frappe.get_all(
+            "ERP Administrative Room",
+            filters={"room_type": "function_room"},
+            fields=["name", "room_type"],
+        )
+        for rv in function_rooms:
+            room_id = rv.get("name")
+            if not room_id:
+                continue
+            if user not in _function_room_pic_user_ids(room_id, school_year_id):
+                continue
+            key = ("func", room_id)
+            if key in seen:
+                continue
+            ho_rows = frappe.get_all(
+                "ERP Administrative Facility Handover",
+                filters=[
+                    ["room", "=", room_id],
+                    ["handover_type", "=", "responsible_user"],
+                ],
+                or_filters=[["direction", "=", "outgoing"], ["direction", "is", "not set"]],
+                fields=["name", "status", "school_year_id"],
+                order_by="creation desc",
+                limit=20,
+            )
+            chosen = None
+            for r in ho_rows:
+                rsy = r.get("school_year_id")
+                if school_year_id and rsy and rsy != school_year_id:
+                    continue
+                chosen = r
+                break
+            if not chosen and ho_rows:
+                chosen = ho_rows[0]
+            if not chosen:
+                continue
+            seen.add(key)
+            rows.append(
+                {
+                    "room_id": room_id,
+                    "room_title": _room_display_title(room_id),
+                    "handover_type": "responsible_user",
+                    "handover_status": chosen.get("status"),
+                    "class_id": None,
+                    "class_title": None,
+                    "room_type": rv.get("room_type") or "function_room",
+                }
+            )
+
+        rows.sort(
+            key=lambda x: (
+                0 if (x.get("handover_status") or "") == "Pending" else 1,
+                (x.get("room_title") or "").lower(),
+            ),
+        )
+        return list_response(rows)
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "facility_equipment.get_teacher_handed_over_rooms")
+        return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False)
 def get_class_facility_context():
     """Tab CSVC: phòng của lớp + handover."""

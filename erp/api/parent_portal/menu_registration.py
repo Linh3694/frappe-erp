@@ -1283,8 +1283,9 @@ def get_class_registrations(class_id=None, month=None, year=None):
             ORDER BY s.student_name
         """, (class_id,), as_dict=True)
         
-        # Lấy đăng ký cho từng học sinh
+        # Lấy đăng ký + ảnh cho từng học sinh
         for student in class_students:
+            student["sis_photo"] = _get_student_photo(student.student_id)
             registration = frappe.db.get_value(
                 "SIS Menu Registration",
                 {"period": period_id, "student_id": student.student_id},

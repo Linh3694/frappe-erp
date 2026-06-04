@@ -1596,6 +1596,125 @@ def get_class_applications(class_id=None):
         )
 
 
+def _teacher_class_ids_for_scholarship(user, school_year_id):
+    """ID lớp CN + giảng dạy của GV."""
+    from erp.api.erp_sis.sis_class import get_teacher_classes
+
+    res = get_teacher_classes(teacher_user_id=user, school_year_id=school_year_id)
+    if not res or not res.get("success"):
+        return []
+    data = res.get("data") or {}
+    ids = []
+    for cls in (data.get("homeroom_classes") or []) + (data.get("teaching_classes") or []):
+        name = cls.get("name")
+        if name:
+            ids.append(name)
+    return list(dict.fromkeys(ids))
+
+
+@frappe.whitelist()
+def get_teacher_applications(school_year_id=None):
+    """Hub Học bổng: gộp thư giới thiệu trên mọi lớp CN + giảng dạy của GV."""
+    logs = []
+    try:
+        if not school_year_id:
+            if frappe.request:
+                school_year_id = frappe.request.args.get("school_year_id")
+            if not school_year_id:
+                data = {}
+                if frappe.request and frappe.request.data:
+                    try:
+                        raw = frappe.request.data
+                        if isinstance(raw, bytes):
+                            raw = raw.decode("utf-8")
+                        if raw:
+                            data = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        data = dict(frappe.local.form_dict or {})
+                else:
+                    data = dict(frappe.local.form_dict or {})
+                school_year_id = data.get("school_year_id")
+
+        user = frappe.session.user
+        teacher_id = frappe.db.get_value("SIS Teacher", {"user_id": user}, "name")
+        if not teacher_id:
+            return error_response("Bạn không phải giáo viên trong hệ thống", logs=logs)
+
+        class_ids = _teacher_class_ids_for_scholarship(user, school_year_id)
+        if not class_ids:
+            return list_response([])
+
+        applications = frappe.db.sql(
+            """
+            SELECT 
+                app.name, app.student_id, app.student_name, app.student_code,
+                COALESCE(
+                    NULLIF(TRIM(c.short_title), ''),
+                    TRIM(REPLACE(REPLACE(COALESCE(c.title, app.class_name, ''), 'Lớp ', ''), 'Class ', ''))
+                ) as class_name,
+                app.status, app.submitted_at,
+                app.scholarship_period_id,
+                CASE 
+                    WHEN app.main_teacher_id = %(teacher_id)s THEN 'main'
+                    WHEN app.second_teacher_id = %(teacher_id)s THEN 'second'
+                END as recommendation_type,
+                CASE 
+                    WHEN app.main_teacher_id = %(teacher_id)s THEN app.main_recommendation_status
+                    WHEN app.second_teacher_id = %(teacher_id)s THEN app.second_recommendation_status
+                END as recommendation_status,
+                CASE 
+                    WHEN app.main_teacher_id = %(teacher_id)s THEN app.main_recommendation_id
+                    WHEN app.second_teacher_id = %(teacher_id)s THEN app.second_recommendation_id
+                END as recommendation_id,
+                period.status as period_status,
+                period.to_date as period_end_date
+            FROM `tabSIS Scholarship Application` app
+            LEFT JOIN `tabSIS Scholarship Period` period ON period.name = app.scholarship_period_id
+            LEFT JOIN `tabSIS Class` c ON c.name = app.class_id
+            WHERE (
+                app.class_id IN %(class_ids)s
+                OR EXISTS (
+                    SELECT 1 FROM `tabSIS Class Student` cs
+                    WHERE cs.class_id IN %(class_ids)s
+                      AND cs.student_id = app.student_id
+                )
+            )
+              AND (app.main_teacher_id = %(teacher_id)s OR app.second_teacher_id = %(teacher_id)s)
+              AND app.status IN ('Submitted', 'WaitingRecommendation', 'RecommendationSubmitted', 'InReview', 'Approved', 'Rejected', 'DeniedByTeacher')
+            ORDER BY app.submitted_at DESC
+            """,
+            {"teacher_id": teacher_id, "class_ids": class_ids},
+            as_dict=True,
+        )
+
+        today = getdate(nowdate())
+        for app in applications:
+            app["recommendation_status_display"] = {
+                "Pending": "Chờ viết thư",
+                "Submitted": "Đã viết thư",
+                "Denied": "Đã từ chối",
+            }.get(app.recommendation_status, app.recommendation_status)
+            period_end = getdate(app.period_end_date) if app.period_end_date else None
+            can_edit = False
+            if (
+                app.recommendation_status
+                and app.recommendation_status.lower() == "submitted"
+                and app.period_status != "Closed"
+                and period_end
+                and today <= period_end
+            ):
+                can_edit = True
+            app["can_edit"] = can_edit
+            app["period_end_date"] = str(app.period_end_date) if app.period_end_date else None
+
+        logs.append(f"Tìm thấy {len(applications)} đơn cho teacher {teacher_id}")
+        return list_response(applications)
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Get Teacher Applications Error")
+        return error_response(message=f"Lỗi: {str(e)}", logs=logs)
+
+
 @frappe.whitelist()
 def get_recommendation_form(application_id=None):
     """

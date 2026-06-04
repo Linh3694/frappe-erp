@@ -16,6 +16,53 @@ from erp.utils.api_response import (
 )
 
 
+def _build_teacher_display_map(teacher_ids):
+    """Lấy tên hiển thị và chức danh giáo viên theo SIS Teacher name."""
+    teacher_map = {}
+    if not teacher_ids:
+        return teacher_map
+
+    unique_ids = list({tid for tid in teacher_ids if tid})
+    if not unique_ids:
+        return teacher_map
+
+    teachers = frappe.get_all(
+        "SIS Teacher",
+        filters={"name": ["in", unique_ids]},
+        fields=["name", "user_id"],
+    )
+    user_ids = [t.user_id for t in teachers if t.get("user_id")]
+    user_map = {}
+    if user_ids:
+        users = frappe.get_all(
+            "User",
+            filters={"name": ["in", user_ids]},
+            fields=["name", "full_name", "first_name", "last_name", "email", "designation", "job_title"],
+        )
+        for u in users:
+            user_map[u.name] = u
+
+    for t in teachers:
+        user_id = t.get("user_id")
+        user_info = user_map.get(user_id, {})
+
+        display_name = user_info.get("full_name") or ""
+        if not display_name and user_id:
+            email_name = user_id.split("@")[0]
+            display_name = " ".join(
+                part.capitalize()
+                for part in email_name.replace(".", " ").replace("_", " ").replace("-", " ").split()
+            )
+
+        jobtitle = user_info.get("designation") or user_info.get("job_title") or ""
+        teacher_map[t.name] = {
+            "teacher_name": display_name or user_id or t.name,
+            "teacher_jobtitle": jobtitle or None,
+        }
+
+    return teacher_map
+
+
 @frappe.whitelist(allow_guest=False)
 def create_event():
     """Create a new event with workflow"""
@@ -1171,49 +1218,15 @@ def get_events():
         # Debug logging can be enabled here if needed for troubleshooting
         # frappe.log_error(f"EventService get_events: filters={filters}, total_count={total_count}, events_returned={len(events)}, page={page}", "Events Debug")
 
-        # Populate teacher info for all events in a single batch query
+        # Bổ sung tên người tạo cho từng sự kiện
         teacher_ids = list(set([e.get("create_by") for e in events if e.get("create_by")]))
-        teacher_map = {}
-        if teacher_ids:
-            # Step 1: Get teacher records to get user_id
-            teachers = frappe.get_all(
-                "SIS Teacher",
-                filters={"name": ["in", teacher_ids]},
-                fields=["name", "user_id"]
-            )
-            
-            # Step 2: Get user info from User table
-            user_ids = [t.get("user_id") for t in teachers if t.get("user_id")]
-            user_map = {}
-            if user_ids:
-                users = frappe.get_all(
-                    "User",
-                    filters={"name": ["in", user_ids]},
-                    fields=["name", "full_name", "first_name", "last_name", "email"]
-                )
-                for u in users:
-                    user_map[u.name] = u
-            
-            # Step 3: Build teacher_map with display names
-            for t in teachers:
-                user_id = t.get("user_id")
-                user_info = user_map.get(user_id, {})
-                
-                # Format teacher name: prioritize full_name, fallback to email parsing
-                display_name = user_info.get("full_name") or ""
-                if not display_name and user_id:
-                    # Extract name from email (user_id is email)
-                    email_name = user_id.split("@")[0]
-                    display_name = " ".join(
-                        part.capitalize() for part in email_name.replace(".", " ").replace("_", " ").replace("-", " ").split()
-                    )
-                teacher_map[t.name] = display_name or user_id or t.name
-        
-        # Add teacher_name to each event
+        teacher_map = _build_teacher_display_map(teacher_ids)
         for event in events:
             create_by = event.get("create_by")
             if create_by and create_by in teacher_map:
-                event["teacher_name"] = teacher_map[create_by]
+                event["teacher_name"] = teacher_map[create_by].get("teacher_name")
+                if teacher_map[create_by].get("teacher_jobtitle"):
+                    event["teacher_jobtitle"] = teacher_map[create_by]["teacher_jobtitle"]
 
         result = {
             "data": events,
@@ -1706,6 +1719,15 @@ def get_event_detail():
             
         result["can_take_attendance"] = can_take_attendance
         result["current_teacher_id"] = current_teacher
+
+        # Bổ sung tên người tạo (create_by là SIS Teacher name)
+        create_by = event_basic.get("create_by")
+        if create_by:
+            creator_info = _build_teacher_display_map([create_by]).get(create_by, {})
+            if creator_info.get("teacher_name"):
+                result["teacher_name"] = creator_info["teacher_name"]
+            if creator_info.get("teacher_jobtitle"):
+                result["teacher_jobtitle"] = creator_info["teacher_jobtitle"]
 
         return single_item_response(result, "Event detail fetched successfully")
     except frappe.DoesNotExistError:
