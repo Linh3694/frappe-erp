@@ -19,4 +19,34 @@ class NoOverlap(Verb):
 						vars_ = ctx.vars_for_teacher_slot(tid, day, p_idx)
 						if len(vars_) > 1:
 							ctx.model.Add(sum(vars_) <= 1)
-		# room: chưa có biến gán phòng trong CP-SAT — kiểm tra ở extract/diagnostics
+		elif ctx.cur_subject_type == "room" and ctx.use_room_vars and ctx.room:
+			self._apply_room_no_overlap(ctx)
+
+	def _apply_room_no_overlap(self, ctx) -> None:
+		"""Mỗi phòng tối đa 1 lớp/slot — dùng biến room[class, day, period]."""
+		num_rooms = len(ctx.room_list)
+		if num_rooms == 0:
+			return
+		for day in ctx.working_days:
+			for p_idx in range(ctx.num_periods):
+				for r_idx in range(num_rooms):
+					indicators = []
+					for c in ctx.inp.classes:
+						room_var = ctx.room.get((c.name, day, p_idx))
+						if room_var is None:
+							continue
+						slot_vars = ctx.vars_for_class_slot(c.name, day, p_idx)
+						if not slot_vars:
+							continue
+						busy = ctx.model.NewBoolVar(f"busy_{c.name}_{day}_{p_idx}_{r_idx}")
+						ctx.model.Add(sum(slot_vars) >= 1).OnlyEnforceIf(busy)
+						ctx.model.Add(sum(slot_vars) == 0).OnlyEnforceIf(busy.Not())
+						at_room = ctx.model.NewBoolVar(f"atroom_{c.name}_{day}_{p_idx}_{r_idx}")
+						ctx.model.Add(room_var == r_idx).OnlyEnforceIf(at_room)
+						ctx.model.Add(room_var != r_idx).OnlyEnforceIf(at_room.Not())
+						uses = ctx.model.NewBoolVar(f"uses_{c.name}_{day}_{p_idx}_{r_idx}")
+						ctx.model.AddBoolAnd([busy, at_room]).OnlyEnforceIf(uses)
+						ctx.model.AddBoolOr([busy.Not(), at_room.Not()]).OnlyEnforceIf(uses.Not())
+						indicators.append(uses)
+					if len(indicators) > 1:
+						ctx.model.Add(sum(indicators) <= 1)

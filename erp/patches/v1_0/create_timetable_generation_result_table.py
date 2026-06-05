@@ -24,11 +24,12 @@ def execute():
 			`teacher_ids` text DEFAULT NULL,
 			`room_id` varchar(140) DEFAULT NULL,
 			`period_priority` int DEFAULT 0,
+			`variant_index` int NOT NULL DEFAULT 0,
 			`creation` datetime DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (`name`),
 			INDEX `idx_session` (`session_id`),
 			INDEX `idx_session_class` (`session_id`, `class_id`),
-			UNIQUE KEY `uq_slot` (`session_id`, `class_id`, `day_of_week`, `timetable_column_id`)
+			UNIQUE KEY `uq_slot_variant` (`session_id`, `variant_index`, `class_id`, `day_of_week`, `timetable_column_id`)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 	""")
 

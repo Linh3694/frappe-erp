@@ -51,3 +51,15 @@ def resolve_room_id(inp: Any, class_info, ts_id: str, rmap) -> str:
 			if r.room_type == req.room_type_required:
 				return r.name
 	return class_info.room_id or ""
+
+
+def le_limit(ctx, vars_, limit: int, *, kind: str, weight: int, tag: str) -> None:
+	"""Ràng buộc sum(vars_) <= limit; hard = constraint, soft = phạt phần vượt (Maximize)."""
+	if not vars_:
+		return
+	if kind == "hard":
+		ctx.model.Add(sum(vars_) <= limit)
+	else:
+		over = ctx.model.NewIntVar(0, len(vars_), f"over_{tag}")
+		ctx.model.Add(over >= sum(vars_) - limit)
+		ctx.objectives.append(over * (-weight))

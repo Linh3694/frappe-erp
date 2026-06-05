@@ -77,8 +77,14 @@ erp.patches.v1_0.migrate_legacy_borrows_to_transactions
 # Thư viện: backfill mã học sinh / mã nhân viên trên phiếu mượn
 erp.patches.v1_0.backfill_library_transaction_borrower_codes
 
+# TKB auto-generate: bảng draft tabSIS_TKB_Gen_Result (cách ly TKB chính thức)
+erp.patches.v1_0.create_timetable_generation_result_table
+
 # TKB auto-generate: seed Rule Set mặc định (S+V+O)
 erp.patches.v1_0.seed_default_timetable_rule_set
+
+# TKB auto-generate: cột variant_index cho đa nghiệm draft (G2, site đã có bảng cũ)
+erp.patches.v1_0.add_variant_index_to_gen_result
 
 # Campus: backfill Role Campus * + User Permission cho user chưa có campus role
 erp.patches.v1_0.backfill_campus_roles

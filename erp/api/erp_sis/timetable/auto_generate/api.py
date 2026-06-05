@@ -541,17 +541,26 @@ def get_generation_status(session_id=None):
 # Preview
 # ════════════════════════════════════════════════════════
 
+def _draft_has_variant_index() -> bool:
+	try:
+		return bool(frappe.db.sql("SHOW COLUMNS FROM `tabSIS_TKB_Gen_Result` LIKE 'variant_index'"))
+	except Exception:
+		return False
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET"])
-def preview_class_week(session_id=None, class_id=None):
+def preview_class_week(session_id=None, class_id=None, variant_index=None):
 	"""Xem TKB draft theo lớp (format tương thích WeeklyGrid)."""
 	try:
 		session_id = session_id or _get_param("session_id")
 		class_id = class_id or _get_param("class_id")
+		variant_index = int(variant_index if variant_index is not None else _get_param("variant_index") or 0)
 
 		if not session_id or not class_id:
 			return error_response("Thiếu session_id hoặc class_id")
 
-		rows = frappe.db.sql("""
+		variant_clause = "AND r.variant_index = %(variant_index)s" if _draft_has_variant_index() else ""
+		rows = frappe.db.sql(f"""
 			SELECT
 				r.class_id, r.day_of_week, r.timetable_column_id,
 				r.timetable_subject_id, r.teacher_ids, r.room_id, r.period_priority,
@@ -560,9 +569,9 @@ def preview_class_week(session_id=None, class_id=None):
 			FROM `tabSIS_TKB_Gen_Result` r
 			LEFT JOIN `tabSIS Timetable Subject` ts ON ts.name = r.timetable_subject_id
 			LEFT JOIN `tabSIS Timetable Column` tc ON tc.name = r.timetable_column_id
-			WHERE r.session_id = %(session_id)s AND r.class_id = %(class_id)s
+			WHERE r.session_id = %(session_id)s AND r.class_id = %(class_id)s {variant_clause}
 			ORDER BY r.period_priority
-		""", {"session_id": session_id, "class_id": class_id}, as_dict=True)
+		""", {"session_id": session_id, "class_id": class_id, "variant_index": variant_index}, as_dict=True)
 
 		# Format tương thích TimetableEntry
 		entries = []
@@ -590,24 +599,25 @@ def preview_class_week(session_id=None, class_id=None):
 				"is_pattern": True,
 			})
 
-		return single_item_response({"entries": entries, "class_id": class_id})
+		return single_item_response({"entries": entries, "class_id": class_id, "variant_index": variant_index})
 
 	except Exception as e:
 		return error_response(str(e))
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
-def preview_teacher_week(session_id=None, teacher_id=None):
+def preview_teacher_week(session_id=None, teacher_id=None, variant_index=None):
 	"""Xem TKB draft theo GV."""
 	try:
 		session_id = session_id or _get_param("session_id")
 		teacher_id = teacher_id or _get_param("teacher_id")
+		variant_index = int(variant_index if variant_index is not None else _get_param("variant_index") or 0)
 
 		if not session_id or not teacher_id:
 			return error_response("Thiếu session_id hoặc teacher_id")
 
-		# Lấy tất cả kết quả có chứa teacher_id
-		all_rows = frappe.db.sql("""
+		variant_clause = "AND r.variant_index = %(variant_index)s" if _draft_has_variant_index() else ""
+		all_rows = frappe.db.sql(f"""
 			SELECT
 				r.class_id, r.day_of_week, r.timetable_column_id,
 				r.timetable_subject_id, r.teacher_ids, r.room_id, r.period_priority,
@@ -618,9 +628,9 @@ def preview_teacher_week(session_id=None, teacher_id=None):
 			LEFT JOIN `tabSIS Timetable Subject` ts ON ts.name = r.timetable_subject_id
 			LEFT JOIN `tabSIS Timetable Column` tc ON tc.name = r.timetable_column_id
 			LEFT JOIN `tabSIS Class` c ON c.name = r.class_id
-			WHERE r.session_id = %(session_id)s
+			WHERE r.session_id = %(session_id)s {variant_clause}
 			ORDER BY r.period_priority
-		""", {"session_id": session_id}, as_dict=True)
+		""", {"session_id": session_id, "variant_index": variant_index}, as_dict=True)
 
 		entries = []
 		for r in all_rows:
@@ -649,7 +659,7 @@ def preview_teacher_week(session_id=None, teacher_id=None):
 					"is_pattern": True,
 				})
 
-		return single_item_response({"entries": entries, "teacher_id": teacher_id})
+		return single_item_response({"entries": entries, "teacher_id": teacher_id, "variant_index": variant_index})
 
 	except Exception as e:
 		return error_response(str(e))
@@ -663,13 +673,24 @@ def get_preview_stats(session_id=None):
 		if not session_id:
 			return error_response("Thiếu session_id")
 
-		# Tổng slot
-		total = frappe.db.sql(
-			"SELECT COUNT(*) as cnt FROM `tabSIS_TKB_Gen_Result` WHERE session_id = %s",
-			session_id, as_dict=True
-		)[0]["cnt"]
+		variants = []
+		if _draft_has_variant_index():
+			variants = frappe.db.sql("""
+				SELECT variant_index, COUNT(*) as slot_count
+				FROM `tabSIS_TKB_Gen_Result`
+				WHERE session_id = %s
+				GROUP BY variant_index
+				ORDER BY variant_index
+			""", session_id, as_dict=True)
+			total = sum(v["slot_count"] for v in variants) if variants else 0
+		else:
+			total = frappe.db.sql(
+				"SELECT COUNT(*) as cnt FROM `tabSIS_TKB_Gen_Result` WHERE session_id = %s",
+				session_id, as_dict=True,
+			)[0]["cnt"]
+			variants = [{"variant_index": 0, "slot_count": total}]
 
-		# Số lớp
+		# Số lớp (biến thể 0)
 		classes = frappe.db.sql("""
 			SELECT DISTINCT r.class_id, c.title
 			FROM `tabSIS_TKB_Gen_Result` r
@@ -695,6 +716,58 @@ def get_preview_stats(session_id=None):
 			"total_classes": len(classes),
 			"classes": [{"name": c["class_id"], "title": c["title"]} for c in classes],
 			"total_teachers": len(all_teachers),
+			"variants": variants,
+		})
+
+	except Exception as e:
+		return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def generate_variants(**kwargs):
+	"""Sinh nhiều biến thể draft (sandbox) — chỉ publish khi admin confirm."""
+	try:
+		data = _get_json_data()
+		session_id = data.get("session_id")
+		k = int(data.get("k", 3))
+		min_diff_ratio = float(data.get("min_diff_ratio", 0.10))
+		run_async = data.get("async", False)
+
+		if not session_id:
+			return error_response("Thiếu session_id")
+
+		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
+		if session.status not in ("Configuring", "Completed", "Failed"):
+			return error_response(f"Không thể chạy solver ở trạng thái {session.status}")
+
+		if run_async:
+			frappe.enqueue(
+				"erp.api.erp_sis.timetable.auto_generate.solver.run_solver_variants",
+				session_id=session_id,
+				k=k,
+				min_diff_ratio=min_diff_ratio,
+				queue="long",
+				timeout=900,
+			)
+			session.status = "Running"
+			session.save(ignore_permissions=True)
+			frappe.db.commit()
+			return single_item_response({"session_id": session_id, "status": "queued"})
+
+		from .solver import run_solver_variants
+		run_solver_variants(session_id, k=k, min_diff_ratio=min_diff_ratio)
+		session.reload()
+		stats = {}
+		if session.solver_stats:
+			try:
+				stats = json.loads(session.solver_stats) if isinstance(session.solver_stats, str) else session.solver_stats
+			except (json.JSONDecodeError, TypeError):
+				pass
+		return single_item_response({
+			"session_id": session_id,
+			"status": session.status,
+			"variant_count": stats.get("variant_count", 0),
+			"total_slots_generated": session.total_slots_generated,
 		})
 
 	except Exception as e:
@@ -707,16 +780,17 @@ def get_preview_stats(session_id=None):
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def publish_session(**kwargs):
-	"""Publish draft -> doctype chính."""
+	"""Publish draft -> doctype chính (chỉ 1 biến thể đã chọn)."""
 	try:
 		data = _get_json_data()
 		session_id = data.get("session_id")
+		variant_index = int(data.get("variant_index", 0))
 		if not session_id:
 			return error_response("Thiếu session_id")
 
 		from .publisher import TimetablePublisher
 		publisher = TimetablePublisher(session_id)
-		result = publisher.publish()
+		result = publisher.publish(variant_index=variant_index)
 
 		return single_item_response(result)
 

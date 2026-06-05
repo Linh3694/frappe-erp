@@ -28,8 +28,8 @@ class TimetablePublisher:
 			"teacher_entries_synced": 0,
 		}
 
-	def publish(self) -> Dict:
-		"""Thực hiện publish toàn bộ."""
+	def publish(self, variant_index: int = 0) -> Dict:
+		"""Thực hiện publish — chỉ copy 1 biến thể draft sang TKB chính thức (bản ghi mới)."""
 		if self.session.status != "Completed":
 			frappe.throw(f"Session phải ở trạng thái 'Completed' để publish (hiện tại: {self.session.status})")
 
@@ -39,8 +39,8 @@ class TimetablePublisher:
 			# 1. Tạo SIS Timetable header
 			timetable = self._create_timetable_header()
 
-			# 2. Load kết quả draft
-			results = self._load_results()
+			# 2. Load kết quả draft (biến thể đã chọn)
+			results = self._load_results(variant_index=variant_index)
 			if not results:
 				frappe.throw("Không có kết quả draft để publish")
 
@@ -176,6 +176,28 @@ class TimetablePublisher:
 					"teacher_id": t_id,
 					"sort_order": i,
 				}).insert(ignore_permissions=True)
+
+	def _has_variant_index_column(self) -> bool:
+		try:
+			return bool(frappe.db.sql("SHOW COLUMNS FROM `tabSIS_TKB_Gen_Result` LIKE 'variant_index'"))
+		except Exception:
+			return False
+
+	def _load_results(self, variant_index: int = 0) -> List[Dict]:
+		"""Đọc draft sandbox — mặc định biến thể 0."""
+		if self._has_variant_index_column():
+			return frappe.db.sql("""
+				SELECT class_id, day_of_week, timetable_column_id, timetable_subject_id,
+				       teacher_ids, room_id, period_priority, variant_index
+				FROM `tabSIS_TKB_Gen_Result`
+				WHERE session_id = %(session_id)s AND variant_index = %(variant_index)s
+			""", {"session_id": self.session_id, "variant_index": int(variant_index)}, as_dict=True)
+		return frappe.db.sql("""
+			SELECT class_id, day_of_week, timetable_column_id, timetable_subject_id,
+			       teacher_ids, room_id, period_priority
+			FROM `tabSIS_TKB_Gen_Result`
+			WHERE session_id = %(session_id)s
+		""", {"session_id": self.session_id}, as_dict=True)
 
 	def _get_subject_map(self) -> Dict[str, str]:
 		"""Mapping timetable_subject_id -> SIS Subject name."""

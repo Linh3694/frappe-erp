@@ -14,6 +14,10 @@ class SolverContext:
 	period_index_map: Dict[str, int] = field(default_factory=dict)
 	room_index_map: Dict[str, int] = field(default_factory=dict)
 	room_list: List[str] = field(default_factory=list)
+	# Biến phòng quyết định (class, day, period_idx) -> IntVar; chỉ tạo khi bật rule room
+	room: Dict[Tuple[str, str, int], Any] = field(default_factory=dict)
+	use_room_vars: bool = False
+	objectives: List[Any] = field(default_factory=list)
 	cur_subject_type: str = ""
 	# rule_id -> assumption lit (diagnostics)
 	assumptions: Dict[str, Any] = field(default_factory=dict)

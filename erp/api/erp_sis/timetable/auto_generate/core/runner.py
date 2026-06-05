@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, List, Optional, Tuple
 
 from .context import SolverContext
@@ -14,6 +15,8 @@ from .variables import create_variables
 
 # Import verbs để đăng ký registry
 from . import verbs  # noqa: F401
+
+AssignmentKey = Tuple[str, str, str, int]
 
 
 class RuleSolverBuilder:
@@ -35,7 +38,25 @@ class _CompatModel:
 		self.x = ctx.x
 
 
-def _apply_legacy_session_soft(ctx: SolverContext, objectives: list) -> None:
+def _needs_room_vars(rule_set: RuleSet) -> bool:
+	for rule in rule_set.effective():
+		if rule.verb == "no_overlap" and rule.subject_type == "room":
+			return True
+		if rule.verb == "attribute_match" and (rule.params or {}).get("require") == "room_type==required":
+			return True
+	return False
+
+
+def _apply_forbid_solutions(ctx: SolverContext, forbid_solutions: List[List[AssignmentKey]], min_diff: int) -> None:
+	if not forbid_solutions or min_diff <= 0:
+		return
+	for sol in forbid_solutions:
+		same_vars = [ctx.x[k] for k in sol if k in ctx.x]
+		if same_vars:
+			ctx.model.Add(sum(same_vars) <= len(same_vars) - min_diff)
+
+
+def _apply_legacy_session_soft(ctx: SolverContext) -> None:
 	"""Soft rules JSON cũ từ session (consecutive_bonus, pair exclusions...)."""
 	inp = ctx.inp
 	soft = inp.soft_rules
@@ -56,20 +77,26 @@ def _apply_legacy_session_soft(ctx: SolverContext, objectives: list) -> None:
 							both = ctx.model.NewBoolVar(f"leg_consec_{c.name}_{ts_id}_{day}_{p_idx}")
 							ctx.model.AddBoolAnd([ctx.x[k1], ctx.x[k2]]).OnlyEnforceIf(both)
 							ctx.model.AddBoolOr([ctx.x[k1].Not(), ctx.x[k2].Not()]).OnlyEnforceIf(both.Not())
-							objectives.append(both * soft.consecutive_bonus)
+							ctx.objectives.append(both * soft.consecutive_bonus)
 
 
-def build_and_solve(inp: Any, rule_set: Optional[RuleSet] = None):
+def build_and_solve(
+	inp: Any,
+	rule_set: Optional[RuleSet] = None,
+	*,
+	forbid_solutions: Optional[List[List[AssignmentKey]]] = None,
+	min_diff: int = 0,
+	objective_pin: Optional[int] = None,
+):
 	"""Trả về (cp_solver, RuleSolverBuilder, status_name, ctx)."""
 	from ortools.sat.python import cp_model
 
 	rs = rule_set or build_default_rule_set()
 	cp = cp_model.CpModel()
-	ctx = SolverContext(model=cp, x={}, inp=inp)
+	ctx = SolverContext(model=cp, x={}, inp=inp, use_room_vars=_needs_room_vars(rs))
 	create_variables(ctx)
 
 	resolver = SubjectResolver()
-	objectives: list = []
 
 	for rule in rs.effective():
 		try:
@@ -85,16 +112,20 @@ def build_and_solve(inp: Any, rule_set: Optional[RuleSet] = None):
 		if rule.kind == "hard":
 			verb.apply_hard(ctx, subject_set, rule.params)
 		else:
-			objectives.extend(verb.build_soft(ctx, subject_set, rule.params, rule.weight))
+			ctx.objectives.extend(verb.build_soft(ctx, subject_set, rule.params, rule.weight))
 
 	# HC9 legacy: max tiết liên tiếp GV (hard) — chưa tách rule_id riêng trong default set
 	from .verbs.max_consecutive import MaxConsecutive
 	MaxConsecutive().apply_hard(ctx, list(inp.teachers.keys()), {"use_teacher_field": True})
 
-	_apply_legacy_session_soft(ctx, objectives)
+	_apply_legacy_session_soft(ctx)
+	_apply_forbid_solutions(ctx, forbid_solutions or [], min_diff)
 
-	if objectives:
-		cp.Maximize(sum(objectives))
+	if ctx.objectives:
+		obj_expr = sum(ctx.objectives)
+		if objective_pin is not None:
+			cp.Add(obj_expr == objective_pin)
+		cp.Maximize(obj_expr)
 
 	solver = cp_model.CpSolver()
 	solver.parameters.max_time_in_seconds = inp.solver_time_limit
@@ -103,6 +134,62 @@ def build_and_solve(inp: Any, rule_set: Optional[RuleSet] = None):
 	status = solver.Solve(cp)
 	builder = RuleSolverBuilder(ctx, inp)
 	return solver, builder, solver.StatusName(status), ctx
+
+
+def solution_to_keys(solution: List[dict], inp: Any) -> List[AssignmentKey]:
+	"""Chuyển solution dict -> keys (class, subject, day, period_idx) cho forbid constraint."""
+	period_map = {}
+	for i, p in enumerate(sorted(inp.periods, key=lambda x: x.period_priority)):
+		period_map[p.name] = i
+	keys = []
+	for slot in solution:
+		p_idx = period_map.get(slot["timetable_column_id"])
+		if p_idx is None:
+			continue
+		keys.append((slot["class_id"], slot["timetable_subject_id"], slot["day_of_week"], p_idx))
+	return keys
+
+
+def build_and_solve_variants(
+	inp: Any,
+	rule_set: Optional[RuleSet] = None,
+	k: int = 3,
+	min_diff_ratio: float = 0.10,
+) -> List[dict]:
+	"""Sinh tối đa k nghiệm cùng objective, khác nhau >= min_diff_ratio * T tiết."""
+	rs = rule_set or build_default_rule_set()
+	found: List[dict] = []
+	forbid: List[List[AssignmentKey]] = []
+	objective_pin: Optional[int] = None
+	min_diff = 0
+
+	for _ in range(max(1, k)):
+		solver, builder, status, _ctx = build_and_solve(
+			inp,
+			rs,
+			forbid_solutions=forbid if forbid else None,
+			min_diff=min_diff,
+			objective_pin=objective_pin,
+		)
+		if status not in ("OPTIMAL", "FEASIBLE"):
+			break
+		solution = builder.extract_solution(solver)
+		if not solution:
+			break
+		found.append({
+			"solution": solution,
+			"status": status,
+			"objective_value": int(round(solver.ObjectiveValue())) if _ctx.objectives else 0,
+		})
+		if objective_pin is None and _ctx.objectives:
+			objective_pin = int(round(solver.ObjectiveValue()))
+		T = len(solution)
+		min_diff = max(1, math.ceil(min_diff_ratio * T))
+		forbid.append(solution_to_keys(solution, inp))
+		if len(found) >= k:
+			break
+
+	return found
 
 
 def solve_with_rules(inp: Any, rule_set: Optional[RuleSet] = None):

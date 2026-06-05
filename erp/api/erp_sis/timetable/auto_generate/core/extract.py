@@ -8,6 +8,17 @@ from .context import SolverContext
 from .helpers import req_map, resolve_room_id, sorted_periods
 
 
+def _resolve_room_for_slot(solver, ctx, class_info, day, p_idx, ts_id, rmap, pin) -> str:
+	if pin and pin.room_id:
+		return pin.room_id
+	room_var = ctx.room.get((class_info.name, day, p_idx))
+	if room_var is not None and ctx.room_list:
+		idx = solver.Value(room_var)
+		if 0 <= idx < len(ctx.room_list):
+			return ctx.room_list[idx]
+	return resolve_room_id(ctx.inp, class_info, ts_id, rmap)
+
+
 def extract_solution(solver, ctx: SolverContext) -> List[Dict]:
 	inp = ctx.inp
 	rmap = req_map(inp)
@@ -33,7 +44,7 @@ def extract_solution(solver, ctx: SolverContext) -> List[Dict]:
 						key_a = f"{c.name}|{ts_id}"
 						teacher_ids = list(inp.class_subject_teachers.get(key_a, []))
 						pin = pin_lookup.get((c.name, day, p_idx, ts_id)) or pin_lookup.get((c.name, day, p_idx, ""))
-						room_id = pin.room_id if pin and pin.room_id else resolve_room_id(inp, c, ts_id, rmap)
+						room_id = _resolve_room_for_slot(solver, ctx, c, day, p_idx, ts_id, rmap, pin)
 						if pin and pin.teacher_id:
 							teacher_ids = [pin.teacher_id]
 						results.append({

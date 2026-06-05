@@ -36,7 +36,7 @@ class RuleSet:
 			if ov.get("enabled") is False:
 				continue
 			kind = rule.kind
-			if ov.get("kind") in ("hard", "soft"):
+			if ov.get("kind") in ("hard", "soft") and rule.allow_kind_override:
 				kind = ov["kind"]
 			weight = int(ov.get("weight", rule.weight))
 			out.append(Rule(

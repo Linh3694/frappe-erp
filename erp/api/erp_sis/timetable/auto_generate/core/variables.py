@@ -1,4 +1,4 @@
-"""Tạo biến CP-SAT x[class, subject, day, period_idx]."""
+"""Tạo biến CP-SAT x[class, subject, day, period_idx] và room[class, day, period_idx]."""
 
 from __future__ import annotations
 
@@ -19,3 +19,13 @@ def create_variables(ctx: SolverContext) -> None:
 	for i, r in enumerate(inp.rooms):
 		ctx.room_index_map[r.name] = i
 		ctx.room_list.append(r.name)
+
+	# Biến phòng: chỉ khi rule room được bật
+	if ctx.use_room_vars and inp.rooms:
+		sentinel = len(inp.rooms)
+		for c in inp.classes:
+			for day in inp.working_days:
+				for p_idx in range(len(inp.periods)):
+					ctx.room[(c.name, day, p_idx)] = ctx.model.NewIntVar(
+						0, sentinel, f"room_{c.name}_{day}_{p_idx}"
+					)
