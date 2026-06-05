@@ -43,6 +43,16 @@ def instances(params: dict) -> list:
 	return params.get("instances") or []
 
 
+def inst_object_int(inst: dict, field: str, default: int) -> int:
+	"""Đọc số từ instances[].object[field]; fallback legacy object.value."""
+	obj = inst.get("object") or {}
+	if field in obj and obj[field] is not None:
+		return int(obj[field])
+	if "value" in obj and obj["value"] is not None:
+		return int(obj["value"])
+	return int(default)
+
+
 def resolve_room_id(inp: Any, class_info, ts_id: str, rmap) -> str:
 	grade = class_info.education_grade_id
 	req = rmap.get((grade, ts_id))

@@ -17,10 +17,10 @@ VERB_SCHEMAS: Dict[str, dict] = {
 	"at_most_per_scope": {
 		"params_schema": {
 			"fields": [
-				{"name": "scope", "type": "select", "label": "Phạm vi", "options": ["day", "week"], "default": "day"},
-				{"name": "source", "type": "text", "label": "Nguồn (source)", "optional": True},
-				{"name": "max", "type": "int", "label": "Max (override)", "optional": True},
-				{"name": "global_value", "type": "int", "label": "Giá trị global", "optional": True},
+				{"name": "scope", "type": "select", "label": "Phạm vi", "options": ["day", "week"], "default": "day", "ui_hidden": True},
+				{"name": "source", "type": "text", "label": "Nguồn dữ liệu", "optional": True, "ui_hidden": True},
+				{"name": "max", "type": "int", "label": "Giới hạn tối đa", "optional": True, "ui_hidden": True},
+				{"name": "global_value", "type": "int", "label": "Giá trị áp dụng chung", "optional": True, "ui_hidden": True},
 			],
 		},
 		"instance_schema": {

@@ -1,4 +1,4 @@
-from ..helpers import instances
+from ..helpers import instances, inst_object_int
 from ..registry import Verb, register_verb
 
 
@@ -8,7 +8,7 @@ class AtMostSimultaneous(Verb):
 		inp = ctx.inp
 		for inst in instances(params):
 			ts_id = inst.get("subject")
-			n = int((inst.get("object") or {}).get("value", params.get("max_classes", 1)))
+			n = inst_object_int(inst, "max_classes", params.get("max_classes", 1))
 			if not ts_id:
 				continue
 			for day in inp.working_days:
