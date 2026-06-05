@@ -34,10 +34,16 @@ def _build_teacher_display_map(teacher_ids):
     user_ids = [t.user_id for t in teachers if t.get("user_id")]
     user_map = {}
     if user_ids:
+        # User chuẩn Frappe có thể không có cột designation — chỉ SELECT field thật sự có trên DB
+        user_meta = frappe.get_meta("User")
+        user_fields = ["name", "full_name", "first_name", "last_name", "email"]
+        for fn in ("job_title", "designation"):
+            if user_meta.has_field(fn):
+                user_fields.append(fn)
         users = frappe.get_all(
             "User",
             filters={"name": ["in", user_ids]},
-            fields=["name", "full_name", "first_name", "last_name", "email", "designation", "job_title"],
+            fields=user_fields,
         )
         for u in users:
             user_map[u.name] = u
@@ -54,7 +60,7 @@ def _build_teacher_display_map(teacher_ids):
                 for part in email_name.replace(".", " ").replace("_", " ").replace("-", " ").split()
             )
 
-        jobtitle = user_info.get("designation") or user_info.get("job_title") or ""
+        jobtitle = (user_info.get("job_title") or "").strip() or (user_info.get("designation") or "").strip()
         teacher_map[t.name] = {
             "teacher_name": display_name or user_id or t.name,
             "teacher_jobtitle": jobtitle or None,
