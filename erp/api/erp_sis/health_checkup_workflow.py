@@ -889,6 +889,15 @@ def get_health_checkup_approval_queue_l2(school_year_id=None, checkup_phase=None
         params_items = {**params, "lf": list_filter}
         items = frappe.db.sql(sql_items, params_items, as_dict=True)
 
+        # Ảnh đại diện học sinh — batch SIS Photo (đồng bộ list nhập liệu)
+        from erp.api.erp_sis.health_checkup import _batch_resolve_student_photos
+
+        student_ids = [r.get("student_id") for r in items if r.get("student_id")]
+        photo_map = _batch_resolve_student_photos(student_ids, school_year_id)
+        for row in items:
+            sid = row.get("student_id")
+            row["student_photo"] = photo_map.get(sid, "") if sid else ""
+
         return success_response(
             data={"counts": counts, "items": items, "list_filter": list_filter},
             message="OK",

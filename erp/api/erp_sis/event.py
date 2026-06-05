@@ -69,6 +69,138 @@ def _build_teacher_display_map(teacher_ids):
     return teacher_map
 
 
+def _get_request_data():
+    """Gộp form_dict, JSON body và raw body URL-encoded."""
+    data = dict(frappe.form_dict) if hasattr(frappe, "form_dict") else dict(frappe.local.form_dict)
+
+    try:
+        request_json = frappe.local.request.get_json()
+        if request_json and isinstance(request_json, dict):
+            data.update(request_json)
+    except Exception:
+        pass
+
+    try:
+        if frappe.request.data:
+            import json
+            raw = frappe.request.data
+            if isinstance(raw, (bytes, bytearray)):
+                raw = raw.decode("utf-8", errors="ignore")
+            if isinstance(raw, str) and raw.strip().startswith("{"):
+                json_data = json.loads(raw)
+                if isinstance(json_data, dict):
+                    data.update(json_data)
+            elif isinstance(raw, str) and "=" in raw:
+                from urllib.parse import parse_qs
+                parsed = parse_qs(raw, keep_blank_values=True)
+                for k, vlist in parsed.items():
+                    if k not in data and vlist:
+                        data[k] = vlist[0]
+    except Exception:
+        pass
+
+    return data
+
+
+def _get_current_teacher():
+    """Lấy SIS Teacher name của user hiện tại."""
+    current_user = frappe.session.user
+    return frappe.db.get_value("SIS Teacher", {"user_id": current_user}, "name")
+
+
+def _get_event_for_creator_check(event_id):
+    """Load event tối thiểu để kiểm tra quyền người tạo."""
+    rows = frappe.db.sql(
+        """
+        SELECT name, campus_id, create_by
+        FROM `tabSIS Event`
+        WHERE name = %s
+        """,
+        (event_id,),
+        as_dict=True,
+    )
+    return rows[0] if rows else None
+
+
+def _assert_event_creator(event_id, teacher):
+    """Chỉ người tạo sự kiện mới được thêm/xóa học sinh và người phụ trách."""
+    if not teacher:
+        return None, forbidden_response("Only teachers can manage event participants")
+
+    event = _get_event_for_creator_check(event_id)
+    if not event:
+        return None, not_found_response("Event not found")
+
+    campus_id = get_current_campus_from_context()
+    if campus_id and event.campus_id != campus_id:
+        return None, forbidden_response("Access denied: Campus mismatch")
+
+    if event.create_by != teacher:
+        return None, forbidden_response("Only event creator can manage participants")
+
+    return event, None
+
+
+def _resolve_class_student_id(student_id):
+    """Lấy class_student_id mới nhất của học sinh — tái dùng logic create_event."""
+    class_student = frappe.get_all(
+        "SIS Class Student",
+        filters={"student_id": student_id},
+        fields=["name", "class_id", "student_id"],
+        order_by="creation desc",
+        limit_page_length=1,
+    )
+    return class_student[0] if class_student else None
+
+
+def _get_event_student_status_default():
+    """Default status khi thêm học sinh vào sự kiện."""
+    try:
+        es_meta = frappe.get_meta("SIS Event Student")
+        es_status_field = es_meta.get_field("status")
+        if es_status_field and es_status_field.options:
+            es_options_raw = es_status_field.options
+            es_parts = es_options_raw.split("\\\\n") if "\\\\n" in es_options_raw else []
+            if not es_parts or len(es_parts) == 1:
+                es_parts = es_options_raw.split("\\n") if "\\n" in es_options_raw else es_parts
+            if not es_parts or len(es_parts) == 1:
+                es_parts = es_options_raw.splitlines()
+            es_allowed = [opt for opt in es_parts if opt]
+            for tok in es_allowed:
+                if tok.strip().lower() == "approved":
+                    return tok
+            return es_allowed[0] if es_allowed else "approved"
+    except Exception:
+        pass
+    return "approved"
+
+
+def _teacher_has_recorded_event_attendance(event_id, teacher_id):
+    """Kiểm tra người phụ trách đã lưu điểm danh sự kiện chưa."""
+    if not event_id or not teacher_id:
+        return False
+    return bool(
+        frappe.db.exists(
+            "SIS Event Attendance",
+            {"event_id": event_id, "recorded_by": teacher_id},
+        )
+    )
+
+
+def _get_teachers_with_recorded_attendance(event_id, teacher_ids):
+    """Batch lấy danh sách teacher_id đã ghi điểm danh cho sự kiện."""
+    if not event_id or not teacher_ids:
+        return set()
+    rows = frappe.get_all(
+        "SIS Event Attendance",
+        filters={"event_id": event_id, "recorded_by": ["in", teacher_ids]},
+        fields=["recorded_by"],
+        distinct=True,
+        limit_page_length=100000,
+    )
+    return {row.recorded_by for row in rows if row.get("recorded_by")}
+
+
 @frappe.whitelist(allow_guest=False)
 def create_event():
     """Create a new event with workflow"""
@@ -1691,11 +1823,13 @@ def get_event_detail():
                     limit_page_length=100000
                 )
                 teacher_user_map = {row.name: row.get("user_id") for row in t_rows}
+            recorded_teacher_ids = _get_teachers_with_recorded_attendance(event_id, teacher_ids)
             result["teachers"] = [
                 {
                     "event_teacher_id": row.name,
                     "teacher_id": row.teacher_id,
-                    "user_id": teacher_user_map.get(row.teacher_id)
+                    "user_id": teacher_user_map.get(row.teacher_id),
+                    "has_recorded_attendance": row.teacher_id in recorded_teacher_ids,
                 }
                 for row in event_teacher_rows
             ]
@@ -1834,6 +1968,201 @@ def update_event_student_status():
     except Exception as e:
         frappe.log_error(f"Error updating event student: {str(e)}")
         return error_response(f"Error updating event student: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def add_event_student():
+    """Thêm học sinh vào sự kiện đã tạo — chỉ người tạo sự kiện."""
+    try:
+        data = _get_request_data()
+        event_id = data.get("event_id")
+        student_id = data.get("student_id")
+
+        if not event_id:
+            return validation_error_response("Validation failed", {"event_id": ["Required"]})
+        if not student_id:
+            return validation_error_response("Validation failed", {"student_id": ["Required"]})
+
+        teacher = _get_current_teacher()
+        event, err = _assert_event_creator(event_id, teacher)
+        if err:
+            return err
+
+        cs = _resolve_class_student_id(student_id)
+        if not cs:
+            return validation_error_response(
+                "Validation failed",
+                {"student_id": ["Student is not assigned to any class"]},
+            )
+
+        class_student_id = cs.get("name")
+        if frappe.db.exists(
+            "SIS Event Student",
+            {"event_id": event_id, "class_student_id": class_student_id},
+        ):
+            return validation_error_response(
+                "Validation failed",
+                {"student_id": ["Student is already in this event"]},
+            )
+
+        status_default = _get_event_student_status_default()
+        doc = frappe.get_doc({
+            "doctype": "SIS Event Student",
+            "campus_id": event.campus_id,
+            "event_id": event_id,
+            "class_student_id": class_student_id,
+            "status": status_default or "approved",
+        })
+        doc.insert()
+        frappe.db.commit()
+
+        return single_item_response(
+            {
+                "event_student_id": doc.name,
+                "student_id": student_id,
+                "class_student_id": class_student_id,
+                "status": doc.status,
+            },
+            "Student added successfully",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error adding event student: {str(e)}")
+        return error_response(f"Error adding event student: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def remove_event_student():
+    """Xóa học sinh khỏi sự kiện — chỉ người tạo sự kiện."""
+    try:
+        data = _get_request_data()
+        event_student_id = data.get("event_student_id") or data.get("id") or data.get("name")
+
+        if not event_student_id:
+            return validation_error_response("Validation failed", {"event_student_id": ["Required"]})
+
+        if not frappe.db.exists("SIS Event Student", event_student_id):
+            return not_found_response("Event student not found")
+
+        es = frappe.get_doc("SIS Event Student", event_student_id)
+        event_id = es.event_id
+
+        teacher = _get_current_teacher()
+        _, err = _assert_event_creator(event_id, teacher)
+        if err:
+            return err
+
+        student_id = frappe.db.get_value("SIS Class Student", es.class_student_id, "student_id")
+        if student_id:
+            frappe.db.delete(
+                "SIS Event Attendance",
+                {"event_id": event_id, "student_id": student_id},
+            )
+
+        frappe.delete_doc("SIS Event Student", event_student_id, ignore_permissions=True)
+        frappe.db.commit()
+
+        return single_item_response(
+            {"event_student_id": event_student_id, "event_id": event_id},
+            "Student removed successfully",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error removing event student: {str(e)}")
+        return error_response(f"Error removing event student: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def add_event_teacher():
+    """Thêm người phụ trách vào sự kiện — chỉ người tạo sự kiện."""
+    try:
+        data = _get_request_data()
+        event_id = data.get("event_id")
+        teacher_id = data.get("teacher_id")
+
+        if not event_id:
+            return validation_error_response("Validation failed", {"event_id": ["Required"]})
+        if not teacher_id:
+            return validation_error_response("Validation failed", {"teacher_id": ["Required"]})
+
+        current_teacher = _get_current_teacher()
+        event, err = _assert_event_creator(event_id, current_teacher)
+        if err:
+            return err
+
+        if not frappe.db.exists("SIS Teacher", teacher_id):
+            return validation_error_response("Validation failed", {"teacher_id": ["Teacher not found"]})
+
+        if frappe.db.exists(
+            "SIS Event Teacher",
+            {"event_id": event_id, "teacher_id": teacher_id},
+        ):
+            return validation_error_response(
+                "Validation failed",
+                {"teacher_id": ["Teacher is already assigned to this event"]},
+            )
+
+        doc = frappe.get_doc({
+            "doctype": "SIS Event Teacher",
+            "campus_id": event.campus_id,
+            "event_id": event_id,
+            "teacher_id": teacher_id,
+        })
+        doc.insert()
+        frappe.db.commit()
+
+        user_id = frappe.db.get_value("SIS Teacher", teacher_id, "user_id")
+
+        return single_item_response(
+            {
+                "event_teacher_id": doc.name,
+                "teacher_id": teacher_id,
+                "user_id": user_id,
+                "has_recorded_attendance": False,
+            },
+            "Teacher added successfully",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error adding event teacher: {str(e)}")
+        return error_response(f"Error adding event teacher: {str(e)}")
+
+
+@frappe.whitelist(allow_guest=False)
+def remove_event_teacher():
+    """Xóa người phụ trách khỏi sự kiện — chặn nếu đã thực hiện điểm danh."""
+    try:
+        data = _get_request_data()
+        event_teacher_id = data.get("event_teacher_id") or data.get("id") or data.get("name")
+
+        if not event_teacher_id:
+            return validation_error_response("Validation failed", {"event_teacher_id": ["Required"]})
+
+        if not frappe.db.exists("SIS Event Teacher", event_teacher_id):
+            return not_found_response("Event teacher not found")
+
+        et = frappe.get_doc("SIS Event Teacher", event_teacher_id)
+        event_id = et.event_id
+        teacher_id = et.teacher_id
+
+        current_teacher = _get_current_teacher()
+        _, err = _assert_event_creator(event_id, current_teacher)
+        if err:
+            return err
+
+        if _teacher_has_recorded_event_attendance(event_id, teacher_id):
+            return validation_error_response(
+                "Không thể xóa người phụ trách đã thực hiện điểm danh",
+                {"event_teacher_id": ["Supervisor has recorded attendance"]},
+            )
+
+        frappe.delete_doc("SIS Event Teacher", event_teacher_id, ignore_permissions=True)
+        frappe.db.commit()
+
+        return single_item_response(
+            {"event_teacher_id": event_teacher_id, "event_id": event_id},
+            "Teacher removed successfully",
+        )
+    except Exception as e:
+        frappe.log_error(f"Error removing event teacher: {str(e)}")
+        return error_response(f"Error removing event teacher: {str(e)}")
 
 
 def _get_request_arg(name: str, fallback: Optional[str] = None) -> Optional[str]:

@@ -211,6 +211,61 @@ def _get_session_checkup_date_for_new_student(school_year_id, checkup_phase, cam
     return _parse_session_checkup_date(raw) if raw else None
 
 
+def _batch_resolve_student_photos(student_ids, school_year_id=None):
+    """Lấy ảnh học sinh theo batch — đồng bộ logic batch_get_students (Active + type student)."""
+    photo_map = {}
+    if not student_ids:
+        return photo_map
+
+    unique_ids = list({sid for sid in student_ids if sid})
+    if not unique_ids:
+        return photo_map
+
+    current_school_year = school_year_id
+    if not current_school_year:
+        current_school_year = frappe.db.get_value(
+            "SIS School Year",
+            {"is_enable": 1},
+            "name",
+            order_by="start_date desc",
+        )
+
+    photos = frappe.db.sql(
+        """
+        SELECT
+            student_id,
+            photo,
+            upload_date,
+            school_year_id
+        FROM `tabSIS Photo`
+        WHERE student_id IN %(student_ids)s
+            AND type = 'student'
+            AND status = 'Active'
+        ORDER BY
+            CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+            upload_date DESC,
+            creation DESC
+        """,
+        {"student_ids": unique_ids, "current_year": current_school_year or ""},
+        as_dict=True,
+    )
+
+    for p in photos:
+        sid = p.get("student_id")
+        if not sid or sid in photo_map:
+            continue
+        photo_url = p.get("photo")
+        if not photo_url:
+            continue
+        if photo_url.startswith("/files/"):
+            photo_url = frappe.utils.get_url(photo_url)
+        elif not photo_url.startswith("http"):
+            photo_url = frappe.utils.get_url("/files/" + photo_url.lstrip("/"))
+        photo_map[sid] = photo_url
+
+    return photo_map
+
+
 def _sis_health_checkup_has_approval_status_column():
     """
     Có cột approval_status trên bảng khám SK định kỳ hay không.
@@ -518,7 +573,14 @@ def get_students_health_checkup(school_year_id=None):
             params["campus_id"] = campus_id
         
         students = frappe.db.sql(sql, params, as_dict=True)
-        
+
+        # Ảnh đại diện học sinh — batch query SIS Photo (đồng bộ daily_health)
+        student_ids = [s.get("student_id") for s in students if s.get("student_id")]
+        photo_map = _batch_resolve_student_photos(student_ids, school_year_id)
+        for row in students:
+            sid = row.get("student_id")
+            row["student_photo"] = photo_map.get(sid, "") if sid else ""
+
         return success_response(
             data=students,
             message=f"Lấy danh sách {len(students)} học sinh thành công"
