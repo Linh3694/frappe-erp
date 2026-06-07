@@ -146,7 +146,7 @@ def update_rule_set(**kwargs):
 		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
 			return error_response("Rule Set không tồn tại", 404)
 		doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
-		for field in ("title_vn", "title_en", "description", "is_default"):
+		for field in ("title_vn", "title_en", "description", "is_default", "school_year_id", "education_stage_id"):
 			if data.get(field) is not None:
 				doc.set(field, data.get(field))
 		if "rules" in data:
