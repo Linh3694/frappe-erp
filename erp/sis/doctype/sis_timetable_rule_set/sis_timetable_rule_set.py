@@ -6,10 +6,20 @@ from frappe.model.document import Document
 
 class SISTimetableRuleSet(Document):
 	def validate(self):
-		if self.is_default and self.campus_id:
+		# Mỗi campus + năm học + cấp học chỉ có tối đa một rule set mặc định
+		if self.is_default and self.campus_id and self.school_year_id and self.education_stage_id:
 			existing = frappe.db.exists(
 				"SIS Timetable Rule Set",
-				{"campus_id": self.campus_id, "is_default": 1, "name": ("!=", self.name)},
+				{
+					"campus_id": self.campus_id,
+					"school_year_id": self.school_year_id,
+					"education_stage_id": self.education_stage_id,
+					"is_default": 1,
+					"name": ("!=", self.name),
+				},
 			)
 			if existing:
-				frappe.msgprint(f"Campus đã có Rule Set default: {existing}", indicator="orange")
+				frappe.msgprint(
+					f"Đã có rule set mặc định cho cặp năm học + cấp học này: {existing}",
+					indicator="orange",
+				)

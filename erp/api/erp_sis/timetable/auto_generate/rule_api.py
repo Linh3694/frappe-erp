@@ -28,20 +28,33 @@ def _json() -> Dict:
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
-def list_rule_sets(campus_id=None):
+def list_rule_sets(campus_id=None, school_year_id=None, education_stage_id=None):
 	try:
 		campus_id = campus_id or frappe.form_dict.get("campus_id")
-		filters = {"campus_id": campus_id} if campus_id else {}
+		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
+		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
+		filters = {}
+		if campus_id:
+			filters["campus_id"] = campus_id
+		if school_year_id:
+			filters["school_year_id"] = school_year_id
+		if education_stage_id:
+			filters["education_stage_id"] = education_stage_id
 		if not frappe.db.table_exists("tabSIS Timetable Rule Set"):
 			# Fallback offline: trả default spec không cần DB
 			return single_item_response({
 				"offline": True,
 				"default": build_default_rule_set("offline").rules,
 			})
+		fields = [
+			"name", "title_vn", "title_en", "campus_id",
+			"school_year_id", "education_stage_id",
+			"is_default", "description",
+		]
 		rows = frappe.get_all(
 			"SIS Timetable Rule Set",
 			filters=filters,
-			fields=["name", "title_vn", "title_en", "campus_id", "is_default", "description"],
+			fields=fields,
 			order_by="modified desc",
 		)
 		return list_response(rows)
@@ -59,13 +72,7 @@ def get_rule_set(rule_set_id=None):
 			return error_response("Rule Set không tồn tại", 404)
 		doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
 		rs = load_rule_set(rule_set_id)
-		return single_item_response({
-			"name": doc.name,
-			"title_vn": doc.title_vn,
-			"campus_id": doc.campus_id,
-			"is_default": doc.is_default,
-			"rules": [_rule_to_dict(r) for r in rs.rules],
-		})
+		return single_item_response(_rule_set_summary(doc, rs.rules))
 	except Exception as e:
 		return error_response(str(e))
 
@@ -74,10 +81,24 @@ def get_rule_set(rule_set_id=None):
 def create_rule_set(**kwargs):
 	try:
 		data = _json()
+		title_vn = (data.get("title_vn") or "").strip()
+		campus_id = data.get("campus_id")
+		school_year_id = data.get("school_year_id")
+		education_stage_id = data.get("education_stage_id")
+		if not title_vn:
+			return error_response("Thiếu tên rule set")
+		if not campus_id:
+			return error_response("Thiếu campus_id")
+		if not school_year_id:
+			return error_response("Thiếu school_year_id (năm học)")
+		if not education_stage_id:
+			return error_response("Thiếu education_stage_id (cấp học)")
 		doc = frappe.new_doc("SIS Timetable Rule Set")
-		doc.title_vn = data.get("title_vn") or "Rule Set"
+		doc.title_vn = title_vn
 		doc.title_en = data.get("title_en") or doc.title_vn
-		doc.campus_id = data.get("campus_id")
+		doc.campus_id = campus_id
+		doc.school_year_id = school_year_id
+		doc.education_stage_id = education_stage_id
 		doc.is_default = int(data.get("is_default") or 0)
 		doc.description = data.get("description") or ""
 		rules = data.get("rules")
@@ -138,13 +159,7 @@ def update_rule_set(**kwargs):
 		doc.save(ignore_permissions=True)
 		frappe.db.commit()
 		rs = load_rule_set(rule_set_id)
-		return single_item_response({
-			"name": doc.name,
-			"title_vn": doc.title_vn,
-			"campus_id": doc.campus_id,
-			"is_default": doc.is_default,
-			"rules": [_rule_to_dict(r) for r in rs.rules],
-		})
+		return single_item_response(_rule_set_summary(doc, rs.rules))
 	except Exception as e:
 		return error_response(str(e))
 
@@ -216,23 +231,52 @@ def list_subject_filter_keys(subject_type=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
-def list_filter_options(entity=None, campus_id=None, search=None, limit=50):
+def list_filter_options(
+	entity=None,
+	campus_id=None,
+	school_year_id=None,
+	education_stage_id=None,
+	search=None,
+	limit=50,
+):
 	"""Entity picker options cho subject filter / instance editor."""
 	try:
 		entity = entity or frappe.form_dict.get("entity")
 		campus_id = campus_id or frappe.form_dict.get("campus_id")
+		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
+		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
 		search = search or frappe.form_dict.get("search") or ""
 		limit = int(frappe.form_dict.get("limit") or limit or 50)
 		if not entity:
 			return error_response("Thiếu entity")
-		options = _query_filter_options(entity, campus_id, search, limit)
+		options = _query_filter_options(
+			entity, campus_id, school_year_id, education_stage_id, search, limit,
+		)
 		return list_response(options)
 	except Exception as e:
 		return error_response(str(e))
 
 
-def _query_filter_options(entity: str, campus_id: Optional[str], search: str, limit: int) -> list:
-	"""Truy vấn entity theo campus — dùng cho UI picker."""
+def _grade_ids_for_stage(education_stage_id: Optional[str]) -> Optional[list]:
+	if not education_stage_id:
+		return None
+	grades = frappe.get_all(
+		"SIS Education Grade",
+		filters={"education_stage_id": education_stage_id},
+		pluck="name",
+	)
+	return grades or []
+
+
+def _query_filter_options(
+	entity: str,
+	campus_id: Optional[str],
+	school_year_id: Optional[str],
+	education_stage_id: Optional[str],
+	search: str,
+	limit: int,
+) -> list:
+	"""Truy vấn entity theo campus + phạm vi rule set — dùng cho UI picker."""
 	entity = entity.lower()
 	if entity == "teacher":
 		filters = {}
@@ -249,8 +293,12 @@ def _query_filter_options(entity: str, campus_id: Optional[str], search: str, li
 		return [{"value": r.name, "label": r.full_name or r.name, "code": r.teacher_code} for r in rows]
 
 	if entity == "class":
+		grades = _grade_ids_for_stage(education_stage_id)
+		if education_stage_id and not grades:
+			return []
+
 		sql = """
-			SELECT c.name, c.title_vn, c.class_code
+			SELECT c.name, c.title, c.short_title
 			FROM `tabSIS Class` c
 			WHERE 1=1
 		"""
@@ -258,17 +306,33 @@ def _query_filter_options(entity: str, campus_id: Optional[str], search: str, li
 		if campus_id:
 			sql += " AND c.campus_id = %s"
 			params.append(campus_id)
+		if school_year_id:
+			sql += " AND c.school_year_id = %s"
+			params.append(school_year_id)
+		if grades:
+			placeholders = ", ".join(["%s"] * len(grades))
+			sql += f" AND c.education_grade IN ({placeholders})"
+			params.extend(grades)
 		if search:
-			sql += " AND (c.title_vn LIKE %s OR c.name LIKE %s)"
-			params.extend([f"%{search}%", f"%{search}%"])
-		sql += " ORDER BY c.title_vn LIMIT %s"
+			sql += " AND (c.title LIKE %s OR c.short_title LIKE %s OR c.name LIKE %s)"
+			params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+		sql += " ORDER BY c.title LIMIT %s"
 		params.append(limit)
 		rows = frappe.db.sql(sql, params, as_dict=True)
-		return [{"value": r.name, "label": r.title_vn or r.name, "code": r.class_code} for r in rows]
+		return [
+			{"value": r.name, "label": r.title or r.name, "code": r.short_title}
+			for r in rows
+		]
 
 	if entity in ("timetable_subject", "subject"):
+		filters = {}
+		if campus_id and frappe.db.has_column("SIS Timetable Subject", "campus_id"):
+			filters["campus_id"] = campus_id
+		if education_stage_id and frappe.db.has_column("SIS Timetable Subject", "education_stage_id"):
+			filters["education_stage_id"] = education_stage_id
 		rows = frappe.get_all(
 			"SIS Timetable Subject",
+			filters=filters,
 			fields=["name", "title_vn", "title_en"],
 			or_filters=[["title_vn", "like", f"%{search}%"], ["name", "like", f"%{search}%"]] if search else None,
 			limit_page_length=limit,
@@ -300,6 +364,21 @@ def _query_filter_options(entity: str, campus_id: Optional[str], search: str, li
 		return [{"value": r.name, "label": r.title_vn or r.name, "code": r.room_code} for r in rows]
 
 	return []
+
+
+def _rule_set_summary(doc, rules=None) -> Dict[str, Any]:
+	out = {
+		"name": doc.name,
+		"title_vn": doc.title_vn,
+		"campus_id": doc.campus_id,
+		"school_year_id": getattr(doc, "school_year_id", None),
+		"education_stage_id": getattr(doc, "education_stage_id", None),
+		"is_default": doc.is_default,
+		"description": doc.description,
+	}
+	if rules is not None:
+		out["rules"] = [_rule_to_dict(r) for r in rules]
+	return out
 
 
 def _rule_to_dict(r) -> Dict[str, Any]:
