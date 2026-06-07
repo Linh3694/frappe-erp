@@ -47,6 +47,7 @@ def main() -> int:
 		"core.tests.test_variants",
 		"core.tests.test_kind_override",
 		"core.tests.test_subject_max_n_per_day",
+		"core.tests.test_list_filter_options",
 	]
 	total_p = total_f = 0
 	for m in modules:
