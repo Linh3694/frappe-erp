@@ -25,10 +25,11 @@ def test_class_query_uses_title_not_title_vn():
 
 
 def test_list_filter_options_accepts_scope_params():
-	"""Signature + body có entity_type (alias) và phạm vi năm học/cấp học."""
+	"""Signature + body có picker_entity, entity_type (alias) và phạm vi năm học/cấp học."""
 	source = _rule_api_source()
 	sig_block = source.split("def list_filter_options(")[1].split("):")[0]
+	assert "picker_entity" in sig_block
 	assert "entity_type" in sig_block
 	assert "school_year_id" in sig_block
 	assert "education_stage_id" in sig_block
-	assert 'frappe.form_dict.get("entity_type")' in source
+	assert 'frappe.form_dict.get("picker_entity")' in source
