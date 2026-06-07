@@ -233,6 +233,7 @@ def list_subject_filter_keys(subject_type=None):
 @frappe.whitelist(allow_guest=False, methods=["GET"])
 def list_filter_options(
 	entity=None,
+	entity_type=None,
 	campus_id=None,
 	school_year_id=None,
 	education_stage_id=None,
@@ -241,7 +242,13 @@ def list_filter_options(
 ):
 	"""Entity picker options cho subject filter / instance editor."""
 	try:
-		entity = entity or frappe.form_dict.get("entity")
+		# entity_type: alias tránh conflict tên param trên một số proxy/Frappe build
+		entity = (
+			entity
+			or entity_type
+			or frappe.form_dict.get("entity")
+			or frappe.form_dict.get("entity_type")
+		)
 		campus_id = campus_id or frappe.form_dict.get("campus_id")
 		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
 		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
@@ -249,10 +256,21 @@ def list_filter_options(
 		limit = int(frappe.form_dict.get("limit") or limit or 50)
 		if not entity:
 			return error_response("Thiếu entity")
+		entity_lower = str(entity).lower()
+		meta = {}
+		if entity_lower in ("class", "subject", "timetable_subject"):
+			if not school_year_id or not education_stage_id:
+				meta["warning"] = (
+					"Rule set chưa có năm học/cấp học — tạo lại rule set hoặc chọn phạm vi trước khi cấu hình"
+				)
+		if entity_lower == "class" and education_stage_id and not _grade_ids_for_stage(education_stage_id):
+			return error_response(
+				"Cấp học chưa có khối lớp (SIS Education Grade) — cấu hình khối trước khi chọn lớp"
+			)
 		options = _query_filter_options(
-			entity, campus_id, school_year_id, education_stage_id, search, limit,
+			entity_lower, campus_id, school_year_id, education_stage_id, search, limit,
 		)
-		return list_response(options)
+		return list_response(options, meta=meta or None)
 	except Exception as e:
 		return error_response(str(e))
 
