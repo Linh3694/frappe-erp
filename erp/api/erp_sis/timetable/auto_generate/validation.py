@@ -34,7 +34,8 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 			teachers = inp.class_subject_teachers.get(key_a, [])
 			if not teachers and req and req.periods_per_week > 0:
 				subject_name = req.timetable_subject_title or ts_id
-				errors.append(f"Lớp {c.title} chưa có GV phân công cho môn {subject_name}")
+				# Chưa phân công GV vẫn cho xếp TKB — chỉ cảnh báo
+				warnings.append(f"Lớp {c.title} chưa có GV phân công cho môn {subject_name}")
 
 		if total_required > max_slots_per_week:
 			errors.append(
