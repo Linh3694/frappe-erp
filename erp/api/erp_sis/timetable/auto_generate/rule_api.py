@@ -34,6 +34,34 @@ def _json() -> Dict:
 	return dict(frappe.form_dict)
 
 
+def _parse_row_json(val: Any) -> dict:
+	if isinstance(val, dict):
+		return val
+	if isinstance(val, str):
+		try:
+			return json.loads(val) if val else {}
+		except json.JSONDecodeError:
+			return {}
+	return {}
+
+
+def _normalize_rule_row(row: dict) -> dict:
+	"""Chuẩn hóa 1 dòng child table trước khi append."""
+	return {
+		"rule_id": (row.get("rule_id") or "").strip(),
+		"kind": row.get("kind") or "hard",
+		"verb": row.get("verb") or "",
+		"subject_type": row.get("subject_type") or "class",
+		"subject_filter": _parse_row_json(row.get("subject_filter")),
+		"params": _parse_row_json(row.get("params")),
+		"weight": int(row.get("weight") or 5),
+		"enabled": int(row.get("enabled") if row.get("enabled") is not None else 1),
+		"allow_kind_override": int(row.get("allow_kind_override") or 0),
+		"sort_order": int(row.get("sort_order") or 0),
+		"description": row.get("description") or "",
+	}
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET"])
 def list_rule_sets(campus_id=None, school_year_id=None, education_stage_id=None):
 	try:
@@ -117,7 +145,7 @@ def create_rule_set(**kwargs):
 			if val_errors:
 				return error_response("; ".join(val_errors))
 		for row in rules or []:
-			doc.append("rules", row)
+			doc.append("rules", _normalize_rule_row(row))
 		doc.insert(ignore_permissions=True)
 		frappe.db.commit()
 		return single_item_response({"name": doc.name})
@@ -163,11 +191,13 @@ def update_rule_set(**kwargs):
 			val_errors = validate_rule_rows(data.get("rules") or [])
 			if val_errors:
 				return error_response("; ".join(val_errors))
-			doc.rules = []
+			# doc.set — xóa hết dòng cũ trong DB (gán [] không đủ trên child table)
+			doc.set("rules", [])
 			for row in data.get("rules") or []:
-				doc.append("rules", row)
+				doc.append("rules", _normalize_rule_row(row))
 		doc.save(ignore_permissions=True)
 		frappe.db.commit()
+		doc.reload()
 		rs = load_rule_set(rule_set_id)
 		return single_item_response(_rule_set_summary(doc, rs.rules))
 	except Exception as e:
@@ -315,7 +345,7 @@ def save_rule_set_requirements(**kwargs):
 				"room_type_required": norm["room_type_required"],
 			})
 
-		doc.requirements = []
+		doc.set("requirements", [])
 		for row in new_rows:
 			doc.append("requirements", row)
 		doc.save(ignore_permissions=True)
