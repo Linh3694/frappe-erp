@@ -88,9 +88,10 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 		if not req.room_type_required:
 			continue
 		if req.room_type_required not in room_types_available:
-			errors.append(
+			# Rule room_type_match đang tắt — chỉ cảnh báo, không chặn solve
+			warnings.append(
 				f"Môn {req.timetable_subject_title}: yêu cầu phòng loại "
-				f"'{req.room_type_required}' nhưng campus không có phòng loại này"
+				f"'{req.room_type_required}' nhưng campus chưa có phòng loại này"
 			)
 
 	# force_pair: số tiết phải chẵn

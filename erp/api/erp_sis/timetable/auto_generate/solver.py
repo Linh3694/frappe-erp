@@ -27,6 +27,7 @@ class SolverResult:
 	variant_count: int = 0
 	warnings: List[str] = field(default_factory=list)
 	errors: List[str] = field(default_factory=list)
+	suspects: List[Dict] = field(default_factory=list)
 
 
 class TimetableSolver:
@@ -115,6 +116,17 @@ class TimetableSolver:
 						"(2) Có đủ GV cho tất cả lớp-môn? "
 						"(3) GV có bị giới hạn quá chặt (max_periods_per_day)?"
 					)
+					try:
+						from .core.diagnostics import diagnose_infeasibility
+
+						result.suspects = diagnose_infeasibility(inp, rule_set)
+						if result.suspects:
+							ids = [s["rule_id"] for s in result.suspects[:5]]
+							result.errors.append(f"Nghi phạm: {', '.join(ids)}")
+					except Exception as diag_err:
+						frappe.logger().warning(
+							f"[Solver] diagnose_infeasibility failed for {self.session_id}: {diag_err}"
+						)
 
 		except Exception as e:
 			result.errors.append(f"Lỗi hệ thống: {str(e)}")
@@ -247,6 +259,7 @@ def run_solver(session_id: str):
 		"total_slots": result.total_slots,
 		"variant_count": result.variant_count,
 		"warnings": result.warnings,
+		"suspects": result.suspects,
 	})
 	session.total_classes = result.total_classes
 	session.total_slots_generated = result.total_slots
@@ -255,7 +268,7 @@ def run_solver(session_id: str):
 		session.status = "Completed"
 	else:
 		session.status = "Failed"
-		session.error_log = "\n".join(result.errors + result.warnings)
+		session.error_log = "\n".join(result.errors)
 
 	session.save(ignore_permissions=True)
 	frappe.db.commit()
@@ -287,7 +300,7 @@ def run_solver_variants(session_id: str, k: int = 3, min_diff_ratio: float = 0.1
 		session.status = "Completed"
 	else:
 		session.status = "Failed"
-		session.error_log = "\n".join(result.errors + result.warnings)
+		session.error_log = "\n".join(result.errors)
 
 	session.save(ignore_permissions=True)
 	frappe.db.commit()

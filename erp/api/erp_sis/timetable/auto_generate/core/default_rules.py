@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from .dto import Rule, RuleSet
 
+# Rule tắt mặc định — bật lại khi campus đã có dữ liệu phòng (G1)
+DISABLED_DEFAULT_RULE_IDS = frozenset({"room_no_overlap", "room_type_match"})
+
 # (rule_id, kind, verb, subject_type, subject_filter, params, weight, description)
 DEFAULT_RULE_SPECS = [
 	("class_no_overlap", "hard", "no_overlap", "class", {}, {}, 5, "Mỗi lớp tối đa 1 môn/slot"),
@@ -42,7 +45,7 @@ def build_default_rule_set(name: str = "default") -> RuleSet:
 			subject_filter=dict(sfilt),
 			params=dict(params),
 			weight=weight,
-			enabled=True,
+			enabled=rid not in DISABLED_DEFAULT_RULE_IDS,
 			description=desc,
 		))
 	return RuleSet(name=name, rules=rules)
