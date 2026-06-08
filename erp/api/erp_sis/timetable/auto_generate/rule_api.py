@@ -381,6 +381,242 @@ def save_rule_set_requirements(**kwargs):
 		return error_response(str(e))
 
 
+_DEFAULT_WORKING_DAYS = ["mon", "tue", "wed", "thu", "fri"]
+_VALID_DAYS = frozenset({"mon", "tue", "wed", "thu", "fri", "sat", "sun"})
+
+
+def _load_study_periods(
+	schedule_id: Optional[str],
+	campus_id: str,
+	education_stage_id: str,
+) -> list:
+	"""Lấy cột TKB tiết học — ưu tiên schedule rule set, fallback legacy."""
+	if schedule_id:
+		rows = frappe.db.sql(
+			"""
+			SELECT name, period_name, period_priority, period_type
+			FROM `tabSIS Timetable Column`
+			WHERE schedule_id = %(schedule_id)s
+			  AND period_type = 'study'
+			ORDER BY period_priority
+			""",
+			{"schedule_id": schedule_id},
+			as_dict=True,
+		)
+		if rows:
+			return rows
+
+	return frappe.db.sql(
+		"""
+		SELECT name, period_name, period_priority, period_type
+		FROM `tabSIS Timetable Column`
+		WHERE campus_id = %(campus_id)s
+		  AND education_stage_id = %(education_stage_id)s
+		  AND period_type = 'study'
+		  AND IFNULL(schedule_id, '') = ''
+		ORDER BY period_priority
+		""",
+		{"campus_id": campus_id, "education_stage_id": education_stage_id},
+		as_dict=True,
+	)
+
+
+def _load_teachers_for_stage(campus_id: str, education_stage_id: str) -> list:
+	"""GV thuộc campus + cấp học (field trực tiếp hoặc mapping child table)."""
+	has_mapping = frappe.db.table_exists("SIS Teacher Education Stage")
+	if has_mapping:
+		rows = frappe.db.sql(
+			"""
+			SELECT DISTINCT t.name AS teacher_id, t.user_id,
+			       u.full_name, u.employee_code
+			FROM `tabSIS Teacher` t
+			LEFT JOIN `tabUser` u ON u.name = t.user_id
+			LEFT JOIN `tabSIS Teacher Education Stage` tes ON tes.parent = t.name
+			WHERE t.campus_id = %(campus_id)s
+			  AND (
+			    t.education_stage_id = %(stage_id)s
+			    OR tes.education_stage_id = %(stage_id)s
+			  )
+			ORDER BY u.full_name ASC, t.name ASC
+			""",
+			{"campus_id": campus_id, "stage_id": education_stage_id},
+			as_dict=True,
+		)
+	else:
+		rows = frappe.db.sql(
+			"""
+			SELECT t.name AS teacher_id, t.user_id,
+			       u.full_name, u.employee_code
+			FROM `tabSIS Teacher` t
+			LEFT JOIN `tabUser` u ON u.name = t.user_id
+			WHERE t.campus_id = %(campus_id)s
+			  AND (
+			    t.education_stage_id = %(stage_id)s
+			    OR IFNULL(t.education_stage_id, '') = ''
+			  )
+			ORDER BY u.full_name ASC, t.name ASC
+			""",
+			{"campus_id": campus_id, "stage_id": education_stage_id},
+			as_dict=True,
+		)
+
+	return [
+		{
+			"teacher_id": r["teacher_id"],
+			"user_id": r.get("user_id") or r["teacher_id"],
+			"full_name": r.get("full_name") or r["teacher_id"],
+			"employee_code": r.get("employee_code") or "",
+		}
+		for r in rows
+	]
+
+
+def _load_unavailability_map(teacher_ids: list) -> dict:
+	"""Đọc slot bận theo teacher_id từ child table."""
+	if not teacher_ids or not frappe.db.table_exists("SIS Teacher Unavailability"):
+		return {}
+
+	rows = frappe.db.sql(
+		"""
+		SELECT parent AS teacher_id, day_of_week, timetable_column_id, reason
+		FROM `tabSIS Teacher Unavailability`
+		WHERE parent IN %(ids)s
+		ORDER BY day_of_week, timetable_column_id
+		""",
+		{"ids": teacher_ids},
+		as_dict=True,
+	)
+	out: Dict[str, list] = {}
+	for row in rows:
+		tid = row["teacher_id"]
+		out.setdefault(tid, []).append({
+			"day_of_week": row["day_of_week"],
+			"timetable_column_id": row["timetable_column_id"],
+			"reason": row.get("reason") or "",
+		})
+	return out
+
+
+def _teacher_in_scope(teacher_id: str, campus_id: str, education_stage_id: str) -> bool:
+	"""Kiểm tra GV thuộc phạm vi rule set."""
+	allowed = {t["teacher_id"] for t in _load_teachers_for_stage(campus_id, education_stage_id)}
+	return teacher_id in allowed
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def get_teacher_unavailability_config(rule_set_id=None):
+	"""Cấu hình lịch bận GV theo phạm vi rule set."""
+	try:
+		rule_set_id = rule_set_id or frappe.form_dict.get("rule_set_id")
+		if not rule_set_id:
+			return error_response("Thiếu rule_set_id")
+		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
+			return error_response("Rule Set không tồn tại", 404)
+
+		doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
+		if not doc.school_year_id or not doc.education_stage_id:
+			return error_response("Rule set chưa có năm học/cấp học")
+
+		schedule_id = getattr(doc, "schedule_id", None) or None
+		slot_meta = compute_max_slots(schedule_id, doc.campus_id, doc.education_stage_id)
+		period_rows = _load_study_periods(schedule_id, doc.campus_id, doc.education_stage_id)
+		teachers = _load_teachers_for_stage(doc.campus_id, doc.education_stage_id)
+		teacher_ids = [t["teacher_id"] for t in teachers]
+		unavailability = _load_unavailability_map(teacher_ids)
+
+		return single_item_response({
+			"rule_set_id": rule_set_id,
+			"schedule_id": schedule_id,
+			"teachers": teachers,
+			"periods": [
+				{
+					"name": p["name"],
+					"period_name": p.get("period_name") or p["name"],
+					"period_priority": p.get("period_priority") or 0,
+				}
+				for p in period_rows
+			],
+			"working_days": _DEFAULT_WORKING_DAYS[: int(slot_meta.get("working_days") or 5)],
+			"unavailability": unavailability,
+		})
+	except Exception as e:
+		return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def save_teacher_unavailability(**kwargs):
+	"""Lưu lịch bận GV vào child table SIS Teacher Unavailability."""
+	try:
+		data = _json()
+		rule_set_id = data.get("rule_set_id")
+		changes = data.get("changes")
+		if not rule_set_id:
+			return error_response("Thiếu rule_set_id")
+		if changes is None:
+			return error_response("Thiếu changes")
+		if isinstance(changes, str):
+			changes = json.loads(changes)
+
+		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
+			return error_response("Rule Set không tồn tại", 404)
+
+		rs_doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
+		if not rs_doc.education_stage_id:
+			return error_response("Rule set chưa có cấp học")
+
+		schedule_id = getattr(rs_doc, "schedule_id", None) or None
+		valid_periods = {
+			p["name"] for p in _load_study_periods(
+				schedule_id, rs_doc.campus_id, rs_doc.education_stage_id,
+			)
+		}
+		if not valid_periods:
+			return error_response("Chưa có tiết học (SIS Timetable Column) trong phạm vi rule set")
+
+		saved = 0
+		for item in changes or []:
+			teacher_id = (item.get("teacher_id") or "").strip()
+			if not teacher_id:
+				continue
+			if not frappe.db.exists("SIS Teacher", teacher_id):
+				return error_response(f"Giáo viên không tồn tại: {teacher_id}")
+			if not _teacher_in_scope(teacher_id, rs_doc.campus_id, rs_doc.education_stage_id):
+				return error_response(f"Giáo viên không thuộc phạm vi rule set: {teacher_id}")
+
+			seen = set()
+			new_rows = []
+			for slot in item.get("slots") or []:
+				day = (slot.get("day_of_week") or "").strip()
+				col = (slot.get("timetable_column_id") or "").strip()
+				if not day or not col:
+					continue
+				if day not in _VALID_DAYS:
+					return error_response(f"Thứ không hợp lệ: {day}")
+				if col not in valid_periods:
+					return error_response(f"Tiết không thuộc phạm vi: {col}")
+				key = (day, col)
+				if key in seen:
+					continue
+				seen.add(key)
+				new_rows.append({
+					"day_of_week": day,
+					"timetable_column_id": col,
+					"reason": (slot.get("reason") or "").strip(),
+				})
+
+			teacher_doc = frappe.get_doc("SIS Teacher", teacher_id)
+			teacher_doc.set("unavailability", [])
+			for row in new_rows:
+				teacher_doc.append("unavailability", row)
+			teacher_doc.save(ignore_permissions=True)
+			saved += 1
+
+		frappe.db.commit()
+		return single_item_response({"saved_teachers": saved})
+	except Exception as e:
+		return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET"])
 def list_rule_catalog_api(**kwargs):
 	try:
