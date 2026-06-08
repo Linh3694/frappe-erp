@@ -5,6 +5,21 @@ import frappe
 from .jwt_auth import authenticate_via_jwt
 
 
+def _set_user_preserving_form_dict(user_email):
+    """Đặt current user mà KHÔNG mất tham số request.
+
+    frappe.set_user() reset frappe.local.form_dict = {} (xem frappe/__init__.py).
+    Middleware này chạy ở before_request — tức SAU make_form_dict() (đã nạp query
+    string / JSON body vào form_dict) nhưng TRƯỚC khi dispatch hàm whitelisted.
+    Nếu không lưu/khôi phục, mọi param request sẽ bị xoá → hàm nhận form_dict rỗng.
+    Đây đúng là cách frappe/auth.py xử lý cho OAuth & API key.
+    """
+    form_dict = getattr(frappe.local, "form_dict", None)
+    frappe.set_user(user_email)
+    if form_dict is not None:
+        frappe.local.form_dict = form_dict
+
+
 def jwt_auth_middleware():
     """
     Global JWT authentication middleware
@@ -42,7 +57,7 @@ def jwt_auth_middleware():
         if has_explicit_jwt:
             user_email = authenticate_via_jwt()
             if user_email:
-                frappe.set_user(user_email)
+                _set_user_preserving_form_dict(user_email)
                 try:
                     frappe.local.login_manager.user = user_email
                 except Exception:
@@ -59,7 +74,7 @@ def jwt_auth_middleware():
         user_email = authenticate_via_jwt()
 
         if user_email:
-            frappe.set_user(user_email)
+            _set_user_preserving_form_dict(user_email)
             try:
                 frappe.local.login_manager.user = user_email
             except Exception:
