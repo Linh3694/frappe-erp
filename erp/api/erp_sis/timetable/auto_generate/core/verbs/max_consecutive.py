@@ -1,3 +1,4 @@
+from ...requirements_matrix import LEGACY_DEFAULT_MAX_CONSECUTIVE
 from ..helpers import instances, inst_object_int, le_limit, teacher_class_subjects
 from ..registry import Verb, register_verb
 
@@ -26,7 +27,7 @@ class MaxConsecutive(Verb):
 
 		for inst in instances(params):
 			t_id = inst.get("subject")
-			n = inst_object_int(inst, "max", params.get("max", 3))
+			n = inst_object_int(inst, "max", params.get("max", LEGACY_DEFAULT_MAX_CONSECUTIVE))
 			self._apply_limit(ctx, t_id, n, tcs, kind=kind, weight=weight)
 
 		for t_id in subject_set or []:

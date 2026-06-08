@@ -146,7 +146,7 @@ VERB_SCHEMAS: Dict[str, dict] = {
 	"max_consecutive": {
 		"params_schema": {
 			"fields": [
-				{"name": "max", "type": "int", "label": "Max liên tiếp", "default": 3},
+				{"name": "max", "type": "int", "label": "Max liên tiếp", "default": 10},
 				{"name": "global", "type": "bool", "label": "Áp dụng global", "default": False},
 			],
 		},
