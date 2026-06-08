@@ -76,7 +76,10 @@ def _rule_set_list_filters(
 	if education_stage_id:
 		filters["education_stage_id"] = education_stage_id
 
-	campus_id = get_current_campus_from_context() or frappe.form_dict.get("campus_id")
+	try:
+		campus_id = get_current_campus_from_context() or frappe.form_dict.get("campus_id")
+	except Exception:
+		campus_id = frappe.form_dict.get("campus_id")
 	user = frappe.session.user
 
 	if user == "Administrator" and not campus_id:
@@ -90,7 +93,7 @@ def _rule_set_list_filters(
 	if len(campuses) == 1:
 		filters["campus_id"] = campuses[0]
 	elif campuses:
-		filters["campus_id"] = ("in", campuses)
+		filters["campus_id"] = ["in", campuses]
 	return filters
 
 
@@ -139,7 +142,7 @@ def list_rule_sets(campus_id=None, school_year_id=None, education_stage_id=None)
 					if len(campuses) == 1:
 						broad["campus_id"] = campuses[0]
 					else:
-						broad["campus_id"] = ("in", campuses)
+						broad["campus_id"] = ["in", campuses]
 					rows = _fetch_rule_set_rows(broad)
 
 		return list_response(rows)
