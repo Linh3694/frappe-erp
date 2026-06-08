@@ -9,6 +9,11 @@ class BalanceWorkload(Verb):
 		tcs = teacher_class_subjects(inp)
 		objectives = []
 		for t_id, cs_list in tcs.items():
+			info = inp.teachers.get(t_id)
+			mode = getattr(info, "workload_spread_mode", "auto") if info else "auto"
+			if mode == "auto":
+				continue
+
 			day_loads = []
 			for day in inp.working_days:
 				dv = []
@@ -21,12 +26,20 @@ class BalanceWorkload(Verb):
 					load = ctx.model.NewIntVar(0, ctx.num_periods, f"bw_{t_id}_{day}")
 					ctx.model.Add(load == sum(dv))
 					day_loads.append(load)
-			if len(day_loads) >= 2:
-				mx = ctx.model.NewIntVar(0, ctx.num_periods, f"bwmx_{t_id}")
-				mn = ctx.model.NewIntVar(0, ctx.num_periods, f"bwmn_{t_id}")
-				ctx.model.AddMaxEquality(mx, day_loads)
-				ctx.model.AddMinEquality(mn, day_loads)
-				diff = ctx.model.NewIntVar(0, ctx.num_periods, f"bwd_{t_id}")
-				ctx.model.Add(diff == mx - mn)
+			if len(day_loads) < 2:
+				continue
+
+			mx = ctx.model.NewIntVar(0, ctx.num_periods, f"bwmx_{t_id}")
+			mn = ctx.model.NewIntVar(0, ctx.num_periods, f"bwmn_{t_id}")
+			ctx.model.AddMaxEquality(mx, day_loads)
+			ctx.model.AddMinEquality(mn, day_loads)
+			diff = ctx.model.NewIntVar(0, ctx.num_periods, f"bwd_{t_id}")
+			ctx.model.Add(diff == mx - mn)
+
+			if mode == "even":
+				# Dạy đều — giảm chênh lệch giữa ngày nhiều/nhất và ít nhất
 				objectives.append(diff * (-weight))
+			elif mode == "concentrated":
+				# Dồn 1 ngày — ưu tiên tăng chênh lệch (dồn tiết vào ít ngày)
+				objectives.append(diff * weight)
 		return objectives

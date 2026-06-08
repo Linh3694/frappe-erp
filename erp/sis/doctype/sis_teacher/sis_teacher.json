@@ -27,6 +27,7 @@
   "max_periods_per_day",
   "max_periods_per_week",
   "max_consecutive_periods",
+  "workload_spread_mode",
   "unavailability_section",
   "unavailability"
  ],
@@ -105,6 +106,14 @@
    "label": "Max Consecutive Periods",
    "default": 4,
    "description": "Số tiết liên tiếp tối đa trước khi nghỉ (mặc định 4)"
+  },
+  {
+   "fieldname": "workload_spread_mode",
+   "fieldtype": "Select",
+   "label": "Workload Spread Mode",
+   "options": "auto\neven\nconcentrated",
+   "default": "auto",
+   "description": "Phân bổ tiết/tuần: auto (solver tự chọn), even (dạy đều), concentrated (dồn 1 ngày)"
   },
   {
    "fieldname": "unavailability_section",

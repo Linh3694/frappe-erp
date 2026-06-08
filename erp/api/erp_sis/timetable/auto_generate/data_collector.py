@@ -36,6 +36,7 @@ class TeacherInfo:
 	max_periods_per_day: int = 8
 	max_periods_per_week: int = 24
 	max_consecutive_periods: int = 4
+	workload_spread_mode: str = "auto"  # auto | even | concentrated
 	unavailable_slots: List[tuple] = field(default_factory=list)  # (day, period_idx)
 
 
@@ -212,25 +213,31 @@ class TimetableDataCollector:
 
 	def _get_teachers(self) -> Dict[str, TeacherInfo]:
 		"""Lấy GV theo campus, kèm scheduling config + unavailability."""
-		rows = frappe.db.sql("""
-			SELECT name, user_id,
-				   COALESCE(max_periods_per_day, 8) as max_periods_per_day,
-				   COALESCE(max_consecutive_periods, 4) as max_consecutive_periods
+		has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
+		has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
+		fields = [
+			"name", "user_id",
+			"COALESCE(max_periods_per_day, 8) as max_periods_per_day",
+			"COALESCE(max_consecutive_periods, 4) as max_consecutive_periods",
+		]
+		if has_week:
+			fields.append("COALESCE(max_periods_per_week, 24) as max_periods_per_week")
+		if has_spread:
+			fields.append("COALESCE(workload_spread_mode, 'auto') as workload_spread_mode")
+		sql = f"""
+			SELECT {", ".join(fields)}
 			FROM `tabSIS Teacher`
 			WHERE campus_id = %(campus_id)s
-		""", {"campus_id": self.session.campus_id}, as_dict=True)
+		"""
+		rows = frappe.db.sql(sql, {"campus_id": self.session.campus_id}, as_dict=True)
 
-		if frappe.db.has_column("SIS Teacher", "max_periods_per_week"):
-			rows = frappe.db.sql("""
-				SELECT name, user_id,
-					   COALESCE(max_periods_per_day, 8) as max_periods_per_day,
-					   COALESCE(max_periods_per_week, 24) as max_periods_per_week,
-					   COALESCE(max_consecutive_periods, 4) as max_consecutive_periods
-				FROM `tabSIS Teacher`
-				WHERE campus_id = %(campus_id)s
-			""", {"campus_id": self.session.campus_id}, as_dict=True)
-
-		teachers = {r["name"]: TeacherInfo(**r) for r in rows}
+		teachers = {}
+		for r in rows:
+			if not has_week:
+				r["max_periods_per_week"] = 24
+			if not has_spread:
+				r["workload_spread_mode"] = "auto"
+			teachers[r["name"]] = TeacherInfo(**r)
 
 		# Child table unavailability (nếu DocType/field đã migrate)
 		if frappe.db.table_exists("SIS Teacher Unavailability"):

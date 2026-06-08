@@ -9,9 +9,12 @@ def load_subjects(campus_id: str, education_stage_id: str) -> List[dict]:
 	"""Môn TKB theo campus + cấp học (kể cả bản ghi chưa gán education_stage_id)."""
 	import frappe
 
+	has_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
+	heavy_sql = "COALESCE(is_heavy, 0) AS is_heavy" if has_heavy else "0 AS is_heavy"
+
 	return frappe.db.sql(
-		"""
-		SELECT name, title_vn, title_en
+		f"""
+		SELECT name, title_vn, title_en, {heavy_sql}
 		FROM `tabSIS Timetable Subject`
 		WHERE campus_id = %(campus_id)s
 		  AND (

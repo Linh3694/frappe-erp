@@ -2,7 +2,7 @@ from ..helpers import class_subject_weekdays, instances, teacher_class_subjects
 from ..registry import Verb, register_verb
 
 
-@register_verb("forbidden_at_slots", supports=["teacher"], kind="hard", description="GV không dạy tại slot")
+@register_verb("forbidden_at_slots", supports=["teacher", "subject"], kind="hard", description="Cấm xếp tại slot")
 class ForbiddenAtSlots(Verb):
 	def apply_hard(self, ctx, subject_set, params):
 		inp = ctx.inp
@@ -20,18 +20,31 @@ class ForbiddenAtSlots(Verb):
 						if v is not None:
 							ctx.model.Add(v == 0)
 
-		# Instance: subject=teacher, object.slots [{day, period_idx}]
+		# Instance: subject=teacher|timetable_subject, object.slots [{day, period_idx}]
 		for inst in instances(params):
-			teacher = inst.get("subject")
+			entity_id = inst.get("subject")
 			obj = inst.get("object") or {}
 			slots = obj.get("slots") or []
+			if entity_id is None:
+				continue
 			for sl in slots:
 				day = sl.get("day")
 				p_idx = sl.get("period_idx", sl.get("period"))
-				if teacher is None or day is None or p_idx is None:
+				if day is None or p_idx is None:
 					continue
-				for (c_id, ts_id) in tcs.get(teacher, []):
-					v = ctx.x.get((c_id, ts_id, day, int(p_idx)))
+				p_idx = int(p_idx)
+				# GV: cấm mọi lớp×môn GV dạy tại slot
+				if entity_id in tcs:
+					for (c_id, ts_id) in tcs.get(entity_id, []):
+						v = ctx.x.get((c_id, ts_id, day, p_idx))
+						if v is not None:
+							ctx.model.Add(v == 0)
+					continue
+				# Môn: cấm môn tại slot cho mọi lớp có môn đó
+				for c in inp.classes:
+					if entity_id not in inp.class_subjects.get(c.name, []):
+						continue
+					v = ctx.x.get((c.name, entity_id, day, p_idx))
 					if v is not None:
 						ctx.model.Add(v == 0)
 

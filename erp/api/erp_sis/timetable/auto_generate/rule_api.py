@@ -374,6 +374,17 @@ def save_rule_set_requirements(**kwargs):
 		for row in new_rows:
 			doc.append("requirements", row)
 		doc.save(ignore_permissions=True)
+
+		# Cập nhật cờ môn nặng trên SIS Timetable Subject (theo môn, không theo lớp)
+		subject_heavy = data.get("subject_heavy")
+		if isinstance(subject_heavy, str):
+			subject_heavy = json.loads(subject_heavy)
+		if subject_heavy and frappe.db.has_column("SIS Timetable Subject", "is_heavy"):
+			for sid, heavy in (subject_heavy or {}).items():
+				if not sid or not frappe.db.exists("SIS Timetable Subject", sid):
+					continue
+				frappe.db.set_value("SIS Timetable Subject", sid, "is_heavy", 1 if heavy else 0)
+
 		frappe.db.commit()
 
 		return single_item_response({"saved": len(new_rows)})
@@ -502,6 +513,46 @@ def _load_teachers_for_stage(
 	]
 
 
+def _enrich_teacher_scheduling_limits(teachers: list) -> list:
+	"""Bổ sung max tiết/ngày, max tiết/tuần, max liên tiếp, phân bổ tuần từ SIS Teacher."""
+	if not teachers:
+		return teachers
+	ids = [t["teacher_id"] for t in teachers]
+	has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
+	has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
+	fields = "name, COALESCE(max_periods_per_day, 8) AS max_periods_per_day, COALESCE(max_consecutive_periods, 4) AS max_consecutive_periods"
+	if has_week:
+		fields += ", COALESCE(max_periods_per_week, 24) AS max_periods_per_week"
+	if has_spread:
+		fields += ", COALESCE(workload_spread_mode, 'auto') AS workload_spread_mode"
+	rows = frappe.db.sql(
+		f"""
+		SELECT {fields}
+		FROM `tabSIS Teacher`
+		WHERE name IN %(ids)s
+		""",
+		{"ids": ids},
+		as_dict=True,
+	)
+	by_id = {r["name"]: r for r in rows}
+	out = []
+	for t in teachers:
+		lim = by_id.get(t["teacher_id"], {})
+		enriched = {**t}
+		enriched["max_periods_per_day"] = int(lim.get("max_periods_per_day") or 8)
+		enriched["max_consecutive_periods"] = int(lim.get("max_consecutive_periods") or 4)
+		if has_week:
+			enriched["max_periods_per_week"] = int(lim.get("max_periods_per_week") or 24)
+		else:
+			enriched["max_periods_per_week"] = 24
+		if has_spread:
+			enriched["workload_spread_mode"] = lim.get("workload_spread_mode") or "auto"
+		else:
+			enriched["workload_spread_mode"] = "auto"
+		out.append(enriched)
+	return out
+
+
 def _load_unavailability_map(teacher_ids: list) -> dict:
 	"""Đọc slot bận theo teacher_id từ child table."""
 	if not teacher_ids or not frappe.db.table_exists("SIS Teacher Unavailability"):
@@ -559,9 +610,9 @@ def get_teacher_unavailability_config(rule_set_id=None):
 		schedule_id = getattr(doc, "schedule_id", None) or None
 		slot_meta = compute_max_slots(schedule_id, doc.campus_id, doc.education_stage_id)
 		period_rows = _load_study_periods(schedule_id, doc.campus_id, doc.education_stage_id)
-		teachers = _load_teachers_for_stage(
+		teachers = _enrich_teacher_scheduling_limits(_load_teachers_for_stage(
 			doc.campus_id, doc.education_stage_id, doc.school_year_id,
-		)
+		))
 		teacher_ids = [t["teacher_id"] for t in teachers]
 		unavailability = _load_unavailability_map(teacher_ids)
 
@@ -611,7 +662,7 @@ def save_teacher_unavailability(**kwargs):
 				schedule_id, rs_doc.campus_id, rs_doc.education_stage_id,
 			)
 		}
-		if not valid_periods:
+		if not valid_periods and any(item.get("slots") for item in (changes or [])):
 			return error_response("Chưa có tiết học (SIS Timetable Column) trong phạm vi rule set")
 
 		saved = 0
@@ -648,9 +699,32 @@ def save_teacher_unavailability(**kwargs):
 				})
 
 			teacher_doc = frappe.get_doc("SIS Teacher", teacher_id)
-			teacher_doc.set("unavailability", [])
-			for row in new_rows:
-				teacher_doc.append("unavailability", row)
+			if item.get("max_periods_per_day") is not None:
+				max_day = int(item.get("max_periods_per_day") or 0)
+				if max_day < 1 or max_day > 20:
+					return error_response("Max tiết/ngày phải từ 1 đến 20")
+				teacher_doc.max_periods_per_day = max_day
+			if item.get("max_periods_per_week") is not None:
+				if frappe.db.has_column("SIS Teacher", "max_periods_per_week"):
+					max_week = int(item.get("max_periods_per_week") or 0)
+					if max_week < 1 or max_week > 60:
+						return error_response("Max tiết/tuần phải từ 1 đến 60")
+					teacher_doc.max_periods_per_week = max_week
+			if item.get("max_consecutive_periods") is not None:
+				max_consec = int(item.get("max_consecutive_periods") or 0)
+				if max_consec < 1 or max_consec > 20:
+					return error_response("Max tiết liên tiếp phải từ 1 đến 20")
+				teacher_doc.max_consecutive_periods = max_consec
+			if item.get("workload_spread_mode") is not None:
+				mode = (item.get("workload_spread_mode") or "auto").strip()
+				if mode not in ("auto", "even", "concentrated"):
+					return error_response("workload_spread_mode không hợp lệ")
+				if frappe.db.has_column("SIS Teacher", "workload_spread_mode"):
+					teacher_doc.workload_spread_mode = mode
+			if "slots" in item:
+				teacher_doc.set("unavailability", [])
+				for row in new_rows:
+					teacher_doc.append("unavailability", row)
 			teacher_doc.save(ignore_permissions=True)
 			saved += 1
 

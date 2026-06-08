@@ -62,8 +62,17 @@ def _consolidate_instance_rules(rules):
 	return [grouped[k] for k in order]
 
 
-def test_rule_catalog_has_27_entries():
-	assert len(list_rule_catalog()) == 27
+def test_rule_catalog_has_22_entries():
+	assert len(list_rule_catalog()) == 22
+
+
+def test_subject_not_at_slot_in_catalog():
+	entry = get_catalog_entry("subject_not_at_slot")
+	assert entry is not None
+	assert entry["parameterized"] is True
+	assert entry["verb"] == "forbidden_at_slots"
+	assert entry.get("subject_label_vn") == "Môn"
+	assert entry.get("object_label_vn") == "Slot cấm"
 
 
 def test_teacher_not_at_slot_is_parameterized():

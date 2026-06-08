@@ -18,6 +18,7 @@ from . import (  # noqa: F401
 	forbidden_on_day,
 	exclude_subject,
 	sync_class_pair,
+	sync_class_group,
 	order_before_same_day,
 	at_most_simultaneous,
 )
