@@ -587,7 +587,11 @@ def get_generation_status(session_id=None):
 
 		if session.solver_stats:
 			try:
-				result["solver_stats"] = json.loads(session.solver_stats) if isinstance(session.solver_stats, str) else session.solver_stats
+				stats = json.loads(session.solver_stats) if isinstance(session.solver_stats, str) else session.solver_stats
+				result["solver_stats"] = stats
+				# Poll phân tích mâu thuẫn async (không đổi session.status)
+				if isinstance(stats, dict) and stats.get("diagnose"):
+					result["diagnose"] = stats["diagnose"]
 			except (json.JSONDecodeError, TypeError):
 				pass
 
@@ -892,22 +896,49 @@ def discard_session(**kwargs):
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def diagnose_infeasibility(**kwargs):
-	"""Phân tích rule mâu thuẫn khi solver INFEASIBLE."""
+	"""Phân tích rule mâu thuẫn khi solver INFEASIBLE. FE mặc định async=true (queue long)."""
 	try:
 		data = _get_json_data()
 		session_id = data.get("session_id")
+		run_async = data.get("async", False)
+
 		if not session_id:
 			return error_response("Thiếu session_id")
-		from .data_collector import TimetableDataCollector
-		from .rule_loader import load_rule_set
-		from .core.diagnostics import diagnose_infeasibility as _diag
 
-		inp = TimetableDataCollector(session_id).collect()
+		if run_async:
+			from .solver import _merge_diagnose_into_solver_stats, run_diagnose_infeasibility
+
+			session = frappe.get_doc("SIS Timetable Generation Session", session_id)
+			_merge_diagnose_into_solver_stats(session, {
+				"status": "Running",
+				"started_at": str(datetime.now()),
+				"completed_at": None,
+				"suspects": [],
+			})
+			session.save(ignore_permissions=True)
+			frappe.db.commit()
+
+			frappe.enqueue(
+				"erp.api.erp_sis.timetable.auto_generate.solver.run_diagnose_infeasibility",
+				session_id=session_id,
+				queue="long",
+				timeout=900,
+			)
+			return single_item_response({"session_id": session_id, "status": "queued"})
+
+		from .solver import _execute_diagnose, _merge_diagnose_into_solver_stats
+
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
-		rs = None
-		if getattr(session, "rule_set_id", None):
-			rs = load_rule_set(session.rule_set_id, session.rule_overrides)
-		suspects = _diag(inp, rs)
+		started = datetime.now()
+		suspects = _execute_diagnose(session_id)
+		_merge_diagnose_into_solver_stats(session, {
+			"status": "Completed",
+			"started_at": str(started),
+			"completed_at": str(datetime.now()),
+			"suspects": suspects,
+		})
+		session.save(ignore_permissions=True)
+		frappe.db.commit()
 		return single_item_response({"suspects": suspects})
 	except Exception as e:
 		return error_response(str(e))

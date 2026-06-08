@@ -295,3 +295,75 @@ def run_solver_variants(session_id: str, k: int = 3, min_diff_ratio: float = 0.1
 
 	session.save(ignore_permissions=True)
 	frappe.db.commit()
+
+
+def _load_solver_stats_dict(session) -> dict:
+	"""Đọc solver_stats JSON từ session."""
+	if not session.solver_stats:
+		return {}
+	try:
+		data = session.solver_stats
+		return json.loads(data) if isinstance(data, str) else dict(data)
+	except (json.JSONDecodeError, TypeError):
+		return {}
+
+
+def _merge_diagnose_into_solver_stats(session, diagnose: dict) -> None:
+	"""Ghi block diagnose vào solver_stats (không đổi session.status)."""
+	stats = _load_solver_stats_dict(session)
+	stats["diagnose"] = diagnose
+	session.solver_stats = json.dumps(stats, ensure_ascii=False)
+
+
+def _execute_diagnose(session_id: str) -> List[Dict]:
+	"""Chạy phân tích rule mâu thuẫn — dùng chung sync/async."""
+	from .core.diagnostics import diagnose_infeasibility as _diag
+
+	inp, val_errors, _ = TimetableSolver(session_id)._prepare_input()
+	if val_errors:
+		raise ValueError("; ".join(val_errors[:5]))
+
+	# INFEASIBLE thường trả sớm — giới hạn thời gian mỗi lần solve trong diagnose
+	if inp.solver_time_limit > 30:
+		inp.solver_time_limit = 30
+
+	rule_set, _ = TimetableSolver(session_id)._load_rule_set()
+	return _diag(inp, rule_set)
+
+
+def run_diagnose_infeasibility(session_id: str):
+	"""Entry point cho background job phân tích INFEASIBLE (queue long)."""
+	session = frappe.get_doc("SIS Timetable Generation Session", session_id)
+	started = datetime.now()
+	_merge_diagnose_into_solver_stats(session, {
+		"status": "Running",
+		"started_at": str(started),
+		"completed_at": None,
+		"suspects": [],
+	})
+	session.save(ignore_permissions=True)
+	frappe.db.commit()
+
+	try:
+		suspects = _execute_diagnose(session_id)
+		session.reload()
+		_merge_diagnose_into_solver_stats(session, {
+			"status": "Completed",
+			"started_at": str(started),
+			"completed_at": str(datetime.now()),
+			"suspects": suspects,
+		})
+		session.save(ignore_permissions=True)
+		frappe.db.commit()
+	except Exception as e:
+		frappe.log_error(f"diagnose_infeasibility failed for session {session_id}: {e}")
+		session.reload()
+		_merge_diagnose_into_solver_stats(session, {
+			"status": "Failed",
+			"started_at": str(started),
+			"completed_at": str(datetime.now()),
+			"suspects": [],
+			"error": str(e),
+		})
+		session.save(ignore_permissions=True)
+		frappe.db.commit()
