@@ -62,36 +62,86 @@ def _normalize_rule_row(row: dict) -> dict:
 	}
 
 
+def _rule_set_list_filters(
+	school_year_id: Optional[str] = None,
+	education_stage_id: Optional[str] = None,
+) -> dict:
+	"""Lọc danh sách rule set — campus lấy từ session/header, không chỉ query FE."""
+	from erp.sis.utils.campus_permissions import get_user_campuses
+	from erp.utils.campus_utils import get_current_campus_from_context
+
+	filters: Dict[str, Any] = {}
+	if school_year_id:
+		filters["school_year_id"] = school_year_id
+	if education_stage_id:
+		filters["education_stage_id"] = education_stage_id
+
+	campus_id = get_current_campus_from_context() or frappe.form_dict.get("campus_id")
+	user = frappe.session.user
+
+	if user == "Administrator" and not campus_id:
+		return filters
+
+	if campus_id:
+		filters["campus_id"] = campus_id
+		return filters
+
+	campuses = get_user_campuses(user)
+	if len(campuses) == 1:
+		filters["campus_id"] = campuses[0]
+	elif campuses:
+		filters["campus_id"] = ("in", campuses)
+	return filters
+
+
+def _fetch_rule_set_rows(filters: dict) -> list:
+	fields = [
+		"name", "title_vn", "title_en", "campus_id",
+		"school_year_id", "education_stage_id",
+		"is_default", "description", "modified",
+	]
+	return frappe.get_all(
+		"SIS Timetable Rule Set",
+		filters=filters,
+		fields=fields,
+		order_by="modified desc",
+		ignore_permissions=True,
+	)
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET"])
 def list_rule_sets(campus_id=None, school_year_id=None, education_stage_id=None):
 	try:
-		campus_id = campus_id or frappe.form_dict.get("campus_id")
+		_ = campus_id  # legacy param — campus thực tế lấy từ context
 		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
 		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
-		filters = {}
-		if campus_id:
-			filters["campus_id"] = campus_id
-		if school_year_id:
-			filters["school_year_id"] = school_year_id
-		if education_stage_id:
-			filters["education_stage_id"] = education_stage_id
 		if not frappe.db.table_exists("tabSIS Timetable Rule Set"):
 			# Fallback offline: trả default spec không cần DB
 			return single_item_response({
 				"offline": True,
 				"default": build_default_rule_set("offline").rules,
 			})
-		fields = [
-			"name", "title_vn", "title_en", "campus_id",
-			"school_year_id", "education_stage_id",
-			"is_default", "description",
-		]
-		rows = frappe.get_all(
-			"SIS Timetable Rule Set",
-			filters=filters,
-			fields=fields,
-			order_by="modified desc",
-		)
+
+		filters = _rule_set_list_filters(school_year_id, education_stage_id)
+		rows = _fetch_rule_set_rows(filters)
+
+		# Campus FE có thể lệch campus_id trong DB — mở rộng phạm vi user có quyền
+		if not rows and filters.get("campus_id"):
+			from erp.sis.utils.campus_permissions import get_user_campuses
+
+			user = frappe.session.user
+			broad = {k: v for k, v in filters.items() if k != "campus_id"}
+			if user == "Administrator":
+				rows = _fetch_rule_set_rows(broad)
+			else:
+				campuses = get_user_campuses(user)
+				if campuses:
+					if len(campuses) == 1:
+						broad["campus_id"] = campuses[0]
+					else:
+						broad["campus_id"] = ("in", campuses)
+					rows = _fetch_rule_set_rows(broad)
+
 		return list_response(rows)
 	except Exception as e:
 		return error_response(str(e))
@@ -116,8 +166,10 @@ def get_rule_set(rule_set_id=None):
 def create_rule_set(**kwargs):
 	try:
 		data = _json()
+		from erp.utils.campus_utils import get_current_campus_from_context
+
 		title_vn = (data.get("title_vn") or "").strip()
-		campus_id = data.get("campus_id")
+		campus_id = data.get("campus_id") or get_current_campus_from_context()
 		school_year_id = data.get("school_year_id")
 		education_stage_id = data.get("education_stage_id")
 		if not title_vn:
