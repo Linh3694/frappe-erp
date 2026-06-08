@@ -12,11 +12,11 @@ def _two_period_input():
 		classes=[ClassInfo("C1", "Lớp 1", "G1")],
 		periods=[PeriodInfo("P1", "Tiết 1", 1), PeriodInfo("P2", "Tiết 2", 2)],
 		teachers={"T1": TeacherInfo("T1", max_periods_per_day=1)},
-		requirements=[SubjectRequirement("M1", "Toán", "G1", 2), SubjectRequirement("M2", "Văn", "G1", 1)],
+		requirements=[SubjectRequirement("M1", "Toán", "C1", 2), SubjectRequirement("M2", "Văn", "C1", 1)],
 		working_days=["mon", "tue", "wed"],
 		solver_time_limit=10,
 	)
-	inp.grade_subjects = {"G1": ["M1", "M2"]}
+	inp.class_subjects = {"C1": ["M1", "M2"]}
 	inp.class_subject_teachers = {"C1|M1": ["T1"], "C1|M2": ["T1"]}
 	inp.column_period_index = {"P1": 0, "P2": 1}
 	return inp

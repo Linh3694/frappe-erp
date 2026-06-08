@@ -16,11 +16,10 @@ class PinnedToSlot(Verb):
 				continue
 			classes = [c for c in inp.classes if not pin.class_id or c.name == pin.class_id]
 			for c in classes:
-				g = c.education_grade_id
 				pk = (c.name, pin.timetable_subject_id, pin.day_of_week, p_idx)
 				if pk in ctx.x:
 					ctx.model.Add(ctx.x[pk] == 1)
-				for ts_id in inp.grade_subjects.get(g, []):
+				for ts_id in inp.class_subjects.get(c.name, []):
 					if ts_id == pin.timetable_subject_id:
 						continue
 					k = (c.name, ts_id, pin.day_of_week, p_idx)
@@ -39,11 +38,9 @@ class PinnedToSlot(Verb):
 			pk = (c_id, ts_id, day, p_idx)
 			if pk in ctx.x:
 				ctx.model.Add(ctx.x[pk] == 1)
-			g = next((c.education_grade_id for c in inp.classes if c.name == c_id), None)
-			if g:
-				for other in inp.grade_subjects.get(g, []):
-					if other == ts_id:
-						continue
-					k = (c_id, other, day, p_idx)
-					if k in ctx.x:
-						ctx.model.Add(ctx.x[k] == 0)
+			for other in inp.class_subjects.get(c_id, []):
+				if other == ts_id:
+					continue
+				k = (c_id, other, day, p_idx)
+				if k in ctx.x:
+					ctx.model.Add(ctx.x[k] == 0)

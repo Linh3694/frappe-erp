@@ -8,8 +8,7 @@ class PreferSlotRange(Verb):
 		preferred = set(params.get("periods", [0, 1, 2, 3]))
 		terms = []
 		for c in inp.classes:
-			g = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(g, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				if subject_set and ts_id not in subject_set and not inp.subject_is_heavy.get(ts_id):
 					continue
 				if not inp.subject_is_heavy.get(ts_id) and subject_set:

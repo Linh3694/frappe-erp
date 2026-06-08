@@ -38,7 +38,7 @@ class TeacherInfo:
 class SubjectRequirement:
 	timetable_subject_id: str
 	timetable_subject_title: str
-	education_grade_id: str
+	class_id: str
 	periods_per_week: int
 	max_periods_per_day: int = 2
 	prefer_consecutive: bool = False
@@ -69,7 +69,7 @@ class TimetableInput:
 	soft_rules: SoftRules = field(default_factory=SoftRules)
 	working_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
 	solver_time_limit: int = 30
-	grade_subjects: Dict[str, List[str]] = field(default_factory=dict)
+	class_subjects: Dict[str, List[str]] = field(default_factory=dict)
 	class_subject_teachers: Dict[str, List[str]] = field(default_factory=dict)
 	column_period_index: Dict[str, int] = field(default_factory=dict)
 	subject_is_heavy: Dict[str, bool] = field(default_factory=dict)
@@ -86,12 +86,12 @@ def tiny_input() -> TimetableInput:
 		],
 		teachers={"T1": TeacherInfo("T1")},
 		requirements=[
-			SubjectRequirement("M1", "Toán", "G1", 4),
-			SubjectRequirement("M2", "Văn", "G1", 4),
+			SubjectRequirement("M1", "Toán", "C1", 4),
+			SubjectRequirement("M2", "Văn", "C1", 4),
 		],
 		working_days=["mon", "tue", "wed", "thu", "fri"],
 	)
-	inp.grade_subjects = {"G1": ["M1", "M2"]}
+	inp.class_subjects = {"C1": ["M1", "M2"]}
 	inp.class_subject_teachers = {"C1|M1": ["T1"], "C1|M2": ["T1"]}
 	inp.column_period_index = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
 	return inp

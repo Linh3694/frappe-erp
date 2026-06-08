@@ -35,8 +35,7 @@ def extract_solution(solver, ctx: SolverContext) -> List[Dict]:
 			pin_lookup[(c_id, pin.day_of_week, p_idx, pin.timetable_subject_id or "")] = pin
 
 	for c in inp.classes:
-		grade = c.education_grade_id
-		for ts_id in inp.grade_subjects.get(grade, []):
+		for ts_id in inp.class_subjects.get(c.name, []):
 			for day in inp.working_days:
 				for p_idx, period in enumerate(periods):
 					key = (c.name, ts_id, day, p_idx)

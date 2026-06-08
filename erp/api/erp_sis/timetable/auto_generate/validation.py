@@ -21,14 +21,13 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 	num_days = len(inp.working_days)
 	max_slots_per_week = num_periods * num_days
 	room_by_id = {r.name: r for r in inp.rooms}
-	req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+	req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 
 	# Lớp thiếu GV + tổng tiết vượt capacity
 	for c in inp.classes:
-		grade = c.education_grade_id
 		total_required = 0
-		for ts_id in inp.grade_subjects.get(grade, []):
-			req = req_map.get((grade, ts_id))
+		for ts_id in inp.class_subjects.get(c.name, []):
+			req = req_map.get((c.name, ts_id))
 			if req:
 				total_required += req.periods_per_week
 			key_a = f"{c.name}|{ts_id}"
@@ -46,9 +45,8 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 	# GV quá tải tuần
 	teacher_weekly_load = {}
 	for c in inp.classes:
-		grade = c.education_grade_id
-		for ts_id in inp.grade_subjects.get(grade, []):
-			req = req_map.get((grade, ts_id))
+		for ts_id in inp.class_subjects.get(c.name, []):
+			req = req_map.get((c.name, ts_id))
 			if not req or req.periods_per_week <= 0:
 				continue
 			key_a = f"{c.name}|{ts_id}"
@@ -86,7 +84,7 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 	for req in inp.requirements:
 		if req.force_pair and req.periods_per_week % 2 != 0:
 			errors.append(
-				f"Môn {req.timetable_subject_title} (khối {req.education_grade_id}): "
+				f"Môn {req.timetable_subject_title} (lớp {req.class_id}): "
 				f"force_pair bật nhưng periods_per_week={req.periods_per_week} (phải chẵn)"
 			)
 

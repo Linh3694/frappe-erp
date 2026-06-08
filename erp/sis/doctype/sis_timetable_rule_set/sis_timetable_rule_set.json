@@ -15,11 +15,14 @@
   "column_break_1",
   "school_year_id",
   "education_stage_id",
+  "schedule_id",
   "column_break_scope",
   "is_default",
   "description",
   "rules_section",
-  "rules"
+  "rules",
+  "requirements_section",
+  "requirements"
  ],
  "fields": [
   {
@@ -63,6 +66,13 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "schedule_id",
+   "fieldtype": "Link",
+   "label": "Timetable Schedule",
+   "options": "SIS Schedule",
+   "description": "Dùng tính max slot/tuần khi cấu hình ma trận số tiết"
+  },
+  {
    "fieldname": "column_break_scope",
    "fieldtype": "Column Break"
   },
@@ -87,6 +97,17 @@
    "fieldtype": "Table",
    "label": "Rules",
    "options": "SIS Timetable Rule"
+  },
+  {
+   "fieldname": "requirements_section",
+   "fieldtype": "Section Break",
+   "label": "Requirements Matrix (Class x Subject)"
+  },
+  {
+   "fieldname": "requirements",
+   "fieldtype": "Table",
+   "label": "Requirements",
+   "options": "SIS Timetable Rule Set Requirement"
   }
  ],
  "links": [],

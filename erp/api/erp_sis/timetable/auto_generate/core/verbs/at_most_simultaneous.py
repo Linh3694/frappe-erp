@@ -15,7 +15,7 @@ class AtMostSimultaneous(Verb):
 				for p_idx in range(ctx.num_periods):
 					vars_ = []
 					for c in inp.classes:
-						if ts_id not in inp.grade_subjects.get(c.education_grade_id, []):
+						if ts_id not in inp.class_subjects.get(c.name, []):
 							continue
 						v = ctx.x.get((c.name, ts_id, day, p_idx))
 						if v is not None:

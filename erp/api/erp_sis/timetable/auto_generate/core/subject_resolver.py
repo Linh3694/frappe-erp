@@ -46,8 +46,7 @@ class SubjectResolver:
 	def _resolve_assignments(self, filt: dict, inp) -> List[tuple]:
 		out = []
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				item = (c.name, ts_id)
 				if self._match_assignment(item, filt, inp):
 					out.append(item)

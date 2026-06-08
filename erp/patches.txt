@@ -5,6 +5,9 @@
 # CRM Lead: backup 5 cot tai khoan phang truoc khi dong bo sang child table
 erp.patches.v1_0.migrate_lead_bank_accounts_prepare
 
+# TKB: backup ma trận khối×môn trước khi đổi sang lớp×môn
+erp.patches.v1_0.migrate_requirements_grade_to_class_prepare
+
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 
@@ -82,6 +85,9 @@ erp.patches.v1_0.create_timetable_generation_result_table
 
 # TKB auto-generate: seed Rule Set mặc định (S+V+O)
 erp.patches.v1_0.seed_default_timetable_rule_set
+
+# TKB: expand backup khối×môn sang lớp×môn sau model sync
+erp.patches.v1_0.migrate_requirements_grade_to_class_apply
 
 # TKB auto-generate: cột variant_index cho đa nghiệm draft (G2, site đã có bảng cũ)
 erp.patches.v1_0.add_variant_index_to_gen_result

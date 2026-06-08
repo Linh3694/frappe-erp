@@ -15,9 +15,8 @@ class AttributeMatch(Verb):
 		inp = ctx.inp
 		rmap = req_map(inp)
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
-				req = rmap.get((grade, ts_id))
+			for ts_id in inp.class_subjects.get(c.name, []):
+				req = rmap.get((c.name, ts_id))
 				if not req or not req.room_type_required:
 					continue
 				valid = [
@@ -45,8 +44,7 @@ class AttributeMatch(Verb):
 		for c in inp.classes:
 			if not c.room_id:
 				continue
-			g = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(g, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				req = rmap.get((g, ts_id))
 				if req and req.room_type_required:
 					continue

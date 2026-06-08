@@ -51,7 +51,7 @@ class RoomInfo:
 class SubjectRequirement:
 	timetable_subject_id: str
 	timetable_subject_title: str
-	education_grade_id: str
+	class_id: str
 	periods_per_week: int
 	max_periods_per_day: int = 2
 	prefer_consecutive: bool = False
@@ -109,7 +109,7 @@ class TimetableInput:
 
 	# Derived indexes (sẽ được build sau collect)
 	class_grade_map: Dict[str, str] = field(default_factory=dict)
-	grade_subjects: Dict[str, List[str]] = field(default_factory=dict)
+	class_subjects: Dict[str, List[str]] = field(default_factory=dict)
 	class_subject_teachers: Dict[str, List[str]] = field(default_factory=dict)
 	column_period_index: Dict[str, int] = field(default_factory=dict)
 	subject_is_heavy: Dict[str, bool] = field(default_factory=dict)
@@ -263,7 +263,7 @@ class TimetableDataCollector:
 		return [RoomInfo(**r) for r in rows]
 
 	def _get_requirements(self) -> List[SubjectRequirement]:
-		"""Lấy requirements từ session (grade x timetable_subject -> periods_per_week)."""
+		"""Lấy requirements từ session (class x timetable_subject -> periods_per_week)."""
 		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
 		has_is_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
 		force_pair_sql = "COALESCE(r.force_pair, 0) as force_pair," if has_force_pair else "0 as force_pair,"
@@ -273,7 +273,7 @@ class TimetableDataCollector:
 			SELECT
 				r.timetable_subject_id,
 				ts.title_vn as timetable_subject_title,
-				r.education_grade_id,
+				r.class_id,
 				r.periods_per_week,
 				r.max_periods_per_day,
 				r.prefer_consecutive,
@@ -289,7 +289,7 @@ class TimetableDataCollector:
 		return [SubjectRequirement(
 			timetable_subject_id=r["timetable_subject_id"],
 			timetable_subject_title=r["timetable_subject_title"],
-			education_grade_id=r["education_grade_id"],
+			class_id=r["class_id"],
 			periods_per_week=r["periods_per_week"],
 			max_periods_per_day=r["max_periods_per_day"] or 2,
 			prefer_consecutive=bool(r["prefer_consecutive"]),
@@ -398,13 +398,13 @@ class TimetableDataCollector:
 		for i, p in enumerate(sorted(inp.periods, key=lambda x: x.period_priority)):
 			inp.column_period_index[p.name] = i
 
-		# grade -> [timetable_subject_ids] (từ requirements)
-		grade_subjects: Dict[str, List[str]] = {}
+		# class -> [timetable_subject_ids] (từ requirements)
+		class_subjects: Dict[str, List[str]] = {}
 		inp.subject_is_heavy = {}
 		for req in inp.requirements:
-			grade_subjects.setdefault(req.education_grade_id, []).append(req.timetable_subject_id)
+			class_subjects.setdefault(req.class_id, []).append(req.timetable_subject_id)
 			inp.subject_is_heavy[req.timetable_subject_id] = req.is_heavy
-		inp.grade_subjects = grade_subjects
+		inp.class_subjects = class_subjects
 
 		# (class_id, timetable_subject_id) -> [teacher_ids]
 		class_subject_teachers: Dict[str, List[str]] = {}

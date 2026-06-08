@@ -88,6 +88,11 @@ def create_session(**kwargs):
 			session_data["rule_overrides"] = json.dumps(data.get("rule_overrides") or {})
 		doc = frappe.get_doc(session_data)
 		doc.insert(ignore_permissions=True)
+
+		rule_set_id = getattr(doc, "rule_set_id", None)
+		if rule_set_id and frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
+			_copy_requirements_from_rule_set_doc(doc.name, rule_set_id)
+
 		frappe.db.commit()
 
 		return single_item_response(_format_session(doc))
@@ -159,6 +164,10 @@ def update_session(**kwargs):
 		if doc.status not in ("Configuring", "Completed", "Failed"):
 			return error_response(f"Không thể sửa session ở trạng thái {doc.status}")
 
+		old_rule_set_id = getattr(doc, "rule_set_id", None) if frappe.db.has_column(
+			"SIS Timetable Generation Session", "rule_set_id"
+		) else None
+
 		updatable = [
 			"title", "soft_rules", "class_ids", "solver_time_limit",
 			"optimization_priority",
@@ -176,6 +185,15 @@ def update_session(**kwargs):
 			doc.status = "Configuring"
 
 		doc.save(ignore_permissions=True)
+
+		new_rule_set_id = getattr(doc, "rule_set_id", None)
+		if (
+			new_rule_set_id
+			and new_rule_set_id != old_rule_set_id
+			and frappe.db.exists("SIS Timetable Rule Set", new_rule_set_id)
+		):
+			_copy_requirements_from_rule_set_doc(session_id, new_rule_set_id)
+
 		frappe.db.commit()
 
 		return single_item_response(_format_session(doc))
@@ -217,75 +235,64 @@ def delete_session(**kwargs):
 
 
 # ════════════════════════════════════════════════════════
-# Requirements Matrix (grade x timetable_subject)
+# Requirements Matrix (class x timetable_subject)
 # ════════════════════════════════════════════════════════
+
+def _session_class_ids(session) -> list | None:
+	if not session.class_ids:
+		return None
+	try:
+		ids = json.loads(session.class_ids) if isinstance(session.class_ids, str) else session.class_ids
+		return ids if isinstance(ids, list) and ids else None
+	except (json.JSONDecodeError, TypeError):
+		return None
+
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
 def get_requirements_matrix(session_id=None):
-	"""Trả về ma trận: rows = timetable_subjects, cols = grades, cells = config."""
+	"""Trả về ma trận: rows = môn TKB, cols = lớp (nhóm theo khối)."""
 	try:
+		from .requirements_matrix import (
+			compute_max_slots,
+			index_requirements,
+			load_grade_groups,
+			load_subjects,
+		)
+
 		session_id = session_id or _get_param("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
+		class_ids = _session_class_ids(session)
 
-		# Lấy danh sách grades theo education_stage
-		grades = frappe.db.sql("""
-			SELECT name, title_vn, grade_code, sort_order
-			FROM `tabSIS Education Grade`
-			WHERE education_stage_id = %(stage_id)s
-			  AND campus_id = %(campus_id)s
-			ORDER BY sort_order
-		""", {"stage_id": session.education_stage_id, "campus_id": session.campus_id}, as_dict=True)
+		grade_groups = load_grade_groups(
+			session.campus_id,
+			session.school_year_id,
+			session.education_stage_id,
+			class_ids=class_ids,
+		)
+		subjects = load_subjects(session.campus_id, session.education_stage_id)
+		slot_meta = compute_max_slots(
+			session.schedule_id, session.campus_id, session.education_stage_id,
+		)
 
-		# Lấy danh sách timetable subjects theo stage
-		subjects = frappe.db.sql("""
-			SELECT name, title_vn, title_en
-			FROM `tabSIS Timetable Subject`
-			WHERE education_stage_id = %(stage_id)s
-			  AND campus_id = %(campus_id)s
-			ORDER BY title_vn
-		""", {"stage_id": session.education_stage_id, "campus_id": session.campus_id}, as_dict=True)
-
-		# Lấy requirements hiện có
-		requirements = frappe.db.sql("""
-			SELECT name, education_grade_id, timetable_subject_id,
-				   periods_per_week, max_periods_per_day, prefer_consecutive, room_type_required
+		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
+		force_pair_sql = ", force_pair" if has_force_pair else ", 0 as force_pair"
+		requirements = frappe.db.sql(f"""
+			SELECT name, class_id, timetable_subject_id,
+				   periods_per_week, max_periods_per_day, prefer_consecutive,
+				   room_type_required{force_pair_sql}
 			FROM `tabSIS Timetable Generation Requirement`
 			WHERE session_id = %(session_id)s
 		""", {"session_id": session_id}, as_dict=True)
 
-		# Index requirements
-		req_map = {}
-		for r in requirements:
-			key = f"{r['education_grade_id']}|{r['timetable_subject_id']}"
-			req_map[key] = r
-
-		# Đếm số tiết study/ngày từ schedule
-		study_periods_count = frappe.db.count("SIS Timetable Column", filters={
-			"schedule_id": session.schedule_id,
-			"period_type": "study",
-		})
-		if not study_periods_count:
-			# Fallback: đếm theo campus + stage (legacy)
-			study_periods_count = frappe.db.count("SIS Timetable Column", filters={
-				"campus_id": session.campus_id,
-				"education_stage_id": session.education_stage_id,
-				"period_type": "study",
-			})
-
-		working_days = 5
-		max_slots_per_week = (study_periods_count or 10) * working_days
-
 		return single_item_response({
-			"grades": grades,
+			"grade_groups": grade_groups,
 			"subjects": subjects,
-			"requirements": req_map,
+			"requirements": index_requirements(requirements),
 			"session_id": session_id,
-			"study_periods_per_day": study_periods_count or 0,
-			"working_days": working_days,
-			"max_slots_per_week": max_slots_per_week,
+			**slot_meta,
 		})
 
 	except Exception as e:
@@ -315,38 +322,43 @@ def save_requirements(**kwargs):
 		saved = 0
 		deleted = 0
 
+		from .requirements_matrix import normalize_requirement_row
+
 		for req in requirements:
-			grade_id = req.get("education_grade_id")
+			class_id = req.get("class_id")
 			ts_id = req.get("timetable_subject_id")
 			ppw = int(req.get("periods_per_week", 0))
 
-			if not grade_id or not ts_id:
+			if not class_id or not ts_id:
 				continue
 
 			existing = frappe.db.sql("""
 				SELECT name FROM `tabSIS Timetable Generation Requirement`
-				WHERE session_id = %s AND education_grade_id = %s AND timetable_subject_id = %s
-			""", (session_id, grade_id, ts_id), as_dict=True)
+				WHERE session_id = %s AND class_id = %s AND timetable_subject_id = %s
+			""", (session_id, class_id, ts_id), as_dict=True)
 
 			if ppw == 0 and existing:
 				frappe.delete_doc("SIS Timetable Generation Requirement", existing[0]["name"],
 								ignore_permissions=True)
 				deleted += 1
 			elif ppw > 0:
+				norm = normalize_requirement_row(req)
 				if existing:
 					doc = frappe.get_doc("SIS Timetable Generation Requirement", existing[0]["name"])
 				else:
 					doc = frappe.get_doc({
 						"doctype": "SIS Timetable Generation Requirement",
 						"session_id": session_id,
-						"education_grade_id": grade_id,
+						"class_id": class_id,
 						"timetable_subject_id": ts_id,
 					})
 
-				doc.periods_per_week = ppw
-				doc.max_periods_per_day = int(req.get("max_periods_per_day", 2))
-				doc.prefer_consecutive = bool(req.get("prefer_consecutive", False))
-				doc.room_type_required = req.get("room_type_required") or ""
+				doc.periods_per_week = norm["periods_per_week"]
+				doc.max_periods_per_day = norm["max_periods_per_day"]
+				doc.prefer_consecutive = norm["prefer_consecutive"]
+				if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
+					doc.force_pair = norm["force_pair"]
+				doc.room_type_required = norm["room_type_required"]
 				doc.save(ignore_permissions=True)
 				saved += 1
 
@@ -363,6 +375,53 @@ def save_requirements(**kwargs):
 		return error_response(str(e))
 
 
+def _copy_requirements_from_rule_set_doc(session_id: str, rule_set_id: str) -> int:
+	"""Copy ma trận từ rule set sang session — dùng nội bộ."""
+	rs = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
+	frappe.db.sql(
+		"DELETE FROM `tabSIS Timetable Generation Requirement` WHERE session_id = %s",
+		session_id,
+	)
+	copied = 0
+	for row in rs.get("requirements") or []:
+		if int(row.periods_per_week or 0) <= 0:
+			continue
+		payload = {
+			"doctype": "SIS Timetable Generation Requirement",
+			"session_id": session_id,
+			"class_id": row.class_id,
+			"timetable_subject_id": row.timetable_subject_id,
+			"periods_per_week": row.periods_per_week,
+			"max_periods_per_day": row.max_periods_per_day or 2,
+			"prefer_consecutive": row.prefer_consecutive,
+			"room_type_required": row.room_type_required or "",
+		}
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
+			payload["force_pair"] = getattr(row, "force_pair", 0)
+		frappe.get_doc(payload).insert(ignore_permissions=True)
+		copied += 1
+	return copied
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def copy_requirements_from_rule_set(**kwargs):
+	"""Copy requirements từ rule set template sang session."""
+	try:
+		data = _get_json_data()
+		session_id = data.get("session_id")
+		rule_set_id = data.get("rule_set_id")
+		if not session_id or not rule_set_id:
+			return error_response("Thiếu session_id hoặc rule_set_id")
+		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
+			return error_response("Rule Set không tồn tại", 404)
+
+		copied = _copy_requirements_from_rule_set_doc(session_id, rule_set_id)
+		frappe.db.commit()
+		return single_item_response({"copied": copied})
+	except Exception as e:
+		return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def copy_requirements_from_session(**kwargs):
 	"""Copy requirements từ session cũ."""
@@ -374,17 +433,21 @@ def copy_requirements_from_session(**kwargs):
 		if not target_session_id or not source_session_id:
 			return error_response("Thiếu target_session_id hoặc source_session_id")
 
+		fields = [
+			"class_id", "timetable_subject_id", "periods_per_week",
+			"max_periods_per_day", "prefer_consecutive", "room_type_required",
+		]
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
+			fields.append("force_pair")
 		source_reqs = frappe.get_all(
 			"SIS Timetable Generation Requirement",
 			filters={"session_id": source_session_id},
-			fields=["education_grade_id", "timetable_subject_id", "periods_per_week",
-					"max_periods_per_day", "prefer_consecutive", "room_type_required"],
+			fields=fields,
 		)
 
-		# Xóa requirements cũ của target
 		frappe.db.sql(
 			"DELETE FROM `tabSIS Timetable Generation Requirement` WHERE session_id = %s",
-			target_session_id
+			target_session_id,
 		)
 
 		copied = 0

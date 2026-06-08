@@ -35,12 +35,12 @@ def test_subject_instance_max_per_day_enforced():
 		periods=[PeriodInfo(f"P{i}", f"Tiết {i}", i) for i in range(1, 5)],
 		teachers={"T1": TeacherInfo("T1")},
 		requirements=[
-			SubjectRequirement("M1", "Toán", "G1", 5, max_periods_per_day=3),
-			SubjectRequirement("M2", "Văn", "G1", 3, max_periods_per_day=3),
+			SubjectRequirement("M1", "Toán", "C1", 5, max_periods_per_day=3),
+			SubjectRequirement("M2", "Văn", "C1", 3, max_periods_per_day=3),
 		],
 		working_days=["mon", "tue", "wed", "thu", "fri"],
 	)
-	inp.grade_subjects = {"G1": ["M1", "M2"]}
+	inp.class_subjects = {"C1": ["M1", "M2"]}
 	inp.class_subject_teachers = {"C1|M1": ["T1"], "C1|M2": ["T1"]}
 	inp.column_period_index = {f"P{i}": i - 1 for i in range(1, 5)}
 

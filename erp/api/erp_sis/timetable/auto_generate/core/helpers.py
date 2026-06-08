@@ -6,14 +6,13 @@ from typing import Any, Dict, List, Tuple
 
 
 def req_map(inp: Any) -> Dict[Tuple[str, str], Any]:
-	return {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+	return {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 
 
 def teacher_class_subjects(inp: Any) -> Dict[str, List[Tuple[str, str]]]:
 	out: Dict[str, List[Tuple[str, str]]] = {}
 	for c in inp.classes:
-		grade = c.education_grade_id
-		for ts_id in inp.grade_subjects.get(grade, []):
+		for ts_id in inp.class_subjects.get(c.name, []):
 			key_a = f"{c.name}|{ts_id}"
 			for t_id in inp.class_subject_teachers.get(key_a, []):
 				out.setdefault(t_id, []).append((c.name, ts_id))
@@ -54,8 +53,7 @@ def inst_object_int(inst: dict, field: str, default: int) -> int:
 
 
 def resolve_room_id(inp: Any, class_info, ts_id: str, rmap) -> str:
-	grade = class_info.education_grade_id
-	req = rmap.get((grade, ts_id))
+	req = rmap.get((class_info.name, ts_id))
 	if req and req.room_type_required:
 		for r in inp.rooms:
 			if r.room_type == req.room_type_required:

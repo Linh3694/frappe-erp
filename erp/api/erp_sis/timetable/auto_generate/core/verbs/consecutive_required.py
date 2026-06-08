@@ -22,8 +22,7 @@ class ConsecutiveRequired(Verb):
 			return
 
 		for c in inp.classes:
-			g = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(g, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				if ts_id not in pair_subjects:
 					continue
 				for day in inp.working_days:

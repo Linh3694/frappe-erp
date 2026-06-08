@@ -8,9 +8,8 @@ class ExactCountPerWeek(Verb):
 		inp = ctx.inp
 		rmap = req_map(inp)
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
-				req = rmap.get((grade, ts_id))
+			for ts_id in inp.class_subjects.get(c.name, []):
+				req = rmap.get((c.name, ts_id))
 				if not req or req.periods_per_week == 0:
 					continue
 				if subject_set and (c.name, ts_id) not in subject_set:

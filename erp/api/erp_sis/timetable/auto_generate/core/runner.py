@@ -60,13 +60,12 @@ def _apply_legacy_session_soft(ctx: SolverContext) -> None:
 	"""Soft rules JSON cũ từ session (consecutive_bonus, pair exclusions...)."""
 	inp = ctx.inp
 	soft = inp.soft_rules
-	req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+	req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 
 	if soft.consecutive_bonus > 0:
 		for c in inp.classes:
-			g = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(g, []):
-				req = req_map.get((g, ts_id))
+			for ts_id in inp.class_subjects.get(c.name, []):
+				req = req_map.get((c.name, ts_id))
 				if not req or not req.prefer_consecutive:
 					continue
 				for day in inp.working_days:

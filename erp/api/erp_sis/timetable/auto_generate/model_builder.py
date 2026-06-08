@@ -86,8 +86,7 @@ class ModelBuilder:
 		inp = self.inp
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			subjects = inp.grade_subjects.get(grade, [])
+			subjects = inp.class_subjects.get(c.name, [])
 
 			for ts_id in subjects:
 				for day in inp.working_days:
@@ -116,8 +115,7 @@ class ModelBuilder:
 		sm = self.solver_model
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			subjects = inp.grade_subjects.get(grade, [])
+			subjects = inp.class_subjects.get(c.name, [])
 			for day in inp.working_days:
 				for p_idx in range(len(inp.periods)):
 					slot_vars = []
@@ -135,14 +133,13 @@ class ModelBuilder:
 
 		req_map: Dict[Tuple[str, str], SubjectRequirement] = {}
 		for req in inp.requirements:
-			req_map[(req.education_grade_id, req.timetable_subject_id)] = req
+			req_map[(req.class_id, req.timetable_subject_id)] = req
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			subjects = inp.grade_subjects.get(grade, [])
+			subjects = inp.class_subjects.get(c.name, [])
 
 			for ts_id in subjects:
-				req = req_map.get((grade, ts_id))
+				req = req_map.get((c.name, ts_id))
 				if not req or req.periods_per_week == 0:
 					continue
 
@@ -165,8 +162,7 @@ class ModelBuilder:
 		# Build: teacher -> [(class, subject, day, p_idx)]
 		teacher_slots: Dict[str, List[Tuple[str, str, str, int]]] = {}
 		for c in inp.classes:
-			grade = c.education_grade_id
-			subjects = inp.grade_subjects.get(grade, [])
+			subjects = inp.class_subjects.get(c.name, [])
 			for ts_id in subjects:
 				key_assign = f"{c.name}|{ts_id}"
 				teachers = inp.class_subject_teachers.get(key_assign, [])
@@ -212,13 +208,12 @@ class ModelBuilder:
 		inp = self.inp
 		sm = self.solver_model
 
-		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			subjects = inp.grade_subjects.get(grade, [])
+			subjects = inp.class_subjects.get(c.name, [])
 			for ts_id in subjects:
-				req = req_map.get((grade, ts_id))
+				req = req_map.get((c.name, ts_id))
 				max_per_day = req.max_periods_per_day if req else 2
 
 				for day in inp.working_days:
@@ -238,8 +233,7 @@ class ModelBuilder:
 		# Build teacher -> all their (class, subject) combos
 		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				key_a = f"{c.name}|{ts_id}"
 				for t_id in inp.class_subject_teachers.get(key_a, []):
 					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
@@ -267,8 +261,7 @@ class ModelBuilder:
 
 		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				key_a = f"{c.name}|{ts_id}"
 				for t_id in inp.class_subject_teachers.get(key_a, []):
 					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
@@ -302,8 +295,7 @@ class ModelBuilder:
 
 		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				key_a = f"{c.name}|{ts_id}"
 				for t_id in inp.class_subject_teachers.get(key_a, []):
 					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
@@ -330,8 +322,7 @@ class ModelBuilder:
 
 		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				key_a = f"{c.name}|{ts_id}"
 				for t_id in inp.class_subject_teachers.get(key_a, []):
 					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
@@ -350,7 +341,7 @@ class ModelBuilder:
 		"""HC12: Tiết cố định / slot bị khóa."""
 		inp = self.inp
 		sm = self.solver_model
-		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 
 		for pin in inp.pinned_slots:
 			p_idx = inp.column_period_index.get(pin.timetable_column_id)
@@ -361,8 +352,7 @@ class ModelBuilder:
 				if not pin.class_id or c.name == pin.class_id
 			]
 			for c in target_classes:
-				grade = c.education_grade_id
-				subjects = inp.grade_subjects.get(grade, [])
+				subjects = inp.class_subjects.get(c.name, [])
 
 				if pin.is_blocking:
 					for ts_id in subjects:
@@ -386,14 +376,13 @@ class ModelBuilder:
 		"""HC13: Môn force_pair phải xếp theo cặp tiết liên tiếp trong cùng buổi."""
 		inp = self.inp
 		sm = self.solver_model
-		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 		num_periods = len(inp.periods)
 		half = num_periods // 2 or num_periods
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
-				req = req_map.get((grade, ts_id))
+			for ts_id in inp.class_subjects.get(c.name, []):
+				req = req_map.get((c.name, ts_id))
 				if not req or not req.force_pair:
 					continue
 				for day in inp.working_days:
@@ -451,13 +440,12 @@ class ModelBuilder:
 		sm = self.solver_model
 		bonuses = []
 
-		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 		num_periods = len(inp.periods)
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
-				req = req_map.get((grade, ts_id))
+			for ts_id in inp.class_subjects.get(c.name, []):
+				req = req_map.get((c.name, ts_id))
 				if not req or not req.prefer_consecutive:
 					continue
 
@@ -482,8 +470,7 @@ class ModelBuilder:
 
 		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				key_a = f"{c.name}|{ts_id}"
 				for t_id in inp.class_subject_teachers.get(key_a, []):
 					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
@@ -529,8 +516,7 @@ class ModelBuilder:
 
 		teacher_class_subjects: Dict[str, List[Tuple[str, str]]] = {}
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				key_a = f"{c.name}|{ts_id}"
 				for t_id in inp.class_subject_teachers.get(key_a, []):
 					teacher_class_subjects.setdefault(t_id, []).append((c.name, ts_id))
@@ -567,15 +553,14 @@ class ModelBuilder:
 		"""Ưu tiên fill tiết ở lớp có phòng chủ nhiệm (môn không yêu cầu phòng đặc biệt)."""
 		inp = self.inp
 		sm = self.solver_model
-		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 		bonuses = []
 
 		for c in inp.classes:
 			if not c.room_id:
 				continue
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
-				req = req_map.get((grade, ts_id))
+			for ts_id in inp.class_subjects.get(c.name, []):
+				req = req_map.get((c.name, ts_id))
 				if req and req.room_type_required:
 					continue
 				for day in inp.working_days:
@@ -594,8 +579,7 @@ class ModelBuilder:
 		num_periods = len(inp.periods)
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				if not inp.subject_is_heavy.get(ts_id):
 					continue
 				for day in inp.working_days:
@@ -607,8 +591,7 @@ class ModelBuilder:
 
 	def _resolve_room_id(self, class_info, ts_id: str, req_map) -> str:
 		"""Chọn phòng homeroom hoặc phòng khớp room_type_required."""
-		grade = class_info.education_grade_id
-		req = req_map.get((grade, ts_id))
+		req = req_map.get((class_info.name, ts_id))
 		if req and req.room_type_required:
 			for r in self.inp.rooms:
 				if r.room_type == req.room_type_required:
@@ -635,8 +618,7 @@ class ModelBuilder:
 					preferred_indices.add(i)
 
 			for c in inp.classes:
-				grade = c.education_grade_id
-				if ts_id not in inp.grade_subjects.get(grade, []):
+				if ts_id not in inp.class_subjects.get(c.name, []):
 					continue
 				for day in inp.working_days:
 					for p_idx in range(len(inp.periods)):
@@ -666,9 +648,8 @@ class ModelBuilder:
 				continue
 
 			for c in inp.classes:
-				grade = c.education_grade_id
-				grade_subs = inp.grade_subjects.get(grade, [])
-				if s1 not in grade_subs or s2 not in grade_subs:
+				class_subs = inp.class_subjects.get(c.name, [])
+				if s1 not in class_subs or s2 not in class_subs:
 					continue
 
 				for day in inp.working_days:
@@ -702,7 +683,7 @@ class ModelBuilder:
 		inp = self.inp
 		sm = self.solver_model
 		sorted_periods = sorted(inp.periods, key=lambda x: x.period_priority)
-		req_map = {(r.education_grade_id, r.timetable_subject_id): r for r in inp.requirements}
+		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 		results = []
 
 		# Map pinned slot -> room/teacher override
@@ -717,8 +698,7 @@ class ModelBuilder:
 				pin_lookup[key] = pin
 
 		for c in inp.classes:
-			grade = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(grade, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				for day in inp.working_days:
 					for p_idx, period in enumerate(sorted_periods):
 						key = (c.name, ts_id, day, p_idx)

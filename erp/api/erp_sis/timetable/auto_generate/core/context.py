@@ -40,11 +40,8 @@ class SolverContext:
 		return out
 
 	def vars_for_class_slot(self, c_id: str, day: str, p_idx: int) -> List[Any]:
-		grade = next((c.education_grade_id for c in self.inp.classes if c.name == c_id), None)
-		if grade is None:
-			return []
 		out = []
-		for ts_id in self.inp.grade_subjects.get(grade, []):
+		for ts_id in self.inp.class_subjects.get(c_id, []):
 			v = self.x.get((c_id, ts_id, day, p_idx))
 			if v is not None:
 				out.append(v)

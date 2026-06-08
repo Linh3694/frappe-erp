@@ -7,8 +7,7 @@ class SpreadAcrossDays(Verb):
 		inp = ctx.inp
 		terms = []
 		for c in inp.classes:
-			g = c.education_grade_id
-			for ts_id in inp.grade_subjects.get(g, []):
+			for ts_id in inp.class_subjects.get(c.name, []):
 				day_vars = []
 				for day in inp.working_days:
 					dv = [ctx.x[k] for p in range(ctx.num_periods) if (k := (c.name, ts_id, day, p)) in ctx.x]

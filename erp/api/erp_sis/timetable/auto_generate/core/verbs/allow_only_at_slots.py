@@ -19,8 +19,7 @@ class AllowOnlyAtSlots(Verb):
 			if not subject:
 				continue
 			for c in inp.classes:
-				g = c.education_grade_id
-				if subject not in inp.grade_subjects.get(g, []):
+				if subject not in inp.class_subjects.get(c.name, []):
 					continue
 				for day in inp.working_days:
 					for p_idx in range(ctx.num_periods):
@@ -40,7 +39,7 @@ class AllowOnlyAtSlots(Verb):
 			for c in inp.classes:
 				if pin.class_id and c.name != pin.class_id:
 					continue
-				for ts_id in inp.grade_subjects.get(c.education_grade_id, []):
+				for ts_id in inp.class_subjects.get(c.name, []):
 					v = ctx.x.get((c.name, ts_id, pin.day_of_week, p_idx))
 					if v is not None:
 						ctx.model.Add(v == 0)

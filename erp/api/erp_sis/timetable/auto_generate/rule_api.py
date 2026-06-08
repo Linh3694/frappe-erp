@@ -14,6 +14,13 @@ from .core.filter_keys import list_subject_filter_keys as _list_filter_keys
 from .core.rule_catalog import get_catalog_entry, list_rule_catalog
 from .core.registry import list_verbs
 from .core.verb_schemas import get_verb_schema
+from .requirements_matrix import (
+	compute_max_slots,
+	index_requirements,
+	load_grade_groups,
+	load_subjects,
+	normalize_requirement_row,
+)
 from .rule_loader import load_rule_set
 from .rule_set_validation import validate_rule_rows
 
@@ -146,7 +153,10 @@ def update_rule_set(**kwargs):
 		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
 			return error_response("Rule Set không tồn tại", 404)
 		doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
-		for field in ("title_vn", "title_en", "description", "is_default", "school_year_id", "education_stage_id"):
+		for field in (
+			"title_vn", "title_en", "description", "is_default",
+			"school_year_id", "education_stage_id", "schedule_id",
+		):
 			if data.get(field) is not None:
 				doc.set(field, data.get(field))
 		if "rules" in data:
@@ -207,6 +217,111 @@ def list_available_verbs(**kwargs):
 			"catalog": list_rule_catalog(),
 			"default_rule_count": len(DEFAULT_RULE_SPECS),
 		})
+	except Exception as e:
+		return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def get_rule_set_requirements_matrix(rule_set_id=None):
+	"""Ma trận số tiết lớp×môn của rule set (template)."""
+	try:
+		rule_set_id = rule_set_id or frappe.form_dict.get("rule_set_id")
+		if not rule_set_id:
+			return error_response("Thiếu rule_set_id")
+		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
+			return error_response("Rule Set không tồn tại", 404)
+
+		doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
+		if not doc.school_year_id or not doc.education_stage_id:
+			return error_response("Rule set chưa có năm học/cấp học")
+
+		grade_groups = load_grade_groups(
+			doc.campus_id, doc.school_year_id, doc.education_stage_id,
+		)
+		subjects = load_subjects(doc.campus_id, doc.education_stage_id)
+		schedule_id = getattr(doc, "schedule_id", None)
+		slot_meta = compute_max_slots(schedule_id, doc.campus_id, doc.education_stage_id)
+
+		rows = []
+		if frappe.db.has_column("SIS Timetable Rule Set", "requirements"):
+			for row in doc.get("requirements") or []:
+				rows.append({
+					"class_id": row.class_id,
+					"timetable_subject_id": row.timetable_subject_id,
+					"periods_per_week": row.periods_per_week,
+					"max_periods_per_day": row.max_periods_per_day,
+					"prefer_consecutive": row.prefer_consecutive,
+					"force_pair": getattr(row, "force_pair", 0),
+					"room_type_required": row.room_type_required,
+				})
+
+		class_count = sum(len(g.get("classes") or []) for g in grade_groups)
+		return single_item_response({
+			"rule_set_id": rule_set_id,
+			"schedule_id": schedule_id,
+			"grade_groups": grade_groups,
+			"subjects": subjects,
+			"requirements": index_requirements(rows),
+			"matrix_scope": {
+				"campus_id": doc.campus_id,
+				"school_year_id": doc.school_year_id,
+				"education_stage_id": doc.education_stage_id,
+				"class_count": class_count,
+				"subject_count": len(subjects),
+				"grade_count": len(grade_groups),
+			},
+			**slot_meta,
+		})
+	except Exception as e:
+		return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def save_rule_set_requirements(**kwargs):
+	"""Lưu ma trận số tiết vào child table rule set."""
+	try:
+		data = _json()
+		rule_set_id = data.get("rule_set_id")
+		requirements = data.get("requirements")
+		if not rule_set_id:
+			return error_response("Thiếu rule_set_id")
+		if requirements is None:
+			return error_response("Thiếu requirements data")
+		if isinstance(requirements, str):
+			requirements = json.loads(requirements)
+
+		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
+			return error_response("Rule Set không tồn tại", 404)
+
+		doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
+		if data.get("schedule_id") is not None:
+			doc.schedule_id = data.get("schedule_id") or ""
+
+		new_rows = []
+		for req in requirements or []:
+			ppw = int(req.get("periods_per_week", 0))
+			cid = req.get("class_id")
+			sid = req.get("timetable_subject_id")
+			if not cid or not sid or ppw <= 0:
+				continue
+			norm = normalize_requirement_row(req)
+			new_rows.append({
+				"class_id": cid,
+				"timetable_subject_id": sid,
+				"periods_per_week": norm["periods_per_week"],
+				"max_periods_per_day": norm["max_periods_per_day"],
+				"prefer_consecutive": int(norm["prefer_consecutive"]),
+				"force_pair": int(norm["force_pair"]),
+				"room_type_required": norm["room_type_required"],
+			})
+
+		doc.requirements = []
+		for row in new_rows:
+			doc.append("requirements", row)
+		doc.save(ignore_permissions=True)
+		frappe.db.commit()
+
+		return single_item_response({"saved": len(new_rows)})
 	except Exception as e:
 		return error_response(str(e))
 
@@ -406,6 +521,7 @@ def _rule_set_summary(doc, rules=None) -> Dict[str, Any]:
 		"campus_id": doc.campus_id,
 		"school_year_id": getattr(doc, "school_year_id", None),
 		"education_stage_id": getattr(doc, "education_stage_id", None),
+		"schedule_id": getattr(doc, "schedule_id", None),
 		"is_default": doc.is_default,
 		"description": doc.description,
 	}

@@ -12,8 +12,7 @@ class OrderBeforeSameDay(Verb):
 			if not before or not after:
 				continue
 			for c in inp.classes:
-				g = c.education_grade_id
-				if before not in inp.grade_subjects.get(g, []) or after not in inp.grade_subjects.get(g, []):
+				if before not in inp.class_subjects.get(c.name, []) or after not in inp.class_subjects.get(c.name, []):
 					continue
 				for day in inp.working_days:
 					for p_b in range(ctx.num_periods):

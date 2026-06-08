@@ -8,8 +8,7 @@ from .context import SolverContext
 def create_variables(ctx: SolverContext) -> None:
 	inp = ctx.inp
 	for c in inp.classes:
-		grade = c.education_grade_id
-		for ts_id in inp.grade_subjects.get(grade, []):
+		for ts_id in inp.class_subjects.get(c.name, []):
 			for day in inp.working_days:
 				for p_idx, period in enumerate(sorted(inp.periods, key=lambda x: x.period_priority)):
 					key = (c.name, ts_id, day, p_idx)

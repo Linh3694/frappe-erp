@@ -18,9 +18,8 @@ class AtMostPerScope(Verb):
 
 		if ctx.cur_subject_type == "assignment" and scope == "day":
 			for c in inp.classes:
-				grade = c.education_grade_id
-				for ts_id in inp.grade_subjects.get(grade, []):
-					req = rmap.get((grade, ts_id))
+				for ts_id in inp.class_subjects.get(c.name, []):
+					req = rmap.get((c.name, ts_id))
 					max_d = req.max_periods_per_day if req else 2
 					if params.get("max") is not None:
 						max_d = int(params["max"])
@@ -42,8 +41,7 @@ class AtMostPerScope(Verb):
 						continue
 					max_d = inst_object_int(inst, "max", params.get("max", 2))
 					for c in inp.classes:
-						grade = c.education_grade_id
-						if ts_id not in inp.grade_subjects.get(grade, []):
+						if ts_id not in inp.class_subjects.get(c.name, []):
 							continue
 						for day in inp.working_days:
 							day_vars = [
@@ -55,8 +53,7 @@ class AtMostPerScope(Verb):
 				for ts_id in subject_set:
 					max_d = int(params.get("max", 2))
 					for c in inp.classes:
-						grade = c.education_grade_id
-						if ts_id not in inp.grade_subjects.get(grade, []):
+						if ts_id not in inp.class_subjects.get(c.name, []):
 							continue
 						for day in inp.working_days:
 							day_vars = [
