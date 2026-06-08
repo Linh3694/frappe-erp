@@ -15,7 +15,7 @@ from .core.rule_catalog import get_catalog_entry, is_parameterized
 def load_rule_set(rule_set_id: str, overrides_json: str | None = None) -> RuleSet:
 	overrides = _parse_overrides(overrides_json)
 
-	if not rule_set_id or not frappe.db.table_exists("tabSIS Timetable Rule Set"):
+	if not rule_set_id or not frappe.db.table_exists("SIS Timetable Rule Set"):
 		rs = build_default_rule_set("default")
 		rs.overrides = overrides
 		return rs
@@ -116,7 +116,7 @@ def _row_to_instance(rule: Rule) -> Optional[dict]:
 
 
 def get_default_rule_set_id(campus_id: str) -> Optional[str]:
-	if not frappe.db.table_exists("tabSIS Timetable Rule Set"):
+	if not frappe.db.table_exists("SIS Timetable Rule Set"):
 		return None
 	return frappe.db.get_value(
 		"SIS Timetable Rule Set",

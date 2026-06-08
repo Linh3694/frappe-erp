@@ -69,7 +69,7 @@ def list_rule_sets(campus_id=None, school_year_id=None, education_stage_id=None)
 
 		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
 		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
-		if not frappe.db.table_exists("tabSIS Timetable Rule Set"):
+		if not frappe.db.table_exists("SIS Timetable Rule Set"):
 			return single_item_response({
 				"offline": True,
 				"default": build_default_rule_set("offline").rules,
