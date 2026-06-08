@@ -375,16 +375,6 @@ def save_rule_set_requirements(**kwargs):
 			doc.append("requirements", row)
 		doc.save(ignore_permissions=True)
 
-		# Cập nhật cờ môn nặng trên SIS Timetable Subject (theo môn, không theo lớp)
-		subject_heavy = data.get("subject_heavy")
-		if isinstance(subject_heavy, str):
-			subject_heavy = json.loads(subject_heavy)
-		if subject_heavy and frappe.db.has_column("SIS Timetable Subject", "is_heavy"):
-			for sid, heavy in (subject_heavy or {}).items():
-				if not sid or not frappe.db.exists("SIS Timetable Subject", sid):
-					continue
-				frappe.db.set_value("SIS Timetable Subject", sid, "is_heavy", 1 if heavy else 0)
-
 		frappe.db.commit()
 
 		return single_item_response({"saved": len(new_rows)})
@@ -801,6 +791,10 @@ def list_filter_options(
 				meta["warning"] = (
 					"Rule set chưa có năm học/cấp học — tạo lại rule set hoặc chọn phạm vi trước khi cấu hình"
 				)
+		if entity_lower == "grade":
+			if not education_stage_id:
+				meta["warning"] = "Rule set chưa có cấp học — chỉ hiển thị khối thuộc cấp đã chọn"
+				return list_response([], meta=meta)
 		if entity_lower == "class" and education_stage_id and not _grade_ids_for_stage(education_stage_id):
 			return error_response(
 				"Cấp học chưa có khối lớp (SIS Education Grade) — cấu hình khối trước khi chọn lớp"
@@ -854,7 +848,7 @@ def _query_filter_options(
 			return []
 
 		sql = """
-			SELECT c.name, c.title, c.short_title
+			SELECT c.name, c.title, c.short_title, c.education_grade AS grade_id
 			FROM `tabSIS Class` c
 			WHERE 1=1
 		"""
@@ -876,7 +870,7 @@ def _query_filter_options(
 		params.append(limit)
 		rows = frappe.db.sql(sql, params, as_dict=True)
 		return [
-			{"value": r.name, "label": r.title or r.name, "code": r.short_title}
+			{"value": r.name, "label": r.title or r.name, "code": r.short_title, "grade_id": r.grade_id}
 			for r in rows
 		]
 
@@ -897,12 +891,20 @@ def _query_filter_options(
 		return [{"value": r.name, "label": r.title_vn or r.title_en or r.name} for r in rows]
 
 	if entity == "grade":
+		filters = {}
+		if campus_id and frappe.db.has_column("SIS Education Grade", "campus_id"):
+			filters["campus_id"] = campus_id
+		if education_stage_id:
+			filters["education_stage_id"] = education_stage_id
+		else:
+			return []
 		rows = frappe.get_all(
 			"SIS Education Grade",
-			fields=["name", "title_vn", "grade_code"],
-			or_filters=[["title_vn", "like", f"%{search}%"]] if search else None,
+			filters=filters,
+			fields=["name", "title_vn", "grade_code", "sort_order"],
+			or_filters=[["title_vn", "like", f"%{search}%"], ["grade_code", "like", f"%{search}%"]] if search else None,
 			limit_page_length=limit,
-			order_by="sort_order asc",
+			order_by="sort_order asc, title_vn asc",
 		)
 		return [{"value": r.name, "label": r.title_vn or r.name, "code": r.grade_code} for r in rows]
 

@@ -17,7 +17,7 @@ DEFAULT_RULE_SPECS = [
 	("teacher_max_periods_per_week", "hard", "at_most_per_scope", "teacher", {}, {"scope": "week", "source": "teacher.max_periods_per_week"}, 5, "Max tiết/tuần GV"),
 	("avoid_teacher_gap", "soft", "avoid_gap", "teacher", {}, {}, 5, "Tránh gap GV"),
 	("spread_subject_across_week", "soft", "spread_across_days", "assignment", {}, {}, 7, "Rải môn nhiều ngày"),
-	("heavy_subjects_morning", "soft", "prefer_slot_range", "assignment", {"is_heavy": 1}, {"periods": [0, 1, 2, 3]}, 6, "Tiết ưu tiên cho môn nặng"),
+	("subject_preferred_periods", "soft", "prefer_slot_range", "subject", {}, {"source": "instances"}, 6, "Tiết ưu tiên theo môn"),
 	("prefer_home_room", "soft", "attribute_match", "assignment", {}, {"require": "room==home_room"}, 3, "Phòng chủ nhiệm"),
 	("balance_workload_across_week", "soft", "balance_workload", "teacher", {}, {}, 4, "Cân bằng tiết/tuần"),
 	("subject_not_at_slot", "hard", "forbidden_at_slots", "subject", {}, {"source": "instances"}, 5, "Môn không xếp tại slot"),

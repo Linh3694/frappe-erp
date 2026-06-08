@@ -167,10 +167,21 @@ VERB_SCHEMAS: Dict[str, dict] = {
 	"prefer_slot_range": {
 		"params_schema": {
 			"fields": [
-				{"name": "periods", "type": "int_list", "label": "Tiết ưu tiên (0-based)", "default": [0, 1, 2, 3]},
+				{
+					"name": "source",
+					"type": "select",
+					"label": "Chế độ",
+					"options": [{"value": "instances", "label": "Theo từng môn"}],
+					"default": "instances",
+					"ui_hidden": True,
+				},
 			],
 		},
-		"instance_schema": None,
+		"instance_schema": {
+			"subject_type": "subject",
+			"object_kind": "IntList",
+			"object_fields": [{"name": "periods", "type": "int_list", "label": "Tiết ưu tiên (0-based)"}],
+		},
 	},
 	"spread_across_days": {"params_schema": {"fields": []}, "instance_schema": None},
 	"avoid_gap": {"params_schema": {"fields": []}, "instance_schema": None},

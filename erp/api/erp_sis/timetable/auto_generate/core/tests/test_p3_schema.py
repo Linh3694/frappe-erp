@@ -66,6 +66,14 @@ def test_rule_catalog_has_22_entries():
 	assert len(list_rule_catalog()) == 22
 
 
+def test_subject_preferred_periods_in_catalog():
+	entry = get_catalog_entry("subject_preferred_periods")
+	assert entry is not None
+	assert entry["parameterized"] is True
+	assert entry["verb"] == "prefer_slot_range"
+	assert entry.get("display_name_vn") == "Tiết ưu tiên"
+
+
 def test_subject_not_at_slot_in_catalog():
 	entry = get_catalog_entry("subject_not_at_slot")
 	assert entry is not None

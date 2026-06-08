@@ -17,6 +17,15 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"instance_required": True,
 		"help_text_vn": "Chọn các môn phải xếp theo cặp 2 tiết liên tiếp trong cùng buổi.",
 	},
+	"subject_preferred_periods": {
+		"parameterized": True,
+		"object_kind": "IntList",
+		"display_name_vn": "Tiết ưu tiên",
+		"subject_label_vn": "Môn",
+		"object_label_vn": "Các tiết ưu tiên",
+		"instance_required": False,
+		"help_text_vn": "Chọn môn và các tiết solver sẽ ưu tiên xếp (áp dụng mọi lớp có môn).",
+	},
 	"subject_not_at_slot": {
 		"parameterized": True,
 		"object_kind": "Slots",
