@@ -508,7 +508,7 @@ def validate_session(**kwargs):
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def generate(**kwargs):
-	"""Chạy solver. Mặc định chạy synchronous để tránh vấn đề worker."""
+	"""Chạy solver. FE mặc định gửi async=true (enqueue queue long, poll status) để tránh nginx 502."""
 	try:
 		data = _get_json_data()
 		session_id = data.get("session_id")

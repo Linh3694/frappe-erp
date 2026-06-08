@@ -110,23 +110,14 @@ class TimetableSolver:
 			else:
 				result.errors.append(f"Solver không tìm được lời giải: {status_name}")
 				if status_name == "INFEASIBLE":
+					# Chẩn đoán chi tiết chỉ qua API diagnose_infeasibility (on-demand), không chạy trong solve
 					result.errors.append(
 						"Các ràng buộc mâu thuẫn nhau. Kiểm tra: "
 						"(1) Tổng số tiết yêu cầu có vượt số slot/tuần? "
 						"(2) Có đủ GV cho tất cả lớp-môn? "
-						"(3) GV có bị giới hạn quá chặt (max_periods_per_day)?"
+						"(3) GV có bị giới hạn quá chặt (max_periods_per_day)? "
+						"Bấm「Phân tích mâu thuẫn」trên giao diện để xem rule nghi phạm."
 					)
-					try:
-						from .core.diagnostics import diagnose_infeasibility
-
-						result.suspects = diagnose_infeasibility(inp, rule_set)
-						if result.suspects:
-							ids = [s["rule_id"] for s in result.suspects[:5]]
-							result.errors.append(f"Nghi phạm: {', '.join(ids)}")
-					except Exception as diag_err:
-						frappe.logger().warning(
-							f"[Solver] diagnose_infeasibility failed for {self.session_id}: {diag_err}"
-						)
 
 		except Exception as e:
 			result.errors.append(f"Lỗi hệ thống: {str(e)}")
