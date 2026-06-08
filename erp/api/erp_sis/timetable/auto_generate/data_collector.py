@@ -90,8 +90,8 @@ class SoftRules:
 	subject_time_preferences: List[Dict] = field(default_factory=list)
 	teacher_gap_minimization: int = 50
 	workload_balance: int = 50
-	consecutive_bonus: int = 80
-	homeroom_preference: int = 60
+	consecutive_bonus: int = 0
+	homeroom_preference: int = 0
 
 
 @dataclass
@@ -381,8 +381,8 @@ class TimetableDataCollector:
 			subject_time_preferences=data.get("subject_time_preferences", []),
 			teacher_gap_minimization=data.get("teacher_gap_minimization", 50),
 			workload_balance=data.get("workload_balance", 50),
-			consecutive_bonus=data.get("consecutive_bonus", 80),
-			homeroom_preference=data.get("homeroom_preference", 60),
+			consecutive_bonus=data.get("consecutive_bonus", 0),
+			homeroom_preference=data.get("homeroom_preference", 0),
 		)
 
 	def _get_working_days(self) -> List[str]:
