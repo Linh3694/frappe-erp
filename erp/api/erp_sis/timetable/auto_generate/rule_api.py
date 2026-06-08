@@ -15,6 +15,7 @@ from .core.rule_catalog import get_catalog_entry, list_rule_catalog
 from .core.registry import list_verbs
 from .core.verb_schemas import get_verb_schema
 from .requirements_matrix import (
+	LEGACY_DEFAULT_MAX_CONSECUTIVE,
 	LEGACY_DEFAULT_MAX_PER_DAY,
 	LEGACY_DEFAULT_MAX_PER_WEEK,
 	compute_max_slots,
@@ -542,7 +543,7 @@ def _enrich_teacher_scheduling_limits(
 			limits["max_periods_per_day"],
 			legacy_default=LEGACY_DEFAULT_MAX_PER_DAY,
 		)
-		enriched["max_consecutive_periods"] = int(lim.get("max_consecutive_periods") or 4)
+		enriched["max_consecutive_periods"] = int(lim.get("max_consecutive_periods") or LEGACY_DEFAULT_MAX_CONSECUTIVE)
 		if has_week:
 			enriched["max_periods_per_week"] = resolve_teacher_period_limit(
 				lim.get("max_periods_per_week"),

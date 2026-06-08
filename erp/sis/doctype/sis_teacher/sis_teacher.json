@@ -104,8 +104,8 @@
    "fieldname": "max_consecutive_periods",
    "fieldtype": "Int",
    "label": "Max Consecutive Periods",
-   "default": 4,
-   "description": "Số tiết liên tiếp tối đa trước khi nghỉ (mặc định 4)"
+   "default": 10,
+   "description": "Số tiết liên tiếp tối đa trước khi nghỉ (mặc định 10)"
   },
   {
    "fieldname": "workload_spread_mode",

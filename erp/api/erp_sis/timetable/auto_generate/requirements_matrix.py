@@ -138,6 +138,7 @@ def compute_max_slots(
 
 LEGACY_DEFAULT_MAX_PER_DAY = 8
 LEGACY_DEFAULT_MAX_PER_WEEK = 24
+LEGACY_DEFAULT_MAX_CONSECUTIVE = 10
 
 
 def teacher_limits_from_slot_meta(slot_meta: Optional[dict]) -> dict:

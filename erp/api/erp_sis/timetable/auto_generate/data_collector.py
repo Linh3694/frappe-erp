@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import frappe
 
 from .requirements_matrix import (
+	LEGACY_DEFAULT_MAX_CONSECUTIVE,
 	LEGACY_DEFAULT_MAX_PER_DAY,
 	LEGACY_DEFAULT_MAX_PER_WEEK,
 	compute_max_slots,
@@ -43,7 +44,7 @@ class TeacherInfo:
 	full_name: str = ""
 	max_periods_per_day: int = 8
 	max_periods_per_week: int = 24
-	max_consecutive_periods: int = 4
+	max_consecutive_periods: int = LEGACY_DEFAULT_MAX_CONSECUTIVE
 	workload_spread_mode: str = "auto"  # auto | even | concentrated
 	unavailable_slots: List[tuple] = field(default_factory=list)  # (day, period_idx)
 
@@ -248,7 +249,7 @@ class TimetableDataCollector:
 		fields = [
 			"t.name", "t.user_id",
 			"COALESCE(t.max_periods_per_day, 8) as max_periods_per_day",
-			"COALESCE(t.max_consecutive_periods, 4) as max_consecutive_periods",
+			f"COALESCE(t.max_consecutive_periods, {LEGACY_DEFAULT_MAX_CONSECUTIVE}) as max_consecutive_periods",
 		]
 		if has_week:
 			fields.append("COALESCE(t.max_periods_per_week, 24) as max_periods_per_week")

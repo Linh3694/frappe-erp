@@ -30,7 +30,7 @@ class TeacherInfo:
 	user_id: str = ""
 	max_periods_per_day: int = 8
 	max_periods_per_week: int = 24
-	max_consecutive_periods: int = 4
+	max_consecutive_periods: int = 10
 	unavailable_slots: list = field(default_factory=list)
 
 
