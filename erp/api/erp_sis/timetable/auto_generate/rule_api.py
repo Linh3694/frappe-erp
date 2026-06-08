@@ -421,42 +421,73 @@ def _load_study_periods(
 	)
 
 
-def _load_teachers_for_stage(campus_id: str, education_stage_id: str) -> list:
-	"""GV thuộc campus + cấp học (field trực tiếp hoặc mapping child table)."""
-	has_mapping = frappe.db.table_exists("SIS Teacher Education Stage")
-	if has_mapping:
+def _load_teachers_for_stage(
+	campus_id: str,
+	education_stage_id: str,
+	school_year_id: Optional[str] = None,
+) -> list:
+	"""GV thuộc campus + cấp học (mapping teacher_id, field trực tiếp, hoặc phân công môn)."""
+	params = {
+		"campus_id": campus_id,
+		"stage_id": education_stage_id,
+		"school_year_id": school_year_id,
+	}
+
+	# SIS Teacher Education Stage là bảng mapping (teacher_id), không phải child table (parent)
+	rows = frappe.db.sql(
+		"""
+		SELECT DISTINCT t.name AS teacher_id, t.user_id,
+		       COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id) AS full_name,
+		       u.employee_code
+		FROM `tabSIS Teacher` t
+		LEFT JOIN `tabUser` u ON u.name = t.user_id
+		LEFT JOIN `tabSIS Teacher Education Stage` tes
+		  ON tes.teacher_id = t.name AND tes.is_active = 1
+		WHERE t.campus_id = %(campus_id)s
+		  AND (
+		    t.education_stage_id = %(stage_id)s
+		    OR tes.education_stage_id = %(stage_id)s
+		  )
+		ORDER BY full_name ASC, t.name ASC
+		""",
+		params,
+		as_dict=True,
+	)
+
+	# Fallback: GV có phân công môn ở lớp thuộc cấp học + năm học rule set
+	if not rows and school_year_id and frappe.db.table_exists("SIS Subject Assignment"):
 		rows = frappe.db.sql(
 			"""
 			SELECT DISTINCT t.name AS teacher_id, t.user_id,
-			       u.full_name, u.employee_code
+			       COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id) AS full_name,
+			       u.employee_code
 			FROM `tabSIS Teacher` t
+			INNER JOIN `tabSIS Subject Assignment` sa ON sa.teacher_id = t.name
+			INNER JOIN `tabSIS Class` c ON c.name = sa.class_id
+			INNER JOIN `tabSIS Education Grade` eg ON eg.name = c.education_grade
 			LEFT JOIN `tabUser` u ON u.name = t.user_id
-			LEFT JOIN `tabSIS Teacher Education Stage` tes ON tes.parent = t.name
 			WHERE t.campus_id = %(campus_id)s
-			  AND (
-			    t.education_stage_id = %(stage_id)s
-			    OR tes.education_stage_id = %(stage_id)s
-			  )
-			ORDER BY u.full_name ASC, t.name ASC
+			  AND c.school_year_id = %(school_year_id)s
+			  AND eg.education_stage_id = %(stage_id)s
+			ORDER BY full_name ASC, t.name ASC
 			""",
-			{"campus_id": campus_id, "stage_id": education_stage_id},
+			params,
 			as_dict=True,
 		)
-	else:
+
+	if not rows:
+		# Fallback cuối: mọi GV campus (khớp data_collector khi cấu hình unavailability)
 		rows = frappe.db.sql(
 			"""
 			SELECT t.name AS teacher_id, t.user_id,
-			       u.full_name, u.employee_code
+			       COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id) AS full_name,
+			       u.employee_code
 			FROM `tabSIS Teacher` t
 			LEFT JOIN `tabUser` u ON u.name = t.user_id
 			WHERE t.campus_id = %(campus_id)s
-			  AND (
-			    t.education_stage_id = %(stage_id)s
-			    OR IFNULL(t.education_stage_id, '') = ''
-			  )
-			ORDER BY u.full_name ASC, t.name ASC
+			ORDER BY full_name ASC, t.name ASC
 			""",
-			{"campus_id": campus_id, "stage_id": education_stage_id},
+			params,
 			as_dict=True,
 		)
 
@@ -497,9 +528,17 @@ def _load_unavailability_map(teacher_ids: list) -> dict:
 	return out
 
 
-def _teacher_in_scope(teacher_id: str, campus_id: str, education_stage_id: str) -> bool:
+def _teacher_in_scope(
+	teacher_id: str,
+	campus_id: str,
+	education_stage_id: str,
+	school_year_id: Optional[str] = None,
+) -> bool:
 	"""Kiểm tra GV thuộc phạm vi rule set."""
-	allowed = {t["teacher_id"] for t in _load_teachers_for_stage(campus_id, education_stage_id)}
+	allowed = {
+		t["teacher_id"]
+		for t in _load_teachers_for_stage(campus_id, education_stage_id, school_year_id)
+	}
 	return teacher_id in allowed
 
 
@@ -520,7 +559,9 @@ def get_teacher_unavailability_config(rule_set_id=None):
 		schedule_id = getattr(doc, "schedule_id", None) or None
 		slot_meta = compute_max_slots(schedule_id, doc.campus_id, doc.education_stage_id)
 		period_rows = _load_study_periods(schedule_id, doc.campus_id, doc.education_stage_id)
-		teachers = _load_teachers_for_stage(doc.campus_id, doc.education_stage_id)
+		teachers = _load_teachers_for_stage(
+			doc.campus_id, doc.education_stage_id, doc.school_year_id,
+		)
 		teacher_ids = [t["teacher_id"] for t in teachers]
 		unavailability = _load_unavailability_map(teacher_ids)
 
@@ -580,7 +621,9 @@ def save_teacher_unavailability(**kwargs):
 				continue
 			if not frappe.db.exists("SIS Teacher", teacher_id):
 				return error_response(f"Giáo viên không tồn tại: {teacher_id}")
-			if not _teacher_in_scope(teacher_id, rs_doc.campus_id, rs_doc.education_stage_id):
+			if not _teacher_in_scope(
+				teacher_id, rs_doc.campus_id, rs_doc.education_stage_id, rs_doc.school_year_id,
+			):
 				return error_response(f"Giáo viên không thuộc phạm vi rule set: {teacher_id}")
 
 			seen = set()
