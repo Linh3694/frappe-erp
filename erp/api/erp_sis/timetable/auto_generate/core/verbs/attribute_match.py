@@ -45,7 +45,7 @@ class AttributeMatch(Verb):
 			if not c.room_id:
 				continue
 			for ts_id in inp.class_subjects.get(c.name, []):
-				req = rmap.get((g, ts_id))
+				req = rmap.get((c.name, ts_id))
 				if req and req.room_type_required:
 					continue
 				for day in inp.working_days:
