@@ -298,7 +298,7 @@ def get_rule_set_requirements_matrix(rule_set_id=None):
 		slot_meta = compute_max_slots(schedule_id, doc.campus_id, doc.education_stage_id)
 
 		rows = []
-		if frappe.db.has_column("SIS Timetable Rule Set", "requirements"):
+		if frappe.db.table_exists("SIS Timetable Rule Set Requirement"):
 			for row in doc.get("requirements") or []:
 				rows.append({
 					"class_id": row.class_id,

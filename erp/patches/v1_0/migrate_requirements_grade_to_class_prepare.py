@@ -11,7 +11,7 @@ import frappe
 
 
 def execute():
-	if not frappe.db.table_exists("tabSIS Timetable Generation Requirement"):
+	if not frappe.db.table_exists("SIS Timetable Generation Requirement"):
 		return
 	if not frappe.db.has_column("SIS Timetable Generation Requirement", "education_grade_id"):
 		return

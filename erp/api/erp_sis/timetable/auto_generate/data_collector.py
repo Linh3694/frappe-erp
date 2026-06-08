@@ -233,7 +233,7 @@ class TimetableDataCollector:
 		teachers = {r["name"]: TeacherInfo(**r) for r in rows}
 
 		# Child table unavailability (nếu DocType/field đã migrate)
-		if frappe.db.table_exists("tabSIS Teacher Unavailability"):
+		if frappe.db.table_exists("SIS Teacher Unavailability"):
 			unavail_rows = frappe.db.sql("""
 				SELECT parent as teacher_id, day_of_week, timetable_column_id
 				FROM `tabSIS Teacher Unavailability`
@@ -347,7 +347,7 @@ class TimetableDataCollector:
 
 	def _get_pinned_slots(self) -> List[PinnedSlotInfo]:
 		"""Lấy tiết cố định của session (nếu DocType đã migrate)."""
-		if not frappe.db.table_exists("tabSIS Timetable Pinned Slot"):
+		if not frappe.db.table_exists("SIS Timetable Pinned Slot"):
 			return []
 
 		rows = frappe.db.sql("""
