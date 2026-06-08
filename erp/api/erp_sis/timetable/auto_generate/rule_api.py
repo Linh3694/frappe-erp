@@ -230,16 +230,19 @@ def list_subject_filter_keys(subject_type=None):
 		return error_response(str(e))
 
 
-def _resolve_picker_entity(
+def _resolve_option_kind(
+	option_kind=None,
 	picker_entity=None,
 	entity=None,
 	entity_type=None,
 ) -> Optional[str]:
-	"""Đọc loại entity cho picker — picker_entity tránh param entity bị proxy strip."""
+	"""Đọc loại option cho picker — option_kind tránh param chứa 'entity' bị proxy strip."""
 	return (
-		picker_entity
+		option_kind
+		or picker_entity
 		or entity
 		or entity_type
+		or frappe.form_dict.get("option_kind")
 		or frappe.form_dict.get("picker_entity")
 		or frappe.form_dict.get("entity")
 		or frappe.form_dict.get("entity_type")
@@ -248,6 +251,7 @@ def _resolve_picker_entity(
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
 def list_filter_options(
+	option_kind=None,
 	picker_entity=None,
 	entity=None,
 	entity_type=None,
@@ -259,14 +263,14 @@ def list_filter_options(
 ):
 	"""Entity picker options cho subject filter / instance editor."""
 	try:
-		entity = _resolve_picker_entity(picker_entity, entity, entity_type)
+		entity = _resolve_option_kind(option_kind, picker_entity, entity, entity_type)
 		campus_id = campus_id or frappe.form_dict.get("campus_id")
 		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
 		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
 		search = search or frappe.form_dict.get("search") or ""
 		limit = int(frappe.form_dict.get("limit") or limit or 50)
 		if not entity:
-			return error_response("Thiếu loại entity (picker_entity)")
+			return error_response("Thiếu option_kind (subject|class|teacher|...)")
 		entity_lower = str(entity).lower()
 		meta = {}
 		if entity_lower in ("class", "subject", "timetable_subject"):
