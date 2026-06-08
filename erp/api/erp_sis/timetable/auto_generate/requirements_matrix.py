@@ -98,29 +98,36 @@ def compute_max_slots(
 	campus_id: str,
 	education_stage_id: str,
 ) -> dict:
-	"""Tính số slot/tuần từ schedule (hoặc fallback theo campus+stage)."""
+	"""Tính slot/tuần từ tiết study của schedule (khớp logic solver)."""
 	import frappe
 
 	study_periods_count = 0
 	if schedule_id:
+		# Chỉ đếm tiết học (study) thuộc khung giờ đã chọn
 		study_periods_count = frappe.db.count(
 			"SIS Timetable Column",
 			filters={"schedule_id": schedule_id, "period_type": "study"},
 		)
 	if not study_periods_count:
-		study_periods_count = frappe.db.count(
-			"SIS Timetable Column",
-			filters={
-				"campus_id": campus_id,
-				"education_stage_id": education_stage_id,
-				"period_type": "study",
-			},
-		)
+		# Legacy: tiết study không gắn schedule — tránh cộng dồn nhiều kỳ học
+		study_periods_count = frappe.db.sql(
+			"""
+			SELECT COUNT(*)
+			FROM `tabSIS Timetable Column`
+			WHERE campus_id = %(campus_id)s
+			  AND education_stage_id = %(education_stage_id)s
+			  AND period_type = 'study'
+			  AND IFNULL(schedule_id, '') = ''
+			""",
+			{"campus_id": campus_id, "education_stage_id": education_stage_id},
+		)[0][0]
 
 	working_days = 5
-	max_slots_per_week = (study_periods_count or 10) * working_days
+	default_per_day = 10
+	per_day = int(study_periods_count or 0) or default_per_day
+	max_slots_per_week = per_day * working_days
 	return {
-		"study_periods_per_day": study_periods_count or 0,
+		"study_periods_per_day": per_day,
 		"working_days": working_days,
 		"max_slots_per_week": max_slots_per_week,
 	}
