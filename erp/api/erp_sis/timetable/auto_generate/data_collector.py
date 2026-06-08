@@ -10,6 +10,13 @@ from dataclasses import dataclass, field
 
 import frappe
 
+from .requirements_matrix import (
+	LEGACY_DEFAULT_MAX_PER_DAY,
+	LEGACY_DEFAULT_MAX_PER_WEEK,
+	compute_max_slots,
+	resolve_teacher_period_limit,
+)
+
 
 @dataclass
 class ClassInfo:
@@ -137,7 +144,29 @@ class TimetableDataCollector:
 		inp.solver_time_limit = self.session.solver_time_limit or 120
 
 		self._build_indexes(inp)
+		self._apply_schedule_teacher_limits(inp)
 		return inp
+
+	def _apply_schedule_teacher_limits(self, inp: TimetableInput) -> None:
+		"""Mặc định max tiết GV theo khung giờ session (tiết/ngày × ngày/tuần)."""
+		slot_meta = compute_max_slots(
+			self.session.schedule_id,
+			self.session.campus_id,
+			self.session.education_stage_id,
+		)
+		per_day = len(inp.periods) or int(slot_meta.get("study_periods_per_day") or 10)
+		per_week = per_day * len(inp.working_days)
+		for teacher in inp.teachers.values():
+			teacher.max_periods_per_day = resolve_teacher_period_limit(
+				teacher.max_periods_per_day,
+				per_day,
+				legacy_default=LEGACY_DEFAULT_MAX_PER_DAY,
+			)
+			teacher.max_periods_per_week = resolve_teacher_period_limit(
+				teacher.max_periods_per_week,
+				per_week,
+				legacy_default=LEGACY_DEFAULT_MAX_PER_WEEK,
+			)
 
 	def _get_classes(self) -> List[ClassInfo]:
 		"""Lấy danh sách lớp theo scope của session."""

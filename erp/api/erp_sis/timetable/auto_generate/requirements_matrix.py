@@ -136,6 +136,37 @@ def compute_max_slots(
 	}
 
 
+LEGACY_DEFAULT_MAX_PER_DAY = 8
+LEGACY_DEFAULT_MAX_PER_WEEK = 24
+
+
+def teacher_limits_from_slot_meta(slot_meta: Optional[dict]) -> dict:
+	"""Mặc định giới hạn GV theo khung giờ rule set / session."""
+	meta = slot_meta or {}
+	per_day = int(meta.get("study_periods_per_day") or 10)
+	working_days = int(meta.get("working_days") or 5)
+	per_week = int(meta.get("max_slots_per_week") or (per_day * working_days))
+	return {
+		"max_periods_per_day": per_day,
+		"max_periods_per_week": per_week,
+	}
+
+
+def resolve_teacher_period_limit(
+	stored: Optional[int],
+	schedule_default: int,
+	*,
+	legacy_default: Optional[int] = None,
+) -> int:
+	"""Ưu tiên giá trị đã lưu; NULL/0 hoặc mặc định DocType cũ (8/24) → theo khung giờ."""
+	if stored is None or int(stored or 0) <= 0:
+		return int(schedule_default)
+	val = int(stored)
+	if legacy_default is not None and val == legacy_default:
+		return int(schedule_default)
+	return val
+
+
 def req_cell_key(class_id: str, subject_id: str) -> str:
 	return f"{class_id}|{subject_id}"
 

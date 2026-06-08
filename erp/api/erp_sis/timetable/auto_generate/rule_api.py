@@ -15,11 +15,15 @@ from .core.rule_catalog import get_catalog_entry, list_rule_catalog
 from .core.registry import list_verbs
 from .core.verb_schemas import get_verb_schema
 from .requirements_matrix import (
+	LEGACY_DEFAULT_MAX_PER_DAY,
+	LEGACY_DEFAULT_MAX_PER_WEEK,
 	compute_max_slots,
 	index_requirements,
 	load_grade_groups,
 	load_subjects,
 	normalize_requirement_row,
+	resolve_teacher_period_limit,
+	teacher_limits_from_slot_meta,
 )
 from .rule_loader import load_rule_set
 from .rule_set_validation import validate_rule_rows
@@ -503,18 +507,22 @@ def _load_teachers_for_stage(
 	]
 
 
-def _enrich_teacher_scheduling_limits(teachers: list) -> list:
+def _enrich_teacher_scheduling_limits(
+	teachers: list,
+	slot_meta: Optional[dict] = None,
+) -> list:
 	"""Bổ sung max tiết/ngày, max tiết/tuần, max liên tiếp, phân bổ tuần từ SIS Teacher."""
 	if not teachers:
 		return teachers
+	limits = teacher_limits_from_slot_meta(slot_meta)
 	ids = [t["teacher_id"] for t in teachers]
 	has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
 	has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
-	fields = "name, COALESCE(max_periods_per_day, 8) AS max_periods_per_day, COALESCE(max_consecutive_periods, 4) AS max_consecutive_periods"
+	fields = "name, max_periods_per_day, max_consecutive_periods"
 	if has_week:
-		fields += ", COALESCE(max_periods_per_week, 24) AS max_periods_per_week"
+		fields += ", max_periods_per_week"
 	if has_spread:
-		fields += ", COALESCE(workload_spread_mode, 'auto') AS workload_spread_mode"
+		fields += ", workload_spread_mode"
 	rows = frappe.db.sql(
 		f"""
 		SELECT {fields}
@@ -529,12 +537,20 @@ def _enrich_teacher_scheduling_limits(teachers: list) -> list:
 	for t in teachers:
 		lim = by_id.get(t["teacher_id"], {})
 		enriched = {**t}
-		enriched["max_periods_per_day"] = int(lim.get("max_periods_per_day") or 8)
+		enriched["max_periods_per_day"] = resolve_teacher_period_limit(
+			lim.get("max_periods_per_day"),
+			limits["max_periods_per_day"],
+			legacy_default=LEGACY_DEFAULT_MAX_PER_DAY,
+		)
 		enriched["max_consecutive_periods"] = int(lim.get("max_consecutive_periods") or 4)
 		if has_week:
-			enriched["max_periods_per_week"] = int(lim.get("max_periods_per_week") or 24)
+			enriched["max_periods_per_week"] = resolve_teacher_period_limit(
+				lim.get("max_periods_per_week"),
+				limits["max_periods_per_week"],
+				legacy_default=LEGACY_DEFAULT_MAX_PER_WEEK,
+			)
 		else:
-			enriched["max_periods_per_week"] = 24
+			enriched["max_periods_per_week"] = limits["max_periods_per_week"]
 		if has_spread:
 			enriched["workload_spread_mode"] = lim.get("workload_spread_mode") or "auto"
 		else:
@@ -602,14 +618,16 @@ def get_teacher_unavailability_config(rule_set_id=None):
 		period_rows = _load_study_periods(schedule_id, doc.campus_id, doc.education_stage_id)
 		teachers = _enrich_teacher_scheduling_limits(_load_teachers_for_stage(
 			doc.campus_id, doc.education_stage_id, doc.school_year_id,
-		))
+		), slot_meta)
 		teacher_ids = [t["teacher_id"] for t in teachers]
 		unavailability = _load_unavailability_map(teacher_ids)
+		limits = teacher_limits_from_slot_meta(slot_meta)
 
 		return single_item_response({
 			"rule_set_id": rule_set_id,
 			"schedule_id": schedule_id,
 			"teachers": teachers,
+			"schedule_limits": limits,
 			"periods": [
 				{
 					"name": p["name"],

@@ -58,12 +58,12 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 		teacher = inp.teachers.get(t_id)
 		if not teacher:
 			continue
-		max_week = teacher.max_periods_per_week or 24
+		max_week = teacher.max_periods_per_week or max_slots_per_week
+		max_day = teacher.max_periods_per_day or num_periods
 		if load > max_week:
 			errors.append(
 				f"GV {t_id}: tổng {load} tiết/tuần vượt giới hạn {max_week}"
 			)
-		max_day = teacher.max_periods_per_day or 8
 		if load > max_day * num_days:
 			errors.append(
 				f"GV {t_id}: tổng {load} tiết/tuần không thể xếp với tối đa "
