@@ -790,6 +790,58 @@ def get_preview_stats(session_id=None):
 		return error_response(str(e))
 
 
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def preview_excel_grid(session_id=None, variant_index=None):
+	"""Xem TKB draft dạng grid Excel — tất cả lớp, enrich môn/GV/phòng."""
+	try:
+		from .excel_preview import build_excel_grid
+
+		session_id = session_id or _get_param("session_id")
+		variant_index = int(variant_index if variant_index is not None else _get_param("variant_index") or 0)
+		if not session_id:
+			return error_response("Thiếu session_id")
+
+		grid = build_excel_grid(session_id, variant_index)
+		return single_item_response(grid)
+	except Exception as e:
+		return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def export_preview_excel(**kwargs):
+	"""Tải ZIP — mỗi biến thể một file Excel column-based."""
+	try:
+		from .excel_preview import send_zip_download
+
+		data = _get_json_data()
+		session_id = data.get("session_id")
+		variant_indices = data.get("variant_indices") or []
+
+		if not session_id:
+			return error_response("Thiếu session_id")
+		if not isinstance(variant_indices, list) or not variant_indices:
+			return error_response("Chọn ít nhất 1 biến thể để tải")
+
+		parsed: list[int] = []
+		for v in variant_indices:
+			try:
+				parsed.append(int(v))
+			except (TypeError, ValueError):
+				return error_response("variant_indices không hợp lệ")
+
+		if len(parsed) > 5:
+			return error_response("Tối đa 5 biến thể mỗi lần tải")
+
+		# Kiểm tra session tồn tại
+		if not frappe.db.exists("SIS Timetable Generation Session", session_id):
+			return error_response("Không tìm thấy phiên gen TKB")
+
+		send_zip_download(session_id, sorted(set(parsed)))
+		return
+	except Exception as e:
+		return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def generate_variants(**kwargs):
 	"""Sinh nhiều biến thể draft (sandbox) — chỉ publish khi admin confirm."""
