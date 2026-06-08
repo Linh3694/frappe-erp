@@ -40,6 +40,7 @@ class PeriodInfo:
 class TeacherInfo:
 	name: str
 	user_id: str
+	full_name: str = ""
 	max_periods_per_day: int = 8
 	max_periods_per_week: int = 24
 	max_consecutive_periods: int = 4
@@ -245,18 +246,20 @@ class TimetableDataCollector:
 		has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
 		has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
 		fields = [
-			"name", "user_id",
-			"COALESCE(max_periods_per_day, 8) as max_periods_per_day",
-			"COALESCE(max_consecutive_periods, 4) as max_consecutive_periods",
+			"t.name", "t.user_id",
+			"COALESCE(t.max_periods_per_day, 8) as max_periods_per_day",
+			"COALESCE(t.max_consecutive_periods, 4) as max_consecutive_periods",
 		]
 		if has_week:
-			fields.append("COALESCE(max_periods_per_week, 24) as max_periods_per_week")
+			fields.append("COALESCE(t.max_periods_per_week, 24) as max_periods_per_week")
 		if has_spread:
-			fields.append("COALESCE(workload_spread_mode, 'auto') as workload_spread_mode")
+			fields.append("COALESCE(t.workload_spread_mode, 'auto') as workload_spread_mode")
 		sql = f"""
-			SELECT {", ".join(fields)}
-			FROM `tabSIS Teacher`
-			WHERE campus_id = %(campus_id)s
+			SELECT {", ".join(fields)},
+			       COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id, t.name) AS full_name
+			FROM `tabSIS Teacher` t
+			LEFT JOIN `tabUser` u ON u.name = t.user_id
+			WHERE t.campus_id = %(campus_id)s
 		"""
 		rows = frappe.db.sql(sql, {"campus_id": self.session.campus_id}, as_dict=True)
 

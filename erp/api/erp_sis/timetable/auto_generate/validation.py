@@ -1,8 +1,19 @@
 """Validation dùng chung cho validate_session API và solver."""
 
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
-from .data_collector import TimetableInput
+from .data_collector import TeacherInfo, TimetableInput
+
+
+def _teacher_label(t_id: str, teachers: Dict[str, TeacherInfo]) -> str:
+	"""Nhãn GV: tên hiển thị kèm ID DocType."""
+	teacher = teachers.get(t_id)
+	if not teacher:
+		return t_id
+	name = (teacher.full_name or "").strip()
+	if name and name not in (t_id, teacher.user_id):
+		return f"{name} ({t_id})"
+	return t_id
 
 
 def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]:
@@ -60,13 +71,14 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 			continue
 		max_week = teacher.max_periods_per_week or max_slots_per_week
 		max_day = teacher.max_periods_per_day or num_periods
+		gv = _teacher_label(t_id, inp.teachers)
 		if load > max_week:
 			errors.append(
-				f"GV {t_id}: tổng {load} tiết/tuần vượt giới hạn {max_week}"
+				f"GV {gv}: tổng {load} tiết/tuần vượt giới hạn {max_week}"
 			)
 		if load > max_day * num_days:
 			errors.append(
-				f"GV {t_id}: tổng {load} tiết/tuần không thể xếp với tối đa "
+				f"GV {gv}: tổng {load} tiết/tuần không thể xếp với tối đa "
 				f"{max_day} tiết/ngày x {num_days} ngày"
 			)
 
