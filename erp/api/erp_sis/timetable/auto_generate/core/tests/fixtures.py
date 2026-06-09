@@ -45,6 +45,7 @@ class SubjectRequirement:
 	force_pair: bool = False
 	room_type_required: Optional[str] = None
 	is_heavy: bool = False
+	program_id: Optional[str] = None
 
 
 @dataclass

@@ -26,6 +26,15 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"instance_required": False,
 		"help_text_vn": "Chọn môn và các tiết solver sẽ ưu tiên xếp (áp dụng mọi lớp có môn).",
 	},
+	"interleave_programs_within_day": {
+		"parameterized": False,
+		"object_kind": "None",
+		"display_name_vn": "Xen kẽ chương trình trong ngày",
+		"subject_label_vn": None,
+		"object_label_vn": None,
+		"instance_required": False,
+		"help_text_vn": "Rule mềm hệ thống: ưu tiên xen kẽ và cân bằng chương trình (curriculum_id) trong cùng ngày.",
+	},
 	"subject_not_at_slot": {
 		"parameterized": True,
 		"object_kind": "Slots",

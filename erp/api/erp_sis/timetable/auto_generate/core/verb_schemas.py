@@ -184,6 +184,7 @@ VERB_SCHEMAS: Dict[str, dict] = {
 		},
 	},
 	"spread_across_days": {"params_schema": {"fields": []}, "instance_schema": None},
+	"program_interleaving": {"params_schema": {"fields": []}, "instance_schema": None},
 	"avoid_gap": {"params_schema": {"fields": []}, "instance_schema": None},
 	"avoid_single_visit": {"params_schema": {"fields": []}, "instance_schema": None},
 	"balance_workload": {"params_schema": {"fields": []}, "instance_schema": None},

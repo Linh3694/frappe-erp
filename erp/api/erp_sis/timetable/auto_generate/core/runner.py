@@ -121,6 +121,10 @@ def build_and_solve(
 	from .force_pair_constraints import apply_requirement_force_pairs
 	apply_requirement_force_pairs(ctx)
 
+	# HC14: ràng buộc hệ thống — không môn nào quá 3 tiết liền trong ngày
+	from .subject_consecutive_cap import apply_subject_max_consecutive_system_cap
+	apply_subject_max_consecutive_system_cap(ctx, max_consecutive=3)
+
 	_apply_legacy_session_soft(ctx)
 	_apply_forbid_solutions(ctx, forbid_solutions or [], min_diff)
 

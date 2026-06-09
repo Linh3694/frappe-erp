@@ -20,6 +20,7 @@ DEFAULT_RULE_SPECS = [
 	("teacher_max_periods_per_week", "hard", "at_most_per_scope", "teacher", {}, {"scope": "week", "source": "teacher.max_periods_per_week"}, 5, "Max tiết/tuần GV"),
 	("avoid_teacher_gap", "soft", "avoid_gap", "teacher", {}, {}, 5, "Tránh gap GV"),
 	("spread_subject_across_week", "soft", "spread_across_days", "assignment", {}, {}, 7, "Rải môn nhiều ngày"),
+	("interleave_programs_within_day", "soft", "program_interleaving", "assignment", {}, {}, 5, "Xen kẽ chương trình trong ngày"),
 	("subject_preferred_periods", "soft", "prefer_slot_range", "subject", {}, {"source": "instances"}, 6, "Tiết ưu tiên theo môn"),
 	("prefer_home_room", "soft", "attribute_match", "assignment", {}, {"require": "room==home_room"}, 3, "Phòng chủ nhiệm"),
 	("balance_workload_across_week", "soft", "balance_workload", "teacher", {}, {}, 4, "Cân bằng tiết/tuần"),

@@ -68,6 +68,7 @@ class SubjectRequirement:
 	force_pair: bool = False
 	room_type_required: Optional[str] = None
 	is_heavy: bool = False
+	program_id: Optional[str] = None
 
 
 @dataclass
@@ -306,8 +307,10 @@ class TimetableDataCollector:
 		"""Lấy requirements từ session (class x timetable_subject -> periods_per_week)."""
 		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
 		has_is_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
+		has_curriculum = frappe.db.has_column("SIS Timetable Subject", "curriculum_id")
 		force_pair_sql = "COALESCE(r.force_pair, 0) as force_pair," if has_force_pair else "0 as force_pair,"
 		is_heavy_sql = "COALESCE(ts.is_heavy, 0) as is_heavy" if has_is_heavy else "0 as is_heavy"
+		program_sql = "NULLIF(ts.curriculum_id, '') as program_id" if has_curriculum else "NULL as program_id"
 
 		rows = frappe.db.sql(f"""
 			SELECT
@@ -319,7 +322,8 @@ class TimetableDataCollector:
 				r.prefer_consecutive,
 				{force_pair_sql}
 				r.room_type_required,
-				{is_heavy_sql}
+				{is_heavy_sql},
+				{program_sql}
 			FROM `tabSIS Timetable Generation Requirement` r
 			JOIN `tabSIS Timetable Subject` ts ON ts.name = r.timetable_subject_id
 			WHERE r.session_id = %(session_id)s
@@ -336,6 +340,7 @@ class TimetableDataCollector:
 			force_pair=bool(r.get("force_pair")),
 			room_type_required=r["room_type_required"] or None,
 			is_heavy=bool(r.get("is_heavy")),
+			program_id=r.get("program_id") or None,
 		) for r in rows]
 
 	def _get_assignments(self) -> List[TeacherAssignment]:

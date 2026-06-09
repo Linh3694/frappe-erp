@@ -14,6 +14,7 @@ from . import (  # noqa: F401
 	avoid_gap,
 	avoid_single_visit,
 	balance_workload,
+	program_interleaving,
 	allow_only_at_slots,
 	forbidden_on_day,
 	exclude_subject,
