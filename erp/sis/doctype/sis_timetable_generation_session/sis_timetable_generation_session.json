@@ -228,6 +228,24 @@
    "read_only": 1
   },
   {
+   "fieldname": "publish_section",
+   "fieldtype": "Section Break",
+   "label": "Publish",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "apply_from",
+   "fieldtype": "Date",
+   "label": "Apply From",
+   "description": "Ngày bắt đầu áp dụng TKB khi publish (mặc định = đầu kỳ học)"
+  },
+  {
+   "fieldname": "apply_to",
+   "fieldtype": "Date",
+   "label": "Apply To",
+   "description": "Ngày kết thúc áp dụng TKB khi publish (mặc định = cuối kỳ học)"
+  },
+  {
    "fieldname": "error_section",
    "fieldtype": "Section Break",
    "label": "Error Log",

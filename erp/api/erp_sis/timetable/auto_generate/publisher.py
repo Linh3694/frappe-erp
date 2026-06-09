@@ -36,8 +36,12 @@ class TimetablePublisher:
 		try:
 			frappe.db.begin()
 
+			schedule = frappe.get_doc("SIS Schedule", self.session.schedule_id)
+			apply_start = getattr(self.session, "apply_from", None) or schedule.start_date
+			apply_end = getattr(self.session, "apply_to", None) or schedule.end_date
+
 			# 1. Tạo SIS Timetable header
-			timetable = self._create_timetable_header()
+			timetable = self._create_timetable_header(apply_start, apply_end)
 
 			# 2. Load kết quả draft (biến thể đã chọn)
 			results = self._load_results(variant_index=variant_index)
@@ -50,11 +54,9 @@ class TimetablePublisher:
 				by_class[row["class_id"]].append(row)
 
 			# 4. Tạo instance + rows cho mỗi lớp
-			schedule = frappe.get_doc("SIS Schedule", self.session.schedule_id)
-
 			for class_id, slots in by_class.items():
-				instance = self._create_instance(timetable.name, class_id, schedule)
-				self._create_rows(instance, slots)
+				instance = self._create_instance(timetable.name, class_id, apply_start, apply_end)
+				self._create_rows(instance, slots, apply_start, apply_end)
 				self.stats["instances_created"] += 1
 
 			frappe.db.commit()
@@ -71,8 +73,8 @@ class TimetablePublisher:
 						teacher_count, _ = sync_instance_bulk(
 							instance_id=inst_id,
 							class_id=class_id,
-							start_date=str(schedule.start_date),
-							end_date=str(schedule.end_date),
+							start_date=str(apply_start),
+							end_date=str(apply_end),
 							campus_id=self.session.campus_id,
 						)
 						self.stats["teacher_entries_synced"] += teacher_count
@@ -103,7 +105,7 @@ class TimetablePublisher:
 			frappe.log_error(f"Publish error for session {self.session_id}: {str(e)}")
 			return {"success": False, "error": str(e)}
 
-	def _create_timetable_header(self) -> "Document":
+	def _create_timetable_header(self, start_date, end_date) -> "Document":
 		"""Tạo SIS Timetable header mới."""
 		doc = frappe.get_doc({
 			"doctype": "SIS Timetable",
@@ -112,29 +114,29 @@ class TimetablePublisher:
 			"campus_id": self.session.campus_id,
 			"school_year_id": self.session.school_year_id,
 			"education_stage_id": self.session.education_stage_id,
-			"start_date": frappe.get_value("SIS Schedule", self.session.schedule_id, "start_date"),
-			"end_date": frappe.get_value("SIS Schedule", self.session.schedule_id, "end_date"),
+			"start_date": str(start_date),
+			"end_date": str(end_date),
 			"upload_source": f"auto_generate:session={self.session.name}",
 			"created_by": frappe.session.user,
 		})
 		doc.insert(ignore_permissions=True)
 		return doc
 
-	def _create_instance(self, timetable_id: str, class_id: str, schedule) -> "Document":
+	def _create_instance(self, timetable_id: str, class_id: str, start_date, end_date) -> "Document":
 		"""Tạo SIS Timetable Instance cho 1 lớp."""
 		doc = frappe.get_doc({
 			"doctype": "SIS Timetable Instance",
 			"timetable_id": timetable_id,
 			"class_id": class_id,
 			"campus_id": self.session.campus_id,
-			"start_date": str(schedule.start_date),
-			"end_date": str(schedule.end_date),
+			"start_date": str(start_date),
+			"end_date": str(end_date),
 			"is_locked": 0,
 		})
 		doc.insert(ignore_permissions=True)
 		return doc
 
-	def _create_rows(self, instance, slots: List[Dict]):
+	def _create_rows(self, instance, slots: List[Dict], valid_from, valid_to):
 		"""Tạo SIS Timetable Instance Row cho instance."""
 		# Cần mapping timetable_subject -> SIS Subject
 		subject_map = self._get_subject_map()
@@ -160,8 +162,8 @@ class TimetablePublisher:
 				"period_priority": slot.get("period_priority", 0),
 				"subject_id": subject_id,
 				"room_id": slot.get("room_id") or "",
-				"valid_from": str(instance.start_date) if instance.start_date else None,
-				"valid_to": str(instance.end_date) if instance.end_date else None,
+				"valid_from": str(valid_from) if valid_from else None,
+				"valid_to": str(valid_to) if valid_to else None,
 			})
 			row_doc.insert(ignore_permissions=True)
 			self.stats["rows_created"] += 1

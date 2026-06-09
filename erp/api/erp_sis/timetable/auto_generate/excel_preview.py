@@ -89,21 +89,22 @@ def _format_time(value) -> str:
 
 def build_excel_grid(session_id: str, variant_index: int = 0) -> dict:
 	"""Dựng cấu trúc grid Thứ | Tiết | [lớp...] cho preview UI."""
-	raw_rows = _fetch_raw_rows(session_id, variant_index)
-	if not raw_rows:
-		return {
-			"classes": [],
-			"rows": [],
-			"variant_index": variant_index,
-		}
+	from .data_collector import TimetableDataCollector
 
-	# Danh sách lớp theo thứ tự title
-	class_map: Dict[str, str] = {}
+	collector = TimetableDataCollector(session_id)
+	inp = collector.collect()
+	raw_rows = _fetch_raw_rows(session_id, variant_index)
+
+	# Danh sách lớp — ưu tiên từ session scope, fallback từ draft
+	class_map: Dict[str, str] = {c.name: c.title for c in inp.classes}
 	for r in raw_rows:
 		cid = r["class_id"]
 		if cid not in class_map:
 			class_map[cid] = r.get("class_title") or cid
 	classes = [{"name": k, "title": v} for k, v in sorted(class_map.items(), key=lambda x: x[1])]
+
+	if not classes:
+		return {"classes": [], "rows": [], "variant_index": variant_index}
 
 	# Batch resolve tên GV
 	all_teacher_ids: set[str] = set()
@@ -111,22 +112,14 @@ def build_excel_grid(session_id: str, variant_index: int = 0) -> dict:
 		all_teacher_ids.update(_parse_teacher_ids(r.get("teacher_ids")))
 	teacher_name_map = _build_teacher_name_map(list(all_teacher_ids))
 
-	# Gom theo (day, period_priority)
+	# Gom dữ liệu ô theo (day, period_priority)
 	slot_map: Dict[Tuple[str, int], dict] = {}
 	for r in raw_rows:
 		day = r.get("day_of_week") or "mon"
 		priority = int(r.get("period_priority") or 0)
 		key = (day, priority)
 		if key not in slot_map:
-			slot_map[key] = {
-				"day_of_week": day,
-				"day_label": DAY_LABEL_VN.get(day, day),
-				"period_name": r.get("period_name") or f"Tiết {priority}",
-				"period_priority": priority,
-				"start_time": _format_time(r.get("start_time")),
-				"end_time": _format_time(r.get("end_time")),
-				"cells": {},
-			}
+			slot_map[key] = {"cells": {}}
 		teacher_ids = _parse_teacher_ids(r.get("teacher_ids"))
 		slot_map[key]["cells"][r["class_id"]] = {
 			"subject_title": r.get("subject_title") or "",
@@ -134,10 +127,27 @@ def build_excel_grid(session_id: str, variant_index: int = 0) -> dict:
 			"room_title": r.get("room_title") or "",
 		}
 
-	rows = sorted(
-		slot_map.values(),
-		key=lambda row: (DAY_ORDER.get(row["day_of_week"], 99), row["period_priority"]),
-	)
+	# Khung đầy đủ ngày × tiết (cho phép click ô trống)
+	study_periods = sorted(
+		[p for p in inp.periods if p.period_type == "study"],
+		key=lambda x: x.period_priority,
+	) or sorted(inp.periods, key=lambda x: x.period_priority)
+
+	rows = []
+	for day in inp.working_days:
+		for period in study_periods:
+			key = (day, period.period_priority)
+			cells = slot_map.get(key, {}).get("cells", {})
+			rows.append({
+				"day_of_week": day,
+				"day_label": DAY_LABEL_VN.get(day, day),
+				"period_name": period.period_name or f"Tiết {period.period_priority}",
+				"period_priority": period.period_priority,
+				"timetable_column_id": period.name,
+				"start_time": _format_time(period.start_time),
+				"end_time": _format_time(period.end_time),
+				"cells": cells,
+			})
 
 	return {
 		"classes": classes,

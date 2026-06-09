@@ -732,16 +732,40 @@ def preview_teacher_week(session_id=None, teacher_id=None, variant_index=None):
 		return error_response(str(e))
 
 
+def _resolve_apply_dates(session, schedule) -> tuple:
+	"""Lấy khoảng ngày apply — ưu tiên session, fallback schedule."""
+	start = getattr(session, "apply_from", None) or schedule.start_date
+	end = getattr(session, "apply_to", None) or schedule.end_date
+	return str(start), str(end)
+
+
+def _validate_apply_dates(apply_from, apply_to, schedule) -> str | None:
+	"""Validate apply_from/apply_to trong phạm vi kỳ học. Trả message lỗi hoặc None."""
+	if not apply_from or not apply_to:
+		return None
+	if apply_from > apply_to:
+		return "Ngày bắt đầu áp dụng phải trước hoặc bằng ngày kết thúc"
+	if schedule.start_date and apply_from < schedule.start_date:
+		return f"Ngày bắt đầu áp dụng phải từ {schedule.start_date} (đầu kỳ học)"
+	if schedule.end_date and apply_to > schedule.end_date:
+		return f"Ngày kết thúc áp dụng phải đến {schedule.end_date} (cuối kỳ học)"
+	return None
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET"])
-def get_preview_stats(session_id=None):
-	"""Thống kê tổng quan kết quả draft."""
+def get_preview_stats(session_id=None, variant_index=None):
+	"""Thống kê tổng quan kết quả draft — filter theo biến thể."""
 	try:
 		session_id = session_id or _get_param("session_id")
 		if not session_id:
 			return error_response("Thiếu session_id")
 
+		v_idx = int(variant_index if variant_index is not None else _get_param("variant_index") or 0)
+		has_variant = _draft_has_variant_index()
+		variant_clause = "AND r.variant_index = %(variant_index)s" if has_variant else ""
+
 		variants = []
-		if _draft_has_variant_index():
+		if has_variant:
 			variants = frappe.db.sql("""
 				SELECT variant_index, COUNT(*) as slot_count
 				FROM `tabSIS_TKB_Gen_Result`
@@ -749,7 +773,8 @@ def get_preview_stats(session_id=None):
 				GROUP BY variant_index
 				ORDER BY variant_index
 			""", session_id, as_dict=True)
-			total = sum(v["slot_count"] for v in variants) if variants else 0
+			active = next((v for v in variants if v["variant_index"] == v_idx), None)
+			total = active["slot_count"] if active else 0
 		else:
 			total = frappe.db.sql(
 				"SELECT COUNT(*) as cnt FROM `tabSIS_TKB_Gen_Result` WHERE session_id = %s",
@@ -757,20 +782,18 @@ def get_preview_stats(session_id=None):
 			)[0]["cnt"]
 			variants = [{"variant_index": 0, "slot_count": total}]
 
-		# Số lớp (biến thể 0)
-		classes = frappe.db.sql("""
+		classes = frappe.db.sql(f"""
 			SELECT DISTINCT r.class_id, c.title
 			FROM `tabSIS_TKB_Gen_Result` r
 			LEFT JOIN `tabSIS Class` c ON c.name = r.class_id
-			WHERE r.session_id = %s
-		""", session_id, as_dict=True)
+			WHERE r.session_id = %(session_id)s {variant_clause}
+		""", {"session_id": session_id, "variant_index": v_idx}, as_dict=True)
 
-		# Số GV (parse teacher_ids JSON)
 		all_teachers = set()
-		teacher_rows = frappe.db.sql(
-			"SELECT teacher_ids FROM `tabSIS_TKB_Gen_Result` WHERE session_id = %s AND teacher_ids IS NOT NULL",
-			session_id, as_dict=True
-		)
+		teacher_rows = frappe.db.sql(f"""
+			SELECT teacher_ids FROM `tabSIS_TKB_Gen_Result` r
+			WHERE r.session_id = %(session_id)s AND r.teacher_ids IS NOT NULL {variant_clause}
+		""", {"session_id": session_id, "variant_index": v_idx}, as_dict=True)
 		for r in teacher_rows:
 			try:
 				tids = json.loads(r["teacher_ids"])
@@ -778,12 +801,27 @@ def get_preview_stats(session_id=None):
 			except (json.JSONDecodeError, TypeError):
 				pass
 
+		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
+		schedule_dates = {}
+		if session.schedule_id:
+			sd = frappe.db.get_value(
+				"SIS Schedule", session.schedule_id, ["start_date", "end_date"], as_dict=True
+			)
+			if sd:
+				schedule_dates = {
+					"start_date": str(sd.start_date) if sd.start_date else None,
+					"end_date": str(sd.end_date) if sd.end_date else None,
+				}
+
 		return single_item_response({
 			"total_slots": total,
 			"total_classes": len(classes),
 			"classes": [{"name": c["class_id"], "title": c["title"]} for c in classes],
 			"total_teachers": len(all_teachers),
 			"variants": variants,
+			"schedule_dates": schedule_dates,
+			"apply_from": str(session.apply_from) if getattr(session, "apply_from", None) else None,
+			"apply_to": str(session.apply_to) if getattr(session, "apply_to", None) else None,
 		})
 
 	except Exception as e:
@@ -897,6 +935,46 @@ def generate_variants(**kwargs):
 # Publish / Discard
 # ════════════════════════════════════════════════════════
 
+@frappe.whitelist(allow_guest=False, methods=["GET"])
+def evaluate_draft(session_id=None, variant_index=None):
+	"""Đánh giá rule cứng/mềm trên draft đã sinh."""
+	try:
+		from .draft_evaluator import evaluate_draft as _evaluate
+
+		session_id = session_id or _get_param("session_id")
+		variant_index = int(variant_index if variant_index is not None else _get_param("variant_index") or 0)
+		if not session_id:
+			return error_response("Thiếu session_id")
+
+		return single_item_response(_evaluate(session_id, variant_index))
+	except Exception as e:
+		return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def update_draft_slot(**kwargs):
+	"""Chỉnh sửa 1 ô draft — đổi môn / xóa slot."""
+	try:
+		from .draft_editor import update_draft_slot as _update
+
+		data = _get_json_data()
+		session_id = data.get("session_id")
+		if not session_id:
+			return error_response("Thiếu session_id")
+
+		result = _update(
+			session_id=session_id,
+			variant_index=int(data.get("variant_index", 0)),
+			class_id=data.get("class_id"),
+			day_of_week=data.get("day_of_week"),
+			timetable_column_id=data.get("timetable_column_id"),
+			timetable_subject_id=data.get("timetable_subject_id"),
+		)
+		return single_item_response(result)
+	except Exception as e:
+		return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def publish_session(**kwargs):
 	"""Publish draft -> doctype chính (chỉ 1 biến thể đã chọn)."""
@@ -904,8 +982,24 @@ def publish_session(**kwargs):
 		data = _get_json_data()
 		session_id = data.get("session_id")
 		variant_index = int(data.get("variant_index", 0))
+		apply_from = data.get("apply_from")
+		apply_to = data.get("apply_to")
 		if not session_id:
 			return error_response("Thiếu session_id")
+
+		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
+		schedule = frappe.get_doc("SIS Schedule", session.schedule_id)
+
+		if apply_from or apply_to:
+			if not apply_from or not apply_to:
+				return error_response("Cần cả apply_from và apply_to")
+			err = _validate_apply_dates(apply_from, apply_to, schedule)
+			if err:
+				return error_response(err)
+			session.apply_from = apply_from
+			session.apply_to = apply_to
+			session.save(ignore_permissions=True)
+			frappe.db.commit()
 
 		from .publisher import TimetablePublisher
 		publisher = TimetablePublisher(session_id)
