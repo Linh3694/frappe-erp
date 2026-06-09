@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple
 import frappe
 
 from .core.force_pair_check import check_force_pair_violations
+from .core.spread_eligibility import cannot_spread_across_days
 from .core.helpers import req_map, sorted_periods
 from .core.rule_catalog import get_catalog_entry
 from .data_collector import TimetableDataCollector
@@ -179,7 +180,7 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 				cnt = day_counts.get((req.class_id, req.timetable_subject_id, day), 0)
 				if cnt > max_day:
 					violations.append(
-						f"{req.timetable_subject_title} — lớp {_class_label(inp, req.class_id)}, "
+						f"{req.timetable_subject_title} — {_class_label(inp, req.class_id)}, "
 						f"{_day_label(day)}: {cnt} tiết (tối đa {max_day})"
 					)
 		hard_results.append(_hard_result("subject_max_per_day", "Max tiết/ngày/môn", violations))
@@ -206,7 +207,7 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 		cls = _class_label(inp, req.class_id)
 		for day, p_idx in raw_violations:
 			pair_failures.append(
-				f"{req.timetable_subject_title} — lớp {cls}, {_day_label(day)}, "
+				f"{req.timetable_subject_title} — {cls}, {_day_label(day)}, "
 				f"{_period_label(periods, p_idx)}: không có cặp trong buổi"
 			)
 	if pair_failures:
@@ -247,12 +248,12 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 			if ts:
 				subject_days[(s["class_id"], ts)].add(s["day_of_week"])
 		for req in inp.requirements:
-			if req.periods_per_week < 2:
+			if cannot_spread_across_days(req.periods_per_week, req.force_pair):
 				continue
 			days_used = len(subject_days.get((req.class_id, req.timetable_subject_id), set()))
 			if days_used < 2:
 				details.append(
-					f"{req.timetable_subject_title} — lớp {_class_label(inp, req.class_id)}: "
+					f"{req.timetable_subject_title} — {_class_label(inp, req.class_id)}: "
 					f"chỉ {days_used} ngày"
 				)
 		soft_results.append(_soft_result(
@@ -275,7 +276,7 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 				) or s["timetable_subject_id"]
 				col = col_name.get(s["timetable_column_id"], s["timetable_column_id"])
 				home_violations.append(
-					f"{subj} — lớp {_class_label(inp, s['class_id'])}, "
+					f"{subj} — {_class_label(inp, s['class_id'])}, "
 					f"{_day_label(s['day_of_week'])} {col}: không dùng phòng chủ nhiệm"
 				)
 		soft_results.append(_soft_result(
@@ -321,7 +322,7 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 				subj = frappe.db.get_value("SIS Timetable Subject", ts, "title_vn") or ts
 				col = col_name.get(s["timetable_column_id"], s["timetable_column_id"])
 				pref_violations.append(
-					f"{subj} — lớp {_class_label(inp, s['class_id'])}, "
+					f"{subj} — {_class_label(inp, s['class_id'])}, "
 					f"{_day_label(s['day_of_week'])} {col}: ngoài tiết ưu tiên"
 				)
 		soft_results.append(_soft_result(

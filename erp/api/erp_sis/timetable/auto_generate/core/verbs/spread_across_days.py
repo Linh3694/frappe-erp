@@ -1,13 +1,19 @@
+from ..helpers import req_map
 from ..registry import Verb, register_verb
+from ..spread_eligibility import cannot_spread_across_days
 
 
 @register_verb("spread_across_days", supports=["assignment"], kind="soft", description="Rải tiết môn ra nhiều ngày")
 class SpreadAcrossDays(Verb):
 	def build_soft(self, ctx, subject_set, params, weight: int):
 		inp = ctx.inp
+		rmap = req_map(inp)
 		terms = []
 		for c in inp.classes:
 			for ts_id in inp.class_subjects.get(c.name, []):
+				req = rmap.get((c.name, ts_id))
+				if req and cannot_spread_across_days(req.periods_per_week, req.force_pair):
+					continue
 				day_vars = []
 				for day in inp.working_days:
 					dv = [ctx.x[k] for p in range(ctx.num_periods) if (k := (c.name, ts_id, day, p)) in ctx.x]
