@@ -96,7 +96,7 @@
    "fieldtype": "Check",
    "label": "Force Pair (Bắt buộc tiết đôi)",
    "default": 0,
-   "description": "Bắt buộc xếp theo cặp 2 tiết liên tiếp trong cùng buổi (hard constraint)"
+   "description": "Bắt buộc cặp 2 tiết liên tiếp trong buổi. Tiết/tuần chẵn: toàn cặp. Tiết/tuần lẻ: cho phép 1 tiết lẻ."
   },
   {
    "fieldname": "column_break_scheduling",

@@ -117,6 +117,10 @@ def build_and_solve(
 	from .verbs.max_consecutive import MaxConsecutive
 	MaxConsecutive().apply_hard(ctx, list(inp.teachers.keys()), {"use_teacher_field": True})
 
+	# HC13: force_pair từ ma trận requirement (checkbox Cặp)
+	from .force_pair_constraints import apply_requirement_force_pairs
+	apply_requirement_force_pairs(ctx)
+
 	_apply_legacy_session_soft(ctx)
 	_apply_forbid_solutions(ctx, forbid_solutions or [], min_diff)
 

@@ -373,36 +373,18 @@ class ModelBuilder:
 							self.model.Add(sm.x[key] == 0)
 
 	def _constraint_force_pair(self):
-		"""HC13: Môn force_pair phải xếp theo cặp tiết liên tiếp trong cùng buổi."""
-		inp = self.inp
-		sm = self.solver_model
-		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
-		num_periods = len(inp.periods)
-		half = num_periods // 2 or num_periods
+		"""HC13: delegate sang force_pair_constraints (legacy ModelBuilder path)."""
+		from .core.force_pair_constraints import apply_requirement_force_pairs
 
-		for c in inp.classes:
-			for ts_id in inp.class_subjects.get(c.name, []):
-				req = req_map.get((c.name, ts_id))
-				if not req or not req.force_pair:
-					continue
-				for day in inp.working_days:
-					for half_start, half_end in [(0, half), (half, num_periods)]:
-						session_slots = list(range(half_start, half_end))
-						if not session_slots:
-							continue
-						k = 0
-						while k + 1 < len(session_slots):
-							p_a, p_b = session_slots[k], session_slots[k + 1]
-							key_a = (c.name, ts_id, day, p_a)
-							key_b = (c.name, ts_id, day, p_b)
-							if key_a in sm.x and key_b in sm.x:
-								self.model.Add(sm.x[key_a] == sm.x[key_b])
-							k += 2
-						if len(session_slots) % 2 == 1:
-							last_p = session_slots[-1]
-							key_last = (c.name, ts_id, day, last_p)
-							if key_last in sm.x:
-								self.model.Add(sm.x[key_last] == 0)
+		class _Ctx:
+			def __init__(self, builder):
+				self.model = builder.model
+				self.x = builder.solver_model.x
+				self.inp = builder.inp
+				self.working_days = builder.inp.working_days
+				self.num_periods = len(builder.inp.periods)
+
+		apply_requirement_force_pairs(_Ctx(self))
 
 	# ── Soft Constraints ──────────────────────────────
 

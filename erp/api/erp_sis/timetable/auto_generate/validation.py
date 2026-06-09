@@ -94,14 +94,6 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 				f"'{req.room_type_required}' nhưng campus chưa có phòng loại này"
 			)
 
-	# force_pair: số tiết phải chẵn
-	for req in inp.requirements:
-		if req.force_pair and req.periods_per_week % 2 != 0:
-			errors.append(
-				f"Môn {req.timetable_subject_title} (lớp {req.class_id}): "
-				f"force_pair bật nhưng periods_per_week={req.periods_per_week} (phải chẵn)"
-			)
-
 	# Xung đột pinned slot cùng lớp + slot
 	seen_pins = {}
 	for pin in inp.pinned_slots:
