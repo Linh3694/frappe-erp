@@ -71,6 +71,15 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"instance_required": True,
 		"help_text_vn": "Mỗi dòng: chọn lớp, môn và slot cố định.",
 	},
+	"assignment_not_at_slot": {
+		"parameterized": True,
+		"object_kind": "SubjectSlot",
+		"display_name_vn": "Slot cấm lớp+môn",
+		"subject_label_vn": "Lớp",
+		"object_label_vn": "Môn + slot cấm",
+		"instance_required": False,
+		"help_text_vn": "Chọn lớp (hoặc nhiều lớp), môn và các slot không được xếp — áp dụng riêng từng lớp.",
+	},
 	"class_group_simultaneous_subject": {
 		"parameterized": True,
 		"object_kind": "ClassGroup",

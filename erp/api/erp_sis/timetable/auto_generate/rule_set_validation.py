@@ -28,9 +28,15 @@ def _instances(params: dict) -> list:
 
 
 def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
+	obj = inst.get("object") or {}
+	if rule_id == "class_group_simultaneous_subject" or object_kind == "ClassGroup":
+		ts_id = obj.get("timetable_subject_id") or obj.get("subject_id")
+		class_ids = obj.get("class_ids") or []
+		if not ts_id:
+			return False
+		return len([c for c in class_ids if c]) >= 2
 	if not inst.get("subject"):
 		return False
-	obj = inst.get("object") or {}
 	if rule_id == "teacher_not_on_day" or object_kind == "Day":
 		days = obj.get("days") or []
 		if not days:
@@ -48,6 +54,19 @@ def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 		if rule_id == "class_excluded_subject" and not obj.get("subject_id"):
 			return False
 		if rule_id == "subject_before_subject" and not obj.get("before_subject_id"):
+			return False
+	if object_kind == "SubjectSlot":
+		if not obj.get("subject_id"):
+			return False
+		if rule_id == "pin_class_subject_slot":
+			if not obj.get("day") or obj.get("period_idx") is None:
+				return False
+		if rule_id == "assignment_not_at_slot":
+			slots = obj.get("slots") or []
+			if slots:
+				return True
+			if obj.get("day") is not None and obj.get("period_idx") is not None:
+				return True
 			return False
 	return True
 

@@ -2,11 +2,41 @@ from ..helpers import class_subject_weekdays, instances, teacher_class_subjects
 from ..registry import Verb, register_verb
 
 
-@register_verb("forbidden_at_slots", supports=["teacher", "subject"], kind="hard", description="Cấm xếp tại slot")
+def _assignment_forbidden_slots(ctx, inst) -> None:
+	"""Cấm lớp+môn tại slot — instance giống pin (subject=class_id, object.subject_id + day/period hoặc slots[])."""
+	c_id = inst.get("subject") or inst.get("class_id")
+	obj = inst.get("object") or {}
+	ts_id = obj.get("subject_id") or obj.get("timetable_subject_id")
+	if not c_id or not ts_id:
+		return
+
+	slot_list = list(obj.get("slots") or [])
+	if not slot_list and obj.get("day") is not None and obj.get("period_idx") is not None:
+		slot_list = [{"day": obj.get("day"), "period_idx": obj.get("period_idx")}]
+
+	for sl in slot_list:
+		day = sl.get("day")
+		p_idx = sl.get("period_idx", sl.get("period"))
+		if day is None or p_idx is None:
+			continue
+		p_idx = int(p_idx)
+		v = ctx.x.get((c_id, ts_id, day, p_idx))
+		if v is not None:
+			ctx.model.Add(v == 0)
+
+
+@register_verb("forbidden_at_slots", supports=["teacher", "subject", "assignment"], kind="hard", description="Cấm xếp tại slot")
 class ForbiddenAtSlots(Verb):
 	def apply_hard(self, ctx, subject_set, params):
 		inp = ctx.inp
 		tcs = teacher_class_subjects(inp)
+		subject_type = getattr(ctx, "cur_subject_type", None)
+
+		# Rule assignment_not_at_slot — chỉ xử lý instance lớp+môn
+		if subject_type == "assignment" and params.get("source") == "instances":
+			for inst in instances(params):
+				_assignment_forbidden_slots(ctx, inst)
+			return
 
 		# Đọc unavailability từ TeacherDTO
 		if params.get("source") == "teacher.unavailability":
