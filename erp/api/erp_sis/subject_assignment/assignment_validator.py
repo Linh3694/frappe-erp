@@ -22,7 +22,8 @@ def validate_no_overlap(
     actual_subject_id: str,
     start_date: str,
     end_date: Optional[str] = None,
-    assignment_id: Optional[str] = None
+    assignment_id: Optional[str] = None,
+    school_year_id: Optional[str] = None,
 ) -> Dict:
     """
     Validate that a new/updated assignment doesn't overlap with existing assignments.
@@ -50,7 +51,11 @@ def validate_no_overlap(
     """
     # Build SQL to find overlaps
     # Handle NULL end_date (full_year assignments)
-    overlaps = frappe.db.sql("""
+    school_year_sql = ""
+    if school_year_id:
+        school_year_sql = "AND school_year_id = %(school_year_id)s"
+
+    overlaps = frappe.db.sql(f"""
         SELECT 
             name,
             start_date,
@@ -61,6 +66,7 @@ def validate_no_overlap(
           AND class_id = %(class_id)s
           AND actual_subject_id = %(actual_subject_id)s
           AND name != %(assignment_id)s
+          {school_year_sql}
           AND (
               -- Case 1: New assignment starts during existing assignment
               (
@@ -90,7 +96,8 @@ def validate_no_overlap(
         "actual_subject_id": actual_subject_id,
         "start_date": start_date,
         "end_date": end_date,
-        "assignment_id": assignment_id or ""
+        "assignment_id": assignment_id or "",
+        "school_year_id": school_year_id,
     }, as_dict=True)
     
     if overlaps:
@@ -128,7 +135,8 @@ def validate_assignment_data(assignment_data: Dict) -> Dict:
         "actual_subject_id": "Actual Subject",
         "start_date": "Start Date",
         "application_type": "Application Type",
-        "campus_id": "Campus"
+        "campus_id": "Campus",
+        "school_year_id": "School Year",
     }
     
     for field, label in required_fields.items():
@@ -161,7 +169,24 @@ def validate_assignment_data(assignment_data: Dict) -> Dict:
     if assignment_data.get("actual_subject_id"):
         if not frappe.db.exists("SIS Actual Subject", assignment_data["actual_subject_id"]):
             errors.append(f"Actual Subject '{assignment_data['actual_subject_id']}' not found")
-    
+
+    if assignment_data.get("school_year_id"):
+        if not frappe.db.exists("SIS School Year", assignment_data["school_year_id"]):
+            errors.append(f"School Year '{assignment_data['school_year_id']}' not found")
+
+    # school_year_id phải khớp lớp khi có class_id
+    if assignment_data.get("school_year_id") and assignment_data.get("class_id"):
+        class_year = frappe.db.get_value(
+            "SIS Class",
+            assignment_data["class_id"],
+            "school_year_id",
+        )
+        if class_year and class_year != assignment_data["school_year_id"]:
+            errors.append(
+                f"School year '{assignment_data['school_year_id']}' "
+                f"does not match class school year '{class_year}'"
+            )
+
     return {
         "valid": len(errors) == 0,
         "errors": errors
@@ -198,7 +223,8 @@ def validate_bulk_assignments(assignments: List[Dict]) -> Dict:
                 actual_subject_id=assignment["actual_subject_id"],
                 start_date=assignment["start_date"],
                 end_date=assignment.get("end_date"),
-                assignment_id=assignment.get("name")
+                assignment_id=assignment.get("name"),
+                school_year_id=assignment.get("school_year_id"),
             )
         
         # Combine results

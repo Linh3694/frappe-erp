@@ -7,6 +7,7 @@ import frappe
 from frappe import _
 import json
 from erp.utils.api_response import validation_error_response, list_response, error_response
+from erp.api.erp_sis.subject_assignment.utils import get_active_school_year_for_campus
 
 
 @frappe.whitelist()
@@ -34,10 +35,20 @@ def get_subject_info(subject_id):
 
         logs.append(f"Found subject: {subject.title}")
 
+        # Lọc phân công theo năm học (ưu tiên param, fallback năm active campus)
+        school_year_id = frappe.form_dict.get("school_year_id")
+        campus_id = getattr(subject, "campus_id", None)
+        if not school_year_id and campus_id:
+            school_year_id = get_active_school_year_for_campus(campus_id)
+
+        assignment_filters = {"actual_subject_id": subject.actual_subject_id}
+        if school_year_id:
+            assignment_filters["school_year_id"] = school_year_id
+
         # Get subject assignments (teachers assigned to this subject)
         assignments = frappe.get_all(
             "SIS Subject Assignment",
-            filters={"actual_subject_id": subject.actual_subject_id},
+            filters=assignment_filters,
             fields=[
                 "name",
                 "teacher_id",
@@ -281,12 +292,17 @@ def get_subject_curriculum_and_teacher(subject_id, class_id):
         teacher_info = None
 
         # Query SIS Subject Assignment to find teacher for this subject and class
+        class_school_year_id = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+        assignment_filters = {
+            "actual_subject_id": subject.actual_subject_id,
+            "class_id": class_id,
+        }
+        if class_school_year_id:
+            assignment_filters["school_year_id"] = class_school_year_id
+
         assignments = frappe.get_all(
             "SIS Subject Assignment",
-            filters={
-                "actual_subject_id": subject.actual_subject_id,
-                "class_id": class_id
-            },
+            filters=assignment_filters,
             fields=[
                 "name",
                 "teacher_id",
@@ -396,19 +412,41 @@ def get_student_subject_teachers():
         class_ids = [cs.class_id for cs in class_students if cs.class_id]
         logs.append(f"✅ Found {len(class_ids)} classes for student: {class_ids}")
 
+        # Map lớp -> năm học để tránh lấy phân công của năm khác
+        class_year_pairs = [
+            (cs.class_id, cs.school_year_id)
+            for cs in class_students
+            if cs.class_id
+        ]
+
         # Step 2: Get all subject assignments for these classes
         # Query trực tiếp từ SIS Subject Assignment thay vì đi qua SIS Student Subject
         # Cách này lấy được TẤT CẢ môn học được dạy trong lớp, không phụ thuộc vào việc
         # học sinh đã có records trong SIS Student Subject hay chưa
-        subject_assignments = frappe.db.sql("""
-            SELECT DISTINCT
-                sa.actual_subject_id,
-                sa.class_id,
-                sa.teacher_id
-            FROM `tabSIS Subject Assignment` sa
-            WHERE sa.class_id IN %(class_ids)s
-            ORDER BY sa.actual_subject_id, sa.class_id
-        """, {"class_ids": class_ids}, as_dict=True)
+        subject_assignments = []
+        if class_year_pairs:
+            pair_conditions = []
+            pair_params = {}
+            for idx, (class_id, school_year_id) in enumerate(class_year_pairs):
+                if school_year_id:
+                    pair_conditions.append(
+                        f"(sa.class_id = %(class_{idx})s AND sa.school_year_id = %(sy_{idx})s)"
+                    )
+                    pair_params[f"class_{idx}"] = class_id
+                    pair_params[f"sy_{idx}"] = school_year_id
+                else:
+                    pair_conditions.append(f"sa.class_id = %(class_{idx})s")
+                    pair_params[f"class_{idx}"] = class_id
+
+            subject_assignments = frappe.db.sql(f"""
+                SELECT DISTINCT
+                    sa.actual_subject_id,
+                    sa.class_id,
+                    sa.teacher_id
+                FROM `tabSIS Subject Assignment` sa
+                WHERE {" OR ".join(pair_conditions)}
+                ORDER BY sa.actual_subject_id, sa.class_id
+            """, pair_params, as_dict=True)
 
         if not subject_assignments:
             logs.append("⚠️ No subject assignments found for these classes")

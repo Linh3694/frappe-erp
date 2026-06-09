@@ -254,9 +254,12 @@ def get_class_chat_scope(class_id=None, school_year_id=None):
                 teachers.append(snap)
 
         # Giáo viên bộ môn phân công vào lớp (dùng social-service / parent hiển thị avatar GV)
+        sa_filters = {"class_id": class_id}
+        if school_year_id:
+            sa_filters["school_year_id"] = school_year_id
         subject_rows = frappe.get_all(
             "SIS Subject Assignment",
-            filters={"class_id": class_id},
+            filters=sa_filters,
             fields=["teacher_id", "actual_subject_id"],
             ignore_permissions=True,
             limit_page_length=2000,

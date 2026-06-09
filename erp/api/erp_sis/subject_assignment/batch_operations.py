@@ -342,7 +342,7 @@ def validate_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 			class_info = frappe.db.get_value(
 				"SIS Class",
 				class_id,
-				["campus_id"],
+				["campus_id", "school_year_id"],
 				as_dict=True
 			)
 			
@@ -356,6 +356,15 @@ def validate_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 					f"does not match teacher campus ({teacher_campus})"
 				)
 				continue
+
+			# Đồng bộ school_year_id từ lớp
+			expected_sy = assignment.get("school_year_id") or class_info.school_year_id
+			if expected_sy and class_info.school_year_id and expected_sy != class_info.school_year_id:
+				errors.append(
+					f"Assignment {idx}: School year does not match class"
+				)
+				continue
+			assignment["school_year_id"] = class_info.school_year_id
 			
 			# Validate actual subject
 			if not actual_subject_id:
@@ -386,7 +395,8 @@ def validate_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 		key = (
 			teacher_id,
 			assignment.get("class_id"),
-			assignment.get("actual_subject_id")
+			assignment.get("actual_subject_id"),
+			assignment.get("school_year_id"),
 		)
 		
 		if key in seen_keys:
@@ -488,13 +498,21 @@ def apply_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 def create_assignment(teacher_id: str, assignment: Dict) -> Dict:
 	"""Create single assignment with weekdays support"""
 	import json as json_module
-	
+	from .utils import resolve_school_year_id
+
+	campus_id = frappe.db.get_value("SIS Teacher", teacher_id, "campus_id")
+	school_year_id = assignment.get("school_year_id") or resolve_school_year_id(
+		class_id=assignment.get("class_id"),
+		campus_id=campus_id,
+	)
+
 	doc_data = {
 		"doctype": "SIS Subject Assignment",
 		"teacher_id": teacher_id,
 		"class_id": assignment["class_id"],
 		"actual_subject_id": assignment["actual_subject_id"],
-		"campus_id": frappe.db.get_value("SIS Teacher", teacher_id, "campus_id"),
+		"campus_id": campus_id,
+		"school_year_id": school_year_id,
 		"application_type": assignment.get("application_type", "full_year"),
 		"start_date": assignment.get("start_date"),
 		"end_date": assignment.get("end_date")
@@ -525,6 +543,15 @@ def update_assignment(assignment: Dict) -> Dict:
 	# Update fields
 	if "class_id" in assignment:
 		doc.class_id = assignment["class_id"]
+		from .utils import resolve_school_year_id
+		new_sy = resolve_school_year_id(
+			class_id=assignment["class_id"],
+			campus_id=doc.campus_id,
+		)
+		if new_sy:
+			doc.school_year_id = new_sy
+	if "school_year_id" in assignment and assignment["school_year_id"]:
+		doc.school_year_id = assignment["school_year_id"]
 	if "actual_subject_id" in assignment:
 		doc.actual_subject_id = assignment["actual_subject_id"]
 	if "application_type" in assignment:

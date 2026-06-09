@@ -283,8 +283,15 @@ class TimetableImportExecutor:
 		"""
 		import json as json_module
 		
-		# Get all assignments for this campus (including weekdays)
-		assignments = frappe.db.sql("""
+		# Lọc phân công theo năm học của import (tránh cache lẫn năm)
+		school_year_id = self.metadata.get("school_year_id")
+		sy_sql = ""
+		params = [campus_id]
+		if school_year_id:
+			sy_sql = "AND school_year_id = %s"
+			params.append(school_year_id)
+
+		assignments = frappe.db.sql(f"""
 			SELECT 
 				class_id,
 				actual_subject_id,
@@ -295,8 +302,9 @@ class TimetableImportExecutor:
 				weekdays
 			FROM `tabSIS Subject Assignment`
 			WHERE campus_id = %s
+			{sy_sql}
 			ORDER BY class_id, actual_subject_id, application_type
-		""", (campus_id,), as_dict=True)
+		""", tuple(params), as_dict=True)
 		
 		for assignment in assignments:
 			key = (assignment.class_id, assignment.actual_subject_id)
@@ -1309,12 +1317,17 @@ class TimetableImportExecutor:
 		
 		# Get all assignments for these classes
 		try:
+			assignment_filters = {
+				"class_id": ["in", class_ids],
+				"campus_id": campus_id,
+			}
+			school_year_id = self.metadata.get("school_year_id")
+			if school_year_id:
+				assignment_filters["school_year_id"] = school_year_id
+
 			assignments = frappe.get_all(
 				"SIS Subject Assignment",
-				filters={
-					"class_id": ["in", class_ids],
-					"campus_id": campus_id
-				},
+				filters=assignment_filters,
 				fields=["name", "teacher_id", "class_id", "actual_subject_id", "application_type"],
 				order_by="creation asc"
 			)

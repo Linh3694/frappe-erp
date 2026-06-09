@@ -37,6 +37,15 @@ def get_teachers_with_assignment_summary(search_term=None):
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
 
+        school_year_id = (
+            frappe.request.args.get("school_year_id")
+            or frappe.form_dict.get("school_year_id")
+        )
+
+        school_year_join = ""
+        if school_year_id:
+            school_year_join = "AND sa.school_year_id = %s"
+
         # Search filter
         search_condition = ""
         search_params = []
@@ -75,7 +84,10 @@ def get_teachers_with_assignment_summary(search_term=None):
 
             FROM `tabSIS Teacher` t
             INNER JOIN `tabUser` u ON t.user_id = u.name
-            LEFT JOIN `tabSIS Subject Assignment` sa ON sa.teacher_id = t.name
+            LEFT JOIN `tabSIS Subject Assignment` sa
+                ON sa.teacher_id = t.name
+                AND sa.campus_id = %s
+                {school_year_join}
             WHERE t.campus_id = %s
             {search_condition}
             GROUP BY t.name, u.full_name, t.user_id
@@ -84,7 +96,11 @@ def get_teachers_with_assignment_summary(search_term=None):
         """
 
         # Execute query
-        params = [campus_id] + search_params
+        params = [campus_id]
+        if school_year_id:
+            params.append(school_year_id)
+        params.append(campus_id)
+        params.extend(search_params)
         results = frappe.db.sql(query, params, as_dict=True)
 
 
@@ -467,6 +483,8 @@ def get_subjects_for_class(class_id: str | None = None):
         if not class_id:
             return validation_error_response("Validation failed", {"class_id": ["Class ID is required"]})
 
+        class_school_year_id = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+
         # ⚡ BULK QUERY: Combine all strategies in single query
         all_subject_ids = frappe.db.sql("""
             -- Strategy 1: Student Subject
@@ -478,6 +496,7 @@ def get_subjects_for_class(class_id: str | None = None):
             -- Strategy 2: Subject Assignment
             SELECT DISTINCT actual_subject_id FROM `tabSIS Subject Assignment`
             WHERE class_id = %(class_id)s AND campus_id = %(campus_id)s AND actual_subject_id IS NOT NULL
+              AND (%(school_year_id)s IS NULL OR school_year_id = %(school_year_id)s)
             
             UNION
             
@@ -489,7 +508,11 @@ def get_subjects_for_class(class_id: str | None = None):
             WHERE ti.class_id = %(class_id)s 
               AND ti.campus_id = %(campus_id)s 
               AND s.actual_subject_id IS NOT NULL
-        """, {"class_id": class_id, "campus_id": campus_id}, as_list=True)
+        """, {
+            "class_id": class_id,
+            "campus_id": campus_id,
+            "school_year_id": class_school_year_id,
+        }, as_list=True)
         
         subject_ids_set = {row[0] for row in all_subject_ids if row[0]}
 

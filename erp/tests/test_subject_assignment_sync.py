@@ -79,6 +79,20 @@ class TestSubjectAssignmentSync(unittest.TestCase):
 			})
 			subject.insert(ignore_permissions=True)
 		
+		# Create test school year
+		if not frappe.db.exists("SIS School Year", "TEST-YEAR"):
+			school_year = frappe.get_doc({
+				"doctype": "SIS School Year",
+				"name": "TEST-YEAR",
+				"title_vn": "Test Year",
+				"title_en": "Test Year",
+				"start_date": "2025-01-01",
+				"end_date": "2025-12-31",
+				"is_enable": 1,
+				"campus_id": "TEST-CAMPUS",
+			})
+			school_year.insert(ignore_permissions=True)
+
 		# Create test class
 		if not frappe.db.exists("SIS Class", "TEST-CLASS-1A"):
 			test_class = frappe.get_doc({
@@ -121,6 +135,7 @@ class TestSubjectAssignmentSync(unittest.TestCase):
 			"class_id": "TEST-CLASS-1A",
 			"actual_subject_id": "TEST-MATH",
 			"campus_id": "TEST-CAMPUS",
+			"school_year_id": "TEST-YEAR",
 			"application_type": "full_year"
 		})
 		assignment.insert(ignore_permissions=True)

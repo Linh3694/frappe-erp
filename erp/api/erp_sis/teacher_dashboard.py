@@ -322,7 +322,16 @@ def get_teacher_timetable_context(teacher_id=None):
 		if not teacher_user_id:
 			return validation_error_response("Validation failed", {"teacher_id": ["Teacher is required"]})
 
-		cache_key = f"teacher_timetable_ctx:{teacher_user_id}"
+		school_year_id = (
+			frappe.local.form_dict.get("school_year_id")
+			or frappe.request.args.get("school_year_id")
+		)
+		if not school_year_id:
+			from erp.api.erp_sis.subject_assignment.utils import get_active_school_year_for_campus
+			campus_id_tmp = get_current_campus_from_context() or "campus-1"
+			school_year_id = get_active_school_year_for_campus(campus_id_tmp)
+
+		cache_key = f"teacher_timetable_ctx:{teacher_user_id}:{school_year_id or 'all'}"
 		try:
 			cached = frappe.cache().get_value(cache_key)
 			if cached:
@@ -335,8 +344,14 @@ def get_teacher_timetable_context(teacher_id=None):
 
 		stage_rows = []
 		if teacher_name:
+			school_year_sql = ""
+			sql_params = {"teacher_name": teacher_name, "campus_id": campus_id}
+			if school_year_id:
+				school_year_sql = "AND sa.school_year_id = %(school_year_id)s"
+				sql_params["school_year_id"] = school_year_id
+
 			stage_rows = frappe.db.sql(
-				"""
+				f"""
 				SELECT DISTINCT es.name, es.title_vn, es.title_en, es.short_title
 				FROM `tabSIS Education Stage` es
 				WHERE es.name IN (
@@ -346,6 +361,7 @@ def get_teacher_timetable_context(teacher_id=None):
 					INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
 					WHERE sa.teacher_id = %(teacher_name)s
 						AND sa.campus_id = %(campus_id)s
+						{school_year_sql}
 						AND eg.education_stage_id IS NOT NULL
 					UNION
 					SELECT DISTINCT tes.education_stage_id
@@ -356,7 +372,7 @@ def get_teacher_timetable_context(teacher_id=None):
 				)
 				ORDER BY es.title_vn ASC, es.name ASC
 				""",
-				{"teacher_name": teacher_name, "campus_id": campus_id},
+				sql_params,
 				as_dict=True,
 			)
 

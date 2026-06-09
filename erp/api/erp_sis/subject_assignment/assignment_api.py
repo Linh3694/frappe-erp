@@ -29,7 +29,11 @@ from .timetable_sync_v2 import (
     batch_sync_assignments
 )
 from .date_override_handler import delete_teacher_override_rows
-from .utils import fix_subject_linkages
+from .utils import (
+    fix_subject_linkages,
+    resolve_school_year_id,
+    validate_school_year_matches_class,
+)
 from erp.api.erp_sis.utils.cache_utils import clear_teacher_dashboard_cache
 
 
@@ -51,16 +55,26 @@ def get_all_subject_assignments():
             campus_id = "campus-1"
             frappe.logger().warning(f"No campus found for user {frappe.session.user}, using default: {campus_id}")
         
-        filters = {"campus_id": campus_id}
-            
+        school_year_id = (
+            frappe.request.args.get("school_year_id")
+            or frappe.form_dict.get("school_year_id")
+        )
+
+        sql_params = [campus_id]
+        school_year_filter = ""
+        if school_year_id:
+            school_year_filter = "AND sa.school_year_id = %s"
+            sql_params.append(school_year_id)
+
         # Get subject assignments with display names
-        subject_assignments_data = frappe.db.sql("""
+        subject_assignments_data = frappe.db.sql(f"""
             SELECT
                 sa.name,
                 sa.teacher_id,
                 sa.actual_subject_id,
                 sa.class_id,
                 sa.campus_id,
+                sa.school_year_id,
                 sa.creation,
                 sa.modified,
                 COALESCE(NULLIF(u.full_name, ''), t.user_id) as teacher_name,
@@ -75,8 +89,9 @@ def get_all_subject_assignments():
             LEFT JOIN `tabSIS Class` c ON sa.class_id = c.name
             LEFT JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
             WHERE sa.campus_id = %s
+            {school_year_filter}
             ORDER BY sa.teacher_id asc
-        """, (campus_id,), as_dict=True)
+        """, tuple(sql_params), as_dict=True)
         
         # ⚡ BULK: Enrich with teacher's education stages (single query instead of N+1)
         teacher_ids = list(set(a['teacher_id'] for a in subject_assignments_data if a.get('teacher_id')))
@@ -135,13 +150,26 @@ def get_teacher_assignment_details(teacher_id=None):
             )
         
         campus_id = get_current_campus_from_context() or "campus-1"
-        
+
+        school_year_id = (
+            frappe.request.args.get("school_year_id")
+            or frappe.form_dict.get("school_year_id")
+        )
+        if not school_year_id:
+            school_year_id = resolve_school_year_id(campus_id=campus_id)
+
         # Verify teacher belongs to campus
         if not frappe.db.exists("SIS Teacher", {"name": teacher_id, "campus_id": campus_id}):
             return not_found_response("Teacher not found or access denied")
-        
+
+        school_year_sql = ""
+        query_params = [teacher_id, campus_id]
+        if school_year_id:
+            school_year_sql = "AND sa.school_year_id = %s"
+            query_params.append(school_year_id)
+
         # Query with GROUP_CONCAT to group subjects by class
-        query = """
+        query = f"""
             SELECT 
                 sa.class_id,
                 c.title as class_title,
@@ -169,11 +197,12 @@ def get_teacher_assignment_details(teacher_id=None):
             INNER JOIN `tabSIS Actual Subject` s ON sa.actual_subject_id = s.name
             WHERE sa.teacher_id = %s 
               AND sa.campus_id = %s
+              {school_year_sql}
             GROUP BY sa.class_id, c.title, c.education_grade, eg.title_vn
             ORDER BY c.title
         """
         
-        results = frappe.db.sql(query, (teacher_id, campus_id), as_dict=True)
+        results = frappe.db.sql(query, tuple(query_params), as_dict=True)
         
         # Parse GROUP_CONCAT results
         for row in results:
@@ -389,7 +418,8 @@ def create_subject_assignment():
         global_start_date = data.get("start_date")
         global_end_date = data.get("end_date")
         global_weekdays = data.get("weekdays")  # JSON array like ["mon", "wed", "fri"]
-        
+        global_school_year_id = data.get("school_year_id")
+
         # Extract replace_teacher_map for conflict resolution
         # Format: {row_id: "teacher_1" or "teacher_2"}
         replace_teacher_map = data.get("replace_teacher_map") or {}
@@ -424,7 +454,8 @@ def create_subject_assignment():
                 start_date = a.get("start_date")
                 end_date = a.get("end_date")
                 weekdays = a.get("weekdays")  # Per-assignment weekdays
-                
+                item_school_year_id = a.get("school_year_id") or global_school_year_id
+
                 if cid and sids:
                     normalized_assignments.append({
                         "class_id": cid, 
@@ -432,7 +463,8 @@ def create_subject_assignment():
                         "application_type": application_type,
                         "start_date": start_date,
                         "end_date": end_date,
-                        "weekdays": weekdays
+                        "weekdays": weekdays,
+                        "school_year_id": item_school_year_id,
                     })
 
         # Case 2: top-level classes + actual_subject_ids
@@ -444,7 +476,8 @@ def create_subject_assignment():
                     "application_type": global_application_type,
                     "start_date": global_start_date,
                     "end_date": global_end_date,
-                    "weekdays": global_weekdays
+                    "weekdays": global_weekdays,
+                    "school_year_id": global_school_year_id,
                 })
 
         # Case 3: legacy single/bulk for one class
@@ -456,7 +489,8 @@ def create_subject_assignment():
                 "application_type": global_application_type,
                 "start_date": global_start_date,
                 "end_date": global_end_date,
-                "weekdays": global_weekdays
+                "weekdays": global_weekdays,
+                "school_year_id": global_school_year_id,
             })
 
         # Validate classes belong to campus
@@ -512,10 +546,23 @@ def create_subject_assignment():
                     else:
                         return not_found_response(f"Selected actual subject does not exist or access denied: {sid}")
 
+                school_year_id = resolve_school_year_id(
+                    class_id=cid,
+                    campus_id=campus_id,
+                    explicit_school_year_id=item.get("school_year_id"),
+                )
+                if not school_year_id:
+                    return validation_error_response(
+                        message="School year is required",
+                        errors={"school_year_id": ["School year is required"]},
+                    )
+                validate_school_year_matches_class(school_year_id, cid)
+
                 filters = {
                     "teacher_id": teacher_id,
                     "actual_subject_id": sid,
                     "campus_id": campus_id,
+                    "school_year_id": school_year_id,
                 }
                 if cid:
                     filters["class_id"] = cid
@@ -546,6 +593,7 @@ def create_subject_assignment():
                     "actual_subject_id": sid,
                     "class_id": cid,
                     "campus_id": campus_id,
+                    "school_year_id": school_year_id,
                     "application_type": application_type,
                     "start_date": start_date,
                     "end_date": end_date
@@ -936,7 +984,32 @@ def update_subject_assignment(assignment_id=None, teacher_id=None, actual_subjec
 
         if 'class_id' in locals() and class_id is not None and class_id != current_class_id:
             assignment_doc.class_id = class_id
-        
+            new_sy = resolve_school_year_id(class_id=class_id, campus_id=campus_id)
+            if new_sy:
+                assignment_doc.school_year_id = new_sy
+
+        # Cho phép cập nhật school_year_id trực tiếp (phải khớp lớp nếu có)
+        explicit_sy = None
+        if frappe.request.data:
+            try:
+                json_data = json.loads(frappe.request.data)
+                explicit_sy = json_data.get("school_year_id")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if not explicit_sy:
+            explicit_sy = frappe.form_dict.get("school_year_id")
+        if explicit_sy and explicit_sy != getattr(assignment_doc, "school_year_id", None):
+            validate_school_year_matches_class(
+                explicit_sy,
+                assignment_doc.class_id,
+            )
+            assignment_doc.school_year_id = explicit_sy
+        elif assignment_doc.class_id:
+            validate_school_year_matches_class(
+                assignment_doc.school_year_id,
+                assignment_doc.class_id,
+            )
+
         # Update time application fields if provided
         application_type = frappe.request.args.get('application_type') or frappe.form_dict.get('application_type')
         start_date = frappe.request.args.get('start_date') or frappe.form_dict.get('start_date')

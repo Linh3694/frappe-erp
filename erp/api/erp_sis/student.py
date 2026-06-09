@@ -1584,7 +1584,10 @@ def get_student_profile():
         sql_params_subjects = {"student_id": student_id}
         school_year_filter_subjects = ""
         if school_year_id:
-            school_year_filter_subjects = "AND ss.school_year_id = %(school_year_id)s"
+            school_year_filter_subjects = (
+                "AND ss.school_year_id = %(school_year_id)s "
+                "AND sa.school_year_id = %(school_year_id)s"
+            )
             sql_params_subjects["school_year_id"] = school_year_id
 
         # Get student subjects with teacher information
@@ -1613,10 +1616,11 @@ def get_student_profile():
             LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
             LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ss.student_id = %(student_id)s
+                {school_year_filter_subjects}
                 AND sa.teacher_id IS NOT NULL
             GROUP BY ss.name, ss.subject_id, s.title, s.title, ss.actual_subject_id, acts.title_vn, ss.class_id, c.title
             ORDER BY s.title ASC
-        """, sql_params_subjects, as_dict=True)
+        """.format(school_year_filter_subjects=school_year_filter_subjects), sql_params_subjects, as_dict=True)
 
         # Process teachers_info to create teacher arrays
         for subject in student_subjects:

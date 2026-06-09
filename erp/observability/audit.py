@@ -162,7 +162,7 @@ def _get_key_fields(doctype: str) -> list:
 		"SIS Academic Program": ["name", "title_vn", "title_en", "campus_id"],
 		"SIS Sub Curriculum": ["name", "title_vn", "title_en", "curriculum_id", "campus_id"],
 		"SIS Calendar": ["name", "title", "type", "school_year_id", "start_date"],
-		"SIS Subject Assignment": ["name", "teacher_id", "actual_subject_id", "class_id", "application_type"],
+		"SIS Subject Assignment": ["name", "teacher_id", "actual_subject_id", "class_id", "school_year_id", "application_type"],
 		"Feedback": ["name", "guardian", "feedback_type", "status", "title"],
 		"SIS Student Leave Request": ["name", "student_id", "start_date", "end_date", "reason", "campus_id"],
 		"SIS Announcement": ["name", "title_vn", "title_en", "status", "campus_id"],

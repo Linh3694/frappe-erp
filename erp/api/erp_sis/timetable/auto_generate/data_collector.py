@@ -358,6 +358,7 @@ class TimetableDataCollector:
 				AND s.education_stage = %(education_stage_id)s
 				AND s.campus_id = %(campus_id)s
 			WHERE sa.campus_id = %(campus_id)s
+			  AND sa.school_year_id = %(school_year_id)s
 			  AND sa.class_id IS NOT NULL
 			  AND sa.class_id != ''
 			  AND s.timetable_subject_id IS NOT NULL
@@ -365,6 +366,7 @@ class TimetableDataCollector:
 		""", {
 			"campus_id": self.session.campus_id,
 			"education_stage_id": self.session.education_stage_id,
+			"school_year_id": self.session.school_year_id,
 		}, as_dict=True)
 
 		assignments = []

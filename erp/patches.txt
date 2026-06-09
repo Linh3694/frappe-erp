@@ -103,3 +103,6 @@ erp.patches.v1_0.disable_room_rules_until_rooms_ready
 
 # TKB: đồng bộ max tiết liên tiếp GV và rule về mặc định 10
 erp.patches.v1_0.backfill_teacher_max_consecutive_periods_10
+
+# Phân công giảng dạy: gán school_year_id = năm học active theo campus
+erp.patches.v1_0.backfill_subject_assignment_school_year

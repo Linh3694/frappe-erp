@@ -26,6 +26,7 @@ from .assignment_api import (
     update_subject_assignment,
     delete_subject_assignment
 )
+from .copy_api import copy_subject_assignments
 
 # Query & Dropdown helpers
 from .assignment_queries import (
@@ -142,20 +143,25 @@ def batch_update_teacher_assignments():
                 continue
             
             for subject_id in subject_ids:
-                # Check if assignment exists
-                existing = frappe.db.exists("SIS Subject Assignment", {
+                # school_year_id từ lớp để check trùng theo năm học
+                class_school_year = frappe.db.get_value("SIS Class", class_id, "school_year_id")
+                existing_filters = {
                     "teacher_id": teacher_id,
                     "class_id": class_id,
                     "actual_subject_id": subject_id,
-                    "campus_id": teacher_campus
-                })
+                    "campus_id": teacher_campus,
+                }
+                if class_school_year:
+                    existing_filters["school_year_id"] = class_school_year
+                existing = frappe.db.exists("SIS Subject Assignment", existing_filters)
                 
                 assignment_data = {
                     "class_id": class_id,
                     "actual_subject_id": subject_id,
                     "application_type": application_type,
                     "start_date": start_date,
-                    "end_date": end_date
+                    "end_date": end_date,
+                    "school_year_id": class_school_year,
                 }
                 
                 # ⚡ NEW: Add weekdays if provided
@@ -223,6 +229,7 @@ __all__ = [
     'create_subject_assignment',
     'update_subject_assignment',
     'delete_subject_assignment',
+    'copy_subject_assignments',
     
     # Query & Dropdown helpers
     'get_teachers_with_assignment_summary',

@@ -141,7 +141,11 @@ def invalidate_subject_mapping_cache(actual_subject_id: str, campus_id: str):
 
 # ============= TEACHER ASSIGNMENT CACHE =============
 
-def get_teacher_assignments_cached(teacher_id: str, campus_id: str) -> List[Dict]:
+def get_teacher_assignments_cached(
+	teacher_id: str,
+	campus_id: str,
+	school_year_id: Optional[str] = None,
+) -> List[Dict]:
 	"""
 	Get all assignments for a teacher (cached).
 	
@@ -158,7 +162,9 @@ def get_teacher_assignments_cached(teacher_id: str, campus_id: str) -> List[Dict
 	
 	Performance: ~0.5ms (cached) vs ~50ms (DB query)
 	"""
-	cache_key = get_request_cache_key("teacher_assignments", teacher_id, campus_id)
+	cache_key = get_request_cache_key(
+		"teacher_assignments", teacher_id, campus_id, school_year_id or "all"
+	)
 	
 	# Try request cache
 	cached = get_from_request_cache(cache_key)
@@ -166,18 +172,25 @@ def get_teacher_assignments_cached(teacher_id: str, campus_id: str) -> List[Dict
 		return cached
 	
 	# Try Redis cache
-	redis_key = f"sis:teacher_assignments:{teacher_id}:{campus_id}"
+	redis_key = f"sis:teacher_assignments:{teacher_id}:{campus_id}:{school_year_id or 'all'}"
 	cached = get_from_redis_cache(redis_key)
 	if cached is not None:
 		set_in_request_cache(cache_key, cached)
 		return cached
 	
 	# DB query
-	assignments = frappe.db.sql("""
+	school_year_sql = ""
+	params = [teacher_id, campus_id]
+	if school_year_id:
+		school_year_sql = "AND sa.school_year_id = %s"
+		params.append(school_year_id)
+
+	assignments = frappe.db.sql(f"""
 		SELECT 
 			sa.name as assignment_id,
 			sa.class_id,
 			sa.actual_subject_id,
+			sa.school_year_id,
 			sa.application_type,
 			sa.start_date,
 			sa.end_date,
@@ -188,8 +201,9 @@ def get_teacher_assignments_cached(teacher_id: str, campus_id: str) -> List[Dict
 			AND s.campus_id = sa.campus_id
 		WHERE sa.teacher_id = %s
 		  AND sa.campus_id = %s
+		  {school_year_sql}
 		ORDER BY sa.class_id, s.name
-	""", (teacher_id, campus_id), as_dict=True)
+	""", tuple(params), as_dict=True)
 	
 	# Cache result
 	set_in_request_cache(cache_key, assignments)
@@ -198,15 +212,22 @@ def get_teacher_assignments_cached(teacher_id: str, campus_id: str) -> List[Dict
 	return assignments
 
 
-def invalidate_teacher_assignments_cache(teacher_id: str, campus_id: str):
+def invalidate_teacher_assignments_cache(
+	teacher_id: str,
+	campus_id: str,
+	school_year_id: Optional[str] = None,
+):
 	"""
 	Invalidate teacher assignments cache.
 	
 	Call this when:
 	- Creating/updating/deleting Subject Assignment for this teacher
 	"""
-	redis_key = f"sis:teacher_assignments:{teacher_id}:{campus_id}"
-	delete_from_redis_cache(redis_key)
+	if school_year_id:
+		delete_from_redis_cache(
+			f"sis:teacher_assignments:{teacher_id}:{campus_id}:{school_year_id}"
+		)
+	delete_from_redis_cache(f"sis:teacher_assignments:{teacher_id}:{campus_id}:all")
 
 
 # ============= CLASS SUBJECT CACHE =============
@@ -323,7 +344,11 @@ def on_subject_assignment_change(doc, method=None):
 		class_id = doc.class_id
 		
 		# Invalidate teacher assignments cache
-		invalidate_teacher_assignments_cache(teacher_id, campus_id)
+		invalidate_teacher_assignments_cache(
+			teacher_id,
+			campus_id,
+			getattr(doc, "school_year_id", None),
+		)
 		
 		# Invalidate class subjects cache
 		invalidate_class_subjects_cache(class_id, campus_id)

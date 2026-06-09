@@ -474,6 +474,7 @@ def _load_teachers_for_stage(
 			LEFT JOIN `tabUser` u ON u.name = t.user_id
 			WHERE t.campus_id = %(campus_id)s
 			  AND c.school_year_id = %(school_year_id)s
+			  AND sa.school_year_id = %(school_year_id)s
 			  AND eg.education_stage_id = %(stage_id)s
 			ORDER BY full_name ASC, t.name ASC
 			""",

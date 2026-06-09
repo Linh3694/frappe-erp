@@ -610,13 +610,16 @@ class TimetableImportValidator:
 				continue
 			
 			# Check if Subject Assignment exists
+			assignment_filters = {
+				"class_id": class_id,
+				"actual_subject_id": actual_subject_id,
+				"campus_id": campus_id,
+			}
+			if self.metadata.get("school_year_id"):
+				assignment_filters["school_year_id"] = self.metadata["school_year_id"]
 			assignment = frappe.db.get_value(
 				"SIS Subject Assignment",
-				{
-					"class_id": class_id,
-					"actual_subject_id": actual_subject_id,
-					"campus_id": campus_id
-				},
+				assignment_filters,
 				"name"
 			)
 			

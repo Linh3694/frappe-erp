@@ -128,7 +128,11 @@ def get_class_chat_scope_for_teacher(class_id=None, school_year_id=None):
             is_subject_teacher = bool(
                 frappe.db.exists(
                     "SIS Subject Assignment",
-                    {"class_id": class_id, "teacher_id": teacher_id},
+                    {
+                        "class_id": class_id,
+                        "teacher_id": teacher_id,
+                        "school_year_id": school_year_id,
+                    },
                 )
             )
         if not (is_homeroom or is_subject_teacher):
@@ -188,7 +192,7 @@ def get_class_chat_scope_for_teacher(class_id=None, school_year_id=None):
         # GV bộ môn + môn dạy (gắn `subjects: [{id,title}]`).
         subject_rows = frappe.get_all(
             "SIS Subject Assignment",
-            filters={"class_id": class_id},
+            filters={"class_id": class_id, "school_year_id": school_year_id},
             fields=["teacher_id", "actual_subject_id"],
             ignore_permissions=True,
             limit_page_length=2000,

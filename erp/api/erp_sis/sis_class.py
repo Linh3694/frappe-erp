@@ -1097,22 +1097,24 @@ def get_teacher_classes(teacher_user_id: str = None, school_year_id: str = None)
             # PRIORITY 2: Subject Assignment (for long-term assignments)
             try:
                 # ⚡ Use SQL DISTINCT for better performance
-                assignment_class_ids_sql = frappe.db.sql("""
+                sy_filter = ""
+                sy_params = [teacher_name, campus_id or "campus-1"]
+                if school_year_id:
+                    sy_filter = "AND school_year_id = %s"
+                    sy_params.append(school_year_id)
+
+                assignment_class_ids_sql = frappe.db.sql(f"""
                     SELECT DISTINCT class_id
                     FROM `tabSIS Subject Assignment`
                     WHERE teacher_id = %s
                         AND campus_id = %s
+                        {sy_filter}
                     LIMIT 100
-                """, (teacher_name, campus_id or "campus-1"), as_dict=False)
+                """, tuple(sy_params), as_dict=False)
                 
                 assignment_class_count = len(teaching_class_ids)
                 for (class_id,) in assignment_class_ids_sql:
-                    if class_id and school_year_id:
-                        # Verify class belongs to current school year
-                        class_year = frappe.db.get_value("SIS Class", class_id, "school_year_id")
-                        if class_year == school_year_id:
-                            teaching_class_ids.add(class_id)
-                    elif class_id:
+                    if class_id:
                         teaching_class_ids.add(class_id)
                 
                 frappe.logger().info(f"Subject Assignment: Added {len(teaching_class_ids) - assignment_class_count} classes")

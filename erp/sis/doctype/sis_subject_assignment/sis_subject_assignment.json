@@ -15,9 +15,10 @@
  "document_type": "Document",
  "editable_grid": 1,
  "engine": "InnoDB",
- "field_order": [
+  "field_order": [
   "basic_information",
   "campus_id",
+  "school_year_id",
   "teacher_id",
   "class_id",
   "actual_subject_id",
@@ -40,6 +41,16 @@
    "options": "SIS Campus",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_list_view": 1,
+   "fetch_from": "class_id.school_year_id",
+   "description": "Năm học áp dụng phân công. Tự điền từ lớp khi có class_id."
   },
   {
    "fieldname": "teacher_id",
@@ -113,15 +124,15 @@
  "indices": [
   {
    "unique": 1,
-   "fields": "teacher_id,class_id,actual_subject_id,campus_id"
+   "fields": "teacher_id,class_id,actual_subject_id,campus_id,school_year_id"
   },
   {
    "unique": 0,
-   "fields": "campus_id,class_id,actual_subject_id"
+   "fields": "campus_id,class_id,actual_subject_id,school_year_id"
   },
   {
    "unique": 0,
-   "fields": "teacher_id,campus_id"
+   "fields": "teacher_id,campus_id,school_year_id"
   }
  ],
  "modified": "2025-12-10 10:00:00.000000",
