@@ -516,6 +516,55 @@ def delete_category():
 
 
 @frappe.whitelist(allow_guest=False)
+def set_all_categories_to_classroom_room():
+    """Cập nhật toàn bộ danh mục thiết bị sang Loại phòng áp dụng = Phòng lớp học."""
+    try:
+        rows = frappe.get_all(
+            "ERP Administrative Facility Equipment Category",
+            fields=["name"],
+            order_by="creation asc",
+        )
+        total_count = len(rows)
+        updated_count = 0
+        skipped_count = 0
+        errors = []
+
+        for row in rows:
+            category_id = (row.get("name") or "").strip()
+            if not category_id:
+                continue
+            try:
+                doc = frappe.get_doc("ERP Administrative Facility Equipment Category", category_id)
+                current_room_types = _normalize_applicable_room_types(
+                    [getattr(child, "room_type", "") for child in (doc.applicable_room_types or [])]
+                )
+                if current_room_types == ["classroom_room"]:
+                    skipped_count += 1
+                    continue
+                _set_category_applicable_room_types(doc, ["classroom_room"])
+                doc.save(ignore_permissions=False)
+                updated_count += 1
+            except Exception as row_err:
+                errors.append(_("Danh mục {0}: {1}").format(category_id, str(row_err)))
+
+        frappe.db.commit()
+        return success_response(
+            data={
+                "total_count": total_count,
+                "updated_count": updated_count,
+                "skipped_count": skipped_count,
+                "error_count": len(errors),
+                "errors": errors,
+            },
+            message=_("Đã cập nhật {0}/{1} danh mục về Phòng lớp học").format(updated_count, total_count),
+        )
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "facility_equipment.set_all_categories_to_classroom_room")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def import_categories_excel():
     """Import hàng loạt danh mục thiết bị từ Excel (cột: Tên thiết bị, Loại, Loại phòng áp dụng, Ghi chú).
 
