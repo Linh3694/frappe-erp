@@ -261,7 +261,7 @@ def _save_uploaded_excel_temp(file_data, filename):
 
 
 def _normalize_category_import_columns(df):
-    """Chuẩn hoá tên cột Excel (VN/EN) -> title, equipment_type, note."""
+    """Chuẩn hoá tên cột Excel (VN/EN) -> title, equipment_type, applicable_room_types, note."""
     rename = {}
     for col in df.columns:
         key = str(col).strip().lower()
@@ -269,9 +269,56 @@ def _normalize_category_import_columns(df):
             rename[col] = "title"
         elif key in ("loại", "loai", "equipment_type", "type", "loại thiết bị"):
             rename[col] = "equipment_type"
+        elif key in (
+            "loại phòng áp dụng",
+            "loai phong ap dung",
+            "applicable_room_types",
+            "applicable room types",
+            "loại phòng",
+            "loai phong",
+            "room_types",
+        ):
+            rename[col] = "applicable_room_types"
         elif key in ("ghi chú", "ghi chu", "note", "mô tả", "mo ta"):
             rename[col] = "note"
     return df.rename(columns=rename)
+
+
+def _parse_applicable_room_types_cell(raw):
+    """
+    Chuyển ô Excel 'Loại phòng áp dụng' (tên hiển thị, nhiều giá trị cách nhau dấu phẩy)
+    thành list room_type code hợp lệ. Bỏ qua giá trị không khớp.
+    """
+    if raw is None:
+        return []
+    try:
+        if isinstance(raw, float) and str(raw) == "nan":
+            return []
+    except Exception:
+        pass
+    text = str(raw).strip()
+    if not text:
+        return []
+
+    # Map tên hiển thị (đã chuẩn hoá) + chính code -> code
+    label_to_code = {}
+    for code in VALID_ROOM_TYPES:
+        label_to_code[code.strip().lower()] = code
+        label = str(ROOM_TYPE_LABELS.get(code, code)).strip().lower()
+        if label:
+            label_to_code[label] = code
+
+    result = []
+    seen = set()
+    for part in text.replace(";", ",").split(","):
+        token = part.strip().lower()
+        if not token:
+            continue
+        code = label_to_code.get(token)
+        if code and code not in seen:
+            seen.add(code)
+            result.append(code)
+    return result
 
 
 def _parse_equipment_type_cell(raw):
@@ -470,7 +517,10 @@ def delete_category():
 
 @frappe.whitelist(allow_guest=False)
 def import_categories_excel():
-    """Import hàng loạt danh mục thiết bị từ Excel (cột: Tên thiết bị, Loại, Ghi chú)."""
+    """Import hàng loạt danh mục thiết bị từ Excel (cột: Tên thiết bị, Loại, Loại phòng áp dụng, Ghi chú).
+
+    Cột 'Loại phòng áp dụng' điền tên hiển thị của loại phòng; nhiều giá trị cách nhau dấu phẩy.
+    """
     try:
         try:
             import pandas as pd
@@ -537,6 +587,10 @@ def import_categories_excel():
             if note_val is not None and str(note_val).strip() and str(note_val) != "nan":
                 note = str(note_val).strip()
 
+            applicable_room_types = _parse_applicable_room_types_cell(
+                row.get("applicable_room_types")
+            )
+
             if title in seen_titles:
                 errors.append(_("Dòng {0}: Trùng tên trong file với dòng trước").format(excel_row))
                 continue
@@ -556,6 +610,7 @@ def import_categories_excel():
                         "note": note,
                     }
                 )
+                _set_category_applicable_room_types(doc, applicable_room_types)
                 doc.insert(ignore_permissions=False)
                 frappe.db.commit()
                 created += 1

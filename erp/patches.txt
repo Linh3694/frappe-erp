@@ -110,8 +110,3 @@ erp.patches.v1_0.backfill_subject_assignment_school_year
 # TKB auto-gen: seed thêm rule phòng mới + bật allow_kind_override
 erp.patches.v1_0.seed_room_rules_into_rule_sets
 
-# CSVC: danh mục thiết bị cũ mặc định áp dụng cho Phòng lớp học
-erp.patches.v1_0.migrate_equipment_category_default_room_type
-
-# CSVC: ép toàn bộ danh mục thiết bị hiện có về Phòng lớp học
-erp.patches.v1_0.force_equipment_categories_to_classroom_room
