@@ -150,7 +150,7 @@ def _get_key_fields(doctype: str) -> list:
 		"SIS Event": ["name", "title", "start_time", "end_time", "status", "campus_id"],
 		"SIS Class": ["name", "title", "school_year_id", "education_grade", "homeroom_teacher"],
 		"SIS Teacher": ["name", "user_id", "campus_id", "education_stage_id", "subject_department_id"],
-		"SIS Subject": ["name", "title", "education_stage", "campus_id"],
+		"SIS Subject": ["name", "title", "education_stage", "campus_id", "room_id", "is_homeroom"],
 		"SIS Curriculum": ["name", "title_vn", "title_en", "campus_id"],
 		"SIS Actual Subject": ["name", "title_vn", "title_en", "education_stage_id", "curriculum_id"],
 		"SIS Timetable": ["name", "title_vn", "title_en", "school_year_id", "education_stage_id"],

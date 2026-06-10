@@ -178,6 +178,22 @@ VERB_SCHEMAS: Dict[str, dict] = {
 		},
 		"instance_schema": None,
 	},
+	"room_eligibility": {
+		"params_schema": {"fields": []},
+		"instance_schema": None,
+	},
+	"room_max_simultaneous": {
+		"params_schema": {
+			"fields": [
+				{"name": "max", "type": "int", "label": "Max toàn cục", "default": 1},
+			],
+		},
+		"instance_schema": {
+			"subject_type": "room",
+			"object_kind": "Int",
+			"object_fields": [{"name": "max", "type": "int", "label": "Max lớp đồng thời"}],
+		},
+	},
 	"prefer_slot_range": {
 		"params_schema": {
 			"fields": [

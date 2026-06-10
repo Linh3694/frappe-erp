@@ -18,6 +18,7 @@ class SISSubject(Document):
         self.validate_timetable_subject_link()
         self.validate_actual_subject_link()
         self.validate_unique_mapping()
+        self.validate_allowed_rooms()
     
     def validate_timetable_subject_link(self):
         """Ensure timetable_subject_id is set"""
@@ -61,3 +62,17 @@ class SISSubject(Document):
                 f"is already mapped to another SIS Subject for education stage '{self.education_stage}'.",
                 frappe.DuplicateEntryError
             )
+
+    def validate_allowed_rooms(self):
+        """Không cho phép 1 phòng xuất hiện nhiều lần trong danh sách."""
+        seen = set()
+        for row in self.get("allowed_rooms") or []:
+            room_id = (row.room_id or "").strip()
+            if not room_id:
+                continue
+            if room_id in seen:
+                frappe.throw(
+                    f"Duplicate room in Allowed Rooms: {room_id}",
+                    frappe.DuplicateEntryError
+                )
+            seen.add(room_id)

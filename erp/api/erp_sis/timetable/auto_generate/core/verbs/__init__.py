@@ -22,4 +22,6 @@ from . import (  # noqa: F401
 	sync_class_group,
 	order_before_same_day,
 	at_most_simultaneous,
+	room_eligibility,
+	room_max_simultaneous,
 )

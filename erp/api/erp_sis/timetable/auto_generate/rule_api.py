@@ -10,7 +10,7 @@ import frappe
 
 from erp.utils.api_response import error_response, list_response, single_item_response
 
-from .core.default_rules import DEFAULT_RULE_SPECS, build_default_rule_set
+from .core.default_rules import DEFAULT_RULE_SPECS, DISABLED_DEFAULT_RULE_IDS, build_default_rule_set
 from .core.filter_keys import list_subject_filter_keys as _list_filter_keys
 from .core.rule_catalog import get_catalog_entry, list_rule_catalog
 from .core.registry import list_verbs
@@ -1028,16 +1028,16 @@ def _query_filter_options(
 
 	if entity == "room":
 		filters = {}
-		if campus_id and frappe.db.has_column("SIS Room", "campus_id"):
+		if campus_id and frappe.db.has_column("ERP Administrative Room", "campus_id"):
 			filters["campus_id"] = campus_id
 		rows = frappe.get_all(
-			"SIS Room",
+			"ERP Administrative Room",
 			filters=filters,
-			fields=["name", "title_vn", "room_code"],
-			or_filters=[["title_vn", "like", f"%{search}%"]] if search else None,
+			fields=["name", "title_vn", "physical_code", "room_type"],
+			or_filters=[["title_vn", "like", f"%{search}%"], ["physical_code", "like", f"%{search}%"]] if search else None,
 			limit_page_length=limit,
 		)
-		return [{"value": r.name, "label": r.title_vn or r.name, "code": r.room_code} for r in rows]
+		return [{"value": r.name, "label": r.physical_code or r.title_vn or r.name, "code": r.room_type} for r in rows]
 
 	return []
 
@@ -1094,7 +1094,7 @@ def _default_rule_rows() -> list:
 			"subject_filter": json.dumps(sfilt or {}),
 			"params": json.dumps(params or {}),
 			"weight": weight,
-			"enabled": 1,
+			"enabled": 0 if rid in DISABLED_DEFAULT_RULE_IDS else 1,
 			"sort_order": i,
 			"description": desc,
 		})

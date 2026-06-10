@@ -117,6 +117,8 @@ class TimetableInput:
 	soft_rules: SoftRules = field(default_factory=SoftRules)
 	working_days: List[str] = field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
 	solver_time_limit: int = 120
+	subject_is_homeroom: Dict[str, bool] = field(default_factory=dict)
+	subject_allowed_room_ids: Dict[str, List[str]] = field(default_factory=dict)
 
 	# Derived indexes (sẽ được build sau collect)
 	class_grade_map: Dict[str, str] = field(default_factory=dict)
@@ -145,6 +147,7 @@ class TimetableDataCollector:
 		inp.soft_rules = self._parse_soft_rules()
 		inp.working_days = self._get_working_days()
 		inp.solver_time_limit = self.session.solver_time_limit or 120
+		inp.subject_is_homeroom, inp.subject_allowed_room_ids = self._get_subject_room_config()
 
 		self._build_indexes(inp)
 		self._apply_schedule_teacher_limits(inp)
@@ -342,6 +345,52 @@ class TimetableDataCollector:
 			is_heavy=bool(r.get("is_heavy")),
 			program_id=r.get("program_id") or None,
 		) for r in rows]
+
+	def _get_subject_room_config(self) -> tuple[Dict[str, bool], Dict[str, List[str]]]:
+		"""Lấy cấu hình phòng theo môn TKB từ SIS Subject."""
+		subject_is_homeroom: Dict[str, bool] = {}
+		subject_allowed_room_ids: Dict[str, List[str]] = {}
+		if not frappe.db.table_exists("SIS Subject"):
+			return subject_is_homeroom, subject_allowed_room_ids
+		has_is_homeroom = frappe.db.has_column("SIS Subject", "is_homeroom")
+		is_homeroom_sql = "COALESCE(is_homeroom, 0)" if has_is_homeroom else "0"
+
+		rows = frappe.db.sql("""
+			SELECT name, timetable_subject_id, {is_homeroom_sql} AS is_homeroom, room_id
+			FROM `tabSIS Subject`
+			WHERE campus_id = %(campus_id)s
+			  AND education_stage = %(education_stage_id)s
+			  AND timetable_subject_id IS NOT NULL
+			  AND timetable_subject_id != ''
+		""".format(is_homeroom_sql=is_homeroom_sql), {
+			"campus_id": self.session.campus_id,
+			"education_stage_id": self.session.education_stage_id,
+		}, as_dict=True)
+
+		subject_doc_ids = [r["name"] for r in rows]
+		allowed_map: Dict[str, List[str]] = {}
+		if subject_doc_ids and frappe.db.table_exists("SIS Subject Room"):
+			child_rows = frappe.db.sql("""
+				SELECT parent, room_id
+				FROM `tabSIS Subject Room`
+				WHERE parent IN %(parents)s
+				  AND room_id IS NOT NULL
+				  AND room_id != ''
+				ORDER BY idx ASC
+			""", {"parents": subject_doc_ids}, as_dict=True)
+			for row in child_rows:
+				allowed_map.setdefault(row["parent"], []).append(row["room_id"])
+
+		for row in rows:
+			ts_id = row["timetable_subject_id"]
+			subject_is_homeroom[ts_id] = bool(row.get("is_homeroom"))
+			allowed = list(dict.fromkeys(allowed_map.get(row["name"], [])))
+			if not allowed and row.get("room_id"):
+				allowed = [row["room_id"]]
+			if allowed:
+				subject_allowed_room_ids[ts_id] = allowed
+
+		return subject_is_homeroom, subject_allowed_room_ids
 
 	def _get_assignments(self) -> List[TeacherAssignment]:
 		"""

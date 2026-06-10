@@ -17,6 +17,178 @@ from erp.utils.api_response import (
 )
 
 
+def _parse_allowed_room_ids(data):
+    """Chuẩn hóa danh sách phòng cho SIS Subject.allowed_rooms."""
+    raw = data.get("allowed_room_ids")
+    if raw is None:
+        raw = data.get("allowed_rooms")
+
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            raw = [raw]
+    if not isinstance(raw, list):
+        return []
+
+    out = []
+    seen = set()
+    for item in raw:
+        if isinstance(item, dict):
+            room_id = (item.get("room_id") or item.get("value") or "").strip()
+        else:
+            room_id = str(item).strip()
+        if not room_id or room_id in seen:
+            continue
+        seen.add(room_id)
+        out.append(room_id)
+    return out
+
+
+def _build_allowed_rooms_rows(room_ids):
+    return [{"room_id": room_id} for room_id in (room_ids or [])]
+
+
+def _normalize_text(value):
+    return str(value or "").strip().lower()
+
+
+def _get_room_lookup(campus_id):
+    filters = {}
+    if frappe.db.has_column("ERP Administrative Room", "campus_id"):
+        filters["campus_id"] = campus_id
+    rows = frappe.get_all(
+        "ERP Administrative Room",
+        filters=filters,
+        fields=["name", "title_vn", "physical_code"],
+        limit_page_length=0,
+    )
+    lookup = {}
+    for row in rows:
+        room_id = row.get("name")
+        if not room_id:
+            continue
+        for key in (row.get("name"), row.get("title_vn"), row.get("physical_code")):
+            norm = _normalize_text(key)
+            if norm and norm not in lookup:
+                lookup[norm] = room_id
+    return lookup
+
+
+def _parse_allowed_rooms_cell(raw_value):
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, float) and str(raw_value).lower() == "nan":
+        return []
+    if isinstance(raw_value, str):
+        text = raw_value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                values = parsed
+            else:
+                values = [parsed]
+        except Exception:
+            values = [part.strip() for part in text.replace(";", ",").split(",")]
+    elif isinstance(raw_value, list):
+        values = raw_value
+    else:
+        values = [raw_value]
+
+    tokens = []
+    seen = set()
+    for value in values:
+        token = str(value or "").strip()
+        if not token:
+            continue
+        norm = _normalize_text(token)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        tokens.append(token)
+    return tokens
+
+
+def _map_allowed_room_ids_from_tokens(tokens, room_lookup):
+    room_ids = []
+    unresolved = []
+    seen = set()
+    for token in tokens:
+        room_id = room_lookup.get(_normalize_text(token))
+        if not room_id:
+            unresolved.append(token)
+            continue
+        if room_id in seen:
+            continue
+        seen.add(room_id)
+        room_ids.append(room_id)
+    return room_ids, unresolved
+
+
+def _fetch_allowed_rooms_map(subject_ids):
+    result = {subject_id: [] for subject_id in (subject_ids or [])}
+    if not subject_ids:
+        return result
+    if not frappe.db.table_exists("SIS Subject Room"):
+        return result
+
+    rows = frappe.get_all(
+        "SIS Subject Room",
+        filters={
+            "parenttype": "SIS Subject",
+            "parent": ["in", subject_ids],
+        },
+        fields=["parent", "room_id"],
+        order_by="idx asc",
+        limit_page_length=0,
+    )
+    room_ids = {row.get("room_id") for row in rows if row.get("room_id")}
+    room_name_map = {}
+    if room_ids:
+        room_docs = frappe.get_all(
+            "ERP Administrative Room",
+            filters={"name": ["in", list(room_ids)]},
+            fields=["name", "title_vn", "physical_code"],
+            limit_page_length=0,
+        )
+        room_name_map = {
+            r.get("name"): (r.get("physical_code") or r.get("title_vn") or r.get("name"))
+            for r in room_docs
+            if r.get("name")
+        }
+
+    for row in rows:
+        parent = row.get("parent")
+        room_id = row.get("room_id")
+        if not parent or not room_id:
+            continue
+        result.setdefault(parent, []).append(
+            {
+                "room_id": room_id,
+                "room_name": room_name_map.get(room_id) or room_id,
+            }
+        )
+    return result
+
+
+def _subject_has_field(fieldname):
+    return frappe.db.has_column("SIS Subject", fieldname)
+
+
+def _to_bool_int(value):
+    if isinstance(value, bool):
+        return int(value)
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return 1 if value else 0
+    return 1 if str(value).strip().lower() in {"1", "true", "yes", "on"} else 0
+
+
 @frappe.whitelist(allow_guest=False)
 def get_all_subjects():
     """Get all subjects with basic information - SIMPLE VERSION"""
@@ -32,6 +204,9 @@ def get_all_subjects():
         filters = {"campus_id": campus_id}
             
 
+        has_is_homeroom = _subject_has_field("is_homeroom")
+        is_homeroom_sql = "COALESCE(s.is_homeroom, 0)" if has_is_homeroom else "0"
+
         try:
             subjects_query = """
                 SELECT
@@ -46,6 +221,7 @@ def get_all_subjects():
                     s.actual_subject_id,
                     s.subcurriculum_id,
                     s.room_id,
+                    {is_homeroom_sql} as is_homeroom,
                     s.campus_id,
                     s.creation,
                     s.modified,
@@ -61,7 +237,7 @@ def get_all_subjects():
                 LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
                 WHERE s.campus_id = %s
                 ORDER BY s.title ASC
-            """
+            """.format(is_homeroom_sql=is_homeroom_sql)
             subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
         except Exception as column_error:
             frappe.logger().warning(f"Query with all fields failed: {str(column_error)}, trying with basic fields only")
@@ -76,6 +252,7 @@ def get_all_subjects():
                     s.timetable_subject_id,
                     s.actual_subject_id,
                     s.room_id,
+                    {is_homeroom_sql} as is_homeroom,
                     s.campus_id,
                     s.creation,
                     s.modified,
@@ -90,7 +267,7 @@ def get_all_subjects():
                 LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
                 WHERE s.campus_id = %s
                 ORDER BY s.title ASC
-            """
+            """.format(is_homeroom_sql=is_homeroom_sql)
             subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
 
         frappe.logger().info(f"Found {len(subjects)} subjects")
@@ -103,6 +280,13 @@ def get_all_subjects():
             message=f"Database error: {str(db_error)}",
             code="DATABASE_ERROR"
         )
+
+    subject_ids = [s.get("name") for s in subjects if s.get("name")]
+    allowed_room_map = _fetch_allowed_rooms_map(subject_ids)
+    for subject in subjects:
+        allowed_rooms = allowed_room_map.get(subject.get("name"), [])
+        subject["allowed_rooms"] = allowed_rooms
+        subject["allowed_room_ids"] = [r.get("room_id") for r in allowed_rooms if r.get("room_id")]
 
     return list_response(subjects, "Subjects fetched successfully")
 
@@ -252,6 +436,18 @@ def get_subject_by_id():
             except:
                 pass
 
+        allowed_room_ids = []
+        allowed_rooms = []
+        for row in subject.get("allowed_rooms") or []:
+            room_id = row.room_id
+            if not room_id:
+                continue
+            allowed_room_ids.append(room_id)
+            allowed_rooms.append({
+                "room_id": room_id,
+                "room_name": frappe.db.get_value("ERP Administrative Room", room_id, "title_vn") or room_id,
+            })
+
         subject_data = {
             "name": subject.name,
             "title": subject.title,
@@ -260,6 +456,9 @@ def get_subject_by_id():
             "actual_subject_id": subject.actual_subject_id,
             "subcurriculum_id": subject.subcurriculum_id,
             "room_id": subject.room_id,
+            "is_homeroom": int(subject.is_homeroom or 0),
+            "allowed_room_ids": allowed_room_ids,
+            "allowed_rooms": allowed_rooms,
             "campus_id": subject.campus_id,
             # Display names for UI
             "education_stage_name": education_stage_name,
@@ -312,6 +511,8 @@ def create_subject():
         actual_subject_id = data.get("actual_subject_id")
         subcurriculum_id = data.get("subcurriculum_id")
         room_id = data.get("room_id")  # Can be None if not provided
+        is_homeroom = _to_bool_int(data.get("is_homeroom"))
+        allowed_room_ids = _parse_allowed_room_ids(data)
 
         
         # Input validation
@@ -354,12 +555,16 @@ def create_subject():
             subject_data["actual_subject_id"] = actual_subject_id
         if room_id:
             subject_data["room_id"] = room_id
+        if _subject_has_field("is_homeroom"):
+            subject_data["is_homeroom"] = is_homeroom
         if subcurriculum_id:
             subject_data["subcurriculum_id"] = subcurriculum_id
 
 
 
         subject_doc = frappe.get_doc(subject_data)
+        if allowed_room_ids is not None and _subject_has_field("allowed_rooms"):
+            subject_doc.set("allowed_rooms", _build_allowed_rooms_rows(allowed_room_ids))
         
         subject_doc.insert()
         frappe.db.commit()
@@ -412,6 +617,8 @@ def create_subject():
             "timetable_subject_id": subject_doc.timetable_subject_id,
             "actual_subject_id": subject_doc.actual_subject_id,
             "room_id": subject_doc.room_id,
+            "is_homeroom": int(subject_doc.is_homeroom or 0),
+            "allowed_room_ids": [r.room_id for r in (subject_doc.get("allowed_rooms") or []) if r.room_id],
             "campus_id": subject_doc.campus_id,
             "education_stage_name": education_stage_name,
             "timetable_subject_name": timetable_subject_name,
@@ -492,6 +699,8 @@ def update_subject():
         actual_subject_id = data.get('actual_subject_id')
         subcurriculum_id = data.get('subcurriculum_id')
         room_id = data.get('room_id')
+        is_homeroom = data.get('is_homeroom')
+        allowed_room_ids = _parse_allowed_room_ids(data)
 
 
         if title and title != subject_doc.title:
@@ -526,8 +735,12 @@ def update_subject():
 
         if 'room_id' in data and room_id != subject_doc.room_id:
             subject_doc.room_id = room_id
+        if is_homeroom is not None and _subject_has_field("is_homeroom"):
+            subject_doc.is_homeroom = _to_bool_int(is_homeroom)
         if 'subcurriculum_id' in data and subcurriculum_id != subject_doc.subcurriculum_id:
             subject_doc.subcurriculum_id = subcurriculum_id
+        if allowed_room_ids is not None and _subject_has_field("allowed_rooms"):
+            subject_doc.set("allowed_rooms", _build_allowed_rooms_rows(allowed_room_ids))
         
         subject_doc.save()
         frappe.db.commit()
@@ -574,6 +787,8 @@ def update_subject():
                 "actual_subject_id": subject_doc.actual_subject_id,
                 "subcurriculum_id": subject_doc.subcurriculum_id,
                 "room_id": subject_doc.room_id,
+                "is_homeroom": int(subject_doc.is_homeroom or 0),
+                "allowed_room_ids": [r.room_id for r in (subject_doc.get("allowed_rooms") or []) if r.room_id],
                 "campus_id": subject_doc.campus_id,
                 "education_stage_name": education_stage_name,
                 "timetable_subject_name": timetable_subject_name,
@@ -1149,7 +1364,15 @@ def bulk_import_subjects():
         
         # Validate required columns
         required_columns = ['title', 'education_stage']
-        optional_columns = ['timetable_subject', 'actual_subject', 'subcurriculum', 'room']
+        optional_columns = [
+            'timetable_subject',
+            'actual_subject',
+            'subcurriculum',
+            'room',
+            'is_homeroom',
+            'allowed_rooms',
+            'allowed_room_ids',
+        ]
         
         # Check for required columns (case insensitive)
         missing_columns = []
@@ -1191,6 +1414,8 @@ def bulk_import_subjects():
                 existing_titles_per_stage[stage] = set()
             existing_titles_per_stage[stage].add(title)
         
+        room_lookup = _get_room_lookup(campus_id)
+
         # Process each row
         success_count = 0
         error_count = 0
@@ -1208,6 +1433,10 @@ def bulk_import_subjects():
                 actual_subject_name = str(row.get('actual_subject', '')).strip() if pd.notna(row.get('actual_subject')) else None
                 subcurriculum_name = str(row.get('subcurriculum', '')).strip() if pd.notna(row.get('subcurriculum')) else None
                 room_name = str(row.get('room', '')).strip() if pd.notna(row.get('room')) else None
+                is_homeroom_raw = row.get('is_homeroom')
+                allowed_rooms_raw = row.get('allowed_rooms')
+                if allowed_rooms_raw is None and 'allowed_room_ids' in df.columns:
+                    allowed_rooms_raw = row.get('allowed_room_ids')
                 
                 # Clean up extra spaces
                 if education_stage:
@@ -1220,6 +1449,7 @@ def bulk_import_subjects():
                     subcurriculum_name = ' '.join(subcurriculum_name.split())
                 if room_name:
                     room_name = ' '.join(room_name.split())
+                is_homeroom = _to_bool_int(is_homeroom_raw) if pd.notna(is_homeroom_raw) else 0
                 
                 frappe.logger().info(f"Processing row {index + 2}: Title='{title}', Education Stage='{education_stage}'")
                 
@@ -1325,15 +1555,16 @@ def bulk_import_subjects():
                 
                 room_id = None
                 if room_name and room_name != 'nan':
-                    room_id = frappe.db.get_value(
-                        "ERP Administrative Room",
-                        {
-                            "title_vn": room_name
-                        },
-                        "name"
-                    )
+                    room_id = room_lookup.get(_normalize_text(room_name))
                     if not room_id:
                         logs.append(f"Row {index + 2}: Warning - Room '{room_name}' not found, skipping")
+
+                allowed_room_tokens = _parse_allowed_rooms_cell(allowed_rooms_raw)
+                allowed_room_ids, unresolved_rooms = _map_allowed_room_ids_from_tokens(allowed_room_tokens, room_lookup)
+                if unresolved_rooms:
+                    logs.append(
+                        f"Row {index + 2}: Warning - Allowed rooms không tìm thấy: {', '.join(unresolved_rooms)}"
+                    )
                 
                 # Build subject data
                 subject_data = {
@@ -1352,9 +1583,13 @@ def bulk_import_subjects():
                     subject_data["subcurriculum_id"] = subcurriculum_id
                 if room_id:
                     subject_data["room_id"] = room_id
+                if _subject_has_field("is_homeroom"):
+                    subject_data["is_homeroom"] = is_homeroom
                 
                 # Create subject
                 subject_doc = frappe.get_doc(subject_data)
+                if allowed_room_ids and _subject_has_field("allowed_rooms"):
+                    subject_doc.set("allowed_rooms", _build_allowed_rooms_rows(allowed_room_ids))
                 
                 subject_doc.flags.ignore_validate = True
                 subject_doc.flags.ignore_permissions = True

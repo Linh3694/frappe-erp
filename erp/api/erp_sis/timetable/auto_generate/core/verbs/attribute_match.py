@@ -36,6 +36,9 @@ class AttributeMatch(Verb):
 
 	def build_soft(self, ctx, subject_set, params, weight: int):
 		require = params.get("require", "")
+		if require == "room_type==required" and ctx.use_room_vars and ctx.room:
+			self._apply_room_type_match_soft(ctx, weight)
+			return []
 		if require != "room==home_room":
 			return []
 		inp = ctx.inp
@@ -54,3 +57,33 @@ class AttributeMatch(Verb):
 						if v is not None:
 							bonuses.append(v * (weight // 10))
 		return bonuses
+
+	def _apply_room_type_match_soft(self, ctx, weight: int) -> None:
+		inp = ctx.inp
+		rmap = req_map(inp)
+		for c in inp.classes:
+			for ts_id in inp.class_subjects.get(c.name, []):
+				req = rmap.get((c.name, ts_id))
+				if not req or not req.room_type_required:
+					continue
+				valid = [
+					ctx.room_index_map[r.name]
+					for r in inp.rooms
+					if r.room_type == req.room_type_required and r.name in ctx.room_index_map
+				]
+				if not valid:
+					continue
+				for day in inp.working_days:
+					for p_idx in range(ctx.num_periods):
+						x_var = ctx.x.get((c.name, ts_id, day, p_idx))
+						room_var = ctx.room.get((c.name, day, p_idx))
+						if x_var is None or room_var is None:
+							continue
+						match = ctx.model.NewBoolVar(f"room_type_soft_{c.name}_{ts_id}_{day}_{p_idx}")
+						ctx.model.AddAllowedAssignments([room_var], [[i] for i in valid]).OnlyEnforceIf(match)
+						ctx.model.AddForbiddenAssignments([room_var], [[i] for i in valid]).OnlyEnforceIf(match.Not())
+						score = ctx.model.NewIntVar(0, 1, f"room_type_score_{c.name}_{ts_id}_{day}_{p_idx}")
+						ctx.model.Add(score == 1).OnlyEnforceIf([x_var, match])
+						ctx.model.Add(score == 0).OnlyEnforceIf([x_var, match.Not()])
+						ctx.model.Add(score == 0).OnlyEnforceIf(x_var.Not())
+						ctx.objectives.append(score * max(1, weight))

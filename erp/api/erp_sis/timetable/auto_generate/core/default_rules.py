@@ -1,21 +1,28 @@
-"""26 rule mặc định — dùng offline (pytest) hoặc fallback khi chưa migrate DB."""
+"""28 rule mặc định — dùng offline (pytest) hoặc fallback khi chưa migrate DB."""
 
 from __future__ import annotations
 
 from .dto import Rule, RuleSet
 
 # Rule tắt mặc định — bật lại khi campus đã có dữ liệu phòng (G1)
-DISABLED_DEFAULT_RULE_IDS = frozenset({"room_no_overlap", "room_type_match"})
+DISABLED_DEFAULT_RULE_IDS = frozenset({
+	"room_no_overlap",
+	"room_type_match",
+	"room_eligibility",
+	"room_max_simultaneous",
+})
 
 # (rule_id, kind, verb, subject_type, subject_filter, params, weight, description)
 DEFAULT_RULE_SPECS = [
 	("class_no_overlap", "hard", "no_overlap", "class", {}, {}, 5, "Mỗi lớp tối đa 1 môn/slot"),
 	("teacher_no_overlap", "hard", "no_overlap", "teacher", {}, {}, 5, "Mỗi GV tối đa 1 lớp/slot"),
 	("room_no_overlap", "hard", "no_overlap", "room", {}, {}, 5, "Mỗi phòng tối đa 1 lớp/slot"),
+	("room_max_simultaneous", "hard", "room_max_simultaneous", "room", {}, {"max": 1}, 5, "Max lớp dùng chung 1 phòng"),
 	("curriculum_exact_periods", "hard", "exact_count_per_week", "assignment", {}, {}, 5, "Đúng số tiết/tuần (theo lớp)"),
 	("subject_max_per_day", "hard", "at_most_per_scope", "assignment", {}, {"scope": "day", "source": "subject.max_per_day"}, 5, "Max tiết/ngày/môn (theo lớp)"),
 	("teacher_unavailable", "hard", "forbidden_at_slots", "teacher", {}, {"source": "teacher.unavailability"}, 5, "GV slot bận"),
 	("room_type_match", "hard", "attribute_match", "assignment", {"has_room_type_required": 1}, {"require": "room_type==required"}, 5, "Khớp loại phòng"),
+	("room_eligibility", "hard", "room_eligibility", "assignment", {}, {}, 5, "Ràng buộc phòng hợp lệ theo môn/lớp"),
 	("teacher_max_periods_per_day", "hard", "at_most_per_scope", "teacher", {}, {"scope": "day", "source": "teacher.max_periods_per_day"}, 5, "Max tiết/ngày GV"),
 	("teacher_max_periods_per_week", "hard", "at_most_per_scope", "teacher", {}, {"scope": "week", "source": "teacher.max_periods_per_week"}, 5, "Max tiết/tuần GV"),
 	("avoid_teacher_gap", "soft", "avoid_gap", "teacher", {}, {}, 5, "Tránh gap GV"),

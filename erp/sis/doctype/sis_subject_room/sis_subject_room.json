@@ -1,0 +1,35 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-06-10 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "room_id",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "room_id",
+   "fieldtype": "Link",
+   "label": "Room",
+   "options": "ERP Administrative Room",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Data",
+   "label": "Note"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "module": "Sis",
+ "name": "SIS Subject Room",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "ASC"
+}
+

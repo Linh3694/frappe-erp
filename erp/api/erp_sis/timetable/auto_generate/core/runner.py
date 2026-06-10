@@ -40,9 +40,11 @@ class _CompatModel:
 
 def _needs_room_vars(rule_set: RuleSet) -> bool:
 	for rule in rule_set.effective():
-		if rule.verb == "no_overlap" and rule.subject_type == "room":
+		if rule.verb in {"no_overlap", "room_max_simultaneous"} and rule.subject_type == "room":
 			return True
 		if rule.verb == "attribute_match" and (rule.params or {}).get("require") == "room_type==required":
+			return True
+		if rule.verb == "room_eligibility" and rule.subject_type == "assignment":
 			return True
 	return False
 

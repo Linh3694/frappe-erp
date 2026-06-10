@@ -1,4 +1,4 @@
-"""Catalog 26 rule — metadata cho UI builder."""
+"""Catalog rule mặc định — metadata cho UI builder."""
 
 from __future__ import annotations
 
@@ -125,6 +125,32 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"instance_required": False,
 		"allow_kind_override": True,
 		"help_text_vn": "Mỗi dòng: chọn GV và số tiết liên tiếp tối đa (hoặc dùng params global).",
+	},
+	"room_no_overlap": {
+		"allow_kind_override": True,
+		"help_text_vn": "Không cho phép trùng phòng trong cùng 1 slot.",
+	},
+	"room_type_match": {
+		"allow_kind_override": True,
+		"help_text_vn": "Môn có room_type_required phải vào phòng đúng loại.",
+	},
+	"room_eligibility": {
+		"parameterized": False,
+		"object_kind": "None",
+		"display_name_vn": "Phòng hợp lệ theo môn/lớp",
+		"instance_required": False,
+		"allow_kind_override": True,
+		"help_text_vn": "Dữ liệu lấy từ Môn học: is_homeroom + danh sách phòng cho phép.",
+	},
+	"room_max_simultaneous": {
+		"parameterized": True,
+		"object_kind": "Int",
+		"display_name_vn": "Max lớp dùng chung phòng",
+		"subject_label_vn": "Phòng",
+		"object_label_vn": "Số lớp tối đa",
+		"instance_required": False,
+		"allow_kind_override": True,
+		"help_text_vn": "Giới hạn số lớp có thể dùng cùng một phòng trong cùng slot.",
 	},
 }
 
