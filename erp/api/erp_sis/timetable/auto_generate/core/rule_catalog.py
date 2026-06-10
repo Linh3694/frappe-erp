@@ -92,11 +92,11 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 	"class_group_simultaneous_subject": {
 		"parameterized": True,
 		"object_kind": "ClassGroup",
-		"display_name_vn": "Nhóm lớp đồng bộ môn",
+		"display_name_vn": "Nhóm lớp đồng bộ/không đồng bộ môn",
 		"subject_label_vn": None,
-		"object_label_vn": "Môn + danh sách lớp",
+		"object_label_vn": "Mode + môn + danh sách lớp",
 		"instance_required": True,
-		"help_text_vn": "Mỗi nhóm: chọn môn và ≥2 lớp học cùng slot mọi tiết.",
+		"help_text_vn": "Mỗi nhóm: chọn mode, môn chính và ≥2 lớp; mode Không đồng bộ cần thêm môn đối ngược.",
 	},
 	"subject_before_subject": {
 		"parameterized": True,

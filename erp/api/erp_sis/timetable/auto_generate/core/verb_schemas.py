@@ -125,6 +125,19 @@ VERB_SCHEMAS: Dict[str, dict] = {
 			],
 		},
 	},
+	"sync_class_group": {
+		"params_schema": {"fields": []},
+		"instance_schema": {
+			"subject_type": "class",
+			"object_kind": "ClassGroup",
+			"object_fields": [
+				{"name": "mode", "type": "select", "label": "Chế độ", "options": ["sync", "desync"]},
+				{"name": "timetable_subject_id", "type": "entity", "entity": "timetable_subject", "label": "Môn chính"},
+				{"name": "target_timetable_subject_id", "type": "entity", "entity": "timetable_subject", "label": "Môn đối ngược"},
+				{"name": "class_ids", "type": "entity_list", "entity": "class", "label": "Danh sách lớp"},
+			],
+		},
+	},
 	"order_before_same_day": {
 		"params_schema": {"fields": []},
 		"instance_schema": {

@@ -30,11 +30,17 @@ def _instances(params: dict) -> list:
 def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 	obj = inst.get("object") or {}
 	if rule_id == "class_group_simultaneous_subject" or object_kind == "ClassGroup":
+		mode = (obj.get("mode") or "sync").strip().lower()
 		ts_id = obj.get("timetable_subject_id") or obj.get("subject_id")
+		target_ts_id = obj.get("target_timetable_subject_id") or obj.get("target_subject_id")
 		class_ids = obj.get("class_ids") or []
 		if not ts_id:
 			return False
-		return len([c for c in class_ids if c]) >= 2
+		if len([c for c in class_ids if c]) < 2:
+			return False
+		if mode == "desync":
+			return bool(target_ts_id and target_ts_id != ts_id)
+		return True
 	if not inst.get("subject"):
 		return False
 	if rule_id == "teacher_not_on_day" or object_kind == "Day":
