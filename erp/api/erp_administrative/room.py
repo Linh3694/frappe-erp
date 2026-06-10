@@ -723,7 +723,7 @@ class RoomExcelImporter:
             self.errors.append(
                 "Thiếu cột bắt buộc: "
                 + ", ".join(missing_cols)
-                + ". File giống form «Tạo phòng cố định»: cần cột Tòa nhà, Số phòng, Loại phòng (hoặc tên tiếng Anh building_title, room_number, room_type). Tuỳ chọn: Sức chứa."
+                + ". File giống form «Tạo phòng cố định»: cần cột Tòa nhà, Số phòng, Loại phòng (hoặc tên tiếng Anh building_title, room_number, room_type). Tuỳ chọn: Sức chứa. Không dùng «Mã phòng» vật lý dạng B1A.303."
             )
             return False
 
@@ -751,9 +751,11 @@ class RoomExcelImporter:
                 'tên tiếng anh': 'title_en',
                 'tên en': 'title_en',
                 'english name': 'title_en',
-                'ký hiệu': 'short_title',
-                'short title': 'short_title',
-                'mã phòng': 'short_title',
+                # Import phòng vật lý cần room_number (vd 303), không nhận physical_code (vd B1A.303)
+                # Map "Mã phòng"/"Ký hiệu" về room_number để tránh rơi vào cột bị bỏ qua.
+                'ký hiệu': 'room_number',
+                'short title': 'room_number',
+                'mã phòng': 'room_number',
                 'loại phòng': 'room_type',
                 'room type': 'room_type',
                 'tòa nhà': 'building_title',
@@ -882,7 +884,14 @@ class RoomExcelImporter:
         if not rn_raw or not str(rn_raw).strip():
             errors.append(_("Số phòng (room_number) là bắt buộc"))
         else:
-            rn = _normalize_room_number_raw(str(rn_raw))
+            rn_raw_text = str(rn_raw).strip()
+            if "." in rn_raw_text:
+                errors.append(
+                    _(
+                        "Bạn đang nhập mã vật lý '{0}'. Vui lòng nhập Số phòng (ví dụ 303) vào cột room_number/Số phòng; hệ thống tự tạo mã vật lý."
+                    ).format(rn_raw_text)
+                )
+            rn = _normalize_room_number_raw(rn_raw_text)
             if not ROOM_NUMBER_PATTERN.match(rn):
                 errors.append(_("Số phòng chỉ gồm chữ và số (ví dụ 303). Giá trị: {0}").format(rn_raw))
             else:
@@ -913,8 +922,8 @@ class RoomExcelImporter:
                     row_data['capacity'] = None
                 else:
                     capacity = int(float(capacity))
-                    if capacity < 0:
-                        errors.append(_("Sức chứa phải là số không âm"))
+                    if capacity <= 0:
+                        errors.append(_("Sức chứa phải là số dương lớn hơn 0"))
                     row_data['capacity'] = capacity
             except (ValueError, TypeError):
                 errors.append(_("Sức chứa phải là số hợp lệ"))
