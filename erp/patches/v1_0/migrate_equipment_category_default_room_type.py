@@ -17,23 +17,34 @@ def execute():
     if not categories:
         return
 
+    default_room_type = "classroom_room"
+    default_room_type_label = "Phòng lớp học"
     changed = 0
     for row in categories:
         name = row.get("name")
         if not name:
             continue
 
-        exists = frappe.db.exists(
-            "ERP Administrative Facility Equipment Category Room Type",
-            {"parent": name, "parenttype": "ERP Administrative Facility Equipment Category"},
-        )
-        if exists:
-            continue
-
         doc = frappe.get_doc("ERP Administrative Facility Equipment Category", name)
-        doc.append("applicable_room_types", {"room_type": "classroom_room"})
-        doc.save(ignore_permissions=True)
-        changed += 1
+        rows = doc.get("applicable_room_types") or []
+        dirty = not (
+            len(rows) == 1
+            and (rows[0].room_type or "").strip() == default_room_type
+            and (rows[0].room_type_label or "").strip() == default_room_type_label
+        )
+
+        if dirty:
+            doc.set(
+                "applicable_room_types",
+                [
+                    {
+                        "room_type": default_room_type,
+                        "room_type_label": default_room_type_label,
+                    }
+                ],
+            )
+            doc.save(ignore_permissions=True)
+            changed += 1
 
     if changed:
         frappe.db.commit()

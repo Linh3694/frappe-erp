@@ -30,6 +30,14 @@ VALID_ROOM_TYPES = (
     "office",
     "function_room",
 )
+ROOM_TYPE_LABELS = {
+    "classroom_room": _("Phòng lớp học"),
+    "meeting_room": _("Phòng họp"),
+    "auditorium": _("Hội trường"),
+    "outdoor": _("Sân ngoài trời"),
+    "office": _("Phòng làm việc"),
+    "function_room": _("Phòng chức năng"),
+}
 
 
 def _resolve_administrative_room_id_from_import_key(room_key):
@@ -185,10 +193,16 @@ def _parse_json_body():
 
 def _category_to_dict(doc):
     applicable_room_types = []
+    applicable_room_type_labels = []
     for row in doc.get("applicable_room_types") or []:
         room_type = (getattr(row, "room_type", None) or "").strip()
         if room_type:
             applicable_room_types.append(room_type)
+            label = (getattr(row, "room_type_label", None) or "").strip() or ROOM_TYPE_LABELS.get(
+                room_type,
+                room_type,
+            )
+            applicable_room_type_labels.append(label)
     return {
         "name": doc.name,
         "title": doc.title,
@@ -196,6 +210,7 @@ def _category_to_dict(doc):
         "equipment_type_display": _("Rời") if doc.equipment_type == "mobile" else _("Cố định"),
         "note": doc.note or "",
         "applicable_room_types": applicable_room_types,
+        "applicable_room_type_labels": applicable_room_type_labels,
     }
 
 
@@ -222,7 +237,13 @@ def _set_category_applicable_room_types(doc, room_types):
     """Ghi đè child table loại phòng áp dụng."""
     doc.set("applicable_room_types", [])
     for room_type in room_types:
-        doc.append("applicable_room_types", {"room_type": room_type})
+        doc.append(
+            "applicable_room_types",
+            {
+                "room_type": room_type,
+                "room_type_label": ROOM_TYPE_LABELS.get(room_type, room_type),
+            },
+        )
 
 
 def _save_uploaded_excel_temp(file_data, filename):
@@ -300,11 +321,12 @@ def get_all_categories():
         )
         names = [r.name for r in rows if getattr(r, "name", None)]
         room_type_map = {}
+        room_type_label_map = {}
         if names:
             child_rows = frappe.get_all(
                 "ERP Administrative Facility Equipment Category Room Type",
                 filters={"parent": ["in", names]},
-                fields=["parent", "room_type", "idx"],
+                fields=["parent", "room_type", "room_type_label", "idx"],
                 order_by="parent asc, idx asc",
             )
             for child in child_rows:
@@ -313,6 +335,9 @@ def get_all_categories():
                 if not parent or not room_type:
                     continue
                 room_type_map.setdefault(parent, []).append(room_type)
+                room_type_label_map.setdefault(parent, []).append(
+                    (child.get("room_type_label") or "").strip() or ROOM_TYPE_LABELS.get(room_type, room_type)
+                )
         out = []
         for r in rows:
             out.append(
@@ -325,6 +350,7 @@ def get_all_categories():
                     else _("Cố định"),
                     "note": r.note or "",
                     "applicable_room_types": room_type_map.get(r.name, []),
+                    "applicable_room_type_labels": room_type_label_map.get(r.name, []),
                 }
             )
         return list_response(out, "OK")

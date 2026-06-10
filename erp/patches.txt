@@ -112,3 +112,6 @@ erp.patches.v1_0.seed_room_rules_into_rule_sets
 
 # CSVC: danh mục thiết bị cũ mặc định áp dụng cho Phòng lớp học
 erp.patches.v1_0.migrate_equipment_category_default_room_type
+
+# CSVC: ép toàn bộ danh mục thiết bị hiện có về Phòng lớp học
+erp.patches.v1_0.force_equipment_categories_to_classroom_room

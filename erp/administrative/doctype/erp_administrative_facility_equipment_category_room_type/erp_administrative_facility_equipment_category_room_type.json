@@ -6,7 +6,8 @@
  "parent_doctype": "ERP Administrative Facility Equipment Category",
  "engine": "InnoDB",
  "field_order": [
-  "room_type"
+  "room_type",
+  "room_type_label"
  ],
  "fields": [
   {
@@ -16,6 +17,13 @@
    "label": "Loại phòng",
    "options": "classroom_room\nmeeting_room\nauditorium\noutdoor\noffice\nfunction_room",
    "reqd": 1
+  },
+  {
+   "fieldname": "room_type_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên hiển thị loại phòng",
+   "read_only": 1
   }
  ],
  "sort_field": "idx",
