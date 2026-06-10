@@ -22,6 +22,14 @@ from erp.api.erp_administrative.room_activity_log import log_room_activity
 
 DOCTYPE_TICKET = "ERP Administrative Ticket"
 _TICKET_CLOSED_STATUSES = ("Closed", "Resolved", "Cancelled", "Done")
+VALID_ROOM_TYPES = (
+    "classroom_room",
+    "meeting_room",
+    "auditorium",
+    "outdoor",
+    "office",
+    "function_room",
+)
 
 
 def _resolve_administrative_room_id_from_import_key(room_key):
@@ -176,13 +184,45 @@ def _parse_json_body():
 
 
 def _category_to_dict(doc):
+    applicable_room_types = []
+    for row in doc.get("applicable_room_types") or []:
+        room_type = (getattr(row, "room_type", None) or "").strip()
+        if room_type:
+            applicable_room_types.append(room_type)
     return {
         "name": doc.name,
         "title": doc.title,
         "equipment_type": doc.equipment_type,
         "equipment_type_display": _("Rời") if doc.equipment_type == "mobile" else _("Cố định"),
         "note": doc.note or "",
+        "applicable_room_types": applicable_room_types,
     }
+
+
+def _normalize_applicable_room_types(raw_values):
+    """Chuẩn hóa list room_type áp dụng từ payload FE."""
+    if not isinstance(raw_values, list):
+        return []
+    normalized = []
+    seen = set()
+    for item in raw_values:
+        room_type = ""
+        if isinstance(item, str):
+            room_type = item.strip()
+        elif isinstance(item, dict):
+            room_type = str(item.get("room_type") or "").strip()
+        if not room_type or room_type not in VALID_ROOM_TYPES or room_type in seen:
+            continue
+        seen.add(room_type)
+        normalized.append(room_type)
+    return normalized
+
+
+def _set_category_applicable_room_types(doc, room_types):
+    """Ghi đè child table loại phòng áp dụng."""
+    doc.set("applicable_room_types", [])
+    for room_type in room_types:
+        doc.append("applicable_room_types", {"room_type": room_type})
 
 
 def _save_uploaded_excel_temp(file_data, filename):
@@ -258,6 +298,21 @@ def get_all_categories():
             fields=["name", "title", "equipment_type", "note"],
             order_by="title asc",
         )
+        names = [r.name for r in rows if getattr(r, "name", None)]
+        room_type_map = {}
+        if names:
+            child_rows = frappe.get_all(
+                "ERP Administrative Facility Equipment Category Room Type",
+                filters={"parent": ["in", names]},
+                fields=["parent", "room_type", "idx"],
+                order_by="parent asc, idx asc",
+            )
+            for child in child_rows:
+                parent = child.get("parent")
+                room_type = (child.get("room_type") or "").strip()
+                if not parent or not room_type:
+                    continue
+                room_type_map.setdefault(parent, []).append(room_type)
         out = []
         for r in rows:
             out.append(
@@ -269,6 +324,7 @@ def get_all_categories():
                     if r.equipment_type == "mobile"
                     else _("Cố định"),
                     "note": r.note or "",
+                    "applicable_room_types": room_type_map.get(r.name, []),
                 }
             )
         return list_response(out, "OK")
@@ -302,6 +358,9 @@ def create_category():
         title = (data.get("title") or data.get("name") or "").strip()
         equipment_type = (data.get("equipment_type") or data.get("type") or "").strip()
         note = data.get("note") or ""
+        applicable_room_types = _normalize_applicable_room_types(
+            data.get("applicable_room_types") or []
+        )
 
         if not title:
             return validation_error_response(_("Thiếu tên"), {"title": ["required"]})
@@ -318,6 +377,7 @@ def create_category():
                 "note": note,
             }
         )
+        _set_category_applicable_room_types(doc, applicable_room_types)
         doc.insert(ignore_permissions=False)
         frappe.db.commit()
         return single_item_response(_category_to_dict(doc), _("Đã tạo"))
@@ -346,6 +406,11 @@ def update_category():
             doc.equipment_type = data["equipment_type"]
         if "note" in data:
             doc.note = data["note"] or ""
+        if "applicable_room_types" in data:
+            _set_category_applicable_room_types(
+                doc,
+                _normalize_applicable_room_types(data.get("applicable_room_types") or []),
+            )
         doc.save(ignore_permissions=False)
         frappe.db.commit()
         return single_item_response(_category_to_dict(doc), _("Đã cập nhật"))

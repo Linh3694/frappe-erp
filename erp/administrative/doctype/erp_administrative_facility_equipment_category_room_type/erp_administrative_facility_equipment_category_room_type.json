@@ -1,0 +1,23 @@
+{
+ "doctype": "DocType",
+ "name": "ERP Administrative Facility Equipment Category Room Type",
+ "module": "Administrative",
+ "istable": 1,
+ "parent_doctype": "ERP Administrative Facility Equipment Category",
+ "engine": "InnoDB",
+ "field_order": [
+  "room_type"
+ ],
+ "fields": [
+  {
+   "fieldname": "room_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại phòng",
+   "options": "classroom_room\nmeeting_room\nauditorium\noutdoor\noffice\nfunction_room",
+   "reqd": 1
+  }
+ ],
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}

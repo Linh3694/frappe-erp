@@ -10,6 +10,7 @@
  "field_order": [
   "title",
   "equipment_type",
+  "applicable_room_types",
   "note"
  ],
  "fields": [
@@ -28,6 +29,12 @@
    "label": "Lo\u1ea1i",
    "options": "mobile\nfixed",
    "reqd": 1
+  },
+  {
+   "fieldname": "applicable_room_types",
+   "fieldtype": "Table",
+   "label": "Lo\u1ea1i ph\u00f2ng \u00e1p d\u1ee5ng",
+   "options": "ERP Administrative Facility Equipment Category Room Type"
   },
   {
    "fieldname": "note",
