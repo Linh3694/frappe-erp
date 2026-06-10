@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from typing import Any, Dict, Optional
 
 import frappe
@@ -50,15 +51,112 @@ def _parse_row_json(val: Any) -> dict:
 	return {}
 
 
+def _slot_cells_from_object(obj: dict) -> list[dict]:
+	"""Chuẩn hóa slot từ object về list[{day, period_idx}]."""
+	slots = []
+	raw_slots = obj.get("slots")
+	if isinstance(raw_slots, list) and raw_slots:
+		for item in raw_slots:
+			if not isinstance(item, dict):
+				continue
+			day = item.get("day")
+			p_idx = item.get("period_idx", item.get("period"))
+			if day is None or p_idx is None:
+				continue
+			slots.append({"day": str(day), "period_idx": int(p_idx)})
+		return slots
+
+	day = obj.get("day")
+	p_idx = obj.get("period_idx")
+	if day is not None and p_idx is not None:
+		slots.append({"day": str(day), "period_idx": int(p_idx)})
+	return slots
+
+
+def _slot_signature(slots: list[dict]) -> str:
+	ordered = sorted(
+		[(str(s.get("day", "")), int(s.get("period_idx", 0))) for s in slots],
+		key=lambda x: (x[0], x[1]),
+	)
+	return ",".join(f"{day}|{idx}" for day, idx in ordered)
+
+
+def _ensure_assignment_group_ids(params: dict) -> dict:
+	"""Backfill group_id cho dữ liệu assignment_not_at_slot cũ thiếu group_id."""
+	instances = params.get("instances")
+	if not isinstance(instances, list) or not instances:
+		return params
+
+	class_profiles: dict[str, dict] = {}
+	for inst in instances:
+		if not isinstance(inst, dict):
+			continue
+		obj = inst.get("object") or {}
+		if not isinstance(obj, dict):
+			continue
+		class_id = inst.get("subject")
+		subject_id = obj.get("subject_id") or obj.get("timetable_subject_id")
+		if not class_id or not subject_id:
+			continue
+		label = (obj.get("label") or "").strip()
+		slots = _slot_cells_from_object(obj)
+		if not slots:
+			continue
+		profile_key = f"{class_id}|{subject_id}|{label}"
+		entry = class_profiles.setdefault(profile_key, {"subject_id": subject_id, "label": label, "slots": []})
+		for sl in slots:
+			if not any(x["day"] == sl["day"] and x["period_idx"] == sl["period_idx"] for x in entry["slots"]):
+				entry["slots"].append(sl)
+
+	group_id_by_profile: dict[str, str] = {}
+	for profile_key, profile in class_profiles.items():
+		subject_id = profile["subject_id"]
+		label = profile["label"]
+		slot_sig = _slot_signature(profile["slots"])
+		base = f"{subject_id}|{label}|{slot_sig}"
+		digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:12]
+		group_id_by_profile[profile_key] = f"legacy-ban-{digest}"
+
+	normalized = []
+	for inst in instances:
+		if not isinstance(inst, dict):
+			normalized.append(inst)
+			continue
+		obj = inst.get("object") or {}
+		if not isinstance(obj, dict):
+			normalized.append(inst)
+			continue
+		if obj.get("group_id"):
+			normalized.append(inst)
+			continue
+		class_id = inst.get("subject")
+		subject_id = obj.get("subject_id") or obj.get("timetable_subject_id")
+		label = (obj.get("label") or "").strip()
+		profile_key = f"{class_id}|{subject_id}|{label}"
+		legacy_gid = group_id_by_profile.get(profile_key)
+		if not legacy_gid:
+			normalized.append(inst)
+			continue
+		new_obj = dict(obj)
+		new_obj["group_id"] = legacy_gid
+		normalized.append({**inst, "object": new_obj})
+
+	return {**params, "instances": normalized}
+
+
 def _normalize_rule_row(row: dict) -> dict:
 	"""Chuẩn hóa 1 dòng child table trước khi append."""
+	rule_id = (row.get("rule_id") or "").strip()
+	params = _parse_row_json(row.get("params"))
+	if rule_id == "assignment_not_at_slot":
+		params = _ensure_assignment_group_ids(params)
 	return {
-		"rule_id": (row.get("rule_id") or "").strip(),
+		"rule_id": rule_id,
 		"kind": row.get("kind") or "hard",
 		"verb": row.get("verb") or "",
 		"subject_type": row.get("subject_type") or "class",
 		"subject_filter": _parse_row_json(row.get("subject_filter")),
-		"params": _parse_row_json(row.get("params")),
+		"params": params,
 		"weight": int(row.get("weight") or 5),
 		"enabled": int(row.get("enabled") if row.get("enabled") is not None else 1),
 		"allow_kind_override": int(row.get("allow_kind_override") or 0),
