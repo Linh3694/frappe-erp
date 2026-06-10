@@ -68,7 +68,7 @@ def test_sync_group_same_subject_same_slot():
 
 
 def test_desync_group_subjects_never_overlap():
-	"""Mode desync: Dance Sport và Âm nhạc không trùng slot trên nhóm lớp đã chọn."""
+	"""Mode desync (legacy field đơn): Dance Sport và Âm nhạc không trùng slot."""
 	inp = TimetableInput(
 		classes=[
 			ClassInfo("C1", "Lớp 1A", "G1", "R1"),
@@ -134,3 +134,85 @@ def test_desync_group_subjects_never_overlap():
 	assert ds_slots, "DS phải được xếp ít nhất 1 slot"
 	assert music_slots, "Âm nhạc phải được xếp ít nhất 1 slot"
 	assert ds_slots.isdisjoint(music_slots), f"DS và Âm nhạc không được trùng slot: DS={ds_slots}, MU={music_slots}"
+
+
+def test_desync_group_multi_targets_never_overlap_main_subject():
+	"""Mode desync đa môn: môn chính không trùng bất kỳ môn đối ngược nào."""
+	inp = TimetableInput(
+		classes=[
+			ClassInfo("C1", "Lớp 1A", "G1", "R1"),
+			ClassInfo("C2", "Lớp 2A", "G2", "R2"),
+		],
+		periods=[PeriodInfo(f"P{i}", f"Tiết {i}", i) for i in range(1, 7)],
+		teachers={
+			"T1": TeacherInfo("T1"),
+			"T2": TeacherInfo("T2"),
+			"T3": TeacherInfo("T3"),
+			"T4": TeacherInfo("T4"),
+			"T5": TeacherInfo("T5"),
+			"T6": TeacherInfo("T6"),
+		},
+		requirements=[
+			SubjectRequirement("DS", "Dance Sport", "C1", 1, max_periods_per_day=1),
+			SubjectRequirement("MU", "Âm nhạc", "C1", 1, max_periods_per_day=1),
+			SubjectRequirement("PE", "Thể dục", "C1", 1, max_periods_per_day=1),
+			SubjectRequirement("DS", "Dance Sport", "C2", 1, max_periods_per_day=1),
+			SubjectRequirement("MU", "Âm nhạc", "C2", 1, max_periods_per_day=1),
+			SubjectRequirement("PE", "Thể dục", "C2", 1, max_periods_per_day=1),
+		],
+		working_days=["mon"],
+	)
+	inp.class_subjects = {"C1": ["DS", "MU", "PE"], "C2": ["DS", "MU", "PE"]}
+	inp.class_subject_teachers = {
+		"C1|DS": ["T1"],
+		"C1|MU": ["T2"],
+		"C1|PE": ["T3"],
+		"C2|DS": ["T4"],
+		"C2|MU": ["T5"],
+		"C2|PE": ["T6"],
+	}
+	inp.column_period_index = {f"P{i}": i - 1 for i in range(1, 7)}
+
+	rule = Rule(
+		rule_id="class_group_simultaneous_subject",
+		kind="hard",
+		verb="sync_class_group",
+		subject_type="class",
+		params={
+			"instances": [{
+				"subject": "C1",
+				"object": {
+					"mode": "desync",
+					"timetable_subject_id": "DS",
+					"target_timetable_subject_ids": ["MU", "PE"],
+					"class_ids": ["C1", "C2"],
+				},
+			}],
+		},
+	)
+
+	rs = _minimal_rules(rule)
+	solver, builder, status, _ctx = build_and_solve(inp, rs)
+	assert status in ("OPTIMAL", "FEASIBLE"), f"unexpected status {status}"
+	solution = builder.extract_solution(solver)
+
+	ds_slots = {
+		(row["day_of_week"], row.get("timetable_column_id"))
+		for row in solution
+		if row["class_id"] in {"C1", "C2"} and row["timetable_subject_id"] == "DS"
+	}
+	music_slots = {
+		(row["day_of_week"], row.get("timetable_column_id"))
+		for row in solution
+		if row["class_id"] in {"C1", "C2"} and row["timetable_subject_id"] == "MU"
+	}
+	pe_slots = {
+		(row["day_of_week"], row.get("timetable_column_id"))
+		for row in solution
+		if row["class_id"] in {"C1", "C2"} and row["timetable_subject_id"] == "PE"
+	}
+	assert ds_slots, "DS phải được xếp ít nhất 1 slot"
+	assert music_slots, "Âm nhạc phải được xếp ít nhất 1 slot"
+	assert pe_slots, "Thể dục phải được xếp ít nhất 1 slot"
+	assert ds_slots.isdisjoint(music_slots), f"DS và Âm nhạc không được trùng slot: DS={ds_slots}, MU={music_slots}"
+	assert ds_slots.isdisjoint(pe_slots), f"DS và Thể dục không được trùng slot: DS={ds_slots}, PE={pe_slots}"

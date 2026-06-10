@@ -32,14 +32,21 @@ def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 	if rule_id == "class_group_simultaneous_subject" or object_kind == "ClassGroup":
 		mode = (obj.get("mode") or "sync").strip().lower()
 		ts_id = obj.get("timetable_subject_id") or obj.get("subject_id")
-		target_ts_id = obj.get("target_timetable_subject_id") or obj.get("target_subject_id")
+		target_ts_ids = obj.get("target_timetable_subject_ids") or []
+		if not isinstance(target_ts_ids, list):
+			target_ts_ids = []
+		legacy_target = obj.get("target_timetable_subject_id") or obj.get("target_subject_id")
+		if legacy_target:
+			target_ts_ids = [*target_ts_ids, legacy_target]
+		target_ts_ids = [str(s).strip() for s in target_ts_ids if s]
 		class_ids = obj.get("class_ids") or []
 		if not ts_id:
 			return False
 		if len([c for c in class_ids if c]) < 2:
 			return False
 		if mode == "desync":
-			return bool(target_ts_id and target_ts_id != ts_id)
+			valid_targets = [s for s in target_ts_ids if s != ts_id]
+			return len(valid_targets) > 0
 		return True
 	if not inst.get("subject"):
 		return False

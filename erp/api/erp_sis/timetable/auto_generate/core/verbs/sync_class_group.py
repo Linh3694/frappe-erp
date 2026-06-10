@@ -10,7 +10,15 @@ class SyncClassGroup(Verb):
 			obj = inst.get("object") or {}
 			mode = (obj.get("mode") or "sync").strip().lower()
 			ts_id = obj.get("timetable_subject_id") or obj.get("subject_id")
-			target_ts_id = obj.get("target_timetable_subject_id") or obj.get("target_subject_id")
+			target_ts_ids = obj.get("target_timetable_subject_ids") or []
+			if not isinstance(target_ts_ids, list):
+				target_ts_ids = []
+			legacy_target = obj.get("target_timetable_subject_id") or obj.get("target_subject_id")
+			if legacy_target:
+				target_ts_ids = [*target_ts_ids, legacy_target]
+			target_ts_ids = [s for s in target_ts_ids if s and s != ts_id]
+			# Khử trùng lặp nhưng giữ thứ tự đầu vào.
+			target_ts_ids = list(dict.fromkeys(target_ts_ids))
 			class_ids = obj.get("class_ids") or []
 			if not ts_id or not isinstance(class_ids, list) or len(class_ids) < 2:
 				continue
@@ -25,16 +33,17 @@ class SyncClassGroup(Verb):
 						if v is not None:
 							subject_vars.append(v)
 					if mode == "desync":
-						if not target_ts_id:
+						if not target_ts_ids:
 							continue
-						target_vars = []
-						for c_id in unique:
-							v = ctx.x.get((c_id, target_ts_id, day, p_idx))
-							if v is not None:
-								target_vars.append(v)
-						if not subject_vars or not target_vars:
-							continue
-						ctx.model.Add(sum(subject_vars) + sum(target_vars) <= 1)
+						for target_ts_id in target_ts_ids:
+							target_vars = []
+							for c_id in unique:
+								v = ctx.x.get((c_id, target_ts_id, day, p_idx))
+								if v is not None:
+									target_vars.append(v)
+							if not subject_vars or not target_vars:
+								continue
+							ctx.model.Add(sum(subject_vars) + sum(target_vars) <= 1)
 						continue
 					for i in range(1, len(subject_vars)):
 						ctx.model.Add(subject_vars[0] == subject_vars[i])

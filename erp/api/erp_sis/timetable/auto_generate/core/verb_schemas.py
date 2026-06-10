@@ -134,6 +134,7 @@ VERB_SCHEMAS: Dict[str, dict] = {
 				{"name": "mode", "type": "select", "label": "Chế độ", "options": ["sync", "desync"]},
 				{"name": "timetable_subject_id", "type": "entity", "entity": "timetable_subject", "label": "Môn chính"},
 				{"name": "target_timetable_subject_id", "type": "entity", "entity": "timetable_subject", "label": "Môn đối ngược"},
+				{"name": "target_timetable_subject_ids", "type": "entity_list", "entity": "timetable_subject", "label": "Danh sách môn đối ngược"},
 				{"name": "class_ids", "type": "entity_list", "entity": "class", "label": "Danh sách lớp"},
 			],
 		},
