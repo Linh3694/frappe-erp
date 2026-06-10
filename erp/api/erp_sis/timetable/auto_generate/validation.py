@@ -82,18 +82,6 @@ def validate_timetable_input(inp: TimetableInput) -> Tuple[List[str], List[str]]
 				f"{max_day} tiết/ngày x {num_days} ngày"
 			)
 
-	# room_type_required: phải có ít nhất 1 phòng loại đó trong campus
-	room_types_available = {r.room_type for r in inp.rooms if r.room_type}
-	for req in inp.requirements:
-		if not req.room_type_required:
-			continue
-		if req.room_type_required not in room_types_available:
-			# Rule room_type_match đang tắt — chỉ cảnh báo, không chặn solve
-			warnings.append(
-				f"Môn {req.timetable_subject_title}: yêu cầu phòng loại "
-				f"'{req.room_type_required}' nhưng campus chưa có phòng loại này"
-			)
-
 	# Xung đột pinned slot cùng lớp + slot
 	seen_pins = {}
 	for pin in inp.pinned_slots:

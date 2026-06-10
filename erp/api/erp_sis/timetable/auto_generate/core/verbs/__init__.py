@@ -7,7 +7,6 @@ from . import (  # noqa: F401
 	consecutive_required,
 	forbidden_at_slots,
 	pinned_to_slot,
-	attribute_match,
 	max_consecutive,
 	prefer_slot_range,
 	spread_across_days,

@@ -62,8 +62,16 @@ def _consolidate_instance_rules(rules):
 	return [grouped[k] for k in order]
 
 
-def test_rule_catalog_has_22_entries():
-	assert len(list_rule_catalog()) == 22
+def test_rule_catalog_room_rules():
+	ids = {e["rule_id"] for e in list_rule_catalog()}
+	# Đã bỏ khỏi catalog
+	assert "room_no_overlap" not in ids
+	assert "prefer_home_room" not in ids
+	assert "room_type_match" not in ids
+	# Ràng buộc phòng còn lại (đều luôn bật)
+	assert "room_max_simultaneous" in ids
+	assert "room_eligibility" in ids
+	assert len(list_rule_catalog()) == 23
 
 
 def test_subject_preferred_periods_in_catalog():

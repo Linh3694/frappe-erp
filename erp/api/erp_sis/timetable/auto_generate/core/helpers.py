@@ -53,11 +53,10 @@ def inst_object_int(inst: dict, field: str, default: int) -> int:
 
 
 def resolve_room_id(inp: Any, class_info, ts_id: str, rmap) -> str:
-	req = rmap.get((class_info.name, ts_id))
-	if req and req.room_type_required:
-		for r in inp.rooms:
-			if r.room_type == req.room_type_required:
-				return r.name
+	"""Fallback phòng khi không dùng room_var — trả phòng chủ nhiệm của lớp.
+
+	Ràng buộc phòng theo môn nay do rule room_eligibility xử lý qua room_var.
+	"""
 	return class_info.room_id or ""
 
 

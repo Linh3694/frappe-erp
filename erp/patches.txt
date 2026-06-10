@@ -110,3 +110,6 @@ erp.patches.v1_0.backfill_subject_assignment_school_year
 # TKB auto-gen: seed thêm rule phòng mới + bật allow_kind_override
 erp.patches.v1_0.seed_room_rules_into_rule_sets
 
+# TKB auto-gen: bỏ room_no_overlap + prefer_home_room, luôn bật room_type_match + room_max_simultaneous
+erp.patches.v1_0.refactor_room_rules
+

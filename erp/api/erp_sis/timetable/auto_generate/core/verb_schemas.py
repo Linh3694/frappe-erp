@@ -170,14 +170,6 @@ VERB_SCHEMAS: Dict[str, dict] = {
 			"object_fields": [{"name": "max", "type": "int", "label": "Max liên tiếp"}],
 		},
 	},
-	"attribute_match": {
-		"params_schema": {
-			"fields": [
-				{"name": "require", "type": "text", "label": "Điều kiện (require)"},
-			],
-		},
-		"instance_schema": None,
-	},
 	"room_eligibility": {
 		"params_schema": {"fields": []},
 		"instance_schema": None,

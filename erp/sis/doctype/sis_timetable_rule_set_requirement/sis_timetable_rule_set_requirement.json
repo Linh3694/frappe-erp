@@ -81,8 +81,10 @@
   {
    "fieldname": "room_type_required",
    "fieldtype": "Select",
-   "label": "Room Type Required",
-   "options": "\nclassroom_room\nmeeting_room\nauditorium\noutdoor\noffice\nfunction_room"
+   "label": "Room Type Required (deprecated)",
+   "options": "\nclassroom_room\nmeeting_room\nauditorium\noutdoor\noffice\nfunction_room",
+   "hidden": 1,
+   "read_only": 1
   }
  ],
  "istable": 1,

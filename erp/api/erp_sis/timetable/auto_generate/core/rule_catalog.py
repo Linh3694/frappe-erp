@@ -126,21 +126,18 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"allow_kind_override": True,
 		"help_text_vn": "Mỗi dòng: chọn GV và số tiết liên tiếp tối đa (hoặc dùng params global).",
 	},
-	"room_no_overlap": {
-		"allow_kind_override": True,
-		"help_text_vn": "Không cho phép trùng phòng trong cùng 1 slot.",
-	},
-	"room_type_match": {
-		"allow_kind_override": True,
-		"help_text_vn": "Môn có room_type_required phải vào phòng đúng loại.",
-	},
 	"room_eligibility": {
 		"parameterized": False,
 		"object_kind": "None",
 		"display_name_vn": "Phòng hợp lệ theo môn/lớp",
 		"instance_required": False,
-		"allow_kind_override": True,
-		"help_text_vn": "Dữ liệu lấy từ Môn học: is_homeroom + danh sách phòng cho phép.",
+		"allow_kind_override": False,
+		"help_text_vn": (
+			"Giới hạn mỗi (lớp + môn) chỉ được xếp vào phòng hợp lệ của môn: "
+			"(1) môn gắn chủ nhiệm → đúng phòng chủ nhiệm của lớp; "
+			"(2) môn có danh sách phòng cho phép → chỉ các phòng trong danh sách. "
+			"Cấu hình tại Môn học (is_homeroom + danh sách phòng)."
+		),
 	},
 	"room_max_simultaneous": {
 		"parameterized": True,
@@ -149,8 +146,11 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"subject_label_vn": "Phòng",
 		"object_label_vn": "Số lớp tối đa",
 		"instance_required": False,
-		"allow_kind_override": True,
-		"help_text_vn": "Giới hạn số lớp có thể dùng cùng một phòng trong cùng slot.",
+		"allow_kind_override": False,
+		"help_text_vn": (
+			"Luôn áp dụng. Mặc định mỗi phòng (gồm phòng lớp học) tối đa 1 lớp/slot; "
+			"giáo vụ khai ngoại lệ cho từng phòng chức năng."
+		),
 	},
 }
 

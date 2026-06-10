@@ -281,8 +281,7 @@ def get_requirements_matrix(session_id=None):
 		force_pair_sql = ", force_pair" if has_force_pair else ", 0 as force_pair"
 		requirements = frappe.db.sql(f"""
 			SELECT name, class_id, timetable_subject_id,
-				   periods_per_week, max_periods_per_day, prefer_consecutive,
-				   room_type_required{force_pair_sql}
+				   periods_per_week, max_periods_per_day, prefer_consecutive{force_pair_sql}
 			FROM `tabSIS Timetable Generation Requirement`
 			WHERE session_id = %(session_id)s
 		""", {"session_id": session_id}, as_dict=True)
@@ -358,7 +357,6 @@ def save_requirements(**kwargs):
 				doc.prefer_consecutive = norm["prefer_consecutive"]
 				if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 					doc.force_pair = norm["force_pair"]
-				doc.room_type_required = norm["room_type_required"]
 				doc.save(ignore_permissions=True)
 				saved += 1
 
@@ -394,7 +392,6 @@ def _copy_requirements_from_rule_set_doc(session_id: str, rule_set_id: str) -> i
 			"periods_per_week": row.periods_per_week,
 			"max_periods_per_day": row.max_periods_per_day or 2,
 			"prefer_consecutive": row.prefer_consecutive,
-			"room_type_required": row.room_type_required or "",
 		}
 		if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 			payload["force_pair"] = getattr(row, "force_pair", 0)
@@ -435,7 +432,7 @@ def copy_requirements_from_session(**kwargs):
 
 		fields = [
 			"class_id", "timetable_subject_id", "periods_per_week",
-			"max_periods_per_day", "prefer_consecutive", "room_type_required",
+			"max_periods_per_day", "prefer_consecutive",
 		]
 		if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 			fields.append("force_pair")

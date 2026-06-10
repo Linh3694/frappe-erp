@@ -66,7 +66,6 @@ class SubjectRequirement:
 	max_periods_per_day: int = 2
 	prefer_consecutive: bool = False
 	force_pair: bool = False
-	room_type_required: Optional[str] = None
 	is_heavy: bool = False
 	program_id: Optional[str] = None
 
@@ -324,7 +323,6 @@ class TimetableDataCollector:
 				r.max_periods_per_day,
 				r.prefer_consecutive,
 				{force_pair_sql}
-				r.room_type_required,
 				{is_heavy_sql},
 				{program_sql}
 			FROM `tabSIS Timetable Generation Requirement` r
@@ -341,7 +339,6 @@ class TimetableDataCollector:
 			max_periods_per_day=r["max_periods_per_day"] or 2,
 			prefer_consecutive=bool(r["prefer_consecutive"]),
 			force_pair=bool(r.get("force_pair")),
-			room_type_required=r["room_type_required"] or None,
 			is_heavy=bool(r.get("is_heavy")),
 			program_id=r.get("program_id") or None,
 		) for r in rows]

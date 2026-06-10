@@ -121,7 +121,6 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 	periods = sorted_periods(inp)
 	col_index = {p.name: i for i, p in enumerate(periods)}
 	col_name = {p.name: p.period_name for p in periods}
-	class_map = {c.name: c for c in inp.classes}
 
 	hard_results: List[Dict] = []
 	soft_results: List[Dict] = []
@@ -258,29 +257,6 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 				)
 		soft_results.append(_soft_result(
 			"spread_subject_across_week", "Rải môn nhiều ngày", details, partial_threshold=5
-		))
-
-	# ── Soft: phòng chủ nhiệm ──
-	rule = next((r for r in rule_set.rules if r.rule_id == "prefer_home_room"), None)
-	if rule and _rule_enabled(rule_set, rule):
-		home_violations: List[str] = []
-		for s in slots:
-			if not s.get("timetable_subject_id"):
-				continue
-			cls = class_map.get(s["class_id"])
-			if not cls or not cls.room_id:
-				continue
-			if s.get("room_id") and s["room_id"] != cls.room_id:
-				subj = frappe.db.get_value(
-					"SIS Timetable Subject", s["timetable_subject_id"], "title_vn"
-				) or s["timetable_subject_id"]
-				col = col_name.get(s["timetable_column_id"], s["timetable_column_id"])
-				home_violations.append(
-					f"{subj} — {_class_label(inp, s['class_id'])}, "
-					f"{_day_label(s['day_of_week'])} {col}: không dùng phòng chủ nhiệm"
-				)
-		soft_results.append(_soft_result(
-			"prefer_home_room", "Phòng chủ nhiệm", home_violations, partial_threshold=10
 		))
 
 	# ── Soft: cân bằng tiết/tuần GV ──

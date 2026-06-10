@@ -26,7 +26,6 @@ FILTER_KEYS: Dict[str, List[dict]] = {
 	"assignment": [
 		{"key": "class_ids", "type": "id_list", "label": "Lớp", "entity": "class"},
 		{"key": "subject_ids", "type": "id_list", "label": "Môn TKB", "entity": "timetable_subject"},
-		{"key": "has_room_type_required", "type": "bool", "label": "Có yêu cầu loại phòng"},
 		{"key": "is_heavy", "type": "bool", "label": "Môn nặng"},
 	],
 	"session_scope": [],

@@ -105,9 +105,11 @@
   {
    "fieldname": "room_type_required",
    "fieldtype": "Select",
-   "label": "Room Type Required",
+   "label": "Room Type Required (deprecated)",
    "options": "\nclassroom_room\nmeeting_room\nauditorium\noutdoor\noffice\nfunction_room",
-   "description": "Loại phòng bắt buộc (trống = không yêu cầu, dùng phòng chủ nhiệm)"
+   "description": "Deprecated — ràng buộc phòng nay theo rule room_eligibility (cấu hình ở Môn học). Field giữ lại cho dữ liệu cũ.",
+   "hidden": 1,
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 0,

@@ -532,19 +532,15 @@ class ModelBuilder:
 		return objectives
 
 	def _soft_homeroom_preference(self, weight: int) -> List:
-		"""Ưu tiên fill tiết ở lớp có phòng chủ nhiệm (môn không yêu cầu phòng đặc biệt)."""
+		"""Ưu tiên fill tiết ở lớp có phòng chủ nhiệm."""
 		inp = self.inp
 		sm = self.solver_model
-		req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
 		bonuses = []
 
 		for c in inp.classes:
 			if not c.room_id:
 				continue
 			for ts_id in inp.class_subjects.get(c.name, []):
-				req = req_map.get((c.name, ts_id))
-				if req and req.room_type_required:
-					continue
 				for day in inp.working_days:
 					for p_idx in range(len(inp.periods)):
 						key = (c.name, ts_id, day, p_idx)
@@ -572,12 +568,7 @@ class ModelBuilder:
 		return penalties
 
 	def _resolve_room_id(self, class_info, ts_id: str, req_map) -> str:
-		"""Chọn phòng homeroom hoặc phòng khớp room_type_required."""
-		req = req_map.get((class_info.name, ts_id))
-		if req and req.room_type_required:
-			for r in self.inp.rooms:
-				if r.room_type == req.room_type_required:
-					return r.name
+		"""Phòng chủ nhiệm của lớp (room_type_required đã bỏ — ràng buộc phòng theo room_eligibility)."""
 		return class_info.room_id or ""
 
 	def _soft_subject_time_preferences(self, preferences: List[Dict]) -> List:

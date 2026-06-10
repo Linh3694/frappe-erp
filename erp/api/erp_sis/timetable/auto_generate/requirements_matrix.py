@@ -181,7 +181,6 @@ def normalize_requirement_row(row: dict) -> dict:
 		"max_periods_per_day": int(row.get("max_periods_per_day") or 2),
 		"prefer_consecutive": bool(row.get("prefer_consecutive")),
 		"force_pair": bool(row.get("force_pair")),
-		"room_type_required": row.get("room_type_required") or "",
 	}
 
 

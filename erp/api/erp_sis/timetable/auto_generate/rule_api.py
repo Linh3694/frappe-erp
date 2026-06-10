@@ -410,7 +410,6 @@ def get_rule_set_requirements_matrix(rule_set_id=None):
 					"max_periods_per_day": row.max_periods_per_day,
 					"prefer_consecutive": row.prefer_consecutive,
 					"force_pair": getattr(row, "force_pair", 0),
-					"room_type_required": row.room_type_required,
 				})
 
 		class_count = sum(len(g.get("classes") or []) for g in grade_groups)
@@ -470,7 +469,6 @@ def save_rule_set_requirements(**kwargs):
 				"max_periods_per_day": norm["max_periods_per_day"],
 				"prefer_consecutive": int(norm["prefer_consecutive"]),
 				"force_pair": int(norm["force_pair"]),
-				"room_type_required": norm["room_type_required"],
 			})
 
 		doc.set("requirements", [])
@@ -891,6 +889,7 @@ def list_filter_options(
 	education_stage_id=None,
 	search=None,
 	limit=50,
+	room_type=None,
 ):
 	"""Entity picker options cho subject filter / instance editor."""
 	try:
@@ -898,6 +897,7 @@ def list_filter_options(
 		campus_id = campus_id or frappe.form_dict.get("campus_id")
 		school_year_id = school_year_id or frappe.form_dict.get("school_year_id")
 		education_stage_id = education_stage_id or frappe.form_dict.get("education_stage_id")
+		room_type = room_type or frappe.form_dict.get("room_type")
 		search = search or frappe.form_dict.get("search") or ""
 		limit = int(frappe.form_dict.get("limit") or limit or 50)
 		if not entity:
@@ -919,6 +919,7 @@ def list_filter_options(
 			)
 		options = _query_filter_options(
 			entity_lower, campus_id, school_year_id, education_stage_id, search, limit,
+			room_type=room_type,
 		)
 		return list_response(options, meta=meta or None)
 	except Exception as e:
@@ -943,6 +944,7 @@ def _query_filter_options(
 	education_stage_id: Optional[str],
 	search: str,
 	limit: int,
+	room_type: Optional[str] = None,
 ) -> list:
 	"""Truy vấn entity theo campus + phạm vi rule set — dùng cho UI picker."""
 	entity = entity.lower()
@@ -1030,6 +1032,8 @@ def _query_filter_options(
 		filters = {}
 		if campus_id and frappe.db.has_column("ERP Administrative Room", "campus_id"):
 			filters["campus_id"] = campus_id
+		if room_type and frappe.db.has_column("ERP Administrative Room", "room_type"):
+			filters["room_type"] = room_type
 		rows = frappe.get_all(
 			"ERP Administrative Room",
 			filters=filters,
