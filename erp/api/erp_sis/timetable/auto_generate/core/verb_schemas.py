@@ -193,8 +193,13 @@ VERB_SCHEMAS: Dict[str, dict] = {
 		},
 		"instance_schema": {
 			"subject_type": "subject",
-			"object_kind": "IntList",
-			"object_fields": [{"name": "periods", "type": "int_list", "label": "Tiết ưu tiên (0-based)"}],
+			"object_kind": "Slots",
+			"object_fields": [
+				{"name": "slots", "type": "slot_list", "label": "Slot ưu tiên"},
+				{"name": "class_ids", "type": "entity_list", "entity": "class", "label": "Lớp áp dụng"},
+				{"name": "grade_ids", "type": "entity_list", "entity": "grade", "label": "Khối áp dụng"},
+				{"name": "periods", "type": "int_list", "label": "Tiết ưu tiên (legacy 0-based)"},
+			],
 		},
 	},
 	"spread_across_days": {"params_schema": {"fields": []}, "instance_schema": None},
