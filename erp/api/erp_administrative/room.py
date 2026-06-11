@@ -598,82 +598,134 @@ def update_room():
         return error_response(f"Error updating room: {str(e)}")
 
 
-@frappe.whitelist(allow_guest=False) 
+def _resolve_campus_for_room_api() -> str:
+    campus_id = get_current_campus_from_context()
+    if campus_id:
+        return campus_id
+    try:
+        first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+        return first_campus or "CAMPUS-00001"
+    except Exception:
+        return "CAMPUS-00001"
+
+
+def _verify_room_access(room_id: str, campus_id: str):
+    if not room_id:
+        return None, "Room ID is required"
+    try:
+        room_doc = frappe.get_doc("ERP Administrative Room", room_id)
+    except frappe.DoesNotExistError:
+        return None, "Room not found"
+
+    building_exists = frappe.db.exists(
+        "ERP Administrative Building",
+        {"name": room_doc.building_id, "campus_id": campus_id},
+    )
+    if not building_exists:
+        return None, "Access denied: You don't have permission to delete this room"
+    return room_doc, None
+
+
+@frappe.whitelist(allow_guest=False)
 def delete_room():
     """Delete a room"""
     try:
-        # Get data from request - follow Building pattern
-        data = {}
-        
-        # First try to get JSON data from request body
-        if frappe.request.data:
-            try:
-                json_data = json.loads(frappe.request.data)
-                if json_data:
-                    data = json_data
-                    room_id = data.get('room_id')
-            except (json.JSONDecodeError, TypeError):
-                # If JSON parsing fails, use form_dict
-                data = frappe.local.form_dict
-                room_id = data.get('room_id')
-        else:
-            # Fallback to form_dict
-            data = frappe.local.form_dict
-            room_id = data.get('room_id')
-        
+        data = _room_api_json_body()
+        room_id = (data.get("room_id") or "").strip()
         if not room_id:
             return error_response("Room ID is required")
-        
-        # Get campus from user context
-        campus_id = get_current_campus_from_context()
 
-        if not campus_id:
-            # Fallback: try to get first available campus from database
-            try:
-                first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
-                campus_id = first_campus or "CAMPUS-00001"
-            except Exception:
-                # Final fallback to known campus
-                campus_id = "CAMPUS-00001"
-        
-        # Get existing document and verify access
-        try:
-            room_doc = frappe.get_doc("ERP Administrative Room", room_id)
-            
-            # Check if the room's building belongs to this campus
-            building_exists = frappe.db.exists(
-                "ERP Administrative Building",
-                {
-                    "name": room_doc.building_id,
-                    "campus_id": campus_id
-                }
-            )
-            
-            if not building_exists:
-                return error_response("Access denied: You don't have permission to delete this room")
-                
-        except frappe.DoesNotExistError:
-            return error_response("Room not found")
-        
-        # Delete the document
+        campus_id = _resolve_campus_for_room_api()
+        _, access_error = _verify_room_access(room_id, campus_id)
+        if access_error:
+            return error_response(access_error)
+
         frappe.delete_doc("ERP Administrative Room", room_id)
         frappe.db.commit()
-        
         return success_response(message="Room deleted successfully")
 
-    except LinkExistsError as e:
-        # Handle case where room is linked to classes
+    except LinkExistsError:
         error_msg = "Không thể xóa phòng vì nó đang được sử dụng bởi các lớp học. Vui lòng gỡ bỏ liên kết trước khi xóa."
         return error_response(error_msg)
-
     except Exception as e:
-        # Truncate error message to avoid CharacterLengthExceededError when logging
         error_str = str(e)
         if len(error_str) > 200:
             error_str = error_str[:200] + "..."
-
         frappe.log_error(f"Error deleting room: {error_str}")
         return error_response("Có lỗi xảy ra khi xóa phòng. Vui lòng thử lại sau.")
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def bulk_delete_rooms():
+    """Xóa nhiều phòng theo cơ chế partial-success."""
+    try:
+        data = _room_api_json_body()
+        raw_room_ids = data.get("room_ids") or data.get("ids") or []
+        if not isinstance(raw_room_ids, list):
+            return validation_error_response(_("room_ids phải là mảng"), {"room_ids": ["invalid_type"]})
+
+        room_ids = []
+        seen = set()
+        for room_id in raw_room_ids:
+            normalized = (str(room_id or "")).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            room_ids.append(normalized)
+
+        if not room_ids:
+            return validation_error_response(_("Thiếu room_ids"), {"room_ids": ["required"]})
+        if len(room_ids) > 200:
+            return validation_error_response(_("Tối đa 200 phòng mỗi lần"), {"room_ids": ["too_many_items"]})
+
+        campus_id = _resolve_campus_for_room_api()
+        deleted_room_ids: List[str] = []
+        failed_items: List[Dict[str, str]] = []
+
+        for room_id in room_ids:
+            _, access_error = _verify_room_access(room_id, campus_id)
+            if access_error:
+                failed_items.append({"room_id": room_id, "message": access_error})
+                continue
+
+            try:
+                frappe.delete_doc("ERP Administrative Room", room_id)
+                frappe.db.commit()
+                deleted_room_ids.append(room_id)
+            except LinkExistsError:
+                frappe.db.rollback()
+                failed_items.append(
+                    {
+                        "room_id": room_id,
+                        "message": "Không thể xóa phòng vì đang có dữ liệu liên kết.",
+                    }
+                )
+            except Exception as row_err:
+                frappe.db.rollback()
+                failed_items.append({"room_id": room_id, "message": str(row_err)})
+
+        deleted_count = len(deleted_room_ids)
+        failed_count = len(failed_items)
+        message = _("Đã xóa %(ok)s/%(total)s phòng") % {"ok": deleted_count, "total": len(room_ids)}
+        if failed_count:
+            message = _("Đã xóa %(ok)s phòng, %(failed)s phòng thất bại") % {
+                "ok": deleted_count,
+                "failed": failed_count,
+            }
+
+        return success_response(
+            data={
+                "total_requested": len(room_ids),
+                "deleted_count": deleted_count,
+                "failed_count": failed_count,
+                "deleted_room_ids": deleted_room_ids,
+                "failed_items": failed_items,
+            },
+            message=message,
+        )
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.bulk_delete_rooms")
+        return error_response(str(e))
 
 
 class RoomExcelImporter:
