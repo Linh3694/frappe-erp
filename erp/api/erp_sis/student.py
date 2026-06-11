@@ -200,6 +200,12 @@ def get_all_students(include_all_campuses=0):
             # Log error but DON'T fail the API - students without photos is better than no students at all
             frappe.logger().error(f"❌ [get_all_students] Failed to enrich students with photos: {str(e)}")
             frappe.logger().error(f"❌ [get_all_students] Traceback: {frappe.get_traceback()}")
+
+        try:
+            campus_id_for_class = None if include_all_campuses else get_current_campus_from_context()
+            _enrich_students_current_class_for_batch(students, campus_id_for_class)
+        except Exception as e:
+            frappe.logger().warning(f"[get_all_students] Failed to enrich class info: {e}")
         
         # Always return all students without pagination info
         return success_response(
