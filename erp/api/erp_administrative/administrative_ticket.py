@@ -1715,11 +1715,30 @@ def get_room_event_bookings(room_id=None, range_start=None, range_end=None, excl
             ],
             order_by="event_start_time asc",
         )
+        creator_ids = list({(r.creator_email or "").strip() for r in rows if (r.creator_email or "").strip()})
+        user_code_map = {}
+        if creator_ids:
+            # Ưu tiên custom field employee_code trên User; fallback username để FE có mã hiển thị.
+            user_fields = ["name", "username"]
+            if frappe.db.has_column("User", "employee_code"):
+                user_fields.insert(1, "employee_code")
+            users = frappe.get_all(
+                "User",
+                filters={"name": ["in", creator_ids]},
+                fields=user_fields,
+                limit_page_length=0,
+            )
+            for u in users:
+                uid = (u.get("name") or "").strip()
+                if not uid:
+                    continue
+                user_code_map[uid] = (u.get("employee_code") or u.get("username") or "").strip()
         bookings = [
             {
                 "name": r.name,
                 "title": r.title or "",
                 "booked_by": (r.creator_fullname or r.creator_email or "").strip(),
+                "booked_by_employee_code": user_code_map.get((r.creator_email or "").strip(), ""),
                 "event_start_time": str(r.event_start_time) if r.event_start_time else "",
                 "event_end_time": str(r.event_end_time) if r.event_end_time else "",
                 "status": r.status or "",
