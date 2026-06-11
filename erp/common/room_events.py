@@ -22,6 +22,45 @@ def _get_room_channel() -> str:
     return frappe.conf.get("REDIS_ROOM_CHANNEL", "room_events")
 
 
+def _room_events_enabled() -> bool:
+    """Cờ bật/tắt room events toàn cục."""
+    return bool(frappe.conf.get("FRAPPE_ROOM_EVENTS_ENABLED", True))
+
+
+def _build_room_payload_from_doc(doc) -> dict:
+    """Snapshot room payload từ doc hiện có để worker nền dùng lại."""
+    return {
+        "name": doc.name,
+        "title_vn": getattr(doc, "title_vn", None),
+        "title_en": getattr(doc, "title_en", None),
+        "short_title": getattr(doc, "short_title", None),
+        "room_name": getattr(doc, "room_name", None),
+        "room_number": getattr(doc, "room_number", None),
+        "building_id": getattr(doc, "building_id", None),
+        "building": getattr(doc, "building", None),
+        "floor": getattr(doc, "floor", None),
+        "block": getattr(doc, "block", None),
+        "campus_id": getattr(doc, "campus_id", None),
+        "capacity": getattr(doc, "capacity", None),
+        "room_type": getattr(doc, "room_type", None),
+        "status": getattr(doc, "status", None),
+        "disabled": getattr(doc, "disabled", None),
+    }
+
+
+def _enqueue_room_event_message(message: dict) -> None:
+    """Đẩy publish sang worker nền để không block API."""
+    queue_name = frappe.conf.get("ROOM_EVENT_QUEUE", "short")
+    timeout_seconds = int(frappe.conf.get("ROOM_EVENT_JOB_TIMEOUT_SECONDS", 120))
+    frappe.enqueue(
+        "erp.common.room_events.process_room_event_async",
+        queue=queue_name,
+        timeout=timeout_seconds,
+        enqueue_after_commit=True,
+        message=message,
+    )
+
+
 def _publish_room(payload: dict) -> None:
     try:
         # Prefer socketio redis; fallback to cache/queue via frappe.cache
@@ -51,38 +90,17 @@ def _publish_room(payload: dict) -> None:
 
 
 def publish_room_event(event_type: str, room_name: str) -> None:
-    """Publish room event to Redis for microservices
-    Chỉ publish trên production server (is_production = true trong site_config.json)
-    """
-    # Chỉ publish events trên production server
+    """Queue room event publish by room_name (compat API)."""
     if not is_production_server():
         return
-    
-    if not frappe.conf.get("FRAPPE_ROOM_EVENTS_ENABLED", True):
+
+    if not _room_events_enabled():
         frappe.logger().info(f"Room events disabled, skipping {event_type} for {room_name}")
         return
 
     try:
-        frappe.logger().info(f"Attempting to publish room event: {event_type} for {room_name}")
-
-        # Get room doc
         room_doc = frappe.get_doc("ERP Administrative Room", room_name)
-        frappe.logger().info(f"Got room doc for {room_name}")
-
-        # Build payload matching inventory-service expectations
-        payload = {
-            "name": room_doc.name,
-            "room_name": room_doc.room_name,
-            "room_number": room_doc.room_number,
-            "building": room_doc.building,
-            "floor": room_doc.floor,
-            "block": room_doc.block,
-            "capacity": room_doc.capacity,
-            "room_type": room_doc.room_type,
-            "status": room_doc.status,
-            "disabled": room_doc.disabled,
-        }
-        frappe.logger().info(f"Built payload for {room_name}")
+        payload = _build_room_payload_from_doc(room_doc)
 
         message = {
             "type": event_type,
@@ -90,28 +108,64 @@ def publish_room_event(event_type: str, room_name: str) -> None:
             "source": "frappe",
             "timestamp": frappe.utils.now_datetime().isoformat() if hasattr(frappe, "utils") else None,
         }
-        frappe.logger().info(f"Built message for {event_type}")
+        _enqueue_room_event_message(message)
+        frappe.logger().info(f"📡 Enqueued room event: {event_type} for {room_name}")
+    except frappe.DoesNotExistError:
+        # on_trash chạy trước delete, nhưng guard thêm để tránh worker sync path làm rơi exception.
+        frappe.logger().warning(f"Room not found while queueing event: {event_type} / {room_name}")
+    except Exception as e:
+        frappe.log_error(f"Failed to enqueue room event {event_type} for {room_name}: {str(e)}", "erp.common.room_events")
 
-        _publish_room(message)
-        frappe.logger().info(f"📡 Published room event: {event_type} for {room_name}")
+
+def process_room_event_async(message: dict) -> None:
+    """Worker nền: publish message lên Redis."""
+    try:
+        _publish_room(message or {})
+        event_type = (message or {}).get("type")
+        room_name = ((message or {}).get("room") or {}).get("name")
+        frappe.logger().info(f"📡 Published room event async: {event_type} for {room_name}")
 
     except Exception as e:
-        frappe.log_error(f"Failed to publish room event {event_type} for {room_name}: {str(e)}", "erp.common.room_events")
+        frappe.log_error(f"Failed to publish async room event: {str(e)}", "erp.common.room_events")
 
 
 def on_room_after_insert(doc, method: str | None = None):
-    """Handle room creation"""
-    publish_room_event("room_created", doc.name)
+    """Handle room creation (async publish)."""
+    if not is_production_server() or not _room_events_enabled():
+        return
+    message = {
+        "type": "room_created",
+        "room": _build_room_payload_from_doc(doc),
+        "source": "frappe",
+        "timestamp": frappe.utils.now_datetime().isoformat() if hasattr(frappe, "utils") else None,
+    }
+    _enqueue_room_event_message(message)
 
 
 def on_room_on_update(doc, method: str | None = None):
-    """Handle room updates"""
-    publish_room_event("room_updated", doc.name)
+    """Handle room updates (async publish)."""
+    if not is_production_server() or not _room_events_enabled():
+        return
+    message = {
+        "type": "room_updated",
+        "room": _build_room_payload_from_doc(doc),
+        "source": "frappe",
+        "timestamp": frappe.utils.now_datetime().isoformat() if hasattr(frappe, "utils") else None,
+    }
+    _enqueue_room_event_message(message)
 
 
 def on_room_on_trash(doc, method: str | None = None):
-    """Handle room deletion"""
-    publish_room_event("room_deleted", doc.name)
+    """Handle room deletion (async publish)."""
+    if not is_production_server() or not _room_events_enabled():
+        return
+    message = {
+        "type": "room_deleted",
+        "room": _build_room_payload_from_doc(doc),
+        "source": "frappe",
+        "timestamp": frappe.utils.now_datetime().isoformat() if hasattr(frappe, "utils") else None,
+    }
+    _enqueue_room_event_message(message)
 
 
 # Utility function for testing
