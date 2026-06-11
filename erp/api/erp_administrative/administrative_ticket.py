@@ -1644,6 +1644,94 @@ def get_rooms_by_building(building_id=None):
         return error_response(str(e))
 
 
+def _room_event_booking_conflicts(room_id, start_dt, end_dt, exclude_ticket_id=None):
+    """Các ticket CSVC sự kiện trùng khung giờ trong cùng phòng (bỏ qua Cancelled).
+
+    Overlap chuẩn: bắt đầu < end mới VÀ kết thúc > start mới.
+    """
+    if not room_id or not start_dt or not end_dt:
+        return []
+    filters = [
+        ["is_event_facility", "=", 1],
+        ["event_room_id", "=", room_id],
+        ["status", "!=", "Cancelled"],
+        ["event_start_time", "<", end_dt],
+        ["event_end_time", ">", start_dt],
+    ]
+    if exclude_ticket_id:
+        filters.append(["name", "!=", exclude_ticket_id])
+    return frappe.get_all(DOCTYPE, filters=filters, fields=["name"])
+
+
+@frappe.whitelist(allow_guest=False)
+def get_room_event_bookings(room_id=None, range_start=None, range_end=None, exclude_ticket_id=None):
+    """Lịch đặt phòng (CSVC sự kiện) theo phòng — hiển thị calendar khi đặt phòng.
+
+    Chỉ trả thời gian + Người đặt; loại trừ ticket Cancelled. Nếu có range thì lọc theo
+    khoảng [range_start, range_end) (overlap).
+    """
+    try:
+        data = _parse_json_body()
+        room_id = (room_id or data.get("room_id") or "").strip()
+        range_start = range_start or data.get("range_start")
+        range_end = range_end or data.get("range_end")
+        exclude_ticket_id = (exclude_ticket_id or data.get("exclude_ticket_id") or "").strip() or None
+
+        if not room_id:
+            return validation_error_response(_("Thiếu room_id"), {"room_id": ["required"]})
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response(_("Không tìm thấy phòng"))
+
+        filters = [
+            ["is_event_facility", "=", 1],
+            ["event_room_id", "=", room_id],
+            ["status", "!=", "Cancelled"],
+        ]
+        if range_start and range_end:
+            try:
+                rs = get_datetime(range_start)
+                re_ = get_datetime(range_end)
+            except Exception:
+                return validation_error_response(
+                    _("Khoảng thời gian không hợp lệ"),
+                    {"range_start": ["invalid"], "range_end": ["invalid"]},
+                )
+            filters.append(["event_start_time", "<", re_])
+            filters.append(["event_end_time", ">", rs])
+        if exclude_ticket_id:
+            filters.append(["name", "!=", exclude_ticket_id])
+
+        rows = frappe.get_all(
+            DOCTYPE,
+            filters=filters,
+            fields=[
+                "name",
+                "title",
+                "creator_fullname",
+                "creator_email",
+                "event_start_time",
+                "event_end_time",
+                "status",
+            ],
+            order_by="event_start_time asc",
+        )
+        bookings = [
+            {
+                "name": r.name,
+                "title": r.title or "",
+                "booked_by": (r.creator_fullname or r.creator_email or "").strip(),
+                "event_start_time": str(r.event_start_time) if r.event_start_time else "",
+                "event_end_time": str(r.event_end_time) if r.event_end_time else "",
+                "status": r.status or "",
+            }
+            for r in rows
+        ]
+        return success_response({"bookings": bookings}, "OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_room_event_bookings")
+        return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False)
 def get_room_equipment_for_ticket(room_id=None):
     """Danh sách thiết bị CSVC theo phòng — dùng form ticket."""
@@ -1907,6 +1995,11 @@ def create_ticket():
                     _("Thời gian kết thúc phải sau thời gian bắt đầu"),
                     {"event_end_time": ["invalid"]},
                 )
+            if _room_event_booking_conflicts(event_room_id, event_start_time, event_end_time):
+                return validation_error_response(
+                    _("Khung giờ này đã có người đặt phòng. Vui lòng chọn thời gian khác."),
+                    {"event_end_time": ["conflict"]},
+                )
 
         room_id_nf = (data.get("room_id") or "").strip()
         related_equipment_ids_merged = _merge_equipment_ids_from_payload(data)
@@ -2137,6 +2230,11 @@ def update_ticket():
                 return validation_error_response(
                     _("Thời gian kết thúc phải sau thời gian bắt đầu"),
                     {"event_end_time": ["invalid"]},
+                )
+            if _room_event_booking_conflicts(er, est, eet, exclude_ticket_id=doc.name):
+                return validation_error_response(
+                    _("Khung giờ này đã có người đặt phòng. Vui lòng chọn thời gian khác."),
+                    {"event_end_time": ["conflict"]},
                 )
 
         # Ticket thường: không lưu room_id (dùng event_room_id cho CSVC sự kiện)
