@@ -1667,8 +1667,8 @@ def _room_event_booking_conflicts(room_id, start_dt, end_dt, exclude_ticket_id=N
 def get_room_event_bookings(room_id=None, range_start=None, range_end=None, exclude_ticket_id=None):
     """Lịch đặt phòng (CSVC sự kiện) theo phòng — hiển thị calendar khi đặt phòng.
 
-    Chỉ trả thời gian + Người đặt; loại trừ ticket Cancelled. Nếu có range thì lọc theo
-    khoảng [range_start, range_end) (overlap).
+    Trả thời gian + thông tin người đặt (họ tên/email/phòng ban/mã NV); loại trừ ticket
+    Cancelled. Nếu có range thì lọc theo khoảng [range_start, range_end) (overlap).
     """
     try:
         data = _parse_json_body()
@@ -1709,6 +1709,7 @@ def get_room_event_bookings(room_id=None, range_start=None, range_end=None, excl
                 "title",
                 "creator_fullname",
                 "creator_email",
+                "creator_department",
                 "event_start_time",
                 "event_end_time",
                 "status",
@@ -1716,12 +1717,14 @@ def get_room_event_bookings(room_id=None, range_start=None, range_end=None, excl
             order_by="event_start_time asc",
         )
         creator_ids = list({(r.creator_email or "").strip() for r in rows if (r.creator_email or "").strip()})
-        user_code_map = {}
+        user_profile_map = {}
         if creator_ids:
-            # Ưu tiên custom field employee_code trên User; fallback username để FE có mã hiển thị.
+            # Lấy profile user để fallback khi ticket thiếu dữ liệu creator_*.
             user_fields = ["name", "username"]
             if frappe.db.has_column("User", "employee_code"):
                 user_fields.insert(1, "employee_code")
+            if frappe.db.has_column("User", "department"):
+                user_fields.append("department")
             users = frappe.get_all(
                 "User",
                 filters={"name": ["in", creator_ids]},
@@ -1732,13 +1735,23 @@ def get_room_event_bookings(room_id=None, range_start=None, range_end=None, excl
                 uid = (u.get("name") or "").strip()
                 if not uid:
                     continue
-                user_code_map[uid] = (u.get("employee_code") or u.get("username") or "").strip()
+                user_profile_map[uid] = {
+                    "employee_code": (u.get("employee_code") or u.get("username") or "").strip(),
+                    "department": (u.get("department") or "").strip(),
+                }
         bookings = [
             {
                 "name": r.name,
                 "title": r.title or "",
                 "booked_by": (r.creator_fullname or r.creator_email or "").strip(),
-                "booked_by_employee_code": user_code_map.get((r.creator_email or "").strip(), ""),
+                "booked_by_email": (r.creator_email or "").strip(),
+                "booked_by_department": (
+                    (r.creator_department or "").strip()
+                    or user_profile_map.get((r.creator_email or "").strip(), {}).get("department", "")
+                ),
+                "booked_by_employee_code": user_profile_map.get(
+                    (r.creator_email or "").strip(), {}
+                ).get("employee_code", ""),
                 "event_start_time": str(r.event_start_time) if r.event_start_time else "",
                 "event_end_time": str(r.event_end_time) if r.event_end_time else "",
                 "status": r.status or "",
@@ -2009,6 +2022,11 @@ def create_ticket():
                     _("Định dạng thời gian sự kiện không hợp lệ"),
                     {"event_start_time": ["invalid"], "event_end_time": ["invalid"]},
                 )
+            if event_start_time.date() < now_datetime().date():
+                return validation_error_response(
+                    _("Ngày bắt đầu không được ở ngày quá khứ"),
+                    {"event_start_time": ["past"]},
+                )
             if not event_start_time or not event_end_time or event_end_time <= event_start_time:
                 return validation_error_response(
                     _("Thời gian kết thúc phải sau thời gian bắt đầu"),
@@ -2244,6 +2262,11 @@ def update_ticket():
                 return validation_error_response(
                     _("Thiếu thời gian sự kiện"),
                     {"event_start_time": ["required"], "event_end_time": ["required"]},
+                )
+            if est.date() < now_datetime().date():
+                return validation_error_response(
+                    _("Ngày bắt đầu không được ở ngày quá khứ"),
+                    {"event_start_time": ["past"]},
                 )
             if eet <= est:
                 return validation_error_response(
