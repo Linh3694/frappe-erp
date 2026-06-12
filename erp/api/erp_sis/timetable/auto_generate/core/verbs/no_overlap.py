@@ -10,7 +10,7 @@ class NoOverlap(Verb):
 					for p_idx in range(ctx.num_periods):
 						vars_ = ctx.vars_for_class_slot(c.name if hasattr(c, "name") else c, day, p_idx)
 						if len(vars_) > 1:
-							ctx.model.Add(sum(vars_) <= 1)
+							ctx.add_hard(ctx.model.Add(sum(vars_) <= 1))
 		elif ctx.cur_subject_type == "teacher":
 			for t_id in subject_set:
 				tid = t_id.name if hasattr(t_id, "name") else t_id
@@ -18,7 +18,7 @@ class NoOverlap(Verb):
 					for p_idx in range(ctx.num_periods):
 						vars_ = ctx.vars_for_teacher_slot(tid, day, p_idx)
 						if len(vars_) > 1:
-							ctx.model.Add(sum(vars_) <= 1)
+							ctx.add_hard(ctx.model.Add(sum(vars_) <= 1))
 
 	def build_soft(self, ctx, subject_set, params, weight: int):
 		return []

@@ -11,6 +11,7 @@ from .dto import RuleSet
 from .extract import extract_solution
 from .registry import assert_compatible, get_verb
 from .subject_resolver import SubjectResolver
+from .tiers import STRONG_FACTOR, WEAK_FACTOR
 from .variables import create_variables
 
 # Import verbs để đăng ký registry
@@ -56,6 +57,18 @@ def _apply_forbid_solutions(ctx: SolverContext, forbid_solutions: List[List[Assi
 			ctx.model.Add(sum(same_vars) <= len(same_vars) - min_diff)
 
 
+def _configure_and_solve(cp, inp):
+	"""Cấu hình CpSolver theo input và chạy 1 pha. Trả về (solver, status)."""
+	from ortools.sat.python import cp_model
+
+	solver = cp_model.CpSolver()
+	solver.parameters.max_time_in_seconds = inp.solver_time_limit
+	solver.parameters.num_workers = 4
+	solver.parameters.log_search_progress = False
+	status = solver.Solve(cp)
+	return solver, status
+
+
 def _apply_legacy_session_soft(ctx: SolverContext) -> None:
 	"""Soft rules JSON cũ từ session (consecutive_bonus, pair exclusions...)."""
 	inp = ctx.inp
@@ -86,13 +99,26 @@ def build_and_solve(
 	forbid_solutions: Optional[List[List[AssignmentKey]]] = None,
 	min_diff: int = 0,
 	objective_pin: Optional[int] = None,
+	diagnostic: bool = False,
+	assume_mode: bool = False,
 ):
-	"""Trả về (cp_solver, RuleSolverBuilder, status_name, ctx)."""
+	"""Trả về (cp_solver, RuleSolverBuilder, status_name, ctx).
+
+	diagnostic=True bật chế độ nới relaxable thành slack → solver luôn ra lời giải
+	tốt nhất có thể; đọc ctx.slacks để dựng báo cáo "% đáp ứng / vô nghiệm ở đâu".
+
+	assume_mode=True gắn assumption literal cho mỗi rule cứng còn lại rồi giải
+	feasibility-only; nếu INFEASIBLE -> ctx.conflict_core = tập rule_id mâu thuẫn tối thiểu
+	(UNSAT core). Thường đi kèm diagnostic=True để coverage không nằm trong core.
+	"""
 	from ortools.sat.python import cp_model
 
 	rs = rule_set or build_default_rule_set()
 	cp = cp_model.CpModel()
-	ctx = SolverContext(model=cp, x={}, inp=inp, use_room_vars=_needs_room_vars(rs))
+	ctx = SolverContext(
+		model=cp, x={}, inp=inp, use_room_vars=_needs_room_vars(rs),
+		diagnostic=diagnostic, assume_mode=assume_mode,
+	)
 	create_variables(ctx)
 
 	resolver = SubjectResolver()
@@ -106,40 +132,82 @@ def build_and_solve(
 
 		subject_set = resolver.resolve(rule.subject_type, rule.subject_filter, inp)
 		ctx.cur_subject_type = rule.subject_type
+		ctx.cur_rule_id = rule.rule_id
 		verb = verb_cls()
 
 		if rule.kind == "hard":
 			verb.apply_hard(ctx, subject_set, rule.params)
 		else:
-			ctx.objectives.extend(verb.build_soft(ctx, subject_set, rule.params, rule.weight))
+			# Soft route vào tầng strong/weak theo rule.tier (band áp dụng ở pha 2).
+			for term in verb.build_soft(ctx, subject_set, rule.params, rule.weight):
+				ctx.add_soft(rule.tier, term)
 
 	# HC9 legacy: max tiết liên tiếp GV (hard) — chưa tách rule_id riêng trong default set
 	from .verbs.max_consecutive import MaxConsecutive
+	ctx.cur_rule_id = "system_teacher_max_consecutive"
 	MaxConsecutive().apply_hard(ctx, list(inp.teachers.keys()), {"use_teacher_field": True})
 
 	# HC13: force_pair từ ma trận requirement (checkbox Cặp)
 	from .force_pair_constraints import apply_requirement_force_pairs
+	ctx.cur_rule_id = "system_force_pair"
 	apply_requirement_force_pairs(ctx)
 
 	# HC14: ràng buộc hệ thống — không môn nào quá 3 tiết liền trong ngày
 	from .subject_consecutive_cap import apply_subject_max_consecutive_system_cap
+	ctx.cur_rule_id = "system_subject_consecutive_cap"
 	apply_subject_max_consecutive_system_cap(ctx, max_consecutive=3)
+	ctx.cur_rule_id = ""
 
 	_apply_legacy_session_soft(ctx)
 	_apply_forbid_solutions(ctx, forbid_solutions or [], min_diff)
 
-	if ctx.objectives:
-		obj_expr = sum(ctx.objectives)
+	builder = RuleSolverBuilder(ctx, inp)
+
+	# Assume pass (UNSAT core): giải feasibility-only với assumption literal trên rule cứng.
+	if assume_mode:
+		if ctx.assumptions:
+			cp.AddAssumptions(list(ctx.assumptions.values()))
+		solver, status = _configure_and_solve(cp, inp)
+		if status == cp_model.INFEASIBLE:
+			try:
+				core_idx = set(solver.SufficientAssumptionsForInfeasibility())
+				ctx.conflict_core = [
+					rid for rid, lit in ctx.assumptions.items() if lit.Index() in core_idx
+				]
+			except Exception:
+				ctx.conflict_core = []
+		return solver, builder, solver.StatusName(status), ctx
+
+	# Gom objective theo tầng. Flat ctx.objectives = soft "trung tính" (verb append
+	# nội bộ); strong/weak nhân band ở pha 2; relaxable giải tách ở pha 1.
+	relax_terms = ctx.objectives_by_tier["relaxable"]
+	soft_terms = (
+		list(ctx.objectives)
+		+ [STRONG_FACTOR * t for t in ctx.objectives_by_tier["strong"]]
+		+ [WEAK_FACTOR * t for t in ctx.objectives_by_tier["weak"]]
+	)
+
+	if relax_terms:
+		# Hybrid 2 pha: pha 1 tối đa coverage/relaxable rồi pin, pha 2 tối ưu sở thích.
+		relax_obj = sum(relax_terms)
+		cp.Maximize(relax_obj)
+		solver1, status1 = _configure_and_solve(cp, inp)
+		if status1 not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+			# Vô nghiệm ngay cả khi đã nới relaxable — không cứu được.
+			return solver1, builder, solver1.StatusName(status1), ctx
+		cp.Add(relax_obj == int(round(solver1.ObjectiveValue())))
+		if soft_terms:
+			cp.Maximize(sum(soft_terms))
+		solver, status = _configure_and_solve(cp, inp)
+		return solver, builder, solver.StatusName(status), ctx
+
+	# Đường thường: 1 pha như trước.
+	if soft_terms:
+		obj_expr = sum(soft_terms)
 		if objective_pin is not None:
 			cp.Add(obj_expr == objective_pin)
 		cp.Maximize(obj_expr)
-
-	solver = cp_model.CpSolver()
-	solver.parameters.max_time_in_seconds = inp.solver_time_limit
-	solver.parameters.num_workers = 4
-	solver.parameters.log_search_progress = False
-	status = solver.Solve(cp)
-	builder = RuleSolverBuilder(ctx, inp)
+	solver, status = _configure_and_solve(cp, inp)
 	return solver, builder, solver.StatusName(status), ctx
 
 

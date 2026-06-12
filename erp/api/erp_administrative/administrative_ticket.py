@@ -853,9 +853,9 @@ def _notify_new_admin_ticket_mobile(doc):
     code = (doc.ticket_code or doc.name or "").strip()
     t = (doc.title or "").strip() or code
     cat = _hc_category_label(doc) or (getattr(doc, "category", None) or "")
-    # Chuẩn hoá: # mã, danh mục, tiêu đề
-    body = _("{0} · {1}: {2}").format(f"#{code}", cat, t) if cat else _("{0}: {1}").format(f"#{code}", t)
-    title = _("Ticket hành chính mới")
+    # Copy mobile mới: [Danh mục] • #MãTicket: Tiêu đề
+    body = _("[{0}] • {1}: {2}").format(cat, f"#{code}", t) if cat else _("{0}: {1}").format(f"#{code}", t)
+    title = _("Có ticket mới cần xử lý")
     data = _hc_ticket_payload(doc, "new_ticket_admin")
 
     seen = set()
@@ -882,8 +882,10 @@ def _notify_new_admin_ticket_mobile(doc):
     if _hc_administrative_confirm_creator_push_enabled() and creator:
         uid = frappe.db.get_value("User", {"email": creator}, "name")
         if uid:
-            title_c = _("Ticket hành chính đã gửi")
-            body_c = _("{0}: {1}. Bộ phận hành chính sẽ phản hồi sớm.").format(f"#{code}", t)
+            title_c = _("Gửi ticket thành công")
+            body_c = _("Ticket {0} đã được gửi. Bộ phận Hành chính sẽ phản hồi bạn trong thời gian sớm nhất.").format(
+                f"#{code}"
+            )
             data_c = {
                 "type": "new_ticket",
                 "action": "new_ticket",
@@ -1025,12 +1027,8 @@ def _hc_notify_new_ticket_via_stream(doc):
     code = (doc.ticket_code or doc.name or "").strip()
     t = (doc.title or "").strip() or code
     cat = _hc_category_label(doc) or (getattr(doc, "category", None) or "")
-    body_ml = (
-        _("{0} · {1}: {2}").format(f"#{code}", cat, t)
-        if cat
-        else _("{0}: {1}").format(f"#{code}", t)
-    )
-    title_ml = _("Ticket hành chính mới")
+    body_ml = _("[{0}] • {1}: {2}").format(cat, f"#{code}", t) if cat else _("{0}: {1}").format(f"#{code}", t)
+    title_ml = _("Có ticket mới cần xử lý")
     ref_name = doc.name
 
     seen = set()
@@ -1067,8 +1065,10 @@ def _hc_notify_new_ticket_via_stream(doc):
         ep_c = _hc_build_email_service_payload(doc, "ticket_creation_confirmation", creator, {})
 
     if _hc_administrative_confirm_creator_push_enabled():
-        title_c = _("Ticket hành chính đã gửi")
-        body_c = _("{0}: {1}. Bộ phận hành chính sẽ phản hồi sớm.").format(f"#{code}", t)
+        title_c = _("Gửi ticket thành công")
+        body_c = _("Ticket {0} đã được gửi. Bộ phận Hành chính sẽ phản hồi bạn trong thời gian sớm nhất.").format(
+            f"#{code}"
+        )
         data_c = {
             "type": "ticket",
             "action": "new_ticket",
@@ -1275,8 +1275,8 @@ def _notify_hc_user_reply(doc, sender_email, message_snippet: str = ""):
             )
             _hc_send_persisted(
                 rec,
-                _("Tin nhắn mới trên ticket hành chính"),
-                _("{0} vừa phản hồi {1}: {2}").format(sender_name, f"#{code}", snip),
+                _("Tin nhắn mới từ Ticket Hành chính"),
+                _('{0}: "{1}"').format(sender_name, snip),
                 d,
                 exclude_email=sender,
                 doc=doc,
@@ -1295,8 +1295,8 @@ def _notify_hc_user_reply(doc, sender_email, message_snippet: str = ""):
         )
         _hc_send_persisted(
             creator,
-            _("Tin nhắn mới trên ticket hành chính"),
-            _("{0} vừa phản hồi {1}: {2}").format(sender_name, f"#{code}", snip),
+            _("Tin nhắn mới từ Ticket Hành chính"),
+            _('{0}: "{1}"').format(sender_name, snip),
             d,
             exclude_email=sender,
             doc=doc,
@@ -1338,22 +1338,22 @@ def _notify_hc_status_changed(doc, old_status, new_status, actor_email):
 
     if act == "ticket_processing":
         title = _("Ticket hành chính đang được xử lý")
-        body = _("{0} đang được xử lý: {1}").format(f"#{code}", t)
+        body = _('Ticket {0} ("{1}") đã được tiếp nhận và đang trong quá trình xử lý.').format(f"#{code}", t)
     elif act == "ticket_waiting":
-        title = _("Chờ phản hồi của bạn (ticket hành chính)")
-        body = _("{0} cần bạn phản hồi: {1}").format(f"#{code}", t)
+        title = _("Ticket hành chính đang được xử lý")
+        body = _("Ticket {0} đang chờ thêm thông tin từ bạn để tiếp tục xử lý").format(f"#{code}")
     elif act == "ticket_done":
-        title = _("Ticket hành chính đã hoàn thành (chờ bạn xác nhận)")
-        body = _("{0} đã hoàn thành, mời bạn xác nhận: {1}").format(f"#{code}", t)
+        title = _("Ticket đã hoàn thành")
+        body = _("Ticket {0} đã xử lý xong. Vui lòng kiểm tra và xác nhận").format(f"#{code}")
     elif act == "ticket_closed":
-        title = _("Ticket hành chính đã đóng")
-        body = _("{0} đã đóng: {1}").format(f"#{code}", t)
+        title = _("Ticket đã hoàn thành")
+        body = _("Ticket {0} đã được đóng").format(f"#{code}")
     elif act == "ticket_cancelled_admin":
-        title = _("Ticket hành chính đã bị hủy")
-        body = _("{0} đã bị hủy: {1}").format(f"#{code}", t)
+        title = _("Ticket đã hoàn thành")
+        body = _("Ticket {0} đã được đóng").format(f"#{code}")
     else:
         title = _("Cập nhật trạng thái ticket hành chính")
-        body = _("{0}: {1} → {2}").format(f"#{code}", old_l, new_l)
+        body = _("Ticket {0} vừa được cập nhật trạng thái mới.").format(f"#{code}")
         act = "ticket_status_changed"
     data = _hc_ticket_payload(doc, act, extra)
 
@@ -1394,7 +1394,7 @@ def _notify_hc_assignment_changed(doc, old_assignee, new_assignee, actor_email):
     if ne and (ne or "").lower() != (actor or "").lower():
         _hc_send_persisted(
             ne,
-            _("Ticket hành chính được gán cho bạn"),
+            _("Bạn nhận được ticket mới"),
             _("{0} đã được gán cho bạn: {1}").format(f"#{code}", t),
             data,
             exclude_email=actor,
@@ -1418,11 +1418,10 @@ def _notify_hc_ticket_pickup(doc):
         {"pickedUpByName": ufn, "actorName": ufn},
     )
     code = (doc.ticket_code or doc.name or "").strip()
-    t = (doc.title or "").strip() or code
     _hc_send_persisted(
         creator,
-        _("Ticket của bạn đang được xử lý (hành chính)"),
-        _("{0} đang xử lý {1}: {2}").format(ufn, f"#{code}", t),
+        _("Ticket hành chính của bạn đã có người tiếp nhận"),
+        _("{0} đã nhận và đang xử lý ticket {1}").format(ufn, f"#{code}"),
         data,
         exclude_email=actor,
         doc=doc,
@@ -1437,9 +1436,8 @@ def _notify_hc_cancelled(doc, actor_email):
     data = _hc_ticket_payload(doc, "ticket_cancelled_admin")
     actor = (actor_email or "").strip()
     code = (doc.ticket_code or doc.name or "").strip()
-    t = (doc.title or "").strip() or code
-    body = _("{0} đã bị hủy: {1}").format(f"#{code}", t)
-    title = _("Ticket hành chính đã bị hủy")
+    body = _("Ticket {0} đã được đóng").format(f"#{code}")
+    title = _("Ticket đã hoàn thành")
     for em in ((doc.creator_email or "").strip(), _hc_user_email(doc.assigned_to)):
         if not em or (em or "").lower() == (actor or "").lower():
             continue
@@ -1470,10 +1468,9 @@ def _notify_hc_reopened(doc, actor_email):
             "newStatusLabel": new_l,
         },
     )
-    title = _("Ticket hành chính được mở lại")
+    title = _("Ticket đã được mở lại")
     code = (doc.ticket_code or doc.name or "").strip()
-    t = (doc.title or "").strip() or code
-    body = _("{0} đã được mở lại: {1}").format(f"#{code}", t)
+    body = _("Ticket {0} đã được mở lại để tiếp tục xử lý.").format(f"#{code}")
     actor = (actor_email or "").strip()
     ufn = _hc_full_name_from_user_or_email(actor) if actor else ""
     for em in ((doc.creator_email or "").strip(), _hc_user_email(doc.assigned_to)):
@@ -1506,7 +1503,6 @@ def _notify_hc_completion_and_feedback_to_pic(doc, actor_email):
         return
     rating = int(getattr(doc, "feedback_rating", 0) or 0)
     code = (doc.ticket_code or doc.name or "").strip()
-    t = (doc.title or "").strip() or code
     data = _hc_ticket_payload(
         doc,
         "completion_confirmed",
@@ -1518,7 +1514,7 @@ def _notify_hc_completion_and_feedback_to_pic(doc, actor_email):
         },
     )
     title = _("Ticket hành chính đã được xác nhận hoàn thành")
-    body = _("{0} xác nhận {1} hoàn thành (đánh giá {2}★): {3}").format(ufn, f"#{code}", rating, t)
+    body = _("{0} đã xác nhận hoàn thành ticket {1} và đánh giá {2}★").format(ufn, f"#{code}", rating)
     _hc_send_persisted(
         pic,
         title,

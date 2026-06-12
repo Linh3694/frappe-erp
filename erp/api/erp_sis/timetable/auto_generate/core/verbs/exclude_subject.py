@@ -15,4 +15,4 @@ class ExcludeSubject(Verb):
 				for p_idx in range(ctx.num_periods):
 					v = ctx.x.get((c_id, ts_id, day, p_idx))
 					if v is not None:
-						ctx.model.Add(v == 0)
+						ctx.add_hard(ctx.model.Add(v == 0))

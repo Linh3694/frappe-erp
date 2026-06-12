@@ -46,7 +46,7 @@ class TeacherInfo:
 	max_periods_per_week: int = 24
 	max_consecutive_periods: int = LEGACY_DEFAULT_MAX_CONSECUTIVE
 	workload_spread_mode: str = "auto"  # auto | even | concentrated
-	unavailable_slots: List[tuple] = field(default_factory=list)  # (day, period_idx)
+	unavailable_slots: List[tuple] = field(default_factory=list)  # (day, period_idx, enforcement, weight)
 
 
 @dataclass
@@ -68,6 +68,9 @@ class SubjectRequirement:
 	force_pair: bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
+	# Phân tầng per-cell: 'mandatory' (cứng = N) | 'relaxable' (cho thiếu, tính coverage).
+	enforcement: str = "mandatory"
+	enforcement_weight: int = 1
 
 
 @dataclass
@@ -91,6 +94,9 @@ class PinnedSlotInfo:
 	room_id: Optional[str] = None
 	is_blocking: bool = False
 	note: str = ""
+	# Per-pin enforcement: 'mandatory' (cứng) | 'relaxable' (pin mềm — ưu tiên, nới được).
+	enforcement: str = "mandatory"
+	weight: int = 5
 
 
 @dataclass
@@ -277,8 +283,13 @@ class TimetableDataCollector:
 
 		# Child table unavailability (nếu DocType/field đã migrate)
 		if frappe.db.table_exists("SIS Teacher Unavailability"):
-			unavail_rows = frappe.db.sql("""
-				SELECT parent as teacher_id, day_of_week, timetable_column_id
+			has_enf = frappe.db.has_column("SIS Teacher Unavailability", "enforcement")
+			has_enf_w = frappe.db.has_column("SIS Teacher Unavailability", "weight")
+			enf_sql = "COALESCE(enforcement, 'mandatory') as enforcement," if has_enf else "'mandatory' as enforcement,"
+			enf_w_sql = "COALESCE(weight, 5) as weight," if has_enf_w else "5 as weight,"
+			unavail_rows = frappe.db.sql(f"""
+				SELECT parent as teacher_id, day_of_week, timetable_column_id,
+				       {enf_sql} {enf_w_sql} 1 as _ok
 				FROM `tabSIS Teacher Unavailability`
 				WHERE parent IN %(ids)s
 			""", {"ids": list(teachers.keys()) or [""]}, as_dict=True)
@@ -292,7 +303,12 @@ class TimetableDataCollector:
 					continue
 				p_idx = period_map.get(row["timetable_column_id"])
 				if p_idx is not None:
-					t.unavailable_slots.append((row["day_of_week"], p_idx))
+					# 4-tuple: (day, period_idx, enforcement, weight)
+					t.unavailable_slots.append((
+						row["day_of_week"], p_idx,
+						row.get("enforcement") or "mandatory",
+						int(row.get("weight") or 5),
+					))
 
 		return teachers
 
@@ -310,9 +326,13 @@ class TimetableDataCollector:
 		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
 		has_is_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
 		has_curriculum = frappe.db.has_column("SIS Timetable Subject", "curriculum_id")
+		has_enforcement = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement")
+		has_enf_weight = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight")
 		force_pair_sql = "COALESCE(r.force_pair, 0) as force_pair," if has_force_pair else "0 as force_pair,"
 		is_heavy_sql = "COALESCE(ts.is_heavy, 0) as is_heavy" if has_is_heavy else "0 as is_heavy"
 		program_sql = "NULLIF(ts.curriculum_id, '') as program_id" if has_curriculum else "NULL as program_id"
+		enforcement_sql = "COALESCE(r.enforcement, 'mandatory') as enforcement," if has_enforcement else "'mandatory' as enforcement,"
+		enf_weight_sql = "COALESCE(r.enforcement_weight, 1) as enforcement_weight," if has_enf_weight else "1 as enforcement_weight,"
 
 		rows = frappe.db.sql(f"""
 			SELECT
@@ -322,6 +342,8 @@ class TimetableDataCollector:
 				r.periods_per_week,
 				r.max_periods_per_day,
 				r.prefer_consecutive,
+				{enforcement_sql}
+				{enf_weight_sql}
 				{force_pair_sql}
 				{is_heavy_sql},
 				{program_sql}
@@ -341,6 +363,8 @@ class TimetableDataCollector:
 			force_pair=bool(r.get("force_pair")),
 			is_heavy=bool(r.get("is_heavy")),
 			program_id=r.get("program_id") or None,
+			enforcement=r.get("enforcement") or "mandatory",
+			enforcement_weight=int(r.get("enforcement_weight") or 1),
 		) for r in rows]
 
 	def _get_subject_room_config(self) -> tuple[Dict[str, bool], Dict[str, List[str]]]:
@@ -443,9 +467,15 @@ class TimetableDataCollector:
 		if not frappe.db.table_exists("SIS Timetable Pinned Slot"):
 			return []
 
-		rows = frappe.db.sql("""
+		has_enf = frappe.db.has_column("SIS Timetable Pinned Slot", "enforcement")
+		has_w = frappe.db.has_column("SIS Timetable Pinned Slot", "weight")
+		enf_sql = "COALESCE(enforcement, 'mandatory') as enforcement," if has_enf else "'mandatory' as enforcement,"
+		w_sql = "COALESCE(weight, 5) as weight," if has_w else "5 as weight,"
+
+		rows = frappe.db.sql(f"""
 			SELECT name, session_id, class_id, day_of_week, timetable_column_id,
-				   timetable_subject_id, teacher_id, room_id, is_blocking, note
+				   timetable_subject_id, teacher_id, room_id, is_blocking,
+				   {enf_sql} {w_sql} note
 			FROM `tabSIS Timetable Pinned Slot`
 			WHERE session_id = %(session_id)s
 		""", {"session_id": self.session.name}, as_dict=True)

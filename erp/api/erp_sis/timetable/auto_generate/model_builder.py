@@ -331,7 +331,8 @@ class ModelBuilder:
 			teacher_info = inp.teachers.get(t_id)
 			if not teacher_info or not teacher_info.unavailable_slots:
 				continue
-			for day, p_idx in teacher_info.unavailable_slots:
+			for slot in teacher_info.unavailable_slots:
+				day, p_idx = slot[0], slot[1]  # (day, period_idx[, enforcement, weight])
 				for (c_id, ts_id) in cs_list:
 					key = (c_id, ts_id, day, p_idx)
 					if key in sm.x:

@@ -8,6 +8,15 @@ from .dto import Rule, RuleSet
 # ràng buộc phòng cốt lõi, luôn bật (room_eligibility chỉ ràng buộc môn đã khai phòng).
 DISABLED_DEFAULT_RULE_IDS = frozenset()
 
+# Tier mặc định cho preference (soft). Chỉ promote lên 'strong' (khó thương lượng)
+# những rule rõ ràng quan trọng/người dùng khai trực tiếp; còn lại 'weak' (dễ thương
+# lượng) để trade-off theo weight như cũ. Người dùng đổi tier per-rule trên UI/override.
+# Lưu ý: rule hard (nhóm A vật lý) không dùng tier — luôn cứng.
+STRONG_PREFERENCE_RULE_IDS = frozenset({
+	"spread_subject_across_week",   # rải môn nhiều ngày — sư phạm cốt lõi
+	"subject_preferred_periods",    # tiết ưu tiên môn — người dùng khai trực tiếp
+})
+
 # (rule_id, kind, verb, subject_type, subject_filter, params, weight, description)
 DEFAULT_RULE_SPECS = [
 	("class_no_overlap", "hard", "no_overlap", "class", {}, {}, 5, "Mỗi lớp tối đa 1 môn/slot"),
@@ -47,6 +56,7 @@ def build_default_rule_set(name: str = "default") -> RuleSet:
 			subject_filter=dict(sfilt),
 			params=dict(params),
 			weight=weight,
+			tier="strong" if rid in STRONG_PREFERENCE_RULE_IDS else "weak",
 			enabled=rid not in DISABLED_DEFAULT_RULE_IDS,
 			description=desc,
 		))

@@ -315,15 +315,15 @@ def _merge_diagnose_into_solver_stats(session, diagnose: dict) -> None:
 	session.solver_stats = json.dumps(stats, ensure_ascii=False)
 
 
-def _execute_diagnose(session_id: str) -> List[Dict]:
-	"""Chạy phân tích rule mâu thuẫn — dùng chung sync/async."""
+def _execute_diagnose(session_id: str) -> Dict:
+	"""Chạy chẩn đoán 1-lần-chạy — trả dict báo cáo coverage. Dùng chung sync/async."""
 	from .core.diagnostics import diagnose_infeasibility as _diag
 
 	inp, val_errors, _ = TimetableSolver(session_id)._prepare_input()
 	if val_errors:
 		raise ValueError("; ".join(val_errors[:5]))
 
-	# INFEASIBLE thường trả sớm — giới hạn thời gian mỗi lần solve trong diagnose
+	# Giới hạn thời gian mỗi lần solve trong diagnose (2 pha hybrid).
 	if inp.solver_time_limit > 30:
 		inp.solver_time_limit = 30
 
@@ -331,39 +331,54 @@ def _execute_diagnose(session_id: str) -> List[Dict]:
 	return _diag(inp, rule_set)
 
 
+def _build_diagnose_block(report: Optional[Dict], started, *, status: str = "Completed", error: str = "") -> dict:
+	"""Chuẩn hoá block diagnose ghi vào solver_stats.
+
+	Lưu ý: report['status'] (OPTIMAL/FEASIBLE) tách thành 'solve_status' để KHÔNG đè
+	'status' của job (Running/Completed/Failed) mà frontend đang dựa vào.
+	"""
+	report = report or {}
+	block = {
+		"status": status,
+		"started_at": str(started),
+		"completed_at": str(datetime.now()),
+		"solve_status": report.get("status"),
+		"feasible_relaxed": report.get("feasible_relaxed", False),
+		"coverage_pct": report.get("coverage_pct", 0.0),
+		"total_required": report.get("total_required", 0),
+		"total_placed": report.get("total_placed", 0),
+		"total_short": report.get("total_short", 0),
+		"shortfalls": report.get("shortfalls", []),
+		"limit_violations": report.get("limit_violations", []),
+		"forbidden_used": report.get("forbidden_used", []),
+		"pins_missed": report.get("pins_missed", []),
+		"conflict_core": report.get("conflict_core", []),
+		"suspects": report.get("suspects", []),
+	}
+	if error:
+		block["error"] = error
+	return block
+
+
 def run_diagnose_infeasibility(session_id: str):
 	"""Entry point cho background job phân tích INFEASIBLE (queue long)."""
 	session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 	started = datetime.now()
-	_merge_diagnose_into_solver_stats(session, {
-		"status": "Running",
-		"started_at": str(started),
-		"completed_at": None,
-		"suspects": [],
-	})
+	_merge_diagnose_into_solver_stats(session, _build_diagnose_block(None, started, status="Running"))
 	session.save(ignore_permissions=True)
 	frappe.db.commit()
 
 	try:
-		suspects = _execute_diagnose(session_id)
+		report = _execute_diagnose(session_id)
 		session.reload()
-		_merge_diagnose_into_solver_stats(session, {
-			"status": "Completed",
-			"started_at": str(started),
-			"completed_at": str(datetime.now()),
-			"suspects": suspects,
-		})
+		_merge_diagnose_into_solver_stats(session, _build_diagnose_block(report, started))
 		session.save(ignore_permissions=True)
 		frappe.db.commit()
 	except Exception as e:
 		frappe.log_error(f"diagnose_infeasibility failed for session {session_id}: {e}")
 		session.reload()
-		_merge_diagnose_into_solver_stats(session, {
-			"status": "Failed",
-			"started_at": str(started),
-			"completed_at": str(datetime.now()),
-			"suspects": [],
-			"error": str(e),
-		})
+		_merge_diagnose_into_solver_stats(
+			session, _build_diagnose_block(None, started, status="Failed", error=str(e))
+		)
 		session.save(ignore_permissions=True)
 		frappe.db.commit()

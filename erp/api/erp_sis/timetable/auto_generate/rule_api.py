@@ -150,7 +150,7 @@ def _normalize_rule_row(row: dict) -> dict:
 	params = _parse_row_json(row.get("params"))
 	if rule_id == "assignment_not_at_slot":
 		params = _ensure_assignment_group_ids(params)
-	return {
+	out = {
 		"rule_id": rule_id,
 		"kind": row.get("kind") or "hard",
 		"verb": row.get("verb") or "",
@@ -163,6 +163,10 @@ def _normalize_rule_row(row: dict) -> dict:
 		"sort_order": int(row.get("sort_order") or 0),
 		"description": row.get("description") or "",
 	}
+	if frappe.db.has_column("SIS Timetable Rule", "tier"):
+		tier = (row.get("tier") or "weak")
+		out["tier"] = tier if tier in ("strong", "weak") else "weak"
+	return out
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET"])
@@ -410,6 +414,8 @@ def get_rule_set_requirements_matrix(rule_set_id=None):
 					"max_periods_per_day": row.max_periods_per_day,
 					"prefer_consecutive": row.prefer_consecutive,
 					"force_pair": getattr(row, "force_pair", 0),
+					"enforcement": getattr(row, "enforcement", "mandatory") or "mandatory",
+					"enforcement_weight": int(getattr(row, "enforcement_weight", 1) or 1),
 				})
 
 		class_count = sum(len(g.get("classes") or []) for g in grade_groups)
@@ -462,14 +468,19 @@ def save_rule_set_requirements(**kwargs):
 			if not cid or not sid or ppw <= 0:
 				continue
 			norm = normalize_requirement_row(req)
-			new_rows.append({
+			row_out = {
 				"class_id": cid,
 				"timetable_subject_id": sid,
 				"periods_per_week": norm["periods_per_week"],
 				"max_periods_per_day": norm["max_periods_per_day"],
 				"prefer_consecutive": int(norm["prefer_consecutive"]),
 				"force_pair": int(norm["force_pair"]),
-			})
+			}
+			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "enforcement"):
+				row_out["enforcement"] = norm["enforcement"]
+			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "enforcement_weight"):
+				row_out["enforcement_weight"] = norm["enforcement_weight"]
+			new_rows.append(row_out)
 
 		doc.set("requirements", [])
 		for row in new_rows:
@@ -662,9 +673,15 @@ def _load_unavailability_map(teacher_ids: list) -> dict:
 	if not teacher_ids or not frappe.db.table_exists("SIS Teacher Unavailability"):
 		return {}
 
+	has_enf = frappe.db.has_column("SIS Teacher Unavailability", "enforcement")
+	has_w = frappe.db.has_column("SIS Teacher Unavailability", "weight")
+	enf_sql = "COALESCE(enforcement, 'mandatory') AS enforcement," if has_enf else "'mandatory' AS enforcement,"
+	w_sql = "COALESCE(weight, 5) AS weight," if has_w else "5 AS weight,"
+
 	rows = frappe.db.sql(
-		"""
-		SELECT parent AS teacher_id, day_of_week, timetable_column_id, reason
+		f"""
+		SELECT parent AS teacher_id, day_of_week, timetable_column_id,
+		       {enf_sql} {w_sql} reason
 		FROM `tabSIS Teacher Unavailability`
 		WHERE parent IN %(ids)s
 		ORDER BY day_of_week, timetable_column_id
@@ -678,6 +695,8 @@ def _load_unavailability_map(teacher_ids: list) -> dict:
 		out.setdefault(tid, []).append({
 			"day_of_week": row["day_of_week"],
 			"timetable_column_id": row["timetable_column_id"],
+			"enforcement": row.get("enforcement") or "mandatory",
+			"weight": int(row.get("weight") or 5),
 			"reason": row.get("reason") or "",
 		})
 	return out
@@ -798,11 +817,19 @@ def save_teacher_unavailability(**kwargs):
 				if key in seen:
 					continue
 				seen.add(key)
-				new_rows.append({
+				enforcement = (slot.get("enforcement") or "mandatory").strip()
+				if enforcement not in ("mandatory", "relaxable"):
+					enforcement = "mandatory"
+				row_data = {
 					"day_of_week": day,
 					"timetable_column_id": col,
 					"reason": (slot.get("reason") or "").strip(),
-				})
+				}
+				if frappe.db.has_column("SIS Teacher Unavailability", "enforcement"):
+					row_data["enforcement"] = enforcement
+				if frappe.db.has_column("SIS Teacher Unavailability", "weight"):
+					row_data["weight"] = int(slot.get("weight") or 5)
+				new_rows.append(row_data)
 
 			teacher_doc = frappe.get_doc("SIS Teacher", teacher_id)
 			if item.get("max_periods_per_day") is not None:
@@ -1073,6 +1100,7 @@ def _rule_to_dict(r) -> Dict[str, Any]:
 		"subject_filter": r.subject_filter,
 		"params": r.params,
 		"weight": r.weight,
+		"tier": getattr(r, "tier", "weak") or "weak",
 		"enabled": r.enabled,
 		"description": r.description,
 		"parameterized": catalog.get("parameterized", False),

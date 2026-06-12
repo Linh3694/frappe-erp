@@ -14,6 +14,8 @@
  "field_order": [
   "day_of_week",
   "timetable_column_id",
+  "enforcement",
+  "weight",
   "reason"
  ],
  "fields": [
@@ -32,6 +34,23 @@
    "options": "SIS Timetable Column",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "enforcement",
+   "fieldtype": "Select",
+   "label": "Mức",
+   "options": "mandatory\nrelaxable",
+   "default": "mandatory",
+   "in_list_view": 1,
+   "description": "mandatory = cấm tuyệt đối (cứng). relaxable = hạn chế, nếu không còn cách khác vẫn xếp được (phạt nặng)."
+  },
+  {
+   "fieldname": "weight",
+   "fieldtype": "Int",
+   "label": "Trọng số (khi relaxable)",
+   "default": "5",
+   "depends_on": "eval:doc.enforcement=='relaxable'",
+   "description": "Cao hơn = càng tránh xếp vào slot hạn chế này."
   },
   {
    "fieldname": "reason",

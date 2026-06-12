@@ -278,10 +278,14 @@ def get_requirements_matrix(session_id=None):
 		)
 
 		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
+		has_enf = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement")
+		has_enf_w = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight")
 		force_pair_sql = ", force_pair" if has_force_pair else ", 0 as force_pair"
+		enf_sql = ", enforcement" if has_enf else ", 'mandatory' as enforcement"
+		enf_w_sql = ", enforcement_weight" if has_enf_w else ", 1 as enforcement_weight"
 		requirements = frappe.db.sql(f"""
 			SELECT name, class_id, timetable_subject_id,
-				   periods_per_week, max_periods_per_day, prefer_consecutive{force_pair_sql}
+				   periods_per_week, max_periods_per_day, prefer_consecutive{force_pair_sql}{enf_sql}{enf_w_sql}
 			FROM `tabSIS Timetable Generation Requirement`
 			WHERE session_id = %(session_id)s
 		""", {"session_id": session_id}, as_dict=True)
@@ -357,6 +361,10 @@ def save_requirements(**kwargs):
 				doc.prefer_consecutive = norm["prefer_consecutive"]
 				if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 					doc.force_pair = norm["force_pair"]
+				if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement"):
+					doc.enforcement = norm["enforcement"]
+				if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight"):
+					doc.enforcement_weight = norm["enforcement_weight"]
 				doc.save(ignore_permissions=True)
 				saved += 1
 
@@ -395,6 +403,10 @@ def _copy_requirements_from_rule_set_doc(session_id: str, rule_set_id: str) -> i
 		}
 		if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 			payload["force_pair"] = getattr(row, "force_pair", 0)
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement"):
+			payload["enforcement"] = getattr(row, "enforcement", "mandatory") or "mandatory"
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight"):
+			payload["enforcement_weight"] = int(getattr(row, "enforcement_weight", 1) or 1)
 		frappe.get_doc(payload).insert(ignore_permissions=True)
 		copied += 1
 	return copied
@@ -1049,15 +1061,12 @@ def diagnose_infeasibility(**kwargs):
 			return error_response("Thiếu session_id")
 
 		if run_async:
-			from .solver import _merge_diagnose_into_solver_stats, run_diagnose_infeasibility
+			from .solver import _build_diagnose_block, _merge_diagnose_into_solver_stats, run_diagnose_infeasibility
 
 			session = frappe.get_doc("SIS Timetable Generation Session", session_id)
-			_merge_diagnose_into_solver_stats(session, {
-				"status": "Running",
-				"started_at": str(datetime.now()),
-				"completed_at": None,
-				"suspects": [],
-			})
+			_merge_diagnose_into_solver_stats(
+				session, _build_diagnose_block(None, datetime.now(), status="Running")
+			)
 			session.save(ignore_permissions=True)
 			frappe.db.commit()
 
@@ -1069,20 +1078,16 @@ def diagnose_infeasibility(**kwargs):
 			)
 			return single_item_response({"session_id": session_id, "status": "queued"})
 
-		from .solver import _execute_diagnose, _merge_diagnose_into_solver_stats
+		from .solver import _build_diagnose_block, _execute_diagnose, _merge_diagnose_into_solver_stats
 
 		session = frappe.get_doc("SIS Timetable Generation Session", session_id)
 		started = datetime.now()
-		suspects = _execute_diagnose(session_id)
-		_merge_diagnose_into_solver_stats(session, {
-			"status": "Completed",
-			"started_at": str(started),
-			"completed_at": str(datetime.now()),
-			"suspects": suspects,
-		})
+		report = _execute_diagnose(session_id)
+		block = _build_diagnose_block(report, started)
+		_merge_diagnose_into_solver_stats(session, block)
 		session.save(ignore_permissions=True)
 		frappe.db.commit()
-		return single_item_response({"suspects": suspects})
+		return single_item_response(block)
 	except Exception as e:
 		return error_response(str(e))
 

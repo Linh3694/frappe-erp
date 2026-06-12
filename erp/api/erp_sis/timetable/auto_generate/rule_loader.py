@@ -8,8 +8,9 @@ from typing import List, Optional
 import frappe
 
 from .core.dto import Rule, RuleSet
-from .core.default_rules import build_default_rule_set
+from .core.default_rules import STRONG_PREFERENCE_RULE_IDS, build_default_rule_set
 from .core.rule_catalog import get_catalog_entry, is_parameterized
+from .core.tiers import normalize_tier
 
 
 def load_rule_set(rule_set_id: str, overrides_json: str | None = None) -> RuleSet:
@@ -36,6 +37,11 @@ def load_rule_set(rule_set_id: str, overrides_json: str | None = None) -> RuleSe
 			subject_filter=_parse_json(row.subject_filter),
 			params=_parse_json(row.params),
 			weight=int(row.weight or 5),
+			# Chưa migrate cột tier -> dùng default cong (strong cho preference cốt lõi).
+			tier=normalize_tier(
+				getattr(row, "tier", None),
+				default="strong" if row.rule_id in STRONG_PREFERENCE_RULE_IDS else "weak",
+			),
 			enabled=bool(row.enabled),
 			allow_kind_override=bool(getattr(row, "allow_kind_override", 0)),
 			description=row.description or "",
@@ -66,6 +72,7 @@ def _consolidate_instance_rules(rules: List[Rule]) -> List[Rule]:
 				subject_filter=dict(rule.subject_filter),
 				params={"instances": list((rule.params or {}).get("instances") or [])},
 				weight=rule.weight,
+				tier=rule.tier,
 				enabled=rule.enabled,
 				allow_kind_override=rule.allow_kind_override,
 				description=rule.description,

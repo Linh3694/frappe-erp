@@ -43,7 +43,7 @@ class SyncClassGroup(Verb):
 									target_vars.append(v)
 							if not subject_vars or not target_vars:
 								continue
-							ctx.model.Add(sum(subject_vars) + sum(target_vars) <= 1)
+							ctx.add_hard(ctx.model.Add(sum(subject_vars) + sum(target_vars) <= 1))
 						continue
 					for i in range(1, len(subject_vars)):
-						ctx.model.Add(subject_vars[0] == subject_vars[i])
+						ctx.add_hard(ctx.model.Add(subject_vars[0] == subject_vars[i]))

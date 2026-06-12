@@ -174,6 +174,7 @@ def req_cell_key(class_id: str, subject_id: str) -> str:
 
 def normalize_requirement_row(row: dict) -> dict:
 	"""Chuẩn hóa 1 ô ma trận từ DB/API."""
+	enf = (row.get("enforcement") or "mandatory")
 	return {
 		"class_id": row.get("class_id"),
 		"timetable_subject_id": row.get("timetable_subject_id"),
@@ -181,6 +182,9 @@ def normalize_requirement_row(row: dict) -> dict:
 		"max_periods_per_day": int(row.get("max_periods_per_day") or 2),
 		"prefer_consecutive": bool(row.get("prefer_consecutive")),
 		"force_pair": bool(row.get("force_pair")),
+		# Per-cell tier: mandatory (đủ N cứng) | relaxable (cho thiếu, tính coverage).
+		"enforcement": enf if enf in ("mandatory", "relaxable") else "mandatory",
+		"enforcement_weight": int(row.get("enforcement_weight") or 1),
 	}
 
 

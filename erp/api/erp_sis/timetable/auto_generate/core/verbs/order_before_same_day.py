@@ -22,4 +22,4 @@ class OrderBeforeSameDay(Verb):
 							va = ctx.x.get((c.name, before, day, p_b))
 							vb = ctx.x.get((c.name, after, day, p_a))
 							if va is not None and vb is not None:
-								ctx.model.Add(va + vb <= 1)
+								ctx.add_hard(ctx.model.Add(va + vb <= 1))

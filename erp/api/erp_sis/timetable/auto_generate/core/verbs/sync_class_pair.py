@@ -18,4 +18,4 @@ class SyncClassPair(Verb):
 					v1 = ctx.x.get((c1, ts_id, day, p_idx))
 					v2 = ctx.x.get((c2, ts_id, day, p_idx))
 					if v1 is not None and v2 is not None:
-						ctx.model.Add(v1 == v2)
+						ctx.add_hard(ctx.model.Add(v1 == v2))

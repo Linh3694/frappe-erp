@@ -29,7 +29,7 @@ class AtMostPerScope(Verb):
 							for p_idx in range(ctx.num_periods)
 							if (c.name, ts_id, day, p_idx) in ctx.x
 						]
-						le_limit(ctx, day_vars, max_d, kind=kind, weight=weight, tag=f"asg_{c.name}_{ts_id}_{day}")
+						le_limit(ctx, day_vars, max_d, kind=kind, weight=weight, relaxable=True, tag=f"asg_{c.name}_{ts_id}_{day}")
 
 		elif ctx.cur_subject_type == "subject" and scope == "day":
 			inst_list = instances(params)
@@ -48,7 +48,7 @@ class AtMostPerScope(Verb):
 								ctx.x[k] for p in range(ctx.num_periods)
 								if (k := (c.name, ts_id, day, p)) in ctx.x
 							]
-							le_limit(ctx, day_vars, max_d, kind=kind, weight=weight, tag=f"sub_{ts_id}_{c.name}_{day}")
+							le_limit(ctx, day_vars, max_d, kind=kind, weight=weight, relaxable=True, tag=f"sub_{ts_id}_{c.name}_{day}")
 			else:
 				for ts_id in subject_set:
 					max_d = int(params.get("max", 2))
@@ -60,7 +60,7 @@ class AtMostPerScope(Verb):
 								ctx.x[k] for p in range(ctx.num_periods)
 								if (k := (c.name, ts_id, day, p)) in ctx.x
 							]
-							le_limit(ctx, day_vars, max_d, kind=kind, weight=weight, tag=f"sub_{ts_id}_{c.name}_{day}")
+							le_limit(ctx, day_vars, max_d, kind=kind, weight=weight, relaxable=True, tag=f"sub_{ts_id}_{c.name}_{day}")
 
 		elif ctx.cur_subject_type == "teacher":
 			tcs = teacher_class_subjects(inp)
@@ -83,7 +83,7 @@ class AtMostPerScope(Verb):
 									v = ctx.x.get((c_id, ts_id, day, p_idx))
 									if v is not None:
 										day_vars.append(v)
-							le_limit(ctx, day_vars, limit, kind=kind, weight=weight, tag=f"tch_{tid}_{day}")
+							le_limit(ctx, day_vars, limit, kind=kind, weight=weight, relaxable=True, tag=f"tch_{tid}_{day}")
 					else:
 						week_vars = []
 						for (c_id, ts_id) in tcs.get(tid, []):
@@ -92,7 +92,7 @@ class AtMostPerScope(Verb):
 									v = ctx.x.get((c_id, ts_id, day, p_idx))
 									if v is not None:
 										week_vars.append(v)
-						le_limit(ctx, week_vars, limit, kind=kind, weight=weight, tag=f"tch_{tid}_week")
+						le_limit(ctx, week_vars, limit, kind=kind, weight=weight, relaxable=True, tag=f"tch_{tid}_week")
 			else:
 				for t_id in (subject_set or tcs.keys()):
 					tid = t_id.name if hasattr(t_id, "name") else t_id
@@ -110,7 +110,7 @@ class AtMostPerScope(Verb):
 									v = ctx.x.get((c_id, ts_id, day, p_idx))
 									if v is not None:
 										day_vars.append(v)
-							le_limit(ctx, day_vars, limit, kind=kind, weight=weight, tag=f"tch_{tid}_{day}")
+							le_limit(ctx, day_vars, limit, kind=kind, weight=weight, relaxable=True, tag=f"tch_{tid}_{day}")
 					else:
 						week_vars = []
 						for (c_id, ts_id) in tcs.get(tid, []):
@@ -119,4 +119,4 @@ class AtMostPerScope(Verb):
 									v = ctx.x.get((c_id, ts_id, day, p_idx))
 									if v is not None:
 										week_vars.append(v)
-						le_limit(ctx, week_vars, limit, kind=kind, weight=weight, tag=f"tch_{tid}_week")
+						le_limit(ctx, week_vars, limit, kind=kind, weight=weight, relaxable=True, tag=f"tch_{tid}_week")

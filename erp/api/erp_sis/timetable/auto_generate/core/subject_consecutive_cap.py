@@ -29,4 +29,4 @@ def apply_subject_max_consecutive_system_cap(ctx: Any, max_consecutive: int = 3)
 						if v is not None:
 							window_vars.append(v)
 					if len(window_vars) == window:
-						ctx.model.Add(sum(window_vars) <= max_consecutive)
+						ctx.add_hard(ctx.model.Add(sum(window_vars) <= max_consecutive))

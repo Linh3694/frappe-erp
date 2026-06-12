@@ -45,6 +45,8 @@ class SubjectRequirement:
 	force_pair: bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
+	enforcement: str = "mandatory"
+	enforcement_weight: int = 1
 
 
 @dataclass

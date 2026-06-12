@@ -48,6 +48,16 @@ def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 			valid_targets = [s for s in target_ts_ids if s != ts_id]
 			return len(valid_targets) > 0
 		return True
+	if rule_id == "subject_max_simultaneous_classes":
+		subject_ids = obj.get("subject_ids") or []
+		if not isinstance(subject_ids, list):
+			subject_ids = []
+		subject_ids = [str(s).strip() for s in subject_ids if s]
+		if not subject_ids and not inst.get("subject"):
+			return False
+		if obj.get("max_classes") is None and obj.get("max") is None and obj.get("value") is None:
+			return False
+		return True
 	if not inst.get("subject"):
 		return False
 	if rule_id == "teacher_not_on_day" or object_kind == "Day":
@@ -61,7 +71,7 @@ def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 		if not slots:
 			return False
 	if object_kind == "Int":
-		if obj.get("max") is None and obj.get("value") is None:
+		if obj.get("max") is None and obj.get("max_classes") is None and obj.get("value") is None:
 			return False
 	if object_kind == "DocType":
 		if rule_id == "class_excluded_subject" and not obj.get("subject_id"):

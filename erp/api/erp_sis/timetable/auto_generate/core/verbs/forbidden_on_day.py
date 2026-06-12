@@ -1,4 +1,4 @@
-from ..helpers import instances, teacher_class_subjects
+from ..helpers import forbid_var, instances, teacher_class_subjects
 from ..registry import Verb, register_verb
 
 
@@ -10,10 +10,16 @@ class ForbiddenOnDay(Verb):
 		for inst in instances(params):
 			teacher = inst.get("subject")
 			obj = inst.get("object") or {}
+			enforcement = obj.get("enforcement")
+			weight = int(obj.get("weight", 5) or 5)
 			days = obj.get("days") or ([obj["day"]] if obj.get("day") else [])
 			for day in days:
 				for (c_id, ts_id) in tcs.get(teacher, []):
 					for p_idx in range(ctx.num_periods):
 						v = ctx.x.get((c_id, ts_id, day, p_idx))
-						if v is not None:
-							ctx.model.Add(v == 0)
+						forbid_var(
+							ctx, v, enforcement=enforcement, weight=weight,
+							rule_id=ctx.cur_rule_id,
+							scope={"teacher_id": teacher, "day": day, "period_idx": p_idx,
+							       "class_id": c_id, "subject_id": ts_id},
+						)

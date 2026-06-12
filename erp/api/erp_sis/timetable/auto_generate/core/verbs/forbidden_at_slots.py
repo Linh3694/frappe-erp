@@ -1,5 +1,26 @@
 from ..helpers import class_subject_weekdays, instances, teacher_class_subjects
 from ..registry import Verb, register_verb
+from ..tiers import STRONG, normalize_enforcement
+
+
+def _norm_unavail(slot):
+	"""Chuẩn hoá 1 entry unavailable_slots về (day, period_idx, enforcement, weight).
+
+	Khoan dung dữ liệu cũ dạng 2-tuple (day, period_idx).
+	"""
+	if isinstance(slot, (list, tuple)):
+		day = slot[0]
+		p_idx = slot[1]
+		enforcement = normalize_enforcement(slot[2]) if len(slot) > 2 else "mandatory"
+		weight = int(slot[3]) if len(slot) > 3 else 5
+		return day, p_idx, enforcement, weight
+	# object/namedtuple
+	return (
+		getattr(slot, "day", None),
+		getattr(slot, "period_idx", None),
+		normalize_enforcement(getattr(slot, "enforcement", None)),
+		int(getattr(slot, "weight", 5) or 5),
+	)
 
 
 def _assignment_forbidden_slots(ctx, inst) -> None:
@@ -22,7 +43,7 @@ def _assignment_forbidden_slots(ctx, inst) -> None:
 		p_idx = int(p_idx)
 		v = ctx.x.get((c_id, ts_id, day, p_idx))
 		if v is not None:
-			ctx.model.Add(v == 0)
+			ctx.add_hard(ctx.model.Add(v == 0))
 
 
 @register_verb("forbidden_at_slots", supports=["teacher", "subject", "assignment"], kind="hard", description="Cấm xếp tại slot")
@@ -38,17 +59,29 @@ class ForbiddenAtSlots(Verb):
 				_assignment_forbidden_slots(ctx, inst)
 			return
 
-		# Đọc unavailability từ TeacherDTO
+		# Đọc unavailability từ TeacherDTO (per-slot enforcement: mandatory cứng / relaxable nới)
 		if params.get("source") == "teacher.unavailability":
 			for t_id, cs_list in tcs.items():
 				info = inp.teachers.get(t_id)
 				if not info or not info.unavailable_slots:
 					continue
-				for day, p_idx in info.unavailable_slots:
+				for slot in info.unavailable_slots:
+					day, p_idx, enforcement, weight = _norm_unavail(slot)
 					for (c_id, ts_id) in cs_list:
 						v = ctx.x.get((c_id, ts_id, day, p_idx))
-						if v is not None:
-							ctx.model.Add(v == 0)
+						if v is None:
+							continue
+						if enforcement == "relaxable":
+							# GV "hạn chế": phạt nếu vẫn phải xếp (tầng strong), ghi báo cáo.
+							ctx.add_soft(STRONG, v * (-weight))
+							ctx.add_violation(
+								ctx.cur_rule_id, "forbidden",
+								{"teacher_id": t_id, "day": day, "period_idx": p_idx,
+								 "class_id": c_id, "subject_id": ts_id},
+								v,
+							)
+						else:
+							ctx.add_hard(ctx.model.Add(v == 0))
 
 		# Instance: subject=teacher|timetable_subject, object.slots [{day, period_idx}]
 		for inst in instances(params):
@@ -68,7 +101,7 @@ class ForbiddenAtSlots(Verb):
 					for (c_id, ts_id) in tcs.get(entity_id, []):
 						v = ctx.x.get((c_id, ts_id, day, p_idx))
 						if v is not None:
-							ctx.model.Add(v == 0)
+							ctx.add_hard(ctx.model.Add(v == 0))
 					continue
 				# Môn: cấm môn tại slot cho mọi lớp có môn đó
 				for c in inp.classes:
@@ -76,7 +109,7 @@ class ForbiddenAtSlots(Verb):
 						continue
 					v = ctx.x.get((c.name, entity_id, day, p_idx))
 					if v is not None:
-						ctx.model.Add(v == 0)
+						ctx.add_hard(ctx.model.Add(v == 0))
 
 		# Weekday availability từ assignment
 		csw = class_subject_weekdays(inp)
@@ -86,4 +119,4 @@ class ForbiddenAtSlots(Verb):
 					for p_idx in range(ctx.num_periods):
 						v = ctx.x.get((c_id, ts_id, day, p_idx))
 						if v is not None:
-							ctx.model.Add(v == 0)
+							ctx.add_hard(ctx.model.Add(v == 0))
