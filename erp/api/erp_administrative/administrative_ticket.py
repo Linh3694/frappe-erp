@@ -1638,6 +1638,25 @@ def get_rooms_by_building(building_id=None):
             fields=["name", "title_vn", "title_en", "short_title", "room_type", "capacity"],
             order_by="title_vn asc",
         )
+        
+        school_year_id = (data.get("school_year_id") or "").strip() or _active_school_year_id_api()
+        if school_year_id and rooms:
+            rnames = [r["name"] for r in rooms]
+            ya_rows = frappe.get_all(
+                "ERP Administrative Room Yearly Assignment",
+                filters={"room": ["in", rnames], "school_year_id": school_year_id},
+                fields=["room", "display_title_vn", "display_title_en"],
+            )
+            ya_map = {y["room"]: y for y in ya_rows}
+            for room in rooms:
+                y = ya_map.get(room["name"])
+                room["yearly_assignment_display"] = y.get("display_title_vn") if y else None
+                room["yearly_assignment_display_en"] = y.get("display_title_en") if y else None
+        else:
+            for room in rooms:
+                room["yearly_assignment_display"] = None
+                room["yearly_assignment_display_en"] = None
+
         return success_response({"rooms": rooms}, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_rooms_by_building")
