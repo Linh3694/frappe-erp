@@ -26,6 +26,7 @@
   "scheduling_section",
   "prefer_consecutive",
   "force_pair",
+  "tier_spread",
   "enforcement",
   "enforcement_weight",
   "column_break_scheduling",
@@ -99,6 +100,14 @@
    "label": "Force Pair (Bắt buộc tiết đôi)",
    "default": 0,
    "description": "Bắt buộc cặp 2 tiết liên tiếp trong buổi. Tiết/tuần chẵn: toàn cặp. Tiết/tuần lẻ: cho phép 1 tiết lẻ."
+  },
+  {
+   "fieldname": "tier_spread",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Rải nhiều ngày",
+   "options": "weak\nstrong",
+   "default": "weak",
+   "description": "strong = khó thương lượng (ưu tiên cao) / weak = dễ thương lượng"
   },
   {
    "fieldname": "enforcement",

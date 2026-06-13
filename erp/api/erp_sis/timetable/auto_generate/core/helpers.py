@@ -44,6 +44,28 @@ def instances(params: dict) -> list:
 	return params.get("instances") or []
 
 
+def resolve_target_class_ids(inp: Any, obj: dict) -> set[str]:
+	"""Lọc lớp áp dụng theo class_ids/grade_ids; rỗng = áp dụng mọi lớp có môn."""
+	class_ids = obj.get("class_ids") or []
+	if not isinstance(class_ids, list):
+		class_ids = []
+	target_class_ids = {str(c).strip() for c in class_ids if c}
+
+	grade_ids = obj.get("grade_ids") or []
+	if not isinstance(grade_ids, list):
+		grade_ids = []
+	target_grade_ids = {str(g).strip() for g in grade_ids if g}
+
+	if target_grade_ids:
+		for c in inp.classes:
+			class_id = c.name if hasattr(c, "name") else c
+			grade_id = getattr(c, "education_grade_id", None)
+			if grade_id in target_grade_ids:
+				target_class_ids.add(class_id)
+
+	return target_class_ids
+
+
 def inst_object_int(inst: dict, field: str, default: int) -> int:
 	"""Đọc số từ instances[].object[field]; fallback legacy object.value."""
 	obj = inst.get("object") or {}

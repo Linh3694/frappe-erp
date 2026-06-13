@@ -42,7 +42,7 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"subject_label_vn": "Môn",
 		"object_label_vn": "Slot cấm",
 		"instance_required": False,
-		"help_text_vn": "Chọn môn và các slot môn không được xếp (áp dụng mọi lớp có môn).",
+		"help_text_vn": "Chọn môn và slot cấm; có thể giới hạn phạm vi theo lớp/khối, để trống sẽ áp dụng mọi lớp có môn.",
 	},
 	"teacher_not_at_slot": {
 		"parameterized": True,
@@ -79,15 +79,6 @@ _CATALOG_EXTRA: Dict[str, dict] = {
 		"object_label_vn": "Môn + slot",
 		"instance_required": True,
 		"help_text_vn": "Mỗi dòng: chọn lớp, môn và slot cố định.",
-	},
-	"assignment_not_at_slot": {
-		"parameterized": True,
-		"object_kind": "SubjectSlot",
-		"display_name_vn": "Slot cấm lớp+môn",
-		"subject_label_vn": "Lớp",
-		"object_label_vn": "Môn + slot cấm",
-		"instance_required": False,
-		"help_text_vn": "Chọn lớp (hoặc nhiều lớp), môn và các slot không được xếp — áp dụng riêng từng lớp.",
 	},
 	"class_group_simultaneous_subject": {
 		"parameterized": True,

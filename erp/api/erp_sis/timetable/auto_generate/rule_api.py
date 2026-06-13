@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 from typing import Any, Dict, Optional
 
 import frappe
@@ -51,105 +50,10 @@ def _parse_row_json(val: Any) -> dict:
 	return {}
 
 
-def _slot_cells_from_object(obj: dict) -> list[dict]:
-	"""Chuẩn hóa slot từ object về list[{day, period_idx}]."""
-	slots = []
-	raw_slots = obj.get("slots")
-	if isinstance(raw_slots, list) and raw_slots:
-		for item in raw_slots:
-			if not isinstance(item, dict):
-				continue
-			day = item.get("day")
-			p_idx = item.get("period_idx", item.get("period"))
-			if day is None or p_idx is None:
-				continue
-			slots.append({"day": str(day), "period_idx": int(p_idx)})
-		return slots
-
-	day = obj.get("day")
-	p_idx = obj.get("period_idx")
-	if day is not None and p_idx is not None:
-		slots.append({"day": str(day), "period_idx": int(p_idx)})
-	return slots
-
-
-def _slot_signature(slots: list[dict]) -> str:
-	ordered = sorted(
-		[(str(s.get("day", "")), int(s.get("period_idx", 0))) for s in slots],
-		key=lambda x: (x[0], x[1]),
-	)
-	return ",".join(f"{day}|{idx}" for day, idx in ordered)
-
-
-def _ensure_assignment_group_ids(params: dict) -> dict:
-	"""Backfill group_id cho dữ liệu assignment_not_at_slot cũ thiếu group_id."""
-	instances = params.get("instances")
-	if not isinstance(instances, list) or not instances:
-		return params
-
-	class_profiles: dict[str, dict] = {}
-	for inst in instances:
-		if not isinstance(inst, dict):
-			continue
-		obj = inst.get("object") or {}
-		if not isinstance(obj, dict):
-			continue
-		class_id = inst.get("subject")
-		subject_id = obj.get("subject_id") or obj.get("timetable_subject_id")
-		if not class_id or not subject_id:
-			continue
-		label = (obj.get("label") or "").strip()
-		slots = _slot_cells_from_object(obj)
-		if not slots:
-			continue
-		profile_key = f"{class_id}|{subject_id}|{label}"
-		entry = class_profiles.setdefault(profile_key, {"subject_id": subject_id, "label": label, "slots": []})
-		for sl in slots:
-			if not any(x["day"] == sl["day"] and x["period_idx"] == sl["period_idx"] for x in entry["slots"]):
-				entry["slots"].append(sl)
-
-	group_id_by_profile: dict[str, str] = {}
-	for profile_key, profile in class_profiles.items():
-		subject_id = profile["subject_id"]
-		label = profile["label"]
-		slot_sig = _slot_signature(profile["slots"])
-		base = f"{subject_id}|{label}|{slot_sig}"
-		digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:12]
-		group_id_by_profile[profile_key] = f"legacy-ban-{digest}"
-
-	normalized = []
-	for inst in instances:
-		if not isinstance(inst, dict):
-			normalized.append(inst)
-			continue
-		obj = inst.get("object") or {}
-		if not isinstance(obj, dict):
-			normalized.append(inst)
-			continue
-		if obj.get("group_id"):
-			normalized.append(inst)
-			continue
-		class_id = inst.get("subject")
-		subject_id = obj.get("subject_id") or obj.get("timetable_subject_id")
-		label = (obj.get("label") or "").strip()
-		profile_key = f"{class_id}|{subject_id}|{label}"
-		legacy_gid = group_id_by_profile.get(profile_key)
-		if not legacy_gid:
-			normalized.append(inst)
-			continue
-		new_obj = dict(obj)
-		new_obj["group_id"] = legacy_gid
-		normalized.append({**inst, "object": new_obj})
-
-	return {**params, "instances": normalized}
-
-
 def _normalize_rule_row(row: dict) -> dict:
 	"""Chuẩn hóa 1 dòng child table trước khi append."""
 	rule_id = (row.get("rule_id") or "").strip()
 	params = _parse_row_json(row.get("params"))
-	if rule_id == "assignment_not_at_slot":
-		params = _ensure_assignment_group_ids(params)
 	out = {
 		"rule_id": rule_id,
 		"kind": row.get("kind") or "hard",
@@ -414,6 +318,7 @@ def get_rule_set_requirements_matrix(rule_set_id=None):
 					"max_periods_per_day": row.max_periods_per_day,
 					"prefer_consecutive": row.prefer_consecutive,
 					"force_pair": getattr(row, "force_pair", 0),
+					"tier_spread": getattr(row, "tier_spread", "weak") or "weak",
 					"enforcement": getattr(row, "enforcement", "mandatory") or "mandatory",
 					"enforcement_weight": int(getattr(row, "enforcement_weight", 1) or 1),
 				})
@@ -476,6 +381,8 @@ def save_rule_set_requirements(**kwargs):
 				"prefer_consecutive": int(norm["prefer_consecutive"]),
 				"force_pair": int(norm["force_pair"]),
 			}
+			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "tier_spread"):
+				row_out["tier_spread"] = norm["tier_spread"]
 			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "enforcement"):
 				row_out["enforcement"] = norm["enforcement"]
 			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "enforcement_weight"):
@@ -618,34 +525,34 @@ def _load_teachers_for_stage(
 
 def _enrich_teacher_scheduling_limits(
 	teachers: list,
+	rule_set_id: str,
 	slot_meta: Optional[dict] = None,
 ) -> list:
-	"""Bổ sung max tiết/ngày, max tiết/tuần, max liên tiếp, phân bổ tuần từ SIS Teacher."""
+	"""Bổ sung max tiết/ngày, max tiết/tuần, max liên tiếp theo rule set."""
 	if not teachers:
 		return teachers
 	limits = teacher_limits_from_slot_meta(slot_meta)
-	ids = [t["teacher_id"] for t in teachers]
-	has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
-	has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
-	tier_fields = [f for f in ("tier_max_consecutive", "tier_avoid_gap", "tier_balance")
-	               if frappe.db.has_column("SIS Teacher", f)]
-	fields = "name, max_periods_per_day, max_consecutive_periods"
-	if has_week:
-		fields += ", max_periods_per_week"
-	if has_spread:
-		fields += ", workload_spread_mode"
-	for tf in tier_fields:
-		fields += f", {tf}"
-	rows = frappe.db.sql(
-		f"""
-		SELECT {fields}
-		FROM `tabSIS Teacher`
-		WHERE name IN %(ids)s
-		""",
-		{"ids": ids},
-		as_dict=True,
-	)
-	by_id = {r["name"]: r for r in rows}
+	by_id: Dict[str, dict] = {}
+	teacher_ids = [t["teacher_id"] for t in teachers]
+	if (
+		rule_set_id
+		and teacher_ids
+		and frappe.db.table_exists("SIS Timetable Rule Set Teacher Config")
+	):
+		rows = frappe.db.sql(
+			"""
+			SELECT teacher_id, max_periods_per_day, max_periods_per_week,
+			       max_consecutive_periods, workload_spread_mode,
+			       tier_max_consecutive, tier_avoid_gap, tier_balance
+			FROM `tabSIS Timetable Rule Set Teacher Config`
+			WHERE rule_set_id = %(rule_set_id)s
+			  AND teacher_id IN %(teacher_ids)s
+			""",
+			{"rule_set_id": rule_set_id, "teacher_ids": teacher_ids},
+			as_dict=True,
+		)
+		by_id = {r["teacher_id"]: r for r in rows}
+
 	out = []
 	for t in teachers:
 		lim = by_id.get(t["teacher_id"], {})
@@ -655,28 +562,26 @@ def _enrich_teacher_scheduling_limits(
 			limits["max_periods_per_day"],
 			legacy_default=LEGACY_DEFAULT_MAX_PER_DAY,
 		)
+		enriched["max_periods_per_week"] = resolve_teacher_period_limit(
+			lim.get("max_periods_per_week"),
+			limits["max_periods_per_week"],
+			legacy_default=LEGACY_DEFAULT_MAX_PER_WEEK,
+		)
 		enriched["max_consecutive_periods"] = int(lim.get("max_consecutive_periods") or LEGACY_DEFAULT_MAX_CONSECUTIVE)
-		if has_week:
-			enriched["max_periods_per_week"] = resolve_teacher_period_limit(
-				lim.get("max_periods_per_week"),
-				limits["max_periods_per_week"],
-				legacy_default=LEGACY_DEFAULT_MAX_PER_WEEK,
-			)
-		else:
-			enriched["max_periods_per_week"] = limits["max_periods_per_week"]
-		if has_spread:
-			enriched["workload_spread_mode"] = lim.get("workload_spread_mode") or "auto"
-		else:
-			enriched["workload_spread_mode"] = "auto"
+		enriched["workload_spread_mode"] = lim.get("workload_spread_mode") or "auto"
 		for tf in ("tier_max_consecutive", "tier_avoid_gap", "tier_balance"):
 			enriched[tf] = lim.get(tf) or "weak"
 		out.append(enriched)
 	return out
 
 
-def _load_unavailability_map(teacher_ids: list) -> dict:
-	"""Đọc slot bận theo teacher_id từ child table."""
-	if not teacher_ids or not frappe.db.table_exists("SIS Teacher Unavailability"):
+def _load_unavailability_map(rule_set_id: str, teacher_ids: list) -> dict:
+	"""Đọc slot bận theo teacher_id từ bảng per-rule-set."""
+	if not rule_set_id or not teacher_ids or not frappe.db.table_exists("SIS Teacher Unavailability"):
+		return {}
+	if not frappe.db.has_column("SIS Teacher Unavailability", "rule_set_id"):
+		return {}
+	if not frappe.db.has_column("SIS Teacher Unavailability", "teacher_id"):
 		return {}
 
 	has_enf = frappe.db.has_column("SIS Teacher Unavailability", "enforcement")
@@ -686,13 +591,14 @@ def _load_unavailability_map(teacher_ids: list) -> dict:
 
 	rows = frappe.db.sql(
 		f"""
-		SELECT parent AS teacher_id, day_of_week, timetable_column_id,
+		SELECT teacher_id, day_of_week, timetable_column_id,
 		       {enf_sql} {w_sql} reason
 		FROM `tabSIS Teacher Unavailability`
-		WHERE parent IN %(ids)s
+		WHERE rule_set_id = %(rule_set_id)s
+		  AND teacher_id IN %(ids)s
 		ORDER BY day_of_week, timetable_column_id
 		""",
-		{"ids": teacher_ids},
+		{"rule_set_id": rule_set_id, "ids": teacher_ids},
 		as_dict=True,
 	)
 	out: Dict[str, list] = {}
@@ -741,9 +647,9 @@ def get_teacher_unavailability_config(rule_set_id=None):
 		period_rows = _load_study_periods(schedule_id, doc.campus_id, doc.education_stage_id)
 		teachers = _enrich_teacher_scheduling_limits(_load_teachers_for_stage(
 			doc.campus_id, doc.education_stage_id, doc.school_year_id,
-		), slot_meta)
+		), rule_set_id, slot_meta)
 		teacher_ids = [t["teacher_id"] for t in teachers]
-		unavailability = _load_unavailability_map(teacher_ids)
+		unavailability = _load_unavailability_map(rule_set_id, teacher_ids)
 		limits = teacher_limits_from_slot_meta(slot_meta)
 
 		return single_item_response({
@@ -768,7 +674,7 @@ def get_teacher_unavailability_config(rule_set_id=None):
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def save_teacher_unavailability(**kwargs):
-	"""Lưu lịch bận GV vào child table SIS Teacher Unavailability."""
+	"""Lưu cấu hình GV theo rule set (config + slot bận)."""
 	try:
 		data = _json()
 		rule_set_id = data.get("rule_set_id")
@@ -782,6 +688,14 @@ def save_teacher_unavailability(**kwargs):
 
 		if not frappe.db.exists("SIS Timetable Rule Set", rule_set_id):
 			return error_response("Rule Set không tồn tại", 404)
+		if not frappe.db.table_exists("SIS Timetable Rule Set Teacher Config"):
+			return error_response("Thiếu bảng SIS Timetable Rule Set Teacher Config (chạy bench migrate)")
+		if not frappe.db.table_exists("SIS Teacher Unavailability"):
+			return error_response("Thiếu bảng SIS Teacher Unavailability (chạy bench migrate)")
+		if not frappe.db.has_column("SIS Teacher Unavailability", "rule_set_id"):
+			return error_response("SIS Teacher Unavailability chưa có rule_set_id (chạy bench migrate)")
+		if not frappe.db.has_column("SIS Teacher Unavailability", "teacher_id"):
+			return error_response("SIS Teacher Unavailability chưa có teacher_id (chạy bench migrate)")
 
 		rs_doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
 		if not rs_doc.education_stage_id:
@@ -837,76 +751,66 @@ def save_teacher_unavailability(**kwargs):
 					row_data["weight"] = int(slot.get("weight") or 5)
 				new_rows.append(row_data)
 
-			teacher_doc = frappe.get_doc("SIS Teacher", teacher_id)
-			if item.get("max_periods_per_day") is not None:
-				max_day = int(item.get("max_periods_per_day") or 0)
-				if max_day < 1 or max_day > 20:
-					return error_response("Max tiết/ngày phải từ 1 đến 20")
-				teacher_doc.max_periods_per_day = max_day
-			if item.get("max_periods_per_week") is not None:
-				if frappe.db.has_column("SIS Teacher", "max_periods_per_week"):
-					max_week = int(item.get("max_periods_per_week") or 0)
-					if max_week < 1 or max_week > 60:
-						return error_response("Max tiết/tuần phải từ 1 đến 60")
-					teacher_doc.max_periods_per_week = max_week
-			if item.get("max_consecutive_periods") is not None:
-				max_consec = int(item.get("max_consecutive_periods") or 0)
-				if max_consec < 1 or max_consec > 20:
-					return error_response("Max tiết liên tiếp phải từ 1 đến 20")
-				teacher_doc.max_consecutive_periods = max_consec
-			if item.get("workload_spread_mode") is not None:
-				mode = (item.get("workload_spread_mode") or "auto").strip()
-				if mode not in ("auto", "even", "concentrated"):
-					return error_response("workload_spread_mode không hợp lệ")
-				if frappe.db.has_column("SIS Teacher", "workload_spread_mode"):
-					teacher_doc.workload_spread_mode = mode
+			max_day = int(item.get("max_periods_per_day") or 0)
+			max_week = int(item.get("max_periods_per_week") or 0)
+			max_consec = int(item.get("max_consecutive_periods") or 0)
+			mode = (item.get("workload_spread_mode") or "auto").strip()
+			if max_day < 1 or max_day > 20:
+				return error_response("Max tiết/ngày phải từ 1 đến 20")
+			if max_week < 1 or max_week > 60:
+				return error_response("Max tiết/tuần phải từ 1 đến 60")
+			if max_consec < 1 or max_consec > 20:
+				return error_response("Max tiết liên tiếp phải từ 1 đến 20")
+			if mode not in ("auto", "even", "concentrated"):
+				return error_response("workload_spread_mode không hợp lệ")
+
+			cfg_name = frappe.db.get_value(
+				"SIS Timetable Rule Set Teacher Config",
+				{"rule_set_id": rule_set_id, "teacher_id": teacher_id},
+			)
+			if cfg_name:
+				cfg_doc = frappe.get_doc("SIS Timetable Rule Set Teacher Config", cfg_name)
+			else:
+				cfg_doc = frappe.get_doc({
+					"doctype": "SIS Timetable Rule Set Teacher Config",
+					"rule_set_id": rule_set_id,
+					"teacher_id": teacher_id,
+				})
+			cfg_doc.max_periods_per_day = max_day
+			cfg_doc.max_periods_per_week = max_week
+			cfg_doc.max_consecutive_periods = max_consec
+			cfg_doc.workload_spread_mode = mode
 			for tier_field in ("tier_max_consecutive", "tier_avoid_gap", "tier_balance"):
-				if item.get(tier_field) is not None and frappe.db.has_column("SIS Teacher", tier_field):
-					val = (item.get(tier_field) or "weak").strip()
-					setattr(teacher_doc, tier_field, "strong" if val == "strong" else "weak")
+				val = (item.get(tier_field) or "weak").strip()
+				setattr(cfg_doc, tier_field, "strong" if val == "strong" else "weak")
+			cfg_doc.save(ignore_permissions=True)
+
 			if "slots" in item:
-				teacher_doc.set("unavailability", [])
+				frappe.db.sql(
+					"""
+					DELETE FROM `tabSIS Teacher Unavailability`
+					WHERE rule_set_id = %(rule_set_id)s AND teacher_id = %(teacher_id)s
+					""",
+					{"rule_set_id": rule_set_id, "teacher_id": teacher_id},
+				)
 				for row in new_rows:
-					teacher_doc.append("unavailability", row)
-			teacher_doc.save(ignore_permissions=True)
+					payload = {
+						"doctype": "SIS Teacher Unavailability",
+						"rule_set_id": rule_set_id,
+						"teacher_id": teacher_id,
+						"day_of_week": row["day_of_week"],
+						"timetable_column_id": row["timetable_column_id"],
+						"reason": row.get("reason") or "",
+					}
+					if frappe.db.has_column("SIS Teacher Unavailability", "enforcement"):
+						payload["enforcement"] = row.get("enforcement") or "mandatory"
+					if frappe.db.has_column("SIS Teacher Unavailability", "weight"):
+						payload["weight"] = int(row.get("weight") or 5)
+					frappe.get_doc(payload).insert(ignore_permissions=True)
 			saved += 1
 
 		frappe.db.commit()
 		return single_item_response({"saved_teachers": saved})
-	except Exception as e:
-		return error_response(str(e))
-
-
-@frappe.whitelist(allow_guest=False, methods=["POST"])
-def save_subject_tiers(**kwargs):
-	"""Lưu tier per-môn (rải / tiết ưu tiên) vào SIS Timetable Subject."""
-	try:
-		data = _json()
-		subjects = data.get("subjects")
-		if subjects is None:
-			return error_response("Thiếu subjects")
-		if isinstance(subjects, str):
-			subjects = json.loads(subjects)
-
-		has_ts = frappe.db.has_column("SIS Timetable Subject", "tier_spread")
-		has_tp = frappe.db.has_column("SIS Timetable Subject", "tier_preferred")
-		if not (has_ts or has_tp):
-			return error_response("Chưa migrate field tier_spread/tier_preferred (chạy bench migrate)")
-
-		saved = 0
-		for s in subjects or []:
-			name = (s.get("name") or "").strip()
-			if not name or not frappe.db.exists("SIS Timetable Subject", name):
-				continue
-			doc = frappe.get_doc("SIS Timetable Subject", name)
-			if has_ts:
-				doc.tier_spread = "strong" if s.get("tier_spread") == "strong" else "weak"
-			if has_tp:
-				doc.tier_preferred = "strong" if s.get("tier_preferred") == "strong" else "weak"
-			doc.save(ignore_permissions=True)
-			saved += 1
-		frappe.db.commit()
-		return single_item_response({"saved": saved})
 	except Exception as e:
 		return error_response(str(e))
 

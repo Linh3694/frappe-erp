@@ -37,7 +37,6 @@ DEFAULT_RULE_SPECS = [
 	("teacher_not_at_slot", "hard", "forbidden_at_slots", "teacher", {}, {"source": "instances"}, 5, "GV không dạy slot"),
 	("teacher_not_on_day", "hard", "forbidden_on_day", "teacher", {}, {"source": "instances"}, 5, "GV không dạy cả ngày"),
 	("pin_class_subject_slot", "hard", "pinned_to_slot", "assignment", {}, {}, 5, "Pin lớp+môn+slot"),
-	("assignment_not_at_slot", "hard", "forbidden_at_slots", "assignment", {}, {"source": "instances"}, 5, "Lớp+môn không xếp tại slot"),
 	("class_group_simultaneous_subject", "hard", "sync_class_group", "class", {}, {}, 5, "Nhóm lớp cùng môn cùng slot"),
 	("subject_before_subject", "hard", "order_before_same_day", "subject", {}, {}, 5, "Thứ tự môn trong ngày"),
 	("subject_max_simultaneous_classes", "hard", "at_most_simultaneous", "subject", {}, {}, 5, "Max lớp đồng thời"),

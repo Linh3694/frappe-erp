@@ -280,12 +280,14 @@ def get_requirements_matrix(session_id=None):
 		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
 		has_enf = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement")
 		has_enf_w = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight")
+		has_tier_spread = frappe.db.has_column("SIS Timetable Generation Requirement", "tier_spread")
 		force_pair_sql = ", force_pair" if has_force_pair else ", 0 as force_pair"
 		enf_sql = ", enforcement" if has_enf else ", 'mandatory' as enforcement"
 		enf_w_sql = ", enforcement_weight" if has_enf_w else ", 1 as enforcement_weight"
+		tier_spread_sql = ", tier_spread" if has_tier_spread else ", 'weak' as tier_spread"
 		requirements = frappe.db.sql(f"""
 			SELECT name, class_id, timetable_subject_id,
-				   periods_per_week, max_periods_per_day, prefer_consecutive{force_pair_sql}{enf_sql}{enf_w_sql}
+				   periods_per_week, max_periods_per_day, prefer_consecutive{force_pair_sql}{tier_spread_sql}{enf_sql}{enf_w_sql}
 			FROM `tabSIS Timetable Generation Requirement`
 			WHERE session_id = %(session_id)s
 		""", {"session_id": session_id}, as_dict=True)
@@ -361,6 +363,8 @@ def save_requirements(**kwargs):
 				doc.prefer_consecutive = norm["prefer_consecutive"]
 				if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 					doc.force_pair = norm["force_pair"]
+				if frappe.db.has_column("SIS Timetable Generation Requirement", "tier_spread"):
+					doc.tier_spread = norm["tier_spread"]
 				if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement"):
 					doc.enforcement = norm["enforcement"]
 				if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight"):
@@ -403,6 +407,8 @@ def _copy_requirements_from_rule_set_doc(session_id: str, rule_set_id: str) -> i
 		}
 		if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 			payload["force_pair"] = getattr(row, "force_pair", 0)
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "tier_spread"):
+			payload["tier_spread"] = getattr(row, "tier_spread", "weak") or "weak"
 		if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement"):
 			payload["enforcement"] = getattr(row, "enforcement", "mandatory") or "mandatory"
 		if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight"):
@@ -448,6 +454,12 @@ def copy_requirements_from_session(**kwargs):
 		]
 		if frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair"):
 			fields.append("force_pair")
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "tier_spread"):
+			fields.append("tier_spread")
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement"):
+			fields.append("enforcement")
+		if frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight"):
+			fields.append("enforcement_weight")
 		source_reqs = frappe.get_all(
 			"SIS Timetable Generation Requirement",
 			filters={"session_id": source_session_id},

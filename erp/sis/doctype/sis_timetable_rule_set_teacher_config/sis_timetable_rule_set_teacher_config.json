@@ -1,0 +1,141 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "hash",
+ "beta": 1,
+ "creation": "2026-06-13 00:00:00.000000",
+ "custom": 0,
+ "description": "Cấu hình xếp lịch giáo viên theo từng rule set",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_set_id",
+  "teacher_id",
+  "max_periods_per_day",
+  "max_periods_per_week",
+  "max_consecutive_periods",
+  "workload_spread_mode",
+  "tier_max_consecutive",
+  "tier_avoid_gap",
+  "tier_balance"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_set_id",
+   "fieldtype": "Link",
+   "label": "Rule Set",
+   "options": "SIS Timetable Rule Set",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "teacher_id",
+   "fieldtype": "Link",
+   "label": "Teacher",
+   "options": "SIS Teacher",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "max_periods_per_day",
+   "fieldtype": "Int",
+   "label": "Max Periods Per Day",
+   "default": 8,
+   "description": "Số tiết tối đa GV dạy trong 1 ngày"
+  },
+  {
+   "fieldname": "max_periods_per_week",
+   "fieldtype": "Int",
+   "label": "Max Periods Per Week",
+   "default": 24,
+   "description": "Số tiết tối đa GV dạy trong 1 tuần"
+  },
+  {
+   "fieldname": "max_consecutive_periods",
+   "fieldtype": "Int",
+   "label": "Max Consecutive Periods",
+   "default": 10,
+   "description": "Số tiết liên tiếp tối đa trước khi nghỉ"
+  },
+  {
+   "fieldname": "workload_spread_mode",
+   "fieldtype": "Select",
+   "label": "Workload Spread Mode",
+   "options": "auto\neven\nconcentrated",
+   "default": "auto",
+   "description": "Phân bổ tiết/tuần: auto (solver tự chọn), even (dạy đều), concentrated (dồn 1 ngày)"
+  },
+  {
+   "fieldname": "tier_max_consecutive",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Max liên tiếp",
+   "options": "weak\nstrong",
+   "default": "weak"
+  },
+  {
+   "fieldname": "tier_avoid_gap",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Tránh gap",
+   "options": "weak\nstrong",
+   "default": "weak"
+  },
+  {
+   "fieldname": "tier_balance",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Cân bằng tải",
+   "options": "weak\nstrong",
+   "default": "weak"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "indices": [
+  {
+   "unique": 1,
+   "fields": "rule_set_id,teacher_id"
+  }
+ ],
+ "istable": 0,
+ "links": [],
+ "modified": "2026-06-13 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Timetable Rule Set Teacher Config",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

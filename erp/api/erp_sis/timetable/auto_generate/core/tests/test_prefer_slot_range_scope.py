@@ -124,15 +124,18 @@ def test_legacy_periods_migrate_to_all_working_days_slots():
 		weight=8,
 	)
 	forbid_rule = Rule(
-		rule_id="assignment_not_at_slot",
+		rule_id="subject_not_at_slot",
 		kind="hard",
 		verb="forbidden_at_slots",
-		subject_type="assignment",
+		subject_type="subject",
 		params={
 			"source": "instances",
 			"instances": [{
-				"subject": "C1",
-				"object": {"subject_id": "M1", "day": "mon", "period_idx": 0},
+				"subject": "M1",
+				"object": {
+					"class_ids": ["C1"],
+					"slots": [{"day": "mon", "period_idx": 0}],
+				},
 			}],
 		},
 	)

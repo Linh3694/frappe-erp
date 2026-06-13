@@ -11,14 +11,10 @@ def load_subjects(campus_id: str, education_stage_id: str) -> List[dict]:
 
 	has_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
 	heavy_sql = "COALESCE(is_heavy, 0) AS is_heavy" if has_heavy else "0 AS is_heavy"
-	has_ts = frappe.db.has_column("SIS Timetable Subject", "tier_spread")
-	has_tp = frappe.db.has_column("SIS Timetable Subject", "tier_preferred")
-	ts_sql = "COALESCE(NULLIF(tier_spread, ''), 'weak') AS tier_spread" if has_ts else "'weak' AS tier_spread"
-	tp_sql = "COALESCE(NULLIF(tier_preferred, ''), 'weak') AS tier_preferred" if has_tp else "'weak' AS tier_preferred"
 
 	return frappe.db.sql(
 		f"""
-		SELECT name, title_vn, title_en, {heavy_sql}, {ts_sql}, {tp_sql}
+		SELECT name, title_vn, title_en, {heavy_sql}
 		FROM `tabSIS Timetable Subject`
 		WHERE campus_id = %(campus_id)s
 		  AND (
@@ -179,6 +175,7 @@ def req_cell_key(class_id: str, subject_id: str) -> str:
 def normalize_requirement_row(row: dict) -> dict:
 	"""Chuẩn hóa 1 ô ma trận từ DB/API."""
 	enf = (row.get("enforcement") or "mandatory")
+	tier_spread = (row.get("tier_spread") or "weak")
 	return {
 		"class_id": row.get("class_id"),
 		"timetable_subject_id": row.get("timetable_subject_id"),
@@ -186,6 +183,7 @@ def normalize_requirement_row(row: dict) -> dict:
 		"max_periods_per_day": int(row.get("max_periods_per_day") or 2),
 		"prefer_consecutive": bool(row.get("prefer_consecutive")),
 		"force_pair": bool(row.get("force_pair")),
+		"tier_spread": tier_spread if tier_spread in ("strong", "weak") else "weak",
 		# Per-cell tier: mandatory (đủ N cứng) | relaxable (cho thiếu, tính coverage).
 		"enforcement": enf if enf in ("mandatory", "relaxable") else "mandatory",
 		"enforcement_weight": int(row.get("enforcement_weight") or 1),

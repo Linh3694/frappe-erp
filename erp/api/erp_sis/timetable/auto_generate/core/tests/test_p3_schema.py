@@ -71,7 +71,7 @@ def test_rule_catalog_room_rules():
 	# Ràng buộc phòng còn lại (đều luôn bật)
 	assert "room_max_simultaneous" in ids
 	assert "room_eligibility" in ids
-	assert len(list_rule_catalog()) == 23
+	assert len(list_rule_catalog()) == 22
 
 
 def test_subject_preferred_periods_in_catalog():

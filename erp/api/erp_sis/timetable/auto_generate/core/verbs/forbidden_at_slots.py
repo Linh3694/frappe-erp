@@ -1,4 +1,4 @@
-from ..helpers import class_subject_weekdays, instances, teacher_class_subjects
+from ..helpers import class_subject_weekdays, instances, resolve_target_class_ids, teacher_class_subjects
 from ..registry import Verb, register_verb
 from ..tiers import STRONG, normalize_enforcement
 
@@ -23,41 +23,11 @@ def _norm_unavail(slot):
 	)
 
 
-def _assignment_forbidden_slots(ctx, inst) -> None:
-	"""Cấm lớp+môn tại slot — instance giống pin (subject=class_id, object.subject_id + day/period hoặc slots[])."""
-	c_id = inst.get("subject") or inst.get("class_id")
-	obj = inst.get("object") or {}
-	ts_id = obj.get("subject_id") or obj.get("timetable_subject_id")
-	if not c_id or not ts_id:
-		return
-
-	slot_list = list(obj.get("slots") or [])
-	if not slot_list and obj.get("day") is not None and obj.get("period_idx") is not None:
-		slot_list = [{"day": obj.get("day"), "period_idx": obj.get("period_idx")}]
-
-	for sl in slot_list:
-		day = sl.get("day")
-		p_idx = sl.get("period_idx", sl.get("period"))
-		if day is None or p_idx is None:
-			continue
-		p_idx = int(p_idx)
-		v = ctx.x.get((c_id, ts_id, day, p_idx))
-		if v is not None:
-			ctx.add_hard(ctx.model.Add(v == 0))
-
-
-@register_verb("forbidden_at_slots", supports=["teacher", "subject", "assignment"], kind="hard", description="Cấm xếp tại slot")
+@register_verb("forbidden_at_slots", supports=["teacher", "subject"], kind="hard", description="Cấm xếp tại slot")
 class ForbiddenAtSlots(Verb):
 	def apply_hard(self, ctx, subject_set, params):
 		inp = ctx.inp
 		tcs = teacher_class_subjects(inp)
-		subject_type = getattr(ctx, "cur_subject_type", None)
-
-		# Rule assignment_not_at_slot — chỉ xử lý instance lớp+môn
-		if subject_type == "assignment" and params.get("source") == "instances":
-			for inst in instances(params):
-				_assignment_forbidden_slots(ctx, inst)
-			return
 
 		# Đọc unavailability từ TeacherDTO (per-slot enforcement: mandatory cứng / relaxable nới)
 		if params.get("source") == "teacher.unavailability":
@@ -85,10 +55,17 @@ class ForbiddenAtSlots(Verb):
 
 		# Instance: subject=teacher|timetable_subject, object.slots [{day, period_idx}]
 		for inst in instances(params):
-			entity_id = inst.get("subject")
 			obj = inst.get("object") or {}
+			entity_ids = []
+			for sid in obj.get("subject_ids") or []:
+				if sid:
+					entity_ids.append(str(sid).strip())
+			legacy_subject = inst.get("subject")
+			if legacy_subject:
+				entity_ids.append(str(legacy_subject).strip())
+			entity_ids = [sid for i, sid in enumerate(entity_ids) if sid and sid not in entity_ids[:i]]
 			slots = obj.get("slots") or []
-			if entity_id is None:
+			if not entity_ids:
 				continue
 			for sl in slots:
 				day = sl.get("day")
@@ -96,20 +73,45 @@ class ForbiddenAtSlots(Verb):
 				if day is None or p_idx is None:
 					continue
 				p_idx = int(p_idx)
-				# GV: cấm mọi lớp×môn GV dạy tại slot
-				if entity_id in tcs:
-					for (c_id, ts_id) in tcs.get(entity_id, []):
-						v = ctx.x.get((c_id, ts_id, day, p_idx))
-						if v is not None:
-							ctx.add_hard(ctx.model.Add(v == 0))
-					continue
-				# Môn: cấm môn tại slot cho mọi lớp có môn đó
-				for c in inp.classes:
-					if entity_id not in inp.class_subjects.get(c.name, []):
+				enforcement = normalize_enforcement(sl.get("enforcement"))
+				weight = int(sl.get("weight", 5) or 5)
+				for entity_id in entity_ids:
+					# GV: cấm mọi lớp×môn GV dạy tại slot
+					if entity_id in tcs:
+						for (c_id, ts_id) in tcs.get(entity_id, []):
+							v = ctx.x.get((c_id, ts_id, day, p_idx))
+							if v is not None:
+								if enforcement == "relaxable":
+									ctx.add_soft(STRONG, v * (-weight))
+									ctx.add_violation(
+										ctx.cur_rule_id, "forbidden",
+										{"teacher_id": entity_id, "day": day, "period_idx": p_idx,
+										 "class_id": c_id, "subject_id": ts_id, "enforcement": "relaxable"},
+										v,
+									)
+								else:
+									ctx.add_hard(ctx.model.Add(v == 0))
 						continue
-					v = ctx.x.get((c.name, entity_id, day, p_idx))
-					if v is not None:
-						ctx.add_hard(ctx.model.Add(v == 0))
+					# Môn: cấm môn tại slot theo phạm vi class_ids/grade_ids (rỗng = mọi lớp có môn).
+					target_classes = resolve_target_class_ids(inp, obj)
+					for c in inp.classes:
+						class_id = c.name if hasattr(c, "name") else c
+						if target_classes and class_id not in target_classes:
+							continue
+						if entity_id not in inp.class_subjects.get(class_id, []):
+							continue
+						v = ctx.x.get((class_id, entity_id, day, p_idx))
+						if v is not None:
+							if enforcement == "relaxable":
+								ctx.add_soft(STRONG, v * (-weight))
+								ctx.add_violation(
+									ctx.cur_rule_id, "forbidden",
+									{"subject_id": entity_id, "day": day, "period_idx": p_idx,
+									 "class_id": class_id, "enforcement": "relaxable"},
+									v,
+								)
+							else:
+								ctx.add_hard(ctx.model.Add(v == 0))
 
 		# Weekday availability từ assignment
 		csw = class_subject_weekdays(inp)

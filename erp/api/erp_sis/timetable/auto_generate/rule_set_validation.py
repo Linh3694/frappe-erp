@@ -29,6 +29,10 @@ def _instances(params: dict) -> list:
 
 def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 	obj = inst.get("object") or {}
+	has_subject_group = False
+	subject_ids = obj.get("subject_ids") or []
+	if isinstance(subject_ids, list):
+		has_subject_group = len([str(s).strip() for s in subject_ids if s]) > 0
 	if rule_id == "class_group_simultaneous_subject" or object_kind == "ClassGroup":
 		mode = (obj.get("mode") or "sync").strip().lower()
 		ts_id = obj.get("timetable_subject_id") or obj.get("subject_id")
@@ -58,7 +62,7 @@ def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 		if obj.get("max_classes") is None and obj.get("max") is None and obj.get("value") is None:
 			return False
 		return True
-	if not inst.get("subject"):
+	if not inst.get("subject") and not has_subject_group:
 		return False
 	if rule_id == "teacher_not_on_day" or object_kind == "Day":
 		days = obj.get("days") or []
@@ -84,13 +88,6 @@ def _instance_valid(rule_id: str, inst: dict, object_kind: str) -> bool:
 		if rule_id == "pin_class_subject_slot":
 			if not obj.get("day") or obj.get("period_idx") is None:
 				return False
-		if rule_id == "assignment_not_at_slot":
-			slots = obj.get("slots") or []
-			if slots:
-				return True
-			if obj.get("day") is not None and obj.get("period_idx") is not None:
-				return True
-			return False
 	return True
 
 

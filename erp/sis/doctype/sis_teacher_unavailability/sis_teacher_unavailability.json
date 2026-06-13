@@ -6,12 +6,14 @@
  "beta": 0,
  "creation": "2026-05-26 00:00:00.000000",
  "custom": 0,
- "description": "Slot GV không dạy (child table của SIS Teacher)",
+ "description": "Slot GV không dạy theo từng rule set",
  "docstatus": 0,
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "rule_set_id",
+  "teacher_id",
   "day_of_week",
   "timetable_column_id",
   "enforcement",
@@ -19,6 +21,22 @@
   "reason"
  ],
  "fields": [
+  {
+   "fieldname": "rule_set_id",
+   "fieldtype": "Link",
+   "label": "Rule Set",
+   "options": "SIS Timetable Rule Set",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "teacher_id",
+   "fieldtype": "Link",
+   "label": "Teacher",
+   "options": "SIS Teacher",
+   "reqd": 1,
+   "in_list_view": 1
+  },
   {
    "fieldname": "day_of_week",
    "fieldtype": "Select",
@@ -60,14 +78,49 @@
   }
  ],
  "index_web_pages_for_search": 0,
- "istable": 1,
+ "indices": [
+  {
+   "unique": 1,
+   "fields": "rule_set_id,teacher_id,day_of_week,timetable_column_id"
+  },
+  {
+   "unique": 0,
+   "fields": "rule_set_id,teacher_id"
+  }
+ ],
+ "istable": 0,
  "links": [],
  "modified": "2026-05-26 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Teacher Unavailability",
  "owner": "Administrator",
- "permissions": [],
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],

@@ -262,74 +262,104 @@ class TimetableDataCollector:
 		return [PeriodInfo(**r) for r in rows]
 
 	def _get_teachers(self) -> Dict[str, TeacherInfo]:
-		"""Lấy GV theo campus, kèm scheduling config + unavailability."""
-		has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
-		has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
-		tier_cols = {
-			"tier_max_consecutive": frappe.db.has_column("SIS Teacher", "tier_max_consecutive"),
-			"tier_avoid_gap": frappe.db.has_column("SIS Teacher", "tier_avoid_gap"),
-			"tier_balance": frappe.db.has_column("SIS Teacher", "tier_balance"),
-		}
-		fields = [
-			"t.name", "t.user_id",
-			"COALESCE(t.max_periods_per_day, 8) as max_periods_per_day",
-			f"COALESCE(t.max_consecutive_periods, {LEGACY_DEFAULT_MAX_CONSECUTIVE}) as max_consecutive_periods",
-		]
-		if has_week:
-			fields.append("COALESCE(t.max_periods_per_week, 24) as max_periods_per_week")
-		if has_spread:
-			fields.append("COALESCE(t.workload_spread_mode, 'auto') as workload_spread_mode")
-		for col, present in tier_cols.items():
-			if present:
-				fields.append(f"COALESCE(NULLIF(t.{col}, ''), 'weak') as {col}")
-		sql = f"""
-			SELECT {", ".join(fields)},
+		"""Lấy GV theo campus, kèm config + slot bận theo rule set (single source)."""
+		rows = frappe.db.sql(
+			"""
+			SELECT t.name, t.user_id,
 			       COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id, t.name) AS full_name
 			FROM `tabSIS Teacher` t
 			LEFT JOIN `tabUser` u ON u.name = t.user_id
 			WHERE t.campus_id = %(campus_id)s
-		"""
-		rows = frappe.db.sql(sql, {"campus_id": self.session.campus_id}, as_dict=True)
+			""",
+			{"campus_id": self.session.campus_id},
+			as_dict=True,
+		)
 
-		teachers = {}
-		for r in rows:
-			if not has_week:
-				r["max_periods_per_week"] = 24
-			if not has_spread:
-				r["workload_spread_mode"] = "auto"
-			for col, present in tier_cols.items():
-				if not present:
-					r[col] = "weak"
-			teachers[r["name"]] = TeacherInfo(**r)
+		teachers: Dict[str, TeacherInfo] = {
+			r["name"]: TeacherInfo(
+				name=r["name"],
+				user_id=r.get("user_id") or r["name"],
+				full_name=r.get("full_name") or r["name"],
+				max_periods_per_day=0,
+				max_periods_per_week=0,
+				max_consecutive_periods=LEGACY_DEFAULT_MAX_CONSECUTIVE,
+				workload_spread_mode="auto",
+				tier_max_consecutive="weak",
+				tier_avoid_gap="weak",
+				tier_balance="weak",
+			)
+			for r in rows
+		}
 
-		# Child table unavailability (nếu DocType/field đã migrate)
-		if frappe.db.table_exists("SIS Teacher Unavailability"):
+		rule_set_id = getattr(self.session, "rule_set_id", None) or None
+		if (
+			rule_set_id
+			and teachers
+			and frappe.db.table_exists("SIS Timetable Rule Set Teacher Config")
+		):
+			cfg_rows = frappe.db.sql(
+				"""
+				SELECT teacher_id, max_periods_per_day, max_periods_per_week,
+				       max_consecutive_periods, workload_spread_mode,
+				       tier_max_consecutive, tier_avoid_gap, tier_balance
+				FROM `tabSIS Timetable Rule Set Teacher Config`
+				WHERE rule_set_id = %(rule_set_id)s
+				  AND teacher_id IN %(teacher_ids)s
+				""",
+				{"rule_set_id": rule_set_id, "teacher_ids": list(teachers.keys())},
+				as_dict=True,
+			)
+			for row in cfg_rows:
+				teacher = teachers.get(row.get("teacher_id"))
+				if not teacher:
+					continue
+				teacher.max_periods_per_day = int(row.get("max_periods_per_day") or 0)
+				teacher.max_periods_per_week = int(row.get("max_periods_per_week") or 0)
+				teacher.max_consecutive_periods = int(row.get("max_consecutive_periods") or LEGACY_DEFAULT_MAX_CONSECUTIVE)
+				teacher.workload_spread_mode = row.get("workload_spread_mode") or "auto"
+				teacher.tier_max_consecutive = row.get("tier_max_consecutive") or "weak"
+				teacher.tier_avoid_gap = row.get("tier_avoid_gap") or "weak"
+				teacher.tier_balance = row.get("tier_balance") or "weak"
+
+		if (
+			rule_set_id
+			and teachers
+			and frappe.db.table_exists("SIS Teacher Unavailability")
+			and frappe.db.has_column("SIS Teacher Unavailability", "rule_set_id")
+			and frappe.db.has_column("SIS Teacher Unavailability", "teacher_id")
+		):
 			has_enf = frappe.db.has_column("SIS Teacher Unavailability", "enforcement")
 			has_enf_w = frappe.db.has_column("SIS Teacher Unavailability", "weight")
 			enf_sql = "COALESCE(enforcement, 'mandatory') as enforcement," if has_enf else "'mandatory' as enforcement,"
 			enf_w_sql = "COALESCE(weight, 5) as weight," if has_enf_w else "5 as weight,"
-			unavail_rows = frappe.db.sql(f"""
-				SELECT parent as teacher_id, day_of_week, timetable_column_id,
+			unavail_rows = frappe.db.sql(
+				f"""
+				SELECT teacher_id, day_of_week, timetable_column_id,
 				       {enf_sql} {enf_w_sql} 1 as _ok
 				FROM `tabSIS Teacher Unavailability`
-				WHERE parent IN %(ids)s
-			""", {"ids": list(teachers.keys()) or [""]}, as_dict=True)
+				WHERE rule_set_id = %(rule_set_id)s
+				  AND teacher_id IN %(ids)s
+				""",
+				{"rule_set_id": rule_set_id, "ids": list(teachers.keys())},
+				as_dict=True,
+			)
 
 			period_map = {p.name: i for i, p in enumerate(
 				sorted(self._get_periods(), key=lambda x: x.period_priority)
 			)}
 			for row in unavail_rows:
-				t = teachers.get(row["teacher_id"])
-				if not t:
+				teacher = teachers.get(row.get("teacher_id"))
+				if not teacher:
 					continue
 				p_idx = period_map.get(row["timetable_column_id"])
-				if p_idx is not None:
-					# 4-tuple: (day, period_idx, enforcement, weight)
-					t.unavailable_slots.append((
-						row["day_of_week"], p_idx,
-						row.get("enforcement") or "mandatory",
-						int(row.get("weight") or 5),
-					))
+				if p_idx is None:
+					continue
+				teacher.unavailable_slots.append((
+					row["day_of_week"],
+					p_idx,
+					row.get("enforcement") or "mandatory",
+					int(row.get("weight") or 5),
+				))
 
 		return teachers
 
@@ -354,10 +384,8 @@ class TimetableDataCollector:
 		program_sql = "NULLIF(ts.curriculum_id, '') as program_id" if has_curriculum else "NULL as program_id"
 		enforcement_sql = "COALESCE(r.enforcement, 'mandatory') as enforcement," if has_enforcement else "'mandatory' as enforcement,"
 		enf_weight_sql = "COALESCE(r.enforcement_weight, 1) as enforcement_weight," if has_enf_weight else "1 as enforcement_weight,"
-		has_t_spread = frappe.db.has_column("SIS Timetable Subject", "tier_spread")
-		has_t_pref = frappe.db.has_column("SIS Timetable Subject", "tier_preferred")
-		t_spread_sql = "COALESCE(NULLIF(ts.tier_spread, ''), 'weak') as tier_spread," if has_t_spread else "'weak' as tier_spread,"
-		t_pref_sql = "COALESCE(NULLIF(ts.tier_preferred, ''), 'weak') as tier_preferred," if has_t_pref else "'weak' as tier_preferred,"
+		has_t_spread = frappe.db.has_column("SIS Timetable Generation Requirement", "tier_spread")
+		t_spread_sql = "COALESCE(NULLIF(r.tier_spread, ''), 'weak') as tier_spread," if has_t_spread else "'weak' as tier_spread,"
 
 		rows = frappe.db.sql(f"""
 			SELECT
@@ -368,7 +396,6 @@ class TimetableDataCollector:
 				r.max_periods_per_day,
 				r.prefer_consecutive,
 				{t_spread_sql}
-				{t_pref_sql}
 				{enforcement_sql}
 				{enf_weight_sql}
 				{force_pair_sql}
@@ -391,7 +418,7 @@ class TimetableDataCollector:
 			is_heavy=bool(r.get("is_heavy")),
 			program_id=r.get("program_id") or None,
 			tier_spread=r.get("tier_spread") or "weak",
-			tier_preferred=r.get("tier_preferred") or "weak",
+			tier_preferred="weak",
 			enforcement=r.get("enforcement") or "mandatory",
 			enforcement_weight=int(r.get("enforcement_weight") or 1),
 		) for r in rows]

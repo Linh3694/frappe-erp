@@ -21,7 +21,7 @@ def test_default_rule_set_rules():
 	# Rule phòng còn lại (luôn bật)
 	assert "room_max_simultaneous" in ids
 	assert "room_eligibility" in ids
-	assert len(rs.rules) == 23
+	assert len(rs.rules) == 22
 
 
 def test_solve_tiny_input():

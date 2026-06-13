@@ -16,6 +16,7 @@
   "scheduling_section",
   "prefer_consecutive",
   "force_pair",
+  "tier_spread",
   "enforcement",
   "enforcement_weight",
   "column_break_scheduling",
@@ -75,6 +76,14 @@
    "fieldtype": "Check",
    "label": "Force Pair",
    "default": 0
+  },
+  {
+   "fieldname": "tier_spread",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Rải nhiều ngày",
+   "options": "weak\nstrong",
+   "default": "weak",
+   "description": "strong = khó thương lượng (ưu tiên cao) / weak = dễ thương lượng"
   },
   {
    "fieldname": "enforcement",
