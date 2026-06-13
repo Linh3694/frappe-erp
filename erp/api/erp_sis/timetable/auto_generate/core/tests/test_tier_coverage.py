@@ -205,6 +205,45 @@ def test_pinned_soft_vs_hard():
 	assert status2 == "INFEASIBLE"
 
 
+def test_per_entity_balance_tier():
+	"""tier_balance per-GV: strong -> term vào strong bucket; weak -> không."""
+	def mk(tier):
+		inp = TimetableInput(
+			classes=[ClassInfo("C1", "L", "G1", "R1")],
+			periods=[PeriodInfo("P1", "T1", 1), PeriodInfo("P2", "T2", 2)],
+			teachers={"T1": TeacherInfo("T1", workload_spread_mode="even", tier_balance=tier)},
+			requirements=[SubjectRequirement("M1", "T", "C1", 4)],
+			working_days=["mon", "tue", "wed"],
+		)
+		inp.class_subjects = {"C1": ["M1"]}
+		inp.class_subject_teachers = {"C1|M1": ["T1"]}
+		inp.column_period_index = {"P1": 0, "P2": 1}
+		return inp
+	_, _, _, cs = build_and_solve(mk("strong"), build_default_rule_set())
+	_, _, _, cw = build_and_solve(mk("weak"), build_default_rule_set())
+	assert len(cs.objectives_by_tier["strong"]) > 0
+	assert len(cw.objectives_by_tier["strong"]) == 0
+
+
+def test_per_entity_spread_tier():
+	"""tier_spread per-môn: strong tăng số term ở strong bucket."""
+	def mk(tier):
+		inp = TimetableInput(
+			classes=[ClassInfo("C1", "L", "G1", "R1")],
+			periods=[PeriodInfo("P1", "T1", 1), PeriodInfo("P2", "T2", 2)],
+			teachers={"T1": TeacherInfo("T1")},
+			requirements=[SubjectRequirement("M1", "T", "C1", 3, tier_spread=tier)],
+			working_days=["mon", "tue", "wed"],
+		)
+		inp.class_subjects = {"C1": ["M1"]}
+		inp.class_subject_teachers = {"C1|M1": ["T1"]}
+		inp.column_period_index = {"P1": 0, "P2": 1}
+		return inp
+	_, _, _, cs = build_and_solve(mk("strong"), build_default_rule_set())
+	_, _, _, cw = build_and_solve(mk("weak"), build_default_rule_set())
+	assert len(cs.objectives_by_tier["strong"]) > len(cw.objectives_by_tier["strong"])
+
+
 def test_unsat_core_minimal():
 	"""Pin mandatory ⟂ unavailability mandatory cùng slot -> core tối thiểu đúng 2 rule."""
 	inp = _tight([("mon", 0, "mandatory", 5)])

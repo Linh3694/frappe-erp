@@ -22,21 +22,25 @@ class MaxConsecutive(Verb):
 			for t_id in tcs:
 				info = inp.teachers.get(t_id)
 				if info:
-					self._apply_limit(ctx, t_id, info.max_consecutive_periods, tcs, kind=kind, weight=weight)
+					tier = getattr(info, "tier_max_consecutive", "weak")
+					self._apply_limit(ctx, t_id, info.max_consecutive_periods, tcs, kind=kind, weight=weight, tier=tier)
 			return
 
 		for inst in instances(params):
 			t_id = inst.get("subject")
 			n = inst_object_int(inst, "max", params.get("max", LEGACY_DEFAULT_MAX_CONSECUTIVE))
-			self._apply_limit(ctx, t_id, n, tcs, kind=kind, weight=weight)
+			info = inp.teachers.get(t_id)
+			tier = getattr(info, "tier_max_consecutive", "weak") if info else "weak"
+			self._apply_limit(ctx, t_id, n, tcs, kind=kind, weight=weight, tier=tier)
 
 		for t_id in subject_set or []:
 			tid = t_id.name if hasattr(t_id, "name") else t_id
 			info = inp.teachers.get(tid)
 			if info and not instances(params):
-				self._apply_limit(ctx, tid, info.max_consecutive_periods, tcs, kind=kind, weight=weight)
+				tier = getattr(info, "tier_max_consecutive", "weak")
+				self._apply_limit(ctx, tid, info.max_consecutive_periods, tcs, kind=kind, weight=weight, tier=tier)
 
-	def _apply_limit(self, ctx, t_id, max_consec, tcs, *, kind: str, weight: int) -> None:
+	def _apply_limit(self, ctx, t_id, max_consec, tcs, *, kind: str, weight: int, tier: str = "") -> None:
 		if max_consec >= ctx.num_periods:
 			return
 		for day in ctx.working_days:
@@ -47,4 +51,4 @@ class MaxConsecutive(Verb):
 						v = ctx.x.get((c_id, ts_id, day, p))
 						if v is not None:
 							window.append(v)
-				le_limit(ctx, window, max_consec, kind=kind, weight=weight, relaxable=True, tag=f"mc_{t_id}_{day}_{start}")
+				le_limit(ctx, window, max_consec, kind=kind, weight=weight, relaxable=True, tier=tier, tag=f"mc_{t_id}_{day}_{start}")

@@ -28,6 +28,9 @@
   "max_periods_per_week",
   "max_consecutive_periods",
   "workload_spread_mode",
+  "tier_max_consecutive",
+  "tier_avoid_gap",
+  "tier_balance",
   "unavailability_section",
   "unavailability"
  ],
@@ -114,6 +117,28 @@
    "options": "auto\neven\nconcentrated",
    "default": "auto",
    "description": "Phân bổ tiết/tuần: auto (solver tự chọn), even (dạy đều), concentrated (dồn 1 ngày)"
+  },
+  {
+   "fieldname": "tier_max_consecutive",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Max liên tiếp",
+   "options": "weak\nstrong",
+   "default": "weak",
+   "description": "strong = khó thương lượng (ưu tiên cao) / weak = dễ thương lượng"
+  },
+  {
+   "fieldname": "tier_avoid_gap",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Tránh gap",
+   "options": "weak\nstrong",
+   "default": "weak"
+  },
+  {
+   "fieldname": "tier_balance",
+   "fieldtype": "Select",
+   "label": "Ưu tiên: Cân bằng tải",
+   "options": "weak\nstrong",
+   "default": "weak"
   },
   {
    "fieldname": "unavailability_section",

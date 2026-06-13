@@ -11,10 +11,14 @@ def load_subjects(campus_id: str, education_stage_id: str) -> List[dict]:
 
 	has_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
 	heavy_sql = "COALESCE(is_heavy, 0) AS is_heavy" if has_heavy else "0 AS is_heavy"
+	has_ts = frappe.db.has_column("SIS Timetable Subject", "tier_spread")
+	has_tp = frappe.db.has_column("SIS Timetable Subject", "tier_preferred")
+	ts_sql = "COALESCE(NULLIF(tier_spread, ''), 'weak') AS tier_spread" if has_ts else "'weak' AS tier_spread"
+	tp_sql = "COALESCE(NULLIF(tier_preferred, ''), 'weak') AS tier_preferred" if has_tp else "'weak' AS tier_preferred"
 
 	return frappe.db.sql(
 		f"""
-		SELECT name, title_vn, title_en, {heavy_sql}
+		SELECT name, title_vn, title_en, {heavy_sql}, {ts_sql}, {tp_sql}
 		FROM `tabSIS Timetable Subject`
 		WHERE campus_id = %(campus_id)s
 		  AND (

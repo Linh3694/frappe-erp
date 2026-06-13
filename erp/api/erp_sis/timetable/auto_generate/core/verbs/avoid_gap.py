@@ -7,12 +7,13 @@ class AvoidGap(Verb):
 	def build_soft(self, ctx, subject_set, params, weight: int):
 		inp = ctx.inp
 		tcs = teacher_class_subjects(inp)
-		penalties = []
 		for t_id, cs_list in tcs.items():
 			if subject_set and t_id not in subject_set and not any(
 				(hasattr(s, "name") and s.name == t_id) or s == t_id for s in subject_set
 			):
 				continue
+			info = inp.teachers.get(t_id)
+			tier = getattr(info, "tier_avoid_gap", "weak") if info else "weak"
 			for day in inp.working_days:
 				teaching_at = []
 				for p_idx in range(ctx.num_periods):
@@ -27,5 +28,5 @@ class AvoidGap(Verb):
 							gap = ctx.model.NewBoolVar(f"gap_{t_id}_{day}_{i}_{k}_{j}")
 							ctx.model.AddBoolAnd([teaching_at[i], teaching_at[j], teaching_at[k].Not()]).OnlyEnforceIf(gap)
 							ctx.model.AddBoolOr([teaching_at[i].Not(), teaching_at[j].Not(), teaching_at[k]]).OnlyEnforceIf(gap.Not())
-							penalties.append(gap * (-weight))
-		return penalties
+							ctx.add_soft(tier, gap * (-weight))
+		return []  # self-bucket theo tier per-GV

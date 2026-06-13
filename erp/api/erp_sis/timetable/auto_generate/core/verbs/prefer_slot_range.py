@@ -54,15 +54,17 @@ def _target_class_ids(inp, obj: dict) -> set[str]:
 class PreferSlotRange(Verb):
 	def build_soft(self, ctx, subject_set, params, weight: int):
 		inp = ctx.inp
+		# Tier per-môn (từ SIS Timetable Subject qua requirement).
+		pref_tier = {r.timetable_subject_id: getattr(r, "tier_preferred", "weak") for r in inp.requirements}
 		inst_list = instances(params)
 		if inst_list or params.get("source") == "instances":
-			terms = []
 			for inst in inst_list:
 				ts_id = inst.get("subject")
 				obj = inst.get("object") or {}
 				preferred_slots = _preferred_slots_from_object(obj, inp.working_days)
 				if not ts_id or not preferred_slots:
 					continue
+				tier = pref_tier.get(ts_id, "weak")
 				target_classes = _target_class_ids(inp, obj)
 				for c in inp.classes:
 					class_id = c.name if hasattr(c, "name") else c
@@ -76,25 +78,25 @@ class PreferSlotRange(Verb):
 							if v is None:
 								continue
 							if (day, p_idx) in preferred_slots:
-								terms.append(v * weight)
+								ctx.add_soft(tier, v * weight)
 							else:
-								terms.append(v * (-weight * max(p_idx // 2, 1)))
-			return terms
+								ctx.add_soft(tier, v * (-weight * max(p_idx // 2, 1)))
+			return []  # self-bucket theo tier per-môn
 
 		# Legacy global periods (deprecated)
 		preferred = set(params.get("periods") or [0, 1, 2, 3])
-		terms = []
 		for c in inp.classes:
 			for ts_id in inp.class_subjects.get(c.name, []):
 				if subject_set and ts_id not in subject_set:
 					continue
+				tier = pref_tier.get(ts_id, "weak")
 				for day in inp.working_days:
 					for p_idx in range(ctx.num_periods):
 						v = ctx.x.get((c.name, ts_id, day, p_idx))
 						if v is None:
 							continue
 						if p_idx in preferred:
-							terms.append(v * weight)
+							ctx.add_soft(tier, v * weight)
 						else:
-							terms.append(v * (-weight * max(p_idx // 2, 1)))
-		return terms
+							ctx.add_soft(tier, v * (-weight * max(p_idx // 2, 1)))
+		return []  # self-bucket theo tier per-môn

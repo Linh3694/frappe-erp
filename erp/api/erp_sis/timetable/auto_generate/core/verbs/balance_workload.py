@@ -7,12 +7,12 @@ class BalanceWorkload(Verb):
 	def build_soft(self, ctx, subject_set, params, weight: int):
 		inp = ctx.inp
 		tcs = teacher_class_subjects(inp)
-		objectives = []
 		for t_id, cs_list in tcs.items():
 			info = inp.teachers.get(t_id)
 			mode = getattr(info, "workload_spread_mode", "auto") if info else "auto"
 			if mode == "auto":
 				continue
+			tier = getattr(info, "tier_balance", "weak") if info else "weak"
 
 			day_loads = []
 			for day in inp.working_days:
@@ -38,8 +38,8 @@ class BalanceWorkload(Verb):
 
 			if mode == "even":
 				# Dạy đều — giảm chênh lệch giữa ngày nhiều/nhất và ít nhất
-				objectives.append(diff * (-weight))
+				ctx.add_soft(tier, diff * (-weight))
 			elif mode == "concentrated":
 				# Dồn 1 ngày — ưu tiên tăng chênh lệch (dồn tiết vào ít ngày)
-				objectives.append(diff * weight)
-		return objectives
+				ctx.add_soft(tier, diff * weight)
+		return []  # self-bucket theo tier per-GV

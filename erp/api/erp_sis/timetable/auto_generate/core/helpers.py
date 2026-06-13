@@ -97,7 +97,7 @@ def pin_var(ctx, v, *, enforcement: str, weight: int, rule_id: str, scope: dict,
 
 def le_limit(
 	ctx, vars_, limit: int, *, kind: str, weight: int, tag: str,
-	rule_id: str = "", relaxable: bool = False,
+	rule_id: str = "", relaxable: bool = False, tier: str = "",
 ) -> None:
 	"""Ràng buộc sum(vars_) <= limit.
 
@@ -119,5 +119,8 @@ def le_limit(
 		# Hard policy đang nới (diagnostic): tầng relaxable, phạt nặng, ghi báo cáo.
 		ctx.add_soft(RELAXABLE, over * (-RELAX_FORBIDDEN_PENALTY))
 		ctx.add_violation(rule_id or ctx.cur_rule_id, "limit", {"tag": tag, "limit": limit}, over)
+	elif tier:
+		# Soft có tier per-entity (vd max liên tiếp theo từng GV).
+		ctx.add_soft(tier, over * (-weight))
 	else:
 		ctx.objectives.append(over * (-weight))

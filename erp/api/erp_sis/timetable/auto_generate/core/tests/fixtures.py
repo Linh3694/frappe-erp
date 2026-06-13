@@ -31,7 +31,11 @@ class TeacherInfo:
 	max_periods_per_day: int = 8
 	max_periods_per_week: int = 24
 	max_consecutive_periods: int = 10
+	workload_spread_mode: str = "auto"
 	unavailable_slots: list = field(default_factory=list)
+	tier_max_consecutive: str = "weak"
+	tier_avoid_gap: str = "weak"
+	tier_balance: str = "weak"
 
 
 @dataclass
@@ -45,6 +49,8 @@ class SubjectRequirement:
 	force_pair: bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
+	tier_spread: str = "weak"
+	tier_preferred: str = "weak"
 	enforcement: str = "mandatory"
 	enforcement_weight: int = 1
 

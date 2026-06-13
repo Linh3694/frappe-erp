@@ -47,6 +47,10 @@ class TeacherInfo:
 	max_consecutive_periods: int = LEGACY_DEFAULT_MAX_CONSECUTIVE
 	workload_spread_mode: str = "auto"  # auto | even | concentrated
 	unavailable_slots: List[tuple] = field(default_factory=list)  # (day, period_idx, enforcement, weight)
+	# Tier per-GV cho preference mềm của GV này (strong = khó thương lượng / weak = dễ).
+	tier_max_consecutive: str = "weak"
+	tier_avoid_gap: str = "weak"
+	tier_balance: str = "weak"
 
 
 @dataclass
@@ -68,6 +72,9 @@ class SubjectRequirement:
 	force_pair: bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
+	# Tier per-môn (từ SIS Timetable Subject) cho rải / tiết ưu tiên.
+	tier_spread: str = "weak"
+	tier_preferred: str = "weak"
 	# Phân tầng per-cell: 'mandatory' (cứng = N) | 'relaxable' (cho thiếu, tính coverage).
 	enforcement: str = "mandatory"
 	enforcement_weight: int = 1
@@ -131,6 +138,9 @@ class TimetableInput:
 	class_subject_teachers: Dict[str, List[str]] = field(default_factory=dict)
 	column_period_index: Dict[str, int] = field(default_factory=dict)
 	subject_is_heavy: Dict[str, bool] = field(default_factory=dict)
+	# Tier per-môn (ts_id -> 'strong'|'weak') cho rải / tiết ưu tiên.
+	subject_tier_spread: Dict[str, str] = field(default_factory=dict)
+	subject_tier_preferred: Dict[str, str] = field(default_factory=dict)
 
 
 class TimetableDataCollector:
@@ -255,6 +265,11 @@ class TimetableDataCollector:
 		"""Lấy GV theo campus, kèm scheduling config + unavailability."""
 		has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
 		has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
+		tier_cols = {
+			"tier_max_consecutive": frappe.db.has_column("SIS Teacher", "tier_max_consecutive"),
+			"tier_avoid_gap": frappe.db.has_column("SIS Teacher", "tier_avoid_gap"),
+			"tier_balance": frappe.db.has_column("SIS Teacher", "tier_balance"),
+		}
 		fields = [
 			"t.name", "t.user_id",
 			"COALESCE(t.max_periods_per_day, 8) as max_periods_per_day",
@@ -264,6 +279,9 @@ class TimetableDataCollector:
 			fields.append("COALESCE(t.max_periods_per_week, 24) as max_periods_per_week")
 		if has_spread:
 			fields.append("COALESCE(t.workload_spread_mode, 'auto') as workload_spread_mode")
+		for col, present in tier_cols.items():
+			if present:
+				fields.append(f"COALESCE(NULLIF(t.{col}, ''), 'weak') as {col}")
 		sql = f"""
 			SELECT {", ".join(fields)},
 			       COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id, t.name) AS full_name
@@ -279,6 +297,9 @@ class TimetableDataCollector:
 				r["max_periods_per_week"] = 24
 			if not has_spread:
 				r["workload_spread_mode"] = "auto"
+			for col, present in tier_cols.items():
+				if not present:
+					r[col] = "weak"
 			teachers[r["name"]] = TeacherInfo(**r)
 
 		# Child table unavailability (nếu DocType/field đã migrate)
@@ -333,6 +354,10 @@ class TimetableDataCollector:
 		program_sql = "NULLIF(ts.curriculum_id, '') as program_id" if has_curriculum else "NULL as program_id"
 		enforcement_sql = "COALESCE(r.enforcement, 'mandatory') as enforcement," if has_enforcement else "'mandatory' as enforcement,"
 		enf_weight_sql = "COALESCE(r.enforcement_weight, 1) as enforcement_weight," if has_enf_weight else "1 as enforcement_weight,"
+		has_t_spread = frappe.db.has_column("SIS Timetable Subject", "tier_spread")
+		has_t_pref = frappe.db.has_column("SIS Timetable Subject", "tier_preferred")
+		t_spread_sql = "COALESCE(NULLIF(ts.tier_spread, ''), 'weak') as tier_spread," if has_t_spread else "'weak' as tier_spread,"
+		t_pref_sql = "COALESCE(NULLIF(ts.tier_preferred, ''), 'weak') as tier_preferred," if has_t_pref else "'weak' as tier_preferred,"
 
 		rows = frappe.db.sql(f"""
 			SELECT
@@ -342,6 +367,8 @@ class TimetableDataCollector:
 				r.periods_per_week,
 				r.max_periods_per_day,
 				r.prefer_consecutive,
+				{t_spread_sql}
+				{t_pref_sql}
 				{enforcement_sql}
 				{enf_weight_sql}
 				{force_pair_sql}
@@ -363,6 +390,8 @@ class TimetableDataCollector:
 			force_pair=bool(r.get("force_pair")),
 			is_heavy=bool(r.get("is_heavy")),
 			program_id=r.get("program_id") or None,
+			tier_spread=r.get("tier_spread") or "weak",
+			tier_preferred=r.get("tier_preferred") or "weak",
 			enforcement=r.get("enforcement") or "mandatory",
 			enforcement_weight=int(r.get("enforcement_weight") or 1),
 		) for r in rows]
@@ -527,6 +556,8 @@ class TimetableDataCollector:
 		for req in inp.requirements:
 			class_subjects.setdefault(req.class_id, []).append(req.timetable_subject_id)
 			inp.subject_is_heavy[req.timetable_subject_id] = req.is_heavy
+			inp.subject_tier_spread[req.timetable_subject_id] = req.tier_spread
+			inp.subject_tier_preferred[req.timetable_subject_id] = req.tier_preferred
 		inp.class_subjects = class_subjects
 
 		# (class_id, timetable_subject_id) -> [teacher_ids]

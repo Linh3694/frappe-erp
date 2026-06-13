@@ -627,11 +627,15 @@ def _enrich_teacher_scheduling_limits(
 	ids = [t["teacher_id"] for t in teachers]
 	has_week = frappe.db.has_column("SIS Teacher", "max_periods_per_week")
 	has_spread = frappe.db.has_column("SIS Teacher", "workload_spread_mode")
+	tier_fields = [f for f in ("tier_max_consecutive", "tier_avoid_gap", "tier_balance")
+	               if frappe.db.has_column("SIS Teacher", f)]
 	fields = "name, max_periods_per_day, max_consecutive_periods"
 	if has_week:
 		fields += ", max_periods_per_week"
 	if has_spread:
 		fields += ", workload_spread_mode"
+	for tf in tier_fields:
+		fields += f", {tf}"
 	rows = frappe.db.sql(
 		f"""
 		SELECT {fields}
@@ -664,6 +668,8 @@ def _enrich_teacher_scheduling_limits(
 			enriched["workload_spread_mode"] = lim.get("workload_spread_mode") or "auto"
 		else:
 			enriched["workload_spread_mode"] = "auto"
+		for tf in ("tier_max_consecutive", "tier_avoid_gap", "tier_balance"):
+			enriched[tf] = lim.get(tf) or "weak"
 		out.append(enriched)
 	return out
 
@@ -854,6 +860,10 @@ def save_teacher_unavailability(**kwargs):
 					return error_response("workload_spread_mode không hợp lệ")
 				if frappe.db.has_column("SIS Teacher", "workload_spread_mode"):
 					teacher_doc.workload_spread_mode = mode
+			for tier_field in ("tier_max_consecutive", "tier_avoid_gap", "tier_balance"):
+				if item.get(tier_field) is not None and frappe.db.has_column("SIS Teacher", tier_field):
+					val = (item.get(tier_field) or "weak").strip()
+					setattr(teacher_doc, tier_field, "strong" if val == "strong" else "weak")
 			if "slots" in item:
 				teacher_doc.set("unavailability", [])
 				for row in new_rows:
@@ -863,6 +873,40 @@ def save_teacher_unavailability(**kwargs):
 
 		frappe.db.commit()
 		return single_item_response({"saved_teachers": saved})
+	except Exception as e:
+		return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
+def save_subject_tiers(**kwargs):
+	"""Lưu tier per-môn (rải / tiết ưu tiên) vào SIS Timetable Subject."""
+	try:
+		data = _json()
+		subjects = data.get("subjects")
+		if subjects is None:
+			return error_response("Thiếu subjects")
+		if isinstance(subjects, str):
+			subjects = json.loads(subjects)
+
+		has_ts = frappe.db.has_column("SIS Timetable Subject", "tier_spread")
+		has_tp = frappe.db.has_column("SIS Timetable Subject", "tier_preferred")
+		if not (has_ts or has_tp):
+			return error_response("Chưa migrate field tier_spread/tier_preferred (chạy bench migrate)")
+
+		saved = 0
+		for s in subjects or []:
+			name = (s.get("name") or "").strip()
+			if not name or not frappe.db.exists("SIS Timetable Subject", name):
+				continue
+			doc = frappe.get_doc("SIS Timetable Subject", name)
+			if has_ts:
+				doc.tier_spread = "strong" if s.get("tier_spread") == "strong" else "weak"
+			if has_tp:
+				doc.tier_preferred = "strong" if s.get("tier_preferred") == "strong" else "weak"
+			doc.save(ignore_permissions=True)
+			saved += 1
+		frappe.db.commit()
+		return single_item_response({"saved": saved})
 	except Exception as e:
 		return error_response(str(e))
 
