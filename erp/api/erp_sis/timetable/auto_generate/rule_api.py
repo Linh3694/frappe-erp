@@ -252,6 +252,33 @@ def delete_rule_set(**kwargs):
 		doc = frappe.get_doc("SIS Timetable Rule Set", rule_set_id)
 		if doc.is_default:
 			return error_response("Không thể xóa rule set mặc định của campus")
+
+		# Unlink session gen TKB đang tham chiếu rule set này (không xóa session).
+		if (
+			frappe.db.table_exists("SIS Timetable Generation Session")
+			and frappe.db.has_column("SIS Timetable Generation Session", "rule_set_id")
+		):
+			frappe.db.sql(
+				"""
+				UPDATE `tabSIS Timetable Generation Session`
+				SET rule_set_id = ''
+				WHERE rule_set_id = %(rule_set_id)s
+				""",
+				{"rule_set_id": rule_set_id},
+			)
+
+		# Xóa dữ liệu phụ thuộc theo rule_set_id để tránh lỗi liên kết khi delete parent.
+		if (
+			frappe.db.table_exists("SIS Timetable Rule Set Teacher Config")
+			and frappe.db.has_column("SIS Timetable Rule Set Teacher Config", "rule_set_id")
+		):
+			frappe.db.delete("SIS Timetable Rule Set Teacher Config", {"rule_set_id": rule_set_id})
+		if (
+			frappe.db.table_exists("SIS Teacher Unavailability")
+			and frappe.db.has_column("SIS Teacher Unavailability", "rule_set_id")
+		):
+			frappe.db.delete("SIS Teacher Unavailability", {"rule_set_id": rule_set_id})
+
 		frappe.delete_doc("SIS Timetable Rule Set", rule_set_id, ignore_permissions=True)
 		frappe.db.commit()
 		return single_item_response({"deleted": rule_set_id})
