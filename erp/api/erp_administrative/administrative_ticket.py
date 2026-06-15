@@ -76,6 +76,64 @@ def _json_list_field_for_db(items):
     return json.dumps(items, separators=(",", ":"))
 
 
+def _normalize_attachment_urls(raw):
+    """Chuẩn hoá mảng URL đính kèm (giữ thứ tự, bỏ trùng/rỗng)."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            raw = parsed if isinstance(parsed, list) else [raw]
+        except Exception:
+            raw = [raw]
+    if not isinstance(raw, list):
+        return []
+    seen = set()
+    out = []
+    for x in raw:
+        s = str(x).strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def _attachments_resolved(doc):
+    """Mảng URL đính kèm từ doc đã lưu (JSON attachments + fallback attachment đơn)."""
+    urls = _normalize_attachment_urls(getattr(doc, "attachments", None))
+    single = (getattr(doc, "attachment", None) or "").strip()
+    if not urls and single:
+        return [single]
+    if single and single not in urls:
+        return [single] + urls
+    return urls
+
+
+def _attachments_payload(data):
+    """Lấy mảng URL từ payload (attachments + fallback attachment đơn)."""
+    urls = _normalize_attachment_urls(data.get("attachments"))
+    single = (data.get("attachment") or "").strip()
+    if single:
+        urls = [single] + [u for u in urls if u != single]
+    return urls
+
+
+def _attachments_for_detail(doc):
+    """Trả về list object {url, filename} để FE hiển thị."""
+    out = []
+    for url in _attachments_resolved(doc):
+        path = url.split("?")[0].split("#")[0]
+        filename = path.rstrip("/").split("/")[-1] or "file"
+        try:
+            from urllib.parse import unquote as _unquote
+
+            filename = _unquote(filename)
+        except Exception:
+            pass
+        out.append({"url": url, "filename": filename})
+    return out
+
+
 def _merge_equipment_ids_from_payload(data):
     """Gộp related_equipment_ids + related_equipment_id; id đơn (nếu có) đứng đầu — tương thích API cũ."""
     eq_ids = _normalize_related_equipment_ids(data.get("related_equipment_ids"))
@@ -346,6 +404,7 @@ def _ticket_to_dict(doc, include_feedback=True):
         }
 
     attachment_url = doc.attachment or ""
+    attachments_list = _attachments_for_detail(doc)
 
     event_building_label = ""
     event_room_label = ""
@@ -525,6 +584,7 @@ def _ticket_to_dict(doc, include_feedback=True):
         "acceptedAt": doc.accepted_at,
         "area_title": doc.area_title or "",
         "attachment": attachment_url,
+        "attachments": attachments_list,
         "is_event_facility": bool(cint(getattr(doc, "is_event_facility", 0))),
         "event_building_id": getattr(doc, "event_building_id", None) or "",
         "event_building_label": event_building_label,
@@ -2000,7 +2060,8 @@ def create_ticket():
         priority = (data.get("priority") or "Medium").strip()
         notes = (data.get("notes") or "").strip()
         area_title = (data.get("area_title") or "").strip()
-        attachment = (data.get("attachment") or "").strip()
+        attachment_urls = _attachments_payload(data)
+        attachment = attachment_urls[0] if attachment_urls else ""
 
         event_building_id = (data.get("event_building_id") or "").strip()
         event_room_id = (data.get("event_room_id") or "").strip()
@@ -2110,6 +2171,7 @@ def create_ticket():
             "notes": notes,
             "area_title": area_title or None,
             "attachment": attachment or None,
+            "attachments": _json_list_field_for_db(attachment_urls),
             "status": "Open",
             "creator_email": email,
             "creator_fullname": ufn,
@@ -2205,8 +2267,10 @@ def update_ticket():
             doc.notes = str(data["notes"] or "")
         if "area_title" in data:
             doc.area_title = str(data["area_title"] or "").strip() or None
-        if "attachment" in data:
-            doc.attachment = str(data["attachment"] or "").strip() or None
+        if "attachments" in data or "attachment" in data:
+            attachment_urls = _attachments_payload(data)
+            doc.attachments = _json_list_field_for_db(attachment_urls)
+            doc.attachment = (attachment_urls[0] if attachment_urls else None)
 
         if "is_event_facility" in data:
             doc.is_event_facility = cint(data.get("is_event_facility"))

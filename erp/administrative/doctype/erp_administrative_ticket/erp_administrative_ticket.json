@@ -24,6 +24,7 @@
   "related_student_ids",
   "description",
   "attachment",
+  "attachments",
   "creator_section",
   "creator_email",
   "creator_fullname",
@@ -154,6 +155,11 @@
    "fieldname": "attachment",
    "fieldtype": "Attach",
    "label": "Đính kèm"
+  },
+  {
+   "fieldname": "attachments",
+   "fieldtype": "JSON",
+   "label": "Danh sách đính kèm (mảng URL)"
   },
   {
    "fieldname": "creator_section",
