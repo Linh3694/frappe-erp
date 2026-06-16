@@ -19,6 +19,31 @@ from erp.api.erp_inventory.inventory_helpers import (
 from erp.api.erp_inventory.device import _resolve_device_name
 
 
+def _ensure_inventory_folder(folder="handovers"):
+	"""Đảm bảo folder File Home/inventory/<folder> tồn tại trước khi lưu file."""
+	# Tạo folder gốc Home/inventory nếu chưa có
+	if not frappe.db.exists("File", {"is_folder": 1, "file_name": "inventory", "folder": "Home"}):
+		frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": "inventory",
+				"is_folder": 1,
+				"folder": "Home",
+			}
+		).insert(ignore_permissions=True, ignore_if_duplicate=True)
+
+	# Tạo folder con Home/inventory/<folder> nếu chưa có
+	if not frappe.db.exists("File", {"is_folder": 1, "file_name": folder, "folder": "Home/inventory"}):
+		frappe.get_doc(
+			{
+				"doctype": "File",
+				"file_name": folder,
+				"is_folder": 1,
+				"folder": "Home/inventory",
+			}
+		).insert(ignore_permissions=True, ignore_if_duplicate=True)
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def upload_handover_report(device_type=None):
 	"""Upload BBBG — tương đương POST /api/inventory/{type}s/upload."""
@@ -47,6 +72,8 @@ def upload_handover_report(device_type=None):
 		ext = os.path.splitext(files["file"].filename)[1] or ".pdf"
 		date_str = datetime.now().strftime("%Y-%m-%d")
 		new_name = f"BBBG-{username}-{date_str}{ext}".replace(" ", "_")
+
+		_ensure_inventory_folder("handovers")
 
 		file_doc = frappe.get_doc(
 			{

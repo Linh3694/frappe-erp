@@ -19,6 +19,7 @@ from erp.api.erp_inventory.inventory_helpers import (
 	user_to_fe,
 )
 from erp.api.erp_inventory.device import _resolve_device_name
+from erp.api.erp_inventory.handover_file import _ensure_inventory_folder
 
 
 def _read_inspection_id(inspection_id=None):
@@ -311,6 +312,8 @@ def upload_inspection_report():
 		inspect_id = data.get("inspectId") or data.get("inspection_id")
 		if not inspect_id or not frappe.db.exists("ERP Inventory Inspection", inspect_id):
 			return not_found_response(_("Inspection not found"))
+
+		_ensure_inventory_folder("reports")
 
 		file_doc = frappe.get_doc(
 			{
