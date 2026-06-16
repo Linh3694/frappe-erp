@@ -44,6 +44,30 @@ def _ensure_inventory_folder(folder="handovers"):
 		).insert(ignore_permissions=True, ignore_if_duplicate=True)
 
 
+def _save_inventory_file(folder, filename, content):
+	"""Ghi file vật lý vào public/files/inventory/<folder>/ và trả về (file_url, tên cuối).
+
+	Frappe lưu file qua `content` sẽ đặt ở public/files/ phẳng (file_url=/files/<tên>),
+	không khớp đường dẫn /files/inventory/<folder>/ mà FE dựng để xem lại → 500.
+	Vì vậy ghi trực tiếp vào đúng thư mục legacy và đặt file_url tương ứng.
+	"""
+	target_dir = get_site_path("public", "files", "inventory", folder)
+	os.makedirs(target_dir, exist_ok=True)
+
+	# Tránh ghi đè file trùng tên: thêm hậu tố -1, -2, ...
+	base, ext = os.path.splitext(filename)
+	final_name = filename
+	counter = 1
+	while os.path.exists(os.path.join(target_dir, final_name)):
+		final_name = f"{base}-{counter}{ext}"
+		counter += 1
+
+	with open(os.path.join(target_dir, final_name), "wb") as f:
+		f.write(content)
+
+	return f"/files/inventory/{folder}/{final_name}", final_name
+
+
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def upload_handover_report(device_type=None):
 	"""Upload BBBG — tương đương POST /api/inventory/{type}s/upload."""
@@ -75,18 +99,20 @@ def upload_handover_report(device_type=None):
 
 		_ensure_inventory_folder("handovers")
 
+		file_url, new_name = _save_inventory_file("handovers", new_name, files["file"].stream.read())
+
 		file_doc = frappe.get_doc(
 			{
 				"doctype": "File",
 				"file_name": new_name,
-				"content": files["file"].stream.read(),
+				"file_url": file_url,
 				"is_private": 0,
 				"folder": "Home/inventory/handovers",
 				"attached_to_doctype": "ERP Inventory Device",
 				"attached_to_name": device_id,
 			}
 		)
-		file_doc.save(ignore_permissions=True)
+		file_doc.insert(ignore_permissions=True)
 
 		# Cập nhật handover log đang mở
 		open_logs = frappe.get_all(

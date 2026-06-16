@@ -19,7 +19,7 @@ from erp.api.erp_inventory.inventory_helpers import (
 	user_to_fe,
 )
 from erp.api.erp_inventory.device import _resolve_device_name
-from erp.api.erp_inventory.handover_file import _ensure_inventory_folder
+from erp.api.erp_inventory.handover_file import _ensure_inventory_folder, _save_inventory_file
 
 
 def _read_inspection_id(inspection_id=None):
@@ -315,18 +315,20 @@ def upload_inspection_report():
 
 		_ensure_inventory_folder("reports")
 
+		file_url, saved_name = _save_inventory_file("reports", files["file"].filename, files["file"].stream.read())
+
 		file_doc = frappe.get_doc(
 			{
 				"doctype": "File",
-				"file_name": files["file"].filename,
-				"content": files["file"].stream.read(),
+				"file_name": saved_name,
+				"file_url": file_url,
 				"is_private": 0,
 				"folder": "Home/inventory/reports",
 				"attached_to_doctype": "ERP Inventory Inspection",
 				"attached_to_name": inspect_id,
 			}
 		)
-		file_doc.save(ignore_permissions=True)
+		file_doc.insert(ignore_permissions=True)
 		inspection = frappe.get_doc("ERP Inventory Inspection", inspect_id)
 		inspection.report_file_url = file_doc.file_url
 		inspection.report_file = file_doc.file_url
