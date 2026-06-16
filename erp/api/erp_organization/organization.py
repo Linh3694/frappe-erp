@@ -103,14 +103,10 @@ def _apply_type_payload(doc, payload):
 
 @frappe.whitelist()
 def get_org_tree(campus_id=None):
+    # Sơ đồ tổ chức là toàn cục (không lọc theo cơ sở) — bỏ qua campus_id dù interceptor có gửi kèm
     try:
-        filters = {}
-        if campus_id:
-            filters["campus_id"] = campus_id
-
         units = frappe.get_all(
             UNIT_DOCTYPE,
-            filters=filters,
             fields=[
                 "name",
                 "unit_name_vn",
