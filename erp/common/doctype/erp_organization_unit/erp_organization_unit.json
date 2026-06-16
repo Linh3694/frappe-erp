@@ -1,0 +1,171 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "format:ORG-{#####}",
+ "creation": "2026-06-16 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "is_tree": 1,
+ "nsm_parent_field": "parent_organization_unit",
+ "title_field": "unit_name_vn",
+ "field_order": [
+  "unit_name_vn",
+  "unit_name_en",
+  "unit_code",
+  "column_break_1",
+  "unit_type",
+  "parent_organization_unit",
+  "is_group",
+  "campus_id",
+  "is_active",
+  "leaders_section",
+  "leaders",
+  "members_section",
+  "members",
+  "tree_section",
+  "lft",
+  "rgt",
+  "old_parent"
+ ],
+ "fields": [
+  {
+   "fieldname": "unit_name_vn",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên đơn vị (VN)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "unit_name_en",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên đơn vị (EN)"
+  },
+  {
+   "fieldname": "unit_code",
+   "fieldtype": "Data",
+   "label": "Mã đơn vị",
+   "unique": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "unit_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Loại đơn vị",
+   "options": "ERP Organization Unit Type"
+  },
+  {
+   "fieldname": "parent_organization_unit",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 1,
+   "label": "Đơn vị cấp trên",
+   "options": "ERP Organization Unit",
+   "search_index": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_group",
+   "fieldtype": "Check",
+   "label": "Là nhóm (có đơn vị con)"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Cơ sở",
+   "options": "SIS Campus"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Đang hoạt động"
+  },
+  {
+   "fieldname": "leaders_section",
+   "fieldtype": "Section Break",
+   "label": "Lãnh đạo"
+  },
+  {
+   "fieldname": "leaders",
+   "fieldtype": "Table",
+   "label": "Lãnh đạo",
+   "options": "ERP Organization Unit Leader"
+  },
+  {
+   "fieldname": "members_section",
+   "fieldtype": "Section Break",
+   "label": "Thành viên"
+  },
+  {
+   "fieldname": "members",
+   "fieldtype": "Table",
+   "label": "Thành viên",
+   "options": "ERP Organization Unit Member"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "tree_section",
+   "fieldtype": "Section Break",
+   "label": "Tree (hệ thống)"
+  },
+  {
+   "fieldname": "lft",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "lft",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "rgt",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "rgt",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "old_parent",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Old Parent",
+   "options": "ERP Organization Unit",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-06-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Organization Unit",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "All"
+  }
+ ],
+ "search_fields": "unit_name_en,unit_code",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

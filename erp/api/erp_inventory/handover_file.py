@@ -3,7 +3,9 @@
 
 import json
 import os
+import re
 import shutil
+import unicodedata
 from datetime import datetime
 
 import frappe
@@ -17,6 +19,23 @@ from erp.api.erp_inventory.inventory_helpers import (
 	normalize_api_param,
 )
 from erp.api.erp_inventory.device import _resolve_device_name
+
+
+def slugify_ascii(text):
+	"""Bỏ dấu tiếng Việt + ký tự đặc biệt để tên file an toàn khi nginx serve.
+
+	Tên file chứa ký tự Unicode (vd: Hiếu_Nguyễn) khiến nginx trả 500 khi xem lại.
+	Chuyển về ASCII: "Hiếu Nguyễn Duy" -> "Hieu_Nguyen_Duy".
+	"""
+	if not text:
+		return ""
+	# đ/Đ không tách dấu được bằng NFD nên xử lý riêng
+	text = text.replace("đ", "d").replace("Đ", "D")
+	text = unicodedata.normalize("NFD", text)
+	text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+	# Chỉ giữ chữ, số, gạch ngang, gạch dưới, chấm; còn lại -> gạch dưới
+	text = re.sub(r"[^A-Za-z0-9._-]+", "_", text)
+	return text.strip("_") or "file"
 
 
 def _ensure_inventory_folder(folder="handovers"):
@@ -53,6 +72,10 @@ def _save_inventory_file(folder, filename, content):
 	"""
 	target_dir = get_site_path("public", "files", "inventory", folder)
 	os.makedirs(target_dir, exist_ok=True)
+
+	# Chuẩn hoá tên file về ASCII để nginx serve được (tránh 500 do ký tự Unicode)
+	base, ext = os.path.splitext(filename)
+	filename = f"{slugify_ascii(base)}{ext}"
 
 	# Tránh ghi đè file trùng tên: thêm hậu tố -1, -2, ...
 	base, ext = os.path.splitext(filename)
@@ -95,7 +118,8 @@ def upload_handover_report(device_type=None):
 
 		ext = os.path.splitext(files["file"].filename)[1] or ".pdf"
 		date_str = datetime.now().strftime("%Y-%m-%d")
-		new_name = f"BBBG-{username}-{date_str}{ext}".replace(" ", "_")
+		safe_username = slugify_ascii(username)
+		new_name = f"BBBG-{safe_username}-{date_str}{ext}"
 
 		_ensure_inventory_folder("handovers")
 

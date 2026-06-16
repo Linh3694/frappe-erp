@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-16 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "full_name",
+  "emp_code",
+  "position",
+  "sort_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Người dùng",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "user.full_name",
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Họ tên",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "user.employee_code",
+   "fieldname": "emp_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã NV",
+   "read_only": 1
+  },
+  {
+   "fieldname": "position",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Chức danh"
+  },
+  {
+   "default": "0",
+   "description": "Số nhỏ đứng trước trong cùng đơn vị",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Thứ tự"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Organization Unit Leader",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
