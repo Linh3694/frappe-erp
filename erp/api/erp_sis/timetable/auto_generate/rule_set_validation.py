@@ -7,8 +7,10 @@ from typing import Any, Dict, List
 
 from .core.rule_catalog import get_catalog_entry
 
-# Rule bắt buộc phải có ít nhất 1 instance khi bật
-_STRICT_INSTANCE_RULES = frozenset({"subject_pair_periods", "teacher_not_on_day"})
+# Rule bắt buộc phải có ít nhất 1 instance khi bật.
+# teacher_not_on_day là rule legacy: ngày bận GV nay lấy từ teacher_unavailable,
+# UI không có chỗ nhập instance nên không ép buộc nữa (tránh chặn lưu rule set).
+_STRICT_INSTANCE_RULES = frozenset({"subject_pair_periods"})
 
 
 def _parse_json_field(val: Any) -> dict:
