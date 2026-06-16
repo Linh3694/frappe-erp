@@ -30,18 +30,75 @@ def _parse(data):
 # ---------- READ ----------
 
 @frappe.whitelist()
-def get_org_unit_types():
+def get_org_unit_types(include_inactive=0):
     try:
+        filters = {}
+        if not int(include_inactive or 0):
+            filters["is_active"] = 1
         rows = frappe.get_all(
             TYPE_DOCTYPE,
-            filters={"is_active": 1},
-            fields=["name", "title_vn", "title_en", "type_order"],
+            filters=filters,
+            fields=["name", "title_vn", "title_en", "type_order", "is_active", "description"],
             order_by="type_order asc",
         )
         return success_response(data=rows)
     except Exception as e:
         frappe.log_error(f"get_org_unit_types: {e}", "Org Chart")
         return error_response(_("Không tải được loại đơn vị"))
+
+
+@frappe.whitelist()
+def create_org_unit_type(data):
+    try:
+        _require_system_manager()
+        payload = _parse(data)
+        doc = frappe.new_doc(TYPE_DOCTYPE)
+        _apply_type_payload(doc, payload)
+        doc.insert()
+        return success_response(data={"name": doc.name}, message=_("Đã tạo loại đơn vị"))
+    except frappe.PermissionError:
+        raise
+    except Exception as e:
+        frappe.log_error(f"create_org_unit_type: {e}", "Org Chart")
+        return error_response(str(e))
+
+
+@frappe.whitelist()
+def update_org_unit_type(name, data):
+    try:
+        _require_system_manager()
+        payload = _parse(data)
+        doc = frappe.get_doc(TYPE_DOCTYPE, name)
+        _apply_type_payload(doc, payload)
+        doc.save()
+        return success_response(data={"name": doc.name}, message=_("Đã cập nhật loại đơn vị"))
+    except frappe.PermissionError:
+        raise
+    except Exception as e:
+        frappe.log_error(f"update_org_unit_type: {e}", "Org Chart")
+        return error_response(str(e))
+
+
+@frappe.whitelist()
+def delete_org_unit_type(name):
+    try:
+        _require_system_manager()
+        used = frappe.db.count(UNIT_DOCTYPE, {"unit_type": name})
+        if used:
+            return error_response(_("Không thể xóa: còn {0} đơn vị đang dùng loại này").format(used))
+        frappe.delete_doc(TYPE_DOCTYPE, name)
+        return success_response(message=_("Đã xóa loại đơn vị"))
+    except frappe.PermissionError:
+        raise
+    except Exception as e:
+        frappe.log_error(f"delete_org_unit_type: {e}", "Org Chart")
+        return error_response(str(e))
+
+
+def _apply_type_payload(doc, payload):
+    for field in ("title_vn", "title_en", "type_order", "is_active", "description"):
+        if field in payload:
+            doc.set(field, payload.get(field))
 
 
 @frappe.whitelist()

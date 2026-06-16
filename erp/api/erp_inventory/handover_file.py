@@ -114,11 +114,28 @@ def upload_handover_report(device_type=None):
 		if not files or "file" not in files:
 			return validation_error_response(_("Không có file được tải lên"), {"file": ["required"]})
 
-		username = form.get("username") or frappe.db.get_value("User", frappe.session.user, "full_name") or "Unknown"
+		# Lấy tên người ĐƯỢC bàn giao (Bên Nhận) từ handover log đang mở của thiết bị
+		open_logs = frappe.get_all(
+			"ERP Inventory Handover Log",
+			filters={"device": device_id, "end_date": ["is", "not set"]},
+			fields=["name", "fullname_snapshot", "user"],
+		)
+		recipient_name = None
+		if open_logs:
+			recipient_name = open_logs[0].get("fullname_snapshot") or frappe.db.get_value(
+				"User", open_logs[0].get("user"), "full_name"
+			)
+		# Fallback: username FE gửi lên hoặc người đang đăng nhập
+		recipient_name = (
+			recipient_name
+			or form.get("username")
+			or frappe.db.get_value("User", frappe.session.user, "full_name")
+			or "Unknown"
+		)
 
 		ext = os.path.splitext(files["file"].filename)[1] or ".pdf"
 		date_str = datetime.now().strftime("%Y-%m-%d")
-		safe_username = slugify_ascii(username)
+		safe_username = slugify_ascii(recipient_name)
 		new_name = f"BBBG-{safe_username}-{date_str}{ext}"
 
 		_ensure_inventory_folder("handovers")
@@ -138,14 +155,9 @@ def upload_handover_report(device_type=None):
 		)
 		file_doc.insert(ignore_permissions=True)
 
-		# Cập nhật handover log đang mở
-		open_logs = frappe.get_all(
-			"ERP Inventory Handover Log",
-			filters={"device": device_id, "end_date": ["is", "not set"]},
-			pluck="name",
-		)
-		for log_name in open_logs:
-			log_doc = frappe.get_doc("ERP Inventory Handover Log", log_name)
+		# Cập nhật handover log đang mở (dùng lại danh sách đã lấy ở trên)
+		for log_row in open_logs:
+			log_doc = frappe.get_doc("ERP Inventory Handover Log", log_row.get("name"))
 			log_doc.document_file_url = file_doc.file_url
 			log_doc.document_file = file_doc.file_url
 			log_doc.save(ignore_permissions=True)
