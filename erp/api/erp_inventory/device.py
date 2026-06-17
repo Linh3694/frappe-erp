@@ -757,18 +757,11 @@ def bulk_upload_devices(device_type=None):
 				room = item.get("room")
 				if room:
 					doc.room = resolve_room_link(room)
-				assigned = item.get("assigned") or []
-				user_ids = []
-				for a in assigned:
-					if isinstance(a, str):
-						u = resolve_user_link(a)
-						if not u:
-							# thử match fullname
-							u = frappe.db.get_value("User", {"full_name": a.strip()}, "name")
-						if u:
-							user_ids.append(u)
-				if user_ids:
-					sync_assigned_users(doc, user_ids)
+				# Match người dùng theo email (cột "Người sử dụng" chỉ để hiển thị)
+				email = (item.get("email") or item.get("assignedEmail") or "").strip()
+				holder_user = resolve_user_link(email) if email else None
+				if holder_user:
+					sync_assigned_users(doc, [holder_user])
 					sync_current_holder_from_assigned(doc)
 					if doc.status == "Standby":
 						doc.status = "PendingDocumentation"

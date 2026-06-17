@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from .dto import Rule, RuleSet
 
-# Không còn rule phòng nào tắt mặc định: room_max_simultaneous + room_eligibility là
-# ràng buộc phòng cốt lõi, luôn bật (room_eligibility chỉ ràng buộc môn đã khai phòng).
-DISABLED_DEFAULT_RULE_IDS = frozenset()
+# room_max_simultaneous + room_eligibility là ràng buộc phòng cốt lõi, luôn bật.
+# teacher_not_at_slot / teacher_not_on_day là rule legacy: slot/ngày bận GV nay lấy
+# từ teacher_unavailable (tab Giáo viên), UI không có chỗ nhập instance. Seed ở trạng
+# thái tắt để không tạo rule "enabled nhưng rỗng" gây chặn lưu rule set.
+DISABLED_DEFAULT_RULE_IDS = frozenset({
+	"teacher_not_at_slot",
+	"teacher_not_on_day",
+})
 
 # Tier mặc định cho preference (soft). Chỉ promote lên 'strong' (khó thương lượng)
 # những rule rõ ràng quan trọng/người dùng khai trực tiếp; còn lại 'weak' (dễ thương
