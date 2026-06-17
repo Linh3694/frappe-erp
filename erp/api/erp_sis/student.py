@@ -1461,8 +1461,24 @@ def get_student_profile():
         if not campus_id:
             campus_id = "campus-1"
 
-        # Get student basic info
-        student = frappe.get_doc("CRM Student", student_id)
+        # Lấy thông tin cơ bản của học sinh
+        # Dùng frappe.db.get_value (không kiểm tra quyền doctype) thay vì get_doc,
+        # vì doctype "CRM Student" chỉ cấp quyền read cho System Manager/SIS Manager/Registrar.
+        # GVCN và các vai trò khác vẫn cần xem hồ sơ học sinh; các tab nhạy cảm
+        # (Gia đình, Dịch vụ) đã có cơ chế phân quyền riêng. Toàn bộ phần còn lại
+        # của hàm này cũng dùng SQL thô nên cách tiếp cận này nhất quán.
+        student = frappe.db.get_value(
+            "CRM Student",
+            student_id,
+            ["name", "student_name", "student_code", "dob", "gender", "campus_id"],
+            as_dict=True
+        )
+
+        if not student:
+            return not_found_response(
+                message="Không tìm thấy thông tin học sinh",
+                code="STUDENT_NOT_FOUND"
+            )
         
         # Determine school year to use (cần xác định trước để lấy ảnh theo năm học)
         if not school_year_id:
@@ -1687,7 +1703,11 @@ def get_student_profile():
         )
 
     except Exception as e:
-        frappe.log_error(f"Error fetching student profile: {str(e)}")
+        # Log full traceback để dễ debug thay vì chỉ message
+        frappe.log_error(
+            title="Error fetching student profile",
+            message=frappe.get_traceback()
+        )
         return error_response(
             message="Error fetching student profile",
             code="FETCH_STUDENT_PROFILE_ERROR"

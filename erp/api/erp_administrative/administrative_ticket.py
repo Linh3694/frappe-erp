@@ -1465,6 +1465,81 @@ def _notify_hc_assignment_changed(doc, old_assignee, new_assignee, actor_email):
         )
 
 
+def _notify_hc_subtask_assigned(doc, st, actor_email):
+    """Gán công việc con cho người xử lý — báo subtask assignee (giống ticket_assigned)."""
+    new_assignee = (getattr(st, "assigned_to", None) or "").strip()
+    if not new_assignee:
+        return
+    ne = _hc_user_email(new_assignee)
+    actor = (actor_email or "").strip()
+    if not ne or (ne or "").lower() == (actor or "").lower():
+        return
+    code = (doc.ticket_code or doc.name or "").strip()
+    sub_title = (getattr(st, "title", None) or "").strip()
+    data = _hc_ticket_payload(
+        doc,
+        "subtask_assigned",
+        {"subTaskId": st.name, "subTaskTitle": sub_title},
+    )
+    _hc_send_persisted(
+        ne,
+        _("Bạn được giao một công việc con"),
+        _("{0}: {1}").format(f"#{code}", sub_title) if sub_title else f"#{code}",
+        data,
+        exclude_email=actor,
+        doc=doc,
+        stream_notification_type="administrative_ticket_subtask_assigned",
+    )
+
+
+def _notify_hc_subtask_status_changed(doc, st, old_status, new_status, actor_email):
+    """Đổi trạng thái công việc con — báo PIC ticket + subtask assignee (loại người thao tác)."""
+    if old_status == new_status:
+        return
+    actor = (actor_email or "").strip()
+    code = (doc.ticket_code or doc.name or "").strip()
+    sub_title = (getattr(st, "title", None) or "").strip()
+    status_l = _hc_status_label_vn(new_status)
+    data = _hc_ticket_payload(
+        doc,
+        "subtask_status_changed",
+        {
+            "subTaskId": st.name,
+            "subTaskTitle": sub_title,
+            "oldStatus": old_status,
+            "newStatus": new_status,
+        },
+    )
+    title = _("Cập nhật công việc con")
+    body = (
+        _("{0} · {1} → «{2}»").format(f"#{code}", sub_title, status_l)
+        if sub_title
+        else _("{0} → «{1}»").format(f"#{code}", status_l)
+    )
+    recipients = []
+    pic = _hc_user_email(getattr(doc, "assigned_to", None))
+    if pic:
+        recipients.append(pic)
+    sub_assignee = _hc_user_email(getattr(st, "assigned_to", None))
+    if sub_assignee:
+        recipients.append(sub_assignee)
+    seen = set()
+    for em in recipients:
+        key = (em or "").strip().lower()
+        if not key or key in seen or key == (actor or "").lower():
+            continue
+        seen.add(key)
+        _hc_send_persisted(
+            em,
+            title,
+            body,
+            data,
+            exclude_email=actor,
+            doc=doc,
+            stream_notification_type="administrative_ticket_subtask_status",
+        )
+
+
 def _notify_hc_ticket_pickup(doc):
     """Staff nhấn Nhận ticket — báo người tạo; action tách biệt ticket_picked_up (khác gán PIC)."""
     creator = (doc.creator_email or "").strip()
@@ -2678,6 +2753,11 @@ def create_subtask():
         st.insert(ignore_permissions=True)
         _append_history(ticket_id, _("Thêm công việc con"), detail=title[:500])
         frappe.db.commit()
+        if assigned_to:
+            try:
+                _notify_hc_subtask_assigned(tdoc, st, _session_email())
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "administrative_ticket.create_subtask.notify")
         return success_response({"ticket": _ticket_to_dict(frappe.get_doc(DOCTYPE, ticket_id))}, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.create_subtask")
@@ -2686,22 +2766,66 @@ def create_subtask():
 
 @frappe.whitelist(allow_guest=False)
 def update_subtask():
-    """Cập nhật trạng thái subtask."""
+    """Cập nhật công việc con: trạng thái và/hoặc người xử lý."""
     try:
         data = _parse_json_body()
-        ticket_id = data.get("ticket_id")
         sub_id = data.get("sub_task_id") or data.get("subTaskId")
         status = (data.get("status") or "").strip()
         if not sub_id or not frappe.db.exists(SUBTASK_DOCTYPE, sub_id):
             return not_found_response(_("Không tìm thấy subtask"))
         st = frappe.get_doc(SUBTASK_DOCTYPE, sub_id)
         tdoc = frappe.get_doc(DOCTYPE, st.ticket)
-        if not _can_read_ticket(tdoc):
+        # Cho phép: staff / creator / PIC ticket, hoặc chính người được giao công việc con.
+        if not _can_read_ticket(tdoc) and st.assigned_to != frappe.session.user:
             return forbidden_response(_("Không có quyền"))
-        if status:
+
+        old_status = st.status
+        old_assignee = (st.assigned_to or "").strip()
+
+        status_changed = False
+        if status and status != old_status:
             st.status = status
+            status_changed = True
+
+        # Đổi người xử lý (nếu client gửi assignedTo / assigned_to).
+        assignee_changed = False
+        if "assignedTo" in data or "assigned_to" in data:
+            new_assignee = (data.get("assigned_to") or data.get("assignedTo") or "").strip()
+            if new_assignee != old_assignee:
+                st.assigned_to = new_assignee or None
+                st.assigned_to_fullname = (
+                    frappe.db.get_value("User", new_assignee, "full_name") or new_assignee
+                    if new_assignee
+                    else ""
+                )
+                assignee_changed = True
+
         st.save(ignore_permissions=True)
+        if status_changed or assignee_changed:
+            detail = []
+            if status_changed:
+                detail.append(_("trạng thái → {0}").format(_hc_status_label_vn(status)))
+            if assignee_changed:
+                detail.append(_("người xử lý"))
+            _append_history(
+                st.ticket,
+                _("Cập nhật công việc con"),
+                detail=("; ".join(detail) or None),
+            )
         frappe.db.commit()
+
+        actor_email = _session_email()
+        if assignee_changed:
+            try:
+                _notify_hc_subtask_assigned(tdoc, st, actor_email)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "administrative_ticket.update_subtask.notify_assign")
+        if status_changed:
+            try:
+                _notify_hc_subtask_status_changed(tdoc, st, old_status, status, actor_email)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "administrative_ticket.update_subtask.notify_status")
+
         return success_response({"success": True}, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.update_subtask")
