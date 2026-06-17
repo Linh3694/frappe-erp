@@ -1606,8 +1606,10 @@ def get_student_profile():
         sql_params_subjects = {"student_id": student_id}
         school_year_filter_subjects = ""
         if school_year_id:
+            # SIS Student Subject không có cột school_year_id; lọc năm học qua
+            # lớp (c.school_year_id) và phân công giảng dạy (sa.school_year_id)
             school_year_filter_subjects = (
-                "AND ss.school_year_id = %(school_year_id)s "
+                "AND c.school_year_id = %(school_year_id)s "
                 "AND sa.school_year_id = %(school_year_id)s"
             )
             sql_params_subjects["school_year_id"] = school_year_id
@@ -1704,20 +1706,13 @@ def get_student_profile():
 
     except Exception as e:
         # Log full traceback để dễ debug thay vì chỉ message
-        tb = frappe.get_traceback()
         frappe.log_error(
             title="Error fetching student profile",
-            message=tb
+            message=frappe.get_traceback()
         )
-        # TODO: gỡ debug_info sau khi xác định được nguyên nhân lỗi trên production
         return error_response(
             message="Error fetching student profile",
-            code="FETCH_STUDENT_PROFILE_ERROR",
-            debug_info={
-                "error": str(e),
-                "error_type": type(e).__name__,
-                "traceback": tb
-            }
+            code="FETCH_STUDENT_PROFILE_ERROR"
         )
 
 
