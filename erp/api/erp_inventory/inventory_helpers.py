@@ -192,6 +192,27 @@ def user_to_fe(user_name: Optional[str]) -> Optional[Dict[str, Any]]:
 	}
 
 
+def get_room_yearly_title(room_name: Optional[str]) -> str:
+	"""Tên phòng theo năm học đang bật (ERP Administrative Room Yearly Assignment)."""
+	if not room_name:
+		return ""
+	sy_id = frappe.db.get_value(
+		"SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+	)
+	filters = {"room": room_name}
+	if sy_id:
+		filters["school_year_id"] = sy_id
+	return (
+		frappe.db.get_value(
+			"ERP Administrative Room Yearly Assignment",
+			filters,
+			"display_title_vn",
+			order_by="modified desc",
+		)
+		or ""
+	)
+
+
 def room_to_fe(room_name: Optional[str]) -> Optional[Dict[str, Any]]:
 	if not room_name or not frappe.db.exists("ERP Administrative Room", room_name):
 		return None
@@ -213,10 +234,14 @@ def room_to_fe(room_name: Optional[str]) -> Optional[Dict[str, Any]]:
 	building_name = ""
 	if r.building_id:
 		building_name = frappe.db.get_value("ERP Administrative Building", r.building_id, "title_vn") or r.building_id
+
+	# Tên phòng theo năm học đang bật (Room Yearly Assignment), fallback về title_vn
+	yearly_title = get_room_yearly_title(r.name)
+	display_name = yearly_title or r.title_vn or ""
 	return {
 		"_id": r.name,
-		"name": r.title_vn or r.physical_code or r.name,
-		"room_name": r.title_vn or "",
+		"name": display_name or r.physical_code or r.name,
+		"room_name": display_name,
 		"short_title": r.short_title or "",
 		"physical_code": r.physical_code or "",
 		"room_type": r.room_type,
