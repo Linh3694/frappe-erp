@@ -1704,13 +1704,20 @@ def get_student_profile():
 
     except Exception as e:
         # Log full traceback để dễ debug thay vì chỉ message
+        tb = frappe.get_traceback()
         frappe.log_error(
             title="Error fetching student profile",
-            message=frappe.get_traceback()
+            message=tb
         )
+        # TODO: gỡ debug_info sau khi xác định được nguyên nhân lỗi trên production
         return error_response(
             message="Error fetching student profile",
-            code="FETCH_STUDENT_PROFILE_ERROR"
+            code="FETCH_STUDENT_PROFILE_ERROR",
+            debug_info={
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "traceback": tb
+            }
         )
 
 
