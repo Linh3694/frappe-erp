@@ -728,6 +728,7 @@ def bulk_upload_devices(device_type=None):
 
 		errors = []
 		valid_count = 0
+		updated_count = 0
 		for item in items:
 			try:
 				serial = (item.get("serial") or "").strip()
@@ -735,24 +736,34 @@ def bulk_upload_devices(device_type=None):
 				if not serial or not name:
 					errors.append({"serial": serial or "?", "message": "Thiếu name hoặc serial"})
 					continue
-				if frappe.db.exists("ERP Inventory Device", {"serial": serial, "device_type": dt}):
-					errors.append({"serial": serial, "name": name, "message": f"Serial {serial} đã tồn tại."})
-					continue
 				status = item.get("status") or "Standby"
 				if status not in VALID_STATUSES:
 					status = "Standby"
-				doc = frappe.get_doc(
-					{
-						"doctype": "ERP Inventory Device",
-						"device_type": dt,
-						"device_subtype": item.get("type") or "",
-						"name_display": name,
-						"manufacturer": item.get("manufacturer") or "",
-						"serial": serial,
-						"release_year": item.get("releaseYear"),
-						"status": status,
-					}
+				# Nếu serial đã tồn tại → cập nhật thiết bị, ngược lại tạo mới
+				existing_name = frappe.db.get_value(
+					"ERP Inventory Device", {"serial": serial, "device_type": dt}, "name"
 				)
+				is_update = bool(existing_name)
+				if is_update:
+					doc = frappe.get_doc("ERP Inventory Device", existing_name)
+					doc.device_subtype = item.get("type") or ""
+					doc.name_display = name
+					doc.manufacturer = item.get("manufacturer") or ""
+					doc.release_year = item.get("releaseYear")
+					doc.status = status
+				else:
+					doc = frappe.get_doc(
+						{
+							"doctype": "ERP Inventory Device",
+							"device_type": dt,
+							"device_subtype": item.get("type") or "",
+							"name_display": name,
+							"manufacturer": item.get("manufacturer") or "",
+							"serial": serial,
+							"release_year": item.get("releaseYear"),
+							"status": status,
+						}
+					)
 				apply_specs_to_doc(doc, dt, item.get("specs") or {})
 				room = item.get("room")
 				if room:
@@ -765,17 +776,25 @@ def bulk_upload_devices(device_type=None):
 					sync_current_holder_from_assigned(doc)
 					if doc.status == "Standby":
 						doc.status = "PendingDocumentation"
-				doc.insert(ignore_permissions=True)
-				valid_count += 1
+				if is_update:
+					doc.save(ignore_permissions=True)
+					updated_count += 1
+				else:
+					doc.insert(ignore_permissions=True)
+					valid_count += 1
 			except Exception as row_err:
 				errors.append({"serial": item.get("serial", "?"), "message": str(row_err)})
 
 		frappe.db.commit()
 		added_key = f"added{dt.capitalize()}s"
+		msg_parts = [f"Thêm mới {valid_count}"]
+		if updated_count:
+			msg_parts.append(f"cập nhật {updated_count}")
 		return {
-			"message": "Thêm mới hàng loạt thành công!",
+			"message": ", ".join(msg_parts) + " thiết bị thành công!",
 			added_key: valid_count,
 			"addedLaptops": valid_count if dt == "laptop" else None,
+			"updated": updated_count,
 			"errors": errors,
 		}
 	except Exception as e:
