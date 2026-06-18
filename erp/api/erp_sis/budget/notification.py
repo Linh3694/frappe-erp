@@ -80,7 +80,7 @@ def notify_plan_approved(plan, head_email):
 
 
 def notify_plan_returned(plan, head_email, reason):
-    """return_plan / unsubmit_plan -> trưởng phòng (kèm lý do)."""
+    """return_plan (về phòng ban) / unsubmit_plan -> trưởng phòng (kèm lý do)."""
     subject = f"[Ngân sách] Bị trả lại: {plan.title or plan.name}"
     body = (
         f"Ngân sách <b>{plan.name}</b> của phòng "
@@ -88,3 +88,14 @@ def notify_plan_returned(plan, head_email, reason):
         f"Lý do: {reason or '(không có)'}"
     )
     _safe_sendmail([head_email] if head_email else [], subject, body)
+
+
+def notify_plan_returned_to_step(plan, step_role, reason):
+    """return_plan trả giật về cấp duyệt thấp hơn -> người duyệt cấp đó (kèm lý do)."""
+    subject = f"[Ngân sách] Trả lại để xem lại: {plan.title or plan.name}"
+    body = (
+        f"Ngân sách <b>{plan.name}</b> của phòng "
+        f"<b>{plan.department_name or plan.department}</b> bị cấp trên trả lại để xem lại.<br>"
+        f"Lý do: {reason or '(không có)'}"
+    )
+    _safe_sendmail(_users_with_role(step_role), subject, body)

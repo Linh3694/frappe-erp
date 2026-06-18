@@ -41,14 +41,6 @@ from .plan import (
     get_my_department,
 )
 
-# Approval Config (cấu hình luồng duyệt)
-from .approval_config import (
-    list_approval_configs,
-    get_approval_config,
-    upsert_approval_config,
-    delete_approval_config,
-)
-
 # Dashboard (số liệu Trang chủ)
 from .dashboard import (
     get_dashboard,
@@ -80,11 +72,6 @@ __all__ = [
     "close_plan",
     "get_plan_history",
     "get_my_department",
-    # Approval Config
-    "list_approval_configs",
-    "get_approval_config",
-    "upsert_approval_config",
-    "delete_approval_config",
     # Dashboard
     "get_dashboard",
 ]

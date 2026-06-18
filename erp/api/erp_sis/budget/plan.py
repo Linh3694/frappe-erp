@@ -258,7 +258,7 @@ def submit_plan():
         return error_response("Ngân sách phải có ít nhất 1 dòng")
 
     try:
-        steps = _plan_steps(doc.period)
+        steps = _plan_steps()
         doc.workflow_state = "Pending"
         doc.current_step = 1
         doc.return_reason = None
@@ -296,7 +296,7 @@ def approve_plan():
         if doc.workflow_state != "Pending":
             return error_response("Chỉ duyệt được ngân sách đang chờ duyệt (Pending)")
 
-        steps = _plan_steps(doc.period)
+        steps = _plan_steps()
         if not _can_approve_step(steps, doc.current_step, email):
             return forbidden_response("Bạn không có quyền duyệt bước này")
 
@@ -356,21 +356,41 @@ def return_plan():
         doc = frappe.get_doc(PLAN_DT, name, for_update=True)
         if doc.workflow_state != "Pending":
             return error_response("Chỉ trả lại được ngân sách đang chờ duyệt")
-        steps = _plan_steps(doc.period)
+        steps = _plan_steps()
         if not _can_approve_step(steps, doc.current_step, email):
             return forbidden_response("Bạn không có quyền trả lại ở bước này")
 
-        doc.workflow_state = "Returned"
-        doc.current_step = 0
+        # Trả GIẬT về từng cấp: lùi đúng 1 bước.
+        # - Còn cấp duyệt thấp hơn (>=1): vẫn Pending, cấp dưới xem lại.
+        # - Đã ở bước 1 (TC): về phòng ban (Returned) để trưởng phòng sửa & nộp lại.
+        prev_step = doc.current_step - 1
         doc.return_reason = reason
-        doc.save(ignore_permissions=True)
-        _append_history(doc.name, "Trả lại", detail=reason, user=email)
-        frappe.db.commit()
-        try:
-            notify.notify_plan_returned(doc, doc.submitted_by, reason)
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), "Notify Return Plan Error")
-        return single_item_response(_plan_to_dict(doc), message="Đã trả lại ngân sách")
+        if prev_step >= 1:
+            doc.current_step = prev_step
+            doc.workflow_state = "Pending"
+            target_role = steps[prev_step - 1].get("approver_role")
+            doc.save(ignore_permissions=True)
+            _append_history(
+                doc.name, f"Trả lại cấp {prev_step} ({target_role})", detail=reason, user=email
+            )
+            frappe.db.commit()
+            try:
+                notify.notify_plan_returned_to_step(doc, target_role, reason)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "Notify Return Plan Error")
+            msg = f"Đã trả lại cấp duyệt {prev_step}"
+        else:
+            doc.current_step = 0
+            doc.workflow_state = "Returned"
+            doc.save(ignore_permissions=True)
+            _append_history(doc.name, "Trả lại phòng ban", detail=reason, user=email)
+            frappe.db.commit()
+            try:
+                notify.notify_plan_returned(doc, doc.submitted_by, reason)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "Notify Return Plan Error")
+            msg = "Đã trả lại phòng ban"
+        return single_item_response(_plan_to_dict(doc), message=msg)
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Lỗi khi trả lại: {str(e)}")

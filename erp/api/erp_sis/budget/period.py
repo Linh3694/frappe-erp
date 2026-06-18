@@ -31,7 +31,6 @@ def _period_to_dict(doc):
         "name": doc.name,
         "school_year_id": doc.school_year_id,
         "status": doc.status,
-        "approval_config": doc.approval_config,
     }
 
 
@@ -70,7 +69,6 @@ def create_period():
         doc = frappe.new_doc(PERIOD_DT)
         doc.school_year_id = data["school_year_id"]
         doc.status = data.get("status") or "Draft"
-        doc.approval_config = data.get("approval_config")
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
 
@@ -94,7 +92,7 @@ def update_period():
         return not_found_response(f"Không tìm thấy kì ngân sách: {name}")
     try:
         doc = frappe.get_doc(PERIOD_DT, name)
-        for f in ("approval_config",):
+        for f in ("school_year_id",):
             if f in data:
                 setattr(doc, f, data.get(f))
         doc.save(ignore_permissions=True)

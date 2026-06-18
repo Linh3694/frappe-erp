@@ -17,6 +17,9 @@ erp.patches.v1_0.rename_sis_budget_to_erp_budget
 # Ngân sách: khởi tạo cây ERP Budget Code (lft/rgt) + tính level sau khi chuyển NestedSet
 erp.patches.v1_0.rebuild_budget_code_tree
 
+# Ngân sách: luồng duyệt cố định TC->CFO->CEO->COO — xoá doctype cấu hình duyệt + tạo role CFO/CEO/COO
+erp.patches.v1_0.budget_fixed_approval_flow
+
 # CRM Lead: ghi bank_accounts tu bang backup; xoa bang tam
 erp.patches.v1_0.migrate_lead_bank_accounts_apply
 

@@ -5,7 +5,7 @@ Bao gồm:
 - Phân quyền (SIS Finance / BOD / System Manager)
 - Cơ chế "trưởng phòng" lấy từ Sơ đồ tổ chức ERP Organization Unit (D6)
 - Ghi lịch sử (_append_history) mirror erp_administrative_ticket
-- Định tuyến duyệt theo approval_config của kì (D3)
+- Luồng duyệt CỐ ĐỊNH: TC -> CFO -> CEO -> COO (PLAN_STEPS)
 """
 
 import json
@@ -19,7 +19,6 @@ PERIOD_DT = "ERP Budget Period"
 PLAN_DT = "ERP Budget Plan"
 PLAN_LINE_DT = "ERP Budget Plan Line"
 PLAN_HISTORY_DT = "ERP Budget Plan History"
-CONFIG_DT = "ERP Budget Approval Config"
 
 ORG_UNIT_DT = "ERP Organization Unit"
 ORG_UNIT_TYPE_DT = "ERP Organization Unit Type"
@@ -157,40 +156,20 @@ def _append_history(plan_id, action, detail=None, user=None):
 
 
 # ---------------------------------------------------------------------------
-# Định tuyến duyệt theo approval_config của kì (D3)
+# Luồng duyệt CỐ ĐỊNH (không cấu hình): TC -> CFO -> CEO -> COO
 # ---------------------------------------------------------------------------
 
-def _get_config_for_period(period_id):
-    """Trả về doc ERP Budget Approval Config gắn với kì (nếu có)."""
-    config_id = frappe.db.get_value(PERIOD_DT, period_id, "approval_config")
-    if config_id and frappe.db.exists(CONFIG_DT, config_id):
-        return frappe.get_doc(CONFIG_DT, config_id)
-    return None
+PLAN_STEPS = [
+    {"step_order": 1, "approver_role": "SIS Finance", "label": "Phòng Tài chính"},
+    {"step_order": 2, "approver_role": "CFO", "label": "CFO"},
+    {"step_order": 3, "approver_role": "CEO", "label": "CEO"},
+    {"step_order": 4, "approver_role": "COO", "label": "COO"},
+]
 
 
-def _plan_steps(period_id):
-    """
-    Trả về list bước duyệt cho Plan, sắp theo step_order.
-    Mặc định [TC, BOD] nếu kì chưa gắn config.
-    """
-    config = _get_config_for_period(period_id)
-    if config and config.plan_steps:
-        steps = sorted(config.plan_steps, key=lambda s: s.step_order or 0)
-        return [
-            {
-                "step_order": s.step_order,
-                "approver_role": s.approver_role,
-                "can_return": bool(s.can_return),
-            }
-            for s in steps
-        ]
-    # Luồng duyệt mặc định: SIS Finance -> CFO -> CEO -> COO
-    return [
-        {"step_order": 1, "approver_role": "SIS Finance", "can_return": True},
-        {"step_order": 2, "approver_role": "CFO", "can_return": True},
-        {"step_order": 3, "approver_role": "CEO", "can_return": True},
-        {"step_order": 4, "approver_role": "COO", "can_return": True},
-    ]
+def _plan_steps():
+    """Luồng duyệt cố định TC -> CFO -> CEO -> COO."""
+    return PLAN_STEPS
 
 
 def _can_approve_step(steps, current_step, email=None):

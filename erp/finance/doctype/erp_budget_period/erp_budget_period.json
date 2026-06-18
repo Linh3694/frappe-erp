@@ -11,8 +11,7 @@
  "field_order": [
   "school_year_id",
   "column_break_basic",
-  "status",
-  "approval_config"
+  "status"
  ],
  "fields": [
   {
@@ -36,12 +35,6 @@
    "options": "Draft\nOpen\nClosed",
    "in_list_view": 1,
    "description": "Draft = chưa mở; Open = phòng ban được nộp; Closed = đã chốt"
-  },
-  {
-   "fieldname": "approval_config",
-   "fieldtype": "Link",
-   "label": "Cấu hình duyệt",
-   "options": "ERP Budget Approval Config"
   }
  ],
  "index_web_pages_for_search": 1,
