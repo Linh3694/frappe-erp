@@ -86,26 +86,33 @@ def _department_unit_type():
     if name:
         return name
     name = frappe.db.get_value(
+        ORG_UNIT_TYPE_DT, {"title_vn": ["like", "%Phòng%"]}, "name"
+    )
+    if name:
+        return name
+    name = frappe.db.get_value(
         ORG_UNIT_TYPE_DT, {"title_en": ["like", "Department%"]}, "name"
     )
     if name:
         return name
+    # Sơ đồ tổ chức: type_order 3 = Phòng (1=tổ chức, 2=khối, 3=phòng, 4=nhóm)
     return frappe.db.get_value(
-        ORG_UNIT_TYPE_DT, {"type_order": 2, "is_active": 1}, "name"
+        ORG_UNIT_TYPE_DT, {"type_order": 3, "is_active": 1}, "name"
     )
 
 
 def list_budget_departments(campus_id=None):
-    """Danh sách phòng ban (cấp Phòng) từ Sơ đồ tổ chức — dùng chung API budget."""
+    """Danh sách phòng ban (cấp Phòng) từ Sơ đồ tổ chức.
+
+    Mã ngân sách dùng chung toàn trường — không lọc campus (campus_id bị bỏ qua).
+    """
+    _ = campus_id  # legacy param; frontend axios có thể inject campus_id
     dept_type = _department_unit_type()
     if not dept_type:
         return []
-    filters = {"unit_type": dept_type, "is_active": 1}
-    if campus_id:
-        filters["campus_id"] = campus_id
     units = frappe.get_all(
         ORG_UNIT_DT,
-        filters=filters,
+        filters={"unit_type": dept_type, "is_active": 1},
         fields=["name", "unit_name_vn", "campus_id"],
         order_by="unit_name_vn asc",
     )
