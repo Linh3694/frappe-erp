@@ -18,8 +18,9 @@ from .utils import (
     PERIOD_DT,
     PLAN_DT,
     _get_request_data,
-    _is_finance,
     _department_unit_type,
+    _is_finance,
+    list_budget_departments,
     ORG_UNIT_DT,
 )
 
@@ -131,24 +132,7 @@ def set_period_status():
 @frappe.whitelist(allow_guest=False)
 def list_departments(campus_id=None):
     """Danh sách đơn vị cấp 'Phòng' (được phép nộp ngân sách) để đổ dropdown."""
-    dept_type = _department_unit_type()
-    if not dept_type:
-        return list_response([])
-    filters = {"unit_type": dept_type, "is_active": 1}
-    if campus_id:
-        filters["campus_id"] = campus_id
-    units = frappe.get_all(
-        ORG_UNIT_DT,
-        filters=filters,
-        fields=["name", "unit_name_vn", "campus_id"],
-        order_by="unit_name_vn asc",
-    )
-    return list_response(
-        [
-            {"department": u.name, "department_name": u.unit_name_vn, "campus_id": u.campus_id}
-            for u in units
-        ]
-    )
+    return list_response(list_budget_departments(campus_id))
 
 
 def _departments_without_leader(campus_id=None):

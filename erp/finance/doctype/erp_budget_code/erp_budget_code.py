@@ -6,6 +6,21 @@ from frappe import _
 from frappe.utils.nestedset import NestedSet
 
 MAX_LEVEL = 4
+CODE_DT = "ERP Budget Code"
+
+
+def sync_is_group_for_code(name):
+    """Có mã con → nhóm; không có → lá. Gọi sau save/delete để đồng bộ parent."""
+    if not name:
+        return
+    has_child = frappe.db.exists(CODE_DT, {"parent_budget_code": name})
+    frappe.db.set_value(
+        CODE_DT,
+        name,
+        "is_group",
+        1 if has_child else 0,
+        update_modified=False,
+    )
 
 
 class ERPBudgetCode(NestedSet):
@@ -19,6 +34,11 @@ class ERPBudgetCode(NestedSet):
             frappe.throw(
                 _("Mã ngân sách tối đa {0} cấp (mã này đang ở cấp {1})").format(MAX_LEVEL, self.level)
             )
+        # Tự suy luận is_group theo số mã con (không tin client)
+        if self.name:
+            self.is_group = 1 if frappe.db.exists(CODE_DT, {"parent_budget_code": self.name}) else 0
+        else:
+            self.is_group = 0
 
     def _validate_unique_code(self):
         # Mã ngân sách dùng chung toàn trường -> duy nhất toàn hệ thống
@@ -56,11 +76,24 @@ class ERPBudgetCode(NestedSet):
         self.level = level
 
     def on_update(self):
+        old_doc = self.get_doc_before_save()
+        old_parent = old_doc.parent_budget_code if old_doc else None
+
         # NestedSet duy trì lft/rgt
         super().on_update()
         # Nếu đổi cấp trên -> cập nhật lại level cho toàn bộ con cháu
         if self.has_value_changed("parent_budget_code"):
             self._resync_descendant_levels(self.name, self.level or 1)
+
+        sync_is_group_for_code(self.name)
+        if old_parent and old_parent != self.parent_budget_code:
+            sync_is_group_for_code(old_parent)
+        if self.parent_budget_code:
+            sync_is_group_for_code(self.parent_budget_code)
+
+    def after_delete(self):
+        if self.parent_budget_code:
+            sync_is_group_for_code(self.parent_budget_code)
 
     def _resync_descendant_levels(self, parent_name, parent_level):
         children = frappe.get_all(

@@ -89,8 +89,6 @@ def upsert_budget_code():
             doc.account_item = data.get("account_item")
         if "parent_budget_code" in data:
             doc.parent_budget_code = data.get("parent_budget_code") or None
-        if "is_group" in data:
-            doc.is_group = 1 if data.get("is_group") in (1, "1", True, "true") else 0
         if "is_active" in data:
             doc.is_active = 1 if data.get("is_active") in (1, "1", True, "true") else 0
 

@@ -79,10 +79,40 @@ def _is_bod():
 # ---------------------------------------------------------------------------
 
 def _department_unit_type():
-    """Trả về name của ERP Organization Unit Type có title_vn = 'Phòng'."""
-    return frappe.db.get_value(
+    """Trả về name loại đơn vị cấp Phòng — fallback nếu title_vn không khớp chính xác."""
+    name = frappe.db.get_value(
         ORG_UNIT_TYPE_DT, {"title_vn": DEPARTMENT_TYPE_TITLE_VN}, "name"
     )
+    if name:
+        return name
+    name = frappe.db.get_value(
+        ORG_UNIT_TYPE_DT, {"title_en": ["like", "Department%"]}, "name"
+    )
+    if name:
+        return name
+    return frappe.db.get_value(
+        ORG_UNIT_TYPE_DT, {"type_order": 2, "is_active": 1}, "name"
+    )
+
+
+def list_budget_departments(campus_id=None):
+    """Danh sách phòng ban (cấp Phòng) từ Sơ đồ tổ chức — dùng chung API budget."""
+    dept_type = _department_unit_type()
+    if not dept_type:
+        return []
+    filters = {"unit_type": dept_type, "is_active": 1}
+    if campus_id:
+        filters["campus_id"] = campus_id
+    units = frappe.get_all(
+        ORG_UNIT_DT,
+        filters=filters,
+        fields=["name", "unit_name_vn", "campus_id"],
+        order_by="unit_name_vn asc",
+    )
+    return [
+        {"department": u.name, "department_name": u.unit_name_vn, "campus_id": u.campus_id}
+        for u in units
+    ]
 
 
 def _user_led_unit(email=None):
