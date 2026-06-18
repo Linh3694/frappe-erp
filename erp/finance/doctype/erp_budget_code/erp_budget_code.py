@@ -1,13 +1,26 @@
 # Copyright (c) 2026, ERP and contributors
-# For license information, please see license.txt
+# Mã ngân sách — cây phân cấp (NestedSet) tối đa 4 cấp; level tự tính theo số cấp trên.
 
 import frappe
 from frappe import _
-from frappe.model.document import Document
+from frappe.utils.nestedset import NestedSet
+
+MAX_LEVEL = 4
 
 
-class ERPBudgetCode(Document):
+class ERPBudgetCode(NestedSet):
+    nsm_parent_field = "parent_budget_code"
+
     def validate(self):
+        self._validate_unique_code()
+        self._validate_not_own_parent()
+        self._set_level()
+        if self.level and self.level > MAX_LEVEL:
+            frappe.throw(
+                _("Mã ngân sách tối đa {0} cấp (mã này đang ở cấp {1})").format(MAX_LEVEL, self.level)
+            )
+
+    def _validate_unique_code(self):
         # Mã ngân sách phải duy nhất trong cùng campus
         if self.budget_code and self.campus_id:
             existing = frappe.db.get_value(
@@ -23,3 +36,44 @@ class ERPBudgetCode(Document):
                 frappe.throw(
                     _("Mã ngân sách '{0}' đã tồn tại trong campus này").format(self.budget_code)
                 )
+
+    def _validate_not_own_parent(self):
+        if self.parent_budget_code and self.parent_budget_code == self.name:
+            frappe.throw(_("Mã ngân sách không thể là cấp trên của chính nó"))
+
+    def _set_level(self):
+        """level = số cấp trên + 1. Không parent -> 1, có 1 parent -> 2, ..."""
+        level = 1
+        parent = self.parent_budget_code
+        seen = {self.name} if self.name else set()
+        while parent:
+            if parent in seen:  # chống vòng lặp
+                frappe.throw(_("Phát hiện vòng lặp trong cây mã ngân sách"))
+            seen.add(parent)
+            level += 1
+            if level > MAX_LEVEL + 1:  # vượt xa giới hạn -> dừng để báo lỗi ở validate
+                break
+            parent = frappe.db.get_value("ERP Budget Code", parent, "parent_budget_code")
+        self.level = level
+
+    def on_update(self):
+        # NestedSet duy trì lft/rgt
+        super().on_update()
+        # Nếu đổi cấp trên -> cập nhật lại level cho toàn bộ con cháu
+        if self.has_value_changed("parent_budget_code"):
+            self._resync_descendant_levels(self.name, self.level or 1)
+
+    def _resync_descendant_levels(self, parent_name, parent_level):
+        children = frappe.get_all(
+            "ERP Budget Code", filters={"parent_budget_code": parent_name}, pluck="name"
+        )
+        for child in children:
+            child_level = parent_level + 1
+            if child_level > MAX_LEVEL:
+                frappe.throw(
+                    _("Di chuyển làm mã con vượt quá {0} cấp — không cho phép").format(MAX_LEVEL)
+                )
+            frappe.db.set_value(
+                "ERP Budget Code", child, "level", child_level, update_modified=False
+            )
+            self._resync_descendant_levels(child, child_level)

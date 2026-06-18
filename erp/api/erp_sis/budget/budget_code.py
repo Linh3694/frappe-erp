@@ -24,6 +24,9 @@ def _code_to_dict(doc):
         "account_item": doc.account_item,
         "campus_id": doc.campus_id,
         "is_active": doc.is_active,
+        "parent_budget_code": doc.parent_budget_code,
+        "is_group": doc.is_group,
+        "level": doc.level,
         "applicable_departments": [
             {"department": d.department, "department_name": d.department_name}
             for d in (doc.applicable_departments or [])
@@ -41,7 +44,8 @@ def list_budget_codes(campus_id=None, is_active=None):
         if is_active is not None:
             filters["is_active"] = 1 if str(is_active) in ("1", "true", "True") else 0
 
-        names = frappe.get_all(CODE_DT, filters=filters, pluck="name", order_by="budget_code asc")
+        # Sắp theo cây (lft) để hiển thị phân cấp đúng thứ tự
+        names = frappe.get_all(CODE_DT, filters=filters, pluck="name", order_by="lft asc")
         data = [_code_to_dict(frappe.get_doc(CODE_DT, n)) for n in names]
         return list_response(data)
     except Exception as e:
@@ -91,6 +95,10 @@ def upsert_budget_code():
             doc.account_item = data.get("account_item")
         if campus_id is not None:
             doc.campus_id = campus_id
+        if "parent_budget_code" in data:
+            doc.parent_budget_code = data.get("parent_budget_code") or None
+        if "is_group" in data:
+            doc.is_group = 1 if data.get("is_group") in (1, "1", True, "true") else 0
         if "is_active" in data:
             doc.is_active = 1 if data.get("is_active") in (1, "1", True, "true") else 0
 
@@ -123,6 +131,11 @@ def delete_budget_code():
         return validation_error_response("Thiếu name", {"name": ["Bắt buộc"]})
     if not frappe.db.exists(CODE_DT, name):
         return not_found_response(f"Không tìm thấy mã ngân sách: {name}")
+
+    # Chặn xóa nếu còn mã con (cây)
+    has_child = frappe.db.exists(CODE_DT, {"parent_budget_code": name})
+    if has_child:
+        return error_response("Không thể xóa: mã ngân sách còn mã con. Hãy xóa/di chuyển mã con trước.")
 
     # Chặn xóa nếu đang được dùng trong plan line
     used = frappe.db.exists("ERP Budget Plan Line", {"budget_code": name})

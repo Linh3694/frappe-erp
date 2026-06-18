@@ -11,11 +11,18 @@
  "field_order": [
   "budget_code",
   "account_item",
+  "level",
   "column_break_basic",
   "campus_id",
+  "parent_budget_code",
+  "is_group",
   "is_active",
   "departments_section",
-  "applicable_departments"
+  "applicable_departments",
+  "tree_section",
+  "lft",
+  "rgt",
+  "old_parent"
  ],
  "fields": [
   {
@@ -33,6 +40,14 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "level",
+   "fieldtype": "Int",
+   "label": "Cấp",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Tự tính theo số cấp trên (không parent = 1, tối đa 4)"
+  },
+  {
    "fieldname": "column_break_basic",
    "fieldtype": "Column Break"
   },
@@ -43,6 +58,18 @@
    "options": "SIS Campus",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "parent_budget_code",
+   "fieldtype": "Link",
+   "label": "Mã ngân sách cấp trên",
+   "options": "ERP Budget Code"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_group",
+   "fieldtype": "Check",
+   "label": "Là nhóm (có mã con)"
   },
   {
    "default": "1",
@@ -61,10 +88,39 @@
    "fieldtype": "Table",
    "label": "Phòng ban áp dụng",
    "options": "ERP Budget Code Department"
+  },
+  {
+   "fieldname": "tree_section",
+   "fieldtype": "Section Break",
+   "label": "Cây phân cấp"
+  },
+  {
+   "fieldname": "lft",
+   "fieldtype": "Int",
+   "label": "lft",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "rgt",
+   "fieldtype": "Int",
+   "label": "rgt",
+   "hidden": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "old_parent",
+   "fieldtype": "Link",
+   "label": "Old Parent",
+   "options": "ERP Budget Code",
+   "hidden": 1,
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 0,
+ "is_tree": 1,
+ "nsm_parent_field": "parent_budget_code",
  "links": [],
  "modified": "2026-06-18 00:00:00.000000",
  "modified_by": "Administrator",
