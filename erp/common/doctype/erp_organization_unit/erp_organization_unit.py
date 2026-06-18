@@ -62,8 +62,10 @@ class ERPOrganizationUnit(NestedSet):
         for user in seen:
             other = self._find_user_in_other_units(user)
             if other:
+                # Lấy tên đơn vị (VN) để hiển thị thay vì mã docname
+                other_name = frappe.db.get_value("ERP Organization Unit", other, "unit_name_vn") or other
                 frappe.throw(
-                    _("Người dùng {0} đã thuộc đơn vị khác: {1}").format(user, other)
+                    _("Người dùng {0} đã thuộc đơn vị khác: {1}").format(user, other_name)
                 )
 
     def _find_user_in_other_units(self, user: str):
