@@ -1,6 +1,7 @@
 """
 Budget API Module - Module Ngân sách
-Quản lý ngân sách năm theo phòng ban, duyệt nhiều cấp cấu hình được, điều chỉnh giữa năm.
+Quản lý ngân sách năm theo phòng ban, duyệt nhiều cấp cấu hình được.
+Ngân sách duyệt 1 lần/năm học, không điều chỉnh giữa năm.
 
 Re-export tất cả whitelisted functions để frontend gọi qua path:
 /api/method/erp.api.erp_sis.budget.<function_name>
@@ -38,18 +39,6 @@ from .plan import (
     close_plan,
     get_plan_history,
     get_my_department,
-)
-
-# Budget Adjustment (điều chỉnh giữa năm)
-from .adjustment import (
-    list_adjustments,
-    get_adjustment,
-    create_adjustment,
-    update_adjustment,
-    submit_adjustment,
-    approve_adjustment,
-    return_adjustment,
-    get_effective_budget,
 )
 
 # Approval Config (cấu hình luồng duyệt)
@@ -91,15 +80,6 @@ __all__ = [
     "close_plan",
     "get_plan_history",
     "get_my_department",
-    # Adjustment
-    "list_adjustments",
-    "get_adjustment",
-    "create_adjustment",
-    "update_adjustment",
-    "submit_adjustment",
-    "approve_adjustment",
-    "return_adjustment",
-    "get_effective_budget",
     # Approval Config
     "list_approval_configs",
     "get_approval_config",

@@ -23,28 +23,22 @@ from .utils import (
     ORG_UNIT_DT,
 )
 
-VALID_STATUS = ("Draft", "Open", "Locked", "Closed")
+VALID_STATUS = ("Draft", "Open", "Closed")
 
 
 def _period_to_dict(doc):
     return {
         "name": doc.name,
-        "title": doc.title,
         "school_year_id": doc.school_year_id,
-        "campus_id": doc.campus_id,
         "status": doc.status,
-        "start_date": str(doc.start_date) if doc.start_date else None,
-        "end_date": str(doc.end_date) if doc.end_date else None,
         "approval_config": doc.approval_config,
     }
 
 
 @frappe.whitelist(allow_guest=False)
-def list_periods(campus_id=None, status=None):
+def list_periods(status=None):
     try:
         filters = {}
-        if campus_id:
-            filters["campus_id"] = campus_id
         if status:
             filters["status"] = status
         names = frappe.get_all(PERIOD_DT, filters=filters, pluck="name", order_by="creation desc")
@@ -70,25 +64,19 @@ def create_period():
     if not _is_finance():
         return error_response("Bạn không có quyền tạo kì ngân sách")
     data = _get_request_data()
-    required = ["title", "school_year_id", "campus_id"]
-    for f in required:
-        if not data.get(f):
-            return validation_error_response(f"Thiếu {f}", {f: ["Bắt buộc"]})
+    if not data.get("school_year_id"):
+        return validation_error_response("Thiếu school_year_id", {"school_year_id": ["Bắt buộc"]})
     try:
         doc = frappe.new_doc(PERIOD_DT)
-        doc.title = data["title"]
         doc.school_year_id = data["school_year_id"]
-        doc.campus_id = data["campus_id"]
         doc.status = data.get("status") or "Draft"
-        doc.start_date = data.get("start_date")
-        doc.end_date = data.get("end_date")
         doc.approval_config = data.get("approval_config")
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
 
         result = _period_to_dict(doc)
-        # Cảnh báo phòng chưa có trưởng phòng (không ai nộp được)
-        result["warnings"] = _departments_without_leader(doc.campus_id)
+        # Cảnh báo phòng chưa có trưởng phòng (không ai nộp được) — toàn trường
+        result["warnings"] = _departments_without_leader()
         return single_item_response(result, message="Tạo kì ngân sách thành công")
     except Exception as e:
         frappe.db.rollback()
@@ -106,7 +94,7 @@ def update_period():
         return not_found_response(f"Không tìm thấy kì ngân sách: {name}")
     try:
         doc = frappe.get_doc(PERIOD_DT, name)
-        for f in ("title", "start_date", "end_date", "approval_config"):
+        for f in ("approval_config",):
             if f in data:
                 setattr(doc, f, data.get(f))
         doc.save(ignore_permissions=True)
@@ -119,7 +107,7 @@ def update_period():
 
 @frappe.whitelist(allow_guest=False)
 def set_period_status():
-    """Đổi trạng thái kì: Draft/Open/Locked/Closed."""
+    """Đổi trạng thái kì: Draft/Open/Closed."""
     if not _is_finance():
         return error_response("Bạn không có quyền đổi trạng thái kì ngân sách")
     data = _get_request_data()
@@ -165,8 +153,8 @@ def list_departments(campus_id=None):
     )
 
 
-def _departments_without_leader(campus_id):
-    """Danh sách phòng (cấp Phòng) chưa gán trưởng phòng -> cảnh báo cho TC."""
+def _departments_without_leader(campus_id=None):
+    """Danh sách phòng (cấp Phòng) chưa gán trưởng phòng -> cảnh báo cho TC (toàn trường)."""
     dept_type = _department_unit_type()
     if not dept_type:
         return []

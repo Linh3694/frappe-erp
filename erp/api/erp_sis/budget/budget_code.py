@@ -22,7 +22,6 @@ def _code_to_dict(doc):
         "name": doc.name,
         "budget_code": doc.budget_code,
         "account_item": doc.account_item,
-        "campus_id": doc.campus_id,
         "is_active": doc.is_active,
         "parent_budget_code": doc.parent_budget_code,
         "is_group": doc.is_group,
@@ -35,12 +34,10 @@ def _code_to_dict(doc):
 
 
 @frappe.whitelist(allow_guest=False)
-def list_budget_codes(campus_id=None, is_active=None):
-    """Danh sách mã ngân sách (lọc theo campus / trạng thái)."""
+def list_budget_codes(is_active=None):
+    """Danh sách mã ngân sách (dùng chung toàn trường; lọc theo trạng thái)."""
     try:
         filters = {}
-        if campus_id:
-            filters["campus_id"] = campus_id
         if is_active is not None:
             filters["is_active"] = 1 if str(is_active) in ("1", "true", "True") else 0
 
@@ -72,14 +69,11 @@ def upsert_budget_code():
     data = _get_request_data()
     name = data.get("name")
     budget_code = data.get("budget_code")
-    campus_id = data.get("campus_id")
 
-    if not name:
-        if not budget_code or not campus_id:
-            return validation_error_response(
-                "Thiếu trường bắt buộc",
-                {"budget_code": ["Bắt buộc"], "campus_id": ["Bắt buộc"]},
-            )
+    if not name and not budget_code:
+        return validation_error_response(
+            "Thiếu trường bắt buộc", {"budget_code": ["Bắt buộc"]}
+        )
 
     departments = _parse(data.get("applicable_departments")) or []
 
@@ -93,8 +87,6 @@ def upsert_budget_code():
             doc.budget_code = budget_code
         if "account_item" in data:
             doc.account_item = data.get("account_item")
-        if campus_id is not None:
-            doc.campus_id = campus_id
         if "parent_budget_code" in data:
             doc.parent_budget_code = data.get("parent_budget_code") or None
         if "is_group" in data:

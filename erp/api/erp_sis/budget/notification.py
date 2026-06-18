@@ -88,13 +88,3 @@ def notify_plan_returned(plan, head_email, reason):
         f"Lý do: {reason or '(không có)'}"
     )
     _safe_sendmail([head_email] if head_email else [], subject, body)
-
-
-def notify_adjustment_event(adjustment, next_step_role, subject_prefix):
-    """Thông báo sự kiện adjustment cho người duyệt step kế."""
-    subject = f"[Ngân sách] {subject_prefix}: {adjustment.title or adjustment.name}"
-    body = (
-        f"Điều chỉnh <b>{adjustment.name}</b> ({adjustment.type}) "
-        f"đang chờ xử lý."
-    )
-    _safe_sendmail(_users_with_role(next_step_role), subject, body)

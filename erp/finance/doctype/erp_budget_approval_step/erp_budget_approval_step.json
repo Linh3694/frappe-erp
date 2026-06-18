@@ -10,9 +10,6 @@
   "step_order",
   "approver_role",
   "can_return",
-  "applies_to_type",
-  "min_amount",
-  "max_amount",
   "approver_users"
  ],
  "fields": [
@@ -36,24 +33,6 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Được trả lại"
-  },
-  {
-   "default": "All",
-   "fieldname": "applies_to_type",
-   "fieldtype": "Select",
-   "label": "Áp dụng cho loại",
-   "options": "All\nTransfer\nIncrease\nDecrease",
-   "description": "Chỉ dùng cho luồng duyệt điều chỉnh (adjustment)"
-  },
-  {
-   "fieldname": "min_amount",
-   "fieldtype": "Currency",
-   "label": "Ngưỡng tối thiểu"
-  },
-  {
-   "fieldname": "max_amount",
-   "fieldtype": "Currency",
-   "label": "Ngưỡng tối đa"
   },
   {
    "fieldname": "approver_users",

@@ -22,9 +22,6 @@ def _step_to_dict(s):
         "step_order": s.step_order,
         "approver_role": s.approver_role,
         "can_return": s.can_return,
-        "applies_to_type": s.applies_to_type,
-        "min_amount": s.min_amount,
-        "max_amount": s.max_amount,
         "approver_users": [{"user": u.user, "full_name": u.full_name} for u in (s.approver_users or [])],
     }
 
@@ -37,7 +34,6 @@ def _config_to_dict(doc):
         "school_year_id": doc.school_year_id,
         "is_active": doc.is_active,
         "plan_steps": [_step_to_dict(s) for s in (doc.plan_steps or [])],
-        "adjustment_steps": [_step_to_dict(s) for s in (doc.adjustment_steps or [])],
     }
 
 
@@ -76,9 +72,6 @@ def _apply_steps(doc, fieldname, steps):
                 "step_order": s.get("step_order"),
                 "approver_role": s.get("approver_role"),
                 "can_return": 1 if s.get("can_return") in (1, "1", True, "true") else 0,
-                "applies_to_type": s.get("applies_to_type") or "All",
-                "min_amount": s.get("min_amount") or 0,
-                "max_amount": s.get("max_amount") or 0,
             },
         )
         for u in (s.get("approver_users") or []):
@@ -109,8 +102,6 @@ def upsert_approval_config():
 
         if "plan_steps" in data:
             _apply_steps(doc, "plan_steps", _parse(data.get("plan_steps")))
-        if "adjustment_steps" in data:
-            _apply_steps(doc, "adjustment_steps", _parse(data.get("adjustment_steps")))
 
         doc.save(ignore_permissions=True)
         frappe.db.commit()

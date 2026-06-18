@@ -7,16 +7,14 @@
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
- "description": "Cấu hình luồng duyệt ngân sách (Plan + Adjustment)",
+ "description": "Cấu hình luồng duyệt ngân sách",
  "field_order": [
   "title",
   "campus_id",
   "school_year_id",
   "is_active",
   "plan_steps_section",
-  "plan_steps",
-  "adjustment_steps_section",
-  "adjustment_steps"
+  "plan_steps"
  ],
  "fields": [
   {
@@ -56,17 +54,6 @@
    "fieldname": "plan_steps",
    "fieldtype": "Table",
    "label": "Các bước duyệt Plan",
-   "options": "ERP Budget Approval Step"
-  },
-  {
-   "fieldname": "adjustment_steps_section",
-   "fieldtype": "Section Break",
-   "label": "Luồng duyệt Điều chỉnh"
-  },
-  {
-   "fieldname": "adjustment_steps",
-   "fieldtype": "Table",
-   "label": "Các bước duyệt Adjustment",
    "options": "ERP Budget Approval Step"
   }
  ],

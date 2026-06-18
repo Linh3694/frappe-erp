@@ -8,5 +8,11 @@ from frappe.model.document import Document
 
 class ERPBudgetPeriod(Document):
     def validate(self):
-        if self.start_date and self.end_date and self.start_date > self.end_date:
-            frappe.throw(_("Ngày bắt đầu phải trước ngày kết thúc"))
+        # Mỗi năm học chỉ có đúng 1 kì ngân sách
+        if self.school_year_id:
+            existing = frappe.db.exists(
+                "ERP Budget Period",
+                {"school_year_id": self.school_year_id, "name": ("!=", self.name)},
+            )
+            if existing:
+                frappe.throw(_("Năm học này đã có kì ngân sách: {0}").format(existing))

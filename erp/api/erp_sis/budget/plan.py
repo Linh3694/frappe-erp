@@ -1,9 +1,10 @@
 """
 Budget Plan APIs - form ngân sách phòng ban + state machine duyệt.
 
-State machine (mục 1.1):
-Draft --submit--> Pending(step1: TC) --approve--> Pending(step2: BOD) --approve--> Approved --> Active --> Closed
+State machine:
+Draft --submit--> Pending(step1: TC -> CFO -> CEO -> COO) --approve--> Approved --> Active --> Closed
 Returned (khi return); Superseded (khi TC unsubmit -> versioning).
+Ngân sách duyệt 1 lần/năm học, không điều chỉnh giữa năm.
 """
 
 import frappe

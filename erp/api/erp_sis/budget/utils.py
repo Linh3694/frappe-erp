@@ -20,7 +20,6 @@ PLAN_DT = "ERP Budget Plan"
 PLAN_LINE_DT = "ERP Budget Plan Line"
 PLAN_HISTORY_DT = "ERP Budget Plan History"
 CONFIG_DT = "ERP Budget Approval Config"
-ADJUSTMENT_DT = "ERP Budget Adjustment"
 
 ORG_UNIT_DT = "ERP Organization Unit"
 ORG_UNIT_TYPE_DT = "ERP Organization Unit Type"
@@ -185,43 +184,13 @@ def _plan_steps(period_id):
             }
             for s in steps
         ]
-    # Seed mặc định v1
+    # Luồng duyệt mặc định: SIS Finance -> CFO -> CEO -> COO
     return [
         {"step_order": 1, "approver_role": "SIS Finance", "can_return": True},
-        {"step_order": 2, "approver_role": "SIS BOD", "can_return": True},
+        {"step_order": 2, "approver_role": "CFO", "can_return": True},
+        {"step_order": 3, "approver_role": "CEO", "can_return": True},
+        {"step_order": 4, "approver_role": "COO", "can_return": True},
     ]
-
-
-def _adjustment_steps(period_id, adj_type, total_abs_delta):
-    """
-    Lọc bước duyệt cho Adjustment theo loại + ngưỡng (D3).
-    Mặc định [TC] nếu kì chưa gắn config.
-    """
-    config = _get_config_for_period(period_id)
-    if config and config.adjustment_steps:
-        steps = sorted(config.adjustment_steps, key=lambda s: s.step_order or 0)
-        result = []
-        for s in steps:
-            applies = (s.applies_to_type or "All")
-            if applies not in ("All", adj_type):
-                continue
-            min_a = s.min_amount or 0
-            max_a = s.max_amount or 0
-            if min_a and total_abs_delta < min_a:
-                continue
-            if max_a and total_abs_delta > max_a:
-                continue
-            result.append(
-                {
-                    "step_order": s.step_order,
-                    "approver_role": s.approver_role,
-                    "can_return": bool(s.can_return),
-                }
-            )
-        if result:
-            return result
-    # Mặc định: chỉ TC duyệt
-    return [{"step_order": 1, "approver_role": "SIS Finance", "can_return": True}]
 
 
 def _can_approve_step(steps, current_step, email=None):

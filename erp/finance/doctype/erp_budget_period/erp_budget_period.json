@@ -7,40 +7,21 @@
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
- "description": "Kì ngân sách gắn với năm học",
+ "description": "Kì ngân sách gắn với năm học (mỗi năm học chỉ có 1 kì)",
  "field_order": [
-  "title",
   "school_year_id",
-  "campus_id",
   "column_break_basic",
   "status",
-  "start_date",
-  "end_date",
   "approval_config"
  ],
  "fields": [
-  {
-   "fieldname": "title",
-   "fieldtype": "Data",
-   "label": "Tên kì ngân sách",
-   "reqd": 1,
-   "in_list_view": 1,
-   "description": "VD: Ngân sách năm học 2026-2027"
-  },
   {
    "fieldname": "school_year_id",
    "fieldtype": "Link",
    "label": "Năm học",
    "options": "SIS School Year",
    "reqd": 1,
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "campus_id",
-   "fieldtype": "Link",
-   "label": "Campus",
-   "options": "SIS Campus",
-   "reqd": 1,
+   "unique": 1,
    "in_list_view": 1
   },
   {
@@ -52,19 +33,9 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Trạng thái",
-   "options": "Draft\nOpen\nLocked\nClosed",
+   "options": "Draft\nOpen\nClosed",
    "in_list_view": 1,
-   "description": "Open = phòng ban được nộp; Locked = chốt, chỉ adjustment"
-  },
-  {
-   "fieldname": "start_date",
-   "fieldtype": "Date",
-   "label": "Ngày bắt đầu"
-  },
-  {
-   "fieldname": "end_date",
-   "fieldtype": "Date",
-   "label": "Ngày kết thúc"
+   "description": "Draft = chưa mở; Open = phòng ban được nộp; Closed = đã chốt"
   },
   {
    "fieldname": "approval_config",
@@ -122,6 +93,6 @@
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
- "title_field": "title",
+ "title_field": "school_year_id",
  "track_changes": 1
 }

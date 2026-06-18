@@ -1,4 +1,4 @@
-"""Đổi tên 11 doctype Ngân sách: 'SIS Budget *' -> 'ERP Budget *' (chuyển module sang Finance).
+"""Đổi tên các doctype Ngân sách: 'SIS Budget *' -> 'ERP Budget *' (chuyển module sang Finance).
 
 Chạy ở pre_model_sync để rename bảng DB hiện có TRƯỚC khi sync JSON mới
 (nếu không sync sẽ tạo doctype mới và để doctype/bảng cũ mồ côi).
@@ -12,14 +12,12 @@ import frappe
 RENAMES = [
     ("SIS Budget Approval Config", "ERP Budget Approval Config"),
     ("SIS Budget Plan", "ERP Budget Plan"),
-    ("SIS Budget Adjustment", "ERP Budget Adjustment"),
     ("SIS Budget Code", "ERP Budget Code"),
     ("SIS Budget Period", "ERP Budget Period"),
     ("SIS Budget Approval Step", "ERP Budget Approval Step"),
     ("SIS Budget Approver", "ERP Budget Approver"),
     ("SIS Budget Plan Line", "ERP Budget Plan Line"),
     ("SIS Budget Plan History", "ERP Budget Plan History"),
-    ("SIS Budget Adjustment Line", "ERP Budget Adjustment Line"),
     ("SIS Budget Code Department", "ERP Budget Code Department"),
 ]
 

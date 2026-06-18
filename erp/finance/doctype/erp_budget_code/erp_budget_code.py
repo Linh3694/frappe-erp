@@ -21,20 +21,19 @@ class ERPBudgetCode(NestedSet):
             )
 
     def _validate_unique_code(self):
-        # Mã ngân sách phải duy nhất trong cùng campus
-        if self.budget_code and self.campus_id:
+        # Mã ngân sách dùng chung toàn trường -> duy nhất toàn hệ thống
+        if self.budget_code:
             existing = frappe.db.get_value(
                 "ERP Budget Code",
                 {
                     "budget_code": self.budget_code,
-                    "campus_id": self.campus_id,
                     "name": ("!=", self.name or ""),
                 },
                 "name",
             )
             if existing:
                 frappe.throw(
-                    _("Mã ngân sách '{0}' đã tồn tại trong campus này").format(self.budget_code)
+                    _("Mã ngân sách '{0}' đã tồn tại").format(self.budget_code)
                 )
 
     def _validate_not_own_parent(self):
