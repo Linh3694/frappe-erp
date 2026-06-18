@@ -4,6 +4,7 @@ import frappe
 # Danh sách role cần đảm bảo tồn tại sau mỗi lần migrate
 REQUIRED_ROLES = [
     "SIS Medical",
+    "SIS Finance",
 ]
 
 # Danh mục ticket IT mặc định — title khớp FE (Overall, Camera, ...)
