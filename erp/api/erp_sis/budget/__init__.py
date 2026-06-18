@@ -21,6 +21,7 @@ from .period import (
     create_period,
     update_period,
     set_period_status,
+    list_departments,
 )
 
 # Budget Plan (form ngân sách phòng ban)
@@ -59,6 +60,11 @@ from .approval_config import (
     delete_approval_config,
 )
 
+# Dashboard (số liệu Trang chủ)
+from .dashboard import (
+    get_dashboard,
+)
+
 __all__ = [
     # Budget Code
     "list_budget_codes",
@@ -71,6 +77,7 @@ __all__ = [
     "create_period",
     "update_period",
     "set_period_status",
+    "list_departments",
     # Plan
     "get_my_plans",
     "get_all_plans",
@@ -98,4 +105,6 @@ __all__ = [
     "get_approval_config",
     "upsert_approval_config",
     "delete_approval_config",
+    # Dashboard
+    "get_dashboard",
 ]

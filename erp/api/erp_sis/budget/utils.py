@@ -14,13 +14,13 @@ import frappe
 from frappe import _
 
 # --- Doctype constants ---
-CODE_DT = "SIS Budget Code"
-PERIOD_DT = "SIS Budget Period"
-PLAN_DT = "SIS Budget Plan"
-PLAN_LINE_DT = "SIS Budget Plan Line"
-PLAN_HISTORY_DT = "SIS Budget Plan History"
-CONFIG_DT = "SIS Budget Approval Config"
-ADJUSTMENT_DT = "SIS Budget Adjustment"
+CODE_DT = "ERP Budget Code"
+PERIOD_DT = "ERP Budget Period"
+PLAN_DT = "ERP Budget Plan"
+PLAN_LINE_DT = "ERP Budget Plan Line"
+PLAN_HISTORY_DT = "ERP Budget Plan History"
+CONFIG_DT = "ERP Budget Approval Config"
+ADJUSTMENT_DT = "ERP Budget Adjustment"
 
 ORG_UNIT_DT = "ERP Organization Unit"
 ORG_UNIT_TYPE_DT = "ERP Organization Unit Type"
@@ -162,7 +162,7 @@ def _append_history(plan_id, action, detail=None, user=None):
 # ---------------------------------------------------------------------------
 
 def _get_config_for_period(period_id):
-    """Trả về doc SIS Budget Approval Config gắn với kì (nếu có)."""
+    """Trả về doc ERP Budget Approval Config gắn với kì (nếu có)."""
     config_id = frappe.db.get_value(PERIOD_DT, period_id, "approval_config")
     if config_id and frappe.db.exists(CONFIG_DT, config_id):
         return frappe.get_doc(CONFIG_DT, config_id)

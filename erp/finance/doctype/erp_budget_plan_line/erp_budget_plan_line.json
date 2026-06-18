@@ -1,0 +1,70 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-06-18 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "budget_code",
+  "account_item",
+  "planned_amount",
+  "approved_amount",
+  "note",
+  "attachment"
+ ],
+ "fields": [
+  {
+   "fieldname": "budget_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Mã ngân sách",
+   "options": "ERP Budget Code",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "budget_code.account_item",
+   "fieldname": "account_item",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Khoản mục",
+   "read_only": 1
+  },
+  {
+   "fieldname": "planned_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Kế hoạch"
+  },
+  {
+   "fieldname": "approved_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Đã duyệt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Text",
+   "label": "Ghi chú / Giải trình"
+  },
+  {
+   "fieldname": "attachment",
+   "fieldtype": "Attach",
+   "label": "Tệp đính kèm"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Finance",
+ "name": "ERP Budget Plan Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

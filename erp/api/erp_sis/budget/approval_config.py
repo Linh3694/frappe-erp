@@ -129,7 +129,7 @@ def delete_approval_config():
     name = data.get("name")
     if not name or not frappe.db.exists(CONFIG_DT, name):
         return not_found_response(f"Không tìm thấy cấu hình: {name}")
-    used = frappe.db.exists("SIS Budget Period", {"approval_config": name})
+    used = frappe.db.exists("ERP Budget Period", {"approval_config": name})
     if used:
         return error_response("Không thể xóa: cấu hình đang được kì ngân sách sử dụng")
     try:

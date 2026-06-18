@@ -8,6 +8,9 @@ erp.patches.v1_0.migrate_lead_bank_accounts_prepare
 # TKB: backup ma trận khối×môn trước khi đổi sang lớp×môn
 erp.patches.v1_0.migrate_requirements_grade_to_class_prepare
 
+# Ngân sách: đổi tên SIS Budget * -> ERP Budget * + chuyển module Finance (rename bảng, giữ data)
+erp.patches.v1_0.rename_sis_budget_to_erp_budget
+
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 

@@ -150,7 +150,7 @@ def _validate_codes_for_department(lines, department):
         if not frappe.db.exists(CODE_DT, code):
             frappe.throw(_("Mã ngân sách không tồn tại: {0}").format(code))
         ok = frappe.db.exists(
-            "SIS Budget Code Department",
+            "ERP Budget Code Department",
             {"parent": code, "parenttype": CODE_DT, "department": department},
         )
         if not ok:

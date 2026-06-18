@@ -125,7 +125,7 @@ def delete_budget_code():
         return not_found_response(f"Không tìm thấy mã ngân sách: {name}")
 
     # Chặn xóa nếu đang được dùng trong plan line
-    used = frappe.db.exists("SIS Budget Plan Line", {"budget_code": name})
+    used = frappe.db.exists("ERP Budget Plan Line", {"budget_code": name})
     if used:
         return error_response("Không thể xóa: mã ngân sách đang được dùng trong kế hoạch")
     try:
