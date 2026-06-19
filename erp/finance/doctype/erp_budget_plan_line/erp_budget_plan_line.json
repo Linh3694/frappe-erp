@@ -9,10 +9,23 @@
  "field_order": [
   "budget_code",
   "account_item",
+  "note",
+  "attachment",
   "planned_amount",
   "approved_amount",
-  "note",
-  "attachment"
+  "months_section",
+  "m7",
+  "m8",
+  "m9",
+  "m10",
+  "m11",
+  "m12",
+  "m1",
+  "m2",
+  "m3",
+  "m4",
+  "m5",
+  "m6"
  ],
  "fields": [
   {
@@ -32,10 +45,22 @@
    "read_only": 1
   },
   {
+   "fieldname": "note",
+   "fieldtype": "Text",
+   "label": "Nội dung chi tiết"
+  },
+  {
+   "fieldname": "attachment",
+   "fieldtype": "Attach",
+   "label": "Tệp đính kèm"
+  },
+  {
    "fieldname": "planned_amount",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Kế hoạch"
+   "label": "Kế hoạch (tổng năm)",
+   "read_only": 1,
+   "description": "Tự tính = tổng 12 tháng"
   },
   {
    "fieldname": "approved_amount",
@@ -45,15 +70,22 @@
    "read_only": 1
   },
   {
-   "fieldname": "note",
-   "fieldtype": "Text",
-   "label": "Ghi chú / Giải trình"
+   "fieldname": "months_section",
+   "fieldtype": "Section Break",
+   "label": "Phân bổ theo tháng (T7 năm nay → T6 năm sau)"
   },
-  {
-   "fieldname": "attachment",
-   "fieldtype": "Attach",
-   "label": "Tệp đính kèm"
-  }
+  { "fieldname": "m7", "fieldtype": "Currency", "label": "T7" },
+  { "fieldname": "m8", "fieldtype": "Currency", "label": "T8" },
+  { "fieldname": "m9", "fieldtype": "Currency", "label": "T9" },
+  { "fieldname": "m10", "fieldtype": "Currency", "label": "T10" },
+  { "fieldname": "m11", "fieldtype": "Currency", "label": "T11" },
+  { "fieldname": "m12", "fieldtype": "Currency", "label": "T12" },
+  { "fieldname": "m1", "fieldtype": "Currency", "label": "T1" },
+  { "fieldname": "m2", "fieldtype": "Currency", "label": "T2" },
+  { "fieldname": "m3", "fieldtype": "Currency", "label": "T3" },
+  { "fieldname": "m4", "fieldtype": "Currency", "label": "T4" },
+  { "fieldname": "m5", "fieldtype": "Currency", "label": "T5" },
+  { "fieldname": "m6", "fieldtype": "Currency", "label": "T6" }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,

@@ -22,6 +22,7 @@ from erp.utils.api_response import (
 )
 
 from .utils import (
+    MONTH_FIELDS,
     PLAN_DT,
     PLAN_HISTORY_DT,
     PERIOD_DT,
@@ -75,6 +76,7 @@ def _plan_to_dict(doc, with_lines=True):
                 "approved_amount": l.approved_amount,
                 "note": l.note,
                 "attachment": l.attachment,
+                **{m: (l.get(m) or 0) for m in MONTH_FIELDS},
             }
             for l in (doc.lines or [])
         ]
@@ -213,15 +215,15 @@ def upsert_plan():
             for l in lines:
                 if not isinstance(l, dict) or not l.get("budget_code"):
                     continue
-                doc.append(
-                    "lines",
-                    {
-                        "budget_code": l.get("budget_code"),
-                        "planned_amount": l.get("planned_amount") or 0,
-                        "note": l.get("note"),
-                        "attachment": l.get("attachment"),
-                    },
-                )
+                row = {
+                    "budget_code": l.get("budget_code"),
+                    "note": l.get("note"),
+                    "attachment": l.get("attachment"),
+                }
+                # planned_amount tự tính từ 12 tháng trong controller
+                for m in MONTH_FIELDS:
+                    row[m] = l.get(m) or 0
+                doc.append("lines", row)
 
         is_new = not doc.name
         doc.save(ignore_permissions=True)
@@ -436,15 +438,14 @@ def unsubmit_plan():
         new_doc.amends = old.name
         new_doc.return_reason = reason
         for l in old.lines:
-            new_doc.append(
-                "lines",
-                {
-                    "budget_code": l.budget_code,
-                    "planned_amount": l.planned_amount,
-                    "note": l.note,
-                    "attachment": l.attachment,
-                },
-            )
+            row = {
+                "budget_code": l.budget_code,
+                "note": l.note,
+                "attachment": l.attachment,
+            }
+            for m in MONTH_FIELDS:
+                row[m] = l.get(m) or 0
+            new_doc.append("lines", row)
         new_doc.insert(ignore_permissions=True)
         _append_history(new_doc.name, f"Tạo bản v{new_doc.version} (mở lại)", detail=reason, user=email)
         frappe.db.commit()

@@ -192,6 +192,10 @@ def _append_history(plan_id, action, detail=None, user=None):
     row.insert(ignore_permissions=True)
 
 
+# 12 tháng ngân sách theo năm tài chính: T7 năm nay -> T6 năm sau (thứ tự hiển thị)
+MONTH_FIELDS = ["m7", "m8", "m9", "m10", "m11", "m12", "m1", "m2", "m3", "m4", "m5", "m6"]
+
+
 # ---------------------------------------------------------------------------
 # Luồng duyệt CỐ ĐỊNH (không cấu hình): TC -> CFO -> CEO -> COO
 # ---------------------------------------------------------------------------
