@@ -39,6 +39,7 @@ class ERPBudgetCode(NestedSet):
             self.is_group = 1 if frappe.db.exists(CODE_DT, {"parent_budget_code": self.name}) else 0
         else:
             self.is_group = 0
+        self._validate_applicable_departments()
 
     def _validate_unique_code(self):
         # Mã ngân sách dùng chung toàn trường -> duy nhất toàn hệ thống
@@ -74,6 +75,16 @@ class ERPBudgetCode(NestedSet):
                 break
             parent = frappe.db.get_value("ERP Budget Code", parent, "parent_budget_code")
         self.level = level
+
+    def _validate_applicable_departments(self):
+        """Phòng ban áp dụng chỉ được gán ở cấp 4 (mã lá nhập ngân sách)."""
+        depts = self.applicable_departments or []
+        if self.level != MAX_LEVEL:
+            if depts:
+                frappe.throw(
+                    _("Chỉ mã ngân sách cấp {0} mới được gán phòng ban áp dụng").format(MAX_LEVEL)
+                )
+            self.set("applicable_departments", [])
 
     def on_update(self):
         old_doc = self.get_doc_before_save()

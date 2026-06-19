@@ -14,6 +14,10 @@ from .budget_code import (
     upsert_budget_code,
     delete_budget_code,
 )
+from .budget_code_import import (
+    download_budget_code_import_template,
+    import_budget_codes_excel,
+)
 
 # Budget Period (kì ngân sách)
 from .period import (
@@ -52,6 +56,8 @@ __all__ = [
     "get_budget_code",
     "upsert_budget_code",
     "delete_budget_code",
+    "download_budget_code_import_template",
+    "import_budget_codes_excel",
     # Period
     "list_periods",
     "get_period",
