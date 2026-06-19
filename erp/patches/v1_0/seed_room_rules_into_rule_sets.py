@@ -12,6 +12,31 @@ from erp.api.erp_sis.timetable.auto_generate.core.default_rules import DEFAULT_R
 ROOM_RULE_IDS = {"room_no_overlap", "room_type_match", "room_eligibility", "room_max_simultaneous"}
 
 
+def _ensure_rule_set_scope(doc) -> bool:
+	"""Backfill năm học + cấp học cho rule set legacy (seed cũ chỉ có campus)."""
+	if doc.school_year_id and doc.education_stage_id:
+		return True
+	if not doc.campus_id:
+		return False
+
+	if not doc.school_year_id:
+		doc.school_year_id = frappe.db.get_value(
+			"SIS School Year",
+			{"is_enable": 1, "campus_id": doc.campus_id},
+			"name",
+			order_by="start_date desc",
+		)
+	if not doc.education_stage_id:
+		doc.education_stage_id = frappe.db.get_value(
+			"SIS Education Stage",
+			{"campus_id": doc.campus_id},
+			"name",
+			order_by="creation asc",
+		)
+
+	return bool(doc.school_year_id and doc.education_stage_id)
+
+
 def execute():
 	if not frappe.db.table_exists("SIS Timetable Rule Set"):
 		return
@@ -20,6 +45,12 @@ def execute():
 	rule_sets = frappe.get_all("SIS Timetable Rule Set", pluck="name")
 	for rs_id in rule_sets:
 		doc = frappe.get_doc("SIS Timetable Rule Set", rs_id)
+		if not _ensure_rule_set_scope(doc):
+			frappe.logger().warning(
+				f"seed_room_rules: bỏ qua {rs_id} — thiếu school_year_id/education_stage_id"
+			)
+			continue
+
 		existing = {row.rule_id for row in (doc.rules or [])}
 		max_sort = max((int(row.sort_order or 0) for row in (doc.rules or [])), default=0)
 
