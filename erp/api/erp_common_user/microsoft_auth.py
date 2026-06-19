@@ -277,12 +277,7 @@ def microsoft_callback(code, state):
                     frappe_user.department = user_info.get("department")
                 if hasattr(frappe_user, 'designation') and user_info.get("jobTitle"):
                     frappe_user.designation = user_info.get("jobTitle")
-                if hasattr(frappe_user, 'employee_code') and user_info.get("employeeId"):
-                    frappe_user.employee_code = user_info.get("employeeId")
-                if hasattr(frappe_user, 'microsoft_id') and getattr(ms_user, 'microsoft_id', None):
-                    frappe_user.microsoft_id = ms_user.microsoft_id
-                if hasattr(frappe_user, 'provider'):
-                    frappe_user.provider = "microsoft"
+                _apply_microsoft_identity_fields(frappe_user, ms_user, user_info)
                 frappe_user.flags.ignore_permissions = True
                 frappe_user.save()
         except Exception:
@@ -671,6 +666,19 @@ def create_or_update_microsoft_user(user_data):
         raise e
 
 
+def _apply_microsoft_identity_fields(user_doc, ms_user, user_data):
+    """Gán microsoft_id, employee_code, provider từ dữ liệu Microsoft sang User."""
+    microsoft_id = user_data.get("id") or getattr(ms_user, "microsoft_id", None)
+    employee_id = user_data.get("employeeId") or getattr(ms_user, "employee_id", None)
+
+    if hasattr(user_doc, "microsoft_id") and microsoft_id:
+        user_doc.microsoft_id = microsoft_id
+    if hasattr(user_doc, "employee_code") and employee_id:
+        user_doc.employee_code = employee_id
+    if hasattr(user_doc, "provider"):
+        user_doc.provider = "microsoft"
+
+
 def find_or_create_frappe_user(ms_user, user_data):
     """Find existing Frappe user or create new one based on Microsoft data.
 
@@ -767,6 +775,7 @@ def create_frappe_user(ms_user, user_data):
             if hasattr(user_doc, 'middle_name'):
                 setattr(user_doc, 'middle_name', "")
             user_doc.full_name = formatted_name
+            _apply_microsoft_identity_fields(user_doc, ms_user, user_data)
             user_doc.flags.ignore_permissions = True
             user_doc.save()
         except Exception:
@@ -828,6 +837,8 @@ def update_frappe_user(user_doc, ms_user, user_data):
                 setattr(user_doc, 'middle_name', "")
         except Exception:
             pass
+
+        _apply_microsoft_identity_fields(user_doc, ms_user, user_data)
 
         user_doc.flags.ignore_permissions = True
         user_doc.save()
@@ -1357,7 +1368,9 @@ def sync_one_microsoft_user(identifier: str):
                 "status": "success",
                 "updated_fields": {
                     "department": user_data.get("department"),
-                    "job_title": user_data.get("jobTitle")
+                    "job_title": user_data.get("jobTitle"),
+                    "employee_code": user_data.get("employeeId"),
+                    "microsoft_id": user_data.get("id"),
                 }
             },
             message="User synced successfully"
