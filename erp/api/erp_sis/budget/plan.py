@@ -903,3 +903,21 @@ def get_plan_history(name=None):
     for r in rows:
         r["creation"] = str(r["creation"]) if r.get("creation") else None
     return list_response(rows)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_plan_versions(name=None):
+    """Các phiên bản (v1, v2…) của cùng phòng + kì với plan đã cho — để xem lịch sử theo version."""
+    name = name or _get_request_data().get("name")
+    if not name or not frappe.db.exists(PLAN_DT, name):
+        return not_found_response(f"Không tìm thấy ngân sách: {name}")
+    doc = frappe.get_doc(PLAN_DT, name)
+    if not _can_read_plan(doc):
+        return forbidden_response("Bạn không có quyền xem ngân sách này")
+    rows = frappe.get_all(
+        PLAN_DT,
+        filters={"department": doc.department, "period": doc.period},
+        fields=["name", "version", "workflow_state", "is_current"],
+        order_by="version asc, creation asc",
+    )
+    return list_response(rows)
