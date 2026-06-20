@@ -35,6 +35,7 @@ from .utils import (
     _is_plan_approver_role,
     _user_budget_unit,
     _user_managed_units,
+    list_budget_departments,
     _can_edit_plan_dept,
     _is_first_leader,
     _unit_name,
@@ -930,42 +931,47 @@ def get_summary(period=None):
             {"period": None, "departments": [], "leaf_amounts": {}}
         )
 
-    plan_names = frappe.get_all(
-        PLAN_DT,
-        filters={
-            "period": period,
-            "is_current": 1,
-            "workflow_state": ("in", ["Approved", "Active", "Closed"]),
-        },
-        pluck="name",
-    )
-
-    departments = {}
-    leaf_amounts = {}
-    for pn in plan_names:
-        plan = frappe.get_doc(PLAN_DT, pn)
-        dept = plan.department
-        if dept not in departments:
-            departments[dept] = plan.department_name or dept
-        for l in plan.lines:
-            if l.get("is_removed"):
-                continue
-            amt = l.approved_amount or l.planned_amount or 0
-            if not amt:
-                continue
-            per_dept = leaf_amounts.setdefault(l.budget_code, {})
-            per_dept[dept] = (per_dept.get(dept) or 0) + amt
+    # Liệt kê TẤT CẢ phòng ban; mỗi phòng lấy bản MỚI NHẤT (version cao nhất, mọi trạng thái).
+    departments = []
+    leaf_amounts = {}  # leaf_amounts[budget_code][department] = số DỰ ĐỊNH (planned)
+    for d in list_budget_departments():
+        dept = d["department"]
+        meta = {
+            "department": dept,
+            "department_name": d["department_name"],
+            "plan_name": None,
+            "plan_state": None,
+            "plan_version": None,
+        }
+        latest = frappe.get_all(
+            PLAN_DT,
+            filters={"department": dept, "period": period},
+            fields=["name", "version", "workflow_state"],
+            order_by="version desc, creation desc",
+            limit=1,
+        )
+        if latest:
+            p = latest[0]
+            meta["plan_name"] = p.name
+            meta["plan_state"] = p.workflow_state
+            meta["plan_version"] = p.version
+            plan = frappe.get_doc(PLAN_DT, p.name)
+            for l in plan.lines:
+                if l.get("is_removed"):
+                    continue
+                amt = l.planned_amount or 0
+                if not amt:
+                    continue
+                per_dept = leaf_amounts.setdefault(l.budget_code, {})
+                per_dept[dept] = (per_dept.get(dept) or 0) + amt
+        departments.append(meta)
 
     sy_id = _period_school_year_id(period)
-    dept_list = sorted(
-        ({"department": k, "department_name": v} for k, v in departments.items()),
-        key=lambda d: (d["department_name"] or "").lower(),
-    )
     data = {
         "period": period,
         "school_year_id": sy_id,
         "school_year_title": _school_year_title(sy_id) if sy_id else None,
-        "departments": dept_list,
+        "departments": departments,
         "leaf_amounts": leaf_amounts,
     }
     return single_item_response(data)
