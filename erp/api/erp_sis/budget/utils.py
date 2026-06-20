@@ -5,7 +5,7 @@ Bao gồm:
 - Phân quyền (SIS Finance / BOD / System Manager)
 - Cơ chế "trưởng phòng" lấy từ Sơ đồ tổ chức ERP Organization Unit (D6)
 - Ghi lịch sử (_append_history) mirror erp_administrative_ticket
-- Luồng duyệt CỐ ĐỊNH: TC -> CEO -> COO (PLAN_STEPS)
+- Luồng duyệt CỐ ĐỊNH: Phòng ban -> TC (CFO) -> COO -> CEO (PLAN_STEPS)
 """
 
 import json
@@ -23,12 +23,32 @@ PLAN_HISTORY_DT = "ERP Budget Plan History"
 ORG_UNIT_DT = "ERP Organization Unit"
 ORG_UNIT_TYPE_DT = "ERP Organization Unit Type"
 ORG_UNIT_LEADER_DT = "ERP Organization Unit Leader"
+ORG_UNIT_MEMBER_DT = "ERP Organization Unit Member"
+SCHOOL_YEAR_DT = "SIS School Year"
 
 # Tên loại đơn vị được phép nộp ngân sách (cấp "Phòng")
 DEPARTMENT_TYPE_TITLE_VN = "Phòng"
 
 FINANCE_ROLES = ("System Manager", "SIS Finance")
 BOD_ROLES = ("System Manager", "SIS BOD")
+
+# Vai trò duyệt ngân sách (BOD): CFO (bước Phòng TC), COO, CEO.
+BUDGET_APPROVER_ROLES = ("CFO", "COO", "CEO")
+
+# Nhãn trạng thái workflow — dùng cho lịch sử "từ giá trị nào sang giá trị nào".
+STATE_LABELS = {
+    "Draft": "Nháp",
+    "Returned": "Bị trả lại",
+    "Pending": "Chờ duyệt",
+    "Approved": "Đã duyệt",
+    "Active": "Đang hiệu lực",
+    "Closed": "Đã đóng",
+    "Superseded": "Đã thay thế",
+}
+
+
+def _state_label(state):
+    return STATE_LABELS.get(state, state or "")
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +92,12 @@ def _is_finance():
 
 def _is_bod():
     return _has_any_role(BOD_ROLES)
+
+
+def _is_plan_approver_role(email=None):
+    """User có ít nhất một vai trò duyệt ngân sách (CFO/COO/CEO)."""
+    user_roles = set(frappe.get_roles(email or frappe.session.user))
+    return any(r in user_roles for r in BUDGET_APPROVER_ROLES)
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +175,50 @@ def _user_led_unit(email=None):
     return rows[0].name if rows else None
 
 
+def _user_budget_unit(email=None):
+    """Phòng (cấp Phòng) mà user được lập ngân sách:
+    - leader của Phòng, hoặc
+    - member của Phòng, hoặc
+    - leader của Nhóm trực thuộc một Phòng (lấy Phòng cha).
+    Trả về name Phòng đầu tiên khớp (mặc định)."""
+    email = email or _session_email()
+    # 1) Leader của Phòng (giữ tương thích _user_led_unit)
+    led = _user_led_unit(email)
+    if led:
+        return led
+    dept_type = _department_unit_type()
+    if not dept_type:
+        return None
+    # 2) Member của Phòng
+    rows = frappe.db.sql(
+        """
+        SELECT u.name
+        FROM `tabERP Organization Unit Member` m
+        INNER JOIN `tabERP Organization Unit` u ON m.parent = u.name
+        WHERE m.user = %(user)s AND u.unit_type = %(dept_type)s AND u.is_active = 1
+        LIMIT 1
+        """,
+        {"user": email, "dept_type": dept_type},
+        as_dict=True,
+    )
+    if rows:
+        return rows[0].name
+    # 3) Leader của Nhóm trực thuộc -> Phòng cha
+    rows = frappe.db.sql(
+        """
+        SELECT p.name
+        FROM `tabERP Organization Unit Leader` l
+        INNER JOIN `tabERP Organization Unit` u ON l.parent = u.name
+        INNER JOIN `tabERP Organization Unit` p ON u.parent_organization_unit = p.name
+        WHERE l.user = %(user)s AND p.unit_type = %(dept_type)s AND p.is_active = 1
+        LIMIT 1
+        """,
+        {"user": email, "dept_type": dept_type},
+        as_dict=True,
+    )
+    return rows[0].name if rows else None
+
+
 def _is_head_of(department, email=None):
     """Kiểm tra user có phải lãnh đạo của department cụ thể không."""
     if not department:
@@ -160,6 +230,64 @@ def _is_head_of(department, email=None):
             {"parent": department, "parenttype": ORG_UNIT_DT, "user": email},
         )
     )
+
+
+def _is_member_or_leader_of(department, email=None):
+    """User là leader HOẶC member (child table) của đơn vị department."""
+    if not department:
+        return False
+    email = email or _session_email()
+    if frappe.db.exists(
+        ORG_UNIT_LEADER_DT,
+        {"parent": department, "parenttype": ORG_UNIT_DT, "user": email},
+    ):
+        return True
+    return bool(
+        frappe.db.exists(
+            ORG_UNIT_MEMBER_DT,
+            {"parent": department, "parenttype": ORG_UNIT_DT, "user": email},
+        )
+    )
+
+
+def _is_subgroup_leader_of(department, email=None):
+    """User là leader của một đơn vị con (Nhóm) trực thuộc department."""
+    if not department:
+        return False
+    email = email or _session_email()
+    rows = frappe.db.sql(
+        """
+        SELECT 1
+        FROM `tabERP Organization Unit Leader` l
+        INNER JOIN `tabERP Organization Unit` u ON l.parent = u.name
+        WHERE l.user = %(user)s
+          AND u.parent_organization_unit = %(dept)s
+          AND u.is_active = 1
+        LIMIT 1
+        """,
+        {"user": email, "dept": department},
+        as_dict=True,
+    )
+    return bool(rows)
+
+
+def _can_edit_plan_dept(department, email=None):
+    """Quyền TẠO/SỬA nháp ngân sách của phòng:
+    leader/member của phòng + leader nhóm trực thuộc (+ System Manager).
+    SIS Finance KHÔNG được sửa (chỉ xem + trả về)."""
+    email = email or _session_email()
+    if "System Manager" in frappe.get_roles(email):
+        return True
+    return _is_member_or_leader_of(department, email) or _is_subgroup_leader_of(department, email)
+
+
+def _is_first_leader(department, email=None):
+    """User là lãnh đạo ĐỨNG ĐẦU (sort_order nhỏ nhất) của phòng — người duy nhất được nộp."""
+    if not department:
+        return False
+    email = email or _session_email()
+    first = _first_department_leader(department)
+    return bool(first and first.get("user") == email)
 
 
 def _unit_name(unit):
@@ -221,20 +349,33 @@ def _append_history(plan_id, action, detail=None, user=None):
 # 12 tháng ngân sách theo năm tài chính: T7 năm nay -> T6 năm sau (thứ tự hiển thị)
 MONTH_FIELDS = ["m7", "m8", "m9", "m10", "m11", "m12", "m1", "m2", "m3", "m4", "m5", "m6"]
 
+# Nhãn tháng cho lịch sử thay đổi (m7 -> "T7")
+MONTH_LABELS = {m: f"T{m[1:]}" for m in MONTH_FIELDS}
+
 
 # ---------------------------------------------------------------------------
-# Luồng duyệt CỐ ĐỊNH (không cấu hình): TC -> CEO -> COO
+# Luồng duyệt CỐ ĐỊNH (không cấu hình): Phòng ban -> TC (CFO) -> COO -> CEO
+#
+# Mỗi bước:
+#   - approver_role: vai trò DUYỆT (tiến bước).
+#   - return_roles : vai trò được XEM + TRẢ VỀ (rộng hơn approve).
+# Bước Phòng Tài chính: CHỈ CFO duyệt; SIS Finance được xem + trả về.
 # ---------------------------------------------------------------------------
 
 PLAN_STEPS = [
-    {"step_order": 1, "approver_role": "SIS Finance", "label": "Phòng Tài chính"},
-    {"step_order": 2, "approver_role": "CEO", "label": "CEO"},
-    {"step_order": 3, "approver_role": "COO", "label": "COO"},
+    {
+        "step_order": 1,
+        "approver_role": "CFO",
+        "return_roles": ("SIS Finance", "CFO"),
+        "label": "Phòng Tài chính",
+    },
+    {"step_order": 2, "approver_role": "COO", "return_roles": ("COO",), "label": "COO"},
+    {"step_order": 3, "approver_role": "CEO", "return_roles": ("CEO",), "label": "CEO"},
 ]
 
 
 def _plan_steps():
-    """Luồng duyệt cố định TC -> CEO -> COO."""
+    """Luồng duyệt cố định Phòng ban -> TC (CFO) -> COO -> CEO."""
     return PLAN_STEPS
 
 
@@ -276,8 +417,68 @@ def _line_attachments_from_payload(line):
     return []
 
 
+# ---------------------------------------------------------------------------
+# Lịch sử thay đổi dòng — diff "từ giá trị nào sang giá trị nào"
+# ---------------------------------------------------------------------------
+
+def _fmt_amount(value):
+    """Định dạng số tiền kiểu vi-VN (dấu . ngăn ngàn) cho lịch sử."""
+    try:
+        n = float(value or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if n == int(n):
+        return f"{int(n):,}".replace(",", ".")
+    return f"{n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _plan_line_snapshot(doc):
+    """Ảnh chụp các dòng để so sánh: {budget_code: {m7..m6, note, explanation}}."""
+    snap = {}
+    for l in (doc.lines or []):
+        if not l.budget_code:
+            continue
+        snap[l.budget_code] = {
+            **{m: float(l.get(m) or 0) for m in MONTH_FIELDS},
+            "note": (l.note or "").strip(),
+            "explanation": (l.explanation or "").strip(),
+        }
+    return snap
+
+
+def _line_total(row):
+    return sum(row.get(m, 0) for m in MONTH_FIELDS)
+
+
+def _diff_line_snapshots(old, new):
+    """So sánh 2 snapshot -> chuỗi mô tả thay đổi (mỗi thay đổi 1 dòng)."""
+    old = old or {}
+    new = new or {}
+    changes = []
+    for code in old:
+        if code not in new:
+            changes.append(f"• Bỏ mã {code} (tổng cũ {_fmt_amount(_line_total(old[code]))})")
+    for code, new_row in new.items():
+        if code not in old:
+            changes.append(f"• Thêm mã {code} (tổng {_fmt_amount(_line_total(new_row))})")
+            continue
+        old_row = old[code]
+        parts = []
+        for m in MONTH_FIELDS:
+            ov, nv = old_row.get(m, 0), new_row.get(m, 0)
+            if ov != nv:
+                parts.append(f"{MONTH_LABELS[m]}: {_fmt_amount(ov)}→{_fmt_amount(nv)}")
+        if old_row.get("note", "") != new_row.get("note", ""):
+            parts.append("sửa ghi chú")
+        if old_row.get("explanation", "") != new_row.get("explanation", ""):
+            parts.append("sửa diễn giải")
+        if parts:
+            changes.append(f"• {code}: " + "; ".join(parts))
+    return "\n".join(changes)
+
+
 def _can_approve_step(steps, current_step, email=None):
-    """Kiểm tra user hiện tại có quyền duyệt bước current_step không."""
+    """User có quyền DUYỆT (tiến bước) current_step không — theo approver_role."""
     email = email or _session_email()
     if current_step < 1 or current_step > len(steps):
         return False
@@ -286,3 +487,83 @@ def _can_approve_step(steps, current_step, email=None):
     if not role:
         return True
     return role in frappe.get_roles(email)
+
+
+def _can_return_step(steps, current_step, email=None):
+    """User có quyền TRẢ VỀ current_step không — theo return_roles (rộng hơn approve).
+    Vd bước Phòng TC: cả SIS Finance lẫn CFO được trả về."""
+    email = email or _session_email()
+    if current_step < 1 or current_step > len(steps):
+        return False
+    step = steps[current_step - 1]
+    roles = step.get("return_roles")
+    if not roles:
+        role = step.get("approver_role")
+        roles = (role,) if role else ()
+    if not roles:
+        return True
+    user_roles = set(frappe.get_roles(email))
+    return any(r in user_roles for r in roles)
+
+
+def _approver_steps_for_user(email=None):
+    """Các bước mà user được DUYỆT."""
+    email = email or _session_email()
+    steps = _plan_steps()
+    return [s["step_order"] for s in steps if _can_approve_step(steps, s["step_order"], email)]
+
+
+def _actionable_steps_for_user(email=None):
+    """Các bước user có thể XỬ LÝ (duyệt HOẶC trả về) — dùng cho hàng chờ."""
+    email = email or _session_email()
+    steps = _plan_steps()
+    return [
+        s["step_order"]
+        for s in steps
+        if _can_approve_step(steps, s["step_order"], email)
+        or _can_return_step(steps, s["step_order"], email)
+    ]
+
+
+def _school_year_title(sy_id):
+    """Tên hiển thị năm học — ưu tiên title_vn."""
+    if not sy_id:
+        return ""
+    return (
+        frappe.db.get_value(SCHOOL_YEAR_DT, sy_id, "title_vn")
+        or frappe.db.get_value(SCHOOL_YEAR_DT, sy_id, "title_en")
+        or sy_id
+    )
+
+
+def _period_school_year_id(period_name):
+    if not period_name:
+        return None
+    return frappe.db.get_value(PERIOD_DT, period_name, "school_year_id")
+
+
+def _plan_display_title(doc):
+    """Tiêu đề hiển thị — dùng tên năm học, không dùng mã SIS School Year."""
+    sy_id = _period_school_year_id(doc.period)
+    sy_title = _school_year_title(sy_id)
+    dept = doc.department_name or _unit_name(doc.department)
+    if sy_title:
+        return f"Ngân sách {sy_title} - {dept}".strip()
+    return (doc.title or doc.name or "").strip()
+
+
+def _can_read_plan(doc, email=None):
+    """Quyền đọc chi tiết ngân sách."""
+    email = email or _session_email()
+    # Phòng TC, BOD, và các vai trò duyệt (CFO/COO/CEO) đều xem được
+    if _is_finance() or _is_bod() or _is_plan_approver_role(email):
+        return True
+    # Leader/member của phòng + leader nhóm trực thuộc
+    if _can_edit_plan_dept(doc.department, email):
+        return True
+    # Đang chờ duyệt ở bước user được xử lý (duyệt/trả về)
+    if doc.workflow_state == "Pending":
+        steps = _plan_steps()
+        if _can_return_step(steps, doc.current_step, email):
+            return True
+    return False

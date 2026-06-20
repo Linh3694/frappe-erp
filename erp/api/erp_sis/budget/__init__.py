@@ -32,6 +32,7 @@ from .period import (
 # Budget Plan (form ngân sách phòng ban)
 from .plan import (
     get_my_plans,
+    get_pending_plans,
     get_all_plans,
     get_plan,
     upsert_plan,
@@ -67,6 +68,7 @@ __all__ = [
     "list_departments",
     # Plan
     "get_my_plans",
+    "get_pending_plans",
     "get_all_plans",
     "get_plan",
     "upsert_plan",

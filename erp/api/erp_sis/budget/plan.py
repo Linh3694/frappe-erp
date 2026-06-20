@@ -31,8 +31,9 @@ from .utils import (
     _parse,
     _session_email,
     _is_finance,
-    _user_led_unit,
-    _is_head_of,
+    _user_budget_unit,
+    _can_edit_plan_dept,
+    _is_first_leader,
     _unit_name,
     _first_department_leader,
     _resolve_campus_from_unit,
@@ -42,6 +43,15 @@ from .utils import (
     _serialize_line_attachments,
     _line_attachments_from_payload,
     _can_approve_step,
+    _can_return_step,
+    _can_read_plan,
+    _actionable_steps_for_user,
+    _plan_line_snapshot,
+    _diff_line_snapshots,
+    _state_label,
+    _period_school_year_id,
+    _school_year_title,
+    _plan_display_title,
 )
 from . import notification as notify
 
@@ -74,6 +84,28 @@ def _plan_to_dict(doc, with_lines=True):
     leader = _first_department_leader(doc.department)
     if leader:
         data["department_leader"] = leader
+    sy_id = _period_school_year_id(doc.period)
+    data["school_year_id"] = sy_id
+    data["school_year_title"] = _school_year_title(sy_id) if sy_id else None
+    data["display_title"] = _plan_display_title(doc)
+
+    # Quyền của user hiện tại với bước đang chờ (cho FE hiện nút Duyệt / Trả lại)
+    can_approve = can_return = False
+    current_step_label = None
+    if doc.workflow_state == "Pending":
+        steps = _plan_steps()
+        email = _session_email()
+        can_approve = _can_approve_step(steps, doc.current_step, email)
+        # 4-mắt: người nộp không tự duyệt
+        if can_approve and doc.submitted_by and doc.submitted_by == email:
+            can_approve = False
+        can_return = _can_return_step(steps, doc.current_step, email)
+        if 1 <= (doc.current_step or 0) <= len(steps):
+            current_step_label = steps[doc.current_step - 1].get("label")
+    data["can_approve_current"] = can_approve
+    data["can_return_current"] = can_return
+    data["current_step_label"] = current_step_label
+
     if with_lines:
         data["lines"] = []
         for l in (doc.lines or []):
@@ -100,10 +132,10 @@ def _plan_to_dict(doc, with_lines=True):
 
 @frappe.whitelist(allow_guest=False)
 def get_my_department():
-    """Trả về phòng ban (cấp Phòng) mà user hiện tại làm trưởng phòng."""
-    unit = _user_led_unit()
+    """Phòng (cấp Phòng) mà user được lập ngân sách: leader/member phòng hoặc leader nhóm trực thuộc."""
+    unit = _user_budget_unit()
     if not unit:
-        return single_item_response(None, message="Bạn không phải trưởng phòng nào")
+        return single_item_response(None, message="Bạn không thuộc phòng nào để lập ngân sách")
     payload = {
         "department": unit,
         "department_name": _unit_name(unit),
@@ -117,11 +149,25 @@ def get_my_department():
 
 @frappe.whitelist(allow_guest=False)
 def get_my_plans(period=None):
-    """Plan của phòng ban mà user làm trưởng phòng (scope theo _user_led_unit)."""
-    unit = _user_led_unit()
+    """Plan của phòng mà user thuộc về (leader/member phòng hoặc leader nhóm trực thuộc)."""
+    unit = _user_budget_unit()
     if not unit:
         return list_response([])
     filters = {"department": unit, "is_current": 1}
+    if period:
+        filters["period"] = period
+    names = frappe.get_all(PLAN_DT, filters=filters, pluck="name", order_by="creation desc")
+    data = [_plan_to_dict(frappe.get_doc(PLAN_DT, n)) for n in names]
+    return list_response(data)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_pending_plans(period=None):
+    """Ngân sách Pending ở bước user xử lý được (duyệt HOẶC trả về: CFO/COO/CEO + SIS Finance)."""
+    my_steps = _actionable_steps_for_user()
+    if not my_steps:
+        return list_response([])
+    filters = {"workflow_state": "Pending", "current_step": ["in", my_steps], "is_current": 1}
     if period:
         filters["period"] = period
     names = frappe.get_all(PLAN_DT, filters=filters, pluck="name", order_by="creation desc")
@@ -152,8 +198,7 @@ def get_plan(name=None):
     if not name or not frappe.db.exists(PLAN_DT, name):
         return not_found_response(f"Không tìm thấy ngân sách: {name}")
     doc = frappe.get_doc(PLAN_DT, name)
-    # Phân quyền đọc: TC/BOD/SM hoặc trưởng phòng sở hữu
-    if not (_is_finance() or "SIS BOD" in frappe.get_roles() or _is_head_of(doc.department)):
+    if not _can_read_plan(doc):
         return forbidden_response("Bạn không có quyền xem ngân sách này")
     return single_item_response(_plan_to_dict(doc))
 
@@ -188,20 +233,22 @@ def upsert_plan():
     email = _session_email()
 
     try:
+        old_snapshot = {}
         if name and frappe.db.exists(PLAN_DT, name):
             doc = frappe.get_doc(PLAN_DT, name)
-            if not (_is_head_of(doc.department, email) or _is_finance()):
-                return forbidden_response("Chỉ trưởng phòng được sửa ngân sách này")
+            if not _can_edit_plan_dept(doc.department, email):
+                return forbidden_response("Bạn không có quyền sửa ngân sách của phòng này")
             if doc.workflow_state not in ("Draft", "Returned"):
                 return error_response("Chỉ sửa được khi ở trạng thái Nháp hoặc Bị trả lại")
             department = doc.department
+            old_snapshot = _plan_line_snapshot(doc)
         else:
-            # Tạo mới -> department = phòng user làm trưởng phòng
-            department = data.get("department") or _user_led_unit(email)
+            # Tạo mới -> department = phòng user thuộc về (leader/member/leader nhóm)
+            department = data.get("department") or _user_budget_unit(email)
             if not department:
-                return forbidden_response("Bạn không phải trưởng phòng nào, không thể tạo ngân sách")
-            if not (_is_head_of(department, email) or _is_finance()):
-                return forbidden_response("Chỉ trưởng phòng được tạo ngân sách cho phòng mình")
+                return forbidden_response("Bạn không thuộc phòng nào để lập ngân sách")
+            if not _can_edit_plan_dept(department, email):
+                return forbidden_response("Bạn không có quyền lập ngân sách cho phòng này")
             period = data.get("period")
             if not period:
                 return validation_error_response("Thiếu period", {"period": ["Bắt buộc"]})
@@ -220,8 +267,7 @@ def upsert_plan():
         doc.campus_id = _resolve_campus_from_unit(department)
         doc.department_name = _unit_name(department)
         if not doc.title:
-            sy = frappe.db.get_value(PERIOD_DT, doc.period, "school_year_id")
-            doc.title = f"Ngân sách {sy or ''} - {doc.department_name}".strip()
+            doc.title = _plan_display_title(doc)
 
         lines = _parse(data.get("lines"))
         if lines is not None:
@@ -242,8 +288,16 @@ def upsert_plan():
                 doc.append("lines", row)
 
         is_new = not doc.name
+        new_snapshot = _plan_line_snapshot(doc)
         doc.save(ignore_permissions=True)
-        _append_history(doc.name, "Lưu nháp" if is_new else "Cập nhật", user=email)
+        # Lịch sử: diff từng dòng (tháng X->Y, ghi chú/diễn giải, thêm/bớt mã)
+        diff_detail = _diff_line_snapshots(old_snapshot, new_snapshot)
+        _append_history(
+            doc.name,
+            "Lưu nháp (tạo mới)" if is_new else "Cập nhật nháp",
+            detail=diff_detail or None,
+            user=email,
+        )
         frappe.db.commit()
         return single_item_response(_plan_to_dict(doc), message="Lưu ngân sách thành công")
     except frappe.ValidationError as e:
@@ -268,8 +322,8 @@ def submit_plan():
         return not_found_response(f"Không tìm thấy ngân sách: {name}")
 
     doc = frappe.get_doc(PLAN_DT, name)
-    if not (_is_head_of(doc.department, email) or _is_finance()):
-        return forbidden_response("Chỉ trưởng phòng được nộp ngân sách này")
+    if not _is_first_leader(doc.department, email):
+        return forbidden_response("Chỉ trưởng phòng đứng đầu (vị trí thứ nhất) được nộp ngân sách")
     if doc.workflow_state not in ("Draft", "Returned"):
         return error_response("Chỉ nộp được khi ở trạng thái Nháp hoặc Bị trả lại")
     if not doc.lines:
@@ -277,13 +331,22 @@ def submit_plan():
 
     try:
         steps = _plan_steps()
+        prev_state = doc.workflow_state
         doc.workflow_state = "Pending"
         doc.current_step = 1
         doc.return_reason = None
         doc.submitted_by = email
         doc.submitted_at = now()
         doc.save(ignore_permissions=True)
-        _append_history(doc.name, "Nộp duyệt", user=email)
+        _append_history(
+            doc.name,
+            "Nộp duyệt",
+            detail=(
+                f"Trạng thái: {_state_label(prev_state)} → {_state_label('Pending')} · "
+                f"Bước 1 ({steps[0].get('label')} – CFO duyệt)"
+            ),
+            user=email,
+        )
         frappe.db.commit()
         try:
             head_email = email
@@ -319,9 +382,10 @@ def approve_plan():
             return forbidden_response("Bạn không có quyền duyệt bước này")
 
         # 4-mắt: người nộp không được tự duyệt
-        if doc.submitted_by and doc.submitted_by == email and not _is_finance():
+        if doc.submitted_by and doc.submitted_by == email:
             return forbidden_response("Người nộp không được tự duyệt")
 
+        cur_label = steps[doc.current_step - 1].get("label")
         is_last = doc.current_step >= len(steps)
         if is_last:
             doc.workflow_state = "Approved"
@@ -331,16 +395,27 @@ def approve_plan():
             for l in doc.lines:
                 l.approved_amount = l.planned_amount or 0
             doc.save(ignore_permissions=True)
-            _append_history(doc.name, "Duyệt - hoàn tất", user=email)
+            _append_history(
+                doc.name,
+                "Duyệt - hoàn tất",
+                detail=f"Bước {cur_label} duyệt · Trạng thái: {_state_label('Pending')} → {_state_label('Approved')}",
+                user=email,
+            )
             frappe.db.commit()
             try:
                 notify.notify_plan_approved(doc, doc.submitted_by)
             except Exception:
                 frappe.log_error(frappe.get_traceback(), "Notify Approve Plan Error")
         else:
+            next_label = steps[doc.current_step].get("label")
             doc.current_step += 1
             doc.save(ignore_permissions=True)
-            _append_history(doc.name, f"Duyệt - chuyển bước {doc.current_step}", user=email)
+            _append_history(
+                doc.name,
+                f"Duyệt - chuyển {next_label}",
+                detail=f"Bước {cur_label} duyệt · Chuyển bước {doc.current_step} ({next_label})",
+                user=email,
+            )
             frappe.db.commit()
             try:
                 next_role = steps[doc.current_step - 1].get("approver_role")
@@ -375,9 +450,10 @@ def return_plan():
         if doc.workflow_state != "Pending":
             return error_response("Chỉ trả lại được ngân sách đang chờ duyệt")
         steps = _plan_steps()
-        if not _can_approve_step(steps, doc.current_step, email):
+        if not _can_return_step(steps, doc.current_step, email):
             return forbidden_response("Bạn không có quyền trả lại ở bước này")
 
+        cur_label = steps[doc.current_step - 1].get("label")
         # Trả GIẬT về từng cấp: lùi đúng 1 bước.
         # - Còn cấp duyệt thấp hơn (>=1): vẫn Pending, cấp dưới xem lại.
         # - Đã ở bước 1 (TC): về phòng ban (Returned) để trưởng phòng sửa & nộp lại.
@@ -386,10 +462,14 @@ def return_plan():
         if prev_step >= 1:
             doc.current_step = prev_step
             doc.workflow_state = "Pending"
-            target_role = steps[prev_step - 1].get("approver_role")
+            target_step = steps[prev_step - 1]
+            target_role = target_step.get("approver_role")
             doc.save(ignore_permissions=True)
             _append_history(
-                doc.name, f"Trả lại cấp {prev_step} ({target_role})", detail=reason, user=email
+                doc.name,
+                f"Trả lại bước {prev_step} ({target_step.get('label')})",
+                detail=f"Từ {cur_label} → {target_step.get('label')} · Lý do: {reason}",
+                user=email,
             )
             frappe.db.commit()
             try:
@@ -401,7 +481,12 @@ def return_plan():
             doc.current_step = 0
             doc.workflow_state = "Returned"
             doc.save(ignore_permissions=True)
-            _append_history(doc.name, "Trả lại phòng ban", detail=reason, user=email)
+            _append_history(
+                doc.name,
+                "Trả lại phòng ban",
+                detail=f"Từ {cur_label} → Phòng ban ({_state_label('Returned')}) · Lý do: {reason}",
+                user=email,
+            )
             frappe.db.commit()
             try:
                 notify.notify_plan_returned(doc, doc.submitted_by, reason)
