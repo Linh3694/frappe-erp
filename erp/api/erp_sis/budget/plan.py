@@ -34,6 +34,7 @@ from .utils import (
     _is_bod,
     _is_plan_approver_role,
     _user_budget_unit,
+    _user_managed_units,
     _can_edit_plan_dept,
     _is_first_leader,
     _unit_name,
@@ -649,81 +650,166 @@ def unsubmit_plan():
 
 
 # ---------------------------------------------------------------------------
-# Create amendment (tạo bản điều chỉnh v+1) - PHÒNG BAN, sau khi đã duyệt.
-# Khác unsubmit: bản cũ (v1) VẪN hiệu lực (is_current=1) tới khi bản mới (v2)
-# duyệt xong. v2 = Draft, is_current=0, đi đúng luồng như v1; duyệt xong mới
-# đóng băng v1 và kích hoạt v2 (trong approve_plan).
+# Lập ngân sách (1 phòng / kì chỉ 1 ngân sách):
+# - Chưa có bản nào trong kì  -> tạo MỚI (v1, is_current=1).
+# - Đã có bản ĐÃ DUYỆT         -> tạo bản tiếp theo (v+1, clone số, is_current=0;
+#                                 bản cũ vẫn hiệu lực tới khi bản mới duyệt xong).
+# - Đang có bản chưa duyệt     -> KHÔNG cho tạo (phải xử lý xong bản đang dở).
 # ---------------------------------------------------------------------------
 
-@frappe.whitelist(allow_guest=False)
-def create_amendment():
-    data = _get_request_data()
-    name = data.get("name")
-    email = _session_email()
-    if not name or not frappe.db.exists(PLAN_DT, name):
-        return not_found_response(f"Không tìm thấy ngân sách: {name}")
+def _target_open_period():
+    """Kì ngân sách đang mở gần nhất (giả định mỗi thời điểm 1 kì Open)."""
+    rows = frappe.get_all(
+        PERIOD_DT, filters={"status": "Open"}, pluck="name", order_by="creation desc", limit=1
+    )
+    return rows[0] if rows else None
 
-    src = frappe.get_doc(PLAN_DT, name)
-    if not _can_edit_plan_dept(src.department, email):
-        return forbidden_response("Bạn không có quyền tạo bản điều chỉnh cho phòng này")
-    if src.workflow_state not in ("Approved", "Active"):
-        return error_response("Chỉ tạo bản điều chỉnh từ ngân sách đã duyệt")
-    if not src.is_current:
-        return error_response("Chỉ tạo bản điều chỉnh từ bản hiện hành")
 
-    # Chặn trùng: đã có 1 bản điều chỉnh đang xử lý cho bản này
-    existing = frappe.db.get_value(
+def _inprogress_plan_in_period(department, period):
+    """Bản chưa duyệt (Draft/Pending/Returned) của phòng trong kì — chặn tạo bản mới."""
+    return frappe.db.get_value(
         PLAN_DT,
-        {"amends": src.name, "workflow_state": ("in", ["Draft", "Returned", "Pending"])},
+        {
+            "department": department,
+            "period": period,
+            "workflow_state": ("in", ["Draft", "Pending", "Returned"]),
+        },
         "name",
     )
-    if existing:
-        return error_response(f"Đã có bản điều chỉnh đang xử lý ({existing})")
+
+
+def _approved_current_plan_in_period(department, period):
+    """Bản hiện hành đã duyệt của phòng trong kì (nguồn để tạo bản tiếp theo)."""
+    return frappe.db.get_value(
+        PLAN_DT,
+        {
+            "department": department,
+            "period": period,
+            "is_current": 1,
+            "workflow_state": ("in", ["Approved", "Active"]),
+        },
+        "name",
+    )
+
+
+def _next_version_in_period(department, period):
+    versions = frappe.get_all(
+        PLAN_DT, filters={"department": department, "period": period}, pluck="version"
+    )
+    return (max([v or 1 for v in versions]) + 1) if versions else 1
+
+
+def _make_amendment_doc(src, period, email):
+    """Tạo bản tiếp theo (v+1) clone số từ src; is_current=0 (bản cũ còn hiệu lực)."""
+    new_doc = frappe.new_doc(PLAN_DT)
+    new_doc.period = src.period
+    new_doc.department = src.department
+    new_doc.department_name = src.department_name
+    new_doc.campus_id = src.campus_id
+    new_doc.title = src.title
+    new_doc.workflow_state = "Draft"
+    new_doc.current_step = 0
+    new_doc.version = _next_version_in_period(src.department, src.period)
+    new_doc.is_current = 0
+    new_doc.amends = src.name
+    for l in src.lines:
+        if l.get("is_removed"):
+            continue
+        row = {
+            "budget_code": l.budget_code,
+            "note": l.note,
+            "explanation": l.explanation,
+            "is_removed": 0,
+            "attachment": l.attachment,
+        }
+        for m in MONTH_FIELDS:
+            row[m] = l.get(m) or 0
+        new_doc.append("lines", row)
+    new_doc.insert(ignore_permissions=True)
+    _append_history(
+        new_doc.name,
+        f"Tạo bản điều chỉnh v{new_doc.version}",
+        detail=f"Sao chép số liệu từ {src.name} (v{src.version}); bản cũ vẫn hiệu lực tới khi duyệt xong",
+        user=email,
+    )
+    return new_doc
+
+
+def _make_new_plan_doc(department, period, email):
+    """Tạo bản ngân sách mới (v1) cho phòng trong kì."""
+    new_doc = frappe.new_doc(PLAN_DT)
+    new_doc.period = period
+    new_doc.department = department
+    new_doc.department_name = _unit_name(department)
+    new_doc.campus_id = _resolve_campus_from_unit(department)
+    new_doc.workflow_state = "Draft"
+    new_doc.current_step = 0
+    new_doc.version = _next_version_in_period(department, period)
+    new_doc.is_current = 1
+    new_doc.title = _plan_display_title(new_doc)
+    new_doc.insert(ignore_permissions=True)
+    _append_history(new_doc.name, "Tạo mới ngân sách", user=email)
+    return new_doc
+
+
+@frappe.whitelist(allow_guest=False)
+def get_creatable_departments():
+    """Danh sách phòng user quản lý ĐỦ ĐIỀU KIỆN lập ngân sách trong kì đang mở.
+    Đủ điều kiện = chưa có bản nào ĐANG DỞ (Draft/Pending/Returned) trong kì.
+    mode = 'next' nếu đã có bản duyệt (tạo bản tiếp theo), 'new' nếu chưa có."""
+    period = _target_open_period()
+    units = _user_managed_units()
+    items = []
+    if period:
+        for unit in units:
+            if _inprogress_plan_in_period(unit, period):
+                continue  # đang có bản dở -> không cho tạo
+            approved = _approved_current_plan_in_period(unit, period)
+            items.append(
+                {
+                    "department": unit,
+                    "department_name": _unit_name(unit),
+                    "mode": "next" if approved else "new",
+                }
+            )
+    return list_response(items)
+
+
+@frappe.whitelist(allow_guest=False)
+def start_plan():
+    """Lập ngân sách cho 1 phòng: tạo mới hoặc tạo bản tiếp theo (tự quyết định)."""
+    data = _get_request_data()
+    department = data.get("department")
+    email = _session_email()
+    if not department:
+        return validation_error_response("Thiếu phòng ban", {"department": ["Bắt buộc"]})
+    if not _can_edit_plan_dept(department, email):
+        return forbidden_response("Bạn không có quyền lập ngân sách cho phòng này")
+
+    period = _target_open_period()
+    if not period:
+        return error_response("Chưa có kì ngân sách nào đang mở")
+    if _inprogress_plan_in_period(department, period):
+        return error_response("Phòng đang có bản ngân sách chưa duyệt xong — xử lý xong rồi mới lập bản mới")
 
     try:
-        new_doc = frappe.new_doc(PLAN_DT)
-        new_doc.period = src.period
-        new_doc.department = src.department
-        new_doc.department_name = src.department_name
-        new_doc.campus_id = src.campus_id
-        new_doc.title = src.title
-        new_doc.workflow_state = "Draft"
-        new_doc.current_step = 0
-        new_doc.version = (src.version or 1) + 1
-        new_doc.is_current = 0  # v1 vẫn áp dụng tới khi v2 duyệt xong
-        new_doc.amends = src.name
-        # Clone số liệu từ các dòng còn hiệu lực (bỏ dòng đã gạch ở bản cũ)
-        for l in src.lines:
-            if l.get("is_removed"):
-                continue
-            row = {
-                "budget_code": l.budget_code,
-                "note": l.note,
-                "explanation": l.explanation,
-                "is_removed": 0,
-                "attachment": l.attachment,
-            }
-            for m in MONTH_FIELDS:
-                row[m] = l.get(m) or 0
-            new_doc.append("lines", row)
-        new_doc.insert(ignore_permissions=True)
-        _append_history(
-            new_doc.name,
-            f"Tạo bản điều chỉnh v{new_doc.version}",
-            detail=f"Sao chép số liệu từ {src.name} (v{src.version}); bản cũ vẫn hiệu lực tới khi duyệt xong",
-            user=email,
-        )
+        approved_name = _approved_current_plan_in_period(department, period)
+        if approved_name:
+            src = frappe.get_doc(PLAN_DT, approved_name)
+            new_doc = _make_amendment_doc(src, period, email)
+            msg = f"Đã tạo bản điều chỉnh v{new_doc.version}"
+        else:
+            new_doc = _make_new_plan_doc(department, period, email)
+            msg = "Đã tạo ngân sách mới"
         frappe.db.commit()
-        return single_item_response(
-            _plan_to_dict(new_doc), message=f"Đã tạo bản điều chỉnh v{new_doc.version}"
-        )
+        return single_item_response(_plan_to_dict(new_doc), message=msg)
     except frappe.ValidationError as e:
         frappe.db.rollback()
         return error_response(str(e))
     except Exception as e:
         frappe.db.rollback()
-        frappe.log_error(frappe.get_traceback(), "Create Amendment Error")
-        return error_response(f"Lỗi khi tạo bản điều chỉnh: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Start Budget Plan Error")
+        return error_response(f"Lỗi khi lập ngân sách: {str(e)}")
 
 
 # ---------------------------------------------------------------------------

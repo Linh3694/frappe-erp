@@ -219,6 +219,39 @@ def _user_budget_unit(email=None):
     return rows[0].name if rows else None
 
 
+def _user_managed_units(email=None):
+    """Tất cả Phòng (cấp Phòng) mà user được lập ngân sách:
+    leader/member của Phòng, hoặc leader của Nhóm trực thuộc Phòng.
+    Trả về danh sách name Phòng (không trùng), giữ thứ tự xuất hiện."""
+    email = email or _session_email()
+    dept_type = _department_unit_type()
+    if not dept_type:
+        return []
+    rows = frappe.db.sql(
+        """
+        SELECT u.name FROM `tabERP Organization Unit Leader` l
+        INNER JOIN `tabERP Organization Unit` u ON l.parent = u.name
+        WHERE l.user = %(user)s AND u.unit_type = %(dept_type)s AND u.is_active = 1
+        UNION
+        SELECT u.name FROM `tabERP Organization Unit Member` m
+        INNER JOIN `tabERP Organization Unit` u ON m.parent = u.name
+        WHERE m.user = %(user)s AND u.unit_type = %(dept_type)s AND u.is_active = 1
+        UNION
+        SELECT p.name FROM `tabERP Organization Unit Leader` l
+        INNER JOIN `tabERP Organization Unit` u ON l.parent = u.name
+        INNER JOIN `tabERP Organization Unit` p ON u.parent_organization_unit = p.name
+        WHERE l.user = %(user)s AND p.unit_type = %(dept_type)s AND p.is_active = 1
+        """,
+        {"user": email, "dept_type": dept_type},
+        as_dict=True,
+    )
+    seen = []
+    for r in rows:
+        if r.name not in seen:
+            seen.append(r.name)
+    return seen
+
+
 def _is_head_of(department, email=None):
     """Kiểm tra user có phải lãnh đạo của department cụ thể không."""
     if not department:
