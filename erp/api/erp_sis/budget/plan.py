@@ -162,11 +162,21 @@ def get_my_plans(period=None):
     unit = _user_budget_unit()
     if not unit:
         return list_response([])
-    filters = {"department": unit, "is_current": 1}
+    base = {"department": unit}
     if period:
-        filters["period"] = period
-    names = frappe.get_all(PLAN_DT, filters=filters, pluck="name", order_by="creation desc")
-    data = [_plan_to_dict(frappe.get_doc(PLAN_DT, n)) for n in names]
+        base["period"] = period
+    # Bản hiện hành + bản điều chỉnh (v+1) đang xử lý (is_current=0, chưa duyệt xong)
+    names = frappe.get_all(
+        PLAN_DT, filters={**base, "is_current": 1}, pluck="name", order_by="creation desc"
+    )
+    amend = frappe.get_all(
+        PLAN_DT,
+        filters={**base, "is_current": 0, "workflow_state": ("in", ["Draft", "Returned", "Pending"]), "amends": ("is", "set")},
+        pluck="name",
+        order_by="creation desc",
+    )
+    seen = list(dict.fromkeys(names + amend))
+    data = [_plan_to_dict(frappe.get_doc(PLAN_DT, n)) for n in seen]
     return list_response(data)
 
 
@@ -176,7 +186,8 @@ def get_pending_plans(period=None):
     my_steps = _actionable_steps_for_user()
     if not my_steps:
         return list_response([])
-    filters = {"workflow_state": "Pending", "current_step": ["in", my_steps], "is_current": 1}
+    # Bỏ ràng buộc is_current: bản điều chỉnh (v2) lúc Pending là is_current=0 nhưng vẫn cần duyệt.
+    filters = {"workflow_state": "Pending", "current_step": ["in", my_steps]}
     if period:
         filters["period"] = period
     names = frappe.get_all(PLAN_DT, filters=filters, pluck="name", order_by="creation desc")
@@ -199,11 +210,22 @@ def get_reviewable_plans(period=None):
     )
     if not is_reviewer:
         return list_response([])
-    filters = {"is_current": 1, "workflow_state": ["!=", "Draft"]}
-    if period:
-        filters["period"] = period
-    names = frappe.get_all(PLAN_DT, filters=filters, pluck="name", order_by="creation desc")
-    data = [_plan_to_dict(frappe.get_doc(PLAN_DT, n)) for n in names]
+    period_filter = {"period": period} if period else {}
+    # Bản hiện hành đã từng nộp + bản điều chỉnh (v2) đang xử lý (is_current=0, đã nộp)
+    names = frappe.get_all(
+        PLAN_DT,
+        filters={**period_filter, "is_current": 1, "workflow_state": ["!=", "Draft"]},
+        pluck="name",
+        order_by="creation desc",
+    )
+    amend = frappe.get_all(
+        PLAN_DT,
+        filters={**period_filter, "is_current": 0, "amends": ("is", "set"), "workflow_state": ("in", ["Pending", "Returned"])},
+        pluck="name",
+        order_by="creation desc",
+    )
+    seen = list(dict.fromkeys(names + amend))
+    data = [_plan_to_dict(frappe.get_doc(PLAN_DT, n)) for n in seen]
     return list_response(data)
 
 
@@ -427,11 +449,39 @@ def approve_plan():
             # D1: approved_amount = planned_amount, khoá. Dòng đã gạch -> 0 (không vào file).
             for l in doc.lines:
                 l.approved_amount = 0 if l.get("is_removed") else (l.planned_amount or 0)
+
+            # Bản điều chỉnh (v+1): đóng băng bản cũ TRƯỚC rồi mới kích hoạt bản này,
+            # tránh vi phạm ràng buộc "1 bản hiện hành / phòng / kì".
+            superseded_old = None
+            if doc.amends and frappe.db.exists(PLAN_DT, doc.amends):
+                old = frappe.get_doc(PLAN_DT, doc.amends)
+                if old.is_current:
+                    old.is_current = 0
+                    old.workflow_state = "Superseded"
+                    old.save(ignore_permissions=True)
+                    superseded_old = old
+                    _append_history(
+                        old.name,
+                        "Đóng băng (thay bằng bản điều chỉnh)",
+                        detail=f"Thay bằng {doc.name} (v{doc.version})",
+                        user=email,
+                    )
+            if doc.amends:
+                doc.is_current = 1
+
             doc.save(ignore_permissions=True)
+            applied_note = (
+                f" · Áp dụng bản v{doc.version}, đóng băng {superseded_old.name}"
+                if superseded_old
+                else ""
+            )
             _append_history(
                 doc.name,
                 "Duyệt - hoàn tất",
-                detail=f"Bước {cur_label} duyệt · Trạng thái: {_state_label('Pending')} → {_state_label('Approved')}",
+                detail=(
+                    f"Bước {cur_label} duyệt · Trạng thái: {_state_label('Pending')} → "
+                    f"{_state_label('Approved')}{applied_note}"
+                ),
                 user=email,
             )
             frappe.db.commit()
@@ -596,6 +646,84 @@ def unsubmit_plan():
         frappe.db.rollback()
         frappe.log_error(frappe.get_traceback(), "Unsubmit Plan Error")
         return error_response(f"Lỗi khi mở lại: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Create amendment (tạo bản điều chỉnh v+1) - PHÒNG BAN, sau khi đã duyệt.
+# Khác unsubmit: bản cũ (v1) VẪN hiệu lực (is_current=1) tới khi bản mới (v2)
+# duyệt xong. v2 = Draft, is_current=0, đi đúng luồng như v1; duyệt xong mới
+# đóng băng v1 và kích hoạt v2 (trong approve_plan).
+# ---------------------------------------------------------------------------
+
+@frappe.whitelist(allow_guest=False)
+def create_amendment():
+    data = _get_request_data()
+    name = data.get("name")
+    email = _session_email()
+    if not name or not frappe.db.exists(PLAN_DT, name):
+        return not_found_response(f"Không tìm thấy ngân sách: {name}")
+
+    src = frappe.get_doc(PLAN_DT, name)
+    if not _can_edit_plan_dept(src.department, email):
+        return forbidden_response("Bạn không có quyền tạo bản điều chỉnh cho phòng này")
+    if src.workflow_state not in ("Approved", "Active"):
+        return error_response("Chỉ tạo bản điều chỉnh từ ngân sách đã duyệt")
+    if not src.is_current:
+        return error_response("Chỉ tạo bản điều chỉnh từ bản hiện hành")
+
+    # Chặn trùng: đã có 1 bản điều chỉnh đang xử lý cho bản này
+    existing = frappe.db.get_value(
+        PLAN_DT,
+        {"amends": src.name, "workflow_state": ("in", ["Draft", "Returned", "Pending"])},
+        "name",
+    )
+    if existing:
+        return error_response(f"Đã có bản điều chỉnh đang xử lý ({existing})")
+
+    try:
+        new_doc = frappe.new_doc(PLAN_DT)
+        new_doc.period = src.period
+        new_doc.department = src.department
+        new_doc.department_name = src.department_name
+        new_doc.campus_id = src.campus_id
+        new_doc.title = src.title
+        new_doc.workflow_state = "Draft"
+        new_doc.current_step = 0
+        new_doc.version = (src.version or 1) + 1
+        new_doc.is_current = 0  # v1 vẫn áp dụng tới khi v2 duyệt xong
+        new_doc.amends = src.name
+        # Clone số liệu từ các dòng còn hiệu lực (bỏ dòng đã gạch ở bản cũ)
+        for l in src.lines:
+            if l.get("is_removed"):
+                continue
+            row = {
+                "budget_code": l.budget_code,
+                "note": l.note,
+                "explanation": l.explanation,
+                "is_removed": 0,
+                "attachment": l.attachment,
+            }
+            for m in MONTH_FIELDS:
+                row[m] = l.get(m) or 0
+            new_doc.append("lines", row)
+        new_doc.insert(ignore_permissions=True)
+        _append_history(
+            new_doc.name,
+            f"Tạo bản điều chỉnh v{new_doc.version}",
+            detail=f"Sao chép số liệu từ {src.name} (v{src.version}); bản cũ vẫn hiệu lực tới khi duyệt xong",
+            user=email,
+        )
+        frappe.db.commit()
+        return single_item_response(
+            _plan_to_dict(new_doc), message=f"Đã tạo bản điều chỉnh v{new_doc.version}"
+        )
+    except frappe.ValidationError as e:
+        frappe.db.rollback()
+        return error_response(str(e))
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "Create Amendment Error")
+        return error_response(f"Lỗi khi tạo bản điều chỉnh: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
