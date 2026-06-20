@@ -5,7 +5,7 @@ Bao gồm:
 - Phân quyền (SIS Finance / BOD / System Manager)
 - Cơ chế "trưởng phòng" lấy từ Sơ đồ tổ chức ERP Organization Unit (D6)
 - Ghi lịch sử (_append_history) mirror erp_administrative_ticket
-- Luồng duyệt CỐ ĐỊNH: TC -> CFO -> CEO -> COO (PLAN_STEPS)
+- Luồng duyệt CỐ ĐỊNH: TC -> CEO -> COO (PLAN_STEPS)
 """
 
 import json
@@ -124,8 +124,8 @@ def list_budget_departments(campus_id=None):
 
 def _user_led_unit(email=None):
     """
-    Trả về ERP Organization Unit (cấp Phòng) mà user là trưởng phòng (∈ leaders).
-    1 user chỉ leader 1 unit -> trả về 1 name (hoặc None).
+    Trả về một ERP Organization Unit (cấp Phòng) mà user là trưởng phòng (∈ leaders).
+    User có thể lãnh đạo nhiều phòng — hàm này chỉ trả về phòng đầu tiên (dùng làm mặc định).
     """
     email = email or _session_email()
     dept_type = _department_unit_type()
@@ -150,16 +150,42 @@ def _user_led_unit(email=None):
 
 
 def _is_head_of(department, email=None):
-    """Kiểm tra user có phải trưởng phòng của department không."""
+    """Kiểm tra user có phải lãnh đạo của department cụ thể không."""
     if not department:
         return False
-    return _user_led_unit(email) == department
+    email = email or _session_email()
+    return bool(
+        frappe.db.exists(
+            ORG_UNIT_LEADER_DT,
+            {"parent": department, "parenttype": ORG_UNIT_DT, "user": email},
+        )
+    )
 
 
 def _unit_name(unit):
     if not unit:
         return None
     return frappe.db.get_value(ORG_UNIT_DT, unit, "unit_name_vn")
+
+
+def _first_department_leader(department):
+    """Lãnh đạo đầu tiên (sort_order) của phòng ban — dùng hiển thị bước phòng ban."""
+    if not department:
+        return None
+    rows = frappe.get_all(
+        ORG_UNIT_LEADER_DT,
+        filters={"parent": department, "parenttype": ORG_UNIT_DT},
+        fields=["user", "full_name", "sort_order"],
+        order_by="sort_order asc, idx asc",
+        limit=1,
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        "user": row.user,
+        "full_name": row.full_name or row.user,
+    }
 
 
 def _resolve_campus_from_unit(unit):
@@ -197,20 +223,57 @@ MONTH_FIELDS = ["m7", "m8", "m9", "m10", "m11", "m12", "m1", "m2", "m3", "m4", "
 
 
 # ---------------------------------------------------------------------------
-# Luồng duyệt CỐ ĐỊNH (không cấu hình): TC -> CFO -> CEO -> COO
+# Luồng duyệt CỐ ĐỊNH (không cấu hình): TC -> CEO -> COO
 # ---------------------------------------------------------------------------
 
 PLAN_STEPS = [
     {"step_order": 1, "approver_role": "SIS Finance", "label": "Phòng Tài chính"},
-    {"step_order": 2, "approver_role": "CFO", "label": "CFO"},
-    {"step_order": 3, "approver_role": "CEO", "label": "CEO"},
-    {"step_order": 4, "approver_role": "COO", "label": "COO"},
+    {"step_order": 2, "approver_role": "CEO", "label": "CEO"},
+    {"step_order": 3, "approver_role": "COO", "label": "COO"},
 ]
 
 
 def _plan_steps():
-    """Luồng duyệt cố định TC -> CFO -> CEO -> COO."""
+    """Luồng duyệt cố định TC -> CEO -> COO."""
     return PLAN_STEPS
+
+
+def _parse_line_attachments(value):
+    """Parse danh sách URL đính kèm — hỗ trợ JSON array hoặc 1 URL legacy (Attach cũ)."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [v for v in value if isinstance(v, str) and v.strip()]
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    return [v for v in parsed if isinstance(v, str) and v.strip()]
+            except (ValueError, TypeError):
+                pass
+        return [raw]
+    return []
+
+
+def _serialize_line_attachments(urls):
+    """Lưu danh sách URL đính kèm vào field attachment (Long Text JSON)."""
+    cleaned = [u.strip() for u in (urls or []) if isinstance(u, str) and u.strip()]
+    return json.dumps(cleaned) if cleaned else None
+
+
+def _line_attachments_from_payload(line):
+    """Lấy attachments từ payload API — ưu tiên mảng attachments, fallback attachment đơn."""
+    if not isinstance(line, dict):
+        return []
+    if line.get("attachments") is not None:
+        return _parse_line_attachments(line.get("attachments"))
+    if line.get("attachment") is not None:
+        return _parse_line_attachments(line.get("attachment"))
+    return []
 
 
 def _can_approve_step(steps, current_step, email=None):

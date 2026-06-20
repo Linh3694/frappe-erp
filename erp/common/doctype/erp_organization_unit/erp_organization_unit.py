@@ -45,7 +45,8 @@ class ERPOrganizationUnit(NestedSet):
             )
 
     def validate_members_unique(self):
-        """Mỗi User chỉ thuộc 1 đơn vị; leaders và members không trùng nhau trong cùng đơn vị."""
+        """Leaders và members không trùng nhau trong cùng đơn vị.
+        Một người có thể là lãnh đạo/thành viên của nhiều đơn vị khác nhau."""
         leader_users = [row.user for row in (self.leaders or []) if row.user]
         member_users = [row.user for row in (self.members or []) if row.user]
 
@@ -57,35 +58,6 @@ class ERPOrganizationUnit(NestedSet):
                     _("Người dùng {0} bị lặp trong đơn vị (leaders/members)").format(user)
                 )
             seen.add(user)
-
-        # Trùng across các đơn vị khác
-        for user in seen:
-            other = self._find_user_in_other_units(user)
-            if other:
-                # Lấy tên đơn vị (VN) để hiển thị thay vì mã docname
-                other_name = frappe.db.get_value("ERP Organization Unit", other, "unit_name_vn") or other
-                frappe.throw(
-                    _("Người dùng {0} đã thuộc đơn vị khác: {1}").format(user, other_name)
-                )
-
-    def _find_user_in_other_units(self, user: str):
-        for child_doctype in (
-            "ERP Organization Unit Leader",
-            "ERP Organization Unit Member",
-        ):
-            rows = frappe.get_all(
-                child_doctype,
-                filters={
-                    "user": user,
-                    "parenttype": "ERP Organization Unit",
-                    "parent": ["!=", self.name or ""],
-                },
-                fields=["parent"],
-                limit=1,
-            )
-            if rows:
-                return rows[0].parent
-        return None
 
     def on_trash(self):
         # Chặn xóa khi còn thành viên/lãnh đạo

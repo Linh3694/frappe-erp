@@ -2,7 +2,7 @@
 Budget Plan APIs - form ngân sách phòng ban + state machine duyệt.
 
 State machine:
-Draft --submit--> Pending(step1: TC -> CFO -> CEO -> COO) --approve--> Approved --> Active --> Closed
+Draft --submit--> Pending(step1: TC -> CEO -> COO) --approve--> Approved --> Active --> Closed
 Returned (khi return); Superseded (khi TC unsubmit -> versioning).
 Ngân sách duyệt 1 lần/năm học, không điều chỉnh giữa năm.
 """
@@ -34,9 +34,13 @@ from .utils import (
     _user_led_unit,
     _is_head_of,
     _unit_name,
+    _first_department_leader,
     _resolve_campus_from_unit,
     _append_history,
     _plan_steps,
+    _parse_line_attachments,
+    _serialize_line_attachments,
+    _line_attachments_from_payload,
     _can_approve_step,
 )
 from . import notification as notify
@@ -67,19 +71,26 @@ def _plan_to_dict(doc, with_lines=True):
         "approved_by": doc.approved_by,
         "approved_at": str(doc.approved_at) if doc.approved_at else None,
     }
+    leader = _first_department_leader(doc.department)
+    if leader:
+        data["department_leader"] = leader
     if with_lines:
-        data["lines"] = [
-            {
-                "budget_code": l.budget_code,
-                "account_item": l.account_item,
-                "planned_amount": l.planned_amount,
-                "approved_amount": l.approved_amount,
-                "note": l.note,
-                "attachment": l.attachment,
-                **{m: (l.get(m) or 0) for m in MONTH_FIELDS},
-            }
-            for l in (doc.lines or [])
-        ]
+        data["lines"] = []
+        for l in (doc.lines or []):
+            attachments = _parse_line_attachments(l.attachment)
+            data["lines"].append(
+                {
+                    "budget_code": l.budget_code,
+                    "account_item": l.account_item,
+                    "planned_amount": l.planned_amount,
+                    "approved_amount": l.approved_amount,
+                    "note": l.note,
+                    "explanation": l.explanation,
+                    "attachment": attachments[0] if attachments else None,
+                    "attachments": attachments,
+                    **{m: (l.get(m) or 0) for m in MONTH_FIELDS},
+                }
+            )
     return data
 
 
@@ -93,9 +104,15 @@ def get_my_department():
     unit = _user_led_unit()
     if not unit:
         return single_item_response(None, message="Bạn không phải trưởng phòng nào")
-    return single_item_response(
-        {"department": unit, "department_name": _unit_name(unit), "campus_id": _resolve_campus_from_unit(unit)}
-    )
+    payload = {
+        "department": unit,
+        "department_name": _unit_name(unit),
+        "campus_id": _resolve_campus_from_unit(unit),
+    }
+    leader = _first_department_leader(unit)
+    if leader:
+        payload["department_leader"] = leader
+    return single_item_response(payload)
 
 
 @frappe.whitelist(allow_guest=False)
@@ -142,23 +159,21 @@ def get_plan(name=None):
 
 
 # ---------------------------------------------------------------------------
-# Validate budget_code thuộc department
+# Validate budget_code: chỉ cần tồn tại + là mã lá (không có mã con).
+# KHÔNG ràng buộc theo phòng ban — phòng có thể lập ngân sách cho mã bất kỳ.
 # ---------------------------------------------------------------------------
 
-def _validate_codes_for_department(lines, department):
+def _validate_codes_for_department(lines, department=None):
     for l in lines or []:
         code = l.get("budget_code") if isinstance(l, dict) else None
         if not code:
             continue
         if not frappe.db.exists(CODE_DT, code):
             frappe.throw(_("Mã ngân sách không tồn tại: {0}").format(code))
-        ok = frappe.db.exists(
-            "ERP Budget Code Department",
-            {"parent": code, "parenttype": CODE_DT, "department": department},
-        )
-        if not ok:
+        has_child = frappe.db.exists(CODE_DT, {"parent_budget_code": code})
+        if has_child:
             frappe.throw(
-                _("Mã ngân sách {0} không áp dụng cho phòng ban này").format(code)
+                _("Mã ngân sách {0} là mã nhóm (có mã con) — chỉ lập cho mã chi tiết").format(code)
             )
 
 
@@ -218,7 +233,8 @@ def upsert_plan():
                 row = {
                     "budget_code": l.get("budget_code"),
                     "note": l.get("note"),
-                    "attachment": l.get("attachment"),
+                    "explanation": l.get("explanation"),
+                    "attachment": _serialize_line_attachments(_line_attachments_from_payload(l)),
                 }
                 # planned_amount tự tính từ 12 tháng trong controller
                 for m in MONTH_FIELDS:
@@ -441,6 +457,7 @@ def unsubmit_plan():
             row = {
                 "budget_code": l.budget_code,
                 "note": l.note,
+                "explanation": l.explanation,
                 "attachment": l.attachment,
             }
             for m in MONTH_FIELDS:

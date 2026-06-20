@@ -10,6 +10,7 @@
   "budget_code",
   "account_item",
   "note",
+  "explanation",
   "attachment",
   "planned_amount",
   "approved_amount",
@@ -50,9 +51,15 @@
    "label": "Nội dung chi tiết"
   },
   {
+   "fieldname": "explanation",
+   "fieldtype": "Text",
+   "label": "Ghi chú / Giải trình"
+  },
+  {
    "fieldname": "attachment",
-   "fieldtype": "Attach",
-   "label": "Tệp đính kèm"
+   "fieldtype": "Long Text",
+   "label": "Tệp đính kèm",
+   "description": "JSON danh sách URL file (upload nhiều tệp)"
   },
   {
    "fieldname": "planned_amount",
