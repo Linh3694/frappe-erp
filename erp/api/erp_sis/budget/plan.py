@@ -109,13 +109,20 @@ def _plan_to_dict(doc, with_lines=True):
     data["current_step_label"] = current_step_label
 
     if with_lines:
+        # Sau khi duyệt xong (final): ẩn hẳn dòng đã gạch khỏi file ngân sách.
+        # Trước đó (Draft/Returned/Pending): vẫn trả kèm cờ is_removed để FE gạch ngang.
+        hide_removed = doc.workflow_state in ("Approved", "Active", "Closed")
         data["lines"] = []
         for l in (doc.lines or []):
+            is_removed = 1 if l.get("is_removed") else 0
+            if is_removed and hide_removed:
+                continue
             attachments = _parse_line_attachments(l.attachment)
             data["lines"].append(
                 {
                     "budget_code": l.budget_code,
                     "account_item": l.account_item,
+                    "is_removed": is_removed,
                     "planned_amount": l.planned_amount,
                     "approved_amount": l.approved_amount,
                     "note": l.note,
@@ -305,6 +312,7 @@ def upsert_plan():
                     "budget_code": l.get("budget_code"),
                     "note": l.get("note"),
                     "explanation": l.get("explanation"),
+                    "is_removed": 1 if l.get("is_removed") else 0,
                     "attachment": _serialize_line_attachments(_line_attachments_from_payload(l)),
                 }
                 # planned_amount tự tính từ 12 tháng trong controller
@@ -351,8 +359,8 @@ def submit_plan():
         return forbidden_response("Chỉ trưởng phòng đứng đầu (vị trí thứ nhất) được nộp ngân sách")
     if doc.workflow_state not in ("Draft", "Returned"):
         return error_response("Chỉ nộp được khi ở trạng thái Nháp hoặc Bị trả lại")
-    if not doc.lines:
-        return error_response("Ngân sách phải có ít nhất 1 dòng")
+    if not [l for l in (doc.lines or []) if not l.get("is_removed")]:
+        return error_response("Ngân sách phải có ít nhất 1 dòng (chưa bị gạch bỏ)")
 
     try:
         steps = _plan_steps()
@@ -416,9 +424,9 @@ def approve_plan():
             doc.workflow_state = "Approved"
             doc.approved_by = email
             doc.approved_at = now()
-            # D1: approved_amount = planned_amount, khoá
+            # D1: approved_amount = planned_amount, khoá. Dòng đã gạch -> 0 (không vào file).
             for l in doc.lines:
-                l.approved_amount = l.planned_amount or 0
+                l.approved_amount = 0 if l.get("is_removed") else (l.planned_amount or 0)
             doc.save(ignore_permissions=True)
             _append_history(
                 doc.name,
@@ -568,6 +576,7 @@ def unsubmit_plan():
                 "budget_code": l.budget_code,
                 "note": l.note,
                 "explanation": l.explanation,
+                "is_removed": 1 if l.get("is_removed") else 0,
                 "attachment": l.attachment,
             }
             for m in MONTH_FIELDS:

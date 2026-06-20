@@ -76,6 +76,8 @@ def _department_dashboard(department, period):
         plan = frappe.get_doc(PLAN_DT, pn)
         is_approved = plan.workflow_state in _APPROVED_STATES
         for l in plan.lines:
+            if l.get("is_removed"):
+                continue
             planned = l.planned_amount or 0
             approved = (l.approved_amount or 0) if is_approved else 0
             data["by_code"].append(
@@ -115,6 +117,8 @@ def _global_dashboard(period):
             },
         )
         for l in plan.lines:
+            if l.get("is_removed"):
+                continue
             planned = l.planned_amount or 0
             approved = l.approved_amount or 0
             row["total_planned"] += planned

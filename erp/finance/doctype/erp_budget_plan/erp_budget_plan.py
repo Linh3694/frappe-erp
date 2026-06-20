@@ -18,9 +18,10 @@ class ERPBudgetPlan(Document):
         # Mỗi dòng: planned_amount = tổng 12 tháng
         for l in self.lines or []:
             l.planned_amount = sum((l.get(m) or 0) for m in MONTH_FIELDS)
-        # Header: tổng kế hoạch / đã duyệt từ các dòng
-        self.total_planned = sum((l.planned_amount or 0) for l in (self.lines or []))
-        self.total_approved = sum((l.approved_amount or 0) for l in (self.lines or []))
+        # Header: tổng kế hoạch / đã duyệt — BỎ dòng đã gạch (is_removed)
+        active = [l for l in (self.lines or []) if not l.get("is_removed")]
+        self.total_planned = sum((l.planned_amount or 0) for l in active)
+        self.total_approved = sum((l.approved_amount or 0) for l in active)
 
     def _validate_unique_current(self):
         # Mỗi phòng chỉ có 1 plan hiện hành (is_current=1) trong 1 kì

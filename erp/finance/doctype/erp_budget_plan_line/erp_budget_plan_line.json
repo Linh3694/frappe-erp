@@ -9,6 +9,7 @@
  "field_order": [
   "budget_code",
   "account_item",
+  "is_removed",
   "note",
   "explanation",
   "attachment",
@@ -44,6 +45,13 @@
    "in_list_view": 1,
    "label": "Khoản mục",
    "read_only": 1
+  },
+  {
+   "fieldname": "is_removed",
+   "fieldtype": "Check",
+   "label": "Đã bỏ (gạch ngang)",
+   "default": "0",
+   "description": "Dòng đã bỏ sau khi từng lưu/nộp — giữ data, không tính vào tổng/báo cáo; ẩn khỏi file ngân sách sau khi duyệt xong"
   },
   {
    "fieldname": "note",
