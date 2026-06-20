@@ -727,6 +727,37 @@ def create_amendment():
 
 
 # ---------------------------------------------------------------------------
+# Delete (chỉ bản Nháp - phòng ban). Xoá kèm lịch sử + bình luận.
+# ---------------------------------------------------------------------------
+
+@frappe.whitelist(allow_guest=False)
+def delete_plan():
+    data = _get_request_data()
+    name = data.get("name")
+    email = _session_email()
+    if not name or not frappe.db.exists(PLAN_DT, name):
+        return not_found_response(f"Không tìm thấy ngân sách: {name}")
+
+    doc = frappe.get_doc(PLAN_DT, name)
+    if not _can_edit_plan_dept(doc.department, email):
+        return forbidden_response("Bạn không có quyền xoá ngân sách của phòng này")
+    if doc.workflow_state != "Draft":
+        return error_response("Chỉ xoá được ngân sách ở trạng thái Nháp")
+
+    try:
+        # Dọn dữ liệu liên quan (lịch sử + bình luận) rồi xoá plan
+        frappe.db.delete(PLAN_HISTORY_DT, {"plan": name})
+        frappe.db.delete("ERP Budget Plan Comment", {"plan": name})
+        frappe.delete_doc(PLAN_DT, name, ignore_permissions=True, force=True)
+        frappe.db.commit()
+        return success_response(message="Đã xoá ngân sách nháp")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "Delete Budget Plan Error")
+        return error_response(f"Lỗi khi xoá ngân sách: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
 # Lifecycle: activate / close
 # ---------------------------------------------------------------------------
 
