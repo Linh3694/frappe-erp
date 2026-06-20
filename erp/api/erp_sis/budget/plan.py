@@ -905,6 +905,72 @@ def get_plan_history(name=None):
     return list_response(rows)
 
 
+# ---------------------------------------------------------------------------
+# Tổng hợp toàn trường: theo mã ngân sách × phòng ban (số đã duyệt).
+# Chỉ cho người duyệt/giám sát: SIS Finance, CFO/COO/CEO, BOD, System Manager.
+# ---------------------------------------------------------------------------
+
+@frappe.whitelist(allow_guest=False)
+def get_summary(period=None):
+    is_reviewer = (
+        "System Manager" in frappe.get_roles()
+        or _is_finance()
+        or _is_bod()
+        or _is_plan_approver_role()
+    )
+    if not is_reviewer:
+        return forbidden_response("Bạn không có quyền xem tổng hợp ngân sách")
+
+    period = period or _target_open_period()
+    if not period:
+        recent = frappe.get_all(PERIOD_DT, pluck="name", order_by="creation desc", limit=1)
+        period = recent[0] if recent else None
+    if not period:
+        return single_item_response(
+            {"period": None, "departments": [], "leaf_amounts": {}}
+        )
+
+    plan_names = frappe.get_all(
+        PLAN_DT,
+        filters={
+            "period": period,
+            "is_current": 1,
+            "workflow_state": ("in", ["Approved", "Active", "Closed"]),
+        },
+        pluck="name",
+    )
+
+    departments = {}
+    leaf_amounts = {}
+    for pn in plan_names:
+        plan = frappe.get_doc(PLAN_DT, pn)
+        dept = plan.department
+        if dept not in departments:
+            departments[dept] = plan.department_name or dept
+        for l in plan.lines:
+            if l.get("is_removed"):
+                continue
+            amt = l.approved_amount or l.planned_amount or 0
+            if not amt:
+                continue
+            per_dept = leaf_amounts.setdefault(l.budget_code, {})
+            per_dept[dept] = (per_dept.get(dept) or 0) + amt
+
+    sy_id = _period_school_year_id(period)
+    dept_list = sorted(
+        ({"department": k, "department_name": v} for k, v in departments.items()),
+        key=lambda d: (d["department_name"] or "").lower(),
+    )
+    data = {
+        "period": period,
+        "school_year_id": sy_id,
+        "school_year_title": _school_year_title(sy_id) if sy_id else None,
+        "departments": dept_list,
+        "leaf_amounts": leaf_amounts,
+    }
+    return single_item_response(data)
+
+
 @frappe.whitelist(allow_guest=False)
 def get_plan_versions(name=None):
     """Các phiên bản (v1, v2…) của cùng phòng + kì với plan đã cho — để xem lịch sử theo version."""
