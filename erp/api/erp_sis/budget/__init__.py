@@ -33,6 +33,7 @@ from .period import (
 from .plan import (
     get_my_plans,
     get_pending_plans,
+    get_reviewable_plans,
     get_all_plans,
     get_plan,
     upsert_plan,
@@ -44,6 +45,13 @@ from .plan import (
     close_plan,
     get_plan_history,
     get_my_department,
+)
+
+# Budget Plan Comment (bình luận theo khoản mục)
+from .comment import (
+    list_plan_comments,
+    get_plan_comment_counts,
+    add_plan_comment,
 )
 
 # Dashboard (số liệu Trang chủ)
@@ -69,6 +77,7 @@ __all__ = [
     # Plan
     "get_my_plans",
     "get_pending_plans",
+    "get_reviewable_plans",
     "get_all_plans",
     "get_plan",
     "upsert_plan",
@@ -80,6 +89,10 @@ __all__ = [
     "close_plan",
     "get_plan_history",
     "get_my_department",
+    # Plan Comment
+    "list_plan_comments",
+    "get_plan_comment_counts",
+    "add_plan_comment",
     # Dashboard
     "get_dashboard",
 ]

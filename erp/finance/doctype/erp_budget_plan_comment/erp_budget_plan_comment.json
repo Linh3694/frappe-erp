@@ -1,0 +1,103 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "plan",
+  "budget_code",
+  "content",
+  "user_email",
+  "user_fullname",
+  "user_avatar"
+ ],
+ "fields": [
+  {
+   "fieldname": "plan",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Budget Plan",
+   "options": "ERP Budget Plan",
+   "reqd": 1
+  },
+  {
+   "fieldname": "budget_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Mã ngân sách",
+   "options": "ERP Budget Code",
+   "reqd": 1
+  },
+  {
+   "fieldname": "content",
+   "fieldtype": "Small Text",
+   "label": "Nội dung",
+   "reqd": 1
+  },
+  {
+   "fieldname": "user_email",
+   "fieldtype": "Data",
+   "label": "Email người bình luận"
+  },
+  {
+   "fieldname": "user_fullname",
+   "fieldtype": "Data",
+   "label": "Họ tên"
+  },
+  {
+   "fieldname": "user_avatar",
+   "fieldtype": "Data",
+   "label": "Avatar URL"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Finance",
+ "name": "ERP Budget Plan Comment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Finance",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

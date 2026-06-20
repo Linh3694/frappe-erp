@@ -553,17 +553,19 @@ def _plan_display_title(doc):
 
 
 def _can_read_plan(doc, email=None):
-    """Quyền đọc chi tiết ngân sách."""
+    """Quyền đọc chi tiết ngân sách.
+
+    - System Manager: xem mọi thứ (kể cả nháp).
+    - Phòng của plan (leader/member/leader nhóm): xem MỌI trạng thái của phòng mình,
+      kể cả nháp chưa nộp (đó là bản nháp của chính họ).
+    - Sau bước phòng ban (Phòng TC, CFO/COO/CEO, BOD): xem mọi ngân sách ĐÃ TỪNG NỘP
+      (workflow_state != "Draft"). KHÔNG xem nháp chưa từng submit của phòng khác.
+    """
     email = email or _session_email()
-    # Phòng TC, BOD, và các vai trò duyệt (CFO/COO/CEO) đều xem được
-    if _is_finance() or _is_bod() or _is_plan_approver_role(email):
+    if "System Manager" in frappe.get_roles(email):
         return True
-    # Leader/member của phòng + leader nhóm trực thuộc
     if _can_edit_plan_dept(doc.department, email):
         return True
-    # Đang chờ duyệt ở bước user được xử lý (duyệt/trả về)
-    if doc.workflow_state == "Pending":
-        steps = _plan_steps()
-        if _can_return_step(steps, doc.current_step, email):
-            return True
+    if _is_finance() or _is_bod() or _is_plan_approver_role(email):
+        return doc.workflow_state != "Draft"
     return False

@@ -31,6 +31,8 @@ from .utils import (
     _parse,
     _session_email,
     _is_finance,
+    _is_bod,
+    _is_plan_approver_role,
     _user_budget_unit,
     _can_edit_plan_dept,
     _is_first_leader,
@@ -168,6 +170,29 @@ def get_pending_plans(period=None):
     if not my_steps:
         return list_response([])
     filters = {"workflow_state": "Pending", "current_step": ["in", my_steps], "is_current": 1}
+    if period:
+        filters["period"] = period
+    names = frappe.get_all(PLAN_DT, filters=filters, pluck="name", order_by="creation desc")
+    data = [_plan_to_dict(frappe.get_doc(PLAN_DT, n)) for n in names]
+    return list_response(data)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_reviewable_plans(period=None):
+    """Mọi ngân sách ĐÃ TỪNG NỘP (workflow_state != Draft, bản hiện hành) cho người SAU bước
+    phòng ban: Phòng TC, CFO/COO/CEO, BOD, System Manager.
+
+    KHÔNG gồm nháp chưa từng submit (đó là status lưu nháp riêng của phòng, tách khỏi luồng).
+    """
+    is_reviewer = (
+        "System Manager" in frappe.get_roles()
+        or _is_finance()
+        or _is_bod()
+        or _is_plan_approver_role()
+    )
+    if not is_reviewer:
+        return list_response([])
+    filters = {"is_current": 1, "workflow_state": ["!=", "Draft"]}
     if period:
         filters["period"] = period
     names = frappe.get_all(PLAN_DT, filters=filters, pluck="name", order_by="creation desc")
