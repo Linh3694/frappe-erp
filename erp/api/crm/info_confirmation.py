@@ -246,17 +246,6 @@ def open_confirmation_round():
     )
 
 
-@frappe.whitelist(methods=["POST"])
-def close_confirmation_round():
-    """Đóng đợt (tắt popup) — không reset cờ."""
-    check_crm_permission(_CARE_ADMIN_ROLES)
-    s = frappe.get_single(SETTINGS_DOCTYPE)
-    s.is_open = 0
-    s.save(ignore_permissions=True)
-    frappe.db.commit()
-    return success_response(message="Đã đóng đợt xác nhận")
-
-
 @frappe.whitelist()
 def get_round_settings():
     """Trạng thái đợt hiện tại (cho màn cấu hình staff)."""
