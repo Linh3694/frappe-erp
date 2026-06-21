@@ -54,9 +54,17 @@ LEAD_SUBSET_FIELDNAMES = [
 
 
 def _get_current_parent():
-    """Lấy document name CRM Guardian của phụ huynh đang đăng nhập (cùng pattern re_enrollment)."""
-    user_email = frappe.session.user
-    if user_email == "Guest":
+    """Document name CRM Guardian của phụ huynh đang đăng nhập.
+
+    Dùng get_parent_portal_user_from_request() (đọc JWT token từ header, fallback
+    session) để KHỚP với nguồn dữ liệu của dropdown 'Đổi học sinh'
+    (otp_auth.get_current_guardian_comprehensive_data) — tránh lệch guardian
+    giữa request GET/POST trong SPA JWT (xem bẫy JWT middleware).
+    """
+    from erp.api.parent_portal.otp_auth import get_parent_portal_user_from_request
+
+    user_email = get_parent_portal_user_from_request()
+    if not user_email or user_email == "Guest":
         return None
     if "@parent.wellspring.edu.vn" not in user_email:
         return None
