@@ -598,7 +598,7 @@ def update_lead():
             "current_grade", "target_grade", "current_school", "student_note",
             "student_place_of_birth", "student_nationality", "student_ethnicity", "student_religion",
             "student_health_insurance_card", "student_initial_medical_registration",
-            "student_health_notes",
+            "student_health_notes", "student_food_allergy", "student_medical_history",
             "registered_address_province", "registered_address_ward", "registered_address_street",
             "registered_address_detail",
             "current_address_province", "current_address_ward", "current_address_street",

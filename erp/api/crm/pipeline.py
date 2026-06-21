@@ -185,6 +185,10 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
         if pic_care:
             doc.pic = pic_care
 
+    # Chuyen sang buoc Enrolled: ghi nhan Ngay nhap hoc (Tuyen sinh co the sua lai sau).
+    if target_step == "Enrolled" and old_step != "Enrolled":
+        doc.enrollment_date = nowdate()
+
     return (doc, old_step, old_status), None
 
 
@@ -522,6 +526,7 @@ def enroll_lead():
         old_status = doc.status
         doc.step = "Enrolled"
         doc.status = "Cho xep lop"
+        doc.enrollment_date = nowdate()
         # Sinh ma HS neu chua co (dong bo logic QLead -> Enrolled trong advance_step)
         if not doc.student_code and not doc.linked_student:
             from erp.api.crm.student_code import _generate_code_internal
@@ -690,6 +695,7 @@ def move_back_to_reenroll():
         old_status = doc.status
         doc.step = "Enrolled"
         doc.status = "Cho xep lop"
+        doc.enrollment_date = nowdate()
         try:
             doc.save(ignore_permissions=True)
             break
@@ -764,6 +770,7 @@ def auto_enroll_paid_leads():
                 old_status = doc.status
                 doc.step = "Enrolled"
                 doc.status = "Cho xep lop"
+                doc.enrollment_date = nowdate()
                 pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
                 if pic_care:
                     doc.pic = pic_care
