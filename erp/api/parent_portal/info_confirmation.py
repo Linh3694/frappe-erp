@@ -47,10 +47,12 @@ def get_confirmation_state():
 
     is_open, year = get_settings()
 
-    # Tất cả HS mà PH có quyền truy cập (access=1) — lọc primary ở dưới.
+    # Chỉ HS mà PH là NGƯỜI LIÊN LẠC CHÍNH CHO CHÍNH HS ĐÓ: dòng quan hệ
+    # (guardian + student) có key_person=1 và access=1 (chính xác theo từng HS,
+    # không lấy mức gia đình).
     rels = frappe.get_all(
         "CRM Family Relationship",
-        filters={"guardian": parent_id, "access": 1},
+        filters={"guardian": parent_id, "access": 1, "key_person": 1},
         fields=["student"],
     )
     student_ids = list({r["student"] for r in rels if r.get("student")})
@@ -58,24 +60,31 @@ def get_confirmation_state():
     students: list[dict] = []
     pending = 0
     for sid in student_ids:
-        # Chỉ giữ HS mà PH là NGƯỜI LIÊN LẠC CHÍNH — dùng đúng check của
-        # confirm/commit (_resolve_lead_for_current_parent), và Lead Enrolled.
-        resolved, err = _resolve_lead_for_current_parent(sid)
-        if err:
-            continue
-        lead_doc, _parent, _fam = resolved
-        if getattr(lead_doc, "step", None) != "Enrolled":
-            continue
-        status = lead_doc.get("info_confirmation_status") or STATUS_UNCONFIRMED
+        lead = frappe.db.get_value(
+            "CRM Lead",
+            {"linked_student": sid, "step": "Enrolled"},
+            [
+                "name",
+                "student_name",
+                "student_code",
+                "info_confirmation_status",
+                "info_change_status",
+            ],
+            as_dict=True,
+            order_by="modified desc",
+        )
+        if not lead:
+            continue  # HS không có Lead Enrolled → ngoài phạm vi
+        status = lead.get("info_confirmation_status") or STATUS_UNCONFIRMED
         if status != STATUS_CONFIRMED:
             pending += 1
         students.append(
             {
                 "student_id": sid,
-                "student_name": lead_doc.get("student_name"),
-                "student_code": lead_doc.get("student_code"),
+                "student_name": lead.get("student_name"),
+                "student_code": lead.get("student_code"),
                 "confirmation_status": status,
-                "change_status": lead_doc.get("info_change_status") or CHANGE_NONE,
+                "change_status": lead.get("info_change_status") or CHANGE_NONE,
             }
         )
 
