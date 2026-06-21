@@ -37,6 +37,8 @@ LEAD_SUBSET_FIELDNAMES = [
     "student_health_insurance_card",
     "student_initial_medical_registration",
     "student_health_notes",
+    "student_food_allergy",
+    "student_medical_history",
     "student_study_interruption",
     "student_study_interruption_reason",
     "student_special_characteristics",

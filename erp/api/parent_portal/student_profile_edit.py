@@ -49,6 +49,10 @@ from erp.utils.api_response import (
 _NON_EDITABLE_LEAD_FIELDS = {
     "name",
     "step",
+    # Identity fields — read-only theo Data.xlsx (do Tuyển sinh quản lý)
+    "student_name",
+    "student_gender",
+    "student_dob",
     "student_code",
     "current_grade",
     "target_grade",
@@ -81,6 +85,99 @@ EDITABLE_GUARDIAN_FIELDS: tuple[str, ...] = (
     "nationality",
     "note",
 )
+
+# Trường bắt buộc nhập của người liên lạc chính (theo Data.xlsx).
+REQUIRED_GUARDIAN_FIELDS: tuple[str, ...] = ("occupation", "position", "workplace")
+REQUIRED_GUARDIAN_LABELS = {
+    "occupation": "Nghề nghiệp",
+    "position": "Chức vụ",
+    "workplace": "Nơi làm việc",
+}
+
+
+def missing_required_guardian_fields(guardian_id: str | None) -> list[str]:
+    """Trả về danh sách NHÃN field bắt buộc còn trống của guardian (rỗng = đủ)."""
+    if not guardian_id or not frappe.db.exists("CRM Guardian", guardian_id):
+        return []
+    row = (
+        frappe.db.get_value(
+            "CRM Guardian", guardian_id, REQUIRED_GUARDIAN_FIELDS, as_dict=True
+        )
+        or {}
+    )
+    missing: list[str] = []
+    for f in REQUIRED_GUARDIAN_FIELDS:
+        if not str(row.get(f) or "").strip():
+            missing.append(REQUIRED_GUARDIAN_LABELS.get(f, f))
+    return missing
+
+
+# ---------------------------------------------------------------------------
+# Diff cũ→mới (R1) — phục vụ log + nội dung noti
+# ---------------------------------------------------------------------------
+
+_CHILD_OP_PREFIXES = (
+    "phone_add",
+    "phone_remove",
+    "phone_primary",
+    "learning_add",
+    "learning_update",
+    "learning_remove",
+    "sibling_add",
+    "sibling_update",
+    "sibling_remove",
+    "bank_accounts",
+    "primary_contact",
+    "reorder",
+)
+
+
+def _norm_compare(v) -> str:
+    return "" if v is None else str(v).strip()
+
+
+def _build_changed_fields(
+    lead_before: dict,
+    lead_doc,
+    guardian_before: dict,
+    guardian_ids: set[str],
+    audit_log: list[str],
+) -> dict:
+    """So sánh snapshot trước/sau → {fields:[...], ops:[...]} (JSON-safe)."""
+    fields: list[dict] = []
+    for f in EDITABLE_LEAD_FIELDS:
+        old = lead_before.get(f)
+        new = lead_doc.get(f)
+        if _norm_compare(old) != _norm_compare(new):
+            fields.append(
+                {
+                    "group": "student",
+                    "field": f,
+                    "old": _json_safe_value(old),
+                    "new": _json_safe_value(new),
+                }
+            )
+    for gid in guardian_ids:
+        before = guardian_before.get(gid) or {}
+        after = (
+            frappe.db.get_value(
+                "CRM Guardian", gid, list(EDITABLE_GUARDIAN_FIELDS), as_dict=True
+            )
+            or {}
+        )
+        for f in EDITABLE_GUARDIAN_FIELDS:
+            if _norm_compare(before.get(f)) != _norm_compare(after.get(f)):
+                fields.append(
+                    {
+                        "group": "guardian",
+                        "guardian": gid,
+                        "field": f,
+                        "old": _json_safe_value(before.get(f)),
+                        "new": _json_safe_value(after.get(f)),
+                    }
+                )
+    ops = [a for a in audit_log if a.split(":")[0] in _CHILD_OP_PREFIXES]
+    return {"fields": fields, "ops": ops}
 
 EDITABLE_SIBLING_FIELDS: tuple[str, ...] = (
     "sibling_name",
@@ -873,6 +970,19 @@ def commit_profile_changes():
 
     audit_log: list[str] = []
     allowed_guardian_ids = _guardian_ids_of_lead(lead_doc, family_payload)
+    changed_fields: dict | None = None
+
+    # Snapshot trước khi apply để dựng diff cũ→mới (R1)
+    _lead_before = {f: lead_doc.get(f) for f in EDITABLE_LEAD_FIELDS}
+    _guardian_before = {
+        gid: (
+            frappe.db.get_value(
+                "CRM Guardian", gid, list(EDITABLE_GUARDIAN_FIELDS), as_dict=True
+            )
+            or {}
+        )
+        for gid in allowed_guardian_ids
+    }
 
     try:
         # 1. Cập nhật field trên chính CRM Lead
@@ -936,10 +1046,25 @@ def commit_profile_changes():
             if not ok:
                 raise _CommitFailure(err)
 
+        # 7b. Kiểm tra trường bắt buộc của người liên lạc chính (D11/R6)
+        missing = missing_required_guardian_fields(parent_id)
+        if missing:
+            raise _CommitFailure(
+                validation_error_response(
+                    "Vui lòng điền đủ các trường bắt buộc: " + ", ".join(missing),
+                    {"required_guardian": missing},
+                )
+            )
+
         # 8. Hoàn tất: tính completion + save doc lead
         _recalculate_admission_profile_completion(lead_doc)
         lead_doc.flags.ignore_validate = True
         lead_doc.save(ignore_permissions=True)
+
+        # Dựng diff cũ→mới cho log + noti (R1)
+        changed_fields = _build_changed_fields(
+            _lead_before, lead_doc, _guardian_before, allowed_guardian_ids, audit_log
+        )
 
         frappe.db.commit()
 
@@ -956,6 +1081,49 @@ def commit_profile_changes():
             message="Không thể lưu thay đổi, vui lòng thử lại",
             code="COMMIT_FAILED",
         )
+
+    # Trạng thái xác nhận + ghi log + noti PIC (chỉ khi có thay đổi thực)
+    if changed_fields and (changed_fields.get("fields") or changed_fields.get("ops")):
+        try:
+            from erp.api.crm.info_confirmation import (
+                ACTION_EDIT_OUT_OF_ROUND,
+                ACTION_WITH_CHANGE,
+                get_settings,
+                notify_pic,
+                set_lead_confirmation,
+                summarize_changes,
+                write_log,
+            )
+
+            is_open, _year = get_settings()
+            set_lead_confirmation(
+                lead_doc.name,
+                confirmed=True if is_open else None,
+                has_change=True,
+                guardian=parent_id,
+            )
+            notified = notify_pic(
+                lead_doc.name,
+                student=student_id,
+                student_name=lead_doc.get("student_name") or "",
+                student_code=lead_doc.get("student_code") or "",
+                body_summary=summarize_changes(changed_fields),
+            )
+            write_log(
+                student=student_id,
+                lead=lead_doc.name,
+                guardian=parent_id,
+                action=ACTION_WITH_CHANGE if is_open else ACTION_EDIT_OUT_OF_ROUND,
+                has_changes=True,
+                changed_fields=changed_fields,
+                notified=notified,
+            )
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(
+                title="commit_profile_changes.post_confirm",
+                message=f"student={student_id} lead={lead_doc.name}",
+            )
 
     # Audit log (info). Không dùng log_error để không spam console lỗi.
     try:

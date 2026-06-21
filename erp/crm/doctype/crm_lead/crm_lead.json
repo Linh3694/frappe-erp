@@ -53,6 +53,8 @@
   "student_health_insurance_card",
   "student_initial_medical_registration",
   "student_health_notes",
+  "student_food_allergy",
+  "student_medical_history",
   "bank_accounts_section",
   "bank_accounts",
   "registered_address_section",
@@ -118,7 +120,13 @@
   "enrollment_documents",
   "events_courses_section",
   "events",
-  "courses"
+  "courses",
+  "info_confirmation_section",
+  "info_confirmation_status",
+  "info_change_status",
+  "info_confirmed_at",
+  "info_confirmed_by",
+  "info_confirmed_year"
  ],
  "fields": [
   {
@@ -326,6 +334,16 @@
    "fieldname": "student_health_notes",
    "fieldtype": "Text",
    "label": "Ghi chu suc khoe"
+  },
+  {
+   "fieldname": "student_food_allergy",
+   "fieldtype": "Text",
+   "label": "Di ung thuc pham"
+  },
+  {
+   "fieldname": "student_medical_history",
+   "fieldtype": "Text",
+   "label": "Tien su benh ly"
   },
   {
    "fieldname": "bank_accounts_section",
@@ -698,6 +716,50 @@
    "fieldtype": "Table",
    "label": "Courses",
    "options": "CRM Lead Course"
+  },
+  {
+   "fieldname": "info_confirmation_section",
+   "fieldtype": "Section Break",
+   "label": "Xac nhan thong tin (Parent Portal)",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "info_confirmation_status",
+   "fieldtype": "Select",
+   "label": "Trang thai xac nhan",
+   "options": "Chưa xác nhận\nĐã xác nhận",
+   "default": "Chưa xác nhận",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "info_change_status",
+   "fieldtype": "Select",
+   "label": "Trang thai thay doi",
+   "options": "Không thay đổi\nCó thay đổi",
+   "default": "Không thay đổi",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "info_confirmed_at",
+   "fieldtype": "Datetime",
+   "label": "Thoi diem xac nhan",
+   "read_only": 1
+  },
+  {
+   "fieldname": "info_confirmed_by",
+   "fieldtype": "Link",
+   "label": "Nguoi xac nhan",
+   "options": "CRM Guardian",
+   "read_only": 1
+  },
+  {
+   "fieldname": "info_confirmed_year",
+   "fieldtype": "Link",
+   "label": "Dot xac nhan (Nam hoc)",
+   "options": "SIS School Year",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,

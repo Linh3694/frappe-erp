@@ -1,0 +1,147 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-06-21 00:00:00.000000",
+ "custom": 0,
+ "description": "Lịch sử xác nhận / thay đổi thông tin học sinh từ Parent Portal (append-only)",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "student",
+  "lead",
+  "guardian",
+  "school_year",
+  "column_break_1",
+  "action",
+  "has_changes",
+  "notified_pic",
+  "event_at",
+  "section_break_1",
+  "changed_fields"
+ ],
+ "fields": [
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "label": "Student",
+   "options": "CRM Student",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "lead",
+   "fieldtype": "Link",
+   "label": "Lead",
+   "options": "CRM Lead"
+  },
+  {
+   "fieldname": "guardian",
+   "fieldtype": "Link",
+   "label": "Guardian",
+   "options": "CRM Guardian"
+  },
+  {
+   "fieldname": "school_year",
+   "fieldtype": "Link",
+   "label": "School Year",
+   "options": "SIS School Year",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "label": "Action",
+   "options": "confirm_no_change\nconfirm_with_change\nedit_out_of_round",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "has_changes",
+   "fieldtype": "Check",
+   "label": "Has Changes",
+   "default": "0",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "notified_pic",
+   "fieldtype": "Check",
+   "label": "Notified PIC",
+   "default": "0"
+  },
+  {
+   "fieldname": "event_at",
+   "fieldtype": "Datetime",
+   "label": "Event At",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "section_break_1",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "changed_fields",
+   "fieldtype": "Long Text",
+   "label": "Changed Fields (JSON)",
+   "description": "[{field,label,group,old,new}] — gồm cả thao tác child table"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-06-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Info Confirmation Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 1,
+   "print": 0,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 0,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Sales Care Admin",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 0,
+   "export": 1,
+   "print": 0,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Sales Care",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

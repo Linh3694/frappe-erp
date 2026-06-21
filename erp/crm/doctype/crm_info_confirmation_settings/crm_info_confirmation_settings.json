@@ -1,0 +1,63 @@
+{
+ "actions": [],
+ "creation": "2026-06-21 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "module": "Crm",
+ "name": "CRM Info Confirmation Settings",
+ "field_order": [
+  "current_year",
+  "is_open",
+  "last_reset_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "current_year",
+   "fieldtype": "Link",
+   "label": "Đợt xác nhận hiện tại (Năm học)",
+   "options": "SIS School Year"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_open",
+   "fieldtype": "Check",
+   "label": "Đang mở đợt xác nhận",
+   "description": "Điều kiện hiển thị popup yêu cầu xác nhận (BR-002). Bật bằng 'Mở đợt'."
+  },
+  {
+   "fieldname": "last_reset_at",
+   "fieldtype": "Datetime",
+   "label": "Lần mở đợt gần nhất",
+   "read_only": 1
+  }
+ ],
+ "modified": "2026-06-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "print": 0,
+   "read": 1,
+   "role": "System Manager",
+   "share": 0,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "print": 0,
+   "read": 1,
+   "role": "SIS Sales Care Admin",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
