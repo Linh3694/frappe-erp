@@ -35,10 +35,11 @@
    "label": "Ngu\u1ed3n ph\u1ee5"
   },
   {
-   "description": "Ghi ch\u00fa t\u1ef1 do b\u1ed5 sung (Ngu\u1ed3n 3)",
+   "description": "Ngu\u1ed3n 3 - ch\u1ecdn t\u1eeb danh m\u1ee5c CRM Source Note",
    "fieldname": "source_note",
-   "fieldtype": "Small Text",
-   "label": "Ghi ch\u00fa ngu\u1ed3n"
+   "fieldtype": "Link",
+   "options": "CRM Source Note",
+   "label": "Ngu\u1ed3n 3"
   }
  ],
  "index_web_pages_for_search": 0,

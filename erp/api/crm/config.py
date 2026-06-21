@@ -167,6 +167,28 @@ def delete_source():
     return _crud_delete("CRM Source", get_request_data().get("name"))
 
 
+# --- CRM Source Note (Nguồn 3) ---
+@frappe.whitelist()
+def get_source_notes():
+    return _crud_list("CRM Source Note")
+
+
+@frappe.whitelist(methods=["POST"])
+def create_source_note():
+    return _crud_create("CRM Source Note", get_request_data(), "note_name")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_source_note():
+    data = get_request_data()
+    return _crud_update("CRM Source Note", data.get("name"), data)
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_source_note():
+    return _crud_delete("CRM Source Note", get_request_data().get("name"))
+
+
 # --- CRM Promotion ---
 @frappe.whitelist()
 def get_promotions():

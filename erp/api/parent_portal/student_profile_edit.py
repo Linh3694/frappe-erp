@@ -1091,7 +1091,6 @@ def commit_profile_changes():
                 get_settings,
                 notify_pic,
                 set_lead_confirmation,
-                summarize_changes,
                 write_log,
             )
 
@@ -1107,7 +1106,8 @@ def commit_profile_changes():
                 student=student_id,
                 student_name=lead_doc.get("student_name") or "",
                 student_code=lead_doc.get("student_code") or "",
-                body_summary=summarize_changes(changed_fields),
+                guardian=parent_id,
+                changed_fields=changed_fields,
             )
             write_log(
                 student=student_id,

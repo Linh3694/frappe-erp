@@ -143,7 +143,8 @@ def notify_pic(
     student: str | None = None,
     student_name: str = "",
     student_code: str = "",
-    body_summary: str = "",
+    guardian: str | None = None,
+    changed_fields: dict | None = None,
 ) -> bool:
     """Đẩy mobile push (Expo) + in-app cho PIC của HS. Fallback role. Không email."""
     recipients = _recipients_for_lead(lead_name)
@@ -156,8 +157,18 @@ def notify_pic(
     except Exception:
         return False
 
-    title = f"Cập nhật thông tin học sinh – {student_name} ({student_code})"
-    body = body_summary or "Phụ huynh đã cập nhật thông tin hồ sơ học sinh."
+    parent_name = ""
+    if guardian:
+        parent_name = (
+            frappe.db.get_value("CRM Guardian", guardian, "guardian_name") or ""
+        )
+
+    groups_label = change_groups_label(changed_fields)
+    title = "Cập nhật thông tin học sinh"
+    body = (
+        f"Phụ huynh {parent_name} đã cập nhật thông tin {groups_label} "
+        f"của học sinh {student_name} - {student_code}"
+    )
     sent = False
     for user in recipients:
         if not user:
@@ -180,10 +191,10 @@ def notify_pic(
     return sent
 
 
-def summarize_changes(changed_fields: dict | None) -> str:
-    """Tóm tắt nhóm field đổi cho body noti (theo quyết định: tóm tắt nhóm)."""
+def change_groups_label(changed_fields: dict | None) -> str:
+    """Danh sách nhóm field đổi, vd 'Học sinh, Phụ huynh'. Fallback 'hồ sơ'."""
     if not changed_fields:
-        return "Phụ huynh đã cập nhật thông tin hồ sơ học sinh."
+        return "hồ sơ"
     groups: set[str] = set()
     for item in changed_fields.get("fields") or []:
         g = item.get("group")
@@ -193,8 +204,14 @@ def summarize_changes(changed_fields: dict | None) -> str:
             groups.add("Học sinh")
     if changed_fields.get("ops"):
         groups.add("Liên hệ/Gia đình")
-    label = ", ".join(sorted(groups)) if groups else "hồ sơ"
-    return f"Phụ huynh đã cập nhật: {label}."
+    return ", ".join(sorted(groups)) if groups else "hồ sơ"
+
+
+def summarize_changes(changed_fields: dict | None) -> str:
+    """Tóm tắt nhóm field đổi cho body noti (theo quyết định: tóm tắt nhóm)."""
+    if not changed_fields:
+        return "Phụ huynh đã cập nhật thông tin hồ sơ học sinh."
+    return f"Phụ huynh đã cập nhật: {change_groups_label(changed_fields)}."
 
 
 def _get_active_school_year() -> str | None:
