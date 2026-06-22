@@ -126,6 +126,7 @@ def create_source():
             {
                 "doctype": "CRM Source",
                 "source_name": (data.get("source_name") or "").strip(),
+                "source_type": data.get("source_type"),
                 "notes": data.get("notes"),
                 "sub_sources": sub_rows,
             }
@@ -151,6 +152,8 @@ def update_source():
         doc = frappe.get_doc("CRM Source", name)
         if "source_name" in data and data.get("source_name"):
             doc.source_name = (data.get("source_name") or "").strip()
+        if "source_type" in data:
+            doc.source_type = data.get("source_type")
         if "notes" in data:
             doc.notes = data.get("notes")
         if "sub_sources" in data:
