@@ -8,7 +8,8 @@ Gồm:
 - Staff endpoints: mở/đóng đợt, theo dõi danh sách, lịch sử, export Excel.
 
 Phạm vi: chỉ Lead `step="Enrolled"`. Noti gửi PIC của HS (CRM Lead.pic), fallback
-role `SIS Sales Care`. Không gửi email.
+role `SIS Sales Care`. Ngoài mobile push còn gửi email thông báo (giai đoạn test
+chỉ tới INFO_EDIT_NOTIFICATION_EMAILS).
 """
 
 from __future__ import annotations
@@ -16,9 +17,10 @@ from __future__ import annotations
 import json
 
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import escape_html, now_datetime
 
 from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.utils.email_service import send_email_via_service
 from erp.utils.api_response import (
     error_response,
     paginated_response,
@@ -44,6 +46,26 @@ ACTION_EDIT_OUT_OF_ROUND = "edit_out_of_round"
 
 _CARE_ROLES = ["SIS Sales Care", "SIS Sales Care Admin", "System Manager"]
 _CARE_ADMIN_ROLES = ["SIS Sales Care Admin", "System Manager"]
+
+# Email nhận thông báo PHHS sửa thông tin (giai đoạn test). Đổi/thêm khi go-live.
+INFO_EDIT_NOTIFICATION_EMAILS = ["hieu.nguyenduy@wellspring.edu.vn"]
+
+# Nhãn tiếng Việt cho các thao tác child-table (ops) — prefix khớp
+# _CHILD_OP_PREFIXES trong parent_portal/student_profile_edit.py
+_OP_LABELS = {
+    "phone_add": "Thêm số điện thoại",
+    "phone_remove": "Xóa số điện thoại",
+    "phone_primary": "Đổi số điện thoại chính",
+    "learning_add": "Thêm quá trình học tập",
+    "learning_update": "Cập nhật quá trình học tập",
+    "learning_remove": "Xóa quá trình học tập",
+    "sibling_add": "Thêm anh/chị/em",
+    "sibling_update": "Cập nhật anh/chị/em",
+    "sibling_remove": "Xóa anh/chị/em",
+    "bank_accounts": "Tài khoản ngân hàng",
+    "primary_contact": "Đổi người liên lạc chính",
+    "reorder": "Sắp xếp lại danh sách",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +210,22 @@ def notify_pic(
                 title="info_confirmation.notify_pic",
                 message=f"user={user} lead={lead_name}",
             )
+
+    # Ngoài mobile push, gửi thêm email thông báo (lỗi email không ảnh hưởng push).
+    try:
+        _send_info_edit_notification_email(
+            student_name=student_name,
+            student_code=student_code,
+            parent_name=parent_name,
+            changed_fields=changed_fields,
+            edited_at=now_datetime(),
+        )
+    except Exception:
+        frappe.log_error(
+            title="info_confirmation.notify_pic.email",
+            message=f"lead={lead_name} student={student}",
+        )
+
     return sent
 
 
@@ -205,6 +243,155 @@ def change_groups_label(changed_fields: dict | None) -> str:
     if changed_fields.get("ops"):
         groups.add("Liên hệ/Gia đình")
     return ", ".join(sorted(groups)) if groups else "hồ sơ"
+
+
+def _field_label(group: str | None, fieldname: str) -> str:
+    """Nhãn hiển thị của field: lấy từ meta (CRM Lead/CRM Guardian), fallback tên field."""
+    doctype = "CRM Guardian" if group == "guardian" else "CRM Lead"
+    try:
+        label = frappe.get_meta(doctype).get_label(fieldname)
+        if label and label != fieldname:
+            return label
+    except Exception:
+        pass
+    return fieldname
+
+
+def _render_changes_rows(changed_fields: dict | None) -> str:
+    """Render danh sách field đã đổi (cũ → mới) + ops thành các <li> trong 1 cell."""
+    items: list[str] = []
+    for item in (changed_fields or {}).get("fields") or []:
+        label = escape_html(_field_label(item.get("group"), item.get("field") or ""))
+        old = escape_html(str(item.get("old") or "").strip() or "(trống)")
+        new = escape_html(str(item.get("new") or "").strip() or "(trống)")
+        items.append(
+            f"<li><b>{label}:</b> {old} &rarr; {new}</li>"
+        )
+    for op in (changed_fields or {}).get("ops") or []:
+        prefix = str(op).split(":")[0]
+        label = _OP_LABELS.get(prefix, prefix)
+        items.append(f"<li>{escape_html(label)}</li>")
+
+    if not items:
+        items.append("<li>Cập nhật thông tin hồ sơ</li>")
+
+    list_html = "".join(items)
+    return f"""
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold; vertical-align: top;">
+                            Nội dung thay đổi:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            <ul style="margin: 0; padding-left: 20px;">{list_html}</ul>
+                        </td>
+                    </tr>"""
+
+
+def _send_info_edit_notification_email(
+    *,
+    student_name: str,
+    student_code: str,
+    parent_name: str,
+    changed_fields: dict | None,
+    edited_at=None,
+) -> dict:
+    """Gửi email thông báo PHHS sửa thông tin học sinh.
+
+    Mẫu HTML tương tự email Tái ghi danh
+    (parent_portal/re_enrollment.py:_send_submission_notification_email),
+    các field thay thế theo ngữ cảnh sửa thông tin. Không raise — chỉ log.
+    """
+    try:
+        from datetime import datetime
+
+        dt = edited_at or datetime.now()
+        if isinstance(dt, str):
+            try:
+                dt = (
+                    datetime.fromisoformat(dt.replace("Z", "+00:00"))
+                    if "T" in dt
+                    else datetime.strptime(dt[:19], "%Y-%m-%d %H:%M:%S")
+                )
+            except (ValueError, TypeError):
+                dt = datetime.now()
+
+        time_str = dt.strftime("%H:%M")
+        date_str = dt.strftime("%d/%m/%Y")
+
+        subject = f"CẬP NHẬT THÔNG TIN HỌC SINH - {student_name}"
+
+        changes_rows = _render_changes_rows(changed_fields)
+
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #002855; border-bottom: 2px solid #BED232; padding-bottom: 10px;">
+                    CẬP NHẬT THÔNG TIN HỌC SINH - {escape_html(student_name)}
+                </h2>
+
+                <p>Phụ huynh đã cập nhật thông tin cho Học sinh:</p>
+
+                <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold; width: 40%;">
+                            Họ và Tên Học sinh:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {escape_html(student_name)} ({escape_html(student_code)})
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Phụ huynh cập nhật:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {escape_html(parent_name or "")}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; font-weight: bold;">
+                            Thời gian cập nhật:
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">
+                            {time_str}, Ngày {date_str}
+                        </td>
+                    </tr>
+                    {changes_rows}
+                </table>
+
+                <p style="color: #00687F; font-weight: bold;">
+                    Vui lòng kiểm tra thông tin trong thời gian sớm nhất.
+                </p>
+
+                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+
+                <p style="font-size: 12px; color: #666;">
+                    Email này được gửi tự động từ hệ thống Wellspring SIS.<br>
+                    Vui lòng không reply trực tiếp vào email này.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        result = send_email_via_service(
+            to_list=INFO_EDIT_NOTIFICATION_EMAILS,
+            subject=subject,
+            body=body,
+        )
+        if result.get("success"):
+            frappe.logger().info(
+                f"Info-edit notification email sent for {student_code}"
+            )
+        else:
+            frappe.logger().error(
+                f"Failed to send info-edit notification email: {result.get('message')}"
+            )
+        return result
+    except Exception as e:
+        frappe.logger().error(f"Error sending info-edit notification email: {e}")
+        return {"success": False, "message": str(e)}
 
 
 def summarize_changes(changed_fields: dict | None) -> str:
