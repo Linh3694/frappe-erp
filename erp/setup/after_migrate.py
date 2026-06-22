@@ -40,6 +40,27 @@ def _ensure_administrative_ticket_file_folder():
         frappe.db.rollback()
 
 
+def _ensure_admission_file_folder():
+    """Folder upload hồ sơ nhập học CRM (khớp FE Home/Admission)."""
+    if frappe.db.exists(
+        "File",
+        {"is_folder": 1, "file_name": "Admission", "folder": "Home"},
+    ):
+        return
+    try:
+        frappe.get_doc(
+            {
+                "doctype": "File",
+                "file_name": "Admission",
+                "is_folder": 1,
+                "folder": "Home",
+            }
+        ).insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+
+
 def _ensure_it_support_ticket_file_folder():
     """Folder upload ảnh comment ticket IT."""
     if frappe.db.exists(
@@ -90,4 +111,5 @@ def execute():
 
     _ensure_administrative_ticket_file_folder()
     _ensure_it_support_ticket_file_folder()
+    _ensure_admission_file_folder()
     _seed_it_support_categories()

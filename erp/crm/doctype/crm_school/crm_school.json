@@ -24,7 +24,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Nhóm trường",
-   "options": "Cong lap\nDan lap",
+   "options": "Song ngữ liên cấp\nQuốc tế hoàn toàn\nTrường công lập\nChất lượng cao tư thục\nDu học/Định cư\nTrường bán công",
    "reqd": 1
   },
   {
