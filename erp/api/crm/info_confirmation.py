@@ -50,6 +50,46 @@ _CARE_ADMIN_ROLES = ["SIS Sales Care Admin", "System Manager"]
 # Email nhận thông báo PHHS sửa thông tin (giai đoạn test). Đổi/thêm khi go-live.
 INFO_EDIT_NOTIFICATION_EMAILS = ["hieu.nguyenduy@wellspring.edu.vn"]
 
+# Nhãn tiếng Việt cho field học sinh/phụ huynh (ưu tiên dùng thay cho meta label —
+# meta có một số nhãn không dấu). Khớp EDITABLE_LEAD_FIELDS / EDITABLE_GUARDIAN_FIELDS
+# trong parent_portal/student_profile_edit.py.
+_FIELD_LABELS_VI = {
+    # Học sinh
+    "student_personal_id_number": "Số định danh cá nhân học sinh",
+    "student_place_of_birth": "Nơi sinh",
+    "student_nationality": "Quốc tịch",
+    "student_ethnicity": "Dân tộc",
+    "student_religion": "Tôn giáo",
+    "registered_address_province": "Tỉnh/Thành phố (hộ khẩu)",
+    "registered_address_ward": "Phường/Xã (hộ khẩu)",
+    "registered_address_street": "Đường/Phố (hộ khẩu)",
+    "registered_address_detail": "Địa chỉ chi tiết (hộ khẩu)",
+    "current_address_province": "Tỉnh/Thành phố (hiện tại)",
+    "current_address_ward": "Phường/Xã (hiện tại)",
+    "current_address_street": "Đường/Phố (hiện tại)",
+    "current_address_detail": "Địa chỉ chi tiết (hiện tại)",
+    "student_health_insurance_card": "Số thẻ Bảo hiểm y tế",
+    "student_initial_medical_registration": "Nơi đăng ký khám chữa bệnh ban đầu",
+    "student_health_notes": "Ghi chú sức khỏe",
+    "student_food_allergy": "Dị ứng thức ăn",
+    "student_medical_history": "Tiền sử bệnh",
+    "student_study_interruption": "Gián đoạn học tập",
+    "student_study_interruption_reason": "Lý do gián đoạn học tập",
+    "student_special_characteristics": "Đặc điểm đặc biệt",
+    "student_discipline_issues": "Vấn đề kỷ luật",
+    # Phụ huynh
+    "guardian_name": "Họ và tên phụ huynh",
+    "dob": "Ngày sinh",
+    "email": "Email",
+    "id_number": "Số CCCD/CMND",
+    "occupation": "Nghề nghiệp",
+    "position": "Chức vụ",
+    "workplace": "Nơi làm việc",
+    "address": "Địa chỉ",
+    "nationality": "Quốc tịch",
+    "note": "Ghi chú",
+}
+
 # Nhãn tiếng Việt cho các thao tác child-table (ops) — prefix khớp
 # _CHILD_OP_PREFIXES trong parent_portal/student_profile_edit.py
 _OP_LABELS = {
@@ -246,7 +286,9 @@ def change_groups_label(changed_fields: dict | None) -> str:
 
 
 def _field_label(group: str | None, fieldname: str) -> str:
-    """Nhãn hiển thị của field: lấy từ meta (CRM Lead/CRM Guardian), fallback tên field."""
+    """Nhãn tiếng Việt của field: ưu tiên _FIELD_LABELS_VI, fallback meta, rồi tên field."""
+    if fieldname in _FIELD_LABELS_VI:
+        return _FIELD_LABELS_VI[fieldname]
     doctype = "CRM Guardian" if group == "guardian" else "CRM Lead"
     try:
         label = frappe.get_meta(doctype).get_label(fieldname)
