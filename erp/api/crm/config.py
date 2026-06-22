@@ -189,6 +189,28 @@ def delete_source_note():
     return _crud_delete("CRM Source Note", get_request_data().get("name"))
 
 
+# --- CRM School (Trường học) ---
+@frappe.whitelist()
+def get_schools():
+    return _crud_list("CRM School")
+
+
+@frappe.whitelist(methods=["POST"])
+def create_school():
+    return _crud_create("CRM School", get_request_data(), "school_name")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_school():
+    data = get_request_data()
+    return _crud_update("CRM School", data.get("name"), data)
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_school():
+    return _crud_delete("CRM School", get_request_data().get("name"))
+
+
 # --- CRM Promotion ---
 @frappe.whitelist()
 def get_promotions():

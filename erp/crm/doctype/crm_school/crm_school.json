@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "school_name",
+  "school_group",
   "address"
  ],
  "fields": [
@@ -14,9 +15,17 @@
    "fieldname": "school_name",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "School Name",
+   "label": "Tên trường",
    "reqd": 1,
    "unique": 1
+  },
+  {
+   "fieldname": "school_group",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Nhóm trường",
+   "options": "Cong lap\nDan lap",
+   "reqd": 1
   },
   {
    "fieldname": "address",

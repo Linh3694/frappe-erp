@@ -114,6 +114,10 @@
   "reject_section",
   "reject_reason",
   "reject_detail",
+  "withdraw_section",
+  "withdraw_transfer_school",
+  "withdraw_transfer_school_address",
+  "withdraw_transfer_reason",
   "documents_section",
   "admission_profile_deadline",
   "admission_profile_completion_date",
@@ -674,6 +678,28 @@
    "fieldname": "reject_detail",
    "fieldtype": "Small Text",
    "label": "Reject Detail"
+  },
+  {
+   "fieldname": "withdraw_section",
+   "fieldtype": "Section Break",
+   "label": "Dừng học",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "withdraw_transfer_school",
+   "fieldtype": "Link",
+   "label": "Trường chuyển đến",
+   "options": "CRM School"
+  },
+  {
+   "fieldname": "withdraw_transfer_school_address",
+   "fieldtype": "Data",
+   "label": "Địa chỉ trường chuyển đến"
+  },
+  {
+   "fieldname": "withdraw_transfer_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do chuyển trường"
   },
   {
    "fieldname": "documents_section",

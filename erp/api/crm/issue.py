@@ -1577,6 +1577,7 @@ def change_issue_status():
     name = data.get("name")
     status = data.get("status")
     result = data.get("result", "")
+    note = (data.get("note") or "").strip()
 
     if not name or not status:
         return validation_error_response(
@@ -1618,8 +1619,8 @@ def change_issue_status():
     elif status == "Hoan thanh":
         if old_status != "Dang xu ly":
             return error_response("Chi duoc hoan thanh van de tu trang thai Dang xu ly")
-        if not is_pic:
-            return error_response("Chi PIC duoc chuyen van de sang Hoan thanh")
+        if not (is_pic or is_care_admin):
+            return error_response("Chi PIC hoac Care Admin duoc chuyen van de sang Hoan thanh")
         if not result:
             return validation_error_response("Can co ket qua khi hoan thanh", {"result": ["Bat buoc"]})
     elif status == "Dong":
@@ -1633,6 +1634,22 @@ def change_issue_status():
         doc.result = result or ""
     elif old_status == "Hoan thanh" and status == "Dang xu ly":
         doc.result = ""
+
+    # Ghi nhat ky kem theo chuyen trang thai (cung mot thao tac tu modal Cap nhat xu ly).
+    # Ghi truc tiep o day vi add_process_log chi cho phep khi trang thai 'Dang xu ly'.
+    if note:
+        user_full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
+        doc.append(
+            "process_logs",
+            {
+                "title": "Cập nhật xử lý",
+                "content": note,
+                "logged_at": now(),
+                "logged_by": current_user,
+                "logged_by_name": user_full_name,
+            },
+        )
+
     _mark_first_response_if_eligible(doc)
     _recompute_sla_state(doc)
     doc.save(ignore_permissions=True)
