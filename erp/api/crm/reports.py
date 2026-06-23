@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 CRM Reports API — dashboard báo cáo tuyển sinh (CRM Lead).
-Đọc từ: tabCRM Lead, tabCRM Lead Step History, tabCRM Lead Source.
+Nguồn: tabCRM Lead, tabCRM Lead Step History, tabCRM Lead Source.
+Số liệu vận hành theo ngày sự kiện (changed_at); hồ sơ mới theo creation.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,6 +24,33 @@ _ELEVATED_PIC_VIEW_ROLES = frozenset(
     }
 )
 _RESTRICT_PIC_ROLES = frozenset({"SIS Sales", "SIS Sales Care"})
+
+# Mốc phễu cohort (lead vào Lead trong kỳ → từng đạt mốc)
+FUNNEL_STAGES: List[Dict[str, Any]] = [
+    {"key": "lead", "label": "Học sinh quan tâm", "kind": "cohort"},
+    {"key": "qlead", "label": "Học sinh tiềm năng", "kind": "step", "value": "QLead"},
+    {
+        "key": "test_attended",
+        "label": "Khảo sát — Tham gia",
+        "kind": "sub_status",
+        "field": "test_status",
+        "value": "Tham gia",
+    },
+    {
+        "key": "test_proposed",
+        "label": "Khảo sát — Đề xuất",
+        "kind": "sub_status",
+        "field": "test_status",
+        "value": "De xuat",
+    },
+    {
+        "key": "deal_committed",
+        "label": "Thoả thuận (Đặt cọc / Đóng phí)",
+        "kind": "deal_status_in",
+        "values": ["Dat coc", "Dong phi"],
+    },
+    {"key": "enrolled", "label": "Nhập học", "kind": "step", "value": "Enrolled"},
+]
 
 
 def _should_restrict_to_own_pic_only() -> bool:
@@ -53,57 +81,75 @@ def _parse_date_range(args) -> Tuple[Any, Any]:
     return fd, td
 
 
-def _prev_period_dates(fd, td):
+def _resolve_period(args) -> Tuple[Any, Any, Any, Any]:
+    """Trả về (from, to, prev_from, prev_to)."""
+    fd, td = _parse_date_range(args)
     delta = td - fd
     p_to = fd - timedelta(days=1)
     p_from = p_to - delta
-    return p_from, p_to
+    return fd, td, p_from, p_to
 
 
-def _append_common_filters(where_parts: List[str], binds: Dict[str, Any], args) -> None:
+def _append_dimension_filters(
+    where_parts: List[str],
+    binds: Dict[str, Any],
+    args,
+    alias: str = "l",
+    prefix: str = "",
+) -> None:
+    """Bộ lọc chiều campus/pic/năm/khối/nguồn/referrer/data_source."""
+    p = prefix or ""
+
     campus_id = (args.get("campus_id") or "").strip()
     if campus_id:
-        binds["_campus"] = campus_id
-        where_parts.append("l.`campus_id` = %(_campus)s")
+        binds[f"{p}_campus"] = campus_id
+        where_parts.append(f"{alias}.`campus_id` = %({p}_campus)s")
 
     pic_eff = _effective_pic_from_request(args.get("pic"))
     if pic_eff:
-        binds["_pic"] = pic_eff
-        where_parts.append("l.`pic` = %(_pic)s")
+        binds[f"{p}_pic"] = pic_eff
+        where_parts.append(f"{alias}.`pic` = %({p}_pic)s")
 
     tay = (args.get("target_academic_year") or "").strip()
     if tay:
-        binds["_tay"] = tay
-        where_parts.append("l.`target_academic_year` = %(_tay)s")
+        binds[f"{p}_tay"] = tay
+        where_parts.append(f"{alias}.`target_academic_year` = %({p}_tay)s")
 
     tg = (args.get("target_grade") or "").strip()
     if tg:
-        binds["_tg"] = tg
-        where_parts.append("l.`target_grade` = %(_tg)s")
+        binds[f"{p}_tg"] = tg
+        where_parts.append(f"{alias}.`target_grade` = %({p}_tg)s")
 
     referrer = (args.get("referrer") or "").strip()
     if referrer:
-        binds["_ref"] = referrer
-        where_parts.append("l.`referrer` = %(_ref)s")
+        binds[f"{p}_ref"] = referrer
+        where_parts.append(f"{alias}.`referrer` = %({p}_ref)s")
 
     ds = (args.get("data_source") or "").strip()
     if ds:
-        binds["_ds"] = ds
-        where_parts.append("l.`data_source` = %(_ds)s")
+        binds[f"{p}_ds"] = ds
+        where_parts.append(f"{alias}.`data_source` = %({p}_ds)s")
 
     source = (args.get("source") or "").strip()
     if source:
-        binds["_src"] = source
+        binds[f"{p}_src"] = source
         where_parts.append(
-            "EXISTS (SELECT 1 FROM `tabCRM Lead Source` s "
-            "WHERE s.`parent` = l.`name` AND s.`source` = %(_src)s)"
+            f"EXISTS (SELECT 1 FROM `tabCRM Lead Source` s "
+            f"WHERE s.`parent` = {alias}.`name` AND s.`source` = %({p}_src)s)"
         )
 
 
 def _where_creation_between(date_from: Any, date_to: Any, args) -> Tuple[str, Dict[str, Any]]:
     where_parts = ["DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s"]
-    binds = {"d_from": date_from, "d_to": date_to}
-    _append_common_filters(where_parts, binds, args)
+    binds: Dict[str, Any] = {"d_from": date_from, "d_to": date_to}
+    _append_dimension_filters(where_parts, binds, args, "l")
+    return " AND ".join(where_parts), binds
+
+
+def _where_lead_dimensions_only(args, alias: str = "l") -> Tuple[str, Dict[str, Any]]:
+    where_parts: List[str] = ["1=1"]
+    binds: Dict[str, Any] = {}
+    _append_dimension_filters(where_parts, binds, args, alias)
     return " AND ".join(where_parts), binds
 
 
@@ -120,96 +166,47 @@ def _full_image(user_image):
         return su
 
 
-def _append_history_join_filters(
-    frags: List[str],
-    binds: Dict[str, Any],
-    args,
-    alias: str,
-) -> None:
-    campus_id = (args.get("campus_id") or "").strip()
-    if campus_id:
-        binds["_cj_campus"] = campus_id
-        frags.append(f"{alias}.`campus_id` = %(_cj_campus)s")
-
-    pic_eff = _effective_pic_from_request(args.get("pic"))
-    if pic_eff:
-        binds["_cj_pic"] = pic_eff
-        frags.append(f"{alias}.`pic` = %(_cj_pic)s")
-
-    tay = (args.get("target_academic_year") or "").strip()
-    if tay:
-        binds["_cj_tay"] = tay
-        frags.append(f"{alias}.`target_academic_year` = %(_cj_tay)s")
-
-    tg = (args.get("target_grade") or "").strip()
-    if tg:
-        binds["_cj_tg"] = tg
-        frags.append(f"{alias}.`target_grade` = %(_cj_tg)s")
-
-    referrer = (args.get("referrer") or "").strip()
-    if referrer:
-        binds["_cj_ref"] = referrer
-        frags.append(f"{alias}.`referrer` = %(_cj_ref)s")
-
-    ds = (args.get("data_source") or "").strip()
-    if ds:
-        binds["_cj_ds"] = ds
-        frags.append(f"{alias}.`data_source` = %(_cj_ds)s")
-
-    source = (args.get("source") or "").strip()
-    if source:
-        binds["_cj_src"] = source
-        frags.append(
-            f"EXISTS (SELECT 1 FROM `tabCRM Lead Source` s "
-            f"WHERE s.`parent` = {alias}.`name` AND s.`source` = %(_cj_src)s)"
-        )
-
-
-def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
-    wsql, binds = _where_creation_between(date_from, date_to, args)
-    row = frappe.db.sql(
-        f"""
-        SELECT
-            COUNT(*) AS total_leads,
-            SUM(IF(l.`step` = 'Enrolled', 1, 0)) AS total_enrolled,
-            SUM(IF(l.`status` = 'Lost', 1, 0)) AS total_lost,
-            SUM(IF(l.`step` = 'QLead' AND IFNULL(TRIM(l.`status`),'') != 'Lost',
-                1, 0)) AS total_qlead_active,
-            AVG(IF(l.`step` = 'Enrolled' AND l.`enrollment_date` IS NOT NULL,
-                DATEDIFF(l.`enrollment_date`, DATE(l.`creation`)), NULL))
-                AS avg_days_to_enroll
-        FROM `tabCRM Lead` l
-        WHERE {wsql}
-        """,
-        binds,
-        as_dict=True,
-    )[0]
-    tl = int(row.get("total_leads") or 0)
-    te = int(row.get("total_enrolled") or 0)
-
-    tl_lead_or_more = int(
-        frappe.db.sql(
-            f"""
-            SELECT COUNT(*) FROM `tabCRM Lead` l
-            WHERE {wsql} AND l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Nghi hoc')
-            """,
-            binds,
-        )[0][0]
+def _batch_user_map(emails: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Gom User một lần — tránh N+1."""
+    uniq = list({e.strip() for e in emails if e and str(e).strip()})
+    if not uniq:
+        return {}
+    rows = frappe.get_all(
+        "User",
+        filters={"name": ["in", uniq]},
+        fields=["name", "full_name", "user_image"],
     )
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        out[r["name"]] = {
+            "full_name": r.get("full_name") or r["name"],
+            "pic_avatar": _full_image(r.get("user_image")),
+        }
+    return out
 
-    conv = round(100.0 * te / max(1, tl_lead_or_more), 2)
 
-    avg_days = row.get("avg_days_to_enroll")
-    avg_days_out = None if avg_days is None else round(float(avg_days), 2)
+def _batch_referrer_names(referrer_ids: List[str]) -> Dict[str, str]:
+    uniq = list({x.strip() for x in referrer_ids if x and str(x).strip()})
+    if not uniq:
+        return {}
+    rows = frappe.get_all(
+        "CRM Referrer",
+        filters={"name": ["in", uniq]},
+        fields=["name", "referrer_name"],
+    )
+    return {r["name"]: (r.get("referrer_name") or r["name"]) for r in rows}
 
-    return {
-        "total_leads": tl,
-        "total_enrolled": te,
-        "total_lost": int(row.get("total_lost") or 0),
-        "total_qlead_active": int(row.get("total_qlead_active") or 0),
-        "conversion_rate_pct": conv,
-        "avg_days_to_enroll": avg_days_out,
-    }
+
+def _batch_source_names(source_ids: List[str]) -> Dict[str, str]:
+    uniq = list({x.strip() for x in source_ids if x and str(x).strip()})
+    if not uniq:
+        return {}
+    rows = frappe.get_all(
+        "CRM Source",
+        filters={"name": ["in", uniq]},
+        fields=["name", "source_name"],
+    )
+    return {r["name"]: (r.get("source_name") or r["name"]) for r in rows}
 
 
 def _pct_change(curr: Optional[float], prev: Optional[float]) -> Optional[float]:
@@ -222,21 +219,294 @@ def _pct_change(curr: Optional[float], prev: Optional[float]) -> Optional[float]
     return round(100.0 * (curr - prev) / prev, 2)
 
 
-STEP_ORDER = ["Draft", "Verify", "Lead", "QLead", "Enrolled", "Nghi hoc"]
+def _include_tu_choi_lost(args) -> bool:
+    v = (args.get("include_tu_choi") or "").strip().lower()
+    return v in ("1", "true", "yes")
+
+
+def _lost_event_condition(include_tu_choi: bool) -> str:
+    if include_tu_choi:
+        return (
+            "(IFNULL(h.`new_status`,'') = 'Lost' "
+            "OR IFNULL(h.`new_status`,'') LIKE '%:Tu choi')"
+        )
+    return "IFNULL(h.`new_status`,'') = 'Lost'"
+
+
+def _count_new_leads(date_from: Any, date_to: Any, args) -> int:
+    wsql, binds = _where_creation_between(date_from, date_to, args)
+    return int(
+        frappe.db.sql(f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {wsql}", binds)[0][0]
+    )
+
+
+def _count_enrolled_events(date_from: Any, date_to: Any, args) -> int:
+    """Distinct lead nhập học trong kỳ (history + fallback enrollment_date)."""
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": date_from, "d_to": date_to, **dim_binds}
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(DISTINCT t.lead_id) FROM (
+            SELECT h.`lead` AS lead_id
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+            WHERE h.`new_step` = 'Enrolled'
+              AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+              AND {dim_sql}
+            UNION
+            SELECT l.`name` AS lead_id
+            FROM `tabCRM Lead` l
+            WHERE l.`step` = 'Enrolled'
+              AND l.`enrollment_date` IS NOT NULL
+              AND DATE(l.`enrollment_date`) BETWEEN %(d_from)s AND %(d_to)s
+              AND {dim_sql}
+              AND NOT EXISTS (
+                  SELECT 1 FROM `tabCRM Lead Step History` hx
+                  WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'Enrolled'
+              )
+        ) t
+        """,
+        binds,
+    )[0][0]
+    return int(row or 0)
+
+
+def _count_lost_events(date_from: Any, date_to: Any, args) -> int:
+    include_tc = _include_tu_choi_lost(args)
+    lost_cond = _lost_event_condition(include_tc)
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": date_from, "d_to": date_to, **dim_binds}
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(DISTINCT h.`lead`)
+        FROM `tabCRM Lead Step History` h
+        INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+        WHERE DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+          AND {lost_cond}
+          AND {dim_sql}
+        """,
+        binds,
+    )[0][0]
+    return int(row or 0)
+
+
+def _count_active_pipeline(args) -> int:
+    """Snapshot: đang chăm sóc (Lead/QLead, chưa Lost)."""
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(*)
+        FROM `tabCRM Lead` l
+        WHERE l.`step` IN ('Lead', 'QLead')
+          AND IFNULL(TRIM(l.`status`), '') != 'Lost'
+          AND {dim_sql}
+        """,
+        dim_binds,
+    )[0][0]
+    return int(row or 0)
+
+
+def _count_leads_entered_pipeline(date_from: Any, date_to: Any, args) -> int:
+    """Lead vào phễu (đạt Lead) trong kỳ — mẫu số tỷ lệ chuyển đổi."""
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": date_from, "d_to": date_to, **dim_binds}
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(DISTINCT t.lead_id) FROM (
+            SELECT h.`lead` AS lead_id
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+            WHERE h.`new_step` = 'Lead'
+              AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+              AND {dim_sql}
+            UNION
+            SELECT l.`name` AS lead_id
+            FROM `tabCRM Lead` l
+            WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
+              AND l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Nghi hoc')
+              AND {dim_sql}
+              AND NOT EXISTS (
+                  SELECT 1 FROM `tabCRM Lead Step History` hx
+                  WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'Lead'
+              )
+        ) t
+        """,
+        binds,
+    )[0][0]
+    return int(row or 0)
+
+
+def _avg_days_to_enroll(date_from: Any, date_to: Any, args) -> Optional[float]:
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": date_from, "d_to": date_to, **dim_binds}
+    row = frappe.db.sql(
+        f"""
+        SELECT AVG(
+            DATEDIFF(
+                COALESCE(
+                    (SELECT MIN(DATE(h2.`changed_at`))
+                     FROM `tabCRM Lead Step History` h2
+                     WHERE h2.`lead` = l.`name` AND h2.`new_step` = 'Enrolled'),
+                    l.`enrollment_date`
+                ),
+                DATE(l.`creation`)
+            )
+        ) AS avg_days
+        FROM `tabCRM Lead` l
+        WHERE (
+            EXISTS (
+                SELECT 1 FROM `tabCRM Lead Step History` h
+                WHERE h.`lead` = l.`name`
+                  AND h.`new_step` = 'Enrolled'
+                  AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+            )
+            OR (
+                l.`step` = 'Enrolled'
+                AND l.`enrollment_date` IS NOT NULL
+                AND DATE(l.`enrollment_date`) BETWEEN %(d_from)s AND %(d_to)s
+            )
+        )
+        AND {dim_sql}
+        """,
+        binds,
+        as_dict=True,
+    )
+    avg = row[0].get("avg_days") if row else None
+    return None if avg is None else round(float(avg), 2)
+
+
+def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
+    total_leads = _count_new_leads(date_from, date_to, args)
+    total_enrolled = _count_enrolled_events(date_from, date_to, args)
+    total_lost = _count_lost_events(date_from, date_to, args)
+    active_pipeline = _count_active_pipeline(args)
+    entered = _count_leads_entered_pipeline(date_from, date_to, args)
+    conv = round(100.0 * total_enrolled / max(1, entered), 2)
+    avg_days = _avg_days_to_enroll(date_from, date_to, args)
+
+    return {
+        "total_leads": total_leads,
+        "total_enrolled": total_enrolled,
+        "total_lost": total_lost,
+        "active_pipeline": active_pipeline,
+        "total_qlead_active": active_pipeline,
+        "conversion_rate_pct": conv,
+        "avg_days_to_enroll": avg_days,
+        "leads_entered_pipeline": entered,
+    }
+
+
+def _cohort_leads_subquery(args) -> Tuple[str, Dict[str, Any]]:
+    """Subquery trả về lead_id thuộc cohort (vào Lead trong kỳ)."""
+    fd, td, _, _ = _resolve_period(args)
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": fd, "d_to": td, **dim_binds}
+    sql = f"""
+        SELECT DISTINCT t.lead_id FROM (
+            SELECT h.`lead` AS lead_id
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+            WHERE h.`new_step` = 'Lead'
+              AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+              AND {dim_sql}
+            UNION
+            SELECT l.`name` AS lead_id
+            FROM `tabCRM Lead` l
+            WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
+              AND l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Nghi hoc')
+              AND {dim_sql}
+              AND NOT EXISTS (
+                  SELECT 1 FROM `tabCRM Lead Step History` hx
+                  WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'Lead'
+              )
+        ) t
+    """
+    return sql, binds
+
+
+def _stage_reached_sql(stage: Dict[str, Any]) -> str:
+    """Điều kiện EXISTS — lead trong cohort đã từng đạt mốc."""
+    kind = stage.get("kind")
+    if kind == "cohort":
+        return "1=1"
+    if kind == "step":
+        step = stage["value"]
+        return f"""(
+            EXISTS (
+                SELECT 1 FROM `tabCRM Lead Step History` hx
+                WHERE hx.`lead` = c.lead_id AND hx.`new_step` = '{step}'
+            )
+            OR EXISTS (
+                SELECT 1 FROM `tabCRM Lead` lx
+                WHERE lx.`name` = c.lead_id AND lx.`step` = '{step}'
+            )
+        )"""
+    if kind == "sub_status":
+        field = stage["field"]
+        val = stage["value"]
+        ev = f"{field}:{val}"
+        return f"""(
+            EXISTS (
+                SELECT 1 FROM `tabCRM Lead Step History` hx
+                WHERE hx.`lead` = c.lead_id
+                  AND (hx.`new_status` = '{ev}' OR hx.`new_status` = '{val}')
+            )
+            OR EXISTS (
+                SELECT 1 FROM `tabCRM Lead` lx
+                WHERE lx.`name` = c.lead_id AND lx.`{field}` = '{val}'
+            )
+        )"""
+    if kind == "deal_status_in":
+        vals = stage["values"]
+        parts = []
+        for v in vals:
+            ev = f"deal_status:{v}"
+            parts.append(f"hx.`new_status` IN ('{ev}', '{v}')")
+            parts.append(f"lx.`deal_status` = '{v}'")
+        hist_or = " OR ".join([p for p in parts if "hx." in p])
+        lead_or = " OR ".join([p for p in parts if "lx." in p])
+        return f"""(
+            EXISTS (
+                SELECT 1 FROM `tabCRM Lead Step History` hx
+                WHERE hx.`lead` = c.lead_id AND ({hist_or})
+            )
+            OR EXISTS (
+                SELECT 1 FROM `tabCRM Lead` lx
+                WHERE lx.`name` = c.lead_id AND ({lead_or})
+            )
+        )"""
+    return "1=0"
+
+
+def _count_cohort_stage(cohort_sql: str, cohort_binds: Dict[str, Any], stage: Dict[str, Any]) -> int:
+    cond = _stage_reached_sql(stage)
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(*) FROM (
+            {cohort_sql}
+        ) c
+        WHERE {cond}
+        """,
+        cohort_binds,
+    )[0][0]
+    return int(row or 0)
 
 
 @frappe.whitelist()
 def get_overview_kpis():
-    """KPI tổng quan và so kỳ trước (cùng độ dài)."""
+    """KPI tổng quan theo ngày sự kiện + so kỳ trước."""
     check_crm_permission()
     args = frappe.request.args or {}
-    fd, td = _parse_date_range(args)
-    pdf, pdt = _prev_period_dates(fd, td)
+    fd, td, pdf, pdt = _resolve_period(args)
 
     curr = _kpi_snapshot(fd, td, args)
     prev = _kpi_snapshot(pdf, pdt, args)
 
-    meta = {"pic_restricted_to_self": _should_restrict_to_own_pic_only()}
+    meta = {
+        "pic_restricted_to_self": _should_restrict_to_own_pic_only(),
+        "measure_basis": "event_date",
+        "period_label": f"{fd} — {td}",
+    }
     changes = {
         "total_leads": _pct_change(curr["total_leads"], prev["total_leads"]),
         "total_enrolled": _pct_change(curr["total_enrolled"], prev["total_enrolled"]),
@@ -248,7 +518,11 @@ def get_overview_kpis():
 
     return success_response(
         {
-            "kpis": {"current_period": curr, "prev_period": prev, "period": {"from": fd, "to": td}},
+            "kpis": {
+                "current_period": curr,
+                "prev_period": prev,
+                "period": {"from": str(fd), "to": str(td)},
+            },
             "changes": changes,
             "meta": meta,
         }
@@ -257,46 +531,114 @@ def get_overview_kpis():
 
 @frappe.whitelist()
 def get_funnel():
-    """Đếm theo step; tỉ lệ giữa hai bước liền nhau trong pipeline."""
+    """Phễu cohort — lead vào Lead trong kỳ, đếm từng mốc đã từng đạt."""
     check_crm_permission()
     args = frappe.request.args or {}
-    fd, td = _parse_date_range(args)
-    wsql, binds = _where_creation_between(fd, td, args)
+    fd, td, _, _ = _resolve_period(args)
+    cohort_sql, cohort_binds = _cohort_leads_subquery(args)
 
-    rows = frappe.db.sql(
+    steps = []
+    transitions = []
+    prev_count: Optional[int] = None
+    prev_key: Optional[str] = None
+
+    for stage in FUNNEL_STAGES:
+        cnt = _count_cohort_stage(cohort_sql, cohort_binds, stage)
+        steps.append({"step": stage["key"], "label": stage["label"], "count": cnt})
+        if prev_count is not None and prev_key is not None:
+            rate = round(100.0 * cnt / max(1, prev_count), 2) if prev_count else None
+            drop = round(100.0 * (prev_count - cnt) / max(1, prev_count), 2) if prev_count else None
+            transitions.append(
+                {
+                    "from_step": prev_key,
+                    "to_step": stage["key"],
+                    "rate_pct": rate,
+                    "drop_off_pct": drop,
+                }
+            )
+        prev_count = cnt
+        prev_key = stage["key"]
+
+    return success_response(
+        {
+            "steps": steps,
+            "transitions": transitions,
+            "meta": {
+                "cohort_definition": "Lead vào phễu trong kỳ lọc",
+                "period": {"from": str(fd), "to": str(td)},
+            },
+        }
+    )
+
+
+@frappe.whitelist()
+def get_status_distribution():
+    """Phân bố status / test_status / deal_status hiện tại."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+
+    status_rows = frappe.db.sql(
         f"""
-        SELECT l.`step` AS step, COUNT(*) AS c
-        FROM `tabCRM Lead` l WHERE {wsql}
-        GROUP BY l.`step`
+        SELECT l.`step`, IFNULL(NULLIF(TRIM(l.`status`), ''), '(Trống)') AS st, COUNT(*) AS c
+        FROM `tabCRM Lead` l
+        WHERE l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Verify', 'Draft')
+          AND {dim_sql}
+        GROUP BY l.`step`, st
+        ORDER BY l.`step`, c DESC
         """,
-        binds,
+        dim_binds,
         as_dict=True,
     )
-    cnt = {r["step"]: int(r["c"]) for r in rows}
-    series = [{"step": s, "count": cnt.get(s, 0)} for s in STEP_ORDER]
 
-    transitions = []
-    for i in range(len(STEP_ORDER) - 1):
-        a, b = STEP_ORDER[i], STEP_ORDER[i + 1]
-        ca, cb = cnt.get(a, 0), cnt.get(b, 0)
-        rate = round(100.0 * cb / max(1, ca), 2) if ca else None
-        transitions.append({"from_step": a, "to_step": b, "rate_pct": rate})
+    test_rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(NULLIF(TRIM(l.`test_status`), ''), '(Trống)') AS st, COUNT(*) AS c
+        FROM `tabCRM Lead` l
+        WHERE l.`step` = 'QLead' AND {dim_sql}
+        GROUP BY st ORDER BY c DESC
+        """,
+        dim_binds,
+        as_dict=True,
+    )
 
-    return success_response({"steps": series, "transitions": transitions})
+    deal_rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(NULLIF(TRIM(l.`deal_status`), ''), '(Trống)') AS st, COUNT(*) AS c
+        FROM `tabCRM Lead` l
+        WHERE l.`step` = 'QLead' AND {dim_sql}
+        GROUP BY st ORDER BY c DESC
+        """,
+        dim_binds,
+        as_dict=True,
+    )
+
+    return success_response(
+        {
+            "by_step_status": [
+                {"step": r["step"], "status": r["st"], "count": int(r["c"])} for r in status_rows
+            ],
+            "by_test_status": [{"status": r["st"], "count": int(r["c"])} for r in test_rows],
+            "by_deal_status": [{"status": r["st"], "count": int(r["c"])} for r in deal_rows],
+        }
+    )
 
 
 @frappe.whitelist()
 def get_trend():
-    """Xu hướng new lead / enrolled (lịch sử) / lost — theo granularity."""
+    """Xu hướng: hồ sơ mới (creation) / nhập học / lost theo ngày sự kiện."""
     check_crm_permission()
     args = frappe.request.args or {}
     gran = (args.get("granularity") or "day").lower()
-    fd, td = _parse_date_range(args)
+    fd, td, _, _ = _resolve_period(args)
+    include_tc = _include_tu_choi_lost(args)
+    lost_cond = _lost_event_condition(include_tc)
+
     wlead, binds_lead = _where_creation_between(fd, td, args)
 
     if gran == "week":
         pn = "YEARWEEK(l.`creation`, 3)"
-        ph = "YEARWEEK(DATE_SUB(h.`changed_at`, INTERVAL 0 SECOND), 3)"
+        ph = "YEARWEEK(h.`changed_at`, 3)"
     elif gran == "month":
         pn = "DATE_FORMAT(l.`creation`, '%%Y-%%m')"
         ph = "DATE_FORMAT(h.`changed_at`, '%%Y-%%m')"
@@ -315,14 +657,9 @@ def get_trend():
         as_dict=True,
     )
 
-    hfr: List[str] = [
-        "DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s",
-        "DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s",
-    ]
-    binds_h = {"d_from": fd, "d_to": td}
-    _append_history_join_filters(hfr, binds_h, args, "l")
-
-    hj = " AND ".join(hfr)
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds_h = {"d_from": fd, "d_to": td, **dim_binds}
+    hj = f"DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s AND {dim_sql}"
 
     enrolled_rows = frappe.db.sql(
         f"""
@@ -342,7 +679,7 @@ def get_trend():
         SELECT {ph} AS period, COUNT(DISTINCT h.`lead`) AS c
         FROM `tabCRM Lead Step History` h
         INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
-        WHERE IFNULL(h.`new_status`,'') = 'Lost' AND {hj}
+        WHERE {lost_cond} AND {hj}
         GROUP BY {ph}
         ORDER BY period ASC
         """,
@@ -356,10 +693,7 @@ def get_trend():
 
     points = []
     for pkey in sorted(periods):
-        nr = next(
-            (int(x["new_leads"]) for x in new_rows if str(x["period"]) == pkey),
-            0,
-        )
+        nr = next((int(x["new_leads"]) for x in new_rows if str(x["period"]) == pkey), 0)
         points.append(
             {
                 "period": pkey,
@@ -374,19 +708,20 @@ def get_trend():
 
 @frappe.whitelist()
 def get_breakdown_by_source():
-    """Phân nhóm CRM Lead Source, data_source, referrer."""
+    """Phân nhóm nguồn — enrolled theo sự kiện trong kỳ."""
     check_crm_permission()
     args = frappe.request.args or {}
-    fd, td = _parse_date_range(args)
+    fd, td, _, _ = _resolve_period(args)
     wsql, binds = _where_creation_between(fd, td, args)
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    eb = {"d_from": fd, "d_to": td, **dim_binds}
 
     src_rows = frappe.db.sql(
         f"""
         SELECT
             ls.`source` AS src,
             IFNULL(NULLIF(TRIM(ls.`sub_source`), ''), '-') AS sub_source,
-            COUNT(DISTINCT l.`name`) AS total_count,
-            SUM(IF(l.`step` = 'Enrolled', 1, 0)) AS enrolled_count
+            COUNT(DISTINCT l.`name`) AS total_count
         FROM `tabCRM Lead` l
         INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
         WHERE {wsql}
@@ -397,13 +732,46 @@ def get_breakdown_by_source():
         binds,
         as_dict=True,
     )
+
+    enrolled_by_src = frappe.db.sql(
+        f"""
+        SELECT ls.`source` AS src,
+               IFNULL(NULLIF(TRIM(ls.`sub_source`), ''), '-') AS sub_source,
+               COUNT(DISTINCT ev.lead_id) AS enrolled_count
+        FROM (
+            SELECT h.`lead` AS lead_id FROM `tabCRM Lead Step History` h
+            INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+            WHERE h.`new_step` = 'Enrolled'
+              AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+              AND {dim_sql}
+            UNION
+            SELECT l.`name` FROM `tabCRM Lead` l
+            WHERE l.`step` = 'Enrolled' AND l.`enrollment_date` IS NOT NULL
+              AND DATE(l.`enrollment_date`) BETWEEN %(d_from)s AND %(d_to)s
+              AND {dim_sql}
+        ) ev
+        INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = ev.lead_id
+        GROUP BY ls.`source`, ls.`sub_source`
+        """,
+        eb,
+        as_dict=True,
+    )
+    enrolled_map = {
+        (r["src"], r.get("sub_source") or ""): int(r["enrolled_count"]) for r in enrolled_by_src
+    }
+
+    source_ids = [r["src"] for r in src_rows if r.get("src")]
+    source_names = _batch_source_names(source_ids)
+
     breakdown = []
     for r in src_rows:
         tot = int(r.get("total_count") or 0)
-        ec = int(r.get("enrolled_count") or 0)
+        key = (r["src"], r.get("sub_source") or "")
+        ec = enrolled_map.get(key, 0)
         breakdown.append(
             {
                 "source": r["src"],
+                "source_name": source_names.get(r["src"], r["src"]),
                 "sub_source": r.get("sub_source") or "",
                 "count_total": tot,
                 "count_enrolled": ec,
@@ -430,95 +798,140 @@ def get_breakdown_by_source():
         binds,
         as_dict=True,
     )
+    ref_names = _batch_referrer_names([r["ref"] for r in ref_rows if r.get("ref")])
 
     return success_response(
         {
             "by_source_rows": breakdown,
             "by_data_source": [{"data_source": r["ds"], "count": int(r["c"])} for r in ds_rows],
-            "referrers_top": [{"referrer": r["ref"], "count": int(r["c"])} for r in ref_rows],
+            "referrers_top": [
+                {
+                    "referrer": r["ref"],
+                    "referrer_name": ref_names.get(r["ref"], r["ref"]),
+                    "count": int(r["c"]),
+                }
+                for r in ref_rows
+            ],
         }
     )
 
 
 @frappe.whitelist()
 def get_breakdown_by_pic():
-    """Bảng hiệu suất PIC + thời gian Lead→chuyển QLead trung bình (giờ)."""
+    """Hiệu suất PIC — assigned theo creation; enrolled/lost theo sự kiện."""
     check_crm_permission()
     args = frappe.request.args or {}
-    fd, td = _parse_date_range(args)
+    fd, td, _, _ = _resolve_period(args)
     wsql, binds = _where_creation_between(fd, td, args)
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    include_tc = _include_tu_choi_lost(args)
+    lost_cond = _lost_event_condition(include_tc)
+    eb = {"d_from": fd, "d_to": td, **dim_binds}
 
-    rows = frappe.db.sql(
+    assigned_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`),'') AS pic, COUNT(*) AS total_assigned,
-            SUM(IF(l.`step` = 'Enrolled', 1, 0)) AS enrolled_count,
-            SUM(IF(IFNULL(l.`status`,'')='Lost', 1, 0)) AS lost_count,
-            SUM(IF(l.`step`='QLead' AND IFNULL(l.`status`,'')!='Lost', 1, 0)) AS qlead_count
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic, COUNT(*) AS total_assigned
         FROM `tabCRM Lead` l
-        WHERE {wsql} AND IFNULL(TRIM(l.`pic`),'') != ''
+        WHERE {wsql} AND IFNULL(TRIM(l.`pic`), '') != ''
         GROUP BY pic
-        ORDER BY total_assigned DESC
-        LIMIT 200
         """,
         binds,
         as_dict=True,
     )
 
-    # Thời gian trung bình tạo HS → vào QLead (bản ghi lịch sử nhảy vào QLead)
-    hfr_pic: List[str] = [
-        "DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s",
-        "DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s",
-    ]
-    bh_pic = {"d_from": fd, "d_to": td}
-    _append_history_join_filters(hfr_pic, bh_pic, args, "l")
-    where_pic_join = " AND ".join(hfr_pic)
+    enrolled_rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic, COUNT(DISTINCT h.`lead`) AS enrolled_count
+        FROM `tabCRM Lead Step History` h
+        INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+        WHERE h.`new_step` = 'Enrolled'
+          AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+          AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND {dim_sql}
+        GROUP BY pic
+        """,
+        eb,
+        as_dict=True,
+    )
 
+    lost_rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic, COUNT(DISTINCT h.`lead`) AS lost_count
+        FROM `tabCRM Lead Step History` h
+        INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+        WHERE DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+          AND {lost_cond}
+          AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND {dim_sql}
+        GROUP BY pic
+        """,
+        eb,
+        as_dict=True,
+    )
+
+    active_rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+               SUM(IF(l.`step` IN ('Lead','QLead') AND IFNULL(TRIM(l.`status`),'') != 'Lost', 1, 0)) AS qlead_count
+        FROM `tabCRM Lead` l
+        WHERE IFNULL(TRIM(l.`pic`), '') != '' AND {dim_sql}
+        GROUP BY pic
+        """,
+        dim_binds,
+        as_dict=True,
+    )
+
+    hj = f"DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s AND {dim_sql}"
     resp_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`),'') AS pic,
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
             AVG(TIMESTAMPDIFF(SECOND, l.`creation`, h.`changed_at`) / 3600.0) AS avg_hours
         FROM `tabCRM Lead Step History` h
         INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
-        WHERE h.`new_step` = 'QLead' AND IFNULL(TRIM(l.`pic`),'') != ''
-          AND {where_pic_join}
+        WHERE h.`new_step` = 'QLead' AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND {hj}
         GROUP BY pic
         """,
-        bh_pic,
+        eb,
         as_dict=True,
     )
-    avg_hours_by_pic = {
+
+    enrolled_map = {r["pic"]: int(r["enrolled_count"]) for r in enrolled_rows}
+    lost_map = {r["pic"]: int(r["lost_count"]) for r in lost_rows}
+    active_map = {r["pic"]: int(r["qlead_count"]) for r in active_rows}
+    assigned_map = {r["pic"]: int(r["total_assigned"]) for r in assigned_rows}
+    resp_map = {
         r["pic"]: None if r.get("avg_hours") is None else round(float(r["avg_hours"]), 2)
         for r in resp_rows
     }
 
-    out = []
-    for r in rows:
-        pic_email = r["pic"]
-        total = int(r["total_assigned"])
-        ee = int(r["enrolled_count"])
-        lf = int(r["lost_count"])
-        qn = int(r["qlead_count"])
-        full_name = pic_email
-        pic_avatar = None
-        if frappe.db.exists("User", pic_email):
-            ud = frappe.db.get_value(
-                "User", pic_email, ["full_name", "user_image"], as_dict=True
-            )
-            if ud:
-                full_name = ud.get("full_name") or pic_email
-                pic_avatar = _full_image(ud.get("user_image"))
+    all_pics = sorted(
+        set(assigned_map) | set(enrolled_map) | set(lost_map) | set(active_map),
+        key=lambda p: assigned_map.get(p, 0) + enrolled_map.get(p, 0),
+        reverse=True,
+    )[:200]
 
+    user_map = _batch_user_map(all_pics)
+    out = []
+    for pic_email in all_pics:
+        if not pic_email:
+            continue
+        total = assigned_map.get(pic_email, 0)
+        ee = enrolled_map.get(pic_email, 0)
+        lf = lost_map.get(pic_email, 0)
+        qn = active_map.get(pic_email, 0)
+        ud = user_map.get(pic_email, {})
         out.append(
             {
                 "pic": pic_email,
-                "pic_name": full_name,
-                "pic_avatar": pic_avatar,
+                "pic_name": ud.get("full_name") or pic_email,
+                "pic_avatar": ud.get("pic_avatar"),
                 "total_assigned": total,
                 "qlead_count": qn,
                 "enrolled_count": ee,
                 "lost_count": lf,
                 "conversion_rate_pct": round(100.0 * ee / max(1, total), 2),
-                "avg_response_time_hours": avg_hours_by_pic.get(pic_email),
+                "avg_response_time_hours": resp_map.get(pic_email),
             }
         )
 
@@ -527,16 +940,16 @@ def get_breakdown_by_pic():
 
 @frappe.whitelist()
 def get_breakdown_by_grade_campus():
-    """Đếm theo (target_grade, campus_id) cho heatmap."""
+    """Heatmap khối × campus — hồ sơ mới trong kỳ."""
     check_crm_permission()
     args = frappe.request.args or {}
-    fd, td = _parse_date_range(args)
+    fd, td, _, _ = _resolve_period(args)
     wsql, binds = _where_creation_between(fd, td, args)
 
     rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`target_grade`),'-') AS g,
-               IFNULL(TRIM(l.`campus_id`),'-') AS c,
+        SELECT IFNULL(TRIM(l.`target_grade`), '-') AS g,
+               IFNULL(TRIM(l.`campus_id`), '-') AS c,
                COUNT(*) AS cnt
         FROM `tabCRM Lead` l
         WHERE {wsql}
@@ -548,38 +961,69 @@ def get_breakdown_by_grade_campus():
         as_dict=True,
     )
 
-    cells = [{"target_grade": r["g"], "campus_id": r["c"], "count": int(r["cnt"])} for r in rows]
+    campus_ids = list({r["c"] for r in rows if r.get("c") and r["c"] != "-"})
+    campus_titles: Dict[str, str] = {}
+    if campus_ids:
+        for c in frappe.get_all(
+            "SIS Campus",
+            filters={"name": ["in", campus_ids]},
+            fields=["name", "title_vn", "short_title"],
+        ):
+            campus_titles[c["name"]] = c.get("title_vn") or c["name"]
+
+    cells = [
+        {
+            "target_grade": r["g"],
+            "campus_id": r["c"],
+            "campus_title": campus_titles.get(r["c"], r["c"]),
+            "count": int(r["cnt"]),
+        }
+        for r in rows
+    ]
     return success_response({"cells": cells})
 
 
 @frappe.whitelist()
 def get_lost_analysis():
-    """Lost: nhóm reject_reason + trang HS Lost."""
+    """Lost theo ngày sự kiện + nhóm lý do."""
     check_crm_permission()
     args = frappe.request.args or {}
-    fd, td = _parse_date_range(args)
-    wsql, binds = _where_creation_between(fd, td, args)
+    fd, td, _, _ = _resolve_period(args)
+    include_tc = _include_tu_choi_lost(args)
+    lost_cond = _lost_event_condition(include_tc)
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": fd, "d_to": td, **dim_binds}
     page = int(args.get("page") or 1)
     per_page = int(args.get("per_page") or 20)
     offset = max(0, page - 1) * per_page
 
-    tlost_rs = frappe.db.sql(
-        f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {wsql} AND l.`status`='Lost'", binds,
-    )
+    lost_base = f"""
+        SELECT DISTINCT h.`lead` AS lead_id,
+               MIN(h.`changed_at`) AS lost_at
+        FROM `tabCRM Lead Step History` h
+        INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+        WHERE DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+          AND {lost_cond}
+          AND {dim_sql}
+        GROUP BY h.`lead`
+    """
 
-    tlost = tlost_rs[0][0] if tlost_rs else 0
+    total_count = int(
+        frappe.db.sql(f"SELECT COUNT(*) FROM ({lost_base}) lb", binds)[0][0] or 0
+    )
 
     summary_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(IFNULL(l.`reject_reason`,'')), '(Không ghi)') AS rr, COUNT(*) AS c
-        FROM `tabCRM Lead` l
-        WHERE {wsql} AND l.`status`='Lost'
+        SELECT IFNULL(TRIM(IFNULL(l.`reject_reason`, '')), '(Không ghi)') AS rr,
+               COUNT(*) AS c
+        FROM ({lost_base}) lb
+        INNER JOIN `tabCRM Lead` l ON l.`name` = lb.lead_id
         GROUP BY rr ORDER BY c DESC LIMIT 80
         """,
         binds,
         as_dict=True,
     )
-    pct_denom = int(tlost) if tlost else 1
+    pct_denom = total_count if total_count else 1
     summary = [
         {
             "reason": r["rr"],
@@ -589,53 +1033,45 @@ def get_lost_analysis():
         for r in summary_rows
     ]
 
-    total_count = frappe.db.sql(
-        f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {wsql} AND l.`status`='Lost'", binds,
-    )[0][0]
-
     leads = frappe.db.sql(
         f"""
         SELECT l.`name`, l.`student_name`, l.`pic`, l.`campus_id`,
-               l.`reject_reason`, l.`reject_detail`, IFNULL(l.`modified`, l.`creation`) AS lost_dt
-        FROM `tabCRM Lead` l
-        WHERE {wsql} AND l.`status`='Lost'
-        ORDER BY l.`modified` DESC
+               l.`reject_reason`, l.`reject_detail`, lb.lost_at
+        FROM ({lost_base}) lb
+        INNER JOIN `tabCRM Lead` l ON l.`name` = lb.lead_id
+        ORDER BY lb.lost_at DESC
         LIMIT %(lim)s OFFSET %(off)s
         """,
         {**binds, "lim": per_page, "off": offset},
         as_dict=True,
     )
 
+    pic_emails = [lw.get("pic") or "" for lw in leads]
+    user_map = _batch_user_map(pic_emails)
     out_leads = []
     for lw in leads:
-        pic_avatar = None
         pe = lw.get("pic") or ""
-        if pe and frappe.db.exists("User", pe):
-            ui = frappe.db.get_value("User", pe, "user_image")
-            pic_avatar = _full_image(ui)
-        full_name_pic = lw.get("pic")
-        if pe and frappe.db.exists("User", pe):
-            fn = frappe.db.get_value("User", pe, "full_name")
-            full_name_pic = fn or lw.get("pic")
-
+        ud = user_map.get(pe, {})
         out_leads.append(
             {
-                **lw,
-                "pic_name": full_name_pic,
-                "pic_avatar": pic_avatar,
-                "lost_at": lw.get("lost_dt"),
-                "lost_dt": None,
+                "name": lw.get("name"),
+                "student_name": lw.get("student_name"),
+                "pic": pe,
+                "pic_name": ud.get("full_name") or pe,
+                "pic_avatar": ud.get("pic_avatar"),
+                "campus_id": lw.get("campus_id"),
+                "reject_reason": lw.get("reject_reason"),
+                "reject_detail": lw.get("reject_detail"),
+                "lost_at": lw.get("lost_at"),
             }
         )
-    for lw in out_leads:
-        lw.pop("lost_dt", None)
 
     pag_out = paginated_response(
         data=out_leads,
         current_page=page,
-        total_count=int(total_count),
+        total_count=total_count,
         per_page=per_page,
         message="OK",
     )
-    pag_out["meta"] = {"reason_summary": summary}
+    pag_out["meta"] = {"reason_summary": summary, "measure_basis": "event_date"}
     return pag_out
