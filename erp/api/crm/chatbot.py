@@ -12,7 +12,7 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import (
     validate_phone_number, normalize_phone_number, generate_crm_code
 )
-from erp.api.crm.duplicate import _find_matching_leads
+from erp.api.crm.duplicate import _find_matching_leads, _find_matching_leads_by_names
 
 
 def _verify_chatbot_api_key() -> bool:
@@ -95,7 +95,8 @@ def create_lead_from_chatbot():
 
         doc.insert(ignore_permissions=True)
 
-        # 2. Kiem tra trung lap SĐT voi ho so trong he thong (khong check voi Verify)
+        # 2. Kiem tra trung lap voi ho so trong he thong (khong check voi Verify):
+        #    SDT, hoac cap Ten HS + Ten PH (khac SDT)
         raw_phones = [phone_number]
         matches = _find_matching_leads(
             raw_phones,
@@ -104,6 +105,17 @@ def create_lead_from_chatbot():
             exclude_draft=True,
             exclude_verify=True
         )
+        name_matches = _find_matching_leads_by_names(
+            doc.student_name,
+            doc.guardian_name,
+            exclude_draft=True,
+            exclude_verify=True
+        )
+        seen = {m["name"] for m in matches}
+        for nm in name_matches:
+            if nm["name"] not in seen:
+                matches.append(nm)
+                seen.add(nm["name"])
         matches = [m for m in matches if m["name"] != doc.name]
 
         doc.step = "Verify"

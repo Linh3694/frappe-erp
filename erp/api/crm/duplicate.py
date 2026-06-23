@@ -196,6 +196,20 @@ def _evaluate_duplicate_rules(matched_lead, exclude_draft=False):
                     "reason": f"Trung SDT, ho so cu o {old_step} <= 1 nam"
                 }
     
+    # TH4: Trung cap Ten HS + Ten PH (khong trung SDT) -> Verify / Can kiem tra (mem)
+    if (
+        "student_name" in matched_fields
+        and "guardian_name" in matched_fields
+        and "phone_number" not in matched_fields
+    ):
+        return {
+            "is_duplicate": False,
+            "duplicate_type": "name_pair",
+            "recommended_step": "Verify",
+            "recommended_status": "Can kiem tra",
+            "reason": "Trung Ten HS + Ten PH (khac SDT)"
+        }
+
     # TH1: Khong trung hoac chi trung 1 truong khong phai SDT
     return {
         "is_duplicate": False,
@@ -217,45 +231,81 @@ def resolve_draft_promotion(doc):
         for row in (doc.phone_numbers or [])
         if getattr(row, "phone_number", None)
     ]
+    student_name = getattr(doc, "student_name", None)
+    guardian_name = getattr(doc, "guardian_name", None)
     matches = _find_matching_leads(
         raw_phones,
-        getattr(doc, "student_name", None),
-        getattr(doc, "guardian_name", None),
+        student_name,
+        guardian_name,
         exclude_draft=True,
         exclude_verify=True,
     )
     matches = [m for m in matches if m["name"] != doc.name]
-    if not matches:
-        return "Lead", "Moi"
-    matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
-    ev = _evaluate_duplicate_rules(matches[0])
-    return "Verify", ev.get("recommended_status") or "Can kiem tra"
+    if matches:
+        matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
+        ev = _evaluate_duplicate_rules(matches[0])
+        return "Verify", ev.get("recommended_status") or "Can kiem tra"
+
+    # Trung cap Ten HS + Ten PH (khac SDT) -> Verify / Can kiem tra
+    name_matches = _find_matching_leads_by_names(
+        student_name,
+        guardian_name,
+        exclude_draft=True,
+        exclude_verify=True,
+    )
+    name_matches = [m for m in name_matches if m["name"] != doc.name]
+    if name_matches:
+        return "Verify", "Can kiem tra"
+
+    return "Lead", "Moi"
 
 
 @frappe.whitelist(methods=["POST"])
 def check_duplicate():
-    """Kiem tra trung lap toan he thong (tru Draft)"""
+    """Kiem tra trung lap toan he thong (tru Draft, tru Verify): SDT hoac cap Ten HS + Ten PH"""
     check_crm_permission()
     data = get_request_data()
-    
+
     phone_numbers = data.get("phone_numbers", [])
     student_name = data.get("student_name", "")
     guardian_name = data.get("guardian_name", "")
     exclude_lead = data.get("exclude_lead", "")
-    
-    if not phone_numbers:
-        return validation_error_response("Thieu SDT", {"phone_numbers": ["Bat buoc"]})
-    
+
+    has_name_pair = bool((student_name or "").strip() and (guardian_name or "").strip())
+    if not phone_numbers and not has_name_pair:
+        return validation_error_response(
+            "Thieu SDT hoac cap Ten HS + Ten PH",
+            {"phone_numbers": ["Bat buoc neu khong co Ten HS + Ten PH"]}
+        )
+
     # Tim ho so trung: chi check voi ho so trong he thong (tru Draft, tru Verify)
-    matches = _find_matching_leads(
+    phone_matches = _find_matching_leads(
         phone_numbers, student_name, guardian_name,
         exclude_draft=True, exclude_verify=True
-    )
-    
-    # Loai bo ho so dang kiem tra
-    if exclude_lead:
-        matches = [m for m in matches if m["name"] != exclude_lead]
-    
+    ) if phone_numbers else []
+    name_matches = _find_matching_leads_by_names(
+        student_name, guardian_name,
+        exclude_draft=True, exclude_verify=True
+    ) if has_name_pair else []
+
+    # Gop / khu trung theo name, union matched_fields; loai ho so dang kiem tra
+    by_name = {}
+    order = []
+    for m in phone_matches + name_matches:
+        if exclude_lead and m["name"] == exclude_lead:
+            continue
+        existing = by_name.get(m["name"])
+        if existing:
+            mf = set(existing.get("matched_fields") or [])
+            mf.update(m.get("matched_fields") or [])
+            existing["matched_fields"] = list(mf)
+        else:
+            row = dict(m)
+            row["matched_fields"] = list(m.get("matched_fields") or [])
+            by_name[m["name"]] = row
+            order.append(m["name"])
+    matches = [by_name[n] for n in order]
+
     if not matches:
         return success_response({
             "is_duplicate": False,
@@ -263,15 +313,16 @@ def check_duplicate():
             "recommended_step": "Verify",
             "recommended_status": "Can kiem tra"
         })
-    
-    # Sap xep theo thoi gian cap nhat gan nhat
+
+    # Sap xep theo thoi gian cap nhat gan nhat; uu tien danh gia theo SDT (giu hanh vi cu)
     matches.sort(key=lambda x: x.get("modified", ""), reverse=True)
-    most_recent = matches[0]
-    
+    phone_first = [m for m in matches if "phone_number" in (m.get("matched_fields") or [])]
+    most_recent = phone_first[0] if phone_first else matches[0]
+
     result = _evaluate_duplicate_rules(most_recent)
     result["duplicate_lead"] = most_recent["name"]
     result["matches"] = matches
-    
+
     return success_response(result)
 
 
