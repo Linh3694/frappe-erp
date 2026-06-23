@@ -260,6 +260,16 @@ def get_all_plans(period=None, workflow_state=None, include_superseded=None):
     return list_response(data)
 
 
+def _plan_months_by_code(doc):
+    """{budget_code: {m7..m6}} cho các dòng chưa gạch — nguồn so sánh diff giữa các version."""
+    result = {}
+    for l in (doc.lines or []):
+        if l.get("is_removed") or not l.budget_code:
+            continue
+        result[l.budget_code] = {m: (l.get(m) or 0) for m in MONTH_FIELDS}
+    return result
+
+
 @frappe.whitelist(allow_guest=False)
 def get_plan(name=None):
     name = name or _get_request_data().get("name")
@@ -268,7 +278,17 @@ def get_plan(name=None):
     doc = frappe.get_doc(PLAN_DT, name)
     if not _can_read_plan(doc):
         return forbidden_response("Bạn không có quyền xem ngân sách này")
-    return single_item_response(_plan_to_dict(doc))
+    data = _plan_to_dict(doc)
+    # Bản version liền trước (bản mà bản này điều chỉnh) — để FE highlight số thay đổi.
+    if doc.amends and frappe.db.exists(PLAN_DT, doc.amends):
+        prev = frappe.get_doc(PLAN_DT, doc.amends)
+        data["prev_version"] = {
+            "name": prev.name,
+            "version": prev.version,
+            "workflow_state": prev.workflow_state,
+            "months_by_code": _plan_months_by_code(prev),
+        }
+    return single_item_response(data)
 
 
 @frappe.whitelist(allow_guest=False)
