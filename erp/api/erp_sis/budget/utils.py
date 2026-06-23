@@ -19,6 +19,7 @@ PERIOD_DT = "ERP Budget Period"
 PLAN_DT = "ERP Budget Plan"
 PLAN_LINE_DT = "ERP Budget Plan Line"
 PLAN_HISTORY_DT = "ERP Budget Plan History"
+SETTLEMENT_DT = "ERP Budget Settlement"
 
 ORG_UNIT_DT = "ERP Organization Unit"
 ORG_UNIT_TYPE_DT = "ERP Organization Unit Type"
@@ -474,6 +475,7 @@ def _plan_line_snapshot(doc):
         snap[l.budget_code] = {
             **{m: float(l.get(m) or 0) for m in MONTH_FIELDS},
             "note": (l.note or "").strip(),
+            "overrun_explanation": (l.overrun_explanation or "").strip(),
             "explanation": (l.explanation or "").strip(),
         }
     return snap
@@ -503,6 +505,8 @@ def _diff_line_snapshots(old, new):
                 parts.append(f"{MONTH_LABELS[m]}: {_fmt_amount(ov)}→{_fmt_amount(nv)}")
         if old_row.get("note", "") != new_row.get("note", ""):
             parts.append("sửa ghi chú")
+        if old_row.get("overrun_explanation", "") != new_row.get("overrun_explanation", ""):
+            parts.append("sửa giải trình vượt KH")
         if old_row.get("explanation", "") != new_row.get("explanation", ""):
             parts.append("sửa diễn giải")
         if parts:
@@ -573,6 +577,42 @@ def _period_school_year_id(period_name):
     if not period_name:
         return None
     return frappe.db.get_value(PERIOD_DT, period_name, "school_year_id")
+
+
+def _previous_school_year_id(school_year_id):
+    """Năm học liền trước — suy ra theo start_date (không cần field quan hệ)."""
+    if not school_year_id:
+        return None
+    start_date = frappe.db.get_value(SCHOOL_YEAR_DT, school_year_id, "start_date")
+    if not start_date:
+        return None
+    rows = frappe.get_all(
+        SCHOOL_YEAR_DT,
+        filters={"start_date": ("<", start_date)},
+        pluck="name",
+        order_by="start_date desc",
+        limit=1,
+    )
+    return rows[0] if rows else None
+
+
+def _settlement_amounts(school_year_id, department):
+    """{budget_code: số tổng kết} của 1 năm học × phòng ban. Cộng dồn nếu trùng mã."""
+    result = {}
+    if not school_year_id or not department:
+        return result
+    rows = frappe.get_all(
+        SETTLEMENT_DT,
+        filters={"school_year_id": school_year_id, "department": department},
+        fields=["budget_code", "settlement_amount"],
+        ignore_permissions=True,
+    )
+    for r in rows:
+        code = r.get("budget_code")
+        if not code:
+            continue
+        result[code] = (result.get(code) or 0) + (r.get("settlement_amount") or 0)
+    return result
 
 
 def _plan_display_title(doc):

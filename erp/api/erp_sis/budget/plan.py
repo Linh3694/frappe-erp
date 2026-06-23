@@ -54,6 +54,8 @@ from .utils import (
     _diff_line_snapshots,
     _state_label,
     _period_school_year_id,
+    _previous_school_year_id,
+    _settlement_amounts,
     _school_year_title,
     _plan_display_title,
 )
@@ -128,6 +130,7 @@ def _plan_to_dict(doc, with_lines=True):
                     "planned_amount": l.planned_amount,
                     "approved_amount": l.approved_amount,
                     "note": l.note,
+                    "overrun_explanation": l.overrun_explanation,
                     "explanation": l.explanation,
                     "attachment": attachments[0] if attachments else None,
                     "attachments": attachments,
@@ -259,6 +262,42 @@ def get_plan(name=None):
     return single_item_response(_plan_to_dict(doc))
 
 
+@frappe.whitelist(allow_guest=False)
+def get_prev_settlement(period=None, department=None):
+    """Số tổng kết năm học LIỀN TRƯỚC của 1 phòng — nguồn cho cột 'Tổng năm trước'.
+
+    Năm trước suy ra theo start_date của SIS School Year. Trả {budget_code: amount}.
+    """
+    data = _get_request_data()
+    period = period or data.get("period")
+    department = department or data.get("department")
+    if not period or not department:
+        return validation_error_response(
+            "Thiếu period/department", {"period": ["Bắt buộc"], "department": ["Bắt buộc"]}
+        )
+
+    email = _session_email()
+    is_reviewer = (
+        "System Manager" in frappe.get_roles()
+        or _is_finance()
+        or _is_bod()
+        or _is_plan_approver_role()
+    )
+    if not (is_reviewer or _can_edit_plan_dept(department, email)):
+        return forbidden_response("Bạn không có quyền xem tổng kết của phòng này")
+
+    cur_sy = _period_school_year_id(period)
+    prev_sy = _previous_school_year_id(cur_sy)
+    amounts = _settlement_amounts(prev_sy, department) if prev_sy else {}
+    return single_item_response(
+        {
+            "prev_school_year_id": prev_sy,
+            "prev_school_year_title": _school_year_title(prev_sy) if prev_sy else None,
+            "amounts": amounts,
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Validate budget_code: chỉ cần tồn tại + là mã lá (không có mã con).
 # KHÔNG ràng buộc theo phòng ban — phòng có thể lập ngân sách cho mã bất kỳ.
@@ -335,6 +374,7 @@ def upsert_plan():
                 row = {
                     "budget_code": l.get("budget_code"),
                     "note": l.get("note"),
+                    "overrun_explanation": l.get("overrun_explanation"),
                     "explanation": l.get("explanation"),
                     "is_removed": 1 if l.get("is_removed") else 0,
                     "attachment": _serialize_line_attachments(_line_attachments_from_payload(l)),
@@ -627,6 +667,7 @@ def unsubmit_plan():
             row = {
                 "budget_code": l.budget_code,
                 "note": l.note,
+                "overrun_explanation": l.overrun_explanation,
                 "explanation": l.explanation,
                 "is_removed": 1 if l.get("is_removed") else 0,
                 "attachment": l.attachment,
@@ -719,6 +760,7 @@ def _make_amendment_doc(src, period, email):
         row = {
             "budget_code": l.budget_code,
             "note": l.note,
+            "overrun_explanation": l.overrun_explanation,
             "explanation": l.explanation,
             "is_removed": 0,
             "attachment": l.attachment,

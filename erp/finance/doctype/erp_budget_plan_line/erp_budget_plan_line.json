@@ -11,6 +11,7 @@
   "account_item",
   "is_removed",
   "note",
+  "overrun_explanation",
   "explanation",
   "attachment",
   "planned_amount",
@@ -57,6 +58,11 @@
    "fieldname": "note",
    "fieldtype": "Text",
    "label": "Nội dung chi tiết"
+  },
+  {
+   "fieldname": "overrun_explanation",
+   "fieldtype": "Text",
+   "label": "Giải trình vượt kế hoạch"
   },
   {
    "fieldname": "explanation",
