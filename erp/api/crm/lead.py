@@ -161,6 +161,75 @@ def enrich_lead_dict_with_sibling_lead_links(lead_dict):
     return lead_dict
 
 
+def _parse_lead_filters(raw):
+    """Chuyen filter nang cao tu FilterBuilder (JSON) -> danh sach dieu kien Frappe.
+
+    Moi dieu kien FE: {"column", "operator", "value"}.
+    Ho tro cot dan xuat `primary_phone` (tra cuu qua bang con CRM Lead Phone).
+    """
+    if not raw:
+        return []
+    conditions = frappe.parse_json(raw) if isinstance(raw, str) else raw
+    if not isinstance(conditions, list):
+        return []
+
+    op_map = {
+        "is": "=", "is_not": "!=",
+        "contains": "like", "not_contains": "not like",
+        "starts_with": "like", "ends_with": "like",
+        "gt": ">", "lt": "<", "gte": ">=", "lte": "<=",
+    }
+    # Chi cho phep loc tren cac cot da khai bao o FE (FILTER_COLUMNS)
+    allowed = {
+        "student_name", "guardian_name", "pic", "step", "status",
+        "test_status", "deal_status", "student_code", "crm_code",
+    }
+
+    out = []
+    for c in conditions:
+        if not isinstance(c, dict):
+            continue
+        field = c.get("column")
+        op = c.get("operator")
+        val = c.get("value")
+        if op not in op_map:
+            continue
+        if val is None or (isinstance(val, str) and not val.strip()):
+            continue
+
+        if op in ("contains", "not_contains"):
+            cmp_val = f"%{val}%"
+        elif op == "starts_with":
+            cmp_val = f"{val}%"
+        elif op == "ends_with":
+            cmp_val = f"%{val}"
+        else:
+            cmp_val = val
+
+        # Cot dan xuat: loc SDT qua bang con CRM Lead Phone -> chuyen ve dieu kien tren `name`
+        if field == "primary_phone":
+            negate = op in ("is_not", "not_contains")
+            lookup_op = "=" if op in ("is", "is_not") else "like"
+            parents = frappe.get_all(
+                "CRM Lead Phone",
+                filters=[["phone_number", lookup_op, cmp_val]],
+                pluck="parent",
+            )
+            names = list({p for p in parents if p})
+            if negate:
+                if names:
+                    out.append(["name", "not in", names])
+            else:
+                out.append(["name", "in", names or ["__no_match__"]])
+            continue
+
+        if field not in allowed:
+            continue
+        out.append([field, op_map[op], cmp_val])
+
+    return out
+
+
 @frappe.whitelist()
 def get_leads():
     """Lay danh sach leads voi filter + pagination"""
@@ -179,37 +248,37 @@ def get_leads():
     sort_by = frappe.request.args.get("sort_by", "modified")
     sort_order = frappe.request.args.get("sort_order", "desc")
     
-    filters = {}
+    # Filter co ban (so khop chinh xac)
+    filters = []
     if step:
-        filters["step"] = step
+        filters.append(["step", "=", step])
     if status:
-        filters["status"] = status
+        filters.append(["status", "=", status])
     if campus_id:
-        filters["campus_id"] = campus_id
+        filters.append(["campus_id", "=", campus_id])
     if pic:
-        filters["pic"] = pic
-    
-    or_filters = {}
+        filters.append(["pic", "=", pic])
+
+    # Filter nang cao tu FilterBuilder (FE) — bao gom cot dan xuat primary_phone
+    filters += _parse_lead_filters(frappe.request.args.get("filters"))
+
+    or_filters = []
     if search:
-        or_filters = {
-            "student_name": ["like", f"%{search}%"],
-            "guardian_name": ["like", f"%{search}%"],
-            "name": ["like", f"%{search}%"],
-            "student_code": ["like", f"%{search}%"],
-            "crm_code": ["like", f"%{search}%"],
-        }
-    
-    # Dem tong
-    if search:
-        total = frappe.db.sql("""
-            SELECT COUNT(*) FROM `tabCRM Lead`
-            WHERE ({conditions})
-            AND (student_name LIKE %(search)s OR guardian_name LIKE %(search)s 
-                 OR name LIKE %(search)s OR student_code LIKE %(search)s
-                 OR crm_code LIKE %(search)s)
-        """.format(conditions=" AND ".join([f"`{k}` = %({k})s" for k in filters]) if filters else "1=1"),
-            {**filters, "search": f"%{search}%"}
-        )[0][0]
+        like = f"%{search}%"
+        or_filters = [
+            ["student_name", "like", like],
+            ["guardian_name", "like", like],
+            ["name", "like", like],
+            ["student_code", "like", like],
+            ["crm_code", "like", like],
+        ]
+
+    # Dem tong (ton trong ca filter co ban, filter nang cao va search)
+    if or_filters:
+        total = len(frappe.get_all(
+            "CRM Lead", filters=filters, or_filters=or_filters,
+            fields=["name"], limit_page_length=0,
+        ))
     else:
         total = frappe.db.count("CRM Lead", filters=filters)
     
@@ -220,7 +289,7 @@ def get_leads():
     leads = frappe.get_all(
         "CRM Lead",
         filters=filters,
-        or_filters=or_filters if search else None,
+        or_filters=or_filters or None,
         fields=[
             "name", "step", "status", "crm_code", "student_name", "guardian_name",
             "student_code", "target_grade", "campus_id", "pic",
