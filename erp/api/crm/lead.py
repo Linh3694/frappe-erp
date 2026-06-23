@@ -284,6 +284,45 @@ def get_lead():
     return single_item_response(lead_data)
 
 
+def _resolve_referrer(referrer_name, staff_code, phone):
+    """
+    Get-or-create CRM Referrer cho "Nguoi gioi thieu" tren form ho so.
+
+    - Khong chuan hoa ten: luu dung chuoi nguoi dung nhap.
+    - Bat buoc dinh danh bang Ma nhan vien (staff_code) HOAC SDT (phone). Thieu ca hai -> tra loi.
+    - Tim referrer da co theo dinh danh (uu tien staff_code, roi phone) de khong tao trung;
+      chua co thi tao moi. Nho do tranh loi "Could not find Referrer: ..." khi nhap ten tu do.
+
+    Returns: (referrer_docname | None, error_message | None)
+    """
+    name = referrer_name if isinstance(referrer_name, str) else (referrer_name or "")
+    if not name.strip():
+        # Khong nhap nguoi gioi thieu -> bo qua (truong khong bat buoc)
+        return None, None
+
+    staff_code = (staff_code or "").strip()
+    phone = (phone or "").strip()
+    if not staff_code and not phone:
+        return None, "Nguoi gioi thieu phai co Ma nhan vien hoac SDT de dinh danh"
+
+    existing = None
+    if staff_code:
+        existing = frappe.db.get_value("CRM Referrer", {"staff_code": staff_code}, "name")
+    if not existing and phone:
+        existing = frappe.db.get_value("CRM Referrer", {"phone": phone}, "name")
+    if existing:
+        return existing, None
+
+    ref = frappe.new_doc("CRM Referrer")
+    ref.referrer_name = name  # giu nguyen chuoi nhap, khong chuan hoa
+    if staff_code:
+        ref.staff_code = staff_code
+    if phone:
+        ref.phone = phone
+    ref.insert(ignore_permissions=True)
+    return ref.name, None
+
+
 @frappe.whitelist(methods=["POST"])
 def create_lead():
     """Tao lead moi"""
@@ -318,12 +357,21 @@ def create_lead():
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note",
-            "target_academic_year", "target_semester", "referrer"
+            "target_academic_year", "target_semester"
         ]
         for field in simple_fields:
             if field in data and data[field]:
                 doc.set(field, data[field])
-        
+
+        # Nguoi gioi thieu: get-or-create CRM Referrer, dinh danh bang Ma nhan vien (staff_code) hoac SDT
+        referrer_name, ref_err = _resolve_referrer(
+            data.get("referrer"), data.get("staff_code"), data.get("referrer_phone")
+        )
+        if ref_err:
+            return validation_error_response(ref_err, {"referrer": [ref_err]})
+        if referrer_name:
+            doc.referrer = referrer_name
+
         # Tao o buoc Draft, khong co status
         doc.step = "Draft"
         doc.status = ""
@@ -609,13 +657,31 @@ def update_lead():
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note", "guardian_dob",
-            "target_academic_year", "target_semester", "referrer",
+            "target_academic_year", "target_semester",
             "reject_reason", "reject_detail", "enrollment_date",
             "admission_profile_deadline", "admission_profile_completion_date"
         ]
         for field in updatable_fields:
             if field in data:
                 doc.set(field, data[field])
+
+        # Nguoi gioi thieu: get-or-create CRM Referrer, dinh danh bang Ma nhan vien (staff_code) hoac SDT
+        if "referrer" in data:
+            raw_referrer = data.get("referrer")
+            raw_str = raw_referrer.strip() if isinstance(raw_referrer, str) else ""
+            if not raw_str:
+                doc.referrer = None  # xoa nguoi gioi thieu khi gui rong
+            elif frappe.db.exists("CRM Referrer", raw_str):
+                # Giu/chon referrer da co trong danh muc -> link truc tiep (khong bat nhap lai dinh danh)
+                doc.referrer = raw_str
+            else:
+                # Ten moi -> get-or-create, bat buoc co Ma nhan vien hoac SDT
+                referrer_name, ref_err = _resolve_referrer(
+                    raw_str, doc.get("staff_code"), data.get("referrer_phone")
+                )
+                if ref_err:
+                    return validation_error_response(ref_err, {"referrer": [ref_err]})
+                doc.referrer = referrer_name
 
         # Cap nhat bang con tai khoan ngan hang (toi da 2 dong)
         if "bank_accounts" in data:

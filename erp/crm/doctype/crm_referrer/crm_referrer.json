@@ -1,12 +1,12 @@
 {
  "actions": [],
- "autoname": "field:referrer_name",
  "creation": "2024-01-01 00:00:00.000000",
  "description": "CRM Referrer - Nguoi gioi thieu",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
   "referrer_name",
+  "staff_code",
   "phone",
   "email"
  ],
@@ -16,8 +16,13 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Referrer Name",
-   "reqd": 1,
-   "unique": 1
+   "reqd": 1
+  },
+  {
+   "fieldname": "staff_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Staff Code"
   },
   {
    "fieldname": "phone",
@@ -38,7 +43,6 @@
  "modified_by": "Administrator",
  "module": "Crm",
  "name": "CRM Referrer",
- "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {
