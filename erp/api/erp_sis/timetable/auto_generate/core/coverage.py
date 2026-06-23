@@ -21,6 +21,8 @@ def build_coverage_report(solver: Any, ctx: Any) -> dict:
 	limit_violations = []
 	forbidden_used = []
 	pins_missed = []
+	room_ineligible = []
+	force_pair_broken = []
 	total_short = 0
 
 	for s in ctx.slacks:
@@ -43,6 +45,12 @@ def build_coverage_report(solver: Any, ctx: Any) -> dict:
 		elif kind == "pin_missed":
 			# Pin mềm (relaxable) không đặt được đúng slot mong muốn.
 			pins_missed.append({"rule_id": s.get("rule_id", ""), **scope})
+		elif kind == "room_ineligible":
+			# Lớp–môn buộc xếp nhưng không còn phòng hợp lệ trống (thắt cổ chai phòng).
+			room_ineligible.append({"rule_id": s.get("rule_id", ""), **scope})
+		elif kind == "force_pair_broken":
+			# Ràng buộc cặp tiết (force_pair) không thể thỏa cho lớp–môn này.
+			force_pair_broken.append({"rule_id": s.get("rule_id", ""), **scope})
 
 	if total_required > 0:
 		coverage_pct = round(100.0 * (total_required - total_short) / total_required, 1)
@@ -58,4 +66,6 @@ def build_coverage_report(solver: Any, ctx: Any) -> dict:
 		"limit_violations": limit_violations,
 		"forbidden_used": forbidden_used,
 		"pins_missed": pins_missed,
+		"room_ineligible": room_ineligible,
+		"force_pair_broken": force_pair_broken,
 	}

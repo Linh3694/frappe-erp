@@ -3,13 +3,17 @@ from ..registry import Verb, register_verb
 
 
 def _force_others_off(ctx, c_id, ts_id, day, p_idx):
-	"""Ép các môn khác của lớp rời slot (chỉ khi pin cứng)."""
+	"""Ép các môn khác của lớp rời slot (chỉ khi pin cứng).
+
+	Đi qua ctx.add_hard để pin mang assumption literal → UNSAT core khoanh được pin
+	khi pin mâu thuẫn với ràng buộc cứng khác (no_overlap, teacher bận, nhóm lớp...).
+	"""
 	for other in ctx.inp.class_subjects.get(c_id, []):
 		if other == ts_id:
 			continue
 		k = (c_id, other, day, p_idx)
 		if k in ctx.x:
-			ctx.model.Add(ctx.x[k] == 0)
+			ctx.add_hard(ctx.model.Add(ctx.x[k] == 0))
 
 
 @register_verb("pinned_to_slot", supports=["assignment"], kind="hard", description="Pin (lớp, môn) vào slot cố định")

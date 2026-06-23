@@ -972,20 +972,22 @@ def get_plan_history(name=None):
 
 
 # ---------------------------------------------------------------------------
-# Tổng hợp toàn trường: theo mã ngân sách × phòng ban (số đã duyệt).
-# Chỉ cho người duyệt/giám sát: SIS Finance, CFO/COO/CEO, BOD, System Manager.
+# Tổng hợp: theo mã ngân sách × phòng ban (số dự định).
+# Phạm vi (D3):
+#   - Xem TẤT CẢ phòng: System Manager, SIS Finance, SIS BOD, CFO/COO/CEO.
+#   - Còn lại (trưởng phòng / thành viên): chỉ phòng mình quản lý.
 # ---------------------------------------------------------------------------
 
 @frappe.whitelist(allow_guest=False)
 def get_summary(period=None):
-    is_reviewer = (
-        "System Manager" in frappe.get_roles()
-        or _is_finance()
-        or _is_bod()
-        or _is_plan_approver_role()
-    )
-    if not is_reviewer:
-        return forbidden_response("Bạn không có quyền xem tổng hợp ngân sách")
+    email = _session_email()
+    is_global = _is_finance() or _is_bod() or _is_plan_approver_role()
+    # Không phải vai trò xem toàn trường -> chỉ phòng mình quản lý.
+    allowed = None
+    if not is_global:
+        allowed = _user_managed_units(email)
+        if not allowed:
+            return forbidden_response("Bạn không có quyền xem tổng hợp ngân sách")
 
     period = period or _target_open_period()
     if not period:
@@ -996,10 +998,15 @@ def get_summary(period=None):
             {"period": None, "departments": [], "leaf_amounts": {}}
         )
 
-    # Liệt kê TẤT CẢ phòng ban; mỗi phòng lấy bản MỚI NHẤT (version cao nhất, mọi trạng thái).
+    # Phòng ban trong phạm vi xem; mỗi phòng lấy bản MỚI NHẤT (version cao nhất, mọi trạng thái).
+    dept_list = list_budget_departments()
+    if allowed is not None:
+        allowed_set = set(allowed)
+        dept_list = [d for d in dept_list if d["department"] in allowed_set]
+
     departments = []
     leaf_amounts = {}  # leaf_amounts[budget_code][department] = số DỰ ĐỊNH (planned)
-    for d in list_budget_departments():
+    for d in dept_list:
         dept = d["department"]
         meta = {
             "department": dept,
@@ -1040,6 +1047,56 @@ def get_summary(period=None):
         "leaf_amounts": leaf_amounts,
     }
     return single_item_response(data)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_summary_department(period=None, department=None):
+    """Chi tiết 12 tháng của 1 phòng (bản MỚI NHẤT, mọi trạng thái) cho tab Tổng hợp.
+
+    Quyền (khớp get_summary):
+      - global (TC/BOD/CFO/COO/CEO/System Manager): xem mọi phòng.
+      - còn lại: chỉ phòng mình quản lý.
+    Trả về plan dạng _plan_to_dict (gồm 12 tháng) hoặc plan=None nếu phòng chưa có bản.
+    """
+    data = _get_request_data()
+    period = period or data.get("period")
+    department = department or data.get("department")
+    if not department:
+        return validation_error_response("Thiếu department", {"department": ["Bắt buộc"]})
+
+    email = _session_email()
+    is_global = _is_finance() or _is_bod() or _is_plan_approver_role()
+    if not is_global and department not in _user_managed_units(email):
+        return forbidden_response("Bạn không có quyền xem ngân sách của phòng này")
+
+    period = period or _target_open_period()
+    if not period:
+        recent = frappe.get_all(PERIOD_DT, pluck="name", order_by="creation desc", limit=1)
+        period = recent[0] if recent else None
+
+    sy_id = _period_school_year_id(period) if period else None
+    result = {
+        "period": period,
+        "department": department,
+        "department_name": _unit_name(department),
+        "school_year_id": sy_id,
+        "school_year_title": _school_year_title(sy_id) if sy_id else None,
+        "plan": None,
+    }
+    if not period:
+        return single_item_response(result)
+
+    latest = frappe.get_all(
+        PLAN_DT,
+        filters={"department": department, "period": period},
+        fields=["name"],
+        order_by="version desc, creation desc",
+        limit=1,
+    )
+    if latest:
+        doc = frappe.get_doc(PLAN_DT, latest[0].name)
+        result["plan"] = _plan_to_dict(doc)
+    return single_item_response(result)
 
 
 @frappe.whitelist(allow_guest=False)

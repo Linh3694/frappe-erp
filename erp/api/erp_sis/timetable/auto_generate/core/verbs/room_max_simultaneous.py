@@ -25,19 +25,24 @@ class RoomMaxSimultaneous(Verb):
 			uses.append(use)
 		return uses
 
-	def _apply_limit(self, ctx, room_idx: int, limit: int, *, kind: str, weight: int, tag: str):
+	def _apply_limit(self, ctx, room_idx: int, limit: int, *, kind: str, weight: int, room_id: str = ""):
 		for day in ctx.working_days:
 			for p_idx in range(ctx.num_periods):
 				uses = self._collect_uses(ctx, room_idx, day, p_idx)
 				if not uses:
 					continue
+				# relaxable=True: ở chế độ chẩn đoán, vượt sức chứa phòng nới thành slack
+				# (kind="limit") để định vị "phòng nào quá tải tại slot nào". Lần giải
+				# thật giữ cứng vì le_limit chỉ nới khi ctx.diagnostic.
 				le_limit(
 					ctx,
 					uses,
 					max(1, limit),
 					kind=kind,
 					weight=max(1, weight),
-					tag=f"{tag}_{room_idx}_{day}_{p_idx}",
+					tag=f"room:{room_id or room_idx}:{day}:{p_idx}",
+					rule_id="room_max_simultaneous",
+					relaxable=True,
 				)
 
 	def _limits(self, ctx, params):
@@ -66,7 +71,7 @@ class RoomMaxSimultaneous(Verb):
 				limit_map.get(room_id, global_max),
 				kind="hard",
 				weight=0,
-				tag="rms_hard",
+				room_id=room_id,
 			)
 
 	def build_soft(self, ctx, subject_set, params, weight: int):
@@ -84,7 +89,7 @@ class RoomMaxSimultaneous(Verb):
 				limit_map.get(room_id, global_max),
 				kind="soft",
 				weight=weight,
-				tag="rms_soft",
+				room_id=room_id,
 			)
 		return []
 

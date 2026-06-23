@@ -49,6 +49,7 @@ from .plan import (
     get_plan_history,
     get_plan_versions,
     get_summary,
+    get_summary_department,
     get_my_department,
 )
 
@@ -98,6 +99,7 @@ __all__ = [
     "get_plan_history",
     "get_plan_versions",
     "get_summary",
+    "get_summary_department",
     "get_my_department",
     # Plan Comment
     "list_plan_comments",

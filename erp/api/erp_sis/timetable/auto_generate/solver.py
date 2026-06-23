@@ -352,6 +352,8 @@ def _build_diagnose_block(report: Optional[Dict], started, *, status: str = "Com
 		"limit_violations": report.get("limit_violations", []),
 		"forbidden_used": report.get("forbidden_used", []),
 		"pins_missed": report.get("pins_missed", []),
+		"room_ineligible": report.get("room_ineligible", []),
+		"force_pair_broken": report.get("force_pair_broken", []),
 		"conflict_core": report.get("conflict_core", []),
 		"suspects": report.get("suspects", []),
 	}

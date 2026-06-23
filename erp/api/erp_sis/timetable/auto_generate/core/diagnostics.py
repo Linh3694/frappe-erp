@@ -43,6 +43,8 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 			"limit_violations": [],
 			"forbidden_used": [],
 			"pins_missed": [],
+			"room_ineligible": [],
+			"force_pair_broken": [],
 			"conflict_core": core,
 			"suspects": _core_suspects(core),
 		}
@@ -83,11 +85,50 @@ def _summarize_suspects(report: dict) -> list:
 			),
 		})
 	for lv in report.get("limit_violations", []):
+		tag = lv.get("tag", "") or ""
+		if tag.startswith("room:"):
+			# tag = "room:{room_id}:{day}:{period_idx}" — phòng quá tải (đụng room_max).
+			parts = tag.split(":")
+			room = parts[1] if len(parts) > 1 else ""
+			day = parts[2] if len(parts) > 2 else ""
+			period = parts[3] if len(parts) > 3 else ""
+			out.append({
+				"rule_id": lv.get("rule_id", "") or "room_max_simultaneous",
+				"verb": "room_max_simultaneous",
+				"scope": {"room_id": room, "day": day, "period_idx": period},
+				"message": f"Phòng {room} quá tải: thừa {lv.get('over')} lớp tại {day}/tiết {period}",
+			})
+		else:
+			out.append({
+				"rule_id": lv.get("rule_id", ""),
+				"verb": "",
+				"scope": {"tag": tag},
+				"message": f"Vượt giới hạn {tag} thêm {lv.get('over')} tiết",
+			})
+	# Thiếu phòng hợp lệ — gộp theo (lớp, môn) đếm số slot để báo cáo gọn.
+	room_inelig_agg: dict = {}
+	for ri in report.get("room_ineligible", []):
+		key = (ri.get("class_id"), ri.get("subject_id"))
+		room_inelig_agg[key] = room_inelig_agg.get(key, 0) + 1
+	for (class_id, subject_id), cnt in room_inelig_agg.items():
 		out.append({
-			"rule_id": lv.get("rule_id", ""),
-			"verb": "",
-			"scope": {"tag": lv.get("tag")},
-			"message": f"Vượt giới hạn {lv.get('tag')} thêm {lv.get('over')} tiết",
+			"rule_id": "room_eligibility",
+			"verb": "room_eligibility",
+			"scope": {"class_id": class_id, "subject_id": subject_id},
+			"message": (
+				f"Lớp {class_id} môn {subject_id}: không còn phòng hợp lệ trống ở {cnt} slot "
+				f"(thiếu phòng hoặc đụng giới hạn room_max)"
+			),
+		})
+	for fp in report.get("force_pair_broken", []):
+		out.append({
+			"rule_id": fp.get("rule_id", "") or "system_force_pair",
+			"verb": "force_pair",
+			"scope": {"class_id": fp.get("class_id"), "subject_id": fp.get("subject_id")},
+			"message": (
+				f"Lớp {fp.get('class_id')} môn {fp.get('subject_id')}: không xếp được cặp tiết "
+				f"(force_pair) — xem lại số tiết/buổi/pin"
+			),
 		})
 	for fb in report.get("forbidden_used", []):
 		out.append({

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import List
 
+from .tiers import RELAX_FORBIDDEN_PENALTY, RELAXABLE
+
 
 def eligible_room_indices(inp, class_id: str, ts_id: str, room_index_map: dict) -> List[int]:
 	"""Tập phòng hợp lệ theo môn/lớp:
@@ -36,7 +38,27 @@ def restrict_room_for_assignment(ctx, class_id: str, ts_id: str, valid_indices: 
 			if x_var is None or room_var is None:
 				continue
 			if kind == "hard":
-				ctx.model.AddAllowedAssignments([room_var], allowed).OnlyEnforceIf(x_var)
+				if getattr(ctx, "diagnostic", False):
+					# Chẩn đoán: nới ràng buộc phòng thành slack để định vị "thiếu phòng ở đâu".
+					# x=1 thì hoặc phòng hợp lệ, hoặc đánh dấu ineligible (phạt RELAXABLE).
+					ineligible = ctx.model.NewBoolVar(
+						f"room_inelig_{tag}_{class_id}_{ts_id}_{day}_{p_idx}"
+					)
+					ctx.model.Add(ineligible <= x_var)
+					ctx.model.AddAllowedAssignments([room_var], allowed).OnlyEnforceIf(
+						[x_var, ineligible.Not()]
+					)
+					ctx.add_soft(RELAXABLE, ineligible * (-RELAX_FORBIDDEN_PENALTY))
+					ctx.add_violation(
+						getattr(ctx, "cur_rule_id", "") or "room_eligibility",
+						"room_ineligible",
+						{"class_id": class_id, "subject_id": ts_id, "day": day, "period_idx": p_idx},
+						ineligible,
+					)
+				else:
+					ctx.add_hard(
+						ctx.model.AddAllowedAssignments([room_var], allowed).OnlyEnforceIf(x_var)
+					)
 				continue
 
 			match = ctx.model.NewBoolVar(f"room_match_{tag}_{class_id}_{ts_id}_{day}_{p_idx}")

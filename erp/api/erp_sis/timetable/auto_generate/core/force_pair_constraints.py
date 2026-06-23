@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, List, Tuple
 
 from .helpers import req_map
+from .tiers import RELAX_FORBIDDEN_PENALTY, RELAXABLE
 
 
 def _session_ranges(num_periods: int) -> List[Tuple[int, int]]:
@@ -26,6 +27,27 @@ def apply_force_pair_constraints(ctx: Any, class_id: str, subject_id: str, perio
 	num = ctx.num_periods
 	is_even = periods_per_week % 2 == 0
 	singleton_vars: List[Any] = []
+
+	# Chế độ chẩn đoán: gắn 1 cờ "phá cặp" cho mỗi (lớp, môn) để nới toàn bộ ràng buộc
+	# force_pair của cặp đó thành slack (phạt RELAXABLE) → định vị được force_pair gây
+	# vô nghiệm thay vì trả UNSAT core rỗng. Lần giải thật giữ cứng.
+	fp_broken = None
+	if getattr(ctx, "diagnostic", False):
+		fp_broken = model.NewBoolVar(f"fp_broken_{class_id}_{subject_id}")
+		ctx.add_soft(RELAXABLE, fp_broken * (-RELAX_FORBIDDEN_PENALTY))
+		ctx.add_violation(
+			getattr(ctx, "cur_rule_id", "") or "system_force_pair",
+			"force_pair_broken",
+			{"class_id": class_id, "subject_id": subject_id},
+			fp_broken,
+		)
+
+	def _gate(lits):
+		"""enforce-if cho ràng buộc cứng; ở chẩn đoán thêm fp_broken.Not()."""
+		out = list(lits)
+		if fp_broken is not None:
+			out.append(fp_broken.Not())
+		return out
 
 	for day in ctx.working_days:
 		for h0, h1 in _session_ranges(num):
@@ -52,7 +74,9 @@ def apply_force_pair_constraints(ctx: Any, class_id: str, subject_id: str, perio
 				if is_even:
 					# Tiết/tuần chẵn: mỗi tiết xếp phải có liền kề cùng môn trong buổi
 					if paired_terms:
-						model.AddBoolOr(paired_terms).OnlyEnforceIf(v)
+						model.AddBoolOr(paired_terms).OnlyEnforceIf(_gate([v]))
+					elif fp_broken is not None:
+						model.Add(v == 0).OnlyEnforceIf(fp_broken.Not())
 					else:
 						model.Add(v == 0)
 				else:
@@ -69,7 +93,10 @@ def apply_force_pair_constraints(ctx: Any, class_id: str, subject_id: str, perio
 					singleton_vars.append(singleton)
 
 	if not is_even and singleton_vars:
-		model.Add(sum(singleton_vars) == 1)
+		if fp_broken is not None:
+			model.Add(sum(singleton_vars) == 1).OnlyEnforceIf(fp_broken.Not())
+		else:
+			model.Add(sum(singleton_vars) == 1)
 
 
 def apply_requirement_force_pairs(ctx: Any) -> None:
