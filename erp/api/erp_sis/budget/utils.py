@@ -15,6 +15,7 @@ from frappe import _
 
 # --- Doctype constants ---
 CODE_DT = "ERP Budget Code"
+CODE_DEPT_DT = "ERP Budget Code Department"
 PERIOD_DT = "ERP Budget Period"
 PLAN_DT = "ERP Budget Plan"
 PLAN_LINE_DT = "ERP Budget Plan Line"
@@ -613,6 +614,20 @@ def _settlement_amounts(school_year_id, department):
             continue
         result[code] = (result.get(code) or 0) + (r.get("settlement_amount") or 0)
     return result
+
+
+def _applicable_leaf_codes(department):
+    """Danh sách mã lá active áp dụng cho 1 phòng — dùng seed snapshot lúc tạo bản."""
+    if not department:
+        return []
+    parents = frappe.get_all(CODE_DEPT_DT, filters={"department": department}, pluck="parent")
+    if not parents:
+        return []
+    return frappe.get_all(
+        CODE_DT,
+        filters={"name": ("in", parents), "is_active": 1, "is_group": 0},
+        pluck="name",
+    )
 
 
 def _plan_display_title(doc):

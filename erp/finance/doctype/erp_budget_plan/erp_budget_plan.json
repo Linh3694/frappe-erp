@@ -23,6 +23,7 @@
   "return_reason",
   "lines_section",
   "lines",
+  "applicable_snapshot",
   "totals_section",
   "total_planned",
   "total_approved",
@@ -121,6 +122,14 @@
    "fieldtype": "Table",
    "label": "Dòng ngân sách",
    "options": "ERP Budget Plan Line"
+  },
+  {
+   "fieldname": "applicable_snapshot",
+   "fieldtype": "Long Text",
+   "label": "Snapshot mã áp dụng (JSON)",
+   "hidden": 1,
+   "read_only": 1,
+   "description": "Danh sách mã lá áp dụng đã đóng băng cho bản này (JSON). Seed từ master lúc tạo; cập nhật khi thêm/bớt mã."
   },
   {
    "fieldname": "totals_section",

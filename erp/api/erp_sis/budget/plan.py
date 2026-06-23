@@ -7,6 +7,8 @@ Returned (khi return); Superseded (khi TC unsubmit -> versioning).
 Ngân sách duyệt 1 lần/năm học, không điều chỉnh giữa năm.
 """
 
+import json
+
 import frappe
 from frappe import _
 from frappe.utils import now
@@ -56,6 +58,7 @@ from .utils import (
     _period_school_year_id,
     _previous_school_year_id,
     _settlement_amounts,
+    _applicable_leaf_codes,
     _school_year_title,
     _plan_display_title,
 )
@@ -94,6 +97,12 @@ def _plan_to_dict(doc, with_lines=True):
     data["school_year_id"] = sy_id
     data["school_year_title"] = _school_year_title(sy_id) if sy_id else None
     data["display_title"] = _plan_display_title(doc)
+
+    # Snapshot mã áp dụng đã đóng băng cho bản này (nguồn để FE dựng danh sách, không live master)
+    try:
+        data["applicable_codes"] = json.loads(doc.applicable_snapshot or "[]")
+    except (ValueError, TypeError):
+        data["applicable_codes"] = []
 
     # Quyền của user hiện tại với bước đang chờ (cho FE hiện nút Duyệt / Trả lại)
     can_approve = can_return = False
@@ -383,6 +392,16 @@ def upsert_plan():
                 for m in MONTH_FIELDS:
                     row[m] = l.get(m) or 0
                 doc.append("lines", row)
+
+        # Snapshot mã áp dụng: ưu tiên list FE gửi (đã gồm thêm/bớt mã tay);
+        # nếu không gửi mà là bản mới chưa có snapshot -> seed từ master hiện hành.
+        applicable_codes = _parse(data.get("applicable_codes"))
+        if applicable_codes is not None:
+            doc.applicable_snapshot = json.dumps(
+                [c for c in applicable_codes if c]
+            )
+        elif not doc.name and not doc.applicable_snapshot:
+            doc.applicable_snapshot = json.dumps(_applicable_leaf_codes(department))
 
         is_new = not doc.name
         new_snapshot = _plan_line_snapshot(doc)
@@ -754,6 +773,8 @@ def _make_amendment_doc(src, period, email):
     new_doc.version = _next_version_in_period(src.department, src.period)
     new_doc.is_current = 0
     new_doc.amends = src.name
+    # Giữ nguyên snapshot mã áp dụng đã đóng băng của bản gốc
+    new_doc.applicable_snapshot = src.applicable_snapshot
     for l in src.lines:
         if l.get("is_removed"):
             continue
@@ -790,6 +811,8 @@ def _make_new_plan_doc(department, period, email):
     new_doc.version = _next_version_in_period(department, period)
     new_doc.is_current = 1
     new_doc.title = _plan_display_title(new_doc)
+    # Đóng băng danh sách mã áp dụng tại thời điểm tạo bản (seed từ master)
+    new_doc.applicable_snapshot = json.dumps(_applicable_leaf_codes(department))
     new_doc.insert(ignore_permissions=True)
     _append_history(new_doc.name, "Tạo mới ngân sách", user=email)
     return new_doc
