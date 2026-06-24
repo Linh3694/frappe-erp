@@ -10,12 +10,13 @@ Tái sử dụng helper từ reports.py: phân quyền theo vai trò (PIC chỉ 
 khoảng thời gian, bộ lọc chiều + bộ lọc động trên trường CRM Lead.
 """
 
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import frappe
 
 from erp.utils.api_response import paginated_response, success_response
-from erp.api.crm.utils import check_crm_permission
+from erp.api.crm.utils import check_crm_permission, STEP_STATUSES, QLEAD_TEST_STATUSES
 from erp.api.crm import reports as r
 
 # Trạng thái HS theo loại hoạt động (đồng bộ doctype)
@@ -29,8 +30,18 @@ _COURSE_STUDENT_STATUSES = [
     "refunded",
 ]
 
-# Bước CRM hiển thị trong báo cáo trạng thái theo khối
+# Báo cáo trạng thái theo khối — thứ tự bước hiển thị + thứ tự trạng thái con QLead
 _GRADE_REPORT_STEPS = ["Lead", "QLead", "Enrolled", "Nghi hoc", "Verify", "Draft"]
+_DEAL_STATUS_ORDER = ["Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Tu choi"]
+
+
+def _order_status_values(present, canonical: List[str]) -> List[str]:
+    """Sắp xếp trạng thái: theo thứ tự chuẩn trước, phần dư sort A→Z, rỗng cuối."""
+    present_set = set(present)
+    ordered = [v for v in canonical if v in present_set]
+    extras = sorted(v for v in present_set if v not in canonical and v != "")
+    tail = [""] if "" in present_set else []
+    return ordered + extras + tail
 
 # Fieldtype meta → kiểu cột filter phía frontend (types/filter.ts)
 _FIELDTYPE_TO_FILTER_TYPE = {
@@ -96,30 +107,104 @@ def get_lead_filter_fields():
 # --------------------------------------------------------------------------- #
 @frappe.whitelist()
 def get_status_by_grade():
-    """Số lượng CRM Lead hiện tại theo khối (target_grade) × bước (step)."""
+    """CRM Lead theo khối × bước × trạng thái.
+
+    Mỗi bước tách theo `status`; riêng QLead bổ sung thêm `test_status`
+    (Khảo sát đầu vào) và `deal_status` (Thỏa thuận) làm các nhóm con.
+    Tổng theo khối chỉ cộng cột trạng thái chính (status), không cộng
+    cột test/deal (vì là chiều bổ sung của cùng tập QLead).
+    """
     check_crm_permission()
     args = frappe.request.args or {}
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
-    rows = frappe.db.sql(
+    status_rows = frappe.db.sql(
         f"""
         SELECT IFNULL(NULLIF(TRIM(l.`target_grade`), ''), '-') AS grade,
                l.`step` AS step,
+               IFNULL(TRIM(l.`status`), '') AS status,
                COUNT(*) AS cnt
         FROM `tabCRM Lead` l
         WHERE l.`step` IN ('Lead','QLead','Enrolled','Nghi hoc','Verify','Draft')
           AND {dim_sql}
-        GROUP BY grade, l.`step`
+        GROUP BY grade, l.`step`, status
         """,
         dim_binds,
         as_dict=True,
     )
 
-    grade_map: Dict[str, Dict[str, int]] = {}
-    for row in rows:
-        g = row["grade"]
-        grade_map.setdefault(g, {})
-        grade_map[g][row["step"]] = int(row["cnt"])
+    def _qlead_sub_rows(field: str):
+        return frappe.db.sql(
+            f"""
+            SELECT IFNULL(NULLIF(TRIM(l.`target_grade`), ''), '-') AS grade,
+                   IFNULL(TRIM(l.`{field}`), '') AS val,
+                   COUNT(*) AS cnt
+            FROM `tabCRM Lead` l
+            WHERE l.`step` = 'QLead'
+              AND IFNULL(TRIM(l.`{field}`), '') != ''
+              AND {dim_sql}
+            GROUP BY grade, val
+            """,
+            dim_binds,
+            as_dict=True,
+        )
+
+    test_rows = _qlead_sub_rows("test_status")
+    deal_rows = _qlead_sub_rows("deal_status")
+
+    # Thu thập trạng thái xuất hiện + giá trị theo khối
+    step_statuses: Dict[str, set] = defaultdict(set)
+    values_by_grade: Dict[str, Dict[str, int]] = defaultdict(dict)
+    total_by_grade: Dict[str, int] = defaultdict(int)
+
+    for row in status_rows:
+        step_statuses[row["step"]].add(row["status"])
+        key = f"{row['step']}|status|{row['status']}"
+        values_by_grade[row["grade"]][key] = int(row["cnt"])
+        total_by_grade[row["grade"]] += int(row["cnt"])
+
+    test_vals: set = set()
+    for row in test_rows:
+        test_vals.add(row["val"])
+        values_by_grade[row["grade"]][f"QLead|test_status|{row['val']}"] = int(row["cnt"])
+
+    deal_vals: set = set()
+    for row in deal_rows:
+        deal_vals.add(row["val"])
+        values_by_grade[row["grade"]][f"QLead|deal_status|{row['val']}"] = int(row["cnt"])
+
+    # Dựng cấu trúc nhóm cột (bước → nhóm con → cột trạng thái)
+    groups: List[Dict[str, Any]] = []
+    for step in _GRADE_REPORT_STEPS:
+        if step not in step_statuses:
+            continue
+        sts = _order_status_values(step_statuses[step], STEP_STATUSES.get(step, []))
+        if not sts:
+            continue
+        sections: List[Dict[str, Any]] = [
+            {
+                "field": "status",
+                "columns": [{"key": f"{step}|status|{s}", "status": s} for s in sts],
+            }
+        ]
+        if step == "QLead":
+            if test_vals:
+                tv = _order_status_values(test_vals, QLEAD_TEST_STATUSES)
+                sections.append(
+                    {
+                        "field": "test_status",
+                        "columns": [{"key": f"QLead|test_status|{v}", "status": v} for v in tv],
+                    }
+                )
+            if deal_vals:
+                dv = _order_status_values(deal_vals, _DEAL_STATUS_ORDER)
+                sections.append(
+                    {
+                        "field": "deal_status",
+                        "columns": [{"key": f"QLead|deal_status|{v}", "status": v} for v in dv],
+                    }
+                )
+        groups.append({"step": step, "sections": sections})
 
     def _grade_sort_key(g: str):
         try:
@@ -128,20 +213,18 @@ def get_status_by_grade():
             return (1, g)
 
     out_rows = []
-    for g in sorted(grade_map.keys(), key=_grade_sort_key):
-        by_step = grade_map[g]
-        total = sum(by_step.values())
+    for g in sorted(values_by_grade.keys(), key=_grade_sort_key):
         out_rows.append(
             {
                 "target_grade": g,
-                "by_step": {s: by_step.get(s, 0) for s in _GRADE_REPORT_STEPS},
-                "total": total,
+                "total": total_by_grade.get(g, 0),
+                "values": values_by_grade.get(g, {}),
             }
         )
 
     return success_response(
         {
-            "steps": _GRADE_REPORT_STEPS,
+            "groups": groups,
             "rows": out_rows,
             "meta": {"pic_restricted_to_self": r._should_restrict_to_own_pic_only()},
         }
