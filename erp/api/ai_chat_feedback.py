@@ -10,6 +10,8 @@ import json
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 from frappe.utils import get_table_name
 
 from erp.utils.api_response import (
@@ -185,13 +187,12 @@ def admin_list():
         search = (data.get("search") or request_args.get("search") or "").strip()
         or_filters = None
         if search:
-            or_filters = [
-                ["user_question", "like", f"%{search}%"],
-                ["ai_answer", "like", f"%{search}%"],
-                ["user_email", "like", f"%{search}%"],
-                ["user_name", "like", f"%{search}%"],
-                ["message_id", "like", f"%{search}%"],
-            ]
+            _names = search_names(
+                DOCTYPE,
+                ["user_question", "ai_answer", "user_email", "user_name", "message_id"],
+                search,
+            )
+            or_filters = [["name", "in", _names or ["__no_match__"]]]
 
         rows = frappe.get_all(
             DOCTYPE,

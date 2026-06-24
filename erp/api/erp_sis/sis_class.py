@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 import json
 from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.search import build_search_condition
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -35,11 +36,10 @@ def search_classes(search_term: str = None):
         where_clauses = ["campus_id = %s"]
         params = [campus_id]
         if search_term and str(search_term).strip():
-            # For title: contains match (can be anywhere)
-            search_clean = str(search_term).strip()
-            like_contains = f"%{search_clean}%"  # Contains (for title)
-            where_clauses.append("(LOWER(title) LIKE LOWER(%s))")
-            params.extend([like_contains])
+            search_frag, search_params = build_search_condition(["title"], search_term)
+            if search_frag:
+                where_clauses.append(search_frag)
+                params.extend(search_params)
         conditions = " AND ".join(where_clauses)
         frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
         

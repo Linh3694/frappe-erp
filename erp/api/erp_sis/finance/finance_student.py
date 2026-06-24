@@ -5,6 +5,8 @@ Quản lý học sinh trong năm tài chính.
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 import json
 
 from erp.utils.api_response import (
@@ -60,8 +62,9 @@ def get_finance_students(finance_year_id=None, search=None, page=1, page_size=20
         params = {"finance_year_id": finance_year_id}
         
         if search:
-            where_clauses.append("(student_name LIKE %(search)s OR student_code LIKE %(search)s)")
-            params["search"] = f"%{search}%"
+            _names = search_names("SIS Finance Student", ["student_name", "student_code"], search)
+            where_clauses.append("name IN %(search_names)s")
+            params["search_names"] = _names or ["__no_match__"]
         
         where_sql = " AND ".join(where_clauses)
         
@@ -80,7 +83,7 @@ def get_finance_students(finance_year_id=None, search=None, page=1, page_size=20
         # Build WHERE clause với prefix fs. (chỉ thay đổi tên cột, không thay đổi placeholder)
         where_clauses_with_prefix = ["fs.finance_year_id = %(finance_year_id)s"]
         if search:
-            where_clauses_with_prefix.append("(fs.student_name LIKE %(search)s OR fs.student_code LIKE %(search)s)")
+            where_clauses_with_prefix.append("fs.name IN %(search_names)s")
         where_sql_with_prefix = " AND ".join(where_clauses_with_prefix)
         
         query_params = {**params, "page_size": page_size, "offset": offset}

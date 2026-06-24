@@ -7,6 +7,8 @@ API endpoints cho admin quản lý kỳ học bổng và đơn đăng ký.
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 from frappe.utils import nowdate, getdate, now
 import json
 from erp.utils.api_response import (
@@ -823,8 +825,9 @@ def get_applications():
             values["status"] = status
         
         if search:
-            conditions.append("(app.student_name LIKE %(search)s OR app.student_code LIKE %(search)s)")
-            values["search"] = f"%{search}%"
+            _names = search_names("SIS Scholarship Application", ["student_name", "student_code"], search)
+            conditions.append("app.name IN %(search_names)s")
+            values["search_names"] = _names or ["__no_match__"]
         
         # Filter theo cấp học user được phân quyền (nếu không phải admin)
         if allowed_stages:

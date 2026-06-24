@@ -7,6 +7,8 @@ API endpoints cho admin quản lý cấu hình và đơn tái ghi danh.
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 from frappe.utils import nowdate, getdate, now
 import json
 import os
@@ -916,8 +918,9 @@ def get_submissions():
         
         # Search by student name or code
         if search:
-            conditions.append("(re.student_name LIKE %(search)s OR re.student_code LIKE %(search)s)")
-            values["search"] = f"%{search}%"
+            _names = search_names("SIS Re-enrollment", ["student_name", "student_code"], search)
+            conditions.append("re.name IN %(search_names)s")
+            values["search_names"] = _names or ["__no_match__"]
         
         # Filter theo lớp (current_class - tên lớp hiển thị)
         if class_name:

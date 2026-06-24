@@ -3,6 +3,7 @@ from datetime import timedelta
 
 import frappe
 from frappe.utils import now, nowdate, getdate
+from erp.utils.search import search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -405,19 +406,17 @@ def list_transactions():
 
     or_filters = {}
     if borrower_id:
-        or_filters = {
-            "borrower_id": ["like", f"%{borrower_id}%"],
-            "student_code": ["like", f"%{borrower_id}%"],
-            "employee_code": ["like", f"%{borrower_id}%"],
-        }
+        _bnames = search_names(
+            TRANSACTION_DTYPE, ["borrower_id", "student_code", "employee_code"], borrower_id
+        )
+        or_filters = {"name": ["in", _bnames or ["__no_match__"]]}
     if search:
-        or_filters = {
-            "borrower_id": ["like", f"%{search}%"],
-            "borrower_name": ["like", f"%{search}%"],
-            "student_code": ["like", f"%{search}%"],
-            "employee_code": ["like", f"%{search}%"],
-            "name": ["like", f"%{search}%"],
-        }
+        _names = search_names(
+            TRANSACTION_DTYPE,
+            ["borrower_name", "borrower_id", "student_code", "employee_code", "name"],
+            search,
+        )
+        or_filters = {"name": ["in", _names or ["__no_match__"]]}
 
     try:
         total = frappe.db.count(TRANSACTION_DTYPE, filters=filters)

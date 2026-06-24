@@ -3,6 +3,8 @@
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 import json
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
@@ -125,55 +127,21 @@ def get_announcements():
         # Get search query
         search_query = data.get("search")
         if search_query:
-            # Search in both English and Vietnamese titles and content
-            search_filters = {
-                "status": "sent",
-                "title_en": ["like", f"%{search_query}%"]
-            }
-            if campus_id:
-                search_filters["campus_id"] = campus_id
-
-            # Try searching in title_en first
-            search_results = frappe.get_all(
+            ann_names = search_names(
                 "SIS Announcement",
-                filters=search_filters,
-                fields=["name"]
+                ["title_en", "title_vn", "content_en", "content_vn"],
+                search_query,
             )
-
-            # If no results, search in title_vn
-            if not search_results:
-                search_filters["title_en"] = ["!=", None]  # Reset title_en filter
-                search_filters["title_vn"] = ["like", f"%{search_query}%"]
-                search_results = frappe.get_all(
-                    "SIS Announcement",
-                    filters=search_filters,
-                    fields=["name"]
-                )
-
-            # If still no results, search in content
-            if not search_results:
-                search_filters["title_vn"] = ["!=", None]  # Reset title_vn filter
-                search_filters["content_en"] = ["like", f"%{search_query}%"]
-                search_results = frappe.get_all(
-                    "SIS Announcement",
-                    filters=search_filters,
-                    fields=["name"]
-                )
-
-                if not search_results:
-                    search_filters["content_en"] = ["!=", None]  # Reset content_en filter
-                    search_filters["content_vn"] = ["like", f"%{search_query}%"]
-                    search_results = frappe.get_all(
-                        "SIS Announcement",
-                        filters=search_filters,
-                        fields=["name"]
-                    )
-
-            if search_results:
-                announcement_names = [result.name for result in search_results]
-                filters["name"] = ["in", announcement_names]
+            # Chỉ giữ thông báo đã gửi + đúng campus (giữ ràng buộc như cũ)
+            if ann_names:
+                visible_filters = {"name": ["in", ann_names], "status": "sent"}
+                if campus_id:
+                    visible_filters["campus_id"] = campus_id
+                ann_names = frappe.get_all("SIS Announcement", filters=visible_filters, pluck="name")
+            if ann_names:
+                filters["name"] = ["in", ann_names]
             else:
-                # No search results found
+                # Không có kết quả khớp search
                 return list_response(
                     data=[],
                     meta={

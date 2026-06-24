@@ -9,6 +9,7 @@ Handles health reports from homeroom teachers and porridge registration
 import frappe
 from frappe import _
 from frappe.utils import today, now, get_datetime, escape_html
+from erp.utils.search import build_search_condition
 import json
 from erp.utils.email_service import send_email_via_service
 from erp.utils.api_response import (
@@ -650,9 +651,10 @@ def get_porridge_registration_list():
         
         # Filter tìm kiếm
         if search:
-            query += " AND (hr.student_name LIKE %s OR hr.student_code LIKE %s OR hr.class_name LIKE %s)"
-            search_pattern = f"%{search}%"
-            params.extend([search_pattern, search_pattern, search_pattern])
+            _frag, _p = build_search_condition(["hr.student_name", "hr.student_code", "hr.class_name"], search)
+            if _frag:
+                query += " AND " + _frag
+                params.extend(_p)
         
         query += " ORDER BY hr.creation DESC"
         
@@ -748,9 +750,10 @@ def get_porridge_list():
             params.append(campus)
         
         if search:
-            query += " AND (hr.student_name LIKE %s OR hr.student_code LIKE %s OR hr.class_name LIKE %s)"
-            search_pattern = f"%{search}%"
-            params.extend([search_pattern, search_pattern, search_pattern])
+            _frag, _p = build_search_condition(["hr.student_name", "hr.student_code", "hr.class_name"], search)
+            if _frag:
+                query += " AND " + _frag
+                params.extend(_p)
         
         query += " ORDER BY hr.student_name ASC"
         

@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 
 import frappe
 from frappe.utils import now
+from erp.utils.search import search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -68,12 +69,12 @@ def list_titles():
         
         # Thêm search nếu có
         if search and search.strip():
-            search_term = f"%{search.strip()}%"
-            or_filters = [
-                ["title", "like", search_term],
-                ["library_code", "like", search_term],
-                ["authors", "like", search_term],
-            ]
+            _names = search_names(
+                TITLE_DTYPE,
+                ["title", "library_code", "authors"],
+                search,
+            )
+            or_filters = [["name", "in", _names or ["__no_match__"]]]
             debug_info["or_filters"] = or_filters
         
         # Lấy data với pagination

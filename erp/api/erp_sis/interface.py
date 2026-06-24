@@ -5,6 +5,8 @@ Handles interface image upload, management, and WebP conversion
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 import os
 import uuid
 from PIL import Image, ImageOps
@@ -304,7 +306,8 @@ def get_interfaces():
         filters = {}
 
         if search:
-            filters["title"] = ["like", f"%{search}%"]
+            _names = search_names("SIS Interface", ["title"], search)
+            filters["name"] = ["in", _names or ["__no_match__"]]
 
         if is_active is not None:
             filters["is_active"] = int(is_active)

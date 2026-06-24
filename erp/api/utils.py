@@ -29,13 +29,9 @@ VIETNAMESE_SURNAMES = [
 
 
 def remove_vietnamese_tones(text: str) -> str:
-    """Loại bỏ dấu tiếng Việt để so sánh"""
-    if not text:
-        return ''
-    text = unicodedata.normalize('NFD', text)
-    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
-    text = text.replace('đ', 'd').replace('Đ', 'D')
-    return text.lower()
+    """Loại bỏ dấu tiếng Việt để so sánh (uỷ quyền về erp.utils.search.strip_accents)."""
+    from erp.utils.search import strip_accents
+    return strip_accents(text)
 
 
 def is_vietnamese_surname(word: str) -> bool:

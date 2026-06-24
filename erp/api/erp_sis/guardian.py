@@ -4,6 +4,7 @@ from frappe.utils import nowdate, get_datetime
 import json
 import re
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.search import build_search_condition
 from erp.utils.api_response import (
     success_response, error_response, list_response,
     single_item_response, validation_error_response,
@@ -1239,9 +1240,13 @@ def search_guardians(search_term=None, page=1, limit=20):
         where_clauses = []
         params = []
         if search_term and str(search_term).strip():
-            like = f"%{str(search_term).strip()}%"
-            where_clauses.append("(LOWER(guardian_name) LIKE LOWER(%s) OR LOWER(guardian_id) LIKE LOWER(%s) OR LOWER(phone_number) LIKE LOWER(%s) OR LOWER(email) LIKE LOWER(%s))")
-            params.extend([like, like, like, like])
+            search_frag, search_params = build_search_condition(
+                ["guardian_name", "guardian_id", "phone_number", "email"],
+                search_term,
+            )
+            if search_frag:
+                where_clauses.append(search_frag)
+                params.extend(search_params)
         
         conditions = " AND ".join(where_clauses) if where_clauses else "1=1"
         frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
@@ -1273,33 +1278,7 @@ def search_guardians(search_term=None, page=1, limit=20):
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(guardians)} guardians")
 
-        # Post-filter in Python for better VN diacritics handling and strict contains
-        def normalize_text(text: str) -> str:
-            try:
-                import unicodedata
-                if not text:
-                    return ''
-                text = unicodedata.normalize('NFD', text)
-                text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
-                # Handle Vietnamese specific characters
-                text = text.replace('đ', 'd').replace('Đ', 'D')
-                return text.lower()
-            except Exception:
-                return (text or '').lower()
-
-        if search_term and str(search_term).strip():
-            norm_q = normalize_text(str(search_term).strip())
-            pre_count = len(guardians)
-            guardians = [
-                g for g in guardians
-                if (
-                    normalize_text(g.get('guardian_name', '')) .find(norm_q) != -1
-                    or (g.get('guardian_id') or '').lower().find(norm_q.lower()) != -1
-                    or (g.get('phone_number') or '').lower().find(norm_q.lower()) != -1
-                    or (g.get('email') or '').lower().find(norm_q.lower()) != -1
-                )
-            ]
-            frappe.logger().info(f"POST-FILTERED {pre_count} -> {len(guardians)} using normalized query='{norm_q}'")
+        # Khớp tên/dấu/đầu-từ đã xử lý ở SQL (build_search_condition) — bỏ hậu-lọc Python
         
         # Get total count (parameterized)
         count_query = (

@@ -5,6 +5,8 @@ Quản lý đơn hàng với cấu trúc milestones và fee_lines (version 2).
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 import json
 
 from erp.utils.api_response import (
@@ -645,8 +647,9 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
         params = {"order_id": order_id}
         
         if search:
-            where_clauses.append("(os.student_name LIKE %(search)s OR os.student_code LIKE %(search)s)")
-            params["search"] = f"%{search}%"
+            _names = search_names("SIS Finance Order Student", ["student_name", "student_code"], search)
+            where_clauses.append("os.name IN %(search_names)s")
+            params["search_names"] = _names or ["__no_match__"]
         
         if data_status:
             where_clauses.append("os.data_status = %(data_status)s")

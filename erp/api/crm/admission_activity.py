@@ -5,6 +5,7 @@ CRM Admission Activity API - CRUD Sự kiện và Khoá học tuyển sinh
 from collections import defaultdict
 
 import frappe
+from erp.utils.search import search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -573,11 +574,7 @@ def get_event_students():
 
     or_filters = None
     if search and search.strip():
-        lead_ids = frappe.db.sql("""
-            SELECT name FROM `tabCRM Lead`
-            WHERE name LIKE %(s)s OR crm_code LIKE %(s)s OR student_name LIKE %(s)s
-        """, {"s": f"%{search.strip()}%"}, as_dict=True)
-        lead_names = [r["name"] for r in lead_ids]
+        lead_names = search_names("CRM Lead", ["name", "crm_code", "student_name"], search.strip())
         if not lead_names:
             return list_response(
                 [],
@@ -1387,11 +1384,7 @@ def get_course_students():
     or_filters = None
     if search and search.strip():
         # Tìm theo tên lead, crm_code, student_name
-        lead_ids = frappe.db.sql("""
-            SELECT name FROM `tabCRM Lead`
-            WHERE name LIKE %(s)s OR crm_code LIKE %(s)s OR student_name LIKE %(s)s
-        """, {"s": f"%{search.strip()}%"}, as_dict=True)
-        lead_names = [r["name"] for r in lead_ids]
+        lead_names = search_names("CRM Lead", ["name", "crm_code", "student_name"], search.strip())
         if not lead_names:
             return list_response([], "Thành công", meta={"summary": _get_course_student_summary(course_id)})
         or_filters = {"crm_lead_id": ["in", lead_names]}

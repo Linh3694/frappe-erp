@@ -3,6 +3,7 @@ from typing import Dict, Any
 
 import frappe
 from frappe.utils import now
+from erp.utils.search import search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -53,7 +54,8 @@ def list_events():
         
         filters: Dict[str, Any] = {}
         if search:
-            filters["title"] = ["like", f"%{search}%"]
+            _names = search_names(EVENT_DTYPE, ["title"], search)
+            filters["name"] = ["in", _names or ["__no_match__"]]
         
         events = frappe.get_all(
             EVENT_DTYPE,

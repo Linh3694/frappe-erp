@@ -9,6 +9,7 @@ from erp.utils.api_response import (
 
 from ._constants import BOOK_INTRO_DTYPE, TITLE_DTYPE
 from ._common import _require_library_role, _get_json_payload
+from erp.utils.search import search_names
 
 @frappe.whitelist(allow_guest=False)
 def list_book_introductions():
@@ -33,18 +34,14 @@ def list_book_introductions():
         # Build query
         if search:
             # Tìm kiếm trong title hoặc title_id
-            or_filters = [
-                ["title", "like", f"%{search}%"],
-            ]
+            intro_names = search_names(BOOK_INTRO_DTYPE, ["title"], search)
+            or_filters = [["name", "in", intro_names or ["__no_match__"]]]
             
             # Lấy danh sách title_id match với search
-            title_ids = frappe.db.sql("""
-                SELECT name FROM `tabSIS Library Title`
-                WHERE title LIKE %(search)s
-            """, {"search": f"%{search}%"}, as_dict=True)
-            
+            title_ids = search_names(TITLE_DTYPE, ["title"], search)
+
             if title_ids:
-                or_filters.append(["title_id", "in", [t.name for t in title_ids]])
+                or_filters.append(["title_id", "in", title_ids])
             
             items = frappe.get_all(
                 BOOK_INTRO_DTYPE,

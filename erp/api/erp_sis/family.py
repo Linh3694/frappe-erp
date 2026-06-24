@@ -11,6 +11,7 @@ from erp.utils.api_response import (
     not_found_response, forbidden_response, paginated_response
 )
 from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.search import build_search_condition
 
 
 def _find_existing_family_for_student(student_id: str, exclude_family: str | None = None):
@@ -1583,9 +1584,13 @@ def search_families(search_term=None, page=1, limit=20):
             params.extend([campus_id, campus_id, campus_id])
 
         if search_term and str(search_term).strip():
-            like = f"%{str(search_term).strip()}%"
-            where_clauses.append("(LOWER(f.family_code) LIKE LOWER(%s) OR LOWER(s.student_name) LIKE LOWER(%s) OR LOWER(g.guardian_name) LIKE LOWER(%s))")
-            params.extend([like, like, like])
+            search_frag, search_params = build_search_condition(
+                ["f.family_code", "s.student_name", "g.guardian_name"],
+                search_term,
+            )
+            if search_frag:
+                where_clauses.append(search_frag)
+                params.extend(search_params)
         
         conditions = " AND ".join(where_clauses)
         frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")

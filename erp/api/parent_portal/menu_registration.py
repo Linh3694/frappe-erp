@@ -7,6 +7,8 @@ API endpoints cho phụ huynh đăng ký suất ăn Á/Âu qua Parent Portal.
 
 import frappe
 from frappe import _
+
+from erp.utils.search import build_search_condition
 from frappe.utils import nowdate, getdate, now, get_first_day, get_last_day
 import json
 from datetime import datetime, timedelta
@@ -1473,17 +1475,17 @@ def get_period_registrations(
             search_clause = ""
             search_params = ()
             if search:
-                sp = f"%{search}%"
-                search_clause = """
-                    AND (
-                        s.student_name LIKE %s OR s.student_code LIKE %s
+                frag_s, params_s = build_search_condition(["s.student_name", "s.student_code"], search)
+                frag_c, params_c = build_search_condition(["cx.title"], search)
+                search_clause = f"""
+                    AND ({frag_s}
                         OR EXISTS (
                             SELECT 1 FROM `tabSIS Class` cx
-                            WHERE cx.name = inc.class_id AND cx.title LIKE %s
+                            WHERE cx.name = inc.class_id AND {frag_c}
                         )
                     )
                 """
-                search_params = (sp, sp, sp)
+                search_params = tuple(params_s) + tuple(params_c)
 
             count_sql = f"""
                 SELECT COUNT(*) AS cnt
@@ -1629,17 +1631,17 @@ def get_period_registrations(
         search_clause = ""
         search_params = ()
         if search:
-            sp = f"%{search}%"
-            search_clause = """
-                    AND (
-                        s.student_name LIKE %s OR s.student_code LIKE %s
+            frag_s, params_s = build_search_condition(["s.student_name", "s.student_code"], search)
+            frag_c, params_c = build_search_condition(["cx.title"], search)
+            search_clause = f"""
+                    AND ({frag_s}
                         OR EXISTS (
                             SELECT 1 FROM `tabSIS Class` cx
-                            WHERE cx.name = inc.class_id AND cx.title LIKE %s
+                            WHERE cx.name = inc.class_id AND {frag_c}
                         )
                     )
                 """
-            search_params = (sp, sp, sp)
+            search_params = tuple(params_s) + tuple(params_c)
 
         count_sql = f"""
                 SELECT COUNT(*) AS cnt

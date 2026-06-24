@@ -5,6 +5,8 @@ Quản lý chi tiết học sinh trong đơn hàng và trạng thái thanh toán
 
 import frappe
 from frappe import _
+
+from erp.utils.search import search_names
 from frappe.utils import nowdate
 import json
 
@@ -61,8 +63,9 @@ def get_order_items(order_id=None, search=None, payment_status=None, page=1, pag
         params = {"order_id": order_id}
         
         if search:
-            where_clauses.append("(foi.student_name LIKE %(search)s OR foi.student_code LIKE %(search)s)")
-            params["search"] = f"%{search}%"
+            _names = search_names("SIS Finance Order Item", ["student_name", "student_code"], search)
+            where_clauses.append("foi.name IN %(search_names)s")
+            params["search_names"] = _names or ["__no_match__"]
         
         if payment_status:
             where_clauses.append("foi.payment_status = %(payment_status)s")

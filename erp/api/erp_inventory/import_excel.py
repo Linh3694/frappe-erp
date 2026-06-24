@@ -13,6 +13,7 @@ from erp.utils.api_response import error_response, validation_error_response
 from erp.api.erp_inventory.inventory_helpers import (
 	DEVICE_TYPES,
 	VALID_STATUSES,
+	_specs_from_doc,
 	apply_specs_to_doc,
 	normalize_device_type,
 	parse_request_data,
@@ -21,6 +22,21 @@ from erp.api.erp_inventory.inventory_helpers import (
 	resolve_user_link,
 	sync_assigned_users,
 	sync_current_holder_from_assigned,
+)
+
+# Dùng chung định nghĩa cột với export/template (single source of truth)
+from erp.api.erp_inventory.inventory_excel_schema import (
+	HEADER_EMAIL,
+	HEADER_HOLDER_NAME,
+	HEADER_MANUFACTURER,
+	HEADER_NAME_DISPLAY,
+	HEADER_RELEASE_YEAR,
+	HEADER_ROOM,
+	HEADER_SERIAL,
+	HEADER_STATUS,
+	HEADER_SUBTYPE,
+	SPEC_HEADER_ALIASES,
+	STATUS_LABEL_TO_CODE,
 )
 
 
@@ -51,9 +67,38 @@ def _read_excel_sheets(file_path):
 def _cell_str(val):
 	if val is None:
 		return ""
-	if isinstance(val, float) and str(val) == "nan":
-		return ""
+	if isinstance(val, float):
+		if val != val:  # NaN
+			return ""
+		# pandas đọc mã phòng / IP / số nguyên thành float (101 → 101.0) — bỏ ".0"
+		if val.is_integer():
+			return str(int(val))
 	return str(val).strip()
+
+
+def _pick(row, *names):
+	"""Đọc ô đầu tiên có giá trị theo danh sách tên cột (hỗ trợ header tiếng Việt)."""
+	for n in names:
+		v = _cell_str(row.get(n))
+		if v:
+			return v
+	return ""
+
+
+def _device_signature(doc):
+	"""Chữ ký so sánh để phân biệt 'update' với 'giữ nguyên' khi re-import."""
+	return {
+		"name_display": doc.name_display,
+		"device_subtype": doc.device_subtype,
+		"manufacturer": doc.manufacturer,
+		"release_year": doc.release_year,
+		"status": doc.status,
+		"room": doc.room,
+		"broken_reason": doc.broken_reason,
+		"broken_description": doc.broken_description,
+		"current_holder_user": doc.current_holder_user,
+		"specs": _specs_from_doc(doc),
+	}
 
 
 def _find_device_by_legacy_or_serial(mongo_id, serial, device_type):
@@ -86,38 +131,41 @@ def import_devices_from_excel_file(file_path, device_type):
 	errors = []
 	created = 0
 	updated = 0
+	unchanged = 0
 	mongo_map = {}
 
 	for idx, row in device_sheet.iterrows():
 		excel_row = int(idx) + 2
 		mongo_id = _cell_str(row.get("mongo_id") or row.get("legacy_mongo_id") or row.get("_id"))
-		serial = _cell_str(row.get("serial") or row.get("Serial"))
-		name_display = _cell_str(row.get("name") or row.get("name_display") or row.get("Tên thiết bị"))
+		serial = _pick(row, "serial", HEADER_SERIAL)
+		name_display = _pick(row, "name", "name_display", HEADER_NAME_DISPLAY)
 		if not serial and not mongo_id:
 			continue
 		if not name_display:
 			name_display = serial or mongo_id
 
 		existing = _find_device_by_legacy_or_serial(mongo_id, serial, dt)
-		status = _cell_str(row.get("status") or row.get("Trạng thái")) or "Standby"
+		status_raw = _pick(row, "status", HEADER_STATUS)
+		status = STATUS_LABEL_TO_CODE.get(status_raw, status_raw) or "Standby"
 		if status not in VALID_STATUSES:
 			status = "Standby"
 
-		room_key = _cell_str(row.get("room_name") or row.get("room") or row.get("Phòng") or row.get("frappeRoomId"))
+		room_key = _pick(row, "room_name", "room", HEADER_ROOM, "frappeRoomId")
 		room_id = resolve_room_link(room_key) if room_key else None
 
-		holder_email = _cell_str(row.get("current_holder_email") or row.get("assigned_user_email") or row.get("Người sử dụng"))
+		# Ưu tiên match theo cột Email; "Người sử dụng" (tên hiển thị) chỉ là fallback
+		holder_email = _pick(row, "current_holder_email", "assigned_user_email", HEADER_EMAIL, "email", HEADER_HOLDER_NAME)
 		holder_user = resolve_user_link(holder_email) if holder_email else None
 
 		specs = {}
-		for k in ("processor", "ram", "storage", "display", "ip", "imei1", "imei2", "phoneNumber", "phone_number"):
-			if k in row and _cell_str(row.get(k)):
-				specs[k] = _cell_str(row.get(k))
+		for spec_key, aliases in SPEC_HEADER_ALIASES.items():
+			val = _pick(row, *aliases)
+			if val:
+				specs[spec_key] = val
 
 		try:
 			if existing:
 				doc = frappe.get_doc("ERP Inventory Device", existing)
-				updated += 1
 			else:
 				doc = frappe.get_doc(
 					{
@@ -127,11 +175,12 @@ def import_devices_from_excel_file(file_path, device_type):
 						"serial": serial or name_display,
 					}
 				)
-				created += 1
 
-			doc.device_subtype = _cell_str(row.get("type") or row.get("device_subtype") or row.get("Loại thiết bị"))
-			doc.manufacturer = _cell_str(row.get("manufacturer") or row.get("Hãng sản xuất"))
-			doc.release_year = cint(row.get("releaseYear") or row.get("release_year") or row.get("Năm sản xuất") or 0) or None
+			sig_before = _device_signature(doc) if existing else None
+
+			doc.device_subtype = _pick(row, "type", "device_subtype", HEADER_SUBTYPE)
+			doc.manufacturer = _pick(row, "manufacturer", HEADER_MANUFACTURER)
+			doc.release_year = cint(row.get("releaseYear") or row.get("release_year") or row.get(HEADER_RELEASE_YEAR) or 0) or None
 			doc.status = status
 			doc.room = room_id
 			doc.broken_reason = _cell_str(row.get("brokenReason") or row.get("broken_reason"))
@@ -147,9 +196,14 @@ def import_devices_from_excel_file(file_path, device_type):
 				doc.current_holder_department = frappe.db.get_value("User", holder_user, "department") or ""
 
 			if existing:
-				doc.save(ignore_permissions=True)
+				if _device_signature(doc) == sig_before:
+					unchanged += 1
+				else:
+					doc.save(ignore_permissions=True)
+					updated += 1
 			else:
 				doc.insert(ignore_permissions=True)
+				created += 1
 
 			if mongo_id:
 				mongo_map[mongo_id] = doc.name
@@ -219,6 +273,7 @@ def import_devices_from_excel_file(file_path, device_type):
 		"device_type": dt,
 		"created_count": created,
 		"updated_count": updated,
+		"unchanged_count": unchanged,
 		"history_created_count": history_created,
 		"errors": errors,
 	}
@@ -351,9 +406,13 @@ def import_devices_full(device_type=None, file_url=None):
 			pass
 
 		return {
-			"success": len(result["errors"]) == 0 or (result["created_count"] + result["updated_count"]) > 0,
-			"message": _("Import xong: tạo {0}, cập nhật {1}, handover {2}").format(
-				result["created_count"], result["updated_count"], result["history_created_count"]
+			"success": len(result["errors"]) == 0
+			or (result["created_count"] + result["updated_count"] + result["unchanged_count"]) > 0,
+			"message": _("Import xong: tạo mới {0}, cập nhật {1}, giữ nguyên {2}, handover {3}").format(
+				result["created_count"],
+				result["updated_count"],
+				result["unchanged_count"],
+				result["history_created_count"],
 			),
 			**result,
 		}

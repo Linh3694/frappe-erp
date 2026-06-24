@@ -7,6 +7,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint, now_datetime
 
+from erp.utils.search import build_search_condition
+
 from erp.utils.api_response import (
 	error_response,
 	not_found_response,
@@ -90,24 +92,23 @@ def _read_device_request_params(device_type=None, device_id=None, data=None):
 
 def _search_device_names(device_type: str, search: str) -> list:
 	"""Tìm theo tên/serial/manufacturer/người được giao."""
-	like = f"%{search}%"
+	frag, fparams = build_search_condition(
+		["d.name_display", "d.serial", "d.manufacturer", "u.full_name", "u.email"],
+		search,
+	)
+	if not frag:
+		return []
 	names = frappe.db.sql(
-		"""
+		f"""
 		SELECT DISTINCT d.name
 		FROM `tabERP Inventory Device` d
 		LEFT JOIN `tabERP Inventory Device Assigned User` au ON au.parent = d.name
 		LEFT JOIN `tabUser` u ON u.name = au.user
-		WHERE d.device_type = %(dt)s
-		  AND (
-			d.name_display LIKE %(like)s
-			OR d.serial LIKE %(like)s
-			OR d.manufacturer LIKE %(like)s
-			OR u.full_name LIKE %(like)s
-			OR u.email LIKE %(like)s
-		  )
+		WHERE d.device_type = %s
+		  AND {frag}
 		ORDER BY d.modified DESC
 		""",
-		{"dt": device_type, "like": like},
+		[device_type, *fparams],
 		pluck="name",
 	)
 	return names or []
@@ -115,20 +116,19 @@ def _search_device_names(device_type: str, search: str) -> list:
 
 def _filter_names_by_assigned(device_type: str, value: str) -> list:
 	"""Lọc thiết bị theo tên người được giao (fullname snapshot hoặc User.full_name)."""
-	like = f"%{value}%"
+	frag, fparams = build_search_condition(["au.fullname_snapshot", "u.full_name"], value)
+	if not frag:
+		return []
 	names = frappe.db.sql(
-		"""
+		f"""
 		SELECT DISTINCT d.name
 		FROM `tabERP Inventory Device` d
 		INNER JOIN `tabERP Inventory Device Assigned User` au ON au.parent = d.name
 		LEFT JOIN `tabUser` u ON u.name = au.user
-		WHERE d.device_type = %(dt)s
-		  AND (
-			au.fullname_snapshot LIKE %(like)s
-			OR u.full_name LIKE %(like)s
-		  )
+		WHERE d.device_type = %s
+		  AND {frag}
 		""",
-		{"dt": device_type, "like": like},
+		[device_type, *fparams],
 		pluck="name",
 	)
 	return list(set(names or []))
@@ -136,20 +136,21 @@ def _filter_names_by_assigned(device_type: str, value: str) -> list:
 
 def _filter_names_by_room(device_type: str, value: str) -> list:
 	"""Lọc thiết bị theo tên phòng (title_vn / short_title / physical_code)."""
-	like = f"%{value}%"
+	frag, fparams = build_search_condition(
+		["r.title_vn", "r.short_title", "r.physical_code"],
+		value,
+	)
+	if not frag:
+		return []
 	names = frappe.db.sql(
-		"""
+		f"""
 		SELECT DISTINCT d.name
 		FROM `tabERP Inventory Device` d
 		INNER JOIN `tabERP Administrative Room` r ON r.name = d.room
-		WHERE d.device_type = %(dt)s
-		  AND (
-			r.title_vn LIKE %(like)s
-			OR r.short_title LIKE %(like)s
-			OR r.physical_code LIKE %(like)s
-		  )
+		WHERE d.device_type = %s
+		  AND {frag}
 		""",
-		{"dt": device_type, "like": like},
+		[device_type, *fparams],
 		pluck="name",
 	)
 	return list(set(names or []))

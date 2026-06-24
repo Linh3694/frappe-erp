@@ -4,6 +4,7 @@ API Khảo sát đầu vào — CRUD kỳ khảo sát, học sinh, điểm môn.
 
 import frappe
 
+from erp.utils.search import search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -361,15 +362,7 @@ def get_entrance_exam_students():
 
     or_filters = None
     if search and search.strip():
-        lead_rows = frappe.db.sql(
-            """
-            SELECT name FROM `tabCRM Lead`
-            WHERE name LIKE %(s)s OR crm_code LIKE %(s)s OR student_name LIKE %(s)s
-            """,
-            {"s": f"%{search.strip()}%"},
-            as_dict=True,
-        )
-        lead_names = [r["name"] for r in lead_rows]
+        lead_names = search_names("CRM Lead", ["name", "crm_code", "student_name"], search.strip())
         if not lead_names:
             return list_response(
                 [],

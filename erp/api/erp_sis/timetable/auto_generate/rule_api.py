@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 import frappe
 
 from erp.utils.api_response import error_response, list_response, single_item_response
+from erp.utils.search import search_names
 
 from .core.default_rules import DEFAULT_RULE_SPECS, DISABLED_DEFAULT_RULE_IDS, build_default_rule_set
 from .core.filter_keys import list_subject_filter_keys as _list_filter_keys
@@ -958,7 +959,7 @@ def _query_filter_options(
 			"SIS Teacher",
 			filters=filters,
 			fields=["name", "full_name", "teacher_code"],
-			or_filters=[["full_name", "like", f"%{search}%"], ["name", "like", f"%{search}%"]] if search else None,
+			or_filters=[["name", "in", search_names("SIS Teacher", ["full_name", "name"], search) or ["__no_match__"]]] if search else None,
 			limit_page_length=limit,
 			order_by="full_name asc",
 		)
@@ -1006,7 +1007,7 @@ def _query_filter_options(
 			"SIS Timetable Subject",
 			filters=filters,
 			fields=["name", "title_vn", "title_en"],
-			or_filters=[["title_vn", "like", f"%{search}%"], ["name", "like", f"%{search}%"]] if search else None,
+			or_filters=[["name", "in", search_names("SIS Timetable Subject", ["title_vn", "name"], search) or ["__no_match__"]]] if search else None,
 			limit_page_length=limit,
 			order_by="title_vn asc",
 		)
@@ -1024,7 +1025,7 @@ def _query_filter_options(
 			"SIS Education Grade",
 			filters=filters,
 			fields=["name", "title_vn", "grade_code", "sort_order"],
-			or_filters=[["title_vn", "like", f"%{search}%"], ["grade_code", "like", f"%{search}%"]] if search else None,
+			or_filters=[["name", "in", search_names("SIS Education Grade", ["title_vn", "grade_code"], search) or ["__no_match__"]]] if search else None,
 			limit_page_length=limit,
 			order_by="sort_order asc, title_vn asc",
 		)
@@ -1040,7 +1041,7 @@ def _query_filter_options(
 			"ERP Administrative Room",
 			filters=filters,
 			fields=["name", "title_vn", "physical_code", "room_type"],
-			or_filters=[["title_vn", "like", f"%{search}%"], ["physical_code", "like", f"%{search}%"]] if search else None,
+			or_filters=[["name", "in", search_names("ERP Administrative Room", ["title_vn", "physical_code"], search) or ["__no_match__"]]] if search else None,
 			limit_page_length=limit,
 		)
 		return [{"value": r.name, "label": r.physical_code or r.title_vn or r.name, "code": r.room_type} for r in rows]

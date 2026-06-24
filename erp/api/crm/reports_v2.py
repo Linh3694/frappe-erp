@@ -595,3 +595,60 @@ def get_source_breakdown():
             "meta": {"pic_restricted_to_self": r._should_restrict_to_own_pic_only()},
         }
     )
+
+
+# --------------------------------------------------------------------------- #
+# KPI — Xếp hạng PIC (cột giống báo cáo nguồn: snapshot × bước + tỉ lệ chuyển đổi)
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def get_pic_breakdown():
+    """Danh sách PIC (snapshot) × bước + tỉ lệ chuyển đổi — cùng cấu trúc báo cáo nguồn."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    dim_sql, dim_binds = r._where_lead_dimensions_only(args)
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+               l.`step` AS step,
+               COUNT(*) AS cnt
+        FROM `tabCRM Lead` l
+        WHERE l.`step` IN {_SOURCE_STEPS_SQL}
+          AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND {dim_sql}
+        GROUP BY pic, l.`step`
+        """,
+        dim_binds,
+        as_dict=True,
+    )
+
+    by_pic: Dict[str, Dict[str, int]] = defaultdict(dict)
+    for row in rows:
+        by_pic[row["pic"]][row["step"]] = int(row["cnt"])
+    user_map = r._batch_user_map(list(by_pic.keys()))
+
+    out = []
+    for pic, steps in by_pic.items():
+        total = sum(steps.values())
+        enrolled = steps.get("Enrolled", 0)
+        ud = user_map.get(pic, {})
+        out.append(
+            {
+                "pic": pic,
+                "pic_name": ud.get("full_name") or pic,
+                "pic_avatar": ud.get("pic_avatar"),
+                "total": total,
+                "by_step": {s: steps.get(s, 0) for s in _SOURCE_REPORT_STEPS},
+                "count_enrolled": enrolled,
+                "conversion_rate_pct": round(100.0 * enrolled / max(1, total), 2),
+            }
+        )
+    out.sort(key=lambda x: x["total"], reverse=True)
+
+    return success_response(
+        {
+            "steps": _SOURCE_REPORT_STEPS,
+            "rows": out,
+            "meta": {"pic_restricted_to_self": r._should_restrict_to_own_pic_only()},
+        }
+    )

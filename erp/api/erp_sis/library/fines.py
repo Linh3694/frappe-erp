@@ -8,6 +8,7 @@ from erp.utils.api_response import (
 )
 
 from ._constants import FINE_DTYPE, COPY_DTYPE, TRANSACTION_DTYPE
+from erp.utils.search import search_names
 from ._common import _require_library_role, _get_json_payload, _parse_date
 
 def _create_fine_if_needed(
@@ -103,7 +104,8 @@ def list_fines():
     if status:
         filters["status"] = status
     if borrower_id:
-        filters["borrower_id"] = ["like", f"%{borrower_id}%"]
+        _names = search_names(FINE_DTYPE, ["borrower_id"], borrower_id)
+        filters["name"] = ["in", _names or ["__no_match__"]]
     if transaction_id:
         filters["transaction_id"] = transaction_id
 

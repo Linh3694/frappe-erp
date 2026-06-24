@@ -5,6 +5,7 @@ CRM Lead API - CRUD Ho So Tuyen Sinh
 import re
 import frappe
 from frappe import _
+from erp.utils.search import build_search_condition
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
     single_item_response, list_response, validation_error_response, not_found_response
@@ -277,16 +278,18 @@ def get_leads():
 
     or_filters = []
     if search:
-        like = f"%{search}%"
-        or_filters = [
-            ["student_name", "like", like],
-            ["guardian_name", "like", like],
-            ["name", "like", like],
-            ["student_code", "like", like],
-            ["crm_code", "like", like],
-        ]
+        # Tim ten/ma: token + bo dau + dau tu qua helper chung (raw SQL tren tabCRM Lead)
+        match_names = set()
+        search_frag, search_params = build_search_condition(
+            ["student_name", "guardian_name", "name", "student_code", "crm_code"],
+            search,
+        )
+        if search_frag:
+            match_names.update(
+                frappe.db.sql_list(f"SELECT name FROM `tabCRM Lead` WHERE {search_frag}", search_params)
+            )
         # Tim theo SDT: luu o bang con CRM Lead Phone (dinh dang +84xxxxxxxxx).
-        # Doi 0xxx -> +84xxx de khop gia tri da luu, roi gop parent vao or_filters.
+        # Doi 0xxx -> +84xxx de khop gia tri da luu, roi gop vao ket qua.
         phone_search = search.strip().replace(" ", "").replace("-", "")
         if phone_search.startswith("0"):
             phone_search = "+84" + phone_search[1:]
@@ -296,9 +299,9 @@ def get_leads():
                 filters=[["phone_number", "like", f"%{phone_search}%"]],
                 pluck="parent",
             )
-            phone_parents = list({p for p in phone_parents if p})
-            if phone_parents:
-                or_filters.append(["name", "in", phone_parents])
+            match_names.update(p for p in phone_parents if p)
+        # Luon dua ve 1 dieu kien name-in; rong -> sentinel de tra ve khong co ket qua
+        or_filters = [["name", "in", list(match_names) if match_names else ["__no_match__"]]]
 
     # Dem tong (ton trong ca filter co ban, filter nang cao va search)
     if or_filters:

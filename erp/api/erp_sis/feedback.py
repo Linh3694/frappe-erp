@@ -9,6 +9,7 @@ Handles feedback management, assignment, SLA tracking, and reporting
 import frappe
 from frappe import _
 from frappe.utils import now, get_datetime, add_to_date
+from erp.utils.search import search_names
 from datetime import datetime, timedelta
 import json
 from erp.utils.api_response import (
@@ -135,11 +136,12 @@ def admin_list():
         search_query = data.get("search") or request_args.get("search")
         search_filters = []
         if search_query:
-            search_filters = [
-                ["title", "like", f"%{search_query}%"],
-                ["content", "like", f"%{search_query}%"],
-                ["guardian", "like", f"%{search_query}%"]
-            ]
+            _names = search_names(
+                "Feedback",
+                ["title", "content", "guardian"],
+                search_query,
+            )
+            search_filters = [["name", "in", _names or ["__no_match__"]]]
         
         # Get feedback list
         feedback_list = frappe.get_all(

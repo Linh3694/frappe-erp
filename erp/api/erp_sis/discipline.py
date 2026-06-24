@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 
 import frappe
 from erp.utils.api_response import success_response, error_response, paginated_response
+from erp.utils.search import build_search_condition, search_names
 from erp.sis.discipline_record_permissions import (
     discipline_session_matches_owner as _discipline_session_matches_owner,
     user_can_create_discipline_record as _can_create_discipline_record,
@@ -2042,8 +2043,36 @@ def _search_discipline_record_names(search_term, campus, owner_user):
     """
     Trả list name bản ghi khớp tìm kiếm (tiêu đề VP/PL, mã/tên HS, mã bản ghi).
     """
-    term = f"%{search_term}%"
-    params = {"term": term}
+    # 1) Khớp theo tiêu đề VP / phân loại / mã bản ghi (cùng hàng record + joins)
+    direct_frag, direct_params = build_search_condition(
+        ["IFNULL(v.title, '')", "IFNULL(cl.title, '')", "r.name"], search_term
+    )
+    match = set()
+    if direct_frag:
+        match |= set(frappe.db.sql_list(f"""
+            SELECT DISTINCT r.name
+            FROM `tabSIS Discipline Record` r
+            LEFT JOIN `tabSIS Discipline Violation` v ON v.name = r.violation
+            LEFT JOIN `tabSIS Discipline Classification` cl ON cl.name = r.classification
+            WHERE {direct_frag}
+        """, direct_params))
+
+    # 2) Khớp theo học sinh (target_student hoặc bảng con entry)
+    stu = search_names("CRM Student", ["student_name", "student_code"], search_term)
+    if stu:
+        match |= set(frappe.db.sql_list(
+            "SELECT name FROM `tabSIS Discipline Record` WHERE target_student IN %(s)s", {"s": stu}
+        ))
+        match |= set(frappe.db.sql_list("""
+            SELECT se.parent FROM `tabSIS Discipline Record Student Entry` se
+            WHERE se.parenttype = 'SIS Discipline Record' AND se.student_id IN %(s)s
+        """, {"s": stu}))
+
+    if not match:
+        return []
+
+    # 3) Áp ràng buộc campus / owner trên tập đã khớp
+    params = {"names": list(match)}
     campus_sql = "1=1"
     if campus:
         campus_sql = "r.campus = %(campus)s"
@@ -2052,33 +2081,10 @@ def _search_discipline_record_names(search_term, campus, owner_user):
     if owner_user:
         owner_sql = " AND r.owner = %(owner)s"
         params["owner"] = owner_user
-
-    sql = f"""
-        SELECT DISTINCT r.name
-        FROM `tabSIS Discipline Record` r
-        LEFT JOIN `tabSIS Discipline Violation` v ON v.name = r.violation
-        LEFT JOIN `tabSIS Discipline Classification` cl ON cl.name = r.classification
-        WHERE {campus_sql}
-        {owner_sql}
-        AND (
-            IFNULL(v.title, '') LIKE %(term)s
-            OR IFNULL(cl.title, '') LIKE %(term)s
-            OR r.name LIKE %(term)s
-            OR EXISTS (
-                SELECT 1 FROM `tabCRM Student` st
-                WHERE st.name = r.target_student
-                AND (st.student_name LIKE %(term)s OR st.student_code LIKE %(term)s)
-            )
-            OR EXISTS (
-                SELECT 1 FROM `tabSIS Discipline Record Student Entry` se
-                INNER JOIN `tabCRM Student` st2 ON st2.name = se.student_id
-                WHERE se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
-                AND (st2.student_name LIKE %(term)s OR st2.student_code LIKE %(term)s)
-            )
-        )
-    """
-    rows = frappe.db.sql(sql, params, as_dict=True)
-    return [r["name"] for r in rows]
+    return frappe.db.sql_list(f"""
+        SELECT r.name FROM `tabSIS Discipline Record` r
+        WHERE {campus_sql}{owner_sql} AND r.name IN %(names)s
+    """, params)
 
 
 def _attach_discipline_child_table_fields(records: list) -> None:

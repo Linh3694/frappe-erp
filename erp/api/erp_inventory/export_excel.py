@@ -16,32 +16,11 @@ from erp.api.erp_inventory.inventory_helpers import (
 	room_to_fe,
 	user_to_fe,
 )
-
-
-STATUS_LABELS = {
-	"Active": "Đang sử dụng",
-	"Standby": "Sẵn sàng bàn giao",
-	"Broken": "Hỏng",
-	"PendingDocumentation": "Thiếu biên bản",
-}
-
-# Cột specs theo loại thiết bị: (header, spec_key)
-SPEC_COLUMNS = {
-	"laptop": [("Processor", "processor"), ("RAM", "ram"), ("Ổ cứng", "storage"), ("Màn hình", "display")],
-	"monitor": [("Màn hình", "display")],
-	"printer": [("Địa chỉ IP", "ip"), ("RAM", "ram"), ("Ổ cứng", "storage"), ("Màn hình", "display")],
-	"projector": [],
-	"phone": [("IMEI 1", "imei1"), ("IMEI 2", "imei2"), ("Số điện thoại", "phone_number")],
-	"tool": [],
-}
-
-BASE_HEADERS = ["Tên thiết bị", "Loại thiết bị", "Hãng sản xuất", "Serial", "Năm sản xuất", "Trạng thái"]
-TAIL_HEADERS = ["Người sử dụng", "Email", "Phòng"]
-
-
-def _columns_for(dt):
-	"""Bộ cột chuẩn dùng chung cho export + template import."""
-	return BASE_HEADERS + [h for h, _ in SPEC_COLUMNS.get(dt, [])] + TAIL_HEADERS
+from erp.api.erp_inventory.inventory_excel_schema import (
+	SPEC_COLUMNS,
+	STATUS_LABELS,
+	columns_for,
+)
 
 
 def _device_specs_dict(doc):
@@ -87,7 +66,7 @@ def export_devices_excel(device_type=None):
 	wb = openpyxl.Workbook()
 	ws = wb.active
 	ws.title = f"Danh sách {dt}"
-	headers = ["STT"] + _columns_for(dt)
+	headers = ["STT"] + columns_for(dt)
 	ws.append(headers)
 	header_fill = PatternFill(start_color="002855", end_color="002855", fill_type="solid")
 	for cell in ws[1]:
@@ -147,7 +126,7 @@ def download_import_template(device_type=None):
 	wb = openpyxl.Workbook()
 	ws = wb.active
 	ws.title = f"Nhập {dt}"
-	cols = _columns_for(dt)
+	cols = columns_for(dt)
 	ws.append(cols)
 
 	# Dòng mẫu khớp đúng thứ tự cột

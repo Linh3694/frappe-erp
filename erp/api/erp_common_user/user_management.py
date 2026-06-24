@@ -9,6 +9,8 @@ from frappe import _
 from datetime import datetime
 import json
 
+from erp.utils.search import build_search_condition
+
 
 @frappe.whitelist()
 def get_users(page=1, limit=20, search=None, role=None, department=None, active=None):
@@ -39,54 +41,42 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         if active is not None:
             filters["enabled"] = int(active)
         
-        # Build search conditions
-        search_conditions = []
-        if search:
-            search_conditions = [
-                ["User", "email", "like", f"%{search}%"],
-                ["User", "full_name", "like", f"%{search}%"]
-            ]
-            # Add custom field searches if they exist
-            try:
-                if frappe.db.has_column("User", "username"):
-                    search_conditions.append(["User", "username", "like", f"%{search}%"])
-                if frappe.db.has_column("User", "employee_code"):
-                    search_conditions.append(["User", "employee_code", "like", f"%{search}%"])
-            except:
-                pass
-        
         # Calculate offset
         offset = (page - 1) * limit
-        
-        # Build WHERE clause
-        where_conditions = ["u.user_type = 'System User'"]
-        
-        # Loại bỏ các user có email đuôi @parent.wellspring.edu.vn (tài khoản phụ huynh)
-        where_conditions.append("u.email NOT LIKE '%@parent.wellspring.edu.vn'")
-        
+
+        # Build WHERE clause (parameterized — tránh SQL injection)
+        where_conditions = ["u.user_type = 'System User'", "u.email NOT LIKE %s"]
+        query_params = ["%@parent.wellspring.edu.vn"]
+
         if active is not None:
-            where_conditions.append(f"u.enabled = {int(active)}")
-            
+            where_conditions.append("u.enabled = %s")
+            query_params.append(int(active))
+
         if department:
-            where_conditions.append(f"u.department = '{department}'")
-            
+            where_conditions.append("u.department = %s")
+            query_params.append(department)
+
         if search:
-            search_clause = f"(u.email LIKE '%{search}%' OR u.full_name LIKE '%{search}%'"
+            # token + bỏ dấu + đầu từ (đồng bộ mọi field)
+            search_fields = ["u.full_name", "u.email"]
             try:
                 if frappe.db.has_column("User", "username"):
-                    search_clause += f" OR u.username LIKE '%{search}%'"
+                    search_fields.append("u.username")
                 if frappe.db.has_column("User", "employee_code"):
-                    search_clause += f" OR u.employee_code LIKE '%{search}%'"
-            except:
+                    search_fields.append("u.employee_code")
+            except Exception:
                 pass
-            search_clause += ")"
-            where_conditions.append(search_clause)
-        
+            search_frag, search_params = build_search_condition(search_fields, search)
+            if search_frag:
+                where_conditions.append(search_frag)
+                query_params.extend(search_params)
+
         if role:
             where_conditions.append(
-                f"u.name IN (SELECT parent FROM `tabHas Role` WHERE role = {frappe.db.escape(role)} AND parenttype = 'User')"
+                "u.name IN (SELECT parent FROM `tabHas Role` WHERE role = %s AND parenttype = 'User')"
             )
-        
+            query_params.append(role)
+
         where_clause = " AND ".join(where_conditions)
         
         # Debug logging
@@ -123,7 +113,7 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             ORDER BY 
                 u.modified DESC
             LIMIT {limit} OFFSET {offset}
-        """, as_dict=True)
+        """, query_params, as_dict=True)
         
         frappe.logger().info(f"Query returned {len(users)} users")
         
@@ -149,7 +139,7 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             SELECT COUNT(*)
             FROM `tabUser` u
             WHERE {where_clause}
-        """)[0][0]
+        """, query_params)[0][0]
         
         # Get role information for each user
         for user in users:

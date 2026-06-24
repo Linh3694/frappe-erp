@@ -6,6 +6,7 @@ import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
 from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.search import build_search_condition
 from erp.utils.compreFace_service import compreFace_service
 
 @frappe.whitelist()
@@ -811,13 +812,12 @@ def get_students_for_bus_selection(search_term=None, school_year_id=None):
 
 		# Add search filter if provided
 		if search_term and str(search_term).strip():
-			search_pattern = f"%{str(search_term).strip()}%"
-			query += """
-				AND (LOWER(s.student_name) LIKE LOWER(%s)
-					OR LOWER(s.student_code) LIKE LOWER(%s)
-					OR LOWER(c.title) LIKE LOWER(%s))
-			"""
-			params.extend([search_pattern, search_pattern, search_pattern])
+			search_frag, search_params = build_search_condition(
+				["s.student_name", "s.student_code", "c.title"], search_term
+			)
+			if search_frag:
+				query += " AND " + search_frag
+				params.extend(search_params)
 
 		query += " ORDER BY s.student_name ASC"
 

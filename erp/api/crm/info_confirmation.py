@@ -20,6 +20,7 @@ import frappe
 from frappe.utils import escape_html, now_datetime
 
 from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.utils.search import build_search_condition
 from erp.utils.email_service import send_email_via_service
 from erp.utils.api_response import (
     error_response,
@@ -519,10 +520,15 @@ def list_confirmation():
     or_filters = None
     q = (data.get("search") or "").strip()
     if q:
-        or_filters = [
-            ["student_name", "like", f"%{q}%"],
-            ["student_code", "like", f"%{q}%"],
-        ]
+        search_frag, search_params = build_search_condition(
+            ["student_name", "student_code"], q
+        )
+        match_names = (
+            frappe.db.sql_list(f"SELECT name FROM `tabCRM Lead` WHERE {search_frag}", search_params)
+            if search_frag
+            else []
+        )
+        or_filters = [["name", "in", match_names if match_names else ["__no_match__"]]]
 
     try:
         page = max(1, int(data.get("page") or 1))

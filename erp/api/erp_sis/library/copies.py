@@ -11,6 +11,7 @@ from erp.utils.api_response import (
 
 from ._constants import TITLE_DTYPE, COPY_DTYPE, ACTIVITY_DTYPE, STATUS_MAP
 from ._common import _require_library_role, _get_json_payload, _import_excel_to_rows, _log_library_activity
+from erp.utils.search import search_names
 
 def _is_available_copy_status(status: str | None) -> bool:
     """Status trống/NULL coi như available — đồng bộ UI mượn sách."""
@@ -19,26 +20,19 @@ def _is_available_copy_status(status: str | None) -> bool:
 
 def _build_copy_search_or_filters(search: str) -> List[List[Any]]:
     """Or-filters tìm bản sao — ưu tiên mã bản sao / mã quy ước."""
-    search_term = f"%{search.strip()}%"
-    or_filters: List[List[Any]] = [
-        ["generated_code", "like", search_term],
-        ["special_code", "like", search_term],
-        ["isbn", "like", search_term],
-        ["book_title", "like", search_term],
-        ["document_identifier", "like", search_term],
-        ["classification_sign", "like", search_term],
-        ["storage_location", "like", search_term],
-    ]
+    copy_names = search_names(
+        COPY_DTYPE,
+        ["generated_code", "special_code", "isbn", "book_title",
+         "document_identifier", "classification_sign", "storage_location"],
+        search,
+    )
+    or_filters: List[List[Any]] = [["name", "in", copy_names or ["__no_match__"]]]
 
     # Nhiều bản sao chỉ link title_id — book_title có thể trống
-    title_ids = frappe.get_all(
+    title_ids = search_names(
         TITLE_DTYPE,
-        or_filters=[
-            ["title", "like", search_term],
-            ["library_code", "like", search_term],
-            ["authors", "like", search_term],
-        ],
-        pluck="name",
+        ["title", "library_code", "authors"],
+        search,
     )
     if title_ids:
         or_filters.append(["title_id", "in", title_ids])

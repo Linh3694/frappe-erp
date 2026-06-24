@@ -4,6 +4,7 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
+from erp.utils.search import build_search_condition
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
     single_item_response, validation_error_response,
@@ -1113,12 +1114,10 @@ def search_students(search_term=None):
         where_clauses = ["campus_id = %s"]
         params = [campus_id]
         if final_search_term:
-            # For student_code: prefix match (starts with)
-            # For student_name: contains match (can be anywhere)
-            like_prefix = f"{final_search_term}%"  # Starts with (for student_code)
-            like_contains = f"%{final_search_term}%"  # Contains (for student_name)
-            where_clauses.append("(LOWER(student_name) LIKE LOWER(%s) OR LOWER(student_code) LIKE LOWER(%s))")
-            params.extend([like_contains, like_prefix])
+            search_frag, search_params = build_search_condition(["student_name", "student_code"], final_search_term)
+            if search_frag:
+                where_clauses.append(search_frag)
+                params.extend(search_params)
         conditions = " AND ".join(where_clauses)
         frappe.logger().info(f"[search_students] FINAL WHERE: {conditions} | params: {params}")
         
@@ -1148,34 +1147,7 @@ def search_students(search_term=None):
         if students:
             frappe.logger().info(f"FIRST 5 RESULTS: {[f'{s.student_name} ({s.student_code})' for s in students[:5]]}")
 
-        # Post-filter in Python for better VN diacritics handling and strict contains
-        def normalize_text(text: str) -> str:
-            try:
-                import unicodedata
-                if not text:
-                    return ''
-                text = unicodedata.normalize('NFD', text)
-                text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
-                # Handle Vietnamese specific characters
-                text = text.replace('đ', 'd').replace('Đ', 'D')
-                return text.lower()
-            except Exception:
-                return (text or '').lower()
-
-        if search_term and str(search_term).strip():
-            norm_q = normalize_text(str(search_term).strip())
-            search_lower = str(search_term).strip().lower()
-            pre_count = len(students)
-            students = [
-                s for s in students
-                if (
-                    # student_name: contains match (can be anywhere)
-                    normalize_text(s.get('student_name', '')).find(norm_q) != -1
-                    # student_code: prefix match (must start with)
-                    or (s.get('student_code') or '').lower().startswith(search_lower)
-                )
-            ]
-            frappe.logger().info(f"POST-FILTERED {pre_count} -> {len(students)} using normalized query='{norm_q}'")
+        # Khớp tên/dấu/đầu-từ đã xử lý ở SQL (build_search_condition) — bỏ hậu-lọc Python
 
         # Enrich with family codes
         try:
@@ -1344,11 +1316,10 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
         
         # Add search term filter if provided
         if search_term and str(search_term).strip():
-            search_clean = str(search_term).strip()
-            like_prefix = f"{search_clean}%"
-            like_contains = f"%{search_clean}%"
-            sql_query += " AND (LOWER(s.student_name) LIKE LOWER(%s) OR LOWER(s.student_code) LIKE LOWER(%s))"
-            params.extend([like_contains, like_prefix])
+            search_frag, search_params = build_search_condition(["s.student_name", "s.student_code"], search_term)
+            if search_frag:
+                sql_query += " AND " + search_frag
+                params.extend(search_params)
         
         sql_query += " ORDER BY s.student_name ASC"
         

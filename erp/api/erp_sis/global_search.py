@@ -6,6 +6,7 @@ from erp.utils.api_response import (
     success_response,
     error_response,
 )
+from erp.utils.search import build_search_condition
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -76,11 +77,11 @@ def global_search(search_term: str = None):
         try:
             where_clauses = ["campus_id = %s"]
             params = [campus_id]
-            like_contains = f"%{search_clean}%"
-            like_prefix = f"{search_clean}%"
-            where_clauses.append("(LOWER(student_name) LIKE LOWER(%s) OR LOWER(student_code) LIKE LOWER(%s))")
-            params.extend([like_contains, like_prefix])
-            
+            search_frag, search_params = build_search_condition(["student_name", "student_code"], search_clean)
+            if search_frag:
+                where_clauses.append(search_frag)
+                params.extend(search_params)
+
             conditions = " AND ".join(where_clauses)
             
             sql_query = (
@@ -181,10 +182,11 @@ def global_search(search_term: str = None):
         try:
             where_clauses = ["campus_id = %s"]
             params = [campus_id]
-            like_contains = f"%{search_clean}%"
-            where_clauses.append("(LOWER(title) LIKE LOWER(%s))")
-            params.extend([like_contains])
-            
+            search_frag, search_params = build_search_condition(["title"], search_clean)
+            if search_frag:
+                where_clauses.append(search_frag)
+                params.extend(search_params)
+
             conditions = " AND ".join(where_clauses)
             
             sql_query = (
