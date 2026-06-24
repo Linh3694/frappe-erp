@@ -48,6 +48,10 @@ def erp_room_booking_query(user):
 	return campus_doctype_query("ERP Room Booking", user)
 
 
+def erp_room_booking_config_query(user):
+	return campus_doctype_query("ERP Room Booking Config", user)
+
+
 def erp_administrative_facility_handover_query(user):
 	return campus_doctype_query("ERP Administrative Facility Handover", user)
 

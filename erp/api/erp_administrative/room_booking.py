@@ -17,6 +17,7 @@ from erp.utils.api_response import (
     success_response,
     validation_error_response,
 )
+from erp.api.erp_administrative.room_booking_config import validate_booking_against_config
 
 BOOKING_DOCTYPE = "ERP Room Booking"
 
@@ -181,6 +182,11 @@ def create_room_booking():
         ctx, err = _validate_booking_payload(data)
         if err:
             return err
+        ok_cfg, err_cfg = validate_booking_against_config(
+            ctx["room_id"], ctx["start_dt"], ctx["end_dt"]
+        )
+        if not ok_cfg:
+            return err_cfg
         if _room_booking_conflicts(ctx["room_id"], ctx["start_dt"], ctx["end_dt"]):
             return validation_error_response(
                 _("Khung giờ này đã có người đặt phòng. Vui lòng chọn thời gian khác."),
@@ -382,6 +388,16 @@ def create_booking_for_ticket(ticket):
         existing = frappe.db.get_value(BOOKING_DOCTYPE, {"source_ticket": ticket.name}, "name")
         if existing:
             return sync_booking_for_ticket(ticket)
+        ok_cfg, err_cfg = validate_booking_against_config(
+            ctx["room_id"], ctx["start_dt"], ctx["end_dt"]
+        )
+        if not ok_cfg:
+            msg = (
+                (err_cfg or {}).get("message")
+                if isinstance(err_cfg, dict)
+                else str(err_cfg)
+            ) or _("Không thể đặt phòng theo cấu hình hiện tại")
+            frappe.throw(msg)
         return _insert_booking(
             ctx,
             email=(getattr(ticket, "creator_email", None) or "").strip(),
@@ -419,6 +435,16 @@ def sync_booking_for_ticket(ticket):
             doc.start_time = ctx["start_dt"]
         if ctx["end_dt"]:
             doc.end_time = ctx["end_dt"]
+        ok_cfg, err_cfg = validate_booking_against_config(
+            doc.room_id, doc.start_time, doc.end_time
+        )
+        if not ok_cfg:
+            msg = (
+                (err_cfg or {}).get("message")
+                if isinstance(err_cfg, dict)
+                else str(err_cfg)
+            ) or _("Không thể đặt phòng theo cấu hình hiện tại")
+            frappe.throw(msg)
         doc.status = "Booked"
         doc.save(ignore_permissions=True)
         return doc
