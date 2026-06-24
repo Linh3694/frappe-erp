@@ -27,9 +27,6 @@ WEEKDAY_NAMES = [
 	"Sunday",
 ]
 
-# Map get_weekday() (0=Monday) → tên thứ trong doctype
-WEEKDAY_INDEX_TO_NAME = {i: name for i, name in enumerate(WEEKDAY_NAMES)}
-
 
 def _active_school_year_id(explicit=None):
 	"""Năm học đang bật — copy logic từ administrative_ticket để tránh circular import."""
@@ -175,8 +172,8 @@ def _get_availability_for_datetime(room_id, dt):
 	config = _get_config_doc_for_room(room_id, active_only=True)
 	if not config:
 		return None, None
-	weekday_idx = get_weekday(dt)  # 0=Monday
-	day_name = WEEKDAY_INDEX_TO_NAME.get(weekday_idx)
+	# frappe.utils.get_weekday trả về tên thứ ("Monday", …) — không phải số
+	day_name = get_weekday(dt)
 	for row in config.availability or []:
 		if (row.day_of_week or "").strip() == day_name:
 			return config, row
