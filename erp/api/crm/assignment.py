@@ -164,10 +164,24 @@ def assign_pic_internal(lead_name, campus_id):
     
     config = frappe.get_doc("CRM PIC Config", config_name)
     active_pics = [item for item in config.pic_list if item.is_active]
-    
+
     if not active_pics:
         return None
-    
+
+    # Loai user da bi tat hoat dong (User.enabled=0) du van con is_active trong config
+    candidate_users = [item.user for item in active_pics if item.user]
+    enabled_users = set(
+        frappe.get_all(
+            "User",
+            filters={"name": ["in", candidate_users], "enabled": 1},
+            pluck="name",
+        )
+    ) if candidate_users else set()
+    active_pics = [item for item in active_pics if item.user in enabled_users]
+
+    if not active_pics:
+        return None
+
     current_index = config.current_index or 0
     if current_index >= len(active_pics):
         current_index = 0
