@@ -19,6 +19,9 @@
   "booked_by_fullname",
   "booked_by_avatar",
   "booked_by_department",
+  "attendees",
+  "calendar_uid",
+  "calendar_sequence",
   "source",
   "source_ticket"
  ],
@@ -109,6 +112,27 @@
    "fieldname": "booked_by_department",
    "fieldtype": "Data",
    "label": "Phòng ban người đặt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "attendees",
+   "fieldtype": "Table",
+   "label": "Người tham dự",
+   "options": "ERP Room Booking Attendee"
+  },
+  {
+   "fieldname": "calendar_uid",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Calendar UID",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "calendar_sequence",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "Calendar Sequence",
    "read_only": 1
   },
   {

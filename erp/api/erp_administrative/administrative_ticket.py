@@ -10,6 +10,7 @@ from frappe.utils import cint, get_datetime, now_datetime, today
 from erp.api.erp_administrative.room_activity_log import log_room_activity
 from erp.api.erp_administrative.room_booking import (
     _room_booking_conflicts,
+    _validate_attendees,
     create_booking_for_ticket,
     remove_booking_for_ticket,
     sync_booking_for_ticket,
@@ -2241,6 +2242,13 @@ def create_ticket():
         uimg = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
         udept = frappe.db.get_value("User", frappe.session.user, "department") or ""
 
+        # Người tham dự (chỉ ticket sự kiện/CSVC)
+        booking_attendee_rows = None
+        if is_event_facility and "attendees" in data:
+            booking_attendee_rows, err_att = _validate_attendees(data.get("attendees"), booker_email=email)
+            if err_att:
+                return err_att
+
         pic = _resolve_pic_from_assignment(category, area_title)
 
         ticket_row = {
@@ -2295,7 +2303,10 @@ def create_ticket():
         # trên cùng lịch đặt phòng (nguồn dữ liệu chung chống trùng giờ).
         if is_event_facility:
             try:
-                create_booking_for_ticket(frappe.get_doc(DOCTYPE, doc.name))
+                create_booking_for_ticket(
+                    frappe.get_doc(DOCTYPE, doc.name),
+                    attendee_rows=booking_attendee_rows,
+                )
                 frappe.db.commit()
             except Exception:
                 frappe.log_error(frappe.get_traceback(), "administrative_ticket.create_ticket.room_booking")
