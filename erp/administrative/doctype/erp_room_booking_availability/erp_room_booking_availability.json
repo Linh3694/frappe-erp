@@ -1,0 +1,48 @@
+{
+ "doctype": "DocType",
+ "name": "ERP Room Booking Availability",
+ "module": "Administrative",
+ "istable": 1,
+ "parent_doctype": "ERP Room Booking Config",
+ "engine": "InnoDB",
+ "editable_grid": 1,
+ "field_order": [
+  "day_of_week",
+  "is_closed",
+  "start_time",
+  "end_time"
+ ],
+ "fields": [
+  {
+   "fieldname": "day_of_week",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Thứ",
+   "options": "Monday\nTuesday\nWednesday\nThursday\nFriday\nSaturday\nSunday",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_closed",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Đóng cửa"
+  },
+  {
+   "default": "07:00:00",
+   "fieldname": "start_time",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "Giờ mở"
+  },
+  {
+   "default": "18:00:00",
+   "fieldname": "end_time",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "Giờ đóng"
+  }
+ ],
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}
