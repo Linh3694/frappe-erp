@@ -11,6 +11,7 @@
   "sla_hours",
   "description",
   "is_active",
+  "related_departments",
   "members"
  ],
  "fields": [
@@ -50,6 +51,14 @@
    "label": "Active"
   },
   {
+   "description": "Phong ban (don vi So do to chuc) tu gan khi chon loai van de",
+   "fieldname": "related_departments",
+   "fieldtype": "Table",
+   "label": "Related Departments",
+   "options": "CRM Issue Module Department"
+  },
+  {
+   "description": "Thanh vien nhan thong bao (notify)",
    "fieldname": "members",
    "fieldtype": "Table",
    "label": "Members",

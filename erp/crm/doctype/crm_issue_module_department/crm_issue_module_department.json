@@ -1,11 +1,12 @@
 {
  "actions": [],
  "autoname": "hash",
- "creation": "2026-04-14 00:00:00.000000",
+ "creation": "2026-06-24 00:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "department"
+  "department",
+  "unit_name"
  ],
  "fields": [
   {
@@ -15,21 +16,29 @@
    "label": "Department",
    "options": "ERP Organization Unit",
    "reqd": 1
+  },
+  {
+   "fetch_from": "department.unit_name_vn",
+   "fieldname": "unit_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Unit Name",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,
  "links": [],
- "modified": "2026-04-14 00:00:00.000000",
+ "modified": "2026-06-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Crm",
- "name": "CRM Issue Related Department",
+ "name": "CRM Issue Module Department",
  "naming_rule": "Random",
  "owner": "Administrator",
  "permissions": [
   {
-   "role": "System Manager",
-   "read": 1
+   "read": 1,
+   "role": "System Manager"
   }
  ],
  "sort_field": "modified",

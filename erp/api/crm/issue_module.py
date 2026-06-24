@@ -26,6 +26,19 @@ def _check_config_permission():
         frappe.throw("Khong co quyen cau hinh loai van de", frappe.PermissionError)
 
 
+def _sync_module_departments(doc, data):
+    """Dong bo bang con related_departments tu payload departments: list docname ERP Organization Unit."""
+    if "departments" not in data:
+        return
+    doc.related_departments = []
+    seen = set()
+    for x in data.get("departments") or []:
+        d = (x or "").strip() if isinstance(x, str) else ""
+        if d and d not in seen and frappe.db.exists("ERP Organization Unit", d):
+            seen.add(d)
+            doc.append("related_departments", {"department": d})
+
+
 @frappe.whitelist()
 def get_modules():
     """Danh sach CRM Issue Module"""
@@ -41,10 +54,23 @@ def get_modules():
         fields=["name", "module_name", "code", "sla_hours", "description", "is_active", "modified"],
         order_by="module_name asc",
     )
+    module_names = [m["name"] for m in modules]
+    depts_by_parent = {}
+    if module_names:
+        for r in frappe.get_all(
+            "CRM Issue Module Department",
+            filters={"parent": ["in", module_names], "parenttype": "CRM Issue Module"},
+            fields=["parent", "department", "idx"],
+            order_by="idx asc",
+        ):
+            if r.department:
+                depts_by_parent.setdefault(r.parent, []).append(r.department)
     for m in modules:
         m["member_count"] = frappe.db.count(
             "CRM Issue Module Member", {"parent": m["name"], "parenttype": "CRM Issue Module"}
         )
+        # departments tu cau hinh loai van de — form tu dien khi chon loai
+        m["departments"] = depts_by_parent.get(m["name"], [])
     return success_response(modules)
 
 
@@ -57,7 +83,9 @@ def get_module():
     if not frappe.db.exists("CRM Issue Module", name):
         return not_found_response("Khong tim thay module")
     doc = frappe.get_doc("CRM Issue Module", name)
-    return single_item_response(doc.as_dict())
+    payload = doc.as_dict()
+    payload["departments"] = [r.department for r in (doc.related_departments or []) if r.department]
+    return single_item_response(payload)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -82,6 +110,7 @@ def create_module():
         for row in data.get("members") or []:
             if row.get("user"):
                 doc.append("members", {"user": row["user"]})
+        _sync_module_departments(doc, data)
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Tao module thanh cong")
@@ -120,6 +149,7 @@ def update_module():
             for row in data.get("members") or []:
                 if row.get("user"):
                     doc.append("members", {"user": row["user"]})
+        _sync_module_departments(doc, data)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Cap nhat thanh cong")

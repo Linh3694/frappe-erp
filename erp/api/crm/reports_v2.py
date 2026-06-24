@@ -471,101 +471,127 @@ def get_courses_report():
 
 
 # --------------------------------------------------------------------------- #
-# Nguồn — Thống kê theo Nguồn 1 (source) / Nguồn 2 (sub_source) / Nguồn 3 (source_note)
+# Nguồn — Danh sách Nguồn 1 × bước, lọc theo 3 cấp nguồn (Nguồn 1/2/3)
 # --------------------------------------------------------------------------- #
-def _source_level_breakdown(args, level_field: str) -> List[Dict[str, Any]]:
-    """Tổng & nhập học theo 1 cấp nguồn (cột con trên tabCRM Lead Source)."""
-    fd, td, _, _ = r._resolve_period(args)
-    wsql, binds = r._where_creation_between(fd, td, args)
-    dim_sql, dim_binds = r._where_lead_dimensions_only(args)
-    eb = {"d_from": fd, "d_to": td, **dim_binds}
+# Bước hiển thị trong báo cáo nguồn (giống báo cáo trạng thái theo khối)
+_SOURCE_REPORT_STEPS = _GRADE_REPORT_STEPS
+_SOURCE_STEPS_SQL = "('Lead','QLead','Enrolled','Nghi hoc','Verify','Draft')"
 
-    total_rows = frappe.db.sql(
+
+@frappe.whitelist()
+def get_source_breakdown():
+    """Danh sách Nguồn 1 (snapshot) × bước + tỉ lệ chuyển đổi; lọc theo Nguồn 1/2/3.
+
+    Mỗi dòng = 1 Nguồn 1 (CRM Source). Cột: số hồ sơ (tổng), số ở từng bước
+    (Lead/QLead/Nhập học/Nghỉ học/Xác minh/Nháp), tỉ lệ chuyển đổi = Nhập học / tổng.
+    3 dropdown (src1/src2/src3) lọc hồ sơ theo cùng dòng nguồn con; options 3 cấp
+    tính trên phạm vi chiều, KHÔNG bị thu hẹp bởi chính lựa chọn (để còn đổi lựa chọn).
+    """
+    check_crm_permission()
+    args = frappe.request.args or {}
+    dim_sql, dim_binds = r._where_lead_dimensions_only(args)
+
+    # --- options 3 cấp nguồn (không áp src filter) ---
+    opt_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(NULLIF(TRIM(ls.`{level_field}`), ''), '(Trống)') AS k,
-               COUNT(DISTINCT l.`name`) AS total_count
+        SELECT IFNULL(NULLIF(TRIM(ls.`source`), ''), '') AS s1,
+               IFNULL(NULLIF(TRIM(ls.`sub_source`), ''), '') AS s2,
+               IFNULL(NULLIF(TRIM(ls.`source_note`), ''), '') AS s3
         FROM `tabCRM Lead` l
         INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
-        WHERE {wsql}
-        GROUP BY k
-        ORDER BY total_count DESC
-        LIMIT 200
+        WHERE l.`step` IN {_SOURCE_STEPS_SQL} AND {dim_sql}
+        """,
+        dim_binds,
+        as_dict=True,
+    )
+    s1set, s2set, s3set = set(), set(), set()
+    for o in opt_rows:
+        if o["s1"]:
+            s1set.add(o["s1"])
+        if o["s2"]:
+            s2set.add(o["s2"])
+        if o["s3"]:
+            s3set.add(o["s3"])
+    s1_names = r._batch_source_names(list(s1set))
+    note_names: Dict[str, str] = {}
+    if s3set:
+        for n in frappe.get_all(
+            "CRM Source Note", filters={"name": ["in", list(s3set)]},
+            fields=["name", "note_name"],
+        ):
+            note_names[n["name"]] = n.get("note_name") or n["name"]
+
+    def _opts(values, label_map: Optional[Dict[str, str]] = None):
+        items = [
+            {"key": v, "label": (label_map.get(v, v) if label_map else v)} for v in values
+        ]
+        items.sort(key=lambda x: str(x["label"]).lower())
+        return items
+
+    options = {
+        "src1": _opts(s1set, s1_names),
+        "src2": _opts(s2set, None),
+        "src3": _opts(s3set, note_names),
+    }
+
+    # --- breakdown (áp src filter trên cùng dòng nguồn con ls) ---
+    binds = dict(dim_binds)
+    src_where: List[str] = []
+    s1 = (args.get("src1") or "").strip()
+    s2 = (args.get("src2") or "").strip()
+    s3 = (args.get("src3") or "").strip()
+    if s1:
+        binds["fsrc1"] = s1
+        src_where.append("ls.`source` = %(fsrc1)s")
+    if s2:
+        binds["fsrc2"] = s2
+        src_where.append("ls.`sub_source` = %(fsrc2)s")
+    if s3:
+        binds["fsrc3"] = s3
+        src_where.append("ls.`source_note` = %(fsrc3)s")
+    src_sql = (" AND " + " AND ".join(src_where)) if src_where else ""
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(NULLIF(TRIM(ls.`source`), ''), '(Trống)') AS src,
+               l.`step` AS step,
+               COUNT(DISTINCT l.`name`) AS cnt
+        FROM `tabCRM Lead` l
+        INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
+        WHERE l.`step` IN {_SOURCE_STEPS_SQL} AND {dim_sql}{src_sql}
+        GROUP BY src, l.`step`
         """,
         binds,
         as_dict=True,
     )
 
-    enrolled_rows = frappe.db.sql(
-        f"""
-        SELECT IFNULL(NULLIF(TRIM(ls.`{level_field}`), ''), '(Trống)') AS k,
-               COUNT(DISTINCT ev.lead_id) AS enrolled_count
-        FROM (
-            SELECT h.`lead` AS lead_id FROM `tabCRM Lead Step History` h
-            INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
-            WHERE h.`new_step` = 'Enrolled'
-              AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
-              AND {dim_sql}
-            UNION
-            SELECT l.`name` FROM `tabCRM Lead` l
-            WHERE l.`step` = 'Enrolled' AND l.`enrollment_date` IS NOT NULL
-              AND DATE(l.`enrollment_date`) BETWEEN %(d_from)s AND %(d_to)s
-              AND {dim_sql}
-        ) ev
-        INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = ev.lead_id
-        GROUP BY k
-        """,
-        eb,
-        as_dict=True,
-    )
-    enrolled_map = {row["k"]: int(row["enrolled_count"]) for row in enrolled_rows}
-
-    # Resolve nhãn cho cấp là Link (source → CRM Source, source_note → CRM Source Note)
-    keys = [row["k"] for row in total_rows if row["k"] and row["k"] != "(Trống)"]
-    label_map: Dict[str, str] = {}
-    if level_field == "source":
-        label_map = r._batch_source_names(keys)
-    elif level_field == "source_note" and keys:
-        for n in frappe.get_all(
-            "CRM Source Note", filters={"name": ["in", keys]},
-            fields=["name", "note_name"],
-        ):
-            label_map[n["name"]] = n.get("note_name") or n["name"]
+    by_src: Dict[str, Dict[str, int]] = defaultdict(dict)
+    for row in rows:
+        by_src[row["src"]][row["step"]] = int(row["cnt"])
+    src_ids = [k for k in by_src if k and k != "(Trống)"]
+    src_labels = r._batch_source_names(src_ids)
 
     out = []
-    for row in total_rows:
-        k = row["k"]
-        tot = int(row["total_count"])
-        ec = enrolled_map.get(k, 0)
+    for src, steps in by_src.items():
+        total = sum(steps.values())
+        enrolled = steps.get("Enrolled", 0)
         out.append(
             {
-                "key": k,
-                "label": label_map.get(k, k),
-                "count_total": tot,
-                "count_enrolled": ec,
-                "conversion_rate_pct": round(100.0 * ec / max(1, tot), 2),
+                "key": src,
+                "label": src_labels.get(src, src),
+                "total": total,
+                "by_step": {s: steps.get(s, 0) for s in _SOURCE_REPORT_STEPS},
+                "count_enrolled": enrolled,
+                "conversion_rate_pct": round(100.0 * enrolled / max(1, total), 2),
             }
         )
-    return out
+    out.sort(key=lambda x: x["total"], reverse=True)
 
-
-@frappe.whitelist()
-def get_source_levels():
-    """Thống kê nguồn 1/2/3."""
-    check_crm_permission()
-    args = frappe.request.args or {}
-    fd, td, _, _ = r._resolve_period(args)
     return success_response(
         {
-            "by_source": _source_level_breakdown(args, "source"),
-            "by_sub_source": _source_level_breakdown(args, "sub_source"),
-            "by_source_note": _source_level_breakdown(args, "source_note"),
-            "meta": {
-                "period": {"from": str(fd), "to": str(td)},
-                "labels": {
-                    "by_source": "Nguồn 1",
-                    "by_sub_source": "Nguồn 2",
-                    "by_source_note": "Nguồn 3",
-                },
-            },
+            "steps": _SOURCE_REPORT_STEPS,
+            "rows": out,
+            "options": options,
+            "meta": {"pic_restricted_to_self": r._should_restrict_to_own_pic_only()},
         }
     )

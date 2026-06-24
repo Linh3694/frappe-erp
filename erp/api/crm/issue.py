@@ -4,6 +4,7 @@ CRM Issue API - Van de chung (tuyen sinh): module, SLA, duyet, PIC tu CRM Lead
 
 import frappe
 from frappe.utils import now, add_to_date, get_datetime, getdate
+from frappe.utils.nestedset import get_ancestors_of, get_descendants_of
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -13,6 +14,9 @@ from erp.utils.api_response import (
     not_found_response,
 )
 from erp.api.crm.utils import ALLOWED_ROLES, check_crm_permission, get_request_data
+
+# Phong ban = don vi So do to chuc (ERP Organization Unit). Thay the CRM Issue Department.
+ORG_UNIT_DOCTYPE = "ERP Organization Unit"
 
 # Role Care duoc tao issue truc tiep (khong qua hang cho)
 DIRECT_ISSUE_ROLES = frozenset(
@@ -30,10 +34,12 @@ APPROVER_ROLES = frozenset(
     }
 )
 
-# User co the duoc gan lam PIC; tach khoi DIRECT_ISSUE_ROLES de Sales van co the xu ly issue.
+# Chi role Care moi duoc them/bot phong ban lien quan cua issue (phong ban mac dinh theo Loai van de)
+ISSUE_DEPT_EDIT_ROLES = APPROVER_ROLES
+
+# User co the duoc gan lam PIC. SIS Sales = user thuong (chi lam PIC khi la leader/thanh vien don vi).
 PIC_ELIGIBLE_ROLES = frozenset(
     {
-        "SIS Sales",
         "SIS Sales Care",
         "SIS Sales Care Admin",
         "SIS Sales Admin",
@@ -43,10 +49,9 @@ PIC_ELIGIBLE_ROLES = frozenset(
 CARE_ADMIN_ROLES = frozenset({"SIS Sales Care Admin"})
 VALID_ISSUE_RESULTS = frozenset({"Hai long", "Chua hai long"})
 
-# Role duoc ghi / xu ly van de (dong bo frontend canWriteIssue; SM tuong duong Sales Admin trong module)
+# Role duoc ghi / xu ly van de (dong bo frontend canWriteIssue). SIS Sales = user thuong (ghi qua Team don vi).
 ISSUE_WRITE_ROLES = frozenset(
     {
-        "SIS Sales",
         "SIS Sales Care",
         "SIS Sales Care Admin",
         "SIS Sales Admin",
@@ -55,10 +60,9 @@ ISSUE_WRITE_ROLES = frozenset(
     }
 )
 
-# Chi nhom Sales doi trang thai / ket qua xu ly (sidebar Issue Detail — dong bo frontend)
+# Nhom Care/Admin doi trang thai / ket qua xu ly (sidebar Issue Detail). SIS Sales = user thuong.
 ISSUE_STATUS_SALES_ROLES = frozenset(
     {
-        "SIS Sales",
         "SIS Sales Care",
         "SIS Sales Care Admin",
         "SIS Sales Admin",
@@ -89,10 +93,9 @@ CRM_ISSUE_LIST_EXTRA_ROLES = frozenset(
     }
 )
 
-# Viền log (sales): khong gom SIS BOD — user vua BOD vua Sales hoac vua phong ban luon dung accent bod
+# Viền log (sales): khong gom SIS BOD. SIS Sales = user thuong -> nhan label theo don vi neu thuoc Team.
 LOG_ACCENT_SALES_ROLES = frozenset(
     {
-        "SIS Sales",
         "SIS Sales Care",
         "SIS Sales Care Admin",
         "SIS Sales Admin",
@@ -229,18 +232,33 @@ def _normalize_issue_date(value):
         return str(value)[:10]
 
 
-def _get_user_crm_issue_department_names(user: str):
-    """Docname CRM Issue Department ma user la thanh vien."""
+def _get_user_org_unit_names(user: str):
+    """
+    Don vi So do to chuc ma user 'thuoc' (de loc 'phong ban toi'):
+    L (user la leader) ∪ M (user la member) ∪ ancestors(L) ∪ descendants(L).
+    Tuong duong dieu kien user ∈ Team(U).
+    """
     if not user or user == "Guest":
         return []
-    rows = frappe.db.sql(
-        """
-        SELECT DISTINCT parent FROM `tabCRM Issue Dept Member`
-        WHERE user = %(u)s
-        """,
-        {"u": user},
+    leader_units = frappe.get_all(
+        "ERP Organization Unit Leader",
+        filters={"user": user, "parenttype": ORG_UNIT_DOCTYPE},
+        pluck="parent",
     )
-    return [r[0] for r in rows] if rows else []
+    member_units = frappe.get_all(
+        "ERP Organization Unit Member",
+        filters={"user": user, "parenttype": ORG_UNIT_DOCTYPE},
+        pluck="parent",
+    )
+    names = set(leader_units or []) | set(member_units or [])
+    for unit in set(leader_units or []):
+        names.update(get_ancestors_of(ORG_UNIT_DOCTYPE, unit) or [])
+        names.update(get_descendants_of(ORG_UNIT_DOCTYPE, unit) or [])
+    return list(names)
+
+
+# Alias tuong thich ten cu (cac cho goi trong file van dung ten nay)
+_get_user_crm_issue_department_names = _get_user_org_unit_names
 
 
 def _can_access_crm_issue_list() -> bool:
@@ -287,7 +305,7 @@ def _compute_log_source_label(logged_by: str, issue_doc) -> str:
         return "Phòng tuyển sinh"
     for dn in _issue_department_docnames(issue_doc):
         if dn and logged_by in _department_member_emails(dn):
-            dn_name = frappe.db.get_value("CRM Issue Department", dn, "department_name")
+            dn_name = frappe.db.get_value(ORG_UNIT_DOCTYPE, dn, "unit_name_vn")
             return ((dn_name or "").strip() or dn)
     return ""
 
@@ -327,7 +345,7 @@ def _finalize_issue_api_dict(doc):
         roles = _session_roles_current()
         can_pic_role = bool(PIC_CHANGE_ROLES & roles)
         data["can_change_pic"] = bool(can_pic_role and ap == "Da duyet")
-        data["can_change_department"] = bool(_can_write_issue_ops(u, doc) and ap == "Da duyet")
+        data["can_change_department"] = bool(_can_edit_issue_departments(u) and ap == "Da duyet")
         data["can_add_process_log"] = bool(
             (_is_issue_pic(u, doc) or _can_write_issue_ops(u, doc)) and ap == "Da duyet" and st == "Dang xu ly"
         )
@@ -424,20 +442,59 @@ def _care_admin_emails():
     return list(set(enabled or []))
 
 
-def _department_member_emails(department_name):
-    """Email thanh vien phong ban CRM Issue."""
-    if not department_name or not frappe.db.exists("CRM Issue Department", department_name):
+def _unit_leader_emails(unit_name):
+    """Email leader (quan ly) cua mot don vi to chuc."""
+    if not unit_name:
         return []
-    dept = frappe.get_doc("CRM Issue Department", department_name)
-    return [m.user for m in (dept.members or [])]
+    return frappe.get_all(
+        "ERP Organization Unit Leader",
+        filters={"parent": unit_name, "parenttype": ORG_UNIT_DOCTYPE},
+        order_by="sort_order asc",
+        pluck="user",
+    )
+
+
+def _unit_member_emails_only(unit_name):
+    """Email member (khong gom leader) cua mot don vi to chuc."""
+    if not unit_name:
+        return []
+    return frappe.get_all(
+        "ERP Organization Unit Member",
+        filters={"parent": unit_name, "parenttype": ORG_UNIT_DOCTYPE},
+        pluck="user",
+    )
+
+
+def _department_member_emails(department_name):
+    """
+    'Thanh vien phong ban' theo phan cap So do to chuc — Team(U):
+    leaders(U) + members(U) + leaders(don vi con) + leaders(cap tren). Dedupe.
+    """
+    if not department_name or not frappe.db.exists(ORG_UNIT_DOCTYPE, department_name):
+        return []
+    seen = set()
+    out = []
+
+    def _add(emails):
+        for e in emails or []:
+            if e and e not in seen:
+                seen.add(e)
+                out.append(e)
+
+    _add(_unit_leader_emails(department_name))
+    _add(_unit_member_emails_only(department_name))
+    for child in (get_descendants_of(ORG_UNIT_DOCTYPE, department_name) or []):
+        _add(_unit_leader_emails(child))
+    for parent in (get_ancestors_of(ORG_UNIT_DOCTYPE, department_name) or []):
+        _add(_unit_leader_emails(parent))
+    return out
 
 
 def _department_manager_emails(department_name):
-    """Email manager cua phong ban CRM Issue."""
-    if not department_name or not frappe.db.exists("CRM Issue Department", department_name):
+    """'Quan ly phong ban' = leaders cua don vi (notify manager)."""
+    if not department_name or not frappe.db.exists(ORG_UNIT_DOCTYPE, department_name):
         return []
-    dept = frappe.get_doc("CRM Issue Department", department_name)
-    return [m.user for m in (dept.members or []) if getattr(m, "is_manager", 0)]
+    return _unit_leader_emails(department_name)
 
 
 def _issue_department_docnames(issue_doc):
@@ -505,22 +562,70 @@ def _issue_names_visible_to_department_members(dept_docnames):
     return list(set(n1 or []) | set(n2 or []))
 
 
-def _sync_issue_departments(doc, data):
+def _set_issue_departments(doc, dept_ids):
     """
-    Dong bo bang con issue_departments + cot department (phan tu dau).
-    Payload: departments: list docname CRM Issue Department.
+    Set bang con issue_departments + cot department (phan tu dau).
+    Validate ton tai trong ERP Organization Unit. Tra ve list docname hop le.
     """
-    if "departments" not in data:
-        return
     ids = []
-    for x in data.get("departments") or []:
+    for x in dept_ids or []:
         sid = (x or "").strip() if isinstance(x, str) else ""
-        if sid and frappe.db.exists("CRM Issue Department", sid) and sid not in ids:
+        if sid and frappe.db.exists(ORG_UNIT_DOCTYPE, sid) and sid not in ids:
             ids.append(sid)
     doc.issue_departments = []
     for sid in ids:
         doc.append("issue_departments", {"department": sid})
     doc.department = ids[0] if ids else ""
+    return ids
+
+
+def _sync_issue_departments(doc, data):
+    """
+    Dong bo bang con issue_departments tu payload.
+    Payload: departments: list docname ERP Organization Unit.
+    """
+    if "departments" not in data:
+        return
+    _set_issue_departments(doc, data.get("departments"))
+
+
+def _module_departments(module_name: str):
+    """Don vi (ERP Organization Unit) cau hinh san tren Loai van de — phong ban mac dinh."""
+    if not module_name:
+        return []
+    return frappe.get_all(
+        "CRM Issue Module Department",
+        filters={"parent": module_name, "parenttype": "CRM Issue Module"},
+        order_by="idx asc",
+        pluck="department",
+    )
+
+
+def _module_member_emails(module_name: str):
+    """Email members cua Loai van de (chi de notify)."""
+    if not module_name:
+        return []
+    return frappe.get_all(
+        "CRM Issue Module Member",
+        filters={"parent": module_name, "parenttype": "CRM Issue Module"},
+        pluck="user",
+    )
+
+
+def _effective_issue_departments(data, module_name, user):
+    """
+    Phong ban hieu luc khi tao/sua issue:
+    - Mac dinh = cau hinh cua Loai van de.
+    - Chi role Care (+ SM) gui departments/department thi moi duoc tu chinh.
+    """
+    sent = None
+    if "departments" in data:
+        sent = data.get("departments") or []
+    elif data.get("department"):
+        sent = [data.get("department")]
+    if sent is not None and _can_edit_issue_departments(user):
+        return sent
+    return _module_departments(module_name)
 
 
 def _enrich_issue_list_departments(issues):
@@ -588,11 +693,18 @@ def _can_create_directly():
     return bool(DIRECT_ISSUE_ROLES & _user_roles())
 
 
-def _is_valid_pic_user(pic_email: str) -> bool:
-    """PIC hop le: user ton tai va co it nhat mot role xu ly (dong bo get_issue_pic_candidates)."""
+def _is_valid_pic_user(pic_email: str, issue_doc=None) -> bool:
+    """
+    PIC hop le: user ton tai va (co role xu ly HOAC la thanh vien Team cua phong ban issue).
+    Nho do leader/thanh vien don vi (vd leader cua group) van lam PIC duoc du role gi.
+    """
     if not pic_email or not frappe.db.exists("User", pic_email):
         return False
-    return bool(PIC_ELIGIBLE_ROLES & set(frappe.get_roles(pic_email)))
+    if PIC_ELIGIBLE_ROLES & set(frappe.get_roles(pic_email)):
+        return True
+    if issue_doc is not None and pic_email in _all_department_member_emails_for_issue(issue_doc):
+        return True
+    return False
 
 
 def _can_approve():
@@ -603,6 +715,15 @@ def _can_approve():
     if "System Manager" in r or "Administrator" in r:
         return True
     return False
+
+
+def _can_edit_issue_departments(user: str = None) -> bool:
+    """Chi role Care (+ SM/Administrator) moi duoc them/bot phong ban lien quan cua issue."""
+    u = user or frappe.session.user
+    if not u or u == "Guest":
+        return False
+    roles = _session_roles_current() if u == frappe.session.user else set(frappe.get_roles(u))
+    return bool(ISSUE_DEPT_EDIT_ROLES & roles or "System Manager" in roles or u == "Administrator")
 
 
 def _generate_issue_code(prefix: str) -> str:
@@ -634,41 +755,30 @@ def _pic_from_student(student_id: str):
 
 
 def _pic_from_department(dept_name: str):
-    """Lay user dau tien trong phong ban lam PIC mac dinh."""
-    if not dept_name or not frappe.db.exists("CRM Issue Department", dept_name):
+    """PIC chinh mac dinh = leader dau tien cua don vi (fallback member dau tien)."""
+    if not dept_name or not frappe.db.exists(ORG_UNIT_DOCTYPE, dept_name):
         return None
-    doc = frappe.get_doc("CRM Issue Department", dept_name)
-    if doc.members and len(doc.members) > 0:
-        return doc.members[0].user
-    return None
-
-
-def _pic_from_module(module_name: str):
-    """Lay user dau tien trong bang thanh vien CRM Issue Module (uu tien PIC tu loai van de)."""
-    if not module_name or not frappe.db.exists("CRM Issue Module", module_name):
-        return None
-    doc = frappe.get_doc("CRM Issue Module", module_name)
-    if doc.members and len(doc.members) > 0:
-        return doc.members[0].user
+    leaders = _unit_leader_emails(dept_name)
+    if leaders:
+        return leaders[0]
+    members = _unit_member_emails_only(dept_name)
+    if members:
+        return members[0]
     return None
 
 
 def _assign_pic_from_issue_context(doc):
     """
-    Gan PIC theo Loai van de -> Lead hoc sinh -> phong ban (dong bo create_issue).
+    Gan PIC: leader cua group (PIC chinh) -> fallback Lead hoc sinh.
     Goi sau khi issue_module / hoc sinh / phong ban da dong bo len doc.
     """
-    module_name = (getattr(doc, "issue_module", None) or "").strip()
-    if not module_name:
-        return
-    pic = _pic_from_module(module_name) or ""
+    pic = ""
+    for dn in _issue_department_docnames(doc):
+        pic = _pic_from_department(dn) or ""
+        if pic:
+            break
     if not pic and getattr(doc, "student", None):
         pic = _pic_from_student(doc.student) or ""
-    if not pic:
-        for dn in _issue_department_docnames(doc):
-            pic = _pic_from_department(dn) or ""
-            if pic:
-                break
     doc.pic = pic
 
 
@@ -886,7 +996,10 @@ def whoami_crm_issue():
 
 @frappe.whitelist()
 def get_issue_pic_candidates():
-    """Tra ve danh sach user co role PIC hop le (Sales/Care)."""
+    """
+    Danh sach user co the lam PIC: role PIC hop le (Sales Care/Admin...).
+    Neu truyen issue -> bo sung Team phong ban cua issue (vd leader cua group) du role gi.
+    """
     # Khong dung check_crm_permission: moi user dang nhap can tai dropdown PIC khi tao/sua issue
 
     pic_roles = list(PIC_ELIGIBLE_ROLES)
@@ -896,16 +1009,28 @@ def get_issue_pic_candidates():
         fields=["parent"],
         pluck="parent",
     )
-    unique_emails = list(set(user_emails))
-    if not unique_emails:
+    emails = set(user_emails or [])
+
+    issue_name = frappe.request.args.get("issue")
+    if issue_name and frappe.db.exists("CRM Issue", issue_name):
+        issue_doc = frappe.get_doc("CRM Issue", issue_name)
+        emails.update(_all_department_member_emails_for_issue(issue_doc))
+
+    if not emails:
         return success_response([])
 
     users = frappe.get_all(
         "User",
-        filters={"name": ["in", unique_emails], "enabled": 1},
+        filters={"name": ["in", list(emails)], "enabled": 1},
         fields=["name as user_id", "full_name", "email", "user_image", "job_title"],
     )
     return success_response(users)
+
+
+@frappe.whitelist()
+def get_my_issue_units():
+    """Don vi So do to chuc ma user hien tai 'thuoc' (loc 'phong ban toi')."""
+    return success_response(_get_user_org_unit_names(frappe.session.user))
 
 
 @frappe.whitelist()
@@ -1228,9 +1353,7 @@ def create_issue():
     for f in required:
         if not data.get(f):
             errors[f] = ["Bat buoc"]
-    dept_payload = data.get("departments") or ([data.get("department")] if data.get("department") else [])
-    if not dept_payload:
-        errors["departments"] = ["Bat buoc"]
+    # Phong ban mac dinh theo Loai van de (khong bat buoc client gui)
     if data.get("priority") and data.get("priority") not in ("Cao", "Trung binh", "Thap"):
         errors["priority"] = ["Gia tri khong hop le"]
     if errors:
@@ -1256,14 +1379,14 @@ def create_issue():
         doc.occurred_at = occurred_at
         doc.lead = data.get("lead") or ""
         _sync_issue_students(doc, data)
-        if "departments" in data:
-            _sync_issue_departments(doc, data)
-        else:
-            doc.department = (data.get("department") or "").strip()
-            doc.issue_departments = []
-            d0 = doc.department
-            if d0 and frappe.db.exists("CRM Issue Department", d0):
-                doc.append("issue_departments", {"department": d0})
+        # Phong ban: mac dinh = cau hinh Loai van de; chi role Care moi duoc tu chinh
+        eff_depts = _effective_issue_departments(data, module_name, frappe.session.user)
+        dept_ids = _set_issue_departments(doc, eff_depts)
+        if not dept_ids:
+            return validation_error_response(
+                "Phong ban lien quan la bat buoc (cau hinh tren Loai van de)",
+                {"departments": ["Bat buoc"]},
+            )
         doc.attachment = data.get("attachment") or ""
 
         sla_h = float(mod.sla_hours or 0)
@@ -1297,12 +1420,26 @@ def create_issue():
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
 
-        # Push: co van de cho duyet -> thong bao nguoi duyet
+        # Push: cho duyet -> bao nguoi duyet; tao truc tiep -> bao PIC + quan ly phong ban + members loai van de
         try:
             if doc.approval_status == "Cho duyet":
                 _notify_crm_issue_mobile(
                     _approver_emails(),
                     "Vấn đề mới chờ duyệt",
+                    f"{doc.issue_code}: {doc.title}",
+                    doc,
+                    "crm_issue_created",
+                    exclude_user=frappe.session.user,
+                )
+            else:
+                recipients = []
+                if doc.pic:
+                    recipients.append(doc.pic)
+                recipients.extend(_all_department_manager_emails_for_issue(doc))
+                recipients.extend(_module_member_emails(doc.issue_module))
+                _notify_crm_issue_mobile(
+                    recipients,
+                    "Vấn đề mới",
                     f"{doc.issue_code}: {doc.title}",
                     doc,
                     "crm_issue_created",
@@ -1348,19 +1485,13 @@ def approve_issue():
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
-    if "departments" in data:
-        dept_values = data.get("departments") or []
-        if not dept_values:
+    # Nguoi duyet la role Care -> duoc dieu chinh phong ban lien quan
+    if "departments" in data or "department" in data:
+        dept_values = data.get("departments")
+        if dept_values is None:
+            dept_values = [data.get("department")] if data.get("department") else []
+        if not _set_issue_departments(doc, dept_values):
             return validation_error_response("Phong ban lien quan la bat buoc", {"departments": ["Bat buoc"]})
-        _sync_issue_departments(doc, data)
-    elif "department" in data:
-        dept_value = (data.get("department") or "").strip()
-        if not dept_value:
-            return validation_error_response("Phong ban lien quan la bat buoc", {"department": ["Bat buoc"]})
-        doc.department = dept_value
-        doc.issue_departments = []
-        if frappe.db.exists("CRM Issue Department", dept_value):
-            doc.append("issue_departments", {"department": dept_value})
 
     if "priority" in data:
         priority = (data.get("priority") or "").strip()
@@ -1370,7 +1501,7 @@ def approve_issue():
 
     if "pic" in data:
         new_pic = (data.get("pic") or "").strip()
-        if new_pic and not _is_valid_pic_user(new_pic):
+        if new_pic and not _is_valid_pic_user(new_pic, doc):
             return error_response("PIC khong hop le")
         doc.pic = new_pic
 
@@ -1395,6 +1526,7 @@ def approve_issue():
         if doc.pic:
             recipients.append(doc.pic)
         recipients.extend(_all_department_manager_emails_for_issue(doc))
+        recipients.extend(_module_member_emails(doc.issue_module))
         _notify_crm_issue_mobile(
             recipients,
             "Vấn đề đã được duyệt",
@@ -1511,19 +1643,19 @@ def update_issue():
             if new_pic != old_pic_s:
                 if not (PIC_CHANGE_ROLES & _session_roles_current()):
                     return error_response("Khong co quyen doi PIC")
-                if new_pic and not _is_valid_pic_user(new_pic):
+                if new_pic and not _is_valid_pic_user(new_pic, doc):
                     return error_response(
                         "PIC khong hop le: chi user co role xu ly van de (dong bo danh sach PIC)"
                     )
 
-        if "departments" in data:
-            _sync_issue_departments(doc, data)
-        elif "department" in data:
-            doc.department = (data.get("department") or "").strip()
-            doc.issue_departments = []
-            d0 = doc.department
-            if d0 and frappe.db.exists("CRM Issue Department", d0):
-                doc.append("issue_departments", {"department": d0})
+        # Chi nhom Care moi duoc them/bot phong ban lien quan
+        if "departments" in data or "department" in data:
+            if not _can_edit_issue_departments(frappe.session.user):
+                return error_response("Chi nhom Care moi duoc thay doi phong ban lien quan")
+            dept_values = data.get("departments")
+            if dept_values is None:
+                dept_values = [data.get("department")] if data.get("department") else []
+            _set_issue_departments(doc, dept_values)
 
         if "students" in data or "student" in data:
             _sync_issue_students(doc, data)

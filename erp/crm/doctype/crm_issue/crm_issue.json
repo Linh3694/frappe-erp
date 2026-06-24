@@ -145,7 +145,7 @@
    "fieldname": "department",
    "fieldtype": "Link",
    "label": "Related Department",
-   "options": "CRM Issue Department"
+   "options": "ERP Organization Unit"
   },
   {
    "fieldname": "issue_departments",
