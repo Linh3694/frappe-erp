@@ -7,7 +7,6 @@ import frappe
 from frappe import _
 from frappe.utils import get_datetime, get_time, get_weekday
 
-from erp.api.erp_administrative.administrative_ticket import _active_school_year_id_api
 from erp.utils.api_response import (
     error_response,
     not_found_response,
@@ -28,8 +27,18 @@ WEEKDAY_NAMES = [
 	"Sunday",
 ]
 
-# Map get_weekday() (0=Monday) → tên thứ trong doctype
-WEEKDAY_INDEX_TO_NAME = {i: name for i, name in enumerate(WEEKDAY_NAMES)}
+
+def _active_school_year_id(explicit=None):
+	"""Năm học đang bật — copy logic từ administrative_ticket để tránh circular import."""
+	sy = (explicit or "").strip()
+	if sy and frappe.db.exists("SIS School Year", sy):
+		return sy
+	return frappe.db.get_value(
+		"SIS School Year",
+		{"is_enable": 1},
+		"name",
+		order_by="start_date desc",
+	)
 
 
 def _parse_json_body():
@@ -163,8 +172,8 @@ def _get_availability_for_datetime(room_id, dt):
 	config = _get_config_doc_for_room(room_id, active_only=True)
 	if not config:
 		return None, None
-	weekday_idx = get_weekday(dt)  # 0=Monday
-	day_name = WEEKDAY_INDEX_TO_NAME.get(weekday_idx)
+	# frappe.utils.get_weekday trả về tên thứ ("Monday", …) — không phải số
+	day_name = get_weekday(dt)
 	for row in config.availability or []:
 		if (row.day_of_week or "").strip() == day_name:
 			return config, row
@@ -224,7 +233,7 @@ def validate_booking_against_config(room_id, start_dt, end_dt):
 
 
 def _enrich_rooms_with_yearly_assignment(rooms, school_year_id=None):
-	sy = (school_year_id or "").strip() or _active_school_year_id_api()
+	sy = (school_year_id or "").strip() or _active_school_year_id()
 	if sy and rooms:
 		rnames = [r["name"] for r in rooms]
 		ya_rows = frappe.get_all(
