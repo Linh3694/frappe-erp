@@ -210,9 +210,22 @@ def _parse_lead_filters(raw):
         if field == "primary_phone":
             negate = op in ("is_not", "not_contains")
             lookup_op = "=" if op in ("is", "is_not") else "like"
+            # SDT luu dang +84xxxxxxxxx -> chuan hoa gia tri loc cho khop
+            pv = str(val).strip().replace(" ", "").replace("-", "")
+            if op in ("is", "is_not"):
+                phone_cmp = normalize_phone_number(pv)
+            else:
+                if pv.startswith("0"):
+                    pv = "+84" + pv[1:]
+                if op == "starts_with":
+                    phone_cmp = f"{pv}%"
+                elif op == "ends_with":
+                    phone_cmp = f"%{pv}"
+                else:  # contains / not_contains
+                    phone_cmp = f"%{pv}%"
             parents = frappe.get_all(
                 "CRM Lead Phone",
-                filters=[["phone_number", lookup_op, cmp_val]],
+                filters=[["phone_number", lookup_op, phone_cmp]],
                 pluck="parent",
             )
             names = list({p for p in parents if p})
@@ -272,6 +285,20 @@ def get_leads():
             ["student_code", "like", like],
             ["crm_code", "like", like],
         ]
+        # Tim theo SDT: luu o bang con CRM Lead Phone (dinh dang +84xxxxxxxxx).
+        # Doi 0xxx -> +84xxx de khop gia tri da luu, roi gop parent vao or_filters.
+        phone_search = search.strip().replace(" ", "").replace("-", "")
+        if phone_search.startswith("0"):
+            phone_search = "+84" + phone_search[1:]
+        if phone_search and any(ch.isdigit() for ch in phone_search):
+            phone_parents = frappe.get_all(
+                "CRM Lead Phone",
+                filters=[["phone_number", "like", f"%{phone_search}%"]],
+                pluck="parent",
+            )
+            phone_parents = list({p for p in phone_parents if p})
+            if phone_parents:
+                or_filters.append(["name", "in", phone_parents])
 
     # Dem tong (ton trong ca filter co ban, filter nang cao va search)
     if or_filters:
@@ -370,7 +397,8 @@ def _resolve_referrer(referrer_name, staff_code, phone):
         return None, None
 
     staff_code = (staff_code or "").strip()
-    phone = (phone or "").strip()
+    # SDT nguoi gioi thieu cung chuan hoa ve +84xxxxxxxxx (luu + doi chieu nhu SDT phu huynh)
+    phone = normalize_phone_number((phone or "").strip())
     if not staff_code and not phone:
         return None, "Nguoi gioi thieu phai co Ma nhan vien hoac SDT de dinh danh"
 

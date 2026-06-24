@@ -90,15 +90,23 @@ def validate_phone_number(phone: str) -> bool:
 
 
 def normalize_phone_number(phone: str) -> str:
-    """Chuan hoa SDT ve dinh dang 0xxxxxxxxx"""
+    """Chuan hoa SDT ve dinh dang +84xxxxxxxxx (dung de luu DB va doi chieu trung).
+
+    Nguoi dung nhap 0xxxxxxxxx; he thong luu + dedup theo +84xxxxxxxxx.
+    Ham idempotent: ap dung lai tren gia tri da chuan hoa van giu nguyen.
+    """
     if not phone:
         return ""
     cleaned = phone.strip().replace(" ", "").replace("-", "")
-    if cleaned.startswith("+84"):
-        cleaned = "0" + cleaned[3:]
-    elif not cleaned.startswith("0") and len(cleaned) >= 9:
-        cleaned = "0" + cleaned
-    return cleaned
+    if cleaned.startswith("+"):
+        cleaned = cleaned[1:]
+    if not cleaned:
+        return ""
+    if cleaned.startswith("0"):
+        cleaned = "84" + cleaned[1:]
+    elif not cleaned.startswith("84"):
+        cleaned = "84" + cleaned
+    return "+" + cleaned
 
 
 def get_valid_statuses_for_step(step: str) -> List[str]:

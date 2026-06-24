@@ -7,3 +7,4 @@
 erp.patches.v1_0.clear_legacy_source_note
 erp.patches.v1_0.backfill_budget_plan_applicable_snapshot
 erp.patches.v1_0.add_crm_report_indexes
+erp.patches.v1_0.normalize_crm_phones_to_e164
