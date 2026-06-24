@@ -8,6 +8,12 @@ from frappe import _
 from frappe.utils import cint, get_datetime, now_datetime, today
 
 from erp.api.erp_administrative.room_activity_log import log_room_activity
+from erp.api.erp_administrative.room_booking import (
+    _room_booking_conflicts,
+    create_booking_for_ticket,
+    remove_booking_for_ticket,
+    sync_booking_for_ticket,
+)
 from erp.api.erp_sis.mobile_push_notification import _mobile_notify_via_redis_stream_only
 from erp.utils.api_response import (
     error_response,
@@ -2183,7 +2189,7 @@ def create_ticket():
                     _("Thời gian kết thúc phải sau thời gian bắt đầu"),
                     {"event_end_time": ["invalid"]},
                 )
-            if _room_event_booking_conflicts(event_room_id, event_start_time, event_end_time):
+            if _room_booking_conflicts(event_room_id, event_start_time, event_end_time):
                 return validation_error_response(
                     _("Khung giờ này đã có người đặt phòng. Vui lòng chọn thời gian khác."),
                     {"event_end_time": ["conflict"]},
@@ -2284,6 +2290,15 @@ def create_ticket():
         except Exception:
             frappe.log_error(frappe.get_traceback(), "administrative_ticket.create_ticket.room_log")
         frappe.db.commit()
+
+        # Ticket sự kiện/CSVC: tạo thêm bản ghi ERP Room Booking để giữ chỗ phòng
+        # trên cùng lịch đặt phòng (nguồn dữ liệu chung chống trùng giờ).
+        if is_event_facility:
+            try:
+                create_booking_for_ticket(frappe.get_doc(DOCTYPE, doc.name))
+                frappe.db.commit()
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "administrative_ticket.create_ticket.room_booking")
 
         try:
             _notify_new_admin_ticket_mobile(frappe.get_doc(DOCTYPE, doc.name))
@@ -2427,7 +2442,7 @@ def update_ticket():
                     _("Thời gian kết thúc phải sau thời gian bắt đầu"),
                     {"event_end_time": ["invalid"]},
                 )
-            if _room_event_booking_conflicts(er, est, eet, exclude_ticket_id=doc.name):
+            if _room_booking_conflicts(er, est, eet, exclude_ticket_id=doc.name):
                 return validation_error_response(
                     _("Khung giờ này đã có người đặt phòng. Vui lòng chọn thời gian khác."),
                     {"event_end_time": ["conflict"]},
@@ -2508,6 +2523,12 @@ def update_ticket():
                 _ticket_log_room_repair_activity(frappe.get_doc(DOCTYPE, doc.name), "repair_completed")
         except Exception:
             frappe.log_error(frappe.get_traceback(), "administrative_ticket.update_ticket.room_log")
+        # Đồng bộ ERP Room Booking gắn với ticket sự kiện/CSVC (phòng/giờ/huỷ).
+        if cint(getattr(doc, "is_event_facility", 0)):
+            try:
+                sync_booking_for_ticket(frappe.get_doc(DOCTYPE, doc.name))
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "administrative_ticket.update_ticket.room_booking")
         frappe.db.commit()
         try:
             doc_reload = frappe.get_doc(DOCTYPE, doc.name)
@@ -2538,6 +2559,8 @@ def delete_ticket():
         ticket_id = data.get("ticket_id") or data.get("name")
         if not ticket_id or not frappe.db.exists(DOCTYPE, ticket_id):
             return not_found_response(_("Không tìm thấy ticket"))
+        # Xoá luôn booking giữ chỗ phòng gắn với ticket (nếu là ticket sự kiện/CSVC).
+        remove_booking_for_ticket(ticket_id, hard_delete=True)
         frappe.delete_doc(DOCTYPE, ticket_id, ignore_permissions=True)
         frappe.db.commit()
         return success_response({"deleted": True}, "OK")
@@ -2599,6 +2622,9 @@ def cancel_ticket():
         doc.cancellation_reason = reason
         doc.save(ignore_permissions=True)
         _append_history(doc.name, _("Hủy ticket"), detail=reason[:500])
+        # Huỷ booking giữ chỗ phòng để giải phóng khung giờ trên lịch đặt phòng.
+        if cint(getattr(doc, "is_event_facility", 0)):
+            remove_booking_for_ticket(doc.name)
         frappe.db.commit()
         try:
             _notify_hc_cancelled(frappe.get_doc(DOCTYPE, doc.name), email)
@@ -2632,6 +2658,12 @@ def reopen_ticket():
         doc.feedback_badges = None
         doc.save(ignore_permissions=True)
         _append_history(doc.name, _("Mở lại ticket"))
+        # Khôi phục booking giữ chỗ phòng (Cancelled → Booked) khi mở lại ticket sự kiện.
+        if cint(getattr(doc, "is_event_facility", 0)):
+            try:
+                sync_booking_for_ticket(frappe.get_doc(DOCTYPE, doc.name))
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "administrative_ticket.reopen_ticket.room_booking")
         frappe.db.commit()
         try:
             _notify_hc_reopened(frappe.get_doc(DOCTYPE, doc.name), email)

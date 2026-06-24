@@ -270,6 +270,7 @@ permission_query_conditions = {
 	"LMS Blueprint Sync Log": "erp.lms.utils.permissions.lms_blueprint_sync_log_query",
 	"ERP Administrative Room Yearly Assignment": "erp.utils.campus_permission_query.erp_administrative_room_yearly_assignment_query",
 	"ERP Administrative Ticket": "erp.utils.campus_permission_query.erp_administrative_ticket_query",
+	"ERP Room Booking": "erp.utils.campus_permission_query.erp_room_booking_query",
 	"ERP Administrative Facility Handover": "erp.utils.campus_permission_query.erp_administrative_facility_handover_query",
 	"ERP Administrative Inventory Check": "erp.utils.campus_permission_query.erp_administrative_inventory_check_query",
 	"ERP Administrative Room Activity Log": "erp.utils.campus_permission_query.erp_administrative_room_activity_log_query",
@@ -452,6 +453,7 @@ has_permission = {
 	"LMS External Tool": "erp.lms.utils.permissions.has_lms_campus_permission",
 	"ERP Administrative Room Yearly Assignment": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 	"ERP Administrative Ticket": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Room Booking": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 	"ERP Administrative Facility Handover": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 	"ERP Administrative Inventory Check": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 	"ERP Administrative Room Activity Log": "erp.utils.campus_permission_query.has_campus_doctype_permission",
@@ -1055,6 +1057,9 @@ doc_events = {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
 	},
 	"ERP Administrative Ticket": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Room Booking": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
 	},
 	"ERP Administrative Facility Handover": {

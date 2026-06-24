@@ -1,0 +1,172 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "autoname": "format:RB-{#####}",
+ "creation": "2026-06-24 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "campus_id",
+  "title",
+  "description",
+  "building_id",
+  "room_id",
+  "start_time",
+  "end_time",
+  "status",
+  "booked_by",
+  "booked_by_email",
+  "booked_by_fullname",
+  "booked_by_avatar",
+  "booked_by_department",
+  "source",
+  "source_ticket"
+ ],
+ "fields": [
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tiêu đề",
+   "reqd": 1
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Nội dung / mục đích"
+  },
+  {
+   "fieldname": "building_id",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Tòa nhà",
+   "options": "ERP Administrative Building",
+   "reqd": 1
+  },
+  {
+   "fieldname": "room_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Phòng",
+   "options": "ERP Administrative Room",
+   "reqd": 1
+  },
+  {
+   "fieldname": "start_time",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Bắt đầu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_time",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Kết thúc",
+   "reqd": 1
+  },
+  {
+   "default": "Booked",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "Booked\nCancelled"
+  },
+  {
+   "fieldname": "booked_by",
+   "fieldtype": "Link",
+   "label": "Người đặt",
+   "options": "User"
+  },
+  {
+   "fieldname": "booked_by_email",
+   "fieldtype": "Data",
+   "label": "Email người đặt"
+  },
+  {
+   "fieldname": "booked_by_fullname",
+   "fieldtype": "Data",
+   "label": "Họ tên người đặt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "booked_by_avatar",
+   "fieldtype": "Data",
+   "label": "Avatar người đặt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "booked_by_department",
+   "fieldtype": "Data",
+   "label": "Phòng ban người đặt",
+   "read_only": 1
+  },
+  {
+   "default": "room_booking_page",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Nguồn tạo",
+   "options": "room_booking_page\nadmin_ticket"
+  },
+  {
+   "fieldname": "source_ticket",
+   "fieldtype": "Link",
+   "label": "Ticket nguồn",
+   "options": "ERP Administrative Ticket"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-24 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Administrative",
+ "name": "ERP Room Booking",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Administrative",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Teacher",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
