@@ -5,6 +5,7 @@ Nguồn: tabCRM Lead, tabCRM Lead Step History, tabCRM Lead Source.
 Số liệu vận hành theo ngày sự kiện (changed_at); hồ sơ mới theo creation.
 """
 
+import json
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
@@ -137,6 +138,87 @@ def _append_dimension_filters(
             f"EXISTS (SELECT 1 FROM `tabCRM Lead Source` s "
             f"WHERE s.`parent` = {alias}.`name` AND s.`source` = %({p}_src)s)"
         )
+
+    _append_dynamic_lead_filters(where_parts, binds, args, alias, prefix)
+
+
+# Toán tử filter động (đồng bộ FilterOperator phía frontend) → SQL
+_DYNAMIC_OP_MAP: Dict[str, str] = {
+    "is": "=",
+    "is_not": "!=",
+    "contains": "LIKE",
+    "not_contains": "NOT LIKE",
+    "starts_with": "LIKE",
+    "ends_with": "LIKE",
+    "gt": ">",
+    "lt": "<",
+    "gte": ">=",
+    "lte": "<=",
+}
+_DYNAMIC_LIKE_OPS = {"contains", "not_contains", "starts_with", "ends_with"}
+
+
+def _crm_lead_valid_columns() -> set:
+    """Cột DB hợp lệ của CRM Lead (whitelist cho filter động)."""
+    try:
+        return set(frappe.get_meta("CRM Lead").get_valid_columns())
+    except Exception:
+        return set()
+
+
+def _parse_lead_filters(args) -> List[Dict[str, Any]]:
+    raw = args.get("lead_filters")
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple)):
+        items = raw
+    else:
+        try:
+            items = json.loads(raw)
+        except Exception:
+            return []
+    return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
+
+
+def _append_dynamic_lead_filters(
+    where_parts: List[str],
+    binds: Dict[str, Any],
+    args,
+    alias: str = "l",
+    prefix: str = "",
+) -> None:
+    """Filter động trên trường CRM Lead bất kỳ (validate theo meta, bind tham số)."""
+    items = _parse_lead_filters(args)
+    if not items:
+        return
+    valid_cols = _crm_lead_valid_columns()
+    if not valid_cols:
+        return
+    p = prefix or ""
+    for idx, cond in enumerate(items):
+        field = str(cond.get("field") or cond.get("column") or "").strip()
+        op = str(cond.get("operator") or "is").strip()
+        if field not in valid_cols or op not in _DYNAMIC_OP_MAP:
+            continue
+        value = cond.get("value")
+        if value is None or value == "":
+            # cho phép is/is_not '' để lọc rỗng; còn lại bỏ qua
+            if op not in ("is", "is_not"):
+                continue
+        if isinstance(value, bool):
+            value = 1 if value else 0
+        sql_op = _DYNAMIC_OP_MAP[op]
+        bind_key = f"{p}_dyn_{idx}"
+        if op in _DYNAMIC_LIKE_OPS:
+            v = str(value)
+            if op in ("contains", "not_contains"):
+                value = f"%{v}%"
+            elif op == "starts_with":
+                value = f"{v}%"
+            else:  # ends_with
+                value = f"%{v}"
+        binds[bind_key] = value
+        where_parts.append(f"{alias}.`{field}` {sql_op} %({bind_key})s")
 
 
 def _where_creation_between(date_from: Any, date_to: Any, args) -> Tuple[str, Dict[str, Any]]:
