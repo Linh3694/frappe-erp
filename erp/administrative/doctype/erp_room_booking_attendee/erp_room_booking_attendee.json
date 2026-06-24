@@ -1,0 +1,48 @@
+{
+ "doctype": "DocType",
+ "name": "ERP Room Booking Attendee",
+ "module": "Administrative",
+ "istable": 1,
+ "parent_doctype": "ERP Room Booking",
+ "engine": "InnoDB",
+ "editable_grid": 1,
+ "field_order": [
+  "user",
+  "email",
+  "full_name",
+  "department"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Người dùng",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Email",
+   "reqd": 1
+  },
+  {
+   "fieldname": "full_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Họ tên",
+   "read_only": 1
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Phòng ban",
+   "read_only": 1
+  }
+ ],
+ "sort_field": "idx",
+ "sort_order": "ASC"
+}
