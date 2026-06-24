@@ -7,7 +7,6 @@ import frappe
 from frappe import _
 from frappe.utils import get_datetime, get_time, get_weekday
 
-from erp.api.erp_administrative.administrative_ticket import _active_school_year_id_api
 from erp.utils.api_response import (
     error_response,
     not_found_response,
@@ -30,6 +29,19 @@ WEEKDAY_NAMES = [
 
 # Map get_weekday() (0=Monday) → tên thứ trong doctype
 WEEKDAY_INDEX_TO_NAME = {i: name for i, name in enumerate(WEEKDAY_NAMES)}
+
+
+def _active_school_year_id(explicit=None):
+	"""Năm học đang bật — copy logic từ administrative_ticket để tránh circular import."""
+	sy = (explicit or "").strip()
+	if sy and frappe.db.exists("SIS School Year", sy):
+		return sy
+	return frappe.db.get_value(
+		"SIS School Year",
+		{"is_enable": 1},
+		"name",
+		order_by="start_date desc",
+	)
 
 
 def _parse_json_body():
@@ -224,7 +236,7 @@ def validate_booking_against_config(room_id, start_dt, end_dt):
 
 
 def _enrich_rooms_with_yearly_assignment(rooms, school_year_id=None):
-	sy = (school_year_id or "").strip() or _active_school_year_id_api()
+	sy = (school_year_id or "").strip() or _active_school_year_id()
 	if sy and rooms:
 		rnames = [r["name"] for r in rooms]
 		ya_rows = frappe.get_all(
