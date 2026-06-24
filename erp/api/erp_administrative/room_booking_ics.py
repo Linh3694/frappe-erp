@@ -1,11 +1,14 @@
 # Copyright (c) 2026, Wellspring International School and contributors
-# Sinh file .ics và gửi lời mời lịch qua email cho đặt phòng.
+# Sinh file .ics và gửi lời mời lịch qua email-service (Microsoft Graph).
 
+import base64
 import uuid
 
 import frappe
 from frappe import _
 from frappe.utils import get_datetime, now_datetime
+
+from erp.utils.email_service import send_email_via_service
 
 ICS_TZ = "Asia/Ho_Chi_Minh"
 ICS_PRODID = "-//Wellspring International School//Room Booking//VI"
@@ -30,11 +33,11 @@ def _ics_escape(text):
 
 
 def _ics_local_dt(dt):
-    """Datetime → chuỗi ICS local (TZID=Asia/Ho_Chi_Minh)."""
-    d = get_datetime(dt)
-    if not d:
-        return ""
-    return d.strftime("%Y%m%dT%H%M%S")
+	"""Datetime → chuỗi ICS local (TZID=Asia/Ho_Chi_Minh)."""
+	d = get_datetime(dt)
+	if not d:
+		return ""
+	return d.strftime("%Y%m%dT%H%M%S")
 
 
 def _ics_utc_stamp(dt=None):
@@ -112,7 +115,7 @@ def _booking_recipients(doc):
 
 
 def send_booking_invites(doc, method="REQUEST"):
-	"""Gửi email kèm file .ics — lỗi gửi mail không làm fail booking."""
+	"""Gửi email kèm file .ics qua email-service — lỗi gửi mail không làm fail booking."""
 	try:
 		recipients = _booking_recipients(doc)
 		if not recipients:
@@ -120,28 +123,38 @@ def send_booking_invites(doc, method="REQUEST"):
 		ics_content = build_ics(doc, method=method)
 		method_upper = (method or "REQUEST").upper()
 		is_cancel = method_upper == "CANCEL"
+		ics_method = "CANCEL" if is_cancel else "REQUEST"
 		subject = (
 			_(f"[Huỷ đặt phòng] {doc.title or doc.name}")
 			if is_cancel
 			else _(f"[Đặt phòng] {doc.title or doc.name}")
 		)
-		message = _(
+		text = (
 			"Cuộc họp đã được huỷ. Tệp đính kèm giúp cập nhật lịch của bạn."
 			if is_cancel
 			else "Vui lòng mở tệp đính kèm để thêm sự kiện vào lịch (Google Calendar, Outlook, Apple Calendar)."
 		)
-		frappe.sendmail(
-			recipients=recipients,
+		body_html = f"<p>{frappe.utils.escape_html(_(text))}</p>"
+		attachments = [
+			{
+				"name": f"dat-phong-{doc.name}.ics",
+				"contentType": f"text/calendar; method={ics_method}",
+				"contentBytes": base64.b64encode(ics_content.encode("utf-8")).decode("ascii"),
+			}
+		]
+		from_email = (frappe.conf.get("room_booking_email_from") or "").strip() or None
+		result = send_email_via_service(
+			to_list=recipients,
 			subject=subject,
-			message=message,
-			attachments=[
-				{
-					"fname": f"dat-phong-{doc.name}.ics",
-					"fcontent": ics_content.encode("utf-8"),
-				}
-			],
-			now=True,
+			body=body_html,
+			from_email=from_email,
+			attachments=attachments,
 		)
+		if not result.get("success"):
+			frappe.log_error(
+				result.get("message") or "send_email_via_service failed",
+				"room_booking_ics.send_booking_invites",
+			)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "room_booking_ics.send_booking_invites")
 
