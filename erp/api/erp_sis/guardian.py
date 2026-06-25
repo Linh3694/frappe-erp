@@ -5,6 +5,7 @@ import json
 import re
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
 from erp.utils.search import build_search_condition
+from erp.utils.country import to_country_or_blank
 from erp.utils.api_response import (
     success_response, error_response, list_response,
     single_item_response, validation_error_response,
@@ -113,7 +114,11 @@ def _extract_guardian_profile_updates(row, column_map: dict, fields=None) -> dic
         value = _read_guardian_excel_value(row, column_map, fieldname)
         if not value:
             continue
-        updates[fieldname] = _normalize_guardian_dob(value) if fieldname == "dob" else value
+        if fieldname == "dob":
+            value = _normalize_guardian_dob(value)
+        elif fieldname == "nationality":
+            value = to_country_or_blank(value)
+        updates[fieldname] = value
     return updates
 
 
@@ -751,9 +756,10 @@ def create_guardian():
         workplace = data.get("workplace") or ""
         address = data.get("address") or ""
         nationality = data.get("nationality") or ""
+        nationality = to_country_or_blank(nationality)
         note = data.get("note") or ""
         dob = data.get("dob") or None
-        
+
         # Bắt buộc tên trước khi xử lý SĐT / email
         if not guardian_name:
             frappe.logger().error(f"Guardian name validation failed: data={data}")
@@ -1052,7 +1058,7 @@ def update_guardian(
             guardian_doc.address = address or ""
             changes_made = True
         if nationality is not None:
-            guardian_doc.nationality = nationality or ""
+            guardian_doc.nationality = to_country_or_blank(nationality)
             changes_made = True
         if note is not None:
             guardian_doc.note = note or ""

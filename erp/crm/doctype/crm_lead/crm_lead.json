@@ -309,8 +309,9 @@
   },
   {
    "fieldname": "student_nationality",
-   "fieldtype": "Data",
-   "label": "Quoc tich"
+   "fieldtype": "Link",
+   "label": "Quoc tich",
+   "options": "Country"
   },
   {
    "fieldname": "student_ethnicity",

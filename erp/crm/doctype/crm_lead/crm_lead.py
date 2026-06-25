@@ -25,8 +25,22 @@ class CRMLead(Document):
         if not rows and legacy and str(legacy).strip():
             self.append('emails', {'email_address': str(legacy).strip(), 'is_primary': 1})
 
+    def _normalize_nationalities(self):
+        """Quoc tich (HS + PH) la Link -> Country: ep ve ten Country hop le hoac rong.
+
+        Choke point chung cho moi luong save chay validate (create/update_lead, bulk...),
+        tranh LinkValidationError voi gia tri tu do / khong khop.
+        """
+        from erp.utils.country import to_country_or_blank
+
+        for field in ("student_nationality", "guardian_nationality"):
+            val = self.get(field)
+            if val:
+                self.set(field, to_country_or_blank(val))
+
     def validate(self):
         """Moi guardian lead: chi 1 dong primary trong emails neu co du lieu."""
+        self._normalize_nationalities()
         self._validate_bank_accounts_max_two()
         self._dedupe_lead_emails()
         rows = getattr(self, 'emails', None) or []

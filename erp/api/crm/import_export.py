@@ -15,6 +15,7 @@ from erp.api.crm.utils import (
     apply_marcom_pic_policy,
 )
 from erp.api.crm.pipeline import _log_step_change
+from erp.utils.country import to_country_or_blank
 from datetime import datetime, timedelta
 
 
@@ -340,6 +341,8 @@ def _apply_bulk_student_section_fields(doc, row):
         if field not in row:
             continue
         new_val = _parse_bulk_cell(field, row.get(field))
+        if field == "student_nationality" and new_val:
+            new_val = to_country_or_blank(new_val)
         if _set_doc_field_if_changed(doc, field, new_val):
             changed = True
     if _apply_bulk_bank_accounts_from_row(doc, row):

@@ -2383,9 +2383,13 @@ def get_withdrawal_report():
 @frappe.whitelist()
 def get_year_comparison():
     """
-    So sánh tỷ lệ tái ghi danh qua các năm (gom theo năm học nguồn của các kỳ trong campus).
+    So sánh tỷ lệ tái ghi danh qua các năm (gom theo năm học nguồn của các kỳ trong cùng campus).
 
-    Args: campus_id (tùy chọn), limit (số năm gần nhất, mặc định 3).
+    Phạm vi campus: ưu tiên campus của kỳ đang chọn (config_id) để khớp với báo cáo
+    tổng quan; nếu không có config_id thì dùng campus_id; nếu cả hai đều trống thì
+    KHÔNG gộp toàn hệ thống mà trả về rỗng (tránh phình số liệu đa campus).
+
+    Args: config_id (tùy chọn, ưu tiên), campus_id (tùy chọn), limit (số năm gần nhất, mặc định 3).
     Trả về danh sách năm đã sắp theo start_date, cũ → mới.
     """
     logs = []
@@ -2393,6 +2397,7 @@ def get_year_comparison():
         if not _check_admin_permission():
             return error_response("Bạn không có quyền truy cập", logs=logs)
 
+        config_id = frappe.request.args.get('config_id')
         campus_id = frappe.request.args.get('campus_id')
         limit = frappe.request.args.get('limit')
         try:
@@ -2400,15 +2405,24 @@ def get_year_comparison():
         except (TypeError, ValueError):
             limit = 3
 
-        resolved_campus = _resolve_campus_id(campus_id) if campus_id else None
+        # Ưu tiên campus của kỳ đang chọn để section 06 khớp với section 01–05
+        resolved_campus = None
+        if config_id:
+            resolved_campus = frappe.db.get_value("SIS Re-enrollment Config", config_id, "campus_id")
+        if not resolved_campus and campus_id:
+            resolved_campus = _resolve_campus_id(campus_id)
 
-        config_filters = {}
-        if resolved_campus:
-            config_filters["campus_id"] = resolved_campus
+        # Không xác định được campus → không gộp đa campus, trả rỗng
+        if not resolved_campus:
+            return success_response(
+                data={"years": []},
+                message="Chưa xác định campus để so sánh theo năm",
+                logs=logs
+            )
 
         configs = frappe.get_all(
             "SIS Re-enrollment Config",
-            filters=config_filters,
+            filters={"campus_id": resolved_campus},
             fields=["name", "source_school_year_id"]
         )
 
@@ -2428,11 +2442,12 @@ def get_year_comparison():
                 as_dict=True
             )
             placeholders = ", ".join(["%s"] * len(config_names))
+            # COUNT(DISTINCT student) để nhiều kỳ cùng campus+năm không cộng trùng học sinh
             stat = frappe.db.sql(f"""
                 SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN re.decision = 're_enroll' THEN 1 ELSE 0 END) AS re_enroll,
-                    SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) AS not_re_enroll
+                    COUNT(DISTINCT re.student_id) AS total,
+                    COUNT(DISTINCT CASE WHEN re.decision = 're_enroll' THEN re.student_id END) AS re_enroll,
+                    COUNT(DISTINCT CASE WHEN re.decision = 'not_re_enroll' THEN re.student_id END) AS not_re_enroll
                 FROM `tabSIS Re-enrollment` re
                 WHERE re.config_id IN ({placeholders})
             """, config_names, as_dict=True)
