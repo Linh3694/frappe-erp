@@ -389,7 +389,8 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
                      name_field: str, statuses: List[str],
                      date_field: str = "event_date",
                      date_coalesce: bool = False,
-                     skip_campus_filter: bool = False) -> Dict[str, Any]:
+                     skip_campus_filter: bool = False,
+                     skip_date_filter: bool = False) -> Dict[str, Any]:
     fd, td, _, _ = r._resolve_period(args)
     match_sql, match_binds = _activity_student_lead_match(args, "es", "act")
 
@@ -399,8 +400,12 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
         if date_coalesce
         else f"e.`{date_field}`"
     )
-    ev_where = [f"DATE({date_expr}) BETWEEN %(d_from)s AND %(d_to)s"]
-    binds: Dict[str, Any] = {"d_from": fd, "d_to": td, **match_binds}
+    ev_where: List[str] = []
+    binds: Dict[str, Any] = {**match_binds}
+    if not skip_date_filter:
+        ev_where.append(f"DATE({date_expr}) BETWEEN %(d_from)s AND %(d_to)s")
+        binds["d_from"] = fd
+        binds["d_to"] = td
 
     campus_id = (args.get("campus_id") or "").strip()
     if campus_id and not skip_campus_filter:
@@ -411,7 +416,7 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
         binds["e_year"] = tay
         ev_where.append("e.`school_year_id` = %(e_year)s")
 
-    where_clause = " AND ".join(ev_where)
+    where_clause = " AND ".join(ev_where) if ev_where else "1=1"
     status_cols = ",\n".join(
         f"SUM(CASE WHEN es.`status` = '{st}' AND {match_sql} THEN 1 ELSE 0 END) AS `st_{st}`"
         for st in statuses
@@ -427,7 +432,7 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
         LEFT JOIN `tab{student_doctype}` es ON es.`{student_fk}` = e.`name`
         WHERE {where_clause}
         GROUP BY e.`name`
-        ORDER BY {date_expr} DESC
+        ORDER BY {date_expr} DESC, e.`modified` DESC
         LIMIT 500
         """,
         binds,
@@ -530,7 +535,8 @@ def get_entrance_exams_report():
             name_field="exam_name",
             date_field="exam_date",
             date_coalesce=True,
-            # Kỳ khảo sát thường không gán campus trên header — tránh lọc mất dòng khi sidebar chọn campus
+            # Đồng bộ module Khảo sát đầu vào — liệt kê tất cả kỳ, không lọc theo kỳ báo cáo
+            skip_date_filter=True,
             skip_campus_filter=True,
             statuses=_ENTRANCE_EXAM_STUDENT_STATUSES,
         )
