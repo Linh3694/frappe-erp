@@ -5,7 +5,7 @@ CRM Lead API - CRUD Ho So Tuyen Sinh
 import re
 import frappe
 from frappe import _
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, search_names
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
     single_item_response, list_response, validation_error_response, not_found_response
@@ -188,6 +188,9 @@ def _parse_lead_filters(raw):
         "student_name", "guardian_name", "pic", "step", "status",
         "test_status", "deal_status", "student_code", "crm_code",
     }
+    # Cot text -> ap chuan search chung (bo dau, token, dau tu) qua search_names.
+    # pic/step/status/test_status/deal_status: dropdown gui dung key/id -> khop chinh xac.
+    text_cols = {"student_name", "guardian_name", "student_code", "crm_code"}
 
     out = []
     for c in conditions:
@@ -242,6 +245,22 @@ def _parse_lead_filters(raw):
 
         if field not in allowed:
             continue
+
+        # Cot text: chuan search chung (bo dau, token, dau tu) -> dieu kien tren `name`
+        if field in text_cols:
+            if op == "ends_with":
+                # search chung khong ho tro hau to -> giu LIKE %val
+                out.append([field, "like", cmp_val])
+                continue
+            names = list({n for n in (search_names("CRM Lead", [field], val) or []) if n})
+            negate = op in ("is_not", "not_contains")
+            if negate:
+                if names:
+                    out.append(["name", "not in", names])
+            else:
+                out.append(["name", "in", names or ["__no_match__"]])
+            continue
+
         out.append([field, op_map[op], cmp_val])
 
     return out
