@@ -376,7 +376,33 @@ def get_leads():
                 order_by="idx asc"
             )
         lead["primary_phone"] = phone or ""
-    
+
+    # Ten nguoi nhap (cot "Nguoi nhap" buoc Du lieu): owner (User id/email) -> full_name
+    owner_ids = list({lead.get("owner") for lead in leads if lead.get("owner")})
+    if owner_ids:
+        owner_map = {
+            u["name"]: (u.get("full_name") or "").strip()
+            for u in frappe.get_all(
+                "User", filters=[["name", "in", owner_ids]], fields=["name", "full_name"]
+            )
+        }
+        for lead in leads:
+            lead["owner_full_name"] = owner_map.get(lead.get("owner"), "")
+
+    # Ngay cham soc gan nhat: lay creation ghi chu (CRM Lead Note) moi nhat moi lead
+    lead_names = [lead["name"] for lead in leads]
+    if lead_names:
+        care_map = {}
+        for note in frappe.get_all(
+            "CRM Lead Note",
+            filters=[["lead", "in", lead_names]],
+            fields=["lead", "max(creation) as last_care_date"],
+            group_by="lead",
+        ):
+            care_map[note["lead"]] = note["last_care_date"]
+        for lead in leads:
+            lead["last_care_date"] = care_map.get(lead["name"])
+
     # per_page=0: tra ve all, truyen total de paginated_response tinh total_pages=1
     resp_per_page = total if per_page == 0 else per_page
     return paginated_response(leads, 1 if per_page == 0 else page, total, resp_per_page)
@@ -757,6 +783,38 @@ def clone_lead_for_sibling():
         return error_response(f"Loi tao ho so nhanh: {str(e)}")
 
 
+# Map Phan loai CRM Promotion -> field % tong tren CRM Lead.
+# Moi field giu TONG % cua cac uu dai cung phan loai (suy tu bang con promotions),
+# de cac noi dung tieu thu cu (parent portal, tinh phi) van doc duoc 1 con so.
+_PROMOTION_CATEGORY_TO_FEE_FIELD = {
+    "Học phí": "tuition_fee_pct",
+    "Phí dịch vụ": "service_fee_pct",
+    "Phí phát triển trường": "dev_fee_pct",
+    "Khảo sát đầu vào": "ksdv_pct",
+}
+
+
+def _sync_lead_fee_pct_from_promotions(doc):
+    """Tinh lai 4 field *_fee_pct = tong gia tri % cac uu dai cung phan loai trong bang con."""
+    totals = {field: 0.0 for field in _PROMOTION_CATEGORY_TO_FEE_FIELD.values()}
+    for row in (doc.get("promotions") or []):
+        if not row.promotion:
+            continue
+        promo = frappe.db.get_value(
+            "CRM Promotion", row.promotion, ["category", "value"], as_dict=True
+        )
+        if not promo:
+            continue
+        field = _PROMOTION_CATEGORY_TO_FEE_FIELD.get((promo.category or "").strip())
+        if field and promo.value is not None:
+            try:
+                totals[field] += float(promo.value)
+            except (TypeError, ValueError):
+                pass
+    for field, total in totals.items():
+        doc.set(field, total if total > 0 else None)
+
+
 @frappe.whitelist(methods=["POST"])
 def update_lead():
     """Cap nhat thong tin lead"""
@@ -874,6 +932,21 @@ def update_lead():
                     "attachment": d_item.get("attachment", "")
                 })
         
+        # Cap nhat chuong trinh uu dai (bang con, khong gioi han so dong/phan loai).
+        # Sau khi set, tinh lai 4 field *_fee_pct = tong % theo phan loai.
+        if "promotions" in data:
+            doc.set("promotions", [])
+            seen = set()
+            for r in (data.get("promotions") or []):
+                if not isinstance(r, dict):
+                    continue
+                promo_id = (r.get("promotion") or "").strip()
+                if not promo_id or promo_id in seen:
+                    continue
+                seen.add(promo_id)
+                doc.append("promotions", {"promotion": promo_id})
+            _sync_lead_fee_pct_from_promotions(doc)
+
         # Tu dong tinh ngay hoan thien ho so khi tat ca tai lieu da co file
         _recalculate_admission_profile_completion(doc)
         

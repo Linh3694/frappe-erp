@@ -10,6 +10,7 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data,
     validate_phone_number, normalize_phone_number,
+    get_valid_statuses_for_step,
     STEP_STATUSES, CRM_STEPS, check_marcom_draft_create_only,
     apply_marcom_pic_policy,
 )
@@ -121,6 +122,23 @@ def _resolve_pic_to_user_name(pic_raw):
     return None
 
 
+def _normalize_dob_string(s):
+    """Chuan hoa chuoi ngay sinh ve YYYY-MM-DD.
+
+    Chap nhan dd/mm/yyyy (dinh dang file mau), dd-mm-yyyy va YYYY-MM-DD.
+    Tra ve nguyen chuoi neu khong khop dinh dang nao (de validate phia sau).
+    """
+    s = (s or "").strip()
+    if not s:
+        return None
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return s
+
+
 def _parse_bulk_cell(field, raw):
     """Chuan hoa gia tri tu Excel / JSON."""
     if raw is None:
@@ -143,7 +161,9 @@ def _parse_bulk_cell(field, raw):
             except Exception:
                 pass
         s = str(raw).strip()
-        return s or None
+        if not s:
+            return None
+        return _normalize_dob_string(s)
     s = str(raw).strip()
     return s if s else None
 
@@ -337,7 +357,7 @@ def download_lead_template():
     template_fields = [
         {"field": "student_name", "label": "Ten hoc sinh"},
         {"field": "student_gender", "label": "Gioi tinh (Nam/Nu)"},
-        {"field": "student_dob", "label": "Ngay sinh (YYYY-MM-DD)"},
+        {"field": "student_dob", "label": "Ngay sinh (dd/mm/yyyy)"},
         {"field": "current_grade", "label": "Lop dang hoc"},
         {"field": "target_grade", "label": "Lop du tuyen"},
         {"field": "guardian_name", "label": "Ten phu huynh"},
@@ -346,13 +366,20 @@ def download_lead_template():
         {"field": "phone_number", "label": "So dien thoai (bat buoc)"},
         {"field": "data_source", "label": "Nguon (Online/Offline/Doi tac)"},
     ]
-    
+
+    if step in ("Lead", "QLead"):
+        valid_statuses = get_valid_statuses_for_step(step)
+        template_fields.append({
+            "field": "status",
+            "label": "Trang thai (%s)" % "/".join(valid_statuses),
+        })
+
     if step == "Lead":
         template_fields.extend([
             {"field": "current_school", "label": "Truong dang hoc"},
             {"field": "guardian_id_number", "label": "So CCCD/Ho chieu"},
         ])
-    
+
     return success_response({"fields": template_fields, "step": step})
 
 
@@ -399,7 +426,7 @@ def bulk_import_leads():
             doc = frappe.new_doc("CRM Lead")
             doc.step = target_step
             doc.status = "New"
-            
+
             field_map = [
                 "student_name", "student_gender", "student_dob",
                 "current_grade", "target_grade", "guardian_name",
@@ -408,7 +435,17 @@ def bulk_import_leads():
             ]
             for field in field_map:
                 if row.get(field):
-                    doc.set(field, row[field])
+                    value = row[field]
+                    if field == "student_dob":
+                        value = _normalize_dob_string(str(value))
+                    doc.set(field, value)
+
+            # Trang thai cho buoc Hoc sinh quan tam (Lead) / Hoc sinh tiem nang (QLead)
+            raw_status = (row.get("status") or "").strip()
+            if raw_status and target_step in ("Lead", "QLead"):
+                valid_statuses = get_valid_statuses_for_step(target_step)
+                if raw_status in valid_statuses:
+                    doc.status = raw_status
             
             doc.append("phone_numbers", {
                 "phone_number": normalized_phone,

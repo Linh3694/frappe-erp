@@ -164,16 +164,17 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
         valid_nghi = get_valid_statuses_for_step("Nghi hoc")
         if doc.status not in valid_nghi:
             doc.status = valid_nghi[0] if valid_nghi else "Chuyen truong"
-        # Nghi hoc / Chuyen truong: luu thong tin truong chuyen den (khong bat buoc)
-        if doc.status == "Chuyen truong":
-            for f in (
-                "withdraw_transfer_school",
-                "withdraw_transfer_school_address",
-                "withdraw_transfer_reason",
-            ):
-                val = extra_data.get(f)
-                if val is not None:
-                    doc.set(f, val)
+        # Nghi hoc: luu thong tin nghi hoc cho moi loai nghi (khong bat buoc,
+        # khong con gioi han chi khi Chuyen truong)
+        for f in (
+            "withdraw_reason_group",
+            "withdraw_transfer_school",
+            "withdraw_transfer_school_address",
+            "withdraw_transfer_reason",
+        ):
+            val = extra_data.get(f)
+            if val is not None:
+                doc.set(f, val)
     if verify_status_from_duplicate:
         doc.status = verify_status_from_duplicate
     if target_step == "Verify" and old_step == "Lead":

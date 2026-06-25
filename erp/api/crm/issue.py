@@ -328,6 +328,7 @@ def _finalize_issue_api_dict(doc):
     data = doc.as_dict()
     _enrich_user_info([data])
     _enrich_issue_students_display(data)
+    _enrich_issue_guardians_display(data)
     _enrich_process_logs_accent(data, doc)
     # Quyen theo session thuc te (tranh lech JWT/Has Role o frontend)
     u = frappe.session.user
@@ -589,18 +590,6 @@ def _sync_issue_departments(doc, data):
     _set_issue_departments(doc, data.get("departments"))
 
 
-def _module_departments(module_name: str):
-    """Don vi (ERP Organization Unit) cau hinh san tren Loai van de — phong ban mac dinh."""
-    if not module_name:
-        return []
-    return frappe.get_all(
-        "CRM Issue Module Department",
-        filters={"parent": module_name, "parenttype": "CRM Issue Module"},
-        order_by="idx asc",
-        pluck="department",
-    )
-
-
 def _module_member_emails(module_name: str):
     """Email members cua Loai van de (chi de notify)."""
     if not module_name:
@@ -610,22 +599,6 @@ def _module_member_emails(module_name: str):
         filters={"parent": module_name, "parenttype": "CRM Issue Module"},
         pluck="user",
     )
-
-
-def _effective_issue_departments(data, module_name, user):
-    """
-    Phong ban hieu luc khi tao/sua issue:
-    - Mac dinh = cau hinh cua Loai van de.
-    - Chi role Care (+ SM) gui departments/department thi moi duoc tu chinh.
-    """
-    sent = None
-    if "departments" in data:
-        sent = data.get("departments") or []
-    elif data.get("department"):
-        sent = [data.get("department")]
-    if sent is not None and _can_edit_issue_departments(user):
-        return sent
-    return _module_departments(module_name)
 
 
 def _enrich_issue_list_departments(issues):
@@ -806,6 +779,30 @@ def _sync_issue_students(doc, data):
     doc.student = st
 
 
+def _sync_issue_guardians(doc, data):
+    """
+    Dong bo bang con issue_guardians + truong guardian (phu huynh dau tien, tuong thich legacy).
+    - Neu co khoa guardians (list): dung lam nguon that.
+    - Neu khong: dung guardian (mot phu huynh) nhu truoc.
+    """
+    if "guardians" in data:
+        ids = []
+        for x in data.get("guardians") or []:
+            gid = (x or "").strip() if isinstance(x, str) else ""
+            if gid and frappe.db.exists("CRM Guardian", gid) and gid not in ids:
+                ids.append(gid)
+        doc.issue_guardians = []
+        for gid in ids:
+            doc.append("issue_guardians", {"guardian": gid})
+        doc.guardian = ids[0] if ids else ""
+        return
+    g = (data.get("guardian") or "").strip()
+    doc.issue_guardians = []
+    if g and frappe.db.exists("CRM Guardian", g):
+        doc.append("issue_guardians", {"guardian": g})
+    doc.guardian = g
+
+
 def _normalize_vn_name(full_name):
     """Tra ve full_name nguyen ban tu User (Frappe da luu dung thu tu, khong reorder)."""
     if not full_name:
@@ -960,6 +957,40 @@ def _enrich_issue_students_display(data):
             data["student_class_title"] = class_by_student.get(single, "")
     except Exception as e:
         frappe.logger().error(f"_enrich_issue_students_display: {e}")
+
+
+def _enrich_issue_guardians_display(data):
+    """Gắn guardian_display_name, guardian_phone cho issue_guardians — hiển thị Tên (SĐT)."""
+    if not isinstance(data, dict):
+        return
+    try:
+        rows = data.get("issue_guardians") or []
+        ids = []
+        for r in rows:
+            gid = (r.get("guardian") or "").strip()
+            if gid and gid not in ids:
+                ids.append(gid)
+        single = (data.get("guardian") or "").strip()
+        if single and single not in ids:
+            ids.append(single)
+        if not ids:
+            return
+        guard_rows = frappe.get_all(
+            "CRM Guardian",
+            filters={"name": ["in", ids]},
+            fields=["name", "guardian_name", "phone_number"],
+        )
+        name_to_display = {g["name"]: (g.get("guardian_name") or "").strip() for g in (guard_rows or [])}
+        name_to_phone = {g["name"]: (g.get("phone_number") or "").strip() for g in (guard_rows or [])}
+        for r in rows:
+            gid = (r.get("guardian") or "").strip()
+            r["guardian_display_name"] = name_to_display.get(gid) or gid
+            r["guardian_phone"] = name_to_phone.get(gid, "")
+        if single:
+            data["guardian_display_name"] = name_to_display.get(single) or single
+            data["guardian_phone"] = name_to_phone.get(single, "")
+    except Exception as e:
+        frappe.logger().error(f"_enrich_issue_guardians_display: {e}")
 
 
 def _compute_sla_deadline(occurred_at, sla_hours):
@@ -1353,7 +1384,7 @@ def create_issue():
     for f in required:
         if not data.get(f):
             errors[f] = ["Bat buoc"]
-    # Phong ban mac dinh theo Loai van de (khong bat buoc client gui)
+    # Phong ban lien quan: tuy chon o form tao moi; chi bat buoc khi tao truc tiep (xu ly ben duoi)
     if data.get("priority") and data.get("priority") not in ("Cao", "Trung binh", "Thap"):
         errors["priority"] = ["Gia tri khong hop le"]
     if errors:
@@ -1379,12 +1410,16 @@ def create_issue():
         doc.occurred_at = occurred_at
         doc.lead = data.get("lead") or ""
         _sync_issue_students(doc, data)
-        # Phong ban: mac dinh = cau hinh Loai van de; chi role Care moi duoc tu chinh
-        eff_depts = _effective_issue_departments(data, module_name, frappe.session.user)
-        dept_ids = _set_issue_departments(doc, eff_depts)
-        if not dept_ids:
+        _sync_issue_guardians(doc, data)
+        # Phong ban lien quan: nhap o form tao moi (khong con mac dinh theo Loai van de).
+        # Tao qua hang cho: nguoi tao khong bat buoc. Tao truc tiep (Care = tu duyet): bat buoc.
+        dept_values = data.get("departments")
+        if dept_values is None:
+            dept_values = [data.get("department")] if data.get("department") else []
+        dept_ids = _set_issue_departments(doc, dept_values)
+        if _can_create_directly() and not dept_ids:
             return validation_error_response(
-                "Phong ban lien quan la bat buoc (cau hinh tren Loai van de)",
+                "Phong ban lien quan la bat buoc",
                 {"departments": ["Bat buoc"]},
             )
         doc.attachment = data.get("attachment") or ""
@@ -1485,13 +1520,17 @@ def approve_issue():
     if doc.approval_status != "Cho duyet":
         return error_response("Van de khong o trang thai cho duyet")
 
-    # Nguoi duyet la role Care -> duoc dieu chinh phong ban lien quan
+    # Nguoi duyet bat buoc chon phong ban lien quan (khong con mac dinh theo Loai van de)
     if "departments" in data or "department" in data:
         dept_values = data.get("departments")
         if dept_values is None:
             dept_values = [data.get("department")] if data.get("department") else []
-        if not _set_issue_departments(doc, dept_values):
-            return validation_error_response("Phong ban lien quan la bat buoc", {"departments": ["Bat buoc"]})
+        _set_issue_departments(doc, dept_values)
+    if not _issue_department_docnames(doc):
+        return validation_error_response(
+            "Phong ban lien quan la bat buoc khi duyet",
+            {"departments": ["Bat buoc"]},
+        )
 
     if "priority" in data:
         priority = (data.get("priority") or "").strip()
@@ -1659,6 +1698,9 @@ def update_issue():
 
         if "students" in data or "student" in data:
             _sync_issue_students(doc, data)
+
+        if "guardians" in data or "guardian" in data:
+            _sync_issue_guardians(doc, data)
 
         if "issue_module" in data and data["issue_module"]:
             if frappe.db.exists("CRM Issue Module", data["issue_module"]):

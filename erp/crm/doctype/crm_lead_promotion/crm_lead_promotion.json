@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "autoname": "hash",
+ "creation": "2026-06-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "promotion",
+  "promotion_name",
+  "category",
+  "value"
+ ],
+ "fields": [
+  {
+   "fieldname": "promotion",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Chương trình ưu đãi",
+   "options": "CRM Promotion",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "promotion.promotion_name",
+   "fieldname": "promotion_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên ưu đãi",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "promotion.category",
+   "fieldname": "category",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Phân loại",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "promotion.value",
+   "fieldname": "value",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Giá trị (%)",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Lead Promotion",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1
+  },
+  {
+   "role": "SIS Manager",
+   "read": 1
+  },
+  {
+   "role": "Registrar",
+   "read": 1
+  },
+  {
+   "role": "SIS Sales",
+   "read": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

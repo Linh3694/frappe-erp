@@ -26,19 +26,6 @@ def _check_config_permission():
         frappe.throw("Khong co quyen cau hinh loai van de", frappe.PermissionError)
 
 
-def _sync_module_departments(doc, data):
-    """Dong bo bang con related_departments tu payload departments: list docname ERP Organization Unit."""
-    if "departments" not in data:
-        return
-    doc.related_departments = []
-    seen = set()
-    for x in data.get("departments") or []:
-        d = (x or "").strip() if isinstance(x, str) else ""
-        if d and d not in seen and frappe.db.exists("ERP Organization Unit", d):
-            seen.add(d)
-            doc.append("related_departments", {"department": d})
-
-
 @frappe.whitelist()
 def get_modules():
     """Danh sach CRM Issue Module"""
@@ -110,7 +97,6 @@ def create_module():
         for row in data.get("members") or []:
             if row.get("user"):
                 doc.append("members", {"user": row["user"]})
-        _sync_module_departments(doc, data)
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Tao module thanh cong")
@@ -149,7 +135,6 @@ def update_module():
             for row in data.get("members") or []:
                 if row.get("user"):
                     doc.append("members", {"user": row["user"]})
-        _sync_module_departments(doc, data)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
         return single_item_response(doc.as_dict(), "Cap nhat thanh cong")

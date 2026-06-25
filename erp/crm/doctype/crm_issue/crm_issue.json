@@ -16,6 +16,8 @@
   "lead",
   "student",
   "issue_students",
+  "guardian",
+  "issue_guardians",
   "occurred_at",
   "issue_content",
   "content",
@@ -109,6 +111,18 @@
    "fieldtype": "Table",
    "label": "Students",
    "options": "CRM Issue Student"
+  },
+  {
+   "fieldname": "guardian",
+   "fieldtype": "Link",
+   "label": "Guardian",
+   "options": "CRM Guardian"
+  },
+  {
+   "fieldname": "issue_guardians",
+   "fieldtype": "Table",
+   "label": "Guardians",
+   "options": "CRM Issue Guardian"
   },
   {
    "fieldname": "occurred_at",

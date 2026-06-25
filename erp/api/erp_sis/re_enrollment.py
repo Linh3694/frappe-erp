@@ -26,6 +26,24 @@ from erp.utils.api_response import (
 # URL pdf-service (có thể cấu hình trong site_config.json)
 PDF_SERVICE_URL = frappe.conf.get("pdf_service_url", "http://172.16.20.113:5020")
 
+# Nhóm lý do không tái ghi danh — value lưu DB ↔ nhãn tiếng Việt.
+# Phải khớp với options Select trên SIS Re-enrollment & CRM Lead và
+# WITHDRAW_REASON_GROUP_OPTIONS bên frontend (src/types/crm.ts).
+NOT_RE_ENROLL_REASON_GROUPS = [
+    ("hoc_phi_tai_chinh", "Học phí / Tài chính"),
+    ("chuyen_tinh_nuoc_ngoai", "Chuyển tỉnh / Nước ngoài"),
+    ("chuong_trinh_khong_phu_hop", "Chương trình không phù hợp"),
+    ("chat_luong_day_hoc", "Chất lượng dạy học"),
+    ("ap_luc_hoc_tap", "Áp lực học tập"),
+    ("ly_do_khac", "Lý do khác"),
+]
+REASON_GROUP_KEY_TO_LABEL = {key: label for key, label in NOT_RE_ENROLL_REASON_GROUPS}
+# Nhận cả nhãn tiếng Việt lẫn key khi import (so khớp sau khi normalize: strip + lower).
+REASON_GROUP_LABEL_TO_KEY = {}
+for _rg_key, _rg_label in NOT_RE_ENROLL_REASON_GROUPS:
+    REASON_GROUP_LABEL_TO_KEY[_rg_label.strip().lower()] = _rg_key
+    REASON_GROUP_LABEL_TO_KEY[_rg_key.strip().lower()] = _rg_key
+
 
 def _check_admin_permission():
     """Kiểm tra quyền admin"""
@@ -260,6 +278,63 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
         deleted_count = 0
     
     return {"created_count": created_count, "deleted_count": deleted_count}
+
+
+def _sync_not_re_enroll_to_crm_lead(submission, logs=None):
+    """Đồng bộ thông tin nghỉ học từ đơn tái ghi danh sang CRM Lead.
+
+    Chỉ ghi giá trị field (Nhóm lý do, Trường chuyển đến, Địa chỉ, Lý do) — KHÔNG đổi
+    bước/trạng thái pipeline. Áp dụng khi decision == 'not_re_enroll'.
+
+    Tìm CRM Lead theo linked_student = student_id, ưu tiên hồ sơ đang ở bước Enrolled,
+    nếu không có thì lấy hồ sơ cập nhật gần nhất.
+    """
+    if logs is None:
+        logs = []
+    try:
+        if not submission.student_id:
+            return
+
+        leads = frappe.get_all(
+            "CRM Lead",
+            filters={"linked_student": submission.student_id},
+            fields=["name", "step"],
+            order_by="modified desc",
+        )
+        if not leads:
+            logs.append(f"Không tìm thấy CRM Lead cho học sinh {submission.student_code}")
+            return
+
+        # Ưu tiên hồ sơ đang Enrolled (đang học), nếu không có lấy hồ sơ mới nhất
+        target = next((l for l in leads if l.get("step") == "Enrolled"), leads[0])
+
+        # Chỉ ghi đè các field CÓ giá trị từ đơn (tránh xoá dữ liệu nghỉ học đã nhập
+        # trực tiếp trên CRM khi field tương ứng ở đơn còn trống)
+        updates = {}
+        if submission.not_re_enroll_reason_group:
+            updates["withdraw_reason_group"] = submission.not_re_enroll_reason_group
+        # Chỉ ghi trường chuyển đến nếu còn tồn tại trong CRM School (tránh lỗi link)
+        transfer_school = submission.withdraw_transfer_school
+        if transfer_school and frappe.db.exists("CRM School", transfer_school):
+            updates["withdraw_transfer_school"] = transfer_school
+        if submission.withdraw_transfer_school_address:
+            updates["withdraw_transfer_school_address"] = submission.withdraw_transfer_school_address
+        if submission.not_re_enroll_reason:
+            updates["withdraw_transfer_reason"] = submission.not_re_enroll_reason
+
+        if not updates:
+            logs.append(f"Không có thông tin nghỉ học để đồng bộ sang CRM Lead {target['name']}")
+            return
+
+        lead_doc = frappe.get_doc("CRM Lead", target["name"])
+        for field, value in updates.items():
+            lead_doc.set(field, value)
+        lead_doc.save(ignore_permissions=True)
+        frappe.db.commit()
+        logs.append(f"Đã đồng bộ thông tin nghỉ học sang CRM Lead {target['name']}")
+    except Exception as e:
+        logs.append(f"Lỗi đồng bộ CRM Lead: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Sync Not Re-enroll To CRM Lead Error")
 
 
 # ==================== CONFIG APIs ====================
@@ -993,6 +1068,7 @@ def get_submissions():
                     g.phone_number as guardian_phone, g.email as guardian_email,
                     re.current_class, re.campus_id,
                     re.decision, re.payment_type, re.not_re_enroll_reason,
+                    re.not_re_enroll_reason_group, re.withdraw_transfer_school, re.withdraw_transfer_school_address,
                     COALESCE(fs.payment_status, re.payment_status) as payment_status,
                     fs.total_amount as finance_total_amount,
                     fs.paid_amount as finance_paid_amount,
@@ -1031,6 +1107,7 @@ def get_submissions():
                     g.phone_number as guardian_phone, g.email as guardian_email,
                     re.current_class, re.campus_id,
                     re.decision, re.payment_type, re.not_re_enroll_reason,
+                    re.not_re_enroll_reason_group, re.withdraw_transfer_school, re.withdraw_transfer_school_address,
                     re.payment_status, re.selected_discount_id, re.selected_discount_name, re.selected_discount_percent,
                     re.selected_discount_deadline,
                     re.dvhs_payment_status,
@@ -1272,6 +1349,9 @@ def get_submission(submission_id=None):
                 "payment_display": "Đóng theo năm" if submission.payment_type == 'annual' else ("Đóng theo kỳ" if submission.payment_type == 'semester' else None),
                 "selected_discount_deadline": str(submission.selected_discount_deadline) if submission.selected_discount_deadline else None,
                 "not_re_enroll_reason": submission.not_re_enroll_reason,
+                "not_re_enroll_reason_group": submission.not_re_enroll_reason_group,
+                "withdraw_transfer_school": submission.withdraw_transfer_school,
+                "withdraw_transfer_school_address": submission.withdraw_transfer_school_address,
                 "agreement_accepted": submission.agreement_accepted,
                 "status": submission.status,
                 "submitted_at": str(submission.submitted_at) if submission.submitted_at else None,
@@ -1372,8 +1452,10 @@ def update_submission():
                 })
         
         # Các trường admin có thể sửa
-        updatable_fields = ['decision', 'payment_type', 'selected_discount_id', 
-                          'not_re_enroll_reason', 'payment_status', 'dvhs_payment_status', 'adjustment_status']
+        updatable_fields = ['decision', 'payment_type', 'selected_discount_id',
+                          'not_re_enroll_reason', 'not_re_enroll_reason_group',
+                          'withdraw_transfer_school', 'withdraw_transfer_school_address',
+                          'payment_status', 'dvhs_payment_status', 'adjustment_status']
         
         for field in updatable_fields:
             if field in data:
@@ -1445,7 +1527,21 @@ def update_submission():
         decision = data.get('decision')
         if decision == 're_enroll':
             submission.not_re_enroll_reason = None
-        elif decision in ['considering', 'not_re_enroll']:
+            # Thông tin nghỉ học chỉ áp dụng cho "Không tái ghi danh"
+            submission.not_re_enroll_reason_group = None
+            submission.withdraw_transfer_school = None
+            submission.withdraw_transfer_school_address = None
+        elif decision == 'considering':
+            submission.payment_type = None
+            submission.selected_discount_id = None
+            submission.selected_discount_name = None
+            submission.selected_discount_deadline = None
+            submission.dvhs_payment_status = 'unpaid'
+            # "Cân nhắc" chỉ giữ lý do tự do, không giữ nhóm lý do / thông tin chuyển trường
+            submission.not_re_enroll_reason_group = None
+            submission.withdraw_transfer_school = None
+            submission.withdraw_transfer_school_address = None
+        elif decision == 'not_re_enroll':
             submission.payment_type = None
             submission.selected_discount_id = None
             submission.selected_discount_name = None
@@ -1458,6 +1554,9 @@ def update_submission():
             submission.selected_discount_name = None
             submission.selected_discount_deadline = None
             submission.not_re_enroll_reason = None
+            submission.not_re_enroll_reason_group = None
+            submission.withdraw_transfer_school = None
+            submission.withdraw_transfer_school_address = None
             submission.dvhs_payment_status = 'unpaid'
             if hasattr(submission, 'selected_discount_percent'):
                 submission.selected_discount_percent = None
@@ -1623,9 +1722,13 @@ def update_submission():
         
         submission.save()
         frappe.db.commit()
-        
+
         logs.append(f"Đã cập nhật đơn: {submission_id}")
-        
+
+        # Đồng bộ thông tin nghỉ học sang CRM Lead khi "Không tái ghi danh"
+        if submission.decision == 'not_re_enroll':
+            _sync_not_re_enroll_to_crm_lead(submission, logs)
+
         # Lấy thông tin config và năm học (dùng chung cho cả 2 loại announcement)
         school_year = ""
         config_is_active = False
@@ -1955,6 +2058,417 @@ def get_statistics():
             message=f"Lỗi: {str(e)}",
             logs=logs
         )
+
+
+def _build_as_of_clause(as_of_date, values):
+    """Trả về điều kiện SQL theo as_of_date (giống get_statistics dòng 1847-1855).
+
+    Cập nhật `values` tại chỗ (thêm as_of_datetime) và trả về chuỗi điều kiện hoặc None.
+    """
+    if not as_of_date:
+        return None
+    try:
+        from datetime import datetime
+        dt = datetime.strptime(as_of_date, "%Y-%m-%d")
+        values["as_of_datetime"] = dt.strftime("%Y-%m-%d 23:59:59.999999")
+        return "(COALESCE(re.submitted_at, re.creation) <= %(as_of_datetime)s)"
+    except ValueError:
+        return None
+
+
+@frappe.whitelist()
+def get_report_breakdown():
+    """
+    Báo cáo tái ghi danh: tổng quan + phân bổ theo khối/cấp học cho 1 kỳ (config).
+
+    Phục vụ dashboard tab Tái ghi danh (Báo cáo Tuyển sinh V2).
+    Args: config_id (bắt buộc), as_of_date (tùy chọn, YYYY-MM-DD).
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+
+        config_id = frappe.request.args.get('config_id')
+        as_of_date = frappe.request.args.get('as_of_date')
+
+        if not config_id:
+            return validation_error_response(
+                "Thiếu config_id", {"config_id": ["Config ID là bắt buộc"]}
+            )
+
+        config_row = frappe.db.get_value(
+            "SIS Re-enrollment Config",
+            config_id,
+            ["source_school_year_id", "campus_id"],
+            as_dict=True
+        )
+        if not config_row:
+            return not_found_response("Không tìm thấy config")
+
+        source_school_year_id = config_row.get("source_school_year_id")
+
+        # ----- (1) Tổng quan + thanh trạng thái: 1 query conditional aggregation -----
+        values = {"config_id": config_id}
+        conditions = ["re.config_id = %(config_id)s"]
+        as_of_clause = _build_as_of_clause(as_of_date, values)
+        if as_of_clause:
+            conditions.append(as_of_clause)
+        where_clause = " AND ".join(conditions)
+
+        overview_row = frappe.db.sql(f"""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN re.decision IS NULL OR re.decision = '' THEN 1 ELSE 0 END) AS not_submitted,
+                SUM(CASE WHEN re.decision = 're_enroll' THEN 1 ELSE 0 END) AS re_enroll,
+                SUM(CASE WHEN re.decision = 'considering' THEN 1 ELSE 0 END) AS considering,
+                SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) AS not_re_enroll,
+                SUM(CASE WHEN re.decision = 're_enroll' AND re.dvhs_payment_status = 'paid' THEN 1 ELSE 0 END) AS re_enrolled_paid,
+                SUM(CASE WHEN re.decision = 're_enroll' AND (re.dvhs_payment_status IS NULL OR re.dvhs_payment_status <> 'paid') THEN 1 ELSE 0 END) AS re_enrolled_unpaid
+            FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause}
+        """, values, as_dict=True)
+
+        row = overview_row[0] if overview_row else {}
+        total_existing = row.get("total") or 0
+        re_enrolled = row.get("re_enroll") or 0
+        stopped = row.get("not_re_enroll") or 0
+        considering = row.get("considering") or 0
+        not_submitted = row.get("not_submitted") or 0
+
+        def _rate(part, whole):
+            return round(part / whole * 100, 1) if whole else 0
+
+        overview = {
+            "total_existing": total_existing,
+            "re_enrolled": re_enrolled,
+            "stopped": stopped,
+            "considering": considering,
+            "not_submitted": not_submitted,
+            "retention_rate": _rate(re_enrolled, total_existing),
+            "re_enroll_rate": _rate(re_enrolled, total_existing),
+        }
+        status_breakdown = {
+            "re_enrolled_paid": row.get("re_enrolled_paid") or 0,
+            "re_enrolled_unpaid": row.get("re_enrolled_unpaid") or 0,
+            # Chưa phản hồi / Đang xem xét = considering + chưa làm đơn
+            "considering": considering + not_submitted,
+            "not_re_enroll": stopped,
+        }
+
+        # ----- (2) Theo khối + (3) theo cấp học: cần source_school_year_id để JOIN lớp -----
+        by_grade = []
+        by_stage = []
+        if source_school_year_id:
+            join_values = {"config_id": config_id, "source_school_year_id": source_school_year_id}
+            join_conditions = ["re.config_id = %(config_id)s"]
+            join_as_of = _build_as_of_clause(as_of_date, join_values)
+            if join_as_of:
+                join_conditions.append(join_as_of)
+            join_where = " AND ".join(join_conditions)
+
+            # JOIN re → SIS Class Student (năm nguồn) → SIS Class → SIS Education Grade.
+            # Dùng INNER JOIN: học sinh không có lớp ở năm nguồn (orphan) bị loại khỏi
+            # phân bổ theo khối/cấp (không thể xếp khối) — tổng theo khối có thể < total_existing.
+            grade_rows = frappe.db.sql(f"""
+                SELECT
+                    eg.grade_code AS grade_code,
+                    MAX(eg.title_vn) AS grade_name,
+                    MIN(eg.sort_order) AS sort_order,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN re.decision = 're_enroll' THEN 1 ELSE 0 END) AS re_enroll,
+                    SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) AS not_re_enroll,
+                    SUM(CASE WHEN re.decision = 'considering' OR re.decision = '' OR re.decision IS NULL THEN 1 ELSE 0 END) AS considering
+                FROM `tabSIS Re-enrollment` re
+                INNER JOIN `tabSIS Class Student` cs ON cs.student_id = re.student_id AND cs.school_year_id = %(source_school_year_id)s
+                INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                WHERE {join_where}
+                GROUP BY eg.grade_code
+                ORDER BY sort_order, eg.grade_code
+            """, join_values, as_dict=True)
+            by_grade = [{
+                "grade_code": r.grade_code,
+                "grade_name": r.grade_name or r.grade_code,
+                "total": r.total or 0,
+                "re_enroll": r.re_enroll or 0,
+                "not_re_enroll": r.not_re_enroll or 0,
+                "considering": r.considering or 0,
+                "sort_order": r.sort_order or 0,
+            } for r in grade_rows]
+
+            stage_rows = frappe.db.sql(f"""
+                SELECT
+                    es.name AS education_stage_id,
+                    MAX(es.title_vn) AS stage_name,
+                    MIN(eg.sort_order) AS sort_order,
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN re.decision = 're_enroll' THEN 1 ELSE 0 END) AS re_enroll,
+                    SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) AS not_re_enroll,
+                    SUM(CASE WHEN re.decision = 'considering' OR re.decision = '' OR re.decision IS NULL THEN 1 ELSE 0 END) AS considering
+                FROM `tabSIS Re-enrollment` re
+                INNER JOIN `tabSIS Class Student` cs ON cs.student_id = re.student_id AND cs.school_year_id = %(source_school_year_id)s
+                INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                INNER JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
+                WHERE {join_where}
+                GROUP BY es.name
+                ORDER BY sort_order, es.name
+            """, join_values, as_dict=True)
+            by_stage = [{
+                "education_stage_id": r.education_stage_id,
+                "stage_name": r.stage_name or r.education_stage_id,
+                "total": r.total or 0,
+                "re_enroll": r.re_enroll or 0,
+                "not_re_enroll": r.not_re_enroll or 0,
+                "considering": r.considering or 0,
+                "re_enroll_rate": _rate(r.re_enroll or 0, r.total or 0),
+                "sort_order": r.sort_order or 0,
+            } for r in stage_rows]
+
+        logs.append(f"Báo cáo breakdown cho config {config_id}")
+        return success_response(
+            data={
+                "overview": overview,
+                "status_breakdown": status_breakdown,
+                "by_stage": by_stage,
+                "by_grade": by_grade,
+            },
+            message="Lấy báo cáo tái ghi danh thành công",
+            logs=logs
+        )
+
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Re-enrollment Get Report Breakdown Error")
+        return error_response(message=f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_withdrawal_report():
+    """
+    Báo cáo dừng học & chuyển trường cho 1 kỳ (config): tổng quan + theo lý do + danh sách HS.
+
+    Phục vụ Slide 04 (Dừng học & chuyển trường) và Slide 05 (Phân tích lý do).
+    Phân loại: có withdraw_transfer_school => Chuyển trường; ngược lại => Dừng học.
+    Args: config_id (bắt buộc), as_of_date (tùy chọn, YYYY-MM-DD).
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+
+        config_id = frappe.request.args.get('config_id')
+        as_of_date = frappe.request.args.get('as_of_date')
+
+        if not config_id:
+            return validation_error_response(
+                "Thiếu config_id", {"config_id": ["Config ID là bắt buộc"]}
+            )
+
+        config_row = frappe.db.get_value(
+            "SIS Re-enrollment Config",
+            config_id,
+            ["source_school_year_id", "campus_id"],
+            as_dict=True
+        )
+        if not config_row:
+            return not_found_response("Không tìm thấy config")
+
+        source_school_year_id = config_row.get("source_school_year_id")
+
+        # ----- (1) Tổng quan dừng học/chuyển trường -----
+        values = {"config_id": config_id}
+        conditions = ["re.config_id = %(config_id)s"]
+        as_of_clause = _build_as_of_clause(as_of_date, values)
+        if as_of_clause:
+            conditions.append(as_of_clause)
+        where_clause = " AND ".join(conditions)
+
+        summary_row = frappe.db.sql(f"""
+            SELECT
+                COUNT(*) AS total_existing,
+                SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) AS total_withdraw,
+                SUM(CASE WHEN re.decision = 'not_re_enroll' AND re.withdraw_transfer_school IS NOT NULL AND re.withdraw_transfer_school != '' THEN 1 ELSE 0 END) AS transfer
+            FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause}
+        """, values, as_dict=True)
+
+        srow = summary_row[0] if summary_row else {}
+        total_existing = srow.get("total_existing") or 0
+        total_withdraw = srow.get("total_withdraw") or 0
+        transfer = srow.get("transfer") or 0
+        stop_only = total_withdraw - transfer
+        summary = {
+            "total_existing": total_existing,
+            "total_withdraw": total_withdraw,
+            "stop_only": stop_only,
+            "transfer": transfer,
+            "withdraw_rate": round(total_withdraw / total_existing * 100, 1) if total_existing else 0,
+        }
+
+        # ----- (2) Phân loại theo nhóm lý do (chỉ HS not_re_enroll) -----
+        reason_rows = frappe.db.sql(f"""
+            SELECT
+                COALESCE(NULLIF(re.not_re_enroll_reason_group, ''), '') AS reason_group,
+                COUNT(*) AS count
+            FROM `tabSIS Re-enrollment` re
+            WHERE {where_clause} AND re.decision = 'not_re_enroll'
+            GROUP BY reason_group
+            ORDER BY count DESC
+        """, values, as_dict=True)
+        by_reason = [{"reason_group": r.reason_group or "", "count": r.count or 0} for r in reason_rows]
+
+        # ----- (3) Danh sách HS dừng học/chuyển trường -----
+        # Khối lấy qua subquery tương quan (tránh fan-out khi HS có nhiều dòng lớp).
+        list_values = dict(values)
+        list_values["source_school_year_id"] = source_school_year_id or ""
+        list_rows = frappe.db.sql(f"""
+            SELECT
+                re.student_name AS student_name,
+                re.student_code AS student_code,
+                re.current_class AS current_class,
+                re.not_re_enroll_reason_group AS reason_group,
+                re.not_re_enroll_reason AS reason_detail,
+                re.withdraw_transfer_school AS transfer_school,
+                sch.school_name AS transfer_school_name,
+                re.submitted_at AS confirmed_date,
+                (SELECT eg.grade_code FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE cs.student_id = re.student_id AND cs.school_year_id = %(source_school_year_id)s
+                    LIMIT 1) AS grade_code,
+                (SELECT eg.title_vn FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+                    INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+                    WHERE cs.student_id = re.student_id AND cs.school_year_id = %(source_school_year_id)s
+                    LIMIT 1) AS grade_name
+            FROM `tabSIS Re-enrollment` re
+            LEFT JOIN `tabCRM School` sch ON re.withdraw_transfer_school = sch.name
+            WHERE {where_clause} AND re.decision = 'not_re_enroll'
+            ORDER BY grade_code, re.student_name
+        """, list_values, as_dict=True)
+
+        withdrawal_list = [{
+            "student_name": r.student_name,
+            "student_code": r.student_code,
+            "grade_code": r.grade_code,
+            "grade_name": r.grade_name or r.grade_code,
+            "current_class": r.current_class,
+            "type": "transfer" if (r.transfer_school and str(r.transfer_school).strip()) else "stop",
+            "reason_group": r.reason_group or "",
+            "reason_detail": r.reason_detail or "",
+            "transfer_school": r.transfer_school,
+            "transfer_school_name": r.transfer_school_name or r.transfer_school or "",
+            "confirmed_date": str(r.confirmed_date)[:10] if r.confirmed_date else "",
+        } for r in list_rows]
+
+        logs.append(f"Báo cáo dừng học cho config {config_id}")
+        return success_response(
+            data={
+                "summary": summary,
+                "by_reason": by_reason,
+                "list": withdrawal_list,
+            },
+            message="Lấy báo cáo dừng học thành công",
+            logs=logs
+        )
+
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Re-enrollment Get Withdrawal Report Error")
+        return error_response(message=f"Lỗi: {str(e)}", logs=logs)
+
+
+@frappe.whitelist()
+def get_year_comparison():
+    """
+    So sánh tỷ lệ tái ghi danh qua các năm (gom theo năm học nguồn của các kỳ trong campus).
+
+    Args: campus_id (tùy chọn), limit (số năm gần nhất, mặc định 3).
+    Trả về danh sách năm đã sắp theo start_date, cũ → mới.
+    """
+    logs = []
+    try:
+        if not _check_admin_permission():
+            return error_response("Bạn không có quyền truy cập", logs=logs)
+
+        campus_id = frappe.request.args.get('campus_id')
+        limit = frappe.request.args.get('limit')
+        try:
+            limit = int(limit) if limit else 3
+        except (TypeError, ValueError):
+            limit = 3
+
+        resolved_campus = _resolve_campus_id(campus_id) if campus_id else None
+
+        config_filters = {}
+        if resolved_campus:
+            config_filters["campus_id"] = resolved_campus
+
+        configs = frappe.get_all(
+            "SIS Re-enrollment Config",
+            filters=config_filters,
+            fields=["name", "source_school_year_id"]
+        )
+
+        # Gom config theo năm nguồn
+        year_to_configs = {}
+        for c in configs:
+            syid = c.get("source_school_year_id")
+            if not syid:
+                continue
+            year_to_configs.setdefault(syid, []).append(c.get("name"))
+
+        years = []
+        for syid, config_names in year_to_configs.items():
+            sy = frappe.db.get_value(
+                "SIS School Year", syid,
+                ["title_vn", "title_en", "start_date"],
+                as_dict=True
+            )
+            placeholders = ", ".join(["%s"] * len(config_names))
+            stat = frappe.db.sql(f"""
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN re.decision = 're_enroll' THEN 1 ELSE 0 END) AS re_enroll,
+                    SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) AS not_re_enroll
+                FROM `tabSIS Re-enrollment` re
+                WHERE re.config_id IN ({placeholders})
+            """, config_names, as_dict=True)
+            srow = stat[0] if stat else {}
+            total = srow.get("total") or 0
+            re_enroll = srow.get("re_enroll") or 0
+            not_re_enroll = srow.get("not_re_enroll") or 0
+            years.append({
+                "school_year_id": syid,
+                "year_name": (sy.title_vn or sy.title_en or syid) if sy else syid,
+                "start_date": str(sy.start_date) if sy and sy.start_date else "",
+                "total": total,
+                "re_enroll": re_enroll,
+                "re_enroll_rate": round(re_enroll / total * 100, 1) if total else 0,
+                "not_re_enroll": not_re_enroll,
+                "stop_rate": round(not_re_enroll / total * 100, 1) if total else 0,
+            })
+
+        # Sắp theo start_date (cũ → mới), lấy `limit` năm gần nhất rồi giữ thứ tự tăng dần
+        years.sort(key=lambda y: y.get("start_date") or "")
+        if limit and len(years) > limit:
+            years = years[-limit:]
+        # Loại trường nội bộ start_date khỏi payload
+        for y in years:
+            y.pop("start_date", None)
+
+        return success_response(
+            data={"years": years},
+            message="Lấy so sánh theo năm thành công",
+            logs=logs
+        )
+
+    except Exception as e:
+        logs.append(f"Lỗi: {str(e)}")
+        frappe.log_error(frappe.get_traceback(), "Re-enrollment Get Year Comparison Error")
+        return error_response(message=f"Lỗi: {str(e)}", logs=logs)
 
 
 @frappe.whitelist()
@@ -2813,6 +3327,8 @@ def export_decision_template(config_id=None):
             fields=[
                 "name", "student_code", "student_name", "current_class", "decision",
                 "selected_discount_id", "payment_type", "not_re_enroll_reason",
+                "not_re_enroll_reason_group", "withdraw_transfer_school",
+                "withdraw_transfer_school_address",
                 "payment_status", "dvhs_payment_status",
             ],
             order_by="student_code asc"
@@ -2847,7 +3363,11 @@ def export_decision_template(config_id=None):
                 "Đóng theo": payment_type_vn,
                 "Học phí": tuition_display_map.get(ps, ps),
                 "DVHS": dvhs_display_map.get(dvh, dvh),
-                "Lý do": sub.not_re_enroll_reason or ""  # Lý do cho Cân nhắc / Không tái ghi danh
+                "Lý do": sub.not_re_enroll_reason or "",  # Lý do cho Cân nhắc / Không tái ghi danh
+                # Thông tin dừng học — chỉ dùng khi Không tái ghi danh
+                "Nhóm lý do": REASON_GROUP_KEY_TO_LABEL.get(sub.not_re_enroll_reason_group, ""),
+                "Trường chuyển đến": sub.withdraw_transfer_school or "",
+                "Địa chỉ trường chuyển đến": sub.withdraw_transfer_school_address or "",
             }
             
             # Thêm cột cho mỗi câu hỏi khảo sát (chỉ khi Tái ghi danh)
@@ -2873,6 +3393,9 @@ def export_decision_template(config_id=None):
                 "Học phí": "",
                 "DVHS": "",
                 "Lý do": "",
+                "Nhóm lý do": "",
+                "Trường chuyển đến": "",
+                "Địa chỉ trường chuyển đến": "",
             }
             for q in questions:
                 empty_row[q["question_vn"]] = ""
@@ -2906,6 +3429,21 @@ def export_decision_template(config_id=None):
                 "Giá trị hợp lệ": "Đã đóng | Chưa đóng",
             },
             {"Cột": "Lý do", "Mô tả": "Lý do (BẮT BUỘC nếu Cân nhắc hoặc Không tái ghi danh)", "Giá trị hợp lệ": "Điền lý do tự do"},
+            {
+                "Cột": "Nhóm lý do",
+                "Mô tả": "Nhóm lý do nghỉ học (chỉ điền khi Không tái ghi danh). Sẽ đồng bộ sang hồ sơ CRM.",
+                "Giá trị hợp lệ": " | ".join(label for _, label in NOT_RE_ENROLL_REASON_GROUPS),
+            },
+            {
+                "Cột": "Trường chuyển đến",
+                "Mô tả": "Trường học sinh chuyển đến (chỉ điền khi Không tái ghi danh). Sẽ đồng bộ sang hồ sơ CRM.",
+                "Giá trị hợp lệ": "Điền đúng tên trường — xem sheet 'Danh sách trường'",
+            },
+            {
+                "Cột": "Địa chỉ trường chuyển đến",
+                "Mô tả": "Địa chỉ trường chuyển đến (chỉ điền khi Không tái ghi danh). Sẽ đồng bộ sang hồ sơ CRM.",
+                "Giá trị hợp lệ": "Nhập tự do",
+            },
         ]
         # Thêm hướng dẫn cho các cột câu hỏi khảo sát
         for q in questions:
@@ -2955,13 +3493,28 @@ def export_decision_template(config_id=None):
             questions_data.append({"Câu hỏi": "", "Số đáp án": "", "Nội dung đáp án": ""})
         
         df_questions = pd.DataFrame(questions_data) if questions_data else pd.DataFrame(columns=["Câu hỏi", "Số đáp án", "Nội dung đáp án"])
-        
+
+        # Sheet 5: Danh sách trường (tham chiếu cho cột "Trường chuyển đến")
+        schools = frappe.get_all(
+            "CRM School",
+            fields=["name", "school_name", "school_group"],
+            order_by="school_name asc"
+        )
+        schools_data = [{
+            "Tên trường (điền vào cột Trường chuyển đến)": s.school_name or s.name,
+            "Nhóm trường": s.school_group or "",
+        } for s in schools]
+        df_schools = pd.DataFrame(schools_data) if schools_data else pd.DataFrame(
+            columns=["Tên trường (điền vào cột Trường chuyển đến)", "Nhóm trường"]
+        )
+
         # Ghi file Excel
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_students.to_excel(writer, sheet_name='Danh sách học sinh', index=False)
             df_guide.to_excel(writer, sheet_name='Hướng dẫn', index=False)
             df_discounts.to_excel(writer, sheet_name='Danh sách ưu đãi', index=False)
+            df_schools.to_excel(writer, sheet_name='Danh sách trường', index=False)
             if questions:
                 df_questions.to_excel(writer, sheet_name='Đáp án câu hỏi', index=False)
         
@@ -2997,6 +3550,9 @@ def import_decision_from_excel():
         - student_code: Mã học sinh (BẮT BUỘC)
         - decision: Quyết định (BẮT BUỘC): re_enroll | considering | not_re_enroll
         - selected_discount_id: ID ưu đãi (BẮT BUỘC nếu decision = re_enroll)
+        - Nhóm lý do, Trường chuyển đến, Địa chỉ trường chuyển đến:
+          thông tin dừng học (tùy chọn, chỉ khi decision = not_re_enroll);
+          khi có sẽ đồng bộ sang hồ sơ CRM Lead.
     
     Returns:
         {
@@ -3138,6 +3694,19 @@ def import_decision_from_excel():
             'hoc phi': 'tuition_payment',
             'DVHS': 'dvhs_payment',
             'dvhs': 'dvhs_payment',
+            # Thông tin dừng học (Không tái ghi danh)
+            'Nhóm lý do': 'reason_group',
+            'nhóm lý do': 'reason_group',
+            'Nhom ly do': 'reason_group',
+            'nhom ly do': 'reason_group',
+            'Trường chuyển đến': 'transfer_school',
+            'trường chuyển đến': 'transfer_school',
+            'Truong chuyen den': 'transfer_school',
+            'truong chuyen den': 'transfer_school',
+            'Địa chỉ trường chuyển đến': 'transfer_school_address',
+            'địa chỉ trường chuyển đến': 'transfer_school_address',
+            'Dia chi truong chuyen den': 'transfer_school_address',
+            'dia chi truong chuyen den': 'transfer_school_address',
         }
         df = df.rename(columns=column_mapping)
         
@@ -3346,6 +3915,10 @@ def import_decision_from_excel():
                         else:
                             submission.selected_discount_percent = discount_info.get("semester_discount")
                     submission.not_re_enroll_reason = None
+                    # Tái ghi danh: xoá thông tin dừng học
+                    submission.not_re_enroll_reason_group = None
+                    submission.withdraw_transfer_school = None
+                    submission.withdraw_transfer_school_address = None
                 else:
                     # Không tái ghi danh hoặc đang cân nhắc
                     submission.selected_discount_id = None
@@ -3353,14 +3926,64 @@ def import_decision_from_excel():
                     submission.selected_discount_deadline = None
                     submission.selected_discount_percent = None
                     submission.payment_type = None
-                    
+
                     # Lấy lý do từ Excel
                     reason_raw = str(row.get('reason', '')).strip() if pd.notna(row.get('reason')) else ''
                     if reason_raw and reason_raw.lower() != 'nan':
                         submission.not_re_enroll_reason = reason_raw
                     else:
                         submission.not_re_enroll_reason = None
-                
+
+                    # Thông tin dừng học — chỉ áp dụng khi Không tái ghi danh
+                    if decision == 'not_re_enroll':
+                        # Nhóm lý do: nhận nhãn tiếng Việt hoặc key
+                        rg_raw = str(row.get('reason_group', '')).strip() if pd.notna(row.get('reason_group')) else ''
+                        if rg_raw and rg_raw.lower() != 'nan':
+                            rg_key = REASON_GROUP_LABEL_TO_KEY.get(rg_raw.strip().lower())
+                            if not rg_key:
+                                errors.append({
+                                    "row": row_num,
+                                    "error": "'Nhóm lý do' = '" + rg_raw + "' không hợp lệ. Giá trị hợp lệ: "
+                                             + ", ".join(label for _, label in NOT_RE_ENROLL_REASON_GROUPS),
+                                    "data": {"student_code": student_code},
+                                })
+                                error_count += 1
+                                continue
+                            submission.not_re_enroll_reason_group = rg_key
+                        else:
+                            submission.not_re_enroll_reason_group = None
+
+                        # Trường chuyển đến: khớp tên với CRM School (cả theo name lẫn school_name)
+                        ts_raw = str(row.get('transfer_school', '')).strip() if pd.notna(row.get('transfer_school')) else ''
+                        if ts_raw and ts_raw.lower() != 'nan':
+                            if frappe.db.exists("CRM School", ts_raw):
+                                submission.withdraw_transfer_school = ts_raw
+                            else:
+                                matched = frappe.db.get_value("CRM School", {"school_name": ts_raw}, "name")
+                                if matched:
+                                    submission.withdraw_transfer_school = matched
+                                else:
+                                    errors.append({
+                                        "row": row_num,
+                                        "error": "'Trường chuyển đến' = '" + ts_raw + "' không có trong Danh sách trường",
+                                        "data": {"student_code": student_code},
+                                    })
+                                    error_count += 1
+                                    continue
+                        else:
+                            submission.withdraw_transfer_school = None
+
+                        # Địa chỉ trường chuyển đến: text tự do
+                        addr_raw = str(row.get('transfer_school_address', '')).strip() if pd.notna(row.get('transfer_school_address')) else ''
+                        submission.withdraw_transfer_school_address = (
+                            addr_raw if (addr_raw and addr_raw.lower() != 'nan') else None
+                        )
+                    else:
+                        # Cân nhắc: không lưu thông tin dừng học
+                        submission.not_re_enroll_reason_group = None
+                        submission.withdraw_transfer_school = None
+                        submission.withdraw_transfer_school_address = None
+
                 # Học phí & DVHS (chỉ khi tái ghi danh; học phí chỉ ghi khi không liên kết năm tài chính)
                 if decision == 're_enroll':
                     tuition_raw = (
@@ -3413,8 +4036,10 @@ def import_decision_from_excel():
                     standard_cols = [
                         'student_code', 'student_name', 'current_class', 'decision', 'discount_deadline',
                         'payment_type', 'reason', 'tuition_payment', 'dvhs_payment',
+                        'reason_group', 'transfer_school', 'transfer_school_address',
                         'Mã học sinh', 'Họ tên', 'Lớp', 'Quyết định', 'Ưu đãi (hạn đóng)', 'Đóng theo',
                         'Lý do', 'Học phí', 'DVHS',
+                        'Nhóm lý do', 'Trường chuyển đến', 'Địa chỉ trường chuyển đến',
                     ]
                     extra_cols = [c for c in df_columns if c not in standard_cols]
                     
@@ -3517,8 +4142,11 @@ def import_decision_from_excel():
                                     logs.append(f"KHÔNG có option nào được chọn cho câu hỏi '{q['question_vn']}' với giá trị '{answer_raw}'")
                 
                 submission.save(ignore_permissions=True)
+                # Đồng bộ thông tin dừng học sang CRM Lead khi Không tái ghi danh
+                if decision == 'not_re_enroll':
+                    _sync_not_re_enroll_to_crm_lead(submission, logs)
                 success_count += 1
-                
+
             except Exception as row_err:
                 errors.append({
                     "row": row_num,

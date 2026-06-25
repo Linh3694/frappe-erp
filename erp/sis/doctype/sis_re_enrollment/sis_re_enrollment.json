@@ -35,7 +35,10 @@
   "selected_discount_deadline",
   "selected_discount_percent",
   "column_break_decision",
+  "not_re_enroll_reason_group",
   "not_re_enroll_reason",
+  "withdraw_transfer_school",
+  "withdraw_transfer_school_address",
   "answers_section",
   "answers",
   "agreement_section",
@@ -192,12 +195,35 @@
    "fieldtype": "Column Break"
   },
   {
+   "fieldname": "not_re_enroll_reason_group",
+   "fieldtype": "Select",
+   "label": "Nhóm lý do",
+   "options": "\nhoc_phi_tai_chinh\nchuyen_tinh_nuoc_ngoai\nchuong_trinh_khong_phu_hop\nchat_luong_day_hoc\nap_luc_hoc_tap\nly_do_khac",
+   "depends_on": "eval:doc.decision=='not_re_enroll'",
+   "description": "Nhóm lý do không tái ghi danh. hoc_phi_tai_chinh: Học phí / Tài chính, chuyen_tinh_nuoc_ngoai: Chuyển tỉnh / Nước ngoài, chuong_trinh_khong_phu_hop: Chương trình không phù hợp, chat_luong_day_hoc: Chất lượng dạy học, ap_luc_hoc_tap: Áp lực học tập, ly_do_khac: Lý do khác"
+  },
+  {
    "fieldname": "not_re_enroll_reason",
    "fieldtype": "Small Text",
    "label": "Lý do",
    "depends_on": "eval:doc.decision=='not_re_enroll' || doc.decision=='considering'",
    "mandatory_depends_on": "eval:doc.decision=='not_re_enroll' || doc.decision=='considering'",
    "description": "Lý do không tái ghi danh hoặc đang cân nhắc"
+  },
+  {
+   "fieldname": "withdraw_transfer_school",
+   "fieldtype": "Link",
+   "label": "Trường chuyển đến",
+   "options": "CRM School",
+   "depends_on": "eval:doc.decision=='not_re_enroll'",
+   "description": "Trường học sinh chuyển đến (đồng bộ sang CRM Lead)"
+  },
+  {
+   "fieldname": "withdraw_transfer_school_address",
+   "fieldtype": "Data",
+   "label": "Địa chỉ trường chuyển đến",
+   "depends_on": "eval:doc.decision=='not_re_enroll'",
+   "description": "Địa chỉ trường chuyển đến (đồng bộ sang CRM Lead)"
   },
   {
    "fieldname": "answers_section",

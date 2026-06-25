@@ -236,63 +236,50 @@ def delete_promotion():
     return _crud_delete("CRM Promotion", get_request_data().get("name"))
 
 
-def _category_to_lead_fee_field():
-    """Map Phân loại CRM Promotion -> field % trên CRM Lead (đồng bộ FE SelectPromotionDialog)."""
-    return {
-        "Học phí": "tuition_fee_pct",
-        "Phí dịch vụ": "service_fee_pct",
-        "Phí phát triển trường": "dev_fee_pct",
-        "Khảo sát đầu vào": "ksdv_pct",
-    }
-
-
-def _lead_row_matches_promotion(row, promo, cat_to_field):
-    """Lead được coi là gán ưu đãi khi đúng phân loại và trùng giá trị % với promotion."""
-    cat = (promo.get("category") or "").strip()
-    field = cat_to_field.get(cat)
-    if not field or promo.get("value") is None:
-        return False
-    pv = row.get(field)
-    if pv is None:
-        return False
-    try:
-        return float(pv) == float(promo["value"])
-    except (TypeError, ValueError):
-        return False
-
-
 @frappe.whitelist()
 def get_promotion_lead_statistics():
     """
-    Thống kê CRM Lead được gán theo từng CRM Promotion
-    (khớp category + giá trị % như màn hồ sơ / tab Học sinh).
+    Thống kê CRM Lead được gán theo từng CRM Promotion.
+
+    Đếm trực tiếp từ bảng con CRM Lead Promotion (mỗi hồ sơ có thể gắn nhiều
+    ưu đãi, không giới hạn theo phân loại) thay vì suy từ 4 field *_fee_pct.
     """
     check_crm_permission()
-    cat_to_field = _category_to_lead_fee_field()
 
     promotions = frappe.get_all(
         "CRM Promotion",
         fields=["name", "promotion_name", "category", "value", "description"],
         order_by="promotion_name asc",
     )
-    leads = frappe.get_all(
-        "CRM Lead",
-        fields=[
-            "name",
-            "student_name",
-            "crm_code",
-            "tuition_fee_pct",
-            "service_fee_pct",
-            "dev_fee_pct",
-            "ksdv_pct",
-        ],
+
+    # Map promotion -> danh sách lead (parent) đã gắn, lấy từ bảng con
+    rows = frappe.get_all(
+        "CRM Lead Promotion",
+        filters={"parenttype": "CRM Lead", "parentfield": "promotions"},
+        fields=["promotion", "parent"],
     )
+    leads_by_promotion = {}
+    for r in rows:
+        if not r.get("promotion") or not r.get("parent"):
+            continue
+        leads_by_promotion.setdefault(r["promotion"], []).append(r["parent"])
+
+    # Thông tin hiển thị cho các lead có liên quan
+    all_lead_names = sorted({n for names in leads_by_promotion.values() for n in names})
+    lead_info = {}
+    if all_lead_names:
+        for l in frappe.get_all(
+            "CRM Lead",
+            filters={"name": ["in", all_lead_names]},
+            fields=["name", "student_name", "crm_code"],
+        ):
+            lead_info[l["name"]] = l
 
     summary = []
     details = []
 
     for promo in promotions:
-        matched = [l for l in leads if _lead_row_matches_promotion(l, promo, cat_to_field)]
+        matched = leads_by_promotion.get(promo["name"], [])
         summary.append(
             {
                 "promotion_id": promo["name"],
@@ -303,16 +290,17 @@ def get_promotion_lead_statistics():
                 "lead_count": len(matched),
             }
         )
-        for l in matched:
+        for lead_name in matched:
+            info = lead_info.get(lead_name, {})
             details.append(
                 {
                     "promotion_id": promo["name"],
                     "promotion_name": promo.get("promotion_name") or "",
                     "category": promo.get("category") or "",
                     "value": promo.get("value"),
-                    "lead_name": l["name"],
-                    "crm_code": l.get("crm_code") or "",
-                    "student_name": l.get("student_name") or "",
+                    "lead_name": lead_name,
+                    "crm_code": info.get("crm_code") or "",
+                    "student_name": info.get("student_name") or "",
                 }
             )
 

@@ -80,6 +80,7 @@
   "cb_fee_1",
   "dev_fee_pct",
   "ksdv_pct",
+  "promotions",
   "guardian_section",
   "guardian_name",
   "relationship",
@@ -115,6 +116,7 @@
   "reject_reason",
   "reject_detail",
   "withdraw_section",
+  "withdraw_reason_group",
   "withdraw_transfer_school",
   "withdraw_transfer_school_address",
   "withdraw_transfer_reason",
@@ -485,6 +487,13 @@
    "description": "0 to 100"
   },
   {
+   "fieldname": "promotions",
+   "fieldtype": "Table",
+   "label": "Chương trình ưu đãi",
+   "options": "CRM Lead Promotion",
+   "description": "Không giới hạn số ưu đãi/phân loại. Các field *_fee_pct được tính tự động = tổng % theo phân loại."
+  },
+  {
    "fieldname": "guardian_section",
    "fieldtype": "Section Break",
    "label": "Guardian Information"
@@ -684,6 +693,13 @@
    "fieldtype": "Section Break",
    "label": "Dừng học",
    "collapsible": 1
+  },
+  {
+   "fieldname": "withdraw_reason_group",
+   "fieldtype": "Select",
+   "label": "Nhóm lý do nghỉ học",
+   "options": "\nhoc_phi_tai_chinh\nchuyen_tinh_nuoc_ngoai\nchuong_trinh_khong_phu_hop\nchat_luong_day_hoc\nap_luc_hoc_tap\nly_do_khac",
+   "description": "hoc_phi_tai_chinh: Học phí / Tài chính, chuyen_tinh_nuoc_ngoai: Chuyển tỉnh / Nước ngoài, chuong_trinh_khong_phu_hop: Chương trình không phù hợp, chat_luong_day_hoc: Chất lượng dạy học, ap_luc_hoc_tap: Áp lực học tập, ly_do_khac: Lý do khác"
   },
   {
    "fieldname": "withdraw_transfer_school",
