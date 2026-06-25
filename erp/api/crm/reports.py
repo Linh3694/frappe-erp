@@ -83,12 +83,28 @@ def _parse_date_range(args) -> Tuple[Any, Any]:
 
 
 def _resolve_period(args) -> Tuple[Any, Any, Any, Any]:
-    """Trả về (from, to, prev_from, prev_to)."""
+    """Trả về (from, to, prev_from, prev_to) — kỳ trước cùng độ dài / cùng khung lịch."""
+    from frappe.utils import add_to_date, get_last_day, getdate
+
     fd, td = _parse_date_range(args)
-    delta = td - fd
-    p_to = fd - timedelta(days=1)
-    p_from = p_to - delta
-    return fd, td, p_from, p_to
+    fd, td = getdate(fd), getdate(td)
+    gran = (args.get("compare_granularity") or "").strip().lower()
+
+    if gran == "year":
+        pdf = getdate(add_to_date(fd, years=-1))
+        pdt = getdate(add_to_date(td, years=-1))
+    elif gran == "month":
+        pdf = getdate(add_to_date(fd, months=-1))
+        pdt = getdate(add_to_date(td, months=-1))
+        if td == get_last_day(td):
+            pdt = get_last_day(pdf)
+    else:
+        # day / week — lùi đúng 1 bucket liền kề (hôm qua, tuần trước, …)
+        span_days = (td - fd).days + 1
+        pdt = getdate(add_to_date(fd, days=-1))
+        pdf = getdate(add_to_date(pdt, days=-(span_days - 1)))
+
+    return fd, td, pdf, pdt
 
 
 def _append_dimension_filters(
@@ -297,8 +313,8 @@ def _pct_change(curr: Optional[float], prev: Optional[float]) -> Optional[float]
     if prev == 0:
         if curr == 0:
             return 0.0
-        return None
-    return round(100.0 * (curr - prev) / prev, 2)
+        return 100.0
+    return round(100.0 * (curr - prev) / prev, 1)
 
 
 def _include_tu_choi_lost(args) -> bool:
@@ -461,6 +477,36 @@ def _avg_days_to_enroll(date_from: Any, date_to: Any, args) -> Optional[float]:
     return None if avg is None else round(float(avg), 2)
 
 
+def _count_qlead_events(date_from: Any, date_to: Any, args) -> int:
+    """Học sinh tiềm năng — đạt QLead trong kỳ (sự kiện)."""
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": date_from, "d_to": date_to, **dim_binds}
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(DISTINCT t.lead_id) FROM (
+            SELECT h.`lead` AS lead_id
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+            WHERE h.`new_step` = 'QLead'
+              AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+              AND {dim_sql}
+            UNION
+            SELECT l.`name` AS lead_id
+            FROM `tabCRM Lead` l
+            WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
+              AND l.`step` = 'QLead'
+              AND {dim_sql}
+              AND NOT EXISTS (
+                  SELECT 1 FROM `tabCRM Lead Step History` hx
+                  WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'QLead'
+              )
+        ) t
+        """,
+        binds,
+    )[0][0]
+    return int(row or 0)
+
+
 def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
     total_leads = _count_new_leads(date_from, date_to, args)
     total_enrolled = _count_enrolled_events(date_from, date_to, args)
@@ -470,13 +516,9 @@ def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
     conv = round(100.0 * total_enrolled / max(1, entered), 2)
     avg_days = _avg_days_to_enroll(date_from, date_to, args)
 
-    # Số đạt từng mốc phễu trong cohort kỳ lọc (Lead → QLead)
-    period_args = dict(args)
-    period_args["from_date"] = str(date_from)
-    period_args["to_date"] = str(date_to)
-    cohort_sql, cohort_binds = _cohort_leads_subquery(period_args)
-    count_lead_interested = _count_cohort_stage(cohort_sql, cohort_binds, FUNNEL_STAGES[0])
-    count_qlead = _count_cohort_stage(cohort_sql, cohort_binds, FUNNEL_STAGES[1])
+    # Học sinh quan tâm / tiềm năng — sự kiện chuyển bước trong kỳ (đồng bộ biểu đồ xu hướng)
+    count_lead_interested = entered
+    count_qlead = _count_qlead_events(date_from, date_to, args)
 
     return {
         "total_leads": total_leads,
@@ -602,6 +644,7 @@ def get_overview_kpis():
         "pic_restricted_to_self": _should_restrict_to_own_pic_only(),
         "measure_basis": "event_date",
         "period_label": f"{fd} — {td}",
+        "prev_period_label": f"{pdf} — {pdt}",
     }
     changes = {
         "total_leads": _pct_change(curr["total_leads"], prev["total_leads"]),

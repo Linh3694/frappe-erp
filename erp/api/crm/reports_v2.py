@@ -30,9 +30,29 @@ _COURSE_STUDENT_STATUSES = [
     "refunded",
 ]
 
-# Báo cáo trạng thái theo khối — thứ tự bước hiển thị + thứ tự trạng thái con QLead
-_GRADE_REPORT_STEPS = ["Lead", "QLead", "Enrolled", "Nghi hoc", "Verify", "Draft"]
+# Báo cáo trạng thái theo khối — Draft+Verify gộp "Hồ sơ mới", rồi các bước còn lại
+_GRADE_REPORT_STEPS = ["Lead", "QLead", "Enrolled", "Nghi hoc"]
+_GRADE_REPORT_ALWAYS_STEPS = frozenset({"Lead"})
+_NEW_PROFILE_DRAFT_KEY = "Draft|status|"
+_NEW_PROFILE_DRAFT_STATUS = "__draft__"
 _DEAL_STATUS_ORDER = ["Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Tu choi"]
+
+
+def _build_new_profile_group(step_statuses: Dict[str, set]) -> Dict[str, Any]:
+    """Gộp Draft (cột Dữ liệu) + Verify (Cần kiểm tra, …) trong nhóm Hồ sơ mới."""
+    columns: List[Dict[str, str]] = [
+        {"key": _NEW_PROFILE_DRAFT_KEY, "status": _NEW_PROFILE_DRAFT_STATUS},
+    ]
+    verify_present = step_statuses.get("Verify", set())
+    verify_sts = _order_status_values(verify_present, STEP_STATUSES.get("Verify", []))
+    if not verify_sts:
+        verify_sts = list(STEP_STATUSES.get("Verify", []))
+    for st in verify_sts:
+        columns.append({"key": f"Verify|status|{st}", "status": st})
+    return {
+        "step": "NewProfile",
+        "sections": [{"field": "status", "columns": columns}],
+    }
 
 
 def _order_status_values(present, canonical: List[str]) -> List[str]:
@@ -174,11 +194,16 @@ def get_status_by_grade():
         values_by_grade[row["grade"]][f"QLead|deal_status|{row['val']}"] = int(row["cnt"])
 
     # Dựng cấu trúc nhóm cột (bước → nhóm con → cột trạng thái)
-    groups: List[Dict[str, Any]] = []
+    groups: List[Dict[str, Any]] = [_build_new_profile_group(step_statuses)]
+
     for step in _GRADE_REPORT_STEPS:
-        if step not in step_statuses:
+        has_data = step in step_statuses
+        if not has_data and step not in _GRADE_REPORT_ALWAYS_STEPS:
             continue
-        sts = _order_status_values(step_statuses[step], STEP_STATUSES.get(step, []))
+        if has_data:
+            sts = _order_status_values(step_statuses[step], STEP_STATUSES.get(step, []))
+        else:
+            sts = list(STEP_STATUSES.get(step, []))
         if not sts:
             continue
         sections: List[Dict[str, Any]] = [
