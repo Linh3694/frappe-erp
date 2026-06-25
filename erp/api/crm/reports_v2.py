@@ -749,9 +749,6 @@ def get_enrollment_target_progress():
     pic_eff = r._effective_pic_from_request(args.get("pic")) if restricted else None
 
     target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
-    # Nếu không có campus_id vẫn cho phép xem actual; target cần campus
-    if not target_doc and campus_id:
-        target_doc = _load_target_doc(campus_id, target_academic_year)
 
     grade_targets_map: Dict[str, int] = {}
     member_targets_map: Dict[str, int] = {}
@@ -812,7 +809,7 @@ def get_enrollment_target_progress():
     # by_member
     all_pics = set(member_targets_map.keys()) | set(actual_by_pic.keys())
     if pic_eff:
-        all_pics = {pic_eff} if pic_eff in all_pics or pic_eff in actual_by_pic else {pic_eff}
+        all_pics = {pic_eff}
 
     user_map = r._batch_user_map(list(all_pics))
     by_member = []
