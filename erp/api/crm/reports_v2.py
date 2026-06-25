@@ -503,8 +503,8 @@ def get_courses_report():
 # --------------------------------------------------------------------------- #
 # Nguồn — Danh sách Nguồn 1 × bước, lọc theo 3 cấp nguồn (Nguồn 1/2/3)
 # --------------------------------------------------------------------------- #
-# Bước hiển thị trong báo cáo nguồn (giống báo cáo trạng thái theo khối)
-_SOURCE_REPORT_STEPS = _GRADE_REPORT_STEPS
+# Bước hiển thị trong báo cáo nguồn / PIC — đủ 6 bước snapshot (khác grade report gộp Draft+Verify)
+_SOURCE_REPORT_STEPS = ["Draft", "Verify", "Lead", "QLead", "Enrolled", "Nghi hoc"]
 _SOURCE_STEPS_SQL = "('Lead','QLead','Enrolled','Nghi hoc','Verify','Draft')"
 
 

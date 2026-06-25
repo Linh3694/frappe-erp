@@ -58,7 +58,23 @@ ALLOWED_ROLES = [
     "SIS Sales Care Admin",
     "SIS Sales Admin",
     "SIS BOD",
+    "SIS Marcom",
 ]
+
+# Marcom-only: chi xem ho so do user co role SIS Marcom nhap (owner) — dong bo sidebar FE
+MARCOM_ROLE = "SIS Marcom"
+_MARCOM_PROFILE_ELEVATED_ROLES = frozenset(
+    {
+        "System Manager",
+        "SIS Manager",
+        "SIS BOD",
+        "Registrar",
+        "SIS Sales Admin",
+        "SIS Sales Care Admin",
+        "SIS Sales",
+        "SIS Sales Care",
+    }
+)
 
 # PIC CRM Lead khi chon thu cong + validate reassign_pic (dong bo DIRECT_ISSUE_ROLES trong issue.py)
 CRM_LEAD_PIC_ELIGIBLE_ROLES = frozenset(
@@ -78,6 +94,41 @@ def check_crm_permission(required_roles: Optional[List[str]] = None) -> bool:
     if not any(role in user_roles for role in roles):
         frappe.throw("Khong co quyen truy cap CRM", frappe.PermissionError)
     return True
+
+
+def should_restrict_marcom_profile_view() -> bool:
+    """User SIS Marcom (khong co role Sales/BOD/Admin): chi xem ho so owner thuoc role Marcom."""
+    roles = set(frappe.get_roles(frappe.session.user))
+    if MARCOM_ROLE not in roles:
+        return False
+    if roles.intersection(_MARCOM_PROFILE_ELEVATED_ROLES):
+        return False
+    return True
+
+
+def get_marcom_profile_owner_users() -> List[str]:
+    """Danh sach User (owner) co role SIS Marcom — nguoi nhap hop le cho viewer bi gioi han."""
+    return frappe.get_all(
+        "Has Role",
+        filters={"role": MARCOM_ROLE, "parenttype": "User"},
+        pluck="parent",
+    )
+
+
+def marcom_profile_owner_filters() -> List[List]:
+    """Bo loc Frappe get_all/count: owner thuoc user co role SIS Marcom."""
+    owners = get_marcom_profile_owner_users()
+    if not owners:
+        return [["name", "=", "__no_match__"]]
+    return [["owner", "in", owners]]
+
+
+def lead_visible_to_marcom_viewer(lead_owner: Optional[str]) -> bool:
+    """Kiem tra ho so co duoc phep xem boi user Marcom-only hay khong."""
+    if not should_restrict_marcom_profile_view():
+        return True
+    owner = (lead_owner or "").strip()
+    return owner in get_marcom_profile_owner_users()
 
 
 def validate_phone_number(phone: str) -> bool:

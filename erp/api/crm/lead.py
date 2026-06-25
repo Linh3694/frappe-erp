@@ -12,7 +12,9 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data, validate_phone_number,
-    normalize_phone_number, get_valid_statuses_for_step, generate_crm_code
+    normalize_phone_number, get_valid_statuses_for_step, generate_crm_code,
+    should_restrict_marcom_profile_view, marcom_profile_owner_filters,
+    lead_visible_to_marcom_viewer, get_marcom_profile_owner_users,
 )
 
 
@@ -276,6 +278,10 @@ def get_leads():
     # Filter nang cao tu FilterBuilder (FE) — bao gom cot dan xuat primary_phone
     filters += _parse_lead_filters(frappe.request.args.get("filters"))
 
+    # SIS Marcom-only: chi ho so do user co role Marcom nhap (owner)
+    if should_restrict_marcom_profile_view():
+        filters += marcom_profile_owner_filters()
+
     or_filters = []
     if search:
         # Tim ten/ma: token + bo dau + dau tu qua helper chung (raw SQL tren tabCRM Lead)
@@ -365,8 +371,11 @@ def get_lead():
     
     if not frappe.db.exists("CRM Lead", name):
         return not_found_response(f"Khong tim thay ho so {name}")
-    
+
     doc = frappe.get_doc("CRM Lead", name)
+    if not lead_visible_to_marcom_viewer(doc.owner):
+        return not_found_response(f"Khong tim thay ho so {name}")
+
     lead_data = doc.as_dict()
     enrich_lead_dict_with_pic_info(lead_data)
     enrich_lead_dict_with_sibling_lead_links(lead_data)
@@ -928,17 +937,28 @@ def get_lead_summary():
     filters = {"step": step}
     if campus_id:
         filters["campus_id"] = campus_id
-    
+
+    owner_filter_sql = ""
+    if should_restrict_marcom_profile_view():
+        marcom_owners = get_marcom_profile_owner_users()
+        if marcom_owners:
+            owner_filter_sql = "AND owner IN %(marcom_owners)s"
+            filters["marcom_owners"] = tuple(marcom_owners)
+        else:
+            owner_filter_sql = "AND 1=0"
+
     # Dem so luong theo tung status
     summary = frappe.db.sql("""
         SELECT status, COUNT(*) as count
         FROM `tabCRM Lead`
         WHERE step = %(step)s
         {campus_filter}
+        {owner_filter}
         GROUP BY status
         ORDER BY count DESC
     """.format(
-        campus_filter="AND campus_id = %(campus_id)s" if campus_id else ""
+        campus_filter="AND campus_id = %(campus_id)s" if campus_id else "",
+        owner_filter=owner_filter_sql,
     ), filters, as_dict=True)
     
     total = sum(item["count"] for item in summary)
