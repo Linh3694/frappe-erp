@@ -179,8 +179,13 @@ def get_status_by_grade():
 
     for row in status_rows:
         step_statuses[row["step"]].add(row["status"])
-        key = f"{row['step']}|status|{row['status']}"
-        values_by_grade[row["grade"]][key] = int(row["cnt"])
+        if row["step"] == "Draft":
+            key = _NEW_PROFILE_DRAFT_KEY
+        else:
+            key = f"{row['step']}|status|{row['status']}"
+        values_by_grade[row["grade"]][key] = values_by_grade[row["grade"]].get(key, 0) + int(
+            row["cnt"]
+        )
         total_by_grade[row["grade"]] += int(row["cnt"])
 
     test_vals: set = set()

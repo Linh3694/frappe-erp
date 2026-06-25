@@ -67,6 +67,20 @@ def _normalize_grade_rows(rows: Any) -> List[Dict[str, Any]]:
     return out
 
 
+def _resolve_pic_user(pic_hint: str) -> Optional[str]:
+    """Map email / username / User.name → User.name (Link field PIC)."""
+    key = (pic_hint or "").strip()
+    if not key:
+        return None
+    if frappe.db.exists("User", key):
+        return key
+    for field in ("email", "username", "full_name"):
+        uid = frappe.db.get_value("User", {field: key}, "name")
+        if uid:
+            return uid
+    return None
+
+
 def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
     """Chuẩn hóa dòng target theo PIC từ payload JSON."""
     if not rows or not isinstance(rows, (list, tuple)):
@@ -75,8 +89,8 @@ def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
     for r in rows:
         if not isinstance(r, dict):
             continue
-        pic = (r.get("pic") or "").strip()
-        if not pic or not frappe.db.exists("User", pic):
+        pic = _resolve_pic_user(r.get("pic") or "")
+        if not pic:
             continue
         target = int(r.get("enrollment_target") or 0)
         if target < 0:
@@ -199,10 +213,11 @@ def save_target_config():
             doc.target_academic_year = target_academic_year
 
         doc.notes = notes if notes is not None else doc.notes
-        doc.grade_targets = []
+        # doc.set() để Frappe ghi đè child table đúng khi cập nhật bản ghi cũ
+        doc.set("grade_targets", [])
         for row in grade_rows:
             doc.append("grade_targets", row)
-        doc.member_targets = []
+        doc.set("member_targets", [])
         for row in member_rows:
             doc.append("member_targets", row)
 
