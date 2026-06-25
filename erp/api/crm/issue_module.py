@@ -38,7 +38,7 @@ def get_modules():
     modules = frappe.get_all(
         "CRM Issue Module",
         filters=filters or None,
-        fields=["name", "module_name", "code", "sla_hours", "description", "is_active", "modified"],
+        fields=["name", "module_name", "sla_hours", "description", "is_active", "modified"],
         order_by="module_name asc",
     )
     module_names = [m["name"] for m in modules]
@@ -80,17 +80,12 @@ def create_module():
     """Tao CRM Issue Module"""
     _check_config_permission()
     data = get_request_data()
-    if not data.get("module_name") or not data.get("code"):
-        return validation_error_response("Thieu thong tin", {"module_name": ["Bat buoc"], "code": ["Bat buoc"]})
-
-    code = str(data["code"]).strip().upper()
-    if frappe.db.exists("CRM Issue Module", {"code": code}):
-        return validation_error_response("Ma da ton tai", {"code": ["Trung"]})
+    if not data.get("module_name"):
+        return validation_error_response("Thieu thong tin", {"module_name": ["Bat buoc"]})
 
     try:
         doc = frappe.new_doc("CRM Issue Module")
         doc.module_name = data["module_name"]
-        doc.code = code
         doc.sla_hours = float(data.get("sla_hours") or 0)
         doc.description = data.get("description") or ""
         doc.is_active = 1 if data.get("is_active", True) else 0
@@ -118,12 +113,6 @@ def update_module():
         doc = frappe.get_doc("CRM Issue Module", name)
         if "module_name" in data:
             doc.module_name = data["module_name"]
-        if "code" in data:
-            new_code = str(data["code"]).strip().upper()
-            exists = frappe.db.exists("CRM Issue Module", {"code": new_code, "name": ["!=", name]})
-            if exists:
-                return validation_error_response("Ma da ton tai", {"code": ["Trung"]})
-            doc.code = new_code
         if "sla_hours" in data:
             doc.sla_hours = float(data["sla_hours"] or 0)
         if "description" in data:

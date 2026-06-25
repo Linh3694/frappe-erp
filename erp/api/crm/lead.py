@@ -73,6 +73,21 @@ def _get_full_image_url(user_image):
     return frappe.utils.get_url(path)
 
 
+def _owner_full_name_from_user(u):
+    """Ten hien thi 'Nguoi nhap': uu tien full_name; rong thi ghep last_name + first_name.
+
+    Tranh truong hop FE phai suy ten tu local part email (vd "le.vuthinhat" -> "Le Vuthinhat").
+    """
+    if not u:
+        return ""
+    nm = (u.get("full_name") or "").strip()
+    if nm:
+        return nm
+    return " ".join(
+        p for p in [(u.get("last_name") or "").strip(), (u.get("first_name") or "").strip()] if p
+    )
+
+
 def enrich_lead_dict_with_pic_info(lead_dict):
     """
     Bo sung pic_info tu User.pic: full_name, user_image, job_title (neu co cot tren User).
@@ -381,9 +396,11 @@ def get_leads():
     owner_ids = list({lead.get("owner") for lead in leads if lead.get("owner")})
     if owner_ids:
         owner_map = {
-            u["name"]: (u.get("full_name") or "").strip()
+            u["name"]: _owner_full_name_from_user(u)
             for u in frappe.get_all(
-                "User", filters=[["name", "in", owner_ids]], fields=["name", "full_name"]
+                "User",
+                filters=[["name", "in", owner_ids]],
+                fields=["name", "full_name", "first_name", "last_name"],
             )
         }
         for lead in leads:
@@ -427,6 +444,14 @@ def get_lead():
     lead_data = doc.as_dict()
     enrich_lead_dict_with_pic_info(lead_data)
     enrich_lead_dict_with_sibling_lead_links(lead_data)
+
+    # Ten nguoi nhap (field "Nguoi nhap"): owner (User id/email) -> full_name
+    owner_id = lead_data.get("owner")
+    if owner_id:
+        owner_user = frappe.db.get_value(
+            "User", owner_id, ["full_name", "first_name", "last_name"], as_dict=True
+        )
+        lead_data["owner_full_name"] = _owner_full_name_from_user(owner_user)
 
     # Lay ghi chu
     notes = frappe.get_all(

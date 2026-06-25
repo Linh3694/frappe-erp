@@ -7,7 +7,6 @@
  "engine": "InnoDB",
  "field_order": [
   "module_name",
-  "code",
   "sla_hours",
   "description",
   "is_active",
@@ -21,15 +20,6 @@
    "in_list_view": 1,
    "label": "Module Name",
    "reqd": 1
-  },
-  {
-   "description": "Prefix ma van de, VD: KL -> KL-00001",
-   "fieldname": "code",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Code",
-   "reqd": 1,
-   "unique": 1
   },
   {
    "description": "So gio can phan hoi (SLA)",

@@ -27,6 +27,7 @@
   "department",
   "issue_departments",
   "priority",
+  "issue_group",
   "approval_section",
   "approval_status",
   "approved_by_user",
@@ -172,8 +173,15 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Priority",
-   "options": "Cao\nTrung binh\nThap",
+   "options": "Khan cap\nCao\nTrung binh\nThap",
    "reqd": 1
+  },
+  {
+   "description": "Nhom van de - team care dien truoc khi duyet",
+   "fieldname": "issue_group",
+   "fieldtype": "Select",
+   "label": "Issue Group",
+   "options": "\nGóp ý\nSự vụ"
   },
   {
    "fieldname": "approval_section",

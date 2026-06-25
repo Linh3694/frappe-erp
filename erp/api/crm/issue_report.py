@@ -5,7 +5,9 @@ Phuc vu dashboard tab "Van de chung" (Bao cao Tuyen sinh V2), canh tab Tai ghi d
 Mot endpoint duy nhat tra ve tat ca section trong 1 lan goi (giong get_report_breakdown):
   - overview        : tong quan (tong, dang xu ly, da xu ly, qua han, ty le hai long...)
   - by_time         : tong hop theo thoi gian (Ngay / Thang / Nam)  -> Yeu cau 1
-  - by_module       : phan loai theo Nhom van de (Loai van de)       -> Yeu cau 2
+  - by_module       : phan loai theo Loai van de (issue_module)      -> Yeu cau 2
+  - by_issue_group  : phan loai theo Nhom van de (Gop y / Su vu)
+  - by_priority     : phan loai theo Muc do (gom Khan cap)
   - by_department   : phan loai theo Phong ban lien quan             -> Yeu cau 2
   - by_status       : tinh trang xu ly (Cho duyet/Tiep nhan/...)     -> Yeu cau 3
   - sla             : thoi han xu ly + alert qua han + danh sach qua han -> Yeu cau 3
@@ -161,7 +163,7 @@ def get_issue_report():
             for tr in time_rows
         ]
 
-        # ---------- (3) Theo Nhom van de (Loai van de) ----------
+        # ---------- (3) Theo Loai van de (issue_module) ----------
         module_rows = frappe.db.sql(
             f"""
             SELECT
@@ -187,6 +189,56 @@ def get_issue_report():
                 "overdue": mr.overdue or 0,
             }
             for mr in module_rows
+        ]
+
+        # ---------- (3b) Theo Nhom van de (Gop y / Su vu) ----------
+        group_rows = frappe.db.sql(
+            f"""
+            SELECT
+                COALESCE(NULLIF(i.issue_group, ''), '') AS issue_group,
+                COUNT(*) AS count,
+                SUM(CASE WHEN {open_clause} AND i.sla_deadline IS NOT NULL AND i.sla_deadline < NOW()
+                         THEN 1 ELSE 0 END) AS overdue
+            FROM `tabCRM Issue` i
+            WHERE {where}
+            GROUP BY issue_group
+            ORDER BY count DESC
+            """,
+            values,
+            as_dict=True,
+        )
+        by_issue_group = [
+            {
+                "issue_group": gr.issue_group or "",
+                "count": gr.count or 0,
+                "overdue": gr.overdue or 0,
+            }
+            for gr in group_rows
+        ]
+
+        # ---------- (3c) Theo Muc do (gom Khan cap) ----------
+        priority_rows = frappe.db.sql(
+            f"""
+            SELECT
+                COALESCE(NULLIF(i.priority, ''), '') AS priority,
+                COUNT(*) AS count,
+                SUM(CASE WHEN {open_clause} AND i.sla_deadline IS NOT NULL AND i.sla_deadline < NOW()
+                         THEN 1 ELSE 0 END) AS overdue
+            FROM `tabCRM Issue` i
+            WHERE {where}
+            GROUP BY priority
+            ORDER BY count DESC
+            """,
+            values,
+            as_dict=True,
+        )
+        by_priority = [
+            {
+                "priority": pr.priority or "",
+                "count": pr.count or 0,
+                "overdue": pr.overdue or 0,
+            }
+            for pr in priority_rows
         ]
 
         # ---------- (4) Theo Phong ban lien quan (cot department = phong ban chinh) ----------
@@ -361,6 +413,8 @@ def get_issue_report():
                 "overview": overview,
                 "by_time": by_time,
                 "by_module": by_module,
+                "by_issue_group": by_issue_group,
+                "by_priority": by_priority,
                 "by_department": by_department,
                 "by_status": by_status,
                 "sla": sla,

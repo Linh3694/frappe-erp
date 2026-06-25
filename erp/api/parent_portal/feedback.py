@@ -23,6 +23,7 @@ from erp.utils.api_response import (
 from erp.api.crm.issue import (
     _compute_sla_deadline,
     _generate_issue_code,
+    _next_care_pic,
     _sync_issue_students,
 )
 
@@ -134,15 +135,14 @@ def _get_request_data():
 
 
 def _ensure_feedback_issue_module():
-    """Dam bao module CRM Issue loai Gop y (ma FB) ton tai; tra ve docname module."""
-    existing = frappe.db.get_value("CRM Issue Module", {"code": "FB"}, "name")
+    """Dam bao Loai van de 'Gop y' (cho feedback phu huynh) ton tai; tra ve docname module."""
+    existing = frappe.db.get_value("CRM Issue Module", {"module_name": "Góp ý"}, "name")
     if existing:
         return existing
     mod = frappe.get_doc(
         {
             "doctype": "CRM Issue Module",
             "module_name": "Góp ý",
-            "code": "FB",
             "is_active": 1,
             "sla_hours": 24,
         }
@@ -217,25 +217,6 @@ def _append_remaining_attachments_to_content(content_html, attachment_list):
     return content_html + "".join(blocks)
 
 
-def _get_next_care_admin_pic():
-    """Round-robin: user role SIS Sales Care Admin co it CRM Issue (pic) nhat."""
-    admins = frappe.get_all(
-        "Has Role",
-        filters={"role": "SIS Sales Care Admin", "parenttype": "User"},
-        pluck="parent",
-    )
-    admins = list(set(admins or []))
-    enabled = [
-        u
-        for u in admins
-        if u and frappe.db.get_value("User", u, "enabled")
-    ]
-    if not enabled:
-        return ""
-    counts = {u: frappe.db.count("CRM Issue", {"pic": u}) for u in enabled}
-    return min(enabled, key=lambda u: counts.get(u, 0))
-
-
 def _create_issue_from_feedback(feedback_doc, guardian_name):
     """
     Tu dong tao CRM Issue khi phu huynh gui feedback loai 'Gop y' (chi loai nay).
@@ -247,10 +228,10 @@ def _create_issue_from_feedback(feedback_doc, guardian_name):
     module_name = _ensure_feedback_issue_module()
     mod = frappe.get_doc("CRM Issue Module", module_name)
     if not mod.is_active:
-        frappe.logger().warning("Module FB khong active, van tao issue theo SLA module")
+        frappe.logger().warning("Loai van de 'Gop y' khong active, van tao issue theo SLA module")
 
     student_ids = _get_student_ids_for_guardian(guardian_name)
-    pic = _get_next_care_admin_pic()
+    pic = _next_care_pic()
 
     raw = (getattr(feedback_doc, "content", None) or "").strip()
     content_html = "<p>" + escape_html(raw).replace("\n", "<br>") + "</p>"
@@ -265,9 +246,11 @@ def _create_issue_from_feedback(feedback_doc, guardian_name):
     doc.title = (getattr(feedback_doc, "title", None) or "").strip() or "Góp ý từ phụ huynh"
     doc.content = content_html
     doc.issue_module = module_name
+    # Nhom van de = Gop y (feedback phu huynh luon thuoc nhom Gop y)
+    doc.issue_group = "Góp ý"
     # Lien ket nguoc ve Feedback de mobile/staff reply phu huynh tu man CRM Issue
     doc.source_feedback = getattr(feedback_doc, "name", None) or ""
-    doc.issue_code = _generate_issue_code(mod.code)
+    doc.issue_code = _generate_issue_code()
     doc.occurred_at = str(getdate(now()))
     doc.priority = (getattr(feedback_doc, "priority", None) or "").strip() or "Trung binh"
     doc.lead = ""

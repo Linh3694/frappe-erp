@@ -4,6 +4,18 @@
 import frappe
 from frappe.model.document import Document
 
+# Bien the gioi tinh tu nhap tay / import -> gia tri canonical cua field student_gender (Nam/Nu).
+# Khop sau khi .strip().lower() nen phu duoc "NU", "Nữ", "female", "F"...
+GENDER_VARIANT_TO_CANONICAL = {
+    "nam": "Nam",
+    "male": "Nam",
+    "m": "Nam",
+    "nu": "Nu",
+    "nữ": "Nu",
+    "female": "Nu",
+    "f": "Nu",
+}
+
 
 class CRMLead(Document):
     def after_insert(self):
@@ -25,6 +37,20 @@ class CRMLead(Document):
         if not rows and legacy and str(legacy).strip():
             self.append('emails', {'email_address': str(legacy).strip(), 'is_primary': 1})
 
+    def _normalize_student_gender(self):
+        """Gioi tinh: chuan hoa moi bien the (Nu/nu/Nữ/female/F...) ve canonical Nam/Nu.
+
+        Choke point chung cho moi luong save chay validate (create/update_lead, import,
+        bulk...) — file import co the ghi "Nữ" theo nhan hien thi thay vi gia tri "Nu".
+        Gia tri khong khop bien the nao thi giu nguyen de validate Select bao loi nhu cu.
+        """
+        raw = self.get("student_gender")
+        if not raw:
+            return
+        canonical = GENDER_VARIANT_TO_CANONICAL.get(str(raw).strip().lower())
+        if canonical and canonical != raw:
+            self.set("student_gender", canonical)
+
     def _normalize_nationalities(self):
         """Quoc tich (HS + PH) la Link -> Country: ep ve ten Country hop le hoac rong.
 
@@ -40,6 +66,7 @@ class CRMLead(Document):
 
     def validate(self):
         """Moi guardian lead: chi 1 dong primary trong emails neu co du lieu."""
+        self._normalize_student_gender()
         self._normalize_nationalities()
         self._validate_bank_accounts_max_two()
         self._dedupe_lead_emails()

@@ -37,17 +37,23 @@ APPROVER_ROLES = frozenset(
 # Chi role Care moi duoc them/bot phong ban lien quan cua issue (phong ban mac dinh theo Loai van de)
 ISSUE_DEPT_EDIT_ROLES = APPROVER_ROLES
 
-# User co the duoc gan lam PIC. SIS Sales = user thuong (chi lam PIC khi la leader/thanh vien don vi).
-PIC_ELIGIBLE_ROLES = frozenset(
+# Team care - pool PIC. PIC la nguoi nhan thuoc team care (khong con theo phong ban).
+CARE_TEAM_ROLES = frozenset(
     {
         "SIS Sales Care",
         "SIS Sales Care Admin",
-        "SIS Sales Admin",
     }
 )
 
 CARE_ADMIN_ROLES = frozenset({"SIS Sales Care Admin"})
 VALID_ISSUE_RESULTS = frozenset({"Hai long", "Chua hai long"})
+
+# Prefix co dinh cho ma van de (khong con theo Loai van de / CRM Issue Module.code)
+ISSUE_CODE_PREFIX = "VDC"
+# Muc do hop le - them Khan cap (cao nhat)
+VALID_PRIORITIES = ("Khan cap", "Cao", "Trung binh", "Thap")
+# Nhom van de - team care dien truoc khi duyet
+VALID_ISSUE_GROUPS = ("Góp ý", "Sự vụ")
 
 # Role duoc ghi / xu ly van de (dong bo frontend canWriteIssue). SIS Sales = user thuong (ghi qua Team don vi).
 ISSUE_WRITE_ROLES = frozenset(
@@ -668,16 +674,12 @@ def _can_create_directly():
 
 def _is_valid_pic_user(pic_email: str, issue_doc=None) -> bool:
     """
-    PIC hop le: user ton tai va (co role xu ly HOAC la thanh vien Team cua phong ban issue).
-    Nho do leader/thanh vien don vi (vd leader cua group) van lam PIC duoc du role gi.
+    PIC hop le: user ton tai va thuoc team care (CARE_TEAM_ROLES).
+    PIC la nguoi nhan thuoc team care — khong con lay theo thanh vien phong ban.
     """
     if not pic_email or not frappe.db.exists("User", pic_email):
         return False
-    if PIC_ELIGIBLE_ROLES & set(frappe.get_roles(pic_email)):
-        return True
-    if issue_doc is not None and pic_email in _all_department_member_emails_for_issue(issue_doc):
-        return True
-    return False
+    return bool(CARE_TEAM_ROLES & set(frappe.get_roles(pic_email)))
 
 
 def _can_approve():
@@ -699,9 +701,9 @@ def _can_edit_issue_departments(user: str = None) -> bool:
     return bool(ISSUE_DEPT_EDIT_ROLES & roles or "System Manager" in roles or u == "Administrator")
 
 
-def _generate_issue_code(prefix: str) -> str:
-    """Sinh ma PREFIX-00001 theo prefix module (VD: KL)."""
-    p = (prefix or "X").strip().upper()
+def _generate_issue_code(prefix: str = ISSUE_CODE_PREFIX) -> str:
+    """Sinh ma VDC-00001 — prefix co dinh (khong con theo Loai van de)."""
+    p = (prefix or ISSUE_CODE_PREFIX).strip().upper()
     rows = frappe.db.sql(
         """
         SELECT issue_code FROM `tabCRM Issue`
@@ -719,40 +721,24 @@ def _generate_issue_code(prefix: str) -> str:
     return f"{p}-{max_n + 1:05d}"
 
 
-def _pic_from_student(student_id: str):
-    """Lay PIC tu CRM Lead co linked_student = student."""
-    if not student_id:
-        return None
-    pic = frappe.db.get_value("CRM Lead", {"linked_student": student_id}, "pic")
-    return pic or None
-
-
-def _pic_from_department(dept_name: str):
-    """PIC chinh mac dinh = leader dau tien cua don vi (fallback member dau tien)."""
-    if not dept_name or not frappe.db.exists(ORG_UNIT_DOCTYPE, dept_name):
-        return None
-    leaders = _unit_leader_emails(dept_name)
-    if leaders:
-        return leaders[0]
-    members = _unit_member_emails_only(dept_name)
-    if members:
-        return members[0]
-    return None
+def _next_care_pic():
+    """Round-robin: user team care (CARE_TEAM_ROLES) dang giu it CRM Issue (pic) nhat."""
+    rows = frappe.get_all(
+        "Has Role",
+        filters={"role": ["in", list(CARE_TEAM_ROLES)], "parenttype": "User"},
+        pluck="parent",
+    )
+    care = list(set(rows or []))
+    enabled = [u for u in care if u and frappe.db.get_value("User", u, "enabled")]
+    if not enabled:
+        return ""
+    counts = {u: frappe.db.count("CRM Issue", {"pic": u}) for u in enabled}
+    return min(enabled, key=lambda u: counts.get(u, 0))
 
 
 def _assign_pic_from_issue_context(doc):
-    """
-    Gan PIC: leader cua group (PIC chinh) -> fallback Lead hoc sinh.
-    Goi sau khi issue_module / hoc sinh / phong ban da dong bo len doc.
-    """
-    pic = ""
-    for dn in _issue_department_docnames(doc):
-        pic = _pic_from_department(dn) or ""
-        if pic:
-            break
-    if not pic and getattr(doc, "student", None):
-        pic = _pic_from_student(doc.student) or ""
-    doc.pic = pic
+    """Gan PIC = thanh vien team care (round-robin it viec nhat). PIC khong con theo phong ban."""
+    doc.pic = _next_care_pic() or ""
 
 
 def _sync_issue_students(doc, data):
@@ -1028,24 +1014,18 @@ def whoami_crm_issue():
 @frappe.whitelist()
 def get_issue_pic_candidates():
     """
-    Danh sach user co the lam PIC: role PIC hop le (Sales Care/Admin...).
-    Neu truyen issue -> bo sung Team phong ban cua issue (vd leader cua group) du role gi.
+    Danh sach user co the lam PIC: thanh vien team care (CARE_TEAM_ROLES).
+    PIC la nguoi nhan thuoc team care — khong con lay theo thanh vien phong ban cua issue.
     """
     # Khong dung check_crm_permission: moi user dang nhap can tai dropdown PIC khi tao/sua issue
 
-    pic_roles = list(PIC_ELIGIBLE_ROLES)
     user_emails = frappe.get_all(
         "Has Role",
-        filters={"role": ["in", pic_roles], "parenttype": "User"},
+        filters={"role": ["in", list(CARE_TEAM_ROLES)], "parenttype": "User"},
         fields=["parent"],
         pluck="parent",
     )
     emails = set(user_emails or [])
-
-    issue_name = frappe.request.args.get("issue")
-    if issue_name and frappe.db.exists("CRM Issue", issue_name):
-        issue_doc = frappe.get_doc("CRM Issue", issue_name)
-        emails.update(_all_department_member_emails_for_issue(issue_doc))
 
     if not emails:
         return success_response([])
@@ -1148,6 +1128,7 @@ def get_issues():
             "status",
             "result",
             "priority",
+            "issue_group",
             "pic",
             "created_by_user",
             "owner",
@@ -1200,6 +1181,7 @@ def get_pending_issues():
             "status",
             "result",
             "priority",
+            "issue_group",
             "pic",
             "created_by_user",
             "owner",
@@ -1385,7 +1367,7 @@ def create_issue():
         if not data.get(f):
             errors[f] = ["Bat buoc"]
     # Phong ban lien quan: tuy chon o form tao moi; chi bat buoc khi tao truc tiep (xu ly ben duoi)
-    if data.get("priority") and data.get("priority") not in ("Cao", "Trung binh", "Thap"):
+    if data.get("priority") and data.get("priority") not in VALID_PRIORITIES:
         errors["priority"] = ["Gia tri khong hop le"]
     if errors:
         return validation_error_response("Thieu thong tin", errors)
@@ -1402,7 +1384,7 @@ def create_issue():
         doc = frappe.new_doc("CRM Issue")
         doc.content = data["content"]
         doc.issue_module = module_name
-        doc.issue_code = _generate_issue_code(mod.code)
+        doc.issue_code = _generate_issue_code()
         doc.title = (data.get("title") or doc.issue_code or mod.module_name or module_name).strip()
         doc.priority = data.get("priority")
 
@@ -1417,11 +1399,20 @@ def create_issue():
         if dept_values is None:
             dept_values = [data.get("department")] if data.get("department") else []
         dept_ids = _set_issue_departments(doc, dept_values)
-        if _can_create_directly() and not dept_ids:
-            return validation_error_response(
-                "Phong ban lien quan la bat buoc",
-                {"departments": ["Bat buoc"]},
-            )
+        # Nhom van de (Gop y / Su vu): team care dien. Care tao truc tiep (tu duyet) -> bat buoc ngay.
+        issue_group = (data.get("issue_group") or "").strip()
+        if _can_create_directly():
+            if not dept_ids:
+                return validation_error_response(
+                    "Phong ban lien quan la bat buoc",
+                    {"departments": ["Bat buoc"]},
+                )
+            if issue_group not in VALID_ISSUE_GROUPS:
+                return validation_error_response(
+                    "Nhom van de la bat buoc",
+                    {"issue_group": ["Bat buoc"]},
+                )
+            doc.issue_group = issue_group
         doc.attachment = data.get("attachment") or ""
 
         sla_h = float(mod.sla_hours or 0)
@@ -1437,8 +1428,14 @@ def create_issue():
             doc.first_response_at = None
             doc.sla_status = "On track"
 
-        # PIC: tu dong — khong nhan tu client
-        _assign_pic_from_issue_context(doc)
+        # PIC = nguoi nhan thuoc team care. Care tao truc tiep co the chi dinh; neu trong -> auto round-robin.
+        pic_in = (data.get("pic") or "").strip()
+        if pic_in and _can_create_directly():
+            if not _is_valid_pic_user(pic_in, doc):
+                return error_response("PIC khong hop le")
+            doc.pic = pic_in
+        else:
+            _assign_pic_from_issue_context(doc)
 
         user = frappe.session.user
         doc.created_by_user = user
@@ -1532,9 +1529,18 @@ def approve_issue():
             {"departments": ["Bat buoc"]},
         )
 
+    # Nhom van de (Gop y / Su vu): team care bat buoc dien truoc khi duyet
+    issue_group = (data.get("issue_group") or getattr(doc, "issue_group", "") or "").strip()
+    if issue_group not in VALID_ISSUE_GROUPS:
+        return validation_error_response(
+            "Nhom van de la bat buoc khi duyet",
+            {"issue_group": ["Bat buoc"]},
+        )
+    doc.issue_group = issue_group
+
     if "priority" in data:
         priority = (data.get("priority") or "").strip()
-        if priority not in ("Cao", "Trung binh", "Thap"):
+        if priority not in VALID_PRIORITIES:
             return validation_error_response("Muc do khong hop le", {"priority": ["Khong hop le"]})
         doc.priority = priority
 
@@ -1672,7 +1678,7 @@ def update_issue():
         if "occurred_at" in data:
             doc.occurred_at = _normalize_issue_date(data.get("occurred_at"))
 
-        if "priority" in data and (data.get("priority") or "").strip() not in ("Cao", "Trung binh", "Thap"):
+        if "priority" in data and (data.get("priority") or "").strip() not in VALID_PRIORITIES:
             return validation_error_response("Muc do khong hop le", {"priority": ["Khong hop le"]})
 
         # PIC chi gan user co role Sales (dong bo get_issue_pic_candidates)
@@ -1696,6 +1702,15 @@ def update_issue():
                 dept_values = [data.get("department")] if data.get("department") else []
             _set_issue_departments(doc, dept_values)
 
+        # Chi nhom Care moi duoc sua Nhom van de (Gop y / Su vu)
+        if "issue_group" in data:
+            if not _can_edit_issue_departments(frappe.session.user):
+                return error_response("Chi nhom Care moi duoc thay doi nhom van de")
+            ig = (data.get("issue_group") or "").strip()
+            if ig and ig not in VALID_ISSUE_GROUPS:
+                return validation_error_response("Nhom van de khong hop le", {"issue_group": ["Khong hop le"]})
+            doc.issue_group = ig
+
         if "students" in data or "student" in data:
             _sync_issue_students(doc, data)
 
@@ -1712,7 +1727,7 @@ def update_issue():
                 else:
                     doc.sla_deadline = _compute_sla_deadline(doc.creation, doc.sla_hours)
                 _recompute_sla_state(doc)
-                doc.issue_code = doc.issue_code or _generate_issue_code(mod.code)
+                doc.issue_code = doc.issue_code or _generate_issue_code()
 
         # PIC: client khong gui (mobile/web form) -> gan lai theo module/hoc sinh/phong ban
         if "pic" not in data:

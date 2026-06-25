@@ -149,9 +149,14 @@ def update_source():
     if not frappe.db.exists("CRM Source", name):
         return not_found_response(f"Khong tim thay {name}")
     try:
+        # source_name la autoname (field:source_name) => doi ten = rename_doc, .save() khong doi duoc.
+        new_name = (data.get("source_name") or "").strip()
+        if "source_name" in data and new_name and new_name != name:
+            if frappe.db.exists("CRM Source", new_name):
+                return error_response(f"{new_name} da ton tai")
+            frappe.rename_doc("CRM Source", name, new_name, ignore_permissions=True)
+            name = new_name
         doc = frappe.get_doc("CRM Source", name)
-        if "source_name" in data and data.get("source_name"):
-            doc.source_name = (data.get("source_name") or "").strip()
         if "source_type" in data:
             doc.source_type = data.get("source_type")
         if "notes" in data:
