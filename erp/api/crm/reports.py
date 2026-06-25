@@ -2,7 +2,7 @@
 """
 CRM Reports API — dashboard báo cáo tuyển sinh (CRM Lead).
 Nguồn: tabCRM Lead, tabCRM Lead Step History, tabCRM Lead Source.
-Số liệu vận hành theo ngày sự kiện (changed_at); hồ sơ mới theo creation.
+Số liệu vận hành theo ngày sự kiện (changed_at); hồ sơ mới = bước Draft (tab Dữ liệu) theo ngày nhập.
 """
 
 import json
@@ -316,9 +316,13 @@ def _lost_event_condition(include_tu_choi: bool) -> str:
 
 
 def _count_new_leads(date_from: Any, date_to: Any, args) -> int:
+    """Hồ sơ mới: bước Draft (tab Dữ liệu), nhập trong kỳ — chưa chuyển Lead."""
     wsql, binds = _where_creation_between(date_from, date_to, args)
     return int(
-        frappe.db.sql(f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {wsql}", binds)[0][0]
+        frappe.db.sql(
+            f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {wsql} AND l.`step` = 'Draft'",
+            binds,
+        )[0][0]
     )
 
 
@@ -722,7 +726,7 @@ def get_status_distribution():
 
 @frappe.whitelist()
 def get_trend():
-    """Xu hướng: hồ sơ mới (creation) / vào Lead / đạt QLead theo bucket thời gian."""
+    """Xu hướng: hồ sơ Draft mới nhập / vào Lead / đạt QLead theo bucket thời gian."""
     check_crm_permission()
     args = frappe.request.args or {}
     gran = (args.get("granularity") or "day").lower()
@@ -747,7 +751,8 @@ def get_trend():
     new_rows = frappe.db.sql(
         f"""
         SELECT {pn} AS period, COUNT(*) AS new_leads
-        FROM `tabCRM Lead` l WHERE {wlead}
+        FROM `tabCRM Lead` l
+        WHERE {wlead} AND l.`step` = 'Draft'
         GROUP BY {pn} ORDER BY period ASC
         """,
         binds_lead,
