@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import frappe
 
 from erp.utils.api_response import paginated_response, success_response
-from erp.api.crm.utils import check_crm_permission, STEP_STATUSES, QLEAD_TEST_STATUSES
+from erp.api.crm.utils import check_crm_permission, STEP_STATUSES, QLEAD_TEST_STATUSES, CRM_LEAD_PIC_ELIGIBLE_ROLES
 from erp.api.crm import reports as r
 
 # Trạng thái HS theo loại hoạt động (đồng bộ doctype)
@@ -786,6 +786,24 @@ def get_pic_breakdown():
 # --------------------------------------------------------------------------- #
 # KPI — Tiến độ mục tiêu nhập học (target vs actual Enrolled)
 # --------------------------------------------------------------------------- #
+def _get_active_crm_sales_user_names() -> List[str]:
+    """User enabled có role Sales CRM — dùng cho danh sách KPI cá nhân."""
+    roles = list(CRM_LEAD_PIC_ELIGIBLE_ROLES)
+    if not roles:
+        return []
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT u.name
+        FROM `tabUser` u
+        INNER JOIN `tabHas Role` r ON r.parent = u.name AND r.parenttype = 'User'
+        WHERE r.role IN %(roles)s AND IFNULL(u.enabled, 0) = 1
+        ORDER BY u.name
+        """,
+        {"roles": roles},
+    )
+    return [row[0] for row in rows] if rows else []
+
+
 def _load_target_doc(campus_id: str, target_academic_year: str):
     """Tải doc CRM Admission Target hoặc None."""
     from erp.api.crm.admission_target import _find_target_name
@@ -935,8 +953,12 @@ def get_enrollment_target_progress():
         "pct": _pct(dept_actual_total, dept_target),
     }
 
-    # by_member
-    all_pics = set(member_targets_map.keys()) | set(actual_by_pic.keys())
+    # by_member — gồm target đã cấu hình, PIC có actual, và toàn bộ user Sales
+    all_pics = (
+        set(member_targets_map.keys())
+        | set(actual_by_pic.keys())
+        | set(_get_active_crm_sales_user_names())
+    )
     if pic_eff:
         all_pics = {pic_eff}
 
