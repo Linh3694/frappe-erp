@@ -3,7 +3,7 @@
 CRM Reports V2 API — báo cáo Tuyển Sinh (UI-v2), bổ sung cho erp.api.crm.reports.
 
 Các endpoint mới phục vụ 5 tab: Tổng quan (trạng thái theo khối + danh sách công
-việc), Hoạt động (sự kiện + khóa học), KPI (tái dùng reports.get_breakdown_by_pic),
+việc), Hoạt động (sự kiện + khóa học + khảo sát đầu vào), KPI (tái dùng reports.get_breakdown_by_pic),
 Nguồn (nguồn 1/2/3), Tái ghi danh (tái dùng erp_sis.re_enrollment).
 
 Tái sử dụng helper từ reports.py: phân quyền theo vai trò (PIC chỉ xem của mình),
@@ -28,6 +28,13 @@ _COURSE_STUDENT_STATUSES = [
     "attended",
     "transferred",
     "refunded",
+]
+_ENTRANCE_EXAM_STUDENT_STATUSES = [
+    "new",
+    "schedule_notified",
+    "not_attending",
+    "exam_taken",
+    "completed",
 ]
 
 # Báo cáo trạng thái theo khối — Draft+Verify gộp "Hồ sơ mới", rồi các bước còn lại
@@ -379,11 +386,12 @@ def _activity_student_lead_match(args, student_alias: str, prefix: str) -> Tuple
 
 
 def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: str,
-                     name_field: str, statuses: List[str]) -> Dict[str, Any]:
+                     name_field: str, statuses: List[str],
+                     date_field: str = "event_date") -> Dict[str, Any]:
     fd, td, _, _ = r._resolve_period(args)
     match_sql, match_binds = _activity_student_lead_match(args, "es", "act")
 
-    ev_where = ["DATE(e.`event_date`) BETWEEN %(d_from)s AND %(d_to)s"]
+    ev_where = [f"DATE(e.`{date_field}`) BETWEEN %(d_from)s AND %(d_to)s"]
     binds: Dict[str, Any] = {"d_from": fd, "d_to": td, **match_binds}
 
     campus_id = (args.get("campus_id") or "").strip()
@@ -403,7 +411,7 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
 
     rows = frappe.db.sql(
         f"""
-        SELECT e.`name`, e.`{name_field}` AS title, e.`event_date`,
+        SELECT e.`name`, e.`{name_field}` AS title, e.`{date_field}` AS event_date,
                e.`campus_id`, e.`school_year_id`, e.`is_active`, e.`student_count`,
                SUM(CASE WHEN es.`name` IS NOT NULL AND {match_sql} THEN 1 ELSE 0 END) AS matched_total,
                {status_cols}
@@ -411,7 +419,7 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
         LEFT JOIN `tab{student_doctype}` es ON es.`{student_fk}` = e.`name`
         WHERE {where_clause}
         GROUP BY e.`name`
-        ORDER BY e.`event_date` DESC
+        ORDER BY e.`{date_field}` DESC
         LIMIT 500
         """,
         binds,
@@ -496,6 +504,24 @@ def get_courses_report():
             student_fk="course_id",
             name_field="course_name",
             statuses=_COURSE_STUDENT_STATUSES,
+        )
+    )
+
+
+@frappe.whitelist()
+def get_entrance_exams_report():
+    """Báo cáo Khảo sát đầu vào — CRM Admission Entrance Exam + Entrance Exam Student."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    return success_response(
+        _activity_report(
+            args,
+            doctype="CRM Admission Entrance Exam",
+            student_doctype="CRM Admission Entrance Exam Student",
+            student_fk="entrance_exam_id",
+            name_field="exam_name",
+            date_field="exam_date",
+            statuses=_ENTRANCE_EXAM_STUDENT_STATUSES,
         )
     )
 
