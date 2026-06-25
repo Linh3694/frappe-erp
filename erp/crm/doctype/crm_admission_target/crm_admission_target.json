@@ -1,0 +1,129 @@
+{
+ "actions": [],
+ "autoname": "format:TARGET-{campus_id}-{target_academic_year}",
+ "creation": "2026-06-25 00:00:00.000000",
+ "description": "Mục tiêu nhập học theo Campus × Năm học — KPI phòng ban và cá nhân",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "campus_id",
+  "target_academic_year",
+  "total_enrollment_target",
+  "notes",
+  "section_grade",
+  "grade_targets",
+  "section_member",
+  "member_targets"
+ ],
+ "fields": [
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 1
+  },
+  {
+   "fieldname": "target_academic_year",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Năm học mục tiêu",
+   "options": "SIS School Year",
+   "reqd": 1
+  },
+  {
+   "fieldname": "total_enrollment_target",
+   "fieldtype": "Int",
+   "label": "Tổng mục tiêu phòng ban",
+   "non_negative": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "section_grade",
+   "fieldtype": "Section Break",
+   "label": "Mục tiêu theo khối"
+  },
+  {
+   "fieldname": "grade_targets",
+   "fieldtype": "Table",
+   "label": "Target theo khối",
+   "options": "CRM Admission Target Grade"
+  },
+  {
+   "fieldname": "section_member",
+   "fieldtype": "Section Break",
+   "label": "Mục tiêu theo thành viên"
+  },
+  {
+   "fieldname": "member_targets",
+   "fieldtype": "Table",
+   "label": "Target theo PIC",
+   "options": "CRM Admission Target Member"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Admission Target",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "SIS Sales Admin",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "SIS Sales"
+  },
+  {
+   "read": 1,
+   "role": "SIS Sales Care"
+  },
+  {
+   "read": 1,
+   "role": "Registrar"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "target_academic_year",
+ "unique_together": "campus_id, target_academic_year"
+}

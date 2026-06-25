@@ -652,3 +652,196 @@ def get_pic_breakdown():
             "meta": {"pic_restricted_to_self": r._should_restrict_to_own_pic_only()},
         }
     )
+
+
+# --------------------------------------------------------------------------- #
+# KPI — Tiến độ mục tiêu nhập học (target vs actual Enrolled)
+# --------------------------------------------------------------------------- #
+def _load_target_doc(campus_id: str, target_academic_year: str):
+    """Tải doc CRM Admission Target hoặc None."""
+    from erp.api.crm.admission_target import _find_target_name
+
+    name = _find_target_name(campus_id, target_academic_year)
+    if not name:
+        return None
+    return frappe.get_doc("CRM Admission Target", name)
+
+
+def _count_enrolled_by_grade(campus_id: str, target_academic_year: str) -> Dict[str, int]:
+    """Đếm số lead Enrolled theo target_grade (snapshot)."""
+    where = ["l.`step` = 'Enrolled'", "l.`target_academic_year` = %(tay)s"]
+    binds: Dict[str, Any] = {"tay": target_academic_year}
+    if campus_id:
+        where.append("l.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(NULLIF(TRIM(l.`target_grade`), ''), '-') AS grade,
+               COUNT(*) AS cnt
+        FROM `tabCRM Lead` l
+        WHERE {" AND ".join(where)}
+        GROUP BY grade
+        """,
+        binds,
+        as_dict=True,
+    )
+    return {row["grade"]: int(row["cnt"]) for row in rows}
+
+
+def _count_enrolled_by_pic(campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None) -> Dict[str, int]:
+    """Đếm số lead Enrolled theo PIC (snapshot)."""
+    where = [
+        "l.`step` = 'Enrolled'",
+        "l.`target_academic_year` = %(tay)s",
+        "IFNULL(TRIM(l.`pic`), '') != ''",
+    ]
+    binds: Dict[str, Any] = {"tay": target_academic_year}
+    if campus_id:
+        where.append("l.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+    if pic_filter:
+        where.append("l.`pic` = %(pic)s")
+        binds["pic"] = pic_filter
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+               COUNT(*) AS cnt
+        FROM `tabCRM Lead` l
+        WHERE {" AND ".join(where)}
+        GROUP BY pic
+        """,
+        binds,
+        as_dict=True,
+    )
+    return {row["pic"]: int(row["cnt"]) for row in rows}
+
+
+def _pct(actual: int, target: int) -> float:
+    if target <= 0:
+        return 0.0 if actual <= 0 else 100.0
+    return round(100.0 * actual / target, 2)
+
+
+@frappe.whitelist()
+def get_enrollment_target_progress():
+    """Tiến độ mục tiêu nhập học: theo khối, tổng phòng ban, theo PIC."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    campus_id = (args.get("campus_id") or "").strip()
+    target_academic_year = (args.get("target_academic_year") or "").strip()
+
+    if not target_academic_year:
+        return success_response(
+            {
+                "by_grade": [],
+                "dept_total": {"target": 0, "actual": 0, "pct": 0},
+                "by_member": [],
+                "meta": {
+                    "configured": False,
+                    "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
+                },
+            }
+        )
+
+    restricted = r._should_restrict_to_own_pic_only()
+    pic_eff = r._effective_pic_from_request(args.get("pic")) if restricted else None
+
+    target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
+    # Nếu không có campus_id vẫn cho phép xem actual; target cần campus
+    if not target_doc and campus_id:
+        target_doc = _load_target_doc(campus_id, target_academic_year)
+
+    grade_targets_map: Dict[str, int] = {}
+    member_targets_map: Dict[str, int] = {}
+    dept_target = 0
+    if target_doc:
+        for row in target_doc.grade_targets or []:
+            g = (row.target_grade or "").strip()
+            if g:
+                grade_targets_map[g] = int(row.enrollment_target or 0)
+        dept_target = int(target_doc.total_enrollment_target or 0)
+        for row in target_doc.member_targets or []:
+            p = (row.pic or "").strip()
+            if p:
+                member_targets_map[p] = int(row.enrollment_target or 0)
+
+    actual_by_grade = _count_enrolled_by_grade(campus_id, target_academic_year)
+    actual_by_pic = _count_enrolled_by_pic(campus_id, target_academic_year, pic_eff)
+
+    # by_grade: union grades từ target + actual
+    all_grades = sorted(
+        set(grade_targets_map.keys()) | set(actual_by_grade.keys()),
+        key=lambda g: (0, int(g)) if g.isdigit() else (1, g),
+    )
+    by_grade = []
+    dept_actual = 0
+    for g in all_grades:
+        if g == "-":
+            continue
+        target = grade_targets_map.get(g, 0)
+        actual = actual_by_grade.get(g, 0)
+        dept_actual += actual
+        by_grade.append(
+            {
+                "target_grade": g,
+                "target": target,
+                "actual": actual,
+                "pct": _pct(actual, target),
+            }
+        )
+
+    # dept_total: dùng tổng target từ doc hoặc sum grade targets
+    if not dept_target and grade_targets_map:
+        dept_target = sum(grade_targets_map.values())
+    # actual tổng: đếm tất cả enrolled (không chỉ grades trong target)
+    if campus_id:
+        dept_actual_total = sum(
+            v for k, v in actual_by_grade.items() if k != "-"
+        )
+    else:
+        dept_actual_total = dept_actual
+
+    dept_total = {
+        "target": dept_target,
+        "actual": dept_actual_total,
+        "pct": _pct(dept_actual_total, dept_target),
+    }
+
+    # by_member
+    all_pics = set(member_targets_map.keys()) | set(actual_by_pic.keys())
+    if pic_eff:
+        all_pics = {pic_eff} if pic_eff in all_pics or pic_eff in actual_by_pic else {pic_eff}
+
+    user_map = r._batch_user_map(list(all_pics))
+    by_member = []
+    for pic in sorted(all_pics):
+        target = member_targets_map.get(pic, 0)
+        actual = actual_by_pic.get(pic, 0)
+        ud = user_map.get(pic, {})
+        by_member.append(
+            {
+                "pic": pic,
+                "pic_name": ud.get("full_name") or pic,
+                "pic_avatar": ud.get("pic_avatar"),
+                "target": target,
+                "actual": actual,
+                "pct": _pct(actual, target),
+            }
+        )
+    by_member.sort(key=lambda x: (-x["actual"], x["pic_name"]))
+
+    return success_response(
+        {
+            "by_grade": by_grade,
+            "dept_total": dept_total,
+            "by_member": by_member,
+            "meta": {
+                "configured": bool(target_doc),
+                "campus_id": campus_id or None,
+                "target_academic_year": target_academic_year,
+                "pic_restricted_to_self": restricted,
+            },
+        }
+    )
