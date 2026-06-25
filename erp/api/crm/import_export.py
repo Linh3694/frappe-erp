@@ -11,6 +11,7 @@ from erp.api.crm.utils import (
     check_crm_permission, get_request_data,
     validate_phone_number, normalize_phone_number,
     STEP_STATUSES, CRM_STEPS, check_marcom_draft_create_only,
+    apply_marcom_pic_policy,
 )
 from erp.api.crm.pipeline import _log_step_change
 from datetime import datetime, timedelta

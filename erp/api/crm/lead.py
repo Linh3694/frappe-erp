@@ -15,7 +15,7 @@ from erp.api.crm.utils import (
     normalize_phone_number, get_valid_statuses_for_step, generate_crm_code,
     should_restrict_marcom_profile_view, marcom_profile_owner_filters,
     lead_visible_to_marcom_viewer, get_marcom_profile_owner_users,
-    check_marcom_draft_create_only,
+    check_marcom_draft_create_only, apply_marcom_pic_policy,
 )
 
 
@@ -333,6 +333,8 @@ def get_leads():
             "data_source", "modified", "creation", "duplicate_fields", "owner",
             # QLead: tab Hoc sinh tien nang — bang can test_status / deal_status
             "test_status", "deal_status",
+            # Marcom: ly do tu choi khi trang thai Lost / Tu choi
+            "reject_reason", "reject_detail",
         ],
         order_by=f"{sort_by} {sort_order}",
         start=offset,
@@ -439,6 +441,7 @@ def create_lead():
     check_crm_permission()
     data = get_request_data()
     check_marcom_draft_create_only("Draft")
+    apply_marcom_pic_policy(data)
     
     # Validate SDT bat buoc
     phone_numbers = data.get("phone_numbers", [])

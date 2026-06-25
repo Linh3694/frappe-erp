@@ -143,6 +143,13 @@ def check_marcom_draft_create_only(target_step: Optional[str] = None) -> None:
         )
 
 
+def apply_marcom_pic_policy(data: dict) -> None:
+    """Marcom-only: khong cho chi dinh PIC Sales thu cong — mac dinh he thong tu phan cong."""
+    if not should_restrict_marcom_profile_view():
+        return
+    data.pop("pic", None)
+
+
 def validate_phone_number(phone: str) -> bool:
     """Validate dinh dang SDT Viet Nam: +84xxxxxxxxx, 0xxxxxxxxx, hoac xxxxxxxxx"""
     if not phone:
