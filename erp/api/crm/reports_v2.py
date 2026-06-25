@@ -387,15 +387,23 @@ def _activity_student_lead_match(args, student_alias: str, prefix: str) -> Tuple
 
 def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: str,
                      name_field: str, statuses: List[str],
-                     date_field: str = "event_date") -> Dict[str, Any]:
+                     date_field: str = "event_date",
+                     date_coalesce: bool = False,
+                     skip_campus_filter: bool = False) -> Dict[str, Any]:
     fd, td, _, _ = r._resolve_period(args)
     match_sql, match_binds = _activity_student_lead_match(args, "es", "act")
 
-    ev_where = [f"DATE(e.`{date_field}`) BETWEEN %(d_from)s AND %(d_to)s"]
+    # Kỳ khảo sát có thể chưa gán ngày thi — fallback creation để không bị loại khỏi báo cáo
+    date_expr = (
+        f"COALESCE(e.`{date_field}`, DATE(e.`creation`))"
+        if date_coalesce
+        else f"e.`{date_field}`"
+    )
+    ev_where = [f"DATE({date_expr}) BETWEEN %(d_from)s AND %(d_to)s"]
     binds: Dict[str, Any] = {"d_from": fd, "d_to": td, **match_binds}
 
     campus_id = (args.get("campus_id") or "").strip()
-    if campus_id:
+    if campus_id and not skip_campus_filter:
         binds["e_campus"] = campus_id
         ev_where.append("e.`campus_id` = %(e_campus)s")
     tay = (args.get("target_academic_year") or "").strip()
@@ -411,7 +419,7 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
 
     rows = frappe.db.sql(
         f"""
-        SELECT e.`name`, e.`{name_field}` AS title, e.`{date_field}` AS event_date,
+        SELECT e.`name`, e.`{name_field}` AS title, {date_expr} AS event_date,
                e.`campus_id`, e.`school_year_id`, e.`is_active`, e.`student_count`,
                SUM(CASE WHEN es.`name` IS NOT NULL AND {match_sql} THEN 1 ELSE 0 END) AS matched_total,
                {status_cols}
@@ -419,7 +427,7 @@ def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: st
         LEFT JOIN `tab{student_doctype}` es ON es.`{student_fk}` = e.`name`
         WHERE {where_clause}
         GROUP BY e.`name`
-        ORDER BY e.`{date_field}` DESC
+        ORDER BY {date_expr} DESC
         LIMIT 500
         """,
         binds,
@@ -521,6 +529,9 @@ def get_entrance_exams_report():
             student_fk="entrance_exam_id",
             name_field="exam_name",
             date_field="exam_date",
+            date_coalesce=True,
+            # Kỳ khảo sát thường không gán campus trên header — tránh lọc mất dòng khi sidebar chọn campus
+            skip_campus_filter=True,
             statuses=_ENTRANCE_EXAM_STUDENT_STATUSES,
         )
     )
