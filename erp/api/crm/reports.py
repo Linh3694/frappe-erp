@@ -722,13 +722,11 @@ def get_status_distribution():
 
 @frappe.whitelist()
 def get_trend():
-    """Xu hướng: hồ sơ mới (creation) / nhập học / lost theo ngày sự kiện."""
+    """Xu hướng: hồ sơ mới (creation) / vào Lead / đạt QLead theo bucket thời gian."""
     check_crm_permission()
     args = frappe.request.args or {}
     gran = (args.get("granularity") or "day").lower()
     fd, td, _, _ = _resolve_period(args)
-    include_tc = _include_tu_choi_lost(args)
-    lost_cond = _lost_event_condition(include_tc)
 
     wlead, binds_lead = _where_creation_between(fd, td, args)
 
@@ -760,35 +758,79 @@ def get_trend():
     binds_h = {"d_from": fd, "d_to": td, **dim_binds}
     hj = f"DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s AND {dim_sql}"
 
-    enrolled_rows = frappe.db.sql(
+    # Học sinh quan tâm — vào phễu Lead trong bucket (lịch sử bước + tạo mới không có history Lead)
+    interested_hist_rows = frappe.db.sql(
         f"""
         SELECT {ph} AS period, COUNT(DISTINCT h.`lead`) AS c
         FROM `tabCRM Lead Step History` h
         INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
-        WHERE h.`new_step` = 'Enrolled' AND {hj}
+        WHERE h.`new_step` = 'Lead' AND {hj}
         GROUP BY {ph}
         ORDER BY period ASC
         """,
         binds_h,
         as_dict=True,
     )
-
-    lost_rows = frappe.db.sql(
+    interested_creation_rows = frappe.db.sql(
         f"""
-        SELECT {ph} AS period, COUNT(DISTINCT h.`lead`) AS c
-        FROM `tabCRM Lead Step History` h
-        INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
-        WHERE {lost_cond} AND {hj}
-        GROUP BY {ph}
+        SELECT {pn} AS period, COUNT(*) AS c
+        FROM `tabCRM Lead` l
+        WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
+          AND l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Nghi hoc')
+          AND {dim_sql}
+          AND NOT EXISTS (
+              SELECT 1 FROM `tabCRM Lead Step History` hx
+              WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'Lead'
+          )
+        GROUP BY {pn}
         ORDER BY period ASC
         """,
         binds_h,
         as_dict=True,
     )
 
-    emap = {str(r["period"]): int(r["c"]) for r in enrolled_rows}
-    lmap = {str(r["period"]): int(r["c"]) for r in lost_rows}
-    periods = {str(r["period"]) for r in new_rows} | set(emap) | set(lmap)
+    # Học sinh tiềm năng — đạt QLead trong bucket
+    qlead_hist_rows = frappe.db.sql(
+        f"""
+        SELECT {ph} AS period, COUNT(DISTINCT h.`lead`) AS c
+        FROM `tabCRM Lead Step History` h
+        INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+        WHERE h.`new_step` = 'QLead' AND {hj}
+        GROUP BY {ph}
+        ORDER BY period ASC
+        """,
+        binds_h,
+        as_dict=True,
+    )
+    qlead_creation_rows = frappe.db.sql(
+        f"""
+        SELECT {pn} AS period, COUNT(*) AS c
+        FROM `tabCRM Lead` l
+        WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
+          AND l.`step` = 'QLead'
+          AND {dim_sql}
+          AND NOT EXISTS (
+              SELECT 1 FROM `tabCRM Lead Step History` hx
+              WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'QLead'
+          )
+        GROUP BY {pn}
+        ORDER BY period ASC
+        """,
+        binds_h,
+        as_dict=True,
+    )
+
+    def _merge_period_counts(*row_sets):
+        merged: Dict[str, int] = {}
+        for rows in row_sets:
+            for r in rows:
+                key = str(r["period"])
+                merged[key] = merged.get(key, 0) + int(r["c"])
+        return merged
+
+    imap = _merge_period_counts(interested_hist_rows, interested_creation_rows)
+    qmap = _merge_period_counts(qlead_hist_rows, qlead_creation_rows)
+    periods = {str(r["period"]) for r in new_rows} | set(imap) | set(qmap)
 
     points = []
     for pkey in sorted(periods):
@@ -797,8 +839,8 @@ def get_trend():
             {
                 "period": pkey,
                 "new_leads": nr,
-                "enrolled": emap.get(pkey, 0),
-                "lost": lmap.get(pkey, 0),
+                "lead_interested": imap.get(pkey, 0),
+                "qlead": qmap.get(pkey, 0),
             }
         )
 
