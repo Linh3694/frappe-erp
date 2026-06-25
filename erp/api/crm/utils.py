@@ -131,6 +131,18 @@ def lead_visible_to_marcom_viewer(lead_owner: Optional[str]) -> bool:
     return owner in get_marcom_profile_owner_users()
 
 
+def check_marcom_draft_create_only(target_step: Optional[str] = None) -> None:
+    """Marcom-only: chi duoc tao/import o buoc Du lieu (Draft)."""
+    if not should_restrict_marcom_profile_view():
+        return
+    step = (target_step or "Draft").strip()
+    if step != "Draft":
+        frappe.throw(
+            "SIS Marcom chi duoc them moi o buoc Du lieu (Draft)",
+            frappe.PermissionError,
+        )
+
+
 def validate_phone_number(phone: str) -> bool:
     """Validate dinh dang SDT Viet Nam: +84xxxxxxxxx, 0xxxxxxxxx, hoac xxxxxxxxx"""
     if not phone:

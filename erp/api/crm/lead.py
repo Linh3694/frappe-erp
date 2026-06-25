@@ -15,6 +15,7 @@ from erp.api.crm.utils import (
     normalize_phone_number, get_valid_statuses_for_step, generate_crm_code,
     should_restrict_marcom_profile_view, marcom_profile_owner_filters,
     lead_visible_to_marcom_viewer, get_marcom_profile_owner_users,
+    check_marcom_draft_create_only,
 )
 
 
@@ -437,6 +438,7 @@ def create_lead():
     """Tao lead moi"""
     check_crm_permission()
     data = get_request_data()
+    check_marcom_draft_create_only("Draft")
     
     # Validate SDT bat buoc
     phone_numbers = data.get("phone_numbers", [])

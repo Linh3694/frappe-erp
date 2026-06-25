@@ -10,7 +10,7 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data,
     validate_phone_number, normalize_phone_number,
-    STEP_STATUSES, CRM_STEPS
+    STEP_STATUSES, CRM_STEPS, check_marcom_draft_create_only,
 )
 from erp.api.crm.pipeline import _log_step_change
 from datetime import datetime, timedelta
@@ -363,6 +363,7 @@ def bulk_import_leads():
     
     rows = data.get("rows", [])
     target_step = data.get("target_step", "Draft")
+    check_marcom_draft_create_only(target_step)
     
     if not rows:
         return validation_error_response("Khong co du lieu", {"rows": ["Bat buoc"]})
