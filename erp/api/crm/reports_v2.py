@@ -62,6 +62,64 @@ def _build_new_profile_group(step_statuses: Dict[str, set]) -> Dict[str, Any]:
     }
 
 
+def _status_value_key(step: str, status: str) -> str:
+    """Key cột ma trận trạng thái — Draft gộp vào nhóm Hồ sơ mới."""
+    if step == "Draft":
+        return _NEW_PROFILE_DRAFT_KEY
+    return f"{step}|status|{status}"
+
+
+def _build_status_report_groups(
+    step_statuses: Dict[str, set],
+    test_vals: set,
+    deal_vals: set,
+) -> List[Dict[str, Any]]:
+    """Dựng cấu trúc nhóm cột dùng chung: Tổng quan (theo khối) & Nguồn."""
+    groups: List[Dict[str, Any]] = [_build_new_profile_group(step_statuses)]
+
+    for step in _GRADE_REPORT_STEPS:
+        has_data = step in step_statuses
+        if not has_data and step not in _GRADE_REPORT_ALWAYS_STEPS:
+            continue
+        if has_data:
+            sts = _order_status_values(step_statuses[step], STEP_STATUSES.get(step, []))
+        else:
+            sts = list(STEP_STATUSES.get(step, []))
+        if not sts:
+            continue
+        sections: List[Dict[str, Any]] = [
+            {
+                "field": "status",
+                "columns": [{"key": f"{step}|status|{s}", "status": s} for s in sts],
+            }
+        ]
+        if step == "QLead":
+            if test_vals:
+                tv = _order_status_values(test_vals, QLEAD_TEST_STATUSES)
+                sections.append(
+                    {
+                        "field": "test_status",
+                        "columns": [{"key": f"QLead|test_status|{v}", "status": v} for v in tv],
+                    }
+                )
+            if deal_vals:
+                dv = _order_status_values(deal_vals, _DEAL_STATUS_ORDER)
+                sections.append(
+                    {
+                        "field": "deal_status",
+                        "columns": [{"key": f"QLead|deal_status|{v}", "status": v} for v in dv],
+                    }
+                )
+        groups.append({"step": step, "sections": sections})
+
+    return groups
+
+
+def _count_enrolled_from_values(values: Dict[str, int]) -> int:
+    """Đếm hồ sơ Nhập học từ ma trận values (mọi trạng thái Enrolled)."""
+    return sum(v for k, v in values.items() if k.startswith("Enrolled|status|"))
+
+
 def _order_status_values(present, canonical: List[str]) -> List[str]:
     """Sắp xếp trạng thái: theo thứ tự chuẩn trước, phần dư sort A→Z, rỗng cuối."""
     present_set = set(present)
@@ -186,10 +244,7 @@ def get_status_by_grade():
 
     for row in status_rows:
         step_statuses[row["step"]].add(row["status"])
-        if row["step"] == "Draft":
-            key = _NEW_PROFILE_DRAFT_KEY
-        else:
-            key = f"{row['step']}|status|{row['status']}"
+        key = _status_value_key(row["step"], row["status"])
         values_by_grade[row["grade"]][key] = values_by_grade[row["grade"]].get(key, 0) + int(
             row["cnt"]
         )
@@ -205,43 +260,7 @@ def get_status_by_grade():
         deal_vals.add(row["val"])
         values_by_grade[row["grade"]][f"QLead|deal_status|{row['val']}"] = int(row["cnt"])
 
-    # Dựng cấu trúc nhóm cột (bước → nhóm con → cột trạng thái)
-    groups: List[Dict[str, Any]] = [_build_new_profile_group(step_statuses)]
-
-    for step in _GRADE_REPORT_STEPS:
-        has_data = step in step_statuses
-        if not has_data and step not in _GRADE_REPORT_ALWAYS_STEPS:
-            continue
-        if has_data:
-            sts = _order_status_values(step_statuses[step], STEP_STATUSES.get(step, []))
-        else:
-            sts = list(STEP_STATUSES.get(step, []))
-        if not sts:
-            continue
-        sections: List[Dict[str, Any]] = [
-            {
-                "field": "status",
-                "columns": [{"key": f"{step}|status|{s}", "status": s} for s in sts],
-            }
-        ]
-        if step == "QLead":
-            if test_vals:
-                tv = _order_status_values(test_vals, QLEAD_TEST_STATUSES)
-                sections.append(
-                    {
-                        "field": "test_status",
-                        "columns": [{"key": f"QLead|test_status|{v}", "status": v} for v in tv],
-                    }
-                )
-            if deal_vals:
-                dv = _order_status_values(deal_vals, _DEAL_STATUS_ORDER)
-                sections.append(
-                    {
-                        "field": "deal_status",
-                        "columns": [{"key": f"QLead|deal_status|{v}", "status": v} for v in dv],
-                    }
-                )
-        groups.append({"step": step, "sections": sections})
+    groups = _build_status_report_groups(step_statuses, test_vals, deal_vals)
 
     def _grade_sort_key(g: str):
         try:
@@ -544,21 +563,19 @@ def get_entrance_exams_report():
 
 
 # --------------------------------------------------------------------------- #
-# Nguồn — Danh sách Nguồn 1 × bước, lọc theo 3 cấp nguồn (Nguồn 1/2/3)
+# Nguồn — Danh sách Nguồn 1 × ma trận trạng thái (cùng cấu trúc Tổng quan), lọc 3 cấp nguồn
 # --------------------------------------------------------------------------- #
-# Bước hiển thị trong báo cáo nguồn / PIC — đủ 6 bước snapshot (khác grade report gộp Draft+Verify)
-_SOURCE_REPORT_STEPS = ["Draft", "Verify", "Lead", "QLead", "Enrolled", "Nghi hoc"]
 _SOURCE_STEPS_SQL = "('Lead','QLead','Enrolled','Nghi hoc','Verify','Draft')"
+# KPI tab PIC vẫn dùng breakdown phẳng theo bước
+_SOURCE_REPORT_STEPS = ["Draft", "Verify", "Lead", "QLead", "Enrolled", "Nghi hoc"]
 
 
 @frappe.whitelist()
 def get_source_breakdown():
-    """Danh sách Nguồn 1 (snapshot) × bước + tỉ lệ chuyển đổi; lọc theo Nguồn 1/2/3.
+    """Danh sách Nguồn 1 (snapshot) × ma trận bước/trạng thái + tỉ lệ chuyển đổi; lọc Nguồn 1/2/3.
 
-    Mỗi dòng = 1 Nguồn 1 (CRM Source). Cột: số hồ sơ (tổng), số ở từng bước
-    (Lead/QLead/Nhập học/Nghỉ học/Xác minh/Nháp), tỉ lệ chuyển đổi = Nhập học / tổng.
-    3 dropdown (src1/src2/src3) lọc hồ sơ theo cùng dòng nguồn con; options 3 cấp
-    tính trên phạm vi chiều, KHÔNG bị thu hẹp bởi chính lựa chọn (để còn đổi lựa chọn).
+    Cột giống báo cáo trạng thái theo khối (Hồ sơ mới / Lead / QLead / … × trạng thái chi tiết).
+    Tỉ lệ chuyển đổi = Nhập học / tổng hồ sơ.
     """
     check_crm_permission()
     args = frappe.request.args or {}
@@ -624,45 +641,84 @@ def get_source_breakdown():
         src_where.append("ls.`source_note` = %(fsrc3)s")
     src_sql = (" AND " + " AND ".join(src_where)) if src_where else ""
 
-    rows = frappe.db.sql(
+    status_rows = frappe.db.sql(
         f"""
         SELECT IFNULL(NULLIF(TRIM(ls.`source`), ''), '(Trống)') AS src,
                l.`step` AS step,
+               IFNULL(TRIM(l.`status`), '') AS status,
                COUNT(DISTINCT l.`name`) AS cnt
         FROM `tabCRM Lead` l
         INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
         WHERE l.`step` IN {_SOURCE_STEPS_SQL} AND {dim_sql}{src_sql}
-        GROUP BY src, l.`step`
+        GROUP BY src, l.`step`, status
         """,
         binds,
         as_dict=True,
     )
 
-    by_src: Dict[str, Dict[str, int]] = defaultdict(dict)
-    for row in rows:
-        by_src[row["src"]][row["step"]] = int(row["cnt"])
-    src_ids = [k for k in by_src if k and k != "(Trống)"]
+    def _qlead_sub_rows_by_src(field: str):
+        return frappe.db.sql(
+            f"""
+            SELECT IFNULL(NULLIF(TRIM(ls.`source`), ''), '(Trống)') AS src,
+                   IFNULL(TRIM(l.`{field}`), '') AS val,
+                   COUNT(DISTINCT l.`name`) AS cnt
+            FROM `tabCRM Lead` l
+            INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
+            WHERE l.`step` = 'QLead'
+              AND IFNULL(TRIM(l.`{field}`), '') != ''
+              AND {dim_sql}{src_sql}
+            GROUP BY src, val
+            """,
+            binds,
+            as_dict=True,
+        )
+
+    test_rows = _qlead_sub_rows_by_src("test_status")
+    deal_rows = _qlead_sub_rows_by_src("deal_status")
+
+    step_statuses: Dict[str, set] = defaultdict(set)
+    values_by_src: Dict[str, Dict[str, int]] = defaultdict(dict)
+    total_by_src: Dict[str, int] = defaultdict(int)
+
+    for row in status_rows:
+        step_statuses[row["step"]].add(row["status"])
+        key = _status_value_key(row["step"], row["status"])
+        values_by_src[row["src"]][key] = values_by_src[row["src"]].get(key, 0) + int(row["cnt"])
+        total_by_src[row["src"]] += int(row["cnt"])
+
+    test_vals: set = set()
+    for row in test_rows:
+        test_vals.add(row["val"])
+        values_by_src[row["src"]][f"QLead|test_status|{row['val']}"] = int(row["cnt"])
+
+    deal_vals: set = set()
+    for row in deal_rows:
+        deal_vals.add(row["val"])
+        values_by_src[row["src"]][f"QLead|deal_status|{row['val']}"] = int(row["cnt"])
+
+    groups = _build_status_report_groups(step_statuses, test_vals, deal_vals)
+    src_ids = [k for k in values_by_src if k and k != "(Trống)"]
     src_labels = r._batch_source_names(src_ids)
 
     out = []
-    for src, steps in by_src.items():
-        total = sum(steps.values())
-        enrolled = steps.get("Enrolled", 0)
+    for src in sorted(values_by_src.keys(), key=lambda x: (-total_by_src.get(x, 0), str(x).lower())):
+        values = values_by_src.get(src, {})
+        total = total_by_src.get(src, 0)
+        enrolled = _count_enrolled_from_values(values)
         out.append(
             {
                 "key": src,
                 "label": src_labels.get(src, src),
                 "total": total,
-                "by_step": {s: steps.get(s, 0) for s in _SOURCE_REPORT_STEPS},
+                "values": values,
                 "count_enrolled": enrolled,
                 "conversion_rate_pct": round(100.0 * enrolled / max(1, total), 2),
             }
         )
-    out.sort(key=lambda x: x["total"], reverse=True)
 
     return success_response(
         {
-            "steps": _SOURCE_REPORT_STEPS,
+            "groups": groups,
             "rows": out,
             "options": options,
             "meta": {"pic_restricted_to_self": r._should_restrict_to_own_pic_only()},
