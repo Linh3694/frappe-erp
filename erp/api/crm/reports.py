@@ -466,8 +466,18 @@ def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
     conv = round(100.0 * total_enrolled / max(1, entered), 2)
     avg_days = _avg_days_to_enroll(date_from, date_to, args)
 
+    # Số đạt từng mốc phễu trong cohort kỳ lọc (Lead → QLead)
+    period_args = dict(args)
+    period_args["from_date"] = str(date_from)
+    period_args["to_date"] = str(date_to)
+    cohort_sql, cohort_binds = _cohort_leads_subquery(period_args)
+    count_lead_interested = _count_cohort_stage(cohort_sql, cohort_binds, FUNNEL_STAGES[0])
+    count_qlead = _count_cohort_stage(cohort_sql, cohort_binds, FUNNEL_STAGES[1])
+
     return {
         "total_leads": total_leads,
+        "count_lead_interested": count_lead_interested,
+        "count_qlead": count_qlead,
         "total_enrolled": total_enrolled,
         "total_lost": total_lost,
         "active_pipeline": active_pipeline,
@@ -591,6 +601,10 @@ def get_overview_kpis():
     }
     changes = {
         "total_leads": _pct_change(curr["total_leads"], prev["total_leads"]),
+        "count_lead_interested": _pct_change(
+            curr["count_lead_interested"], prev["count_lead_interested"]
+        ),
+        "count_qlead": _pct_change(curr["count_qlead"], prev["count_qlead"]),
         "total_enrolled": _pct_change(curr["total_enrolled"], prev["total_enrolled"]),
         "total_lost": _pct_change(curr["total_lost"], prev["total_lost"]),
         "conversion_rate_pct": _pct_change(
@@ -724,6 +738,9 @@ def get_trend():
     elif gran == "month":
         pn = "DATE_FORMAT(l.`creation`, '%%Y-%%m')"
         ph = "DATE_FORMAT(h.`changed_at`, '%%Y-%%m')"
+    elif gran == "year":
+        pn = "DATE_FORMAT(l.`creation`, '%%Y')"
+        ph = "DATE_FORMAT(h.`changed_at`, '%%Y')"
     else:
         pn = "DATE(l.`creation`)"
         ph = "DATE(h.`changed_at`)"
