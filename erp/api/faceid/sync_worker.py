@@ -25,6 +25,22 @@ MAX_ATTEMPTS = 5
 _last_gateway_online: bool | None = None
 
 
+def run_sync_jobs_now(job_names: list[str]) -> dict:
+    """Chạy ngay các job vừa xếp hàng (operator bấm Đồng bộ)."""
+    processed = failed = 0
+    errors: list[dict] = []
+    for name in job_names:
+        if not name:
+            continue
+        try:
+            _process_one_job(name)
+            processed += 1
+        except Exception as e:
+            failed += 1
+            errors.append({"job": name, "error": str(e)[:200]})
+    return {"processed": processed, "failed": failed, "errors": errors}
+
+
 def create_device_sync_job(
     job_type: str,
     ref_doctype: str,

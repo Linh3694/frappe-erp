@@ -6,8 +6,9 @@ import json
 from datetime import date
 
 import frappe
+from frappe.utils import cint
 
-from erp.api.faceid.sync_worker import create_device_sync_job
+from erp.api.faceid.sync_worker import create_device_sync_job, run_sync_jobs_now
 from erp.utils.faceid_gateway import gateway_get, gateway_post
 
 
@@ -17,6 +18,14 @@ def _ok(data=None, message="OK"):
 
 def _err(message, data=None):
     return {"success": False, "message": message, "data": data}
+
+
+def _person_is_active(row) -> bool:
+    """Bản ghi cũ có thể chưa có is_active — mặc định doctype là bật."""
+    val = row.get("is_active") if isinstance(row, dict) else getattr(row, "is_active", None)
+    if val is None or val == "":
+        return True
+    return cint(val) == 1
 
 
 def _apply_person_campus_filter(filters: dict, person_type: str | None, campus_id: str | None):
@@ -149,18 +158,21 @@ def set_persons_active(names, active=1):
 
 
 @frappe.whitelist()
-def sync_persons(person_type=None, campus_id=None):
+def sync_persons(person_type=None, campus_id=None, force=0):
     """
     Đồng bộ dữ liệu xuống controller local:
-    - is_active=1 & cần sync → upsert_person
+    - is_active=1 → upsert_person (force=1: đẩy lại tất cả đang bật)
     - is_active=0 & on_device=1 → delete_person
+    Chạy job ngay sau khi xếp hàng (operator-driven).
     """
+    force = cint(force)
     filters = {}
     if person_type:
         filters["person_type"] = person_type
     _apply_person_campus_filter(filters, person_type, campus_id)
 
     upsert_count = delete_count = 0
+    job_names: list[str] = []
     persons = frappe.get_all(
         "FaceID Person",
         filters=filters,
@@ -168,22 +180,47 @@ def sync_persons(person_type=None, campus_id=None):
         limit=10000,
     )
     for p in persons:
-        if p.is_active:
-            if p.sync_status != "synced" or not p.on_device:
-                create_device_sync_job("upsert_person", "FaceID Person", p.name, priority=8)
+        if _person_is_active(p):
+            if force or p.sync_status != "synced" or not cint(p.on_device):
+                job_names.append(
+                    create_device_sync_job("upsert_person", "FaceID Person", p.name, priority=8)
+                )
                 upsert_count += 1
-        elif p.on_device:
-            create_device_sync_job(
-                "delete_person",
-                "FaceID Person",
-                p.name,
-                payload={"external_code": p.external_code},
-                priority=8,
+        elif cint(p.on_device):
+            job_names.append(
+                create_device_sync_job(
+                    "delete_person",
+                    "FaceID Person",
+                    p.name,
+                    payload={"external_code": p.external_code},
+                    priority=8,
+                )
             )
             delete_count += 1
+
+    run_stats = run_sync_jobs_now(job_names) if job_names else {"processed": 0, "failed": 0, "errors": []}
+    processed = run_stats.get("processed", 0)
+    failed = run_stats.get("failed", 0)
+
+    if upsert_count == 0 and delete_count == 0:
+        msg = "Không có person nào cần đồng bộ (kiểm tra tab loại và trạng thái kích hoạt)"
+    elif failed:
+        msg = (
+            f"Đã xử lý {processed}/{upsert_count + delete_count} job; "
+            f"{failed} lỗi (xem FaceID Device Sync Job hoặc last_error trên person)"
+        )
+    else:
+        msg = f"Đã đồng bộ: {upsert_count} đẩy xuống, {delete_count} xóa khỏi máy"
+
     return _ok(
-        {"upsert_queued": upsert_count, "delete_queued": delete_count},
-        message=f"Đã xếp hàng: {upsert_count} đẩy xuống, {delete_count} xóa khỏi máy",
+        {
+            "upsert_queued": upsert_count,
+            "delete_queued": delete_count,
+            "processed": processed,
+            "failed": failed,
+            "errors": run_stats.get("errors") or [],
+        },
+        message=msg,
     )
 
 
