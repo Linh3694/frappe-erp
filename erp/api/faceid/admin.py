@@ -8,7 +8,11 @@ from datetime import date
 import frappe
 from frappe.utils import cint
 
-from erp.api.faceid.sync_worker import create_device_sync_job, run_sync_jobs_now
+from erp.api.faceid.sync_worker import (
+    create_device_sync_job,
+    person_sync_job_stats,
+    run_sync_jobs_now,
+)
 
 # Lô nhỏ chạy inline trong request; lớn hơn → worker nền (tránh timeout FE)
 SYNC_INLINE_MAX = 5
@@ -206,6 +210,9 @@ def sync_persons(person_type=None, campus_id=None, force=0):
     run_stats: dict = {"processed": 0, "failed": 0, "errors": []}
 
     if job_names:
+        from erp.api.faceid.sync_worker import dedupe_failed_person_sync_jobs
+
+        dedupe_failed_person_sync_jobs(person_type)
         if len(job_names) <= SYNC_INLINE_MAX:
             run_stats = run_sync_jobs_now(job_names)
         else:
@@ -240,6 +247,7 @@ def sync_persons(person_type=None, campus_id=None, force=0):
             "failed": failed,
             "async": async_mode,
             "errors": run_stats.get("errors") or [],
+            **person_sync_job_stats(person_type),
         },
         message=msg,
     )
@@ -634,9 +642,8 @@ def get_sync_status(person_type=None):
     person_filters = {}
     if person_type:
         person_filters["person_type"] = person_type
-    pending = frappe.db.count("FaceID Device Sync Job", {"state": "pending"})
-    failed = frappe.db.count("FaceID Device Sync Job", {"state": "failed"})
-    running = frappe.db.count("FaceID Device Sync Job", {"state": "running"})
+
+    job_stats = person_sync_job_stats(person_type)
     persons_pending = frappe.db.count(
         "FaceID Person", {**person_filters, "sync_status": "pending"}
     )
@@ -646,15 +653,75 @@ def get_sync_status(person_type=None):
     persons_on_device = frappe.db.count(
         "FaceID Person", {**person_filters, "on_device": 1}
     )
+    persons_error = frappe.db.count(
+        "FaceID Person", {**person_filters, "sync_status": "error"}
+    )
+
+    sample_errors: list[dict] = []
+    type_clause = ""
+    err_params: list = []
+    if person_type:
+        type_clause = " AND p.person_type = %s"
+        err_params.append(person_type)
+    err_rows = frappe.db.sql(
+        f"""
+        SELECT j.name, j.ref_name, j.last_error, j.attempts
+        FROM `tabFaceID Device Sync Job` j
+        INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
+        WHERE j.ref_doctype = 'FaceID Person'
+          AND j.job_type IN ('upsert_person', 'delete_person')
+          AND j.state = 'failed'
+          AND j.last_error IS NOT NULL AND j.last_error != ''
+          {type_clause}
+        ORDER BY j.modified DESC
+        LIMIT 5
+        """,
+        tuple(err_params),
+        as_dict=True,
+    )
+    for row in err_rows:
+        sample_errors.append(
+            {
+                "job": row.name,
+                "person": row.ref_name,
+                "error": row.last_error,
+                "attempts": row.attempts,
+            }
+        )
+
     return _ok(
         {
-            "jobs_pending": pending,
-            "jobs_failed": failed,
-            "jobs_running": running,
+            **job_stats,
             "persons_pending": persons_pending,
             "persons_synced": persons_synced,
             "persons_on_device": persons_on_device,
+            "persons_error": persons_error,
+            "sample_errors": sample_errors,
         }
+    )
+
+
+@frappe.whitelist()
+def retry_failed_person_sync_jobs(person_type=None, limit=2000):
+    """Thử lại job person failed (operator)."""
+    from erp.api.faceid.sync_worker import (
+        dedupe_failed_person_sync_jobs,
+        drain_pending_device_sync_jobs,
+        retry_failed_sync_jobs,
+    )
+
+    deduped = dedupe_failed_person_sync_jobs(person_type)
+    retried = retry_failed_sync_jobs(person_type, int(limit))
+    if retried:
+        frappe.enqueue(
+            "erp.api.faceid.sync_worker.drain_pending_device_sync_jobs",
+            queue="long",
+            timeout=7200,
+            enqueue_after_commit=True,
+        )
+    return _ok(
+        {"retried": retried, "deduped": deduped, **person_sync_job_stats(person_type)},
+        message=f"Đã dọn {deduped} job trùng, đưa {retried} job lỗi vào hàng chờ lại",
     )
 
 

@@ -51,7 +51,7 @@ def drain_pending_device_sync_jobs(max_batches: int = 5000) -> dict:
         )
         if not pending:
             return {"batches": batches - 1, "remaining": 0}
-        process_pending_device_sync_jobs()
+        process_pending_device_sync_jobs_fast()
     remaining = frappe.db.count(
         "FaceID Device Sync Job",
         {"state": ["in", ["pending", "failed"]], "attempts": ["<", MAX_ATTEMPTS]},
@@ -64,6 +64,66 @@ def drain_pending_device_sync_jobs(max_batches: int = 5000) -> dict:
     return {"batches": max_batches, "remaining": remaining}
 
 
+def person_sync_job_stats(person_type: str | None = None) -> dict:
+    """Thống kê job upsert/delete person — lọc theo person_type nếu có."""
+    type_clause = ""
+    params: list = []
+    if person_type:
+        type_clause = " AND p.person_type = %s"
+        params.append(person_type)
+
+    def _count(state: str) -> int:
+        return frappe.db.sql(
+            f"""
+            SELECT COUNT(*)
+            FROM `tabFaceID Device Sync Job` j
+            INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
+            WHERE j.ref_doctype = 'FaceID Person'
+              AND j.job_type IN ('upsert_person', 'delete_person')
+              AND j.state = %s
+              {type_clause}
+            """,
+            tuple([state, *params]),
+        )[0][0]
+
+    pending = _count("pending")
+    running = _count("running")
+    failed = _count("failed")
+    done = _count("done")
+    return {
+        "jobs_pending": pending,
+        "jobs_running": running,
+        "jobs_failed": failed,
+        "jobs_done": done,
+        "jobs_total": pending + running + failed + done,
+    }
+
+
+def _cancel_duplicate_failed_jobs(
+    job_type: str, ref_doctype: str, ref_name: str, keep_name: str
+):
+    """Hủy job failed trùng ref (tránh backlog 2000+ job lỗi trùng person)."""
+    others = frappe.get_all(
+        "FaceID Device Sync Job",
+        filters={
+            "job_type": job_type,
+            "ref_doctype": ref_doctype,
+            "ref_name": ref_name,
+            "state": "failed",
+            "name": ["!=", keep_name],
+        },
+        pluck="name",
+        limit=200,
+    )
+    for name in others:
+        frappe.db.set_value(
+            "FaceID Device Sync Job",
+            name,
+            {"state": "done", "last_error": "deduped"},
+            update_modified=False,
+        )
+
+
 def create_device_sync_job(
     job_type: str,
     ref_doctype: str,
@@ -71,18 +131,42 @@ def create_device_sync_job(
     payload: dict | None = None,
     priority: int = 5,
 ):
-    """Tạo job pending (tránh trùng pending cùng ref)."""
-    existing = frappe.db.exists(
+    """Tạo job pending — tái sử dụng pending/running/failed thay vì tạo trùng."""
+    active = frappe.db.get_value(
         "FaceID Device Sync Job",
         {
             "job_type": job_type,
             "ref_doctype": ref_doctype,
             "ref_name": ref_name,
-            "state": "pending",
+            "state": ["in", ["pending", "running"]],
         },
+        "name",
     )
-    if existing:
-        return existing
+    if active:
+        return active
+
+    reusable = frappe.db.get_value(
+        "FaceID Device Sync Job",
+        {
+            "job_type": job_type,
+            "ref_doctype": ref_doctype,
+            "ref_name": ref_name,
+            "state": "failed",
+            "attempts": ["<", MAX_ATTEMPTS],
+        },
+        "name",
+        order_by="modified desc",
+    )
+    if reusable:
+        frappe.db.set_value(
+            "FaceID Device Sync Job",
+            reusable,
+            {"state": "pending", "last_error": None},
+            update_modified=True,
+        )
+        _cancel_duplicate_failed_jobs(job_type, ref_doctype, ref_name, reusable)
+        return reusable
+
     doc = frappe.get_doc(
         {
             "doctype": "FaceID Device Sync Job",
@@ -96,6 +180,24 @@ def create_device_sync_job(
     )
     doc.insert(ignore_permissions=True)
     return doc.name
+
+
+def process_pending_device_sync_jobs_fast(batch_size: int | None = None):
+    """Drain nền — batch lớn, không sleep giữa job."""
+    cfg = get_gateway_config()
+    batch = batch_size or cfg["batch_size"] * 5
+    jobs = frappe.get_all(
+        "FaceID Device Sync Job",
+        filters={"state": ["in", ["pending", "failed"]], "attempts": ["<", MAX_ATTEMPTS]},
+        fields=["name"],
+        order_by="priority desc, creation asc",
+        limit=batch,
+    )
+    for j in jobs:
+        try:
+            _process_one_job(j.name)
+        except Exception:
+            frappe.log_error(title=f"FaceID job {j.name}", message=frappe.get_traceback())
 
 
 def process_pending_device_sync_jobs():
@@ -435,13 +537,77 @@ def reconcile_pickup_auth_to_controller():
         _process_one_job(job)
 
 
-def retry_failed_sync_jobs():
-    """Reset failed jobs còn dưới max attempts."""
-    failed = frappe.get_all(
-        "FaceID Device Sync Job",
-        filters={"state": "failed", "attempts": ["<", MAX_ATTEMPTS]},
-        pluck="name",
-        limit=50,
+def retry_failed_sync_jobs(person_type: str | None = None, limit: int = 2000) -> int:
+    """Reset failed jobs còn dưới max attempts — ưu tiên job person."""
+    type_clause = ""
+    params = [MAX_ATTEMPTS]
+    if person_type:
+        type_clause = " AND p.person_type = %s"
+        params.append(person_type)
+    params.append(int(limit))
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT j.name
+        FROM `tabFaceID Device Sync Job` j
+        INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
+        WHERE j.ref_doctype = 'FaceID Person'
+          AND j.job_type IN ('upsert_person', 'delete_person')
+          AND j.state = 'failed'
+          AND j.attempts < %s
+          {type_clause}
+        ORDER BY j.modified DESC
+        LIMIT %s
+        """,
+        tuple(params),
+        as_dict=True,
     )
-    for name in failed:
-        frappe.db.set_value("FaceID Device Sync Job", name, "state", "pending")
+    for row in rows:
+        frappe.db.set_value(
+            "FaceID Device Sync Job",
+            row.name,
+            {"state": "pending", "last_error": None},
+            update_modified=True,
+        )
+    return len(rows)
+
+
+def dedupe_failed_person_sync_jobs(person_type: str | None = None) -> int:
+    """Đánh dấu done các job failed trùng person — giữ job mới nhất mỗi (ref, loại)."""
+    type_clause = ""
+    params: list = []
+    if person_type:
+        type_clause = " AND p.person_type = %s"
+        params.append(person_type)
+
+    dupes = frappe.db.sql(
+        f"""
+        SELECT j.name
+        FROM `tabFaceID Device Sync Job` j
+        INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
+        WHERE j.ref_doctype = 'FaceID Person'
+          AND j.state = 'failed'
+          AND j.job_type IN ('upsert_person', 'delete_person')
+          {type_clause}
+          AND j.name NOT IN (
+            SELECT keep_id FROM (
+              SELECT SUBSTRING_INDEX(GROUP_CONCAT(j2.name ORDER BY j2.modified DESC), ',', 1) AS keep_id
+              FROM `tabFaceID Device Sync Job` j2
+              WHERE j2.ref_doctype = 'FaceID Person'
+                AND j2.state = 'failed'
+                AND j2.job_type IN ('upsert_person', 'delete_person')
+              GROUP BY j2.ref_name, j2.job_type
+            ) AS latest_jobs
+          )
+        """,
+        tuple(params),
+        as_dict=True,
+    )
+    for row in dupes:
+        frappe.db.set_value(
+            "FaceID Device Sync Job",
+            row.name,
+            {"state": "done", "last_error": "deduped"},
+            update_modified=False,
+        )
+    return len(dupes)
