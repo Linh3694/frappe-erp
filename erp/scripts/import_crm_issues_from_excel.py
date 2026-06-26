@@ -38,7 +38,12 @@ from datetime import datetime, date, timedelta
 
 import frappe
 
-from erp.api.crm.issue import _sync_issue_students, _set_issue_departments
+from erp.api.crm.issue import (
+    _sync_issue_students,
+    _set_issue_departments,
+    _sync_issue_guardians,
+)
+from erp.api.crm.utils import normalize_phone_number
 
 # ----------------------------------------------------------------------------- config
 
@@ -310,6 +315,49 @@ def _resolve_students(code_cell, name_cell):
     return ids, missing
 
 
+def _phone_strings(cell):
+    """
+    Từ ô SĐT -> list chuỗi số. Xử lý: float Excel ('903296856.0', rớt số 0 đầu),
+    nhiều số (xuống dòng/phẩy), và ghi chú chữ ('934567755 (số Hân)').
+    Chỉ lấy các run 8–11 chữ số.
+    """
+    if cell is None or cell == "":
+        return []
+    s = str(int(cell)) if isinstance(cell, (int, float)) else str(cell)
+    out, seen = [], set()
+    for m in re.findall(r"\d{8,11}", s):
+        if m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
+def _resolve_guardians(phone_cell, name_cell):
+    """
+    Trả về (list docname CRM Guardian, list giá trị không khớp).
+    Ưu tiên khớp theo SĐT đã chuẩn hoá (+84...); fallback theo guardian_name.
+    """
+    ids, missing = [], []
+    for raw in _phone_strings(phone_cell):
+        norm = normalize_phone_number(raw)
+        gid = None
+        if norm:
+            gid = (frappe.db.get_value("CRM Guardian", {"phone_number": norm}, "name")
+                   or frappe.db.get_value("CRM Guardian Phone", {"phone_number": norm}, "parent"))
+        if gid and gid not in ids:
+            ids.append(gid)
+        elif not gid:
+            missing.append(raw)
+    if not ids:
+        for nm in _split_multi(name_cell):
+            gid = frappe.db.get_value("CRM Guardian", {"guardian_name": nm}, "name")
+            if gid and gid not in ids:
+                ids.append(gid)
+            elif not gid:
+                missing.append(nm)
+    return ids, missing
+
+
 def _resolve_departments(text):
     """Trả về (list docname ERP Organization Unit, list tên không khớp)."""
     ids, missing = [], []
@@ -376,7 +424,7 @@ def check_master(path):
     colmap, headers = _build_colmap(ws)
     print("Header phát hiện:", {k: headers[v] for k, v in colmap.items()})
 
-    modules, depts, pics, stu_codes = {}, {}, {}, {}
+    modules, depts, pics, stu_codes, phones = {}, {}, {}, {}, {}
     n = 0
     for row in ws.iter_rows(min_row=HEADER_ROW + 1, values_only=True):
         if _row_is_empty(row, colmap):
@@ -392,6 +440,8 @@ def check_master(path):
             pics[p] = pics.get(p, 0) + 1
         for c in _split_multi(_cell(row, colmap, "student_code")):
             stu_codes[c] = stu_codes.get(c, 0) + 1
+        for ph in _phone_strings(_cell(row, colmap, "parent_phone")):
+            phones[ph] = phones.get(ph, 0) + 1
 
     def _report_group(title, counter, resolver):
         print(f"\n=== {title} ({len(counter)} giá trị, {sum(counter.values())} lượt) ===")
@@ -414,6 +464,9 @@ def check_master(path):
                   lambda v: v if frappe.db.exists("User", v) else None)
     _report_group("Mã học sinh (CRM Student)", stu_codes,
                   lambda v: frappe.db.get_value("CRM Student", {"student_code": v}, "name"))
+    _report_group("SĐT PHHS (CRM Guardian)", phones,
+                  lambda v: (frappe.db.get_value("CRM Guardian", {"phone_number": normalize_phone_number(v)}, "name")
+                             or frappe.db.get_value("CRM Guardian Phone", {"phone_number": normalize_phone_number(v)}, "parent")))
     wb.close()
 
 
@@ -456,6 +509,31 @@ def ensure_modules(path, commit=False):
     print(f"{'Đã tạo' if commit else 'Sẽ tạo'}: {len(created)}")
     for x in created:
         print("  ➕", x)
+
+
+def wipe_imported(commit=False, prefixes=("ISSUE-", "CARE-")):
+    """
+    Xoá các CRM Issue đã import (theo prefix issue_code) để nhập lại sạch.
+    Dùng delete_doc -> dọn luôn child table (issue_students/departments/guardians/process_logs).
+    commit=False: chỉ liệt kê. CHỈ DÙNG TRÊN MÔI TRƯỜNG TEST.
+    """
+    names = []
+    for p in prefixes:
+        names += frappe.get_all("CRM Issue", filters={"issue_code": ["like", f"{p}%"]}, pluck="name")
+    names = sorted(set(names))
+    print(f"\n=== wipe_imported (commit={commit}) — khớp {len(names)} issue (prefix {prefixes}) ===")
+    if commit:
+        for nm in names:
+            frappe.delete_doc("CRM Issue", nm, force=True, ignore_permissions=True)
+        frappe.db.commit()
+        print(f"Đã xoá {len(names)}.")
+    else:
+        for nm in names[:20]:
+            print("  -", nm)
+        if len(names) > 20:
+            print(f"  ... và {len(names) - 20} nữa")
+        print("(commit=False — chưa xoá gì)")
+    return {"matched": len(names), "deleted": len(names) if commit else 0}
 
 
 # ----------------------------------------------------------------------------- import
@@ -543,12 +621,17 @@ def run(path, commit=False, limit=None, default_date=None):
             else:
                 warnings.append(f"{rowlbl}: PIC user không tồn tại -> để trống: {pic_email!r}")
 
+        guardian_ids, guardian_missing = _resolve_guardians(
+            _cell(row, colmap, "parent_phone"), _cell(row, colmap, "parent_name"))
+        if guardian_missing:
+            warnings.append(f"{rowlbl}: PHHS không khớp -> để trống: {guardian_missing}")
+
         submitter = _txt(_cell(row, colmap, "submitter_name"))
 
         if not commit:
             created.append(f"{rowlbl}: OK (module={module_name}, prio={priority}, status={status}, "
                            f"result={result or '∅'}, students={len(student_ids)}, depts={len(dept_ids)}, "
-                           f"pic={'✓' if pic else '∅'}) [DRY-RUN, chưa ghi]")
+                           f"guardians={len(guardian_ids)}, pic={'✓' if pic else '∅'}) [DRY-RUN, chưa ghi]")
             continue
 
         # --- build & insert ---
@@ -564,7 +647,7 @@ def run(path, commit=False, limit=None, default_date=None):
             doc.status = status
             doc.result = result
             doc.approval_status = "Da duyet"
-            doc.created_by_user = submitter
+            doc.created_by_user = pic  # Người tạo = PIC (theo yêu cầu)
             doc.pic = pic
 
             link = _txt(_cell(row, colmap, "link"))
@@ -573,6 +656,7 @@ def run(path, commit=False, limit=None, default_date=None):
 
             _sync_issue_students(doc, {"students": student_ids})
             _set_issue_departments(doc, dept_ids)
+            _sync_issue_guardians(doc, {"guardians": guardian_ids})
 
             if student_ids:
                 campus = frappe.db.get_value("CRM Student", student_ids[0], "campus_id")
@@ -586,16 +670,14 @@ def run(path, commit=False, limit=None, default_date=None):
                 val = _txt(_cell(row, colmap, key))
                 if val:
                     doc.append("process_logs", {"title": title, "content": _to_html(val)})
-            pinfo = _txt(_cell(row, colmap, "parent_name"))
-            pphone = _txt(_cell(row, colmap, "parent_phone"))
-            if pinfo or pphone:
-                doc.append("process_logs", {
-                    "title": "PHHS liên quan",
-                    "content": _to_html(f"{pinfo} {('- ' + pphone) if pphone else ''}".strip()),
-                })
 
             doc.flags.ignore_permissions = True
             doc.insert(ignore_permissions=True)
+
+            # Ngày yêu cầu (frontend = creation) phải = ngày tiếp nhận -> set creation = occurred_at
+            frappe.db.set_value("CRM Issue", doc.name, "creation", occurred,
+                                update_modified=False)
+
             created.append(f"{rowlbl}: TẠO {doc.name} (issue_code={doc.issue_code})")
         except Exception as e:
             skipped.append(f"{rowlbl}: LỖI insert — {e}")
