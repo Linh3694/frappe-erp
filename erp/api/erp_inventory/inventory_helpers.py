@@ -169,6 +169,13 @@ def resolve_room_link(room_key: Optional[str]) -> Optional[str]:
 		rid = frappe.db.get_value("ERP Administrative Room", {field: key}, "name")
 		if rid:
 			return rid
+	# physical_code/short_title/room_number được lưu dạng IN HOA → thử khớp không phân biệt hoa thường
+	key_upper = key.upper()
+	if key_upper != key:
+		for field in ("physical_code", "short_title", "room_number"):
+			rid = frappe.db.get_value("ERP Administrative Room", {field: key_upper}, "name")
+			if rid:
+				return rid
 	return None
 
 
