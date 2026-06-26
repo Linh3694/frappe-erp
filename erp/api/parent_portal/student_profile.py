@@ -53,6 +53,16 @@ LEAD_SUBSET_FIELDNAMES = [
 ]
 
 
+# Các trường (CRM Lead) phụ huynh KHÔNG được sửa trên Parent Portal — chỉ xem.
+# Nguồn: bảng quy định "Không sửa" của nhà trường (trường định danh gốc).
+# FE đọc danh sách này (`readonly_fields`) để khóa input; nếu vắng, FE tự fallback.
+READONLY_LEAD_FIELDS = [
+    "student_name",
+    "student_gender",
+    "student_dob",
+]
+
+
 def _get_current_parent():
     """Document name CRM Guardian của phụ huynh đang đăng nhập.
 
@@ -192,6 +202,7 @@ def get_student_profile():
                 "learning_history": [],
                 "promotions": [],
                 "student": _serialize_crm_student_min(student_id),
+                "readonly_fields": list(READONLY_LEAD_FIELDS),
             },
             message="Học sinh chưa có CRM Lead liên kết",
         )
@@ -239,6 +250,7 @@ def get_student_profile():
             "learning_history": learning_history,
             "promotions": [],
             "student": _serialize_crm_student_min(student_id),
+            "readonly_fields": list(READONLY_LEAD_FIELDS),
         },
         message="OK",
     )

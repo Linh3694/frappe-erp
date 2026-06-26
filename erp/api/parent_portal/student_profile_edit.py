@@ -27,6 +27,7 @@ from erp.api.crm.lead import (
 from erp.api.crm.utils import get_request_data
 from erp.api.parent_portal.student_profile import (
     LEAD_SUBSET_FIELDNAMES,
+    READONLY_LEAD_FIELDS,
     _enrich_target_academic_year,
     _get_current_parent,
     _json_safe_value,
@@ -878,6 +879,7 @@ def _build_refresh_payload(student_id: str) -> dict[str, Any]:
             "learning_history": [],
             "promotions": [],
             "student": _serialize_crm_student_min(student_id),
+            "readonly_fields": list(READONLY_LEAD_FIELDS),
         }
 
     lead_name = lr[0][0]
@@ -920,6 +922,7 @@ def _build_refresh_payload(student_id: str) -> dict[str, Any]:
         "learning_history": learning_history,
         "promotions": [],
         "student": _serialize_crm_student_min(student_id),
+        "readonly_fields": list(READONLY_LEAD_FIELDS),
     }
 
 

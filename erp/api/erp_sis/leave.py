@@ -60,22 +60,43 @@ def get_class_leave_requests(class_id=None):
         # Build filters for leave requests
         filters = {"student_id": ["in", student_ids]}
 
-        # Add search filter if provided
+        # Tìm kiếm server-side TRÊN TOÀN BỘ dữ liệu (không chỉ trang hiện tại):
+        # áp điều kiện LIKE ở tầng DB TRƯỚC khi phân trang, gồm cả tên người tạo (owner.full_name).
+        or_filters = None
         if search:
-            # Search in student_name, student_code, or reason_display
-            search_filters = []
-            if search:
-                # We can't directly search in multiple fields, so we'll get all and filter later
-                # For better performance, we could implement full-text search or indexed search
-                pass
+            like = f"%{search}%"
+            or_filters = [
+                ["student_name", "like", like],
+                ["student_code", "like", like],
+                ["reason", "like", like],
+                ["parent_name", "like", like],
+            ]
+            # Khớp theo tên người tạo: tìm các User có full_name khớp rồi lọc theo owner.
+            matched_owner_emails = frappe.get_all(
+                "User",
+                filters=[["full_name", "like", like]],
+                pluck="name",
+            )
+            if matched_owner_emails:
+                or_filters.append(["owner", "in", matched_owner_emails])
 
-        # Get total count first (without pagination)
-        total_count = frappe.db.count("SIS Student Leave Request", filters=filters)
+        # Get total count first (tôn trọng cả search để total_pages chính xác)
+        if or_filters:
+            total_count = len(frappe.get_all(
+                "SIS Student Leave Request",
+                filters=filters,
+                or_filters=or_filters,
+                pluck="name",
+                limit_page_length=0,
+            ))
+        else:
+            total_count = frappe.db.count("SIS Student Leave Request", filters=filters)
 
-        # Get leave requests with pagination
+        # Get leave requests with pagination (search đã áp ở DB nên slice là kết quả đúng)
         leave_requests = frappe.get_all(
             "SIS Student Leave Request",
             filters=filters,
+            or_filters=or_filters or None,
             fields=[
                 "name", "student_name", "parent_name", "reason", "other_reason", "student_code",
                 "start_date", "end_date", "total_days", "description",
@@ -97,17 +118,6 @@ def get_class_leave_requests(class_id=None):
             )
             for user in users:
                 owner_names_map[user.name] = user.full_name or user.name
-
-        # Apply search filter client-side if search is provided
-        if search:
-            leave_requests = [
-                req for req in leave_requests
-                if (search.lower() in (req.get('student_name') or '').lower() or
-                    search.lower() in (req.get('student_code') or '').lower() or
-                    search.lower() in (req.get('reason') or '').lower() or
-                    search.lower() in (req.get('parent_name') or '').lower() or
-                    search.lower() in (owner_names_map.get(req.get('owner'), '') or '').lower())
-            ]
 
         # Transform reason to Vietnamese for display and add creator name
         reason_mapping = {

@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from typing import Optional
 from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.search import build_search_condition
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -1250,6 +1251,26 @@ def get_events():
             if "start_time" not in filters:
                 filters["start_time"] = []
             filters["start_time"].append(["<=", date_to])
+
+        # Tìm kiếm server-side theo tiêu đề TRÊN TOÀN BỘ dữ liệu (không chỉ trang hiện tại).
+        search = (frappe.local.form_dict.get("search") or "").strip()
+        if search:
+            search_frag, search_params = build_search_condition(["title"], search)
+            matched_names = set(
+                frappe.db.sql_list(
+                    f"SELECT name FROM `tabSIS Event` WHERE {search_frag}", search_params
+                )
+            ) if search_frag else set()
+            # Giao với ràng buộc name sẵn có (vd danh sách duyệt for_approval) nếu có
+            existing_name = filters.get("name")
+            if isinstance(existing_name, list) and len(existing_name) == 2 and existing_name[0] == "in":
+                matched_names &= set(existing_name[1])
+            if not matched_names:
+                return single_item_response({
+                    "data": [],
+                    "pagination": {"page": page, "limit": limit, "total": 0, "pages": 0},
+                }, "Events fetched successfully")
+            filters["name"] = ["in", list(matched_names)]
 
         # Query events with safe pagination calculation
         try:
