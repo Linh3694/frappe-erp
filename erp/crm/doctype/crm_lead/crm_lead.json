@@ -699,8 +699,8 @@
    "fieldname": "withdraw_reason_group",
    "fieldtype": "Select",
    "label": "Nhóm lý do nghỉ học",
-   "options": "\nhoc_phi_tai_chinh\nchuyen_tinh_nuoc_ngoai\nchuong_trinh_khong_phu_hop\nchat_luong_day_hoc\nap_luc_hoc_tap\nly_do_khac",
-   "description": "hoc_phi_tai_chinh: Học phí / Tài chính, chuyen_tinh_nuoc_ngoai: Chuyển tỉnh / Nước ngoài, chuong_trinh_khong_phu_hop: Chương trình không phù hợp, chat_luong_day_hoc: Chất lượng dạy học, ap_luc_hoc_tap: Áp lực học tập, ly_do_khac: Lý do khác"
+   "options": "\nhoc_tap\nchuyen_he_quoc_te\nchuyen_truong_cong_lap\nmoi_truong_hoc_duong\ntai_chinh\ndich_vu_trai_nghiem\ndu_hoc_dinh_cu\nchuyen_tinh_khu_vuc\nchuyen_noi_o\nchua_ro_ly_do\nky_luat",
+   "description": "hoc_tap: Học tập (Chương trình học, kết quả học tập), chuyen_he_quoc_te: Chuyển sang hệ Quốc tế hoàn toàn, chuyen_truong_cong_lap: Chuyển ra trường Công lập/Chuyên, moi_truong_hoc_duong: Môi trường học đường (Văn hoá, kỷ luật, an toàn, hòa nhập), tai_chinh: Tài chính (Học phí, Khả năng chi trả dài hạn), dich_vu_trai_nghiem: Dịch vụ & Trải nghiệm (DV Chăm sóc, Xe bus, Ăn uống, Portal), du_hoc_dinh_cu: Du học / Định cư, chuyen_tinh_khu_vuc: Chuyển tỉnh / Chuyển khu vực, chuyen_noi_o: Chuyển nơi ở / Khoảng cách xa, chua_ro_ly_do: Chưa rõ lý do (Chưa phản hồi, Chưa chia sẻ), ky_luat: Kỷ Luật"
   },
   {
    "fieldname": "withdraw_transfer_school",

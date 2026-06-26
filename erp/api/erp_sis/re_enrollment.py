@@ -30,12 +30,17 @@ PDF_SERVICE_URL = frappe.conf.get("pdf_service_url", "http://172.16.20.113:5020"
 # Phải khớp với options Select trên SIS Re-enrollment & CRM Lead và
 # WITHDRAW_REASON_GROUP_OPTIONS bên frontend (src/types/crm.ts).
 NOT_RE_ENROLL_REASON_GROUPS = [
-    ("hoc_phi_tai_chinh", "Học phí / Tài chính"),
-    ("chuyen_tinh_nuoc_ngoai", "Chuyển tỉnh / Nước ngoài"),
-    ("chuong_trinh_khong_phu_hop", "Chương trình không phù hợp"),
-    ("chat_luong_day_hoc", "Chất lượng dạy học"),
-    ("ap_luc_hoc_tap", "Áp lực học tập"),
-    ("ly_do_khac", "Lý do khác"),
+    ("hoc_tap", "Học tập (Chương trình học, kết quả học tập)"),
+    ("chuyen_he_quoc_te", "Chuyển sang hệ Quốc tế hoàn toàn"),
+    ("chuyen_truong_cong_lap", "Chuyển ra trường Công lập/Chuyên"),
+    ("moi_truong_hoc_duong", "Môi trường học đường (Văn hoá, kỷ luật, an toàn, hòa nhập)"),
+    ("tai_chinh", "Tài chính (Học phí, Khả năng chi trả dài hạn)"),
+    ("dich_vu_trai_nghiem", "Dịch vụ & Trải nghiệm (DV Chăm sóc, Xe bus, Ăn uống, Portal)"),
+    ("du_hoc_dinh_cu", "Du học / Định cư"),
+    ("chuyen_tinh_khu_vuc", "Chuyển tỉnh / Chuyển khu vực"),
+    ("chuyen_noi_o", "Chuyển nơi ở / Khoảng cách xa"),
+    ("chua_ro_ly_do", "Chưa rõ lý do (Chưa phản hồi, Chưa chia sẻ)"),
+    ("ky_luat", "Kỷ Luật"),
 ]
 REASON_GROUP_KEY_TO_LABEL = {key: label for key, label in NOT_RE_ENROLL_REASON_GROUPS}
 # Nhận cả nhãn tiếng Việt lẫn key khi import (so khớp sau khi normalize: strip + lower).

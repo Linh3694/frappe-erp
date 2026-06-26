@@ -1,0 +1,564 @@
+#!/usr/bin/env python3
+"""
+Import "Vấn đề chung" (CRM Issue) thẳng vào CSDL từ file Excel tổng hợp vấn đề/feedback PHHS.
+
+ĐÂY LÀ SCRIPT ONE-OFF (không phải tính năng import trên UI, không whitelist API).
+Dùng Frappe ORM (frappe.get_doc/insert) — KHÔNG raw SQL — để giữ autoname, child table, validation.
+
+Nguồn: chỉ đọc sheet "Data báo cáo sự vụfeedback".
+  - Header ở row 5, data từ row 6.
+  - Cột map theo NHÃN header (không hardcode chỉ số) để bền với thay đổi layout.
+
+Cách chạy (sau khi đã sửa bench env):
+
+    # 0) Pre-flight: thống kê khớp/không khớp module, phòng ban, PIC, học sinh (không ghi gì)
+    bench --site admin.sis.localhost execute \
+        erp.scripts.import_crm_issues_from_excel.check_master \
+        --kwargs "{'path': '/Users/admin/Downloads/TSxIT_Tổng hợp vấn đề và feedback PHHS (1).xlsx'}"
+
+    # 1) Tạo sẵn các Loại vấn đề (CRM Issue Module) còn thiếu — dry-run trước
+    bench --site admin.sis.localhost execute \
+        erp.scripts.import_crm_issues_from_excel.ensure_modules \
+        --kwargs "{'path': '.../(1).xlsx', 'commit': False}"
+    # rồi commit=True để tạo thật
+
+    # 2) Import — dry-run (chỉ resolve + in báo cáo, KHÔNG ghi)
+    bench --site admin.sis.localhost execute \
+        erp.scripts.import_crm_issues_from_excel.run \
+        --kwargs "{'path': '.../(1).xlsx', 'commit': False}"
+    # rồi commit=True để ghi thật
+
+Hoặc trong `bench --site ... console`:
+    from erp.scripts.import_crm_issues_from_excel import run, ensure_modules, check_master
+    run(path="...(1).xlsx", commit=False)
+"""
+
+import re
+from datetime import datetime, date, timedelta
+
+import frappe
+
+from erp.api.crm.issue import _sync_issue_students, _set_issue_departments
+
+# ----------------------------------------------------------------------------- config
+
+DATA_SHEET = "Data báo cáo sự vụfeedback"
+HEADER_ROW = 5            # nhãn cột ở row 5; data bắt đầu row 6
+
+REPORT_FILE = "import_crm_issues_report.txt"
+
+# Gộp các Loại vấn đề gần trùng nghĩa (áp dụng cho cả ensure_modules lẫn resolve khi import).
+MODULE_ALIASES = {
+    "Học bổng": "Học bổng - Khen thưởng",
+}
+
+# Map nhãn cột -> khoá nội bộ. Match bằng "chứa chuỗi con" trên header đã chuẩn hoá khoảng trắng.
+# Thứ tự quan trọng: 'pic_email' phải kiểm trước 'submitter_email' (đều chứa "email/mã nv").
+COLUMN_MATCHERS = [
+    ("status",          ["tình trạng xử lý"]),
+    ("received_date",   ["ngày tiếp nhận"]),
+    ("submitter_name",  ["người gửi ý kiến"]),
+    ("pic_name",        ["người phụ trách"]),
+    ("pic_email",       ["email/mã nv pic"]),
+    ("module",          ["nhóm ý kiến"]),
+    ("code",            ["mã sự vụ"]),
+    ("priority",        ["mức độ ưu tiên"]),
+    ("related_dept",    ["bộ phận liên quan"]),
+    ("received_dept",   ["bộ phận tiếp nhận"]),
+    ("content",         ["nội dung"]),
+    ("student_code",    ["mã học sinh"]),
+    ("student_name",    ["học sinh liên quan"]),
+    ("grade",           ["lớp/grade", "lớp/ grade"]),
+    ("parent_name",     ["phhs liên quan"]),
+    ("parent_phone",    ["sđt phhs"]),
+    ("handled_school",  ["thông tin xử lý của bộ phận tiếp nhận"]),
+    ("handled_dept",    ["kết quả xử lý của bộ phận liên quan"]),
+    ("link",            ["link liên quan"]),
+    ("satisfaction",    ["theo dõi mức độ hài lòng"]),
+    ("ts_note",         ["note của ts"]),
+]
+
+PRIORITY_MAP = {"high": "Cao", "normal": "Trung binh", "medium": "Trung binh", "low": "Thap"}
+DEFAULT_PRIORITY = "Trung binh"
+
+STATUS_MAP = {
+    "chờ phê duyệt": "Cho duyet",
+    "tiếp nhận": "Tiep nhan",
+    "đang xử lý": "Dang xu ly",
+    "hoàn thành": "Hoan thanh",
+    "đóng": "Dong",
+}
+DEFAULT_STATUS = "Tiep nhan"
+
+# ----------------------------------------------------------------------------- helpers
+
+def _norm(s):
+    """Chuẩn hoá: gộp mọi khoảng trắng/newline thành 1 space, strip, lower."""
+    if s is None:
+        return ""
+    return re.sub(r"\s+", " ", str(s)).strip().lower()
+
+
+def _txt(v):
+    """Lấy chuỗi gọn từ ô (giữ nguyên dấu)."""
+    if v is None:
+        return ""
+    return re.sub(r"[ \t]+", " ", str(v)).strip()
+
+
+def _resolve_path(path):
+    """
+    Cho phép truyền:
+      - URL file Frappe: '/private/files/x.xlsx' -> sites/<site>/private/files/x.xlsx
+                         '/files/x.xlsx'         -> sites/<site>/public/files/x.xlsx
+      - hoặc path filesystem tuyệt đối (dùng nguyên).
+    Thử cả bản giải mã %20 nếu cần.
+    """
+    import os
+    from urllib.parse import unquote
+
+    candidates = []
+    if path.startswith("/private/files/"):
+        name = path[len("/private/files/"):]
+        candidates += [frappe.get_site_path("private", "files", name),
+                       frappe.get_site_path("private", "files", unquote(name))]
+    elif path.startswith("/files/"):
+        name = path[len("/files/"):]
+        candidates += [frappe.get_site_path("public", "files", name),
+                       frappe.get_site_path("public", "files", unquote(name))]
+    else:
+        candidates += [path, unquote(path)]
+
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    # không thấy -> trả candidate đầu để openpyxl báo lỗi rõ ràng
+    return candidates[0]
+
+
+def _open_data_sheet(path):
+    import openpyxl
+    real = _resolve_path(path)
+    wb = openpyxl.load_workbook(real, data_only=True, read_only=True)
+    if DATA_SHEET not in wb.sheetnames:
+        # fallback: sheet bắt đầu bằng "Data"
+        cand = [n for n in wb.sheetnames if n.startswith("Data")]
+        if not cand:
+            raise ValueError(f"Không tìm thấy sheet '{DATA_SHEET}'. Có: {wb.sheetnames}")
+        ws = wb[cand[0]]
+    else:
+        ws = wb[DATA_SHEET]
+    return wb, ws
+
+
+def _build_colmap(ws):
+    """Đọc row HEADER_ROW, trả về dict khoá_nội_bộ -> chỉ số cột (0-based)."""
+    header_cells = list(ws.iter_rows(min_row=HEADER_ROW, max_row=HEADER_ROW, values_only=True))[0]
+    headers = [_norm(c) for c in header_cells]
+    colmap = {}
+    for key, needles in COLUMN_MATCHERS:
+        if key in colmap:
+            continue
+        for ci, h in enumerate(headers):
+            if not h:
+                continue
+            if any(n in h for n in needles):
+                # tránh map nhầm submitter_email vào cột PIC ("email/mã nv pic")
+                colmap[key] = ci
+                break
+    return colmap, header_cells
+
+
+def _cell(row, colmap, key):
+    ci = colmap.get(key)
+    if ci is None or ci >= len(row):
+        return None
+    return row[ci]
+
+
+def parse_date(v):
+    """Trả về 'YYYY-MM-DD' hoặc None. Hỗ trợ datetime/date, chuỗi DD/MM/YYYY, serial Excel."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v.strftime("%Y-%m-%d")
+    if isinstance(v, date):
+        return v.strftime("%Y-%m-%d")
+    if isinstance(v, (int, float)):
+        return (date(1899, 12, 30) + timedelta(days=int(v))).strftime("%Y-%m-%d")
+    s = str(v).strip()
+    if not s:
+        return None
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    try:
+        return (date(1899, 12, 30) + timedelta(days=int(float(s)))).strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def _escape_html(s):
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _to_html(s):
+    s = _txt(s)
+    if not s:
+        return ""
+    return "<p>" + _escape_html(s).replace("\n", "<br>") + "</p>"
+
+
+def _split_multi(s):
+    """Tách giá trị nhiều mục ngăn bởi dấu phẩy (và xuống dòng)."""
+    if not s:
+        return []
+    parts = re.split(r"[,\n]+", str(s))
+    return [p.strip() for p in parts if p and p.strip()]
+
+
+def _resolve_module(text):
+    """Trả về docname CRM Issue Module theo module_name (áp alias). None nếu không có."""
+    name = _txt(text)
+    if not name:
+        return None
+    name = MODULE_ALIASES.get(name, name)
+    return frappe.db.get_value("CRM Issue Module", {"module_name": name}, "name")
+
+
+def _resolve_students(code_cell, name_cell):
+    """Trả về (list docname CRM Student, list mã/tên không khớp)."""
+    ids, missing = [], []
+    codes = _split_multi(code_cell)
+    for c in codes:
+        sid = frappe.db.get_value("CRM Student", {"student_code": c}, "name")
+        if sid and sid not in ids:
+            ids.append(sid)
+        elif not sid:
+            missing.append(c)
+    if not ids:
+        # fallback theo tên (có thể nhiều người trùng tên -> lấy bản đầu)
+        for nm in _split_multi(name_cell):
+            sid = frappe.db.get_value("CRM Student", {"student_name": nm}, "name")
+            if sid and sid not in ids:
+                ids.append(sid)
+            elif not sid:
+                missing.append(nm)
+    return ids, missing
+
+
+def _resolve_departments(text):
+    """Trả về (list docname ERP Organization Unit, list tên không khớp)."""
+    ids, missing = [], []
+    for nm in _split_multi(text):
+        did = frappe.db.get_value("ERP Organization Unit", {"unit_name_vn": nm}, "name")
+        if did and did not in ids:
+            ids.append(did)
+        elif not did:
+            missing.append(nm)
+    return ids, missing
+
+
+def _map_priority(v):
+    return PRIORITY_MAP.get(_norm(v), DEFAULT_PRIORITY) if _txt(v) else DEFAULT_PRIORITY
+
+
+def _map_status(v):
+    return STATUS_MAP.get(_norm(v), DEFAULT_STATUS) if _txt(v) else DEFAULT_STATUS
+
+
+def _apply_satisfaction(sat, status):
+    """
+    (result, status) theo quy tắc nghiệp vụ:
+      - 'Hài lòng'                  -> result Hai long
+      - 'Đồng ý, nhưng chưa hài lòng' -> status Hoan thanh, result Chua hai long
+      - 'Tiếp tục theo dõi'         -> status Dang xu ly, result rỗng
+      - khác/rỗng                   -> result rỗng (giữ status đã map)
+    """
+    s = _norm(sat)
+    if s == "hài lòng":
+        return "Hai long", status
+    if s == "đồng ý, nhưng chưa hài lòng":
+        return "Chua hai long", "Hoan thanh"
+    if s == "tiếp tục theo dõi":
+        return "", "Dang xu ly"
+    return "", status
+
+
+def _row_is_empty(row, colmap):
+    keys = ("code", "content", "module", "status", "received_date", "student_code", "student_name")
+    return not any(_txt(_cell(row, colmap, k)) for k in keys)
+
+
+def _write_report(lines):
+    text = "\n".join(lines)
+    try:
+        path = frappe.get_site_path(REPORT_FILE)
+    except Exception:
+        path = REPORT_FILE
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        print(f"\n📝 Báo cáo đã ghi: {path}")
+    except Exception as e:
+        print(f"\n⚠️ Không ghi được file báo cáo ({e}). In ra console:")
+    return path
+
+
+# ----------------------------------------------------------------------------- pre-flight
+
+def check_master(path):
+    """Pre-flight: liệt kê module / phòng ban / PIC / mã HS trong sheet, đánh dấu khớp/không khớp. Không ghi gì."""
+    wb, ws = _open_data_sheet(path)
+    colmap, headers = _build_colmap(ws)
+    print("Header phát hiện:", {k: headers[v] for k, v in colmap.items()})
+
+    modules, depts, pics, stu_codes = {}, {}, {}, {}
+    n = 0
+    for row in ws.iter_rows(min_row=HEADER_ROW + 1, values_only=True):
+        if _row_is_empty(row, colmap):
+            continue
+        n += 1
+        m = _txt(_cell(row, colmap, "module"))
+        if m:
+            modules[m] = modules.get(m, 0) + 1
+        for d in _split_multi(_cell(row, colmap, "related_dept")):
+            depts[d] = depts.get(d, 0) + 1
+        p = _txt(_cell(row, colmap, "pic_email"))
+        if p:
+            pics[p] = pics.get(p, 0) + 1
+        for c in _split_multi(_cell(row, colmap, "student_code")):
+            stu_codes[c] = stu_codes.get(c, 0) + 1
+
+    def _report_group(title, counter, resolver):
+        print(f"\n=== {title} ({len(counter)} giá trị, {sum(counter.values())} lượt) ===")
+        ok = miss = 0
+        for val, cnt in sorted(counter.items(), key=lambda x: -x[1]):
+            hit = resolver(val)
+            flag = "✅" if hit else "❌ THIẾU"
+            if hit:
+                ok += 1
+            else:
+                miss += 1
+            print(f"  {flag}  {val!r}  x{cnt}" + (f"  -> {hit}" if hit else ""))
+        print(f"  Tổng: {ok} khớp / {miss} thiếu")
+
+    print(f"\nSố dòng data: {n}")
+    _report_group("Loại vấn đề (CRM Issue Module)", modules, _resolve_module)
+    _report_group("Phòng ban liên quan (ERP Organization Unit)", depts,
+                  lambda v: frappe.db.get_value("ERP Organization Unit", {"unit_name_vn": v}, "name"))
+    _report_group("PIC (User by email)", pics,
+                  lambda v: v if frappe.db.exists("User", v) else None)
+    _report_group("Mã học sinh (CRM Student)", stu_codes,
+                  lambda v: frappe.db.get_value("CRM Student", {"student_code": v}, "name"))
+    wb.close()
+
+
+def ensure_modules(path, commit=False):
+    """Tạo các CRM Issue Module còn thiếu (module_name = Nhóm Ý kiến, áp alias). Dry-run nếu commit=False."""
+    wb, ws = _open_data_sheet(path)
+    colmap, _ = _build_colmap(ws)
+    names = {}
+    for row in ws.iter_rows(min_row=HEADER_ROW + 1, values_only=True):
+        if _row_is_empty(row, colmap):
+            continue
+        m = _txt(_cell(row, colmap, "module"))
+        if m:
+            m = MODULE_ALIASES.get(m, m)
+            names[m] = names.get(m, 0) + 1
+    wb.close()
+
+    created, existed = [], []
+    for nm, cnt in sorted(names.items(), key=lambda x: -x[1]):
+        if frappe.db.get_value("CRM Issue Module", {"module_name": nm}, "name"):
+            existed.append(nm)
+            continue
+        if commit:
+            doc = frappe.new_doc("CRM Issue Module")
+            doc.module_name = nm
+            doc.is_active = 1
+            doc.flags.ignore_permissions = True
+            doc.insert()
+            created.append(f"{nm} -> {doc.name}")
+        else:
+            created.append(f"{nm} (SẼ TẠO)")
+
+    if commit:
+        frappe.db.commit()
+
+    print(f"\n=== ensure_modules (commit={commit}) ===")
+    print(f"Đã có: {len(existed)}")
+    for x in existed:
+        print("  ✅", x)
+    print(f"{'Đã tạo' if commit else 'Sẽ tạo'}: {len(created)}")
+    for x in created:
+        print("  ➕", x)
+
+
+# ----------------------------------------------------------------------------- import
+
+def run(path, commit=False, limit=None, default_date=None):
+    """
+    Import sheet Data -> CRM Issue.
+    commit=False (mặc định): chỉ resolve + báo cáo, KHÔNG ghi CSDL (dry-run).
+    commit=True: insert thật + commit.
+    limit: giới hạn số dòng (để test nhanh).
+    default_date: 'YYYY-MM-DD' dùng cho dòng thiếu ngày tiếp nhận (mặc định None = bỏ dòng).
+    """
+    wb, ws = _open_data_sheet(path)
+    colmap, headers = _build_colmap(ws)
+
+    required = ["status", "received_date", "pic_email", "module", "code", "priority",
+               "related_dept", "content", "student_code", "satisfaction"]
+    missing_cols = [k for k in required if k not in colmap]
+    if missing_cols:
+        print(f"⚠️ Không tìm thấy cột cho khoá: {missing_cols}. Header={headers}")
+
+    report = [f"IMPORT CRM ISSUE — commit={commit} — file={path}", "=" * 70]
+    created, skipped, warnings = [], [], []
+    seen_codes = set()
+    n = 0
+
+    for ridx, row in enumerate(ws.iter_rows(min_row=HEADER_ROW + 1, values_only=True), start=HEADER_ROW + 1):
+        if _row_is_empty(row, colmap):
+            continue
+        if limit and n >= limit:
+            break
+        n += 1
+
+        code = _txt(_cell(row, colmap, "code"))
+        rowlbl = f"row {ridx} (code={code or '∅'})"
+
+        # --- validate bắt buộc & trùng mã ---
+        occurred = parse_date(_cell(row, colmap, "received_date"))
+        if not occurred:
+            if default_date:
+                occurred = default_date
+                warnings.append(f"{rowlbl}: ngày tiếp nhận trống -> dùng default_date {default_date}.")
+            else:
+                skipped.append(f"{rowlbl}: BỎ — ngày tiếp nhận trống/không parse được "
+                               f"({_cell(row, colmap, 'received_date')!r})")
+                continue
+
+        module_name = _resolve_module(_cell(row, colmap, "module"))
+        if not module_name:
+            skipped.append(f"{rowlbl}: BỎ — Loại vấn đề không khớp "
+                           f"({_txt(_cell(row, colmap, 'module'))!r}). Tạo module trước (ensure_modules).")
+            continue
+
+        if code:
+            if code in seen_codes or frappe.db.exists("CRM Issue", {"issue_code": code}):
+                skipped.append(f"{rowlbl}: BỎ — issue_code đã tồn tại/trùng trong file.")
+                continue
+            seen_codes.add(code)
+
+        # --- giá trị ---
+        priority = _map_priority(_cell(row, colmap, "priority"))
+        status = _map_status(_cell(row, colmap, "status"))
+        result, status = _apply_satisfaction(_cell(row, colmap, "satisfaction"), status)
+
+        content_html = _to_html(_cell(row, colmap, "content"))
+        if not content_html:
+            content_html = "<p>(Không có nội dung)</p>"
+            warnings.append(f"{rowlbl}: nội dung trống -> dùng placeholder.")
+
+        # --- resolve links ---
+        student_ids, stu_missing = _resolve_students(
+            _cell(row, colmap, "student_code"), _cell(row, colmap, "student_name"))
+        if stu_missing:
+            warnings.append(f"{rowlbl}: HS không khớp -> để trống: {stu_missing}")
+
+        dept_ids, dept_missing = _resolve_departments(_cell(row, colmap, "related_dept"))
+        if dept_missing:
+            warnings.append(f"{rowlbl}: Phòng ban không khớp -> để trống: {dept_missing}")
+
+        pic_email = _txt(_cell(row, colmap, "pic_email"))
+        pic = ""
+        if pic_email:
+            if frappe.db.exists("User", pic_email):
+                pic = pic_email
+            else:
+                warnings.append(f"{rowlbl}: PIC user không tồn tại -> để trống: {pic_email!r}")
+
+        submitter = _txt(_cell(row, colmap, "submitter_name"))
+
+        if not commit:
+            created.append(f"{rowlbl}: OK (module={module_name}, prio={priority}, status={status}, "
+                           f"result={result or '∅'}, students={len(student_ids)}, depts={len(dept_ids)}, "
+                           f"pic={'✓' if pic else '∅'}) [DRY-RUN, chưa ghi]")
+            continue
+
+        # --- build & insert ---
+        try:
+            doc = frappe.new_doc("CRM Issue")
+            doc.title = (submitter or _txt(_cell(row, colmap, "student_name")) or module_name)[:140]
+            doc.content = content_html
+            doc.issue_module = module_name
+            doc.issue_group = "Sự vụ"
+            doc.issue_code = code or None  # nếu trống để autoname/quy ước hệ thống xử lý
+            doc.occurred_at = occurred
+            doc.priority = priority
+            doc.status = status
+            doc.result = result
+            doc.approval_status = "Da duyet"
+            doc.created_by_user = submitter
+            doc.pic = pic
+
+            link = _txt(_cell(row, colmap, "link"))
+            if link.lower().startswith("http"):
+                doc.attachment = link
+
+            _sync_issue_students(doc, {"students": student_ids})
+            _set_issue_departments(doc, dept_ids)
+
+            if student_ids:
+                campus = frappe.db.get_value("CRM Student", student_ids[0], "campus_id")
+                if campus:
+                    doc.campus_id = campus
+
+            # process logs từ các cột xử lý
+            for title, key in (("Thông tin Xử lý của Bộ phận tiếp nhận", "handled_school"),
+                               ("Kết quả Xử lý của Bộ phận liên quan", "handled_dept"),
+                               ("Note của TS/Quản lý", "ts_note")):
+                val = _txt(_cell(row, colmap, key))
+                if val:
+                    doc.append("process_logs", {"title": title, "content": _to_html(val)})
+            pinfo = _txt(_cell(row, colmap, "parent_name"))
+            pphone = _txt(_cell(row, colmap, "parent_phone"))
+            if pinfo or pphone:
+                doc.append("process_logs", {
+                    "title": "PHHS liên quan",
+                    "content": _to_html(f"{pinfo} {('- ' + pphone) if pphone else ''}".strip()),
+                })
+
+            doc.flags.ignore_permissions = True
+            doc.insert(ignore_permissions=True)
+            created.append(f"{rowlbl}: TẠO {doc.name} (issue_code={doc.issue_code})")
+        except Exception as e:
+            skipped.append(f"{rowlbl}: LỖI insert — {e}")
+
+    wb.close()
+    if commit:
+        frappe.db.commit()
+
+    # --- báo cáo ---
+    report.append(f"\nĐọc {n} dòng | {'TẠO' if commit else 'sẽ tạo'}: {len(created)} | "
+                  f"BỎ: {len(skipped)} | cảnh báo: {len(warnings)}")
+    report.append("\n----- THÀNH CÔNG / DỰ KIẾN -----")
+    report.extend(created)
+    report.append("\n----- BỎ DÒNG -----")
+    report.extend(skipped or ["(không có)"])
+    report.append("\n----- CẢNH BÁO (vẫn tạo, link để trống) -----")
+    report.extend(warnings or ["(không có)"])
+
+    _write_report(report)
+    print(f"\n✅ Xong. commit={commit} | đọc {n} | {'tạo' if commit else 'dự kiến'} {len(created)} "
+          f"| bỏ {len(skipped)} | cảnh báo {len(warnings)}")
+    return {"read": n, "created": len(created), "skipped": len(skipped), "warnings": len(warnings)}
