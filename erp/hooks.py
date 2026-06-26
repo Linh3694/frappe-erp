@@ -1344,7 +1344,6 @@ scheduler_events = {
         # FaceID reconcile pickup + CRM Issue SLA + LMS enrollment (mỗi 15 phút)
         "*/15 * * * *": [
             "erp.api.faceid.sync_worker.reconcile_pickup_auth_to_controller",
-            "erp.api.faceid.sync_worker.retry_failed_sync_jobs",
             "erp.api.crm.sla_scheduler.check_crm_issue_sla",
             "erp.lms.sync.enrollment_sync.sync_all_sections",
         ],
