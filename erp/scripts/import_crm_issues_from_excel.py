@@ -57,6 +57,19 @@ MODULE_ALIASES = {
     "Học bổng": "Học bổng - Khen thưởng",
 }
 
+# Ánh xạ tên "Bộ phận liên quan" trong Excel -> unit_name_vn thật trên org chart.
+# Tên nào khớp y hệt (Trường Tiểu học, Phòng Kế toán, Phòng Tuyển sinh & Dịch vụ trường học)
+# thì không cần liệt kê.
+DEPT_ALIASES = {
+    "Trường THCS": "Trường Trung học cơ sở",
+    "Trường THPT": "Trường Trung học phổ thông",
+    "Khối HCTH & DVHS": "Khối hành chính tổng hợp và Dịch vụ học sinh",
+    "Ban Đào tạo": "Ban đào tạo",
+    "Khoa Phát triển Học sinh": "Khoa Phát triển Sinh viên",
+    "Khối vận hành": "Khối Vận hành",
+    "Phòng Công nghệ thông tin": "Phòng IT",
+}
+
 # Map nhãn cột -> khoá nội bộ. Match bằng "chứa chuỗi con" trên header đã chuẩn hoá khoảng trắng.
 # Thứ tự quan trọng: 'pic_email' phải kiểm trước 'submitter_email' (đều chứa "email/mã nv").
 COLUMN_MATCHERS = [
@@ -358,11 +371,33 @@ def _resolve_guardians(phone_cell, name_cell):
     return ids, missing
 
 
+def _resolve_dept_name(nm):
+    """Docname ERP Organization Unit từ tên Excel (áp DEPT_ALIASES). None nếu không có."""
+    name = DEPT_ALIASES.get(nm, nm)
+    return frappe.db.get_value("ERP Organization Unit", {"unit_name_vn": name}, "name")
+
+
+def _unique_issue_code(code, seen):
+    """
+    Trả về (code_duy_nhất, đã_đổi?). Nếu code đã có (trong file `seen` hoặc trong CSDL),
+    thêm hậu tố -2, -3, ... cho tới khi không trùng (vd ISSUE-04 -> ISSUE-04-2).
+    """
+    def taken(c):
+        return c in seen or bool(frappe.db.exists("CRM Issue", {"issue_code": c}))
+
+    if not taken(code):
+        return code, False
+    i = 2
+    while taken(f"{code}-{i}"):
+        i += 1
+    return f"{code}-{i}", True
+
+
 def _resolve_departments(text):
     """Trả về (list docname ERP Organization Unit, list tên không khớp)."""
     ids, missing = [], []
     for nm in _split_multi(text):
-        did = frappe.db.get_value("ERP Organization Unit", {"unit_name_vn": nm}, "name")
+        did = _resolve_dept_name(nm)
         if did and did not in ids:
             ids.append(did)
         elif not did:
@@ -458,8 +493,7 @@ def check_master(path):
 
     print(f"\nSố dòng data: {n}")
     _report_group("Loại vấn đề (CRM Issue Module)", modules, _resolve_module)
-    _report_group("Phòng ban liên quan (ERP Organization Unit)", depts,
-                  lambda v: frappe.db.get_value("ERP Organization Unit", {"unit_name_vn": v}, "name"))
+    _report_group("Phòng ban liên quan (ERP Organization Unit)", depts, _resolve_dept_name)
     _report_group("PIC (User by email)", pics,
                   lambda v: v if frappe.db.exists("User", v) else None)
     _report_group("Mã học sinh (CRM Student)", stu_codes,
@@ -588,9 +622,10 @@ def run(path, commit=False, limit=None, default_date=None):
             continue
 
         if code:
-            if code in seen_codes or frappe.db.exists("CRM Issue", {"issue_code": code}):
-                skipped.append(f"{rowlbl}: BỎ — issue_code đã tồn tại/trùng trong file.")
-                continue
+            new_code, renamed = _unique_issue_code(code, seen_codes)
+            if renamed:
+                warnings.append(f"{rowlbl}: trùng mã -> đổi thành {new_code}")
+            code = new_code
             seen_codes.add(code)
 
         # --- giá trị ---

@@ -14,6 +14,7 @@ from erp.utils.api_response import (
     not_found_response,
 )
 from erp.api.crm.utils import ALLOWED_ROLES, check_crm_permission, get_request_data
+from erp.utils.search import build_search_condition
 
 # Phong ban = don vi So do to chuc (ERP Organization Unit). Thay the CRM Issue Department.
 ORG_UNIT_DOCTYPE = "ERP Organization Unit"
@@ -1063,6 +1064,7 @@ def get_issues():
     department = frappe.request.args.get("department")
     pic = (frappe.request.args.get("pic") or "").strip()
     only_my_departments = frappe.request.args.get("only_my_departments")
+    search = (frappe.request.args.get("search") or "").strip()
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 20))
 
@@ -1104,6 +1106,17 @@ def get_issues():
             out["is_department_member"] = is_department_member
             return out
         name_constraint_sets.append(set(visible))
+    if search:
+        # Tim theo ma/tieu de tren TOAN BO du lieu (khong chi trang hien tai):
+        # token + bo dau + dau tu qua helper chung -> dua ve dieu kien name-in.
+        search_frag, search_params = build_search_condition(["issue_code", "title"], search)
+        matched_names = set()
+        if search_frag:
+            matched_names.update(
+                frappe.db.sql_list(f"SELECT name FROM `tabCRM Issue` WHERE {search_frag}", search_params)
+            )
+        # Search rong/khong khop -> set rong -> intersection ben duoi tra ve khong co ket qua.
+        name_constraint_sets.append(matched_names)
     if name_constraint_sets:
         inter = set.intersection(*name_constraint_sets)
         names_list = list(inter)
@@ -1164,9 +1177,24 @@ def get_pending_issues():
 
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 50))
+    search = (frappe.request.args.get("search") or "").strip()
     filters = {"approval_status": "Cho duyet"}
     scope_meta = "all"
     dept_flag = bool(_get_user_crm_issue_department_names(user))
+    if search:
+        # Tim theo ma/tieu de tren toan bo hang cho (khong chi trang hien tai).
+        search_frag, search_params = build_search_condition(["issue_code", "title"], search)
+        matched_names = (
+            frappe.db.sql_list(f"SELECT name FROM `tabCRM Issue` WHERE {search_frag}", search_params)
+            if search_frag
+            else []
+        )
+        if not matched_names:
+            out = paginated_response([], page, 0, per_page)
+            out["can_see_pending_queue_scope"] = scope_meta
+            out["is_department_member"] = dept_flag
+            return out
+        filters["name"] = ["in", matched_names]
     total = frappe.db.count("CRM Issue", filters=filters)
     offset = (page - 1) * per_page
 
