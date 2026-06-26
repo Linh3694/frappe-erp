@@ -23,6 +23,7 @@ from erp.api.erp_inventory.inventory_helpers import (
 	apply_specs_to_doc,
 	build_device_filters,
 	device_doc_to_fe,
+	device_signature,
 	get_user_job_title,
 	normalize_device_type,
 	paginated_devices_response,
@@ -35,6 +36,7 @@ from erp.api.erp_inventory.inventory_helpers import (
 	sync_current_holder_from_assigned,
 	user_to_fe,
 )
+from erp.api.erp_inventory.inventory_excel_schema import STATUS_LABEL_TO_CODE
 
 
 def _resolve_device_name(device_id: str, device_type: str = None):
@@ -728,8 +730,10 @@ def bulk_upload_devices(device_type=None):
 			return validation_error_response(_("Không có dữ liệu hợp lệ"), {key: ["empty"]})
 
 		errors = []
+		warnings = []
 		valid_count = 0
 		updated_count = 0
+		unchanged_count = 0
 		for item in items:
 			try:
 				serial = (item.get("serial") or "").strip()
@@ -737,7 +741,9 @@ def bulk_upload_devices(device_type=None):
 				if not serial or not name:
 					errors.append({"serial": serial or "?", "message": "Thiếu name hoặc serial"})
 					continue
-				status = item.get("status") or "Standby"
+				# Trạng thái có thể là nhãn tiếng Việt ("Thiếu biên bản"...) → đổi về mã chuẩn
+				status_raw = item.get("status") or ""
+				status = STATUS_LABEL_TO_CODE.get(status_raw, status_raw) or "Standby"
 				if status not in VALID_STATUSES:
 					status = "Standby"
 				# Nếu serial đã tồn tại → cập nhật thiết bị, ngược lại tạo mới
@@ -747,39 +753,50 @@ def bulk_upload_devices(device_type=None):
 				is_update = bool(existing_name)
 				if is_update:
 					doc = frappe.get_doc("ERP Inventory Device", existing_name)
-					doc.device_subtype = item.get("type") or ""
-					doc.name_display = name
-					doc.manufacturer = item.get("manufacturer") or ""
-					doc.release_year = item.get("releaseYear")
-					doc.status = status
 				else:
 					doc = frappe.get_doc(
 						{
 							"doctype": "ERP Inventory Device",
 							"device_type": dt,
-							"device_subtype": item.get("type") or "",
-							"name_display": name,
-							"manufacturer": item.get("manufacturer") or "",
 							"serial": serial,
-							"release_year": item.get("releaseYear"),
-							"status": status,
 						}
 					)
+				# Chụp chữ ký trước khi áp dữ liệu để phân biệt "cập nhật" với "không đổi"
+				sig_before = device_signature(doc) if is_update else None
+
+				doc.device_subtype = item.get("type") or ""
+				doc.name_display = name
+				doc.manufacturer = item.get("manufacturer") or ""
+				doc.release_year = item.get("releaseYear")
+				doc.status = status
 				apply_specs_to_doc(doc, dt, item.get("specs") or {})
-				room = item.get("room")
+				room = (item.get("room") or "").strip()
 				if room:
-					doc.room = resolve_room_link(room)
+					resolved_room = resolve_room_link(room)
+					if resolved_room:
+						doc.room = resolved_room
+					elif is_update:
+						# Không tìm thấy phòng → giữ nguyên phòng cũ, báo cảnh báo
+						warnings.append({"serial": serial, "message": f"Phòng '{room}' không tồn tại, giữ nguyên phòng cũ"})
+					else:
+						warnings.append({"serial": serial, "message": f"Phòng '{room}' không tồn tại, bỏ qua"})
 				# Match người dùng theo email (cột "Người sử dụng" chỉ để hiển thị)
 				email = (item.get("email") or item.get("assignedEmail") or "").strip()
-				holder_user = resolve_user_link(email) if email else None
-				if holder_user:
-					sync_assigned_users(doc, [holder_user])
-					sync_current_holder_from_assigned(doc)
-					if doc.status == "Standby":
-						doc.status = "PendingDocumentation"
+				if email:
+					holder_user = resolve_user_link(email)
+					if holder_user:
+						sync_assigned_users(doc, [holder_user])
+						sync_current_holder_from_assigned(doc)
+						if doc.status == "Standby":
+							doc.status = "PendingDocumentation"
+					else:
+						warnings.append({"serial": serial, "message": f"Email '{email}' không khớp người dùng nào, bỏ qua"})
 				if is_update:
-					doc.save(ignore_permissions=True)
-					updated_count += 1
+					if device_signature(doc) == sig_before:
+						unchanged_count += 1
+					else:
+						doc.save(ignore_permissions=True)
+						updated_count += 1
 				else:
 					doc.insert(ignore_permissions=True)
 					valid_count += 1
@@ -788,15 +805,15 @@ def bulk_upload_devices(device_type=None):
 
 		frappe.db.commit()
 		added_key = f"added{dt.capitalize()}s"
-		msg_parts = [f"Thêm mới {valid_count}"]
-		if updated_count:
-			msg_parts.append(f"cập nhật {updated_count}")
+		msg_parts = [f"Thêm mới {valid_count}", f"cập nhật {updated_count}", f"không đổi {unchanged_count}"]
 		return {
 			"message": ", ".join(msg_parts) + " thiết bị thành công!",
 			added_key: valid_count,
 			"addedLaptops": valid_count if dt == "laptop" else None,
 			"updated": updated_count,
+			"unchanged": unchanged_count,
 			"errors": errors,
+			"warnings": warnings,
 		}
 	except Exception as e:
 		frappe.db.rollback()

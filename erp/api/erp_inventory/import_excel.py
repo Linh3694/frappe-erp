@@ -13,8 +13,8 @@ from erp.utils.api_response import error_response, validation_error_response
 from erp.api.erp_inventory.inventory_helpers import (
 	DEVICE_TYPES,
 	VALID_STATUSES,
-	_specs_from_doc,
 	apply_specs_to_doc,
+	device_signature,
 	normalize_device_type,
 	parse_request_data,
 	require_migration_role,
@@ -85,20 +85,8 @@ def _pick(row, *names):
 	return ""
 
 
-def _device_signature(doc):
-	"""Chữ ký so sánh để phân biệt 'update' với 'giữ nguyên' khi re-import."""
-	return {
-		"name_display": doc.name_display,
-		"device_subtype": doc.device_subtype,
-		"manufacturer": doc.manufacturer,
-		"release_year": doc.release_year,
-		"status": doc.status,
-		"room": doc.room,
-		"broken_reason": doc.broken_reason,
-		"broken_description": doc.broken_description,
-		"current_holder_user": doc.current_holder_user,
-		"specs": _specs_from_doc(doc),
-	}
+# Chữ ký so sánh dùng chung (đã chuyển sang inventory_helpers.device_signature)
+_device_signature = device_signature
 
 
 def _find_device_by_legacy_or_serial(mongo_id, serial, device_type):

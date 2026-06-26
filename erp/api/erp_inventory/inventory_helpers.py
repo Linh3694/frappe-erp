@@ -276,6 +276,26 @@ def _specs_from_doc(doc) -> Dict[str, Any]:
 	return specs
 
 
+def device_signature(doc) -> Dict[str, Any]:
+	"""Chữ ký so sánh để phân biệt 'update' với 'giữ nguyên' khi re-import.
+
+	Dùng chung cho cả import migration (import_excel) và import hàng loạt từ FE
+	(device.bulk_upload_devices) để hành vi 'Không đổi' nhất quán.
+	"""
+	return {
+		"name_display": doc.name_display,
+		"device_subtype": doc.device_subtype,
+		"manufacturer": doc.manufacturer,
+		"release_year": doc.release_year,
+		"status": doc.status,
+		"room": doc.room,
+		"broken_reason": getattr(doc, "broken_reason", None),
+		"broken_description": getattr(doc, "broken_description", None),
+		"current_holder_user": doc.current_holder_user,
+		"specs": _specs_from_doc(doc),
+	}
+
+
 def get_assignment_history(device_name: str) -> List[Dict[str, Any]]:
 	rows = frappe.get_all(
 		"ERP Inventory Handover Log",
