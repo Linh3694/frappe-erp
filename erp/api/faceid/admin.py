@@ -718,7 +718,7 @@ def delete_device(name):
 
 @frappe.whitelist()
 def get_device_status(name):
-    """Đọc giờ máy + số person/face từ controller, cache vào doc."""
+    """Đọc giờ máy + số person/face + ảnh standby từ controller, cache vào doc."""
     doc = frappe.get_doc("FaceID Device", name)
     ip = _device_ip(name)
     res = gateway_get(f"/api/devices/{ip}/status")
@@ -727,6 +727,15 @@ def get_device_status(name):
     face_count = _extract_isapi_count(status.get("faces") or {}, "faceLibNum", "recordNum", "faceNum")
     time_info = status.get("time") or {}
     device_time = time_info.get("localTime") or time_info.get("LocalTime")
+
+    screen_images = {}
+    try:
+        screen_images = gateway_get(f"/api/devices/{ip}/screen-images") or {}
+    except Exception:
+        frappe.log_error(
+            title=f"FaceID screen images {name}",
+            message=frappe.get_traceback(),
+        )
 
     frappe.db.set_value(
         "FaceID Device",
@@ -746,6 +755,7 @@ def get_device_status(name):
             "device_time": device_time,
             "time_zone": time_info.get("timeZone") or time_info.get("TimeZone"),
             "raw": status,
+            "screen_images": screen_images,
         }
     )
 
