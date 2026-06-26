@@ -156,6 +156,7 @@ def _job_upsert_person(job):
         doc.name,
         {
             "sync_status": "synced",
+            "on_device": 1,
             "last_synced_at": frappe.utils.now(),
             "last_error": None,
             "face_status": "synced" if photo else doc.face_status,
@@ -167,11 +168,25 @@ def _job_upsert_person(job):
 def _job_delete_person(job):
     payload = json.loads(job.payload or "{}") if job.payload else {}
     code = payload.get("external_code")
+    person_name = job.ref_name
     if not code and frappe.db.exists("FaceID Person", job.ref_name):
         doc = frappe.get_doc("FaceID Person", job.ref_name)
         code = doc.external_code
+        person_name = doc.name
     if code:
         gateway_delete(f"/api/persons/{code}")
+    if person_name and frappe.db.exists("FaceID Person", person_name):
+        frappe.db.set_value(
+            "FaceID Person",
+            person_name,
+            {
+                "on_device": 0,
+                "sync_status": "synced",
+                "last_synced_at": frappe.utils.now(),
+                "last_error": None,
+            },
+            update_modified=False,
+        )
 
 
 def _shift_payload(doc) -> dict:

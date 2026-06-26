@@ -18,10 +18,15 @@ def _enqueue(job_type: str, ref_doctype: str, ref_name: str, payload: dict | Non
 
 
 def on_person_changed(doc, method=None, job_type="upsert_person"):
+    # Operator-driven: bỏ qua khi refresh/lấy dữ liệu từ nguồn
+    if getattr(doc.flags, "faceid_refresh", False):
+        return
     _enqueue(job_type, doc.doctype, doc.name)
 
 
 def on_work_shift_changed(doc, method=None):
+    if getattr(doc.flags, "faceid_refresh", False):
+        return
     _enqueue("sync_shift", doc.doctype, doc.name)
 
 

@@ -25,13 +25,8 @@ class FaceIDPerson(Document):
             )
         return self.external_code
 
-    def after_insert(self):
-        self._enqueue_sync("upsert_person")
-
-    def on_update(self):
-        self._enqueue_sync("upsert_person")
-
     def on_trash(self):
+        # Xóa doc → vẫn cần gỡ khỏi máy (operator-driven nhưng trash là ngoại lệ)
         from erp.api.faceid.sync_worker import create_device_sync_job
 
         create_device_sync_job(
@@ -41,8 +36,3 @@ class FaceIDPerson(Document):
             payload={"external_code": self.external_code},
             priority=8,
         )
-
-    def _enqueue_sync(self, job_type):
-        from erp.api.faceid.person_hooks import on_person_changed
-
-        on_person_changed(self, job_type=job_type)
