@@ -598,58 +598,6 @@ def list_gate_events(
 # ---- Devices ----
 
 
-def _extract_isapi_count(data, *keys: str) -> int | None:
-    """Trích số đếm từ response ISAPI lồng nhau."""
-    if not isinstance(data, dict):
-        return None
-    for key in keys:
-        if key in data and data[key] is not None:
-            try:
-                return int(data[key])
-            except (TypeError, ValueError):
-                pass
-    for val in data.values():
-        if isinstance(val, dict):
-            found = _extract_isapi_count(val, *keys)
-            if found is not None:
-                return found
-    return None
-
-
-def _push_device_to_controller(doc) -> dict:
-    """Đẩy metadata + credential xuống controller local."""
-    ip = str(doc.ip).split("/")[0]
-    body: dict = {
-        "name": doc.device_name,
-        "ip": ip,
-        "model": doc.model,
-        "user": doc.username,
-        "https": bool(doc.https),
-        "auth": doc.auth_mode or "auto",
-    }
-    pwd = doc.get_password("password")
-    if pwd:
-        body["password"] = pwd
-
-    if doc.controller_device_id:
-        res = gateway_put(f"/api/devices/{doc.controller_device_id}", body)
-    else:
-        res = gateway_post("/api/devices", body)
-
-    device = res.get("device") if isinstance(res, dict) else None
-    cid = (device or {}).get("id") if device else res.get("id") if isinstance(res, dict) else None
-    if cid and int(cid) != cint(doc.controller_device_id):
-        frappe.db.set_value(
-            "FaceID Device",
-            doc.name,
-            "controller_device_id",
-            int(cid),
-            update_modified=False,
-        )
-        doc.controller_device_id = int(cid)
-    return device or res or {}
-
-
 def _device_ip(name: str) -> str:
     ip = frappe.db.get_value("FaceID Device", name, "ip")
     if not ip:
@@ -700,7 +648,6 @@ def save_device(data):
         if new_password:
             doc.password = new_password
     doc.save(ignore_permissions=True)
-    _push_device_to_controller(doc)
     return _ok(doc.as_dict())
 
 
@@ -719,45 +666,10 @@ def delete_device(name):
 @frappe.whitelist()
 def get_device_status(name):
     """Đọc giờ máy + số person/face + ảnh standby từ controller, cache vào doc."""
+    from erp.api.faceid.device_gateway import fetch_device_status
+
     doc = frappe.get_doc("FaceID Device", name)
-    ip = _device_ip(name)
-    res = gateway_get(f"/api/devices/{ip}/status")
-    status = res.get("status") or {}
-    person_count = _extract_isapi_count(status.get("persons") or {}, "userNumber", "recordNum")
-    face_count = _extract_isapi_count(status.get("faces") or {}, "faceLibNum", "recordNum", "faceNum")
-    time_info = status.get("time") or {}
-    device_time = time_info.get("localTime") or time_info.get("LocalTime")
-
-    screen_images = {}
-    try:
-        screen_images = gateway_get(f"/api/devices/{ip}/screen-images") or {}
-    except Exception:
-        frappe.log_error(
-            title=f"FaceID screen images {name}",
-            message=frappe.get_traceback(),
-        )
-
-    frappe.db.set_value(
-        "FaceID Device",
-        name,
-        {
-            "person_count": person_count,
-            "face_count": face_count,
-            "device_time": device_time,
-            "last_status_at": frappe.utils.now(),
-        },
-        update_modified=False,
-    )
-    return _ok(
-        {
-            "person_count": person_count,
-            "face_count": face_count,
-            "device_time": device_time,
-            "time_zone": time_info.get("timeZone") or time_info.get("TimeZone"),
-            "raw": status,
-            "screen_images": screen_images,
-        }
-    )
+    return _ok(fetch_device_status(doc))
 
 
 @frappe.whitelist()
@@ -804,36 +716,40 @@ def provision_device(name):
 @frappe.whitelist()
 def pull_devices_from_controller():
     """Đồng bộ danh sách thiết bị từ controller."""
-    res = gateway_get("/api/devices")
-    devices = res.get("devices") or []
-    synced = 0
-    for d in devices:
-        ip = str(d.get("ip", "")).split("/")[0]
-        existing = frappe.db.get_value("FaceID Device", {"ip": ip}, "name")
-        if existing:
-            frappe.db.set_value(
-                "FaceID Device",
-                existing,
-                {
-                    "controller_device_id": d.get("id"),
-                    "status": d.get("status") or "unknown",
-                    "last_seen": d.get("last_seen"),
-                },
-                update_modified=False,
-            )
-        else:
-            frappe.get_doc(
-                {
-                    "doctype": "FaceID Device",
-                    "device_name": d.get("name") or ip,
-                    "ip": ip,
-                    "controller_device_id": d.get("id"),
-                    "model": d.get("model"),
-                    "status": d.get("status") or "unknown",
-                }
-            ).insert(ignore_permissions=True)
-        synced += 1
-    return _ok({"synced": synced})
+    frappe.flags.faceid_skip_controller_push = True
+    try:
+        res = gateway_get("/api/devices")
+        devices = res.get("devices") or []
+        synced = 0
+        for d in devices:
+            ip = str(d.get("ip", "")).split("/")[0]
+            existing = frappe.db.get_value("FaceID Device", {"ip": ip}, "name")
+            if existing:
+                frappe.db.set_value(
+                    "FaceID Device",
+                    existing,
+                    {
+                        "controller_device_id": d.get("id"),
+                        "status": d.get("status") or "unknown",
+                        "last_seen": d.get("last_seen"),
+                    },
+                    update_modified=False,
+                )
+            else:
+                frappe.get_doc(
+                    {
+                        "doctype": "FaceID Device",
+                        "device_name": d.get("name") or ip,
+                        "ip": ip,
+                        "controller_device_id": d.get("id"),
+                        "model": d.get("model"),
+                        "status": d.get("status") or "unknown",
+                    }
+                ).insert(ignore_permissions=True)
+            synced += 1
+        return _ok({"synced": synced})
+    finally:
+        frappe.flags.faceid_skip_controller_push = False
 
 
 # ---- Sync status ----

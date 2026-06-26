@@ -11,16 +11,35 @@ class FaceIDDevice(Document):
         if not self.ip:
             frappe.throw("IP thiết bị là bắt buộc")
 
+    def after_insert(self):
+        self._sync_to_controller()
+
+    def on_update(self):
+        self._sync_to_controller()
+
     def on_trash(self):
         """Xóa thiết bị trên controller local khi xóa doc Frappe."""
-        if not self.controller_device_id:
-            return
         try:
-            from erp.utils.faceid_gateway import gateway_delete
+            from erp.api.faceid.device_gateway import delete_device_from_controller
 
-            gateway_delete(f"/api/devices/{self.controller_device_id}")
+            delete_device_from_controller(self.controller_device_id)
         except Exception:
             frappe.log_error(
                 title=f"FaceID on_trash device {self.name}",
                 message=frappe.get_traceback(),
             )
+
+    def _sync_to_controller(self):
+        """Đẩy máy xuống controller sau khi lưu trên Frappe."""
+        if frappe.flags.get("faceid_skip_controller_push"):
+            return
+        try:
+            from erp.api.faceid.device_gateway import push_device_to_controller
+
+            push_device_to_controller(self)
+        except Exception as e:
+            frappe.log_error(
+                title=f"FaceID push device {self.name}",
+                message=frappe.get_traceback(),
+            )
+            frappe.throw(f"Không đẩy được xuống controller: {e}")
