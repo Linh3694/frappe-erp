@@ -106,34 +106,90 @@ def _txt(v):
     return re.sub(r"[ \t]+", " ", str(v)).strip()
 
 
+def _files_dirs(sub):
+    """Thư mục files khả dĩ (anchor cả tương đối lẫn tuyệt đối) để né lệch cwd."""
+    import os
+    dirs = []
+    try:
+        dirs.append(frappe.get_site_path(sub, "files"))
+    except Exception:
+        pass
+    try:
+        site = getattr(frappe.local, "site", None)
+        bench = frappe.utils.get_bench_path()
+        if site and bench:
+            dirs.append(os.path.join(bench, "sites", site, sub, "files"))
+    except Exception:
+        pass
+    return dirs
+
+
 def _resolve_path(path):
     """
     Cho phép truyền:
-      - URL file Frappe: '/private/files/x.xlsx' -> sites/<site>/private/files/x.xlsx
-                         '/files/x.xlsx'         -> sites/<site>/public/files/x.xlsx
-      - hoặc path filesystem tuyệt đối (dùng nguyên).
-    Thử cả bản giải mã %20 nếu cần.
+      - URL file Frappe: '/private/files/x.xlsx' hoặc '/files/x.xlsx'
+      - path filesystem (tuyệt đối/tương đối).
+    Bền với: cwd khác sites, lệch chuẩn hoá Unicode (NFC/NFD), %20, Frappe đổi tên file.
+    Khi không match đúng tên, tìm theo TIỀN TỐ ASCII (vd 'TSxIT') trong thư mục files.
     """
     import os
+    import glob
+    import unicodedata
     from urllib.parse import unquote
 
-    candidates = []
-    if path.startswith("/private/files/"):
-        name = path[len("/private/files/"):]
-        candidates += [frappe.get_site_path("private", "files", name),
-                       frappe.get_site_path("private", "files", unquote(name))]
-    elif path.startswith("/files/"):
-        name = path[len("/files/"):]
-        candidates += [frappe.get_site_path("public", "files", name),
-                       frappe.get_site_path("public", "files", unquote(name))]
-    else:
-        candidates += [path, unquote(path)]
-
-    for c in candidates:
-        if c and os.path.exists(c):
+    # 1) path filesystem trực tiếp
+    for c in (path, unquote(path)):
+        if c and os.path.isfile(c):
             return c
-    # không thấy -> trả candidate đầu để openpyxl báo lỗi rõ ràng
-    return candidates[0]
+
+    if path.startswith("/private/files/") or path.startswith("/files/"):
+        sub = "private" if path.startswith("/private/files/") else "public"
+        base = unquote(path.split("/")[-1])
+        name_variants = {base,
+                        unicodedata.normalize("NFC", base),
+                        unicodedata.normalize("NFD", base)}
+
+        dirs = _files_dirs(sub)
+
+        # 2) thử tên chính xác (mọi biến thể chuẩn hoá) trong mọi thư mục
+        for d in dirs:
+            for nm in name_variants:
+                cand = os.path.join(d, nm)
+                if os.path.isfile(cand):
+                    return cand
+
+        # 3) glob theo tiền tố ASCII đầu (chống lệch Unicode + đổi tên)
+        ascii_prefix = ""
+        for ch in base:
+            if ord(ch) < 128 and ch not in "*?[]":
+                ascii_prefix += ch
+            else:
+                break
+        if len(ascii_prefix) >= 3:
+            ext = os.path.splitext(base)[1] or ".xlsx"
+            for d in dirs:
+                hits = (glob.glob(os.path.join(d, ascii_prefix + "*" + ext))
+                       or glob.glob(os.path.join(d, ascii_prefix + "*")))
+                xlsx = [h for h in hits if h.lower().endswith(".xlsx")]
+                if len(xlsx) == 1:
+                    return xlsx[0]
+                if len(hits) == 1:
+                    return hits[0]
+                if xlsx:
+                    return xlsx[0]
+
+        # 4) tra DocType File theo file_url rồi lấy full path
+        for url in {path, unquote(path)}:
+            fn = frappe.db.get_value("File", {"file_url": url}, "name")
+            if fn:
+                try:
+                    fp = frappe.get_doc("File", fn).get_full_path()
+                    if os.path.isfile(fp):
+                        return fp
+                except Exception:
+                    pass
+
+    return path
 
 
 def _open_data_sheet(path):
