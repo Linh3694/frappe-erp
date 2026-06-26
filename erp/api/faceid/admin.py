@@ -19,6 +19,19 @@ def _err(message, data=None):
     return {"success": False, "message": message, "data": data}
 
 
+def _apply_person_campus_filter(filters: dict, person_type: str | None, campus_id: str | None):
+    """
+    Lọc campus cho FaceID Person.
+    NV (staff) theo user_management — User không gắn campus_id, bỏ qua filter campus.
+    HS/PH lấy từ CRM Student/Guardian có campus_id.
+    """
+    if not campus_id:
+        return
+    if person_type == "staff":
+        return
+    filters["campus_id"] = campus_id
+
+
 # ---- Persons ----
 
 
@@ -35,8 +48,7 @@ def list_persons(
     filters = {}
     if person_type:
         filters["person_type"] = person_type
-    if campus_id:
-        filters["campus_id"] = campus_id
+    _apply_person_campus_filter(filters, person_type, campus_id)
     if sync_status:
         filters["sync_status"] = sync_status
     if is_active is not None and str(is_active) != "":
@@ -146,8 +158,7 @@ def sync_persons(person_type=None, campus_id=None):
     filters = {}
     if person_type:
         filters["person_type"] = person_type
-    if campus_id:
-        filters["campus_id"] = campus_id
+    _apply_person_campus_filter(filters, person_type, campus_id)
 
     upsert_count = delete_count = 0
     persons = frappe.get_all(

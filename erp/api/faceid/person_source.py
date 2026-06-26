@@ -158,7 +158,7 @@ def _resolve_staff_external_code(user_name: str, user_row: dict | None = None) -
 
 
 def _iter_staff_users() -> list[dict]:
-    """User hệ thống (loại trừ portal phụ huynh) — nguồn nhân viên FaceID."""
+    """User hệ thống — cùng tiêu chí user_management.get_users (không lọc campus)."""
     return frappe.db.sql(
         """
         SELECT u.name, u.full_name, u.email
@@ -167,11 +167,10 @@ def _iter_staff_users() -> list[dict]:
           AND u.user_type = 'System User'
           AND u.name NOT IN ('Guest', 'Administrator')
           AND u.email NOT LIKE %s
-          AND u.email NOT LIKE %s
         ORDER BY u.full_name
         LIMIT 10000
         """,
-        ("%@parent.%", "%@parent-portal.%"),
+        ("%@parent.wellspring.edu.vn",),
         as_dict=True,
     )
 
