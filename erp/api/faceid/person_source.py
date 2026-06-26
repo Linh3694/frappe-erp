@@ -96,10 +96,84 @@ def _student_photo_map(student_ids: list[str], school_year: str | None) -> dict[
 def _user_extra_fields() -> list[str]:
     """Các cột User tùy chọn (custom field)."""
     cols = []
-    for col in ("job_title", "designation", "department", "user_image"):
+    for col in ("job_title", "designation", "department", "user_image", "username", "employee_code"):
         if frappe.db.has_column("User", col):
             cols.append(col)
     return cols
+
+
+def _load_staff_user_row(user_name: str) -> dict | None:
+    """Đọc User kèm custom field (defensive)."""
+    try:
+        doc = frappe.get_cached_doc("User", user_name)
+    except Exception:
+        return None
+    row = {
+        "name": doc.name,
+        "full_name": doc.full_name or doc.name,
+        "email": getattr(doc, "email", None) or doc.name,
+    }
+    for col in _user_extra_fields():
+        if hasattr(doc, col):
+            row[col] = getattr(doc, col)
+    return row
+
+
+def _resolve_staff_external_code(user_name: str, user_row: dict | None = None) -> str | None:
+    """
+    Suy mã nhân viên để đồng bộ FaceID.
+    Ưu tiên: User.employee_code → Employee → username → local-part email.
+    """
+    row = user_row or _load_staff_user_row(user_name)
+    if not row:
+        return None
+
+    code = (row.get("employee_code") or "").strip()
+    if code:
+        return code
+
+    if frappe.db.table_exists("Employee"):
+        emp = frappe.db.get_value(
+            "Employee",
+            {"user_id": user_name},
+            ["employee_number", "name"],
+            as_dict=True,
+        )
+        if emp:
+            emp_code = (emp.get("employee_number") or emp.get("name") or "").strip()
+            if emp_code:
+                return emp_code
+
+    username = (row.get("username") or "").strip()
+    if username:
+        return username
+
+    email = (row.get("email") or user_name).strip()
+    if "@" in email:
+        local = email.split("@", 1)[0].strip()
+        if local:
+            return local
+
+    return email or user_name
+
+
+def _iter_staff_users() -> list[dict]:
+    """User hệ thống (loại trừ portal phụ huynh) — nguồn nhân viên FaceID."""
+    return frappe.db.sql(
+        """
+        SELECT u.name, u.full_name, u.email
+        FROM `tabUser` u
+        WHERE u.enabled = 1
+          AND u.user_type = 'System User'
+          AND u.name NOT IN ('Guest', 'Administrator')
+          AND u.email NOT LIKE %s
+          AND u.email NOT LIKE %s
+        ORDER BY u.full_name
+        LIMIT 10000
+        """,
+        ("%@parent.%", "%@parent-portal.%"),
+        as_dict=True,
+    )
 
 
 def _find_existing_person(values: dict) -> str | None:
@@ -313,30 +387,29 @@ def refresh_guardians(campus_id: str | None = None) -> dict:
 
 
 def refresh_staff() -> dict:
-    extra = _user_extra_fields()
-    fields = ["name", "full_name", "employee_code"] + extra
-    users = frappe.get_all(
-        "User",
-        filters={"enabled": 1, "employee_code": ["is", "set"]},
-        fields=fields,
-        limit=10000,
-    )
-    created = updated = conflicts = 0
+    users = _iter_staff_users()
+    created = updated = conflicts = skipped = 0
     for u in users:
-        if not u.employee_code:
+        row = _load_staff_user_row(u.name)
+        if not row:
+            skipped += 1
+            continue
+        external_code = _resolve_staff_external_code(u.name, row)
+        if not external_code:
+            skipped += 1
             continue
         position = ""
-        if hasattr(u, "job_title") and u.job_title:
-            position = u.job_title
-        elif hasattr(u, "designation") and u.designation:
-            position = u.designation
-        department = getattr(u, "department", None) or ""
-        photo_url = getattr(u, "user_image", None) or get_user_photo_url(u.name)
+        if row.get("job_title"):
+            position = str(row["job_title"])
+        elif row.get("designation"):
+            position = str(row["designation"])
+        department = (row.get("department") or "").strip()
+        photo_url = row.get("user_image") or get_user_photo_url(u.name)
         _, action = _upsert_person(
             {
                 "person_type": "staff",
-                "external_code": u.employee_code,
-                "display_name": u.full_name or u.name,
+                "external_code": external_code,
+                "display_name": row.get("full_name") or u.name,
                 "position": position,
                 "department": department,
                 "photo_url": photo_url,
@@ -353,6 +426,7 @@ def refresh_staff() -> dict:
         "created": created,
         "updated": updated,
         "conflicts": conflicts,
+        "skipped": skipped,
         "total_candidates": len(users),
     }
 

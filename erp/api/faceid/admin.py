@@ -103,6 +103,8 @@ def refresh_persons_from_source(person_type, campus_id=None, class_id=None):
     msg = f"Đã lấy dữ liệu: {stats.get('created', 0)} mới, {stats.get('updated', 0)} cập nhật"
     if stats.get("conflicts"):
         msg += f", {stats['conflicts']} bỏ qua (trùng mã loại khác)"
+    if stats.get("skipped"):
+        msg += f", {stats['skipped']} bỏ qua (không đọc được user)"
     return _ok(stats, message=msg)
 
 
