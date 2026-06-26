@@ -23,7 +23,7 @@ def _read_file_bytes(file_url: str | None) -> bytes | None:
 def get_student_photo_bytes(crm_student: str) -> bytes | None:
     """Ảnh học sinh từ SIS Photo (ưu tiên năm học active)."""
     current_school_year = frappe.db.get_value(
-        "SIS School Year", {"is_active": 1}, "name"
+        "SIS School Year", {"is_enable": 1}, "name"
     )
     photos = frappe.db.sql(
         """

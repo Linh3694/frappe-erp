@@ -490,7 +490,7 @@ def delete_pickup_auth(name):
 def sync_family_pickup(campus_id=None):
     """Tạo ủy quyền đón từ CRM Family Relationship (ủy quyền đứng)."""
     today = date.today()
-    school_year = frappe.db.get_value("SIS School Year", {"is_active": 1}, ["start_date", "end_date"], as_dict=True)
+    school_year = frappe.db.get_value("SIS School Year", {"is_enable": 1}, ["start_date", "end_date"], as_dict=True)
     valid_from = school_year.start_date if school_year else today
     valid_to = school_year.end_date if school_year else today
     rels = frappe.get_all(
