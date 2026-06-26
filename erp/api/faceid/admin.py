@@ -16,7 +16,13 @@ from erp.api.faceid.sync_worker import (
 
 # Lô nhỏ chạy inline trong request; lớn hơn → worker nền (tránh timeout FE)
 SYNC_INLINE_MAX = 5
-from erp.utils.faceid_gateway import gateway_get, gateway_post
+from erp.utils.faceid_gateway import (
+    gateway_delete,
+    gateway_get,
+    gateway_post,
+    gateway_post_file,
+    gateway_put,
+)
 
 
 def _ok(data=None, message="OK"):
@@ -165,11 +171,12 @@ def set_persons_active(names, active=1):
 
 
 @frappe.whitelist()
-def sync_persons(person_type=None, campus_id=None, force=0):
+def sync_persons(person_type=None, campus_id=None, force=0, device_names=None):
     """
     Đồng bộ dữ liệu xuống controller local:
     - is_active=1 → upsert_person (force=1: đẩy lại tất cả đang bật)
     - is_active=0 & on_device=1 → delete_person
+    device_names: danh sách FaceID Device name — chỉ đẩy xuống các máy đã chọn.
     Chạy inline nếu ≤ SYNC_INLINE_MAX job; lớn hơn → worker nền (tránh timeout HTTP).
     """
     force = cint(force)
@@ -177,6 +184,21 @@ def sync_persons(person_type=None, campus_id=None, force=0):
     if person_type:
         filters["person_type"] = person_type
     _apply_person_campus_filter(filters, person_type, campus_id)
+
+    # Resolve máy đích (picker tạm thời — không ghi vào target_devices)
+    device_ips: list[str] | None = None
+    if device_names:
+        raw_names = frappe.parse_json(device_names) if isinstance(device_names, str) else device_names
+        if raw_names:
+            device_ips = []
+            for dev_name in raw_names:
+                ip = frappe.db.get_value("FaceID Device", dev_name, "ip")
+                if ip:
+                    device_ips.append(str(ip).split("/")[0])
+            if not device_ips:
+                return _err("Không tìm thấy IP cho các máy đã chọn")
+
+    sync_payload = {"device_ips": device_ips} if device_ips else None
 
     upsert_count = delete_count = 0
     job_names: list[str] = []
@@ -190,7 +212,13 @@ def sync_persons(person_type=None, campus_id=None, force=0):
         if _person_is_active(p):
             if force or p.sync_status != "synced" or not cint(p.on_device):
                 job_names.append(
-                    create_device_sync_job("upsert_person", "FaceID Person", p.name, priority=8)
+                    create_device_sync_job(
+                        "upsert_person",
+                        "FaceID Person",
+                        p.name,
+                        payload=sync_payload,
+                        priority=8,
+                    )
                 )
                 upsert_count += 1
         elif cint(p.on_device):
@@ -199,7 +227,7 @@ def sync_persons(person_type=None, campus_id=None, force=0):
                     "delete_person",
                     "FaceID Person",
                     p.name,
-                    payload={"external_code": p.external_code},
+                    payload={"external_code": p.external_code, **(sync_payload or {})},
                     priority=8,
                 )
             )
@@ -570,11 +598,88 @@ def list_gate_events(
 # ---- Devices ----
 
 
+def _extract_isapi_count(data, *keys: str) -> int | None:
+    """Trích số đếm từ response ISAPI lồng nhau."""
+    if not isinstance(data, dict):
+        return None
+    for key in keys:
+        if key in data and data[key] is not None:
+            try:
+                return int(data[key])
+            except (TypeError, ValueError):
+                pass
+    for val in data.values():
+        if isinstance(val, dict):
+            found = _extract_isapi_count(val, *keys)
+            if found is not None:
+                return found
+    return None
+
+
+def _push_device_to_controller(doc) -> dict:
+    """Đẩy metadata + credential xuống controller local."""
+    ip = str(doc.ip).split("/")[0]
+    body: dict = {
+        "name": doc.device_name,
+        "ip": ip,
+        "model": doc.model,
+        "user": doc.username,
+        "https": bool(doc.https),
+        "auth": doc.auth_mode or "auto",
+    }
+    pwd = doc.get_password("password")
+    if pwd:
+        body["password"] = pwd
+
+    if doc.controller_device_id:
+        res = gateway_put(f"/api/devices/{doc.controller_device_id}", body)
+    else:
+        res = gateway_post("/api/devices", body)
+
+    device = res.get("device") if isinstance(res, dict) else None
+    cid = (device or {}).get("id") if device else res.get("id") if isinstance(res, dict) else None
+    if cid and int(cid) != cint(doc.controller_device_id):
+        frappe.db.set_value(
+            "FaceID Device",
+            doc.name,
+            "controller_device_id",
+            int(cid),
+            update_modified=False,
+        )
+        doc.controller_device_id = int(cid)
+    return device or res or {}
+
+
+def _device_ip(name: str) -> str:
+    ip = frappe.db.get_value("FaceID Device", name, "ip")
+    if not ip:
+        frappe.throw(f"Không tìm thấy thiết bị {name}")
+    return str(ip).split("/")[0]
+
+
 @frappe.whitelist()
 def list_devices():
     rows = frappe.get_all(
         "FaceID Device",
-        fields=["name", "device_name", "ip", "gate_type", "is_pickup_gate", "status", "last_seen"],
+        fields=[
+            "name",
+            "device_name",
+            "ip",
+            "gate_type",
+            "is_pickup_gate",
+            "status",
+            "last_seen",
+            "username",
+            "https",
+            "auth_mode",
+            "controller_device_id",
+            "campus_id",
+            "model",
+            "person_count",
+            "face_count",
+            "device_time",
+            "last_status_at",
+        ],
         order_by="device_name asc",
     )
     return _ok(rows)
@@ -584,13 +689,100 @@ def list_devices():
 def save_device(data):
     payload = frappe.parse_json(data) if isinstance(data, str) else data
     name = payload.get("name")
+    new_password = payload.pop("password", None)
     if name and frappe.db.exists("FaceID Device", name):
         doc = frappe.get_doc("FaceID Device", name)
         doc.update(payload)
+        if new_password:
+            doc.password = new_password
     else:
         doc = frappe.get_doc({"doctype": "FaceID Device", **payload})
+        if new_password:
+            doc.password = new_password
     doc.save(ignore_permissions=True)
+    _push_device_to_controller(doc)
     return _ok(doc.as_dict())
+
+
+@frappe.whitelist()
+def delete_device(name):
+    doc = frappe.get_doc("FaceID Device", name)
+    if doc.controller_device_id:
+        try:
+            gateway_delete(f"/api/devices/{doc.controller_device_id}")
+        except Exception:
+            frappe.log_error(title=f"FaceID delete device {name}", message=frappe.get_traceback())
+    frappe.delete_doc("FaceID Device", name, ignore_permissions=True)
+    return _ok(message="Đã xóa thiết bị")
+
+
+@frappe.whitelist()
+def get_device_status(name):
+    """Đọc giờ máy + số person/face từ controller, cache vào doc."""
+    doc = frappe.get_doc("FaceID Device", name)
+    ip = _device_ip(name)
+    res = gateway_get(f"/api/devices/{ip}/status")
+    status = res.get("status") or {}
+    person_count = _extract_isapi_count(status.get("persons") or {}, "userNumber", "recordNum")
+    face_count = _extract_isapi_count(status.get("faces") or {}, "faceLibNum", "recordNum", "faceNum")
+    time_info = status.get("time") or {}
+    device_time = time_info.get("localTime") or time_info.get("LocalTime")
+
+    frappe.db.set_value(
+        "FaceID Device",
+        name,
+        {
+            "person_count": person_count,
+            "face_count": face_count,
+            "device_time": device_time,
+            "last_status_at": frappe.utils.now(),
+        },
+        update_modified=False,
+    )
+    return _ok(
+        {
+            "person_count": person_count,
+            "face_count": face_count,
+            "device_time": device_time,
+            "time_zone": time_info.get("timeZone") or time_info.get("TimeZone"),
+            "raw": status,
+        }
+    )
+
+
+@frappe.whitelist()
+def probe_device(name):
+    ip = _device_ip(name)
+    res = gateway_post(f"/api/devices/{ip}/probe", {})
+    return _ok(res)
+
+
+@frappe.whitelist()
+def list_device_screen_images(name):
+    ip = _device_ip(name)
+    res = gateway_get(f"/api/devices/{ip}/screen-images")
+    return _ok(res)
+
+
+@frappe.whitelist()
+def upload_device_screen_image(name):
+    ip = _device_ip(name)
+    upload = frappe.request.files.get("file")
+    if not upload:
+        frappe.throw("Thiếu file ảnh (field `file`)")
+    res = gateway_post_file(
+        f"/api/devices/{ip}/screen-image",
+        upload.stream.read(),
+        filename=upload.filename or "screen.jpg",
+    )
+    return _ok(res)
+
+
+@frappe.whitelist()
+def delete_device_screen_image(name, uuid):
+    ip = _device_ip(name)
+    res = gateway_delete(f"/api/devices/{ip}/screen-image/{uuid}")
+    return _ok(res)
 
 
 @frappe.whitelist()

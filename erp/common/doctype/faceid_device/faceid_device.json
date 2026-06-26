@@ -8,12 +8,23 @@
   "device_name",
   "ip",
   "controller_device_id",
+  "section_credentials",
+  "username",
+  "password",
+  "https",
+  "auth_mode",
+  "column_break_creds",
   "gate_type",
   "campus_id",
   "is_pickup_gate",
   "model",
+  "section_status",
   "status",
-  "last_seen"
+  "last_seen",
+  "person_count",
+  "face_count",
+  "device_time",
+  "last_status_at"
  ],
  "fields": [
   {
@@ -34,7 +45,40 @@
   {
    "fieldname": "controller_device_id",
    "fieldtype": "Int",
-   "label": "ID trên Controller"
+   "label": "ID trên Controller",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_credentials",
+   "fieldtype": "Section Break",
+   "label": "Đăng nhập thiết bị"
+  },
+  {
+   "fieldname": "username",
+   "fieldtype": "Data",
+   "label": "Username ISAPI"
+  },
+  {
+   "fieldname": "password",
+   "fieldtype": "Password",
+   "label": "Password ISAPI"
+  },
+  {
+   "default": "0",
+   "fieldname": "https",
+   "fieldtype": "Check",
+   "label": "HTTPS"
+  },
+  {
+   "default": "auto",
+   "fieldname": "auth_mode",
+   "fieldtype": "Select",
+   "label": "Chế độ xác thực",
+   "options": "auto\ndigest\nsession"
+  },
+  {
+   "fieldname": "column_break_creds",
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "gate_type",
@@ -61,6 +105,11 @@
    "label": "Model"
   },
   {
+   "fieldname": "section_status",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái máy (cache)"
+  },
+  {
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Trạng thái",
@@ -71,12 +120,37 @@
   {
    "fieldname": "last_seen",
    "fieldtype": "Datetime",
-   "label": "Lần thấy cuối"
+   "label": "Lần thấy cuối",
+   "read_only": 1
+  },
+  {
+   "fieldname": "person_count",
+   "fieldtype": "Int",
+   "label": "Số person trên máy",
+   "read_only": 1
+  },
+  {
+   "fieldname": "face_count",
+   "fieldtype": "Int",
+   "label": "Số face trên máy",
+   "read_only": 1
+  },
+  {
+   "fieldname": "device_time",
+   "fieldtype": "Data",
+   "label": "Giờ máy",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_status_at",
+   "fieldtype": "Datetime",
+   "label": "Lần cập nhật trạng thái",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-25 00:00:00.000000",
+ "modified": "2026-06-26 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Common",
  "name": "FaceID Device",
