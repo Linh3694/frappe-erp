@@ -8,6 +8,8 @@
   "person_type",
   "external_code",
   "display_name",
+  "position",
+  "department",
   "campus_id",
   "crm_student",
   "crm_guardian",
@@ -17,8 +19,12 @@
   "valid_to",
   "target_devices",
   "photo_file",
+  "photo_url",
+  "is_active",
+  "on_device",
   "face_status",
   "sync_status",
+  "source_synced_at",
   "last_synced_at",
   "last_error"
  ],
@@ -45,6 +51,18 @@
    "in_list_view": 1,
    "label": "Tên hiển thị",
    "reqd": 1
+  },
+  {
+   "fieldname": "position",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Chức vụ"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Phòng ban"
   },
   {
    "fieldname": "campus_id",
@@ -98,6 +116,24 @@
    "label": "Ảnh cache"
   },
   {
+   "fieldname": "photo_url",
+   "fieldtype": "Small Text",
+   "label": "URL ảnh nguồn"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Kích hoạt"
+  },
+  {
+   "default": "0",
+   "fieldname": "on_device",
+   "fieldtype": "Check",
+   "label": "Đã có trên máy"
+  },
+  {
    "fieldname": "face_status",
    "fieldtype": "Select",
    "label": "Trạng thái ảnh",
@@ -111,6 +147,11 @@
    "options": "pending\nsynced\nerror",
    "default": "pending",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "source_synced_at",
+   "fieldtype": "Datetime",
+   "label": "Lần lấy dữ liệu nguồn"
   },
   {
    "fieldname": "last_synced_at",

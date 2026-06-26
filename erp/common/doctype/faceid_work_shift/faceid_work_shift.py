@@ -13,13 +13,4 @@ class FaceIDWorkShift(Document):
             if row.start_time and row.end_time and str(row.start_time) >= str(row.end_time):
                 frappe.throw(f"Thứ {row.weekday}: giờ bắt đầu phải nhỏ hơn giờ kết thúc")
 
-    def after_insert(self):
-        self._enqueue_sync()
-
-    def on_update(self):
-        self._enqueue_sync()
-
-    def _enqueue_sync(self):
-        from erp.api.faceid.person_hooks import on_work_shift_changed
-
-        on_work_shift_changed(self)
+    # Operator-driven: không auto sync — admin bấm "Áp dụng xuống máy"

@@ -23,7 +23,15 @@ def _err(message, data=None):
 
 
 @frappe.whitelist()
-def list_persons(person_type=None, campus_id=None, sync_status=None, limit=100, offset=0):
+def list_persons(
+    person_type=None,
+    campus_id=None,
+    sync_status=None,
+    is_active=None,
+    search=None,
+    limit=100,
+    offset=0,
+):
     filters = {}
     if person_type:
         filters["person_type"] = person_type
@@ -31,28 +39,136 @@ def list_persons(person_type=None, campus_id=None, sync_status=None, limit=100, 
         filters["campus_id"] = campus_id
     if sync_status:
         filters["sync_status"] = sync_status
+    if is_active is not None and str(is_active) != "":
+        filters["is_active"] = int(is_active)
+
+    or_filters = None
+    if search:
+        q = f"%{search.strip()}%"
+        or_filters = [
+            ["display_name", "like", q],
+            ["external_code", "like", q],
+            ["position", "like", q],
+            ["department", "like", q],
+        ]
+
     rows = frappe.get_all(
         "FaceID Person",
         filters=filters,
+        or_filters=or_filters,
         fields=[
             "name",
             "person_type",
             "external_code",
             "display_name",
+            "position",
+            "department",
+            "photo_url",
             "campus_id",
             "work_shift",
+            "is_active",
+            "on_device",
             "face_status",
             "sync_status",
             "last_synced_at",
             "last_error",
             "valid_from",
             "valid_to",
+            "source_synced_at",
         ],
         order_by="modified desc",
         limit=int(limit),
         start=int(offset),
     )
-    return _ok(rows)
+    total = frappe.db.count("FaceID Person", filters=filters)
+    if or_filters:
+        total = len(
+            frappe.get_all(
+                "FaceID Person",
+                filters=filters,
+                or_filters=or_filters,
+                pluck="name",
+                limit=0,
+            )
+        )
+    return _ok({"items": rows, "total": total})
+
+
+@frappe.whitelist()
+def refresh_persons_from_source(person_type, campus_id=None, class_id=None):
+    """Lấy dữ liệu từ nguồn CRM/SIS/User và upsert vào FaceID Person."""
+    from erp.api.faceid.person_source import refresh_persons_from_source as _refresh
+
+    stats = _refresh(person_type, campus_id, class_id)
+    return _ok(stats, message=f"Đã lấy dữ liệu: {stats.get('created', 0)} mới, {stats.get('updated', 0)} cập nhật")
+
+
+@frappe.whitelist()
+def set_person_active(name, active=1):
+    """Bật/tắt kích hoạt person (staged — chưa đẩy xuống máy)."""
+    doc = frappe.get_doc("FaceID Person", name)
+    doc.is_active = int(active)
+    doc.sync_status = "pending"
+    doc.flags.faceid_refresh = 1
+    doc.save(ignore_permissions=True)
+    return _ok(doc.as_dict())
+
+
+@frappe.whitelist()
+def set_persons_active(names, active=1):
+    """Bật/tắt hàng loạt."""
+    name_list = frappe.parse_json(names) if isinstance(names, str) else names
+    updated = 0
+    for n in name_list or []:
+        if not frappe.db.exists("FaceID Person", n):
+            continue
+        doc = frappe.get_doc("FaceID Person", n)
+        doc.is_active = int(active)
+        doc.sync_status = "pending"
+        doc.flags.faceid_refresh = 1
+        doc.save(ignore_permissions=True)
+        updated += 1
+    return _ok({"updated": updated})
+
+
+@frappe.whitelist()
+def sync_persons(person_type=None, campus_id=None):
+    """
+    Đồng bộ dữ liệu xuống controller local:
+    - is_active=1 & cần sync → upsert_person
+    - is_active=0 & on_device=1 → delete_person
+    """
+    filters = {}
+    if person_type:
+        filters["person_type"] = person_type
+    if campus_id:
+        filters["campus_id"] = campus_id
+
+    upsert_count = delete_count = 0
+    persons = frappe.get_all(
+        "FaceID Person",
+        filters=filters,
+        fields=["name", "is_active", "on_device", "sync_status", "external_code"],
+        limit=10000,
+    )
+    for p in persons:
+        if p.is_active:
+            if p.sync_status != "synced" or not p.on_device:
+                create_device_sync_job("upsert_person", "FaceID Person", p.name, priority=8)
+                upsert_count += 1
+        elif p.on_device:
+            create_device_sync_job(
+                "delete_person",
+                "FaceID Person",
+                p.name,
+                payload={"external_code": p.external_code},
+                priority=8,
+            )
+            delete_count += 1
+    return _ok(
+        {"upsert_queued": upsert_count, "delete_queued": delete_count},
+        message=f"Đã xếp hàng: {upsert_count} đẩy xuống, {delete_count} xóa khỏi máy",
+    )
 
 
 @frappe.whitelist()
@@ -87,101 +203,36 @@ def delete_person(name):
 
 @frappe.whitelist()
 def resync_person(name):
-    create_device_sync_job("upsert_person", "FaceID Person", name, priority=8)
-    return _ok(message="Đã xếp hàng sync person")
+    doc = frappe.get_doc("FaceID Person", name)
+    if doc.is_active:
+        create_device_sync_job("upsert_person", "FaceID Person", name, priority=8)
+        return _ok(message="Đã xếp hàng sync person")
+    if doc.on_device:
+        create_device_sync_job(
+            "delete_person",
+            "FaceID Person",
+            name,
+            payload={"external_code": doc.external_code},
+            priority=8,
+        )
+        return _ok(message="Đã xếp hàng xóa person khỏi máy")
+    return _ok(message="Person không cần sync")
 
 
+# Giữ alias bulk_enroll_* cho tương thích ngược — gọi refresh
 @frappe.whitelist()
 def bulk_enroll_students(campus_id=None, class_id=None):
-    """Enroll hàng loạt học sinh từ CRM Student."""
-    filters = {}
-    if campus_id:
-        filters["campus_id"] = campus_id
-    students = frappe.get_all(
-        "CRM Student",
-        filters=filters,
-        fields=["name", "student_name", "student_code", "campus_id"],
-        limit=5000,
-    )
-    if class_id:
-        class_students = frappe.get_all(
-            "SIS Class Student",
-            filters={"parent": class_id},
-            pluck="student_id",
-        )
-        students = [s for s in students if s.name in class_students]
-    created = 0
-    for s in students:
-        if frappe.db.exists("FaceID Person", {"external_code": s.student_code}):
-            continue
-        doc = frappe.get_doc(
-            {
-                "doctype": "FaceID Person",
-                "person_type": "student",
-                "external_code": s.student_code,
-                "display_name": s.student_name,
-                "crm_student": s.name,
-                "campus_id": s.campus_id,
-            }
-        )
-        doc.insert(ignore_permissions=True)
-        created += 1
-    return _ok({"created": created, "total_candidates": len(students)})
+    return refresh_persons_from_source("student", campus_id, class_id)
 
 
 @frappe.whitelist()
 def bulk_enroll_staff():
-    """Enroll nhân viên từ User có employee_code."""
-    users = frappe.get_all(
-        "User",
-        filters={"enabled": 1, "employee_code": ["is", "set"]},
-        fields=["name", "full_name", "employee_code"],
-        limit=5000,
-    )
-    created = 0
-    for u in users:
-        if frappe.db.exists("FaceID Person", {"external_code": u.employee_code}):
-            continue
-        doc = frappe.get_doc(
-            {
-                "doctype": "FaceID Person",
-                "person_type": "staff",
-                "external_code": u.employee_code,
-                "display_name": u.full_name or u.name,
-                "user": u.name,
-            }
-        )
-        doc.insert(ignore_permissions=True)
-        created += 1
-    return _ok({"created": created})
+    return refresh_persons_from_source("staff")
 
 
 @frappe.whitelist()
 def bulk_enroll_guardians(campus_id=None):
-    guardians = frappe.get_all(
-        "CRM Guardian",
-        fields=["name", "guardian_name", "guardian_id"],
-        limit=5000,
-    )
-    created = 0
-    for g in guardians:
-        if not g.guardian_id:
-            continue
-        if frappe.db.exists("FaceID Person", {"external_code": g.guardian_id}):
-            continue
-        doc = frappe.get_doc(
-            {
-                "doctype": "FaceID Person",
-                "person_type": "guardian",
-                "external_code": g.guardian_id,
-                "display_name": g.guardian_name,
-                "crm_guardian": g.name,
-                "campus_id": campus_id,
-            }
-        )
-        doc.insert(ignore_permissions=True)
-        created += 1
-    return _ok({"created": created})
+    return refresh_persons_from_source("guardian", campus_id)
 
 
 # ---- Work Shifts ----
@@ -248,6 +299,15 @@ def delete_work_shift(name):
 def resync_work_shift(name):
     create_device_sync_job("sync_shift", "FaceID Work Shift", name, priority=7)
     return _ok(message="Đã xếp hàng sync ca")
+
+
+@frappe.whitelist()
+def sync_all_work_shifts():
+    """Đồng bộ tất cả ca làm việc xuống controller."""
+    shifts = frappe.get_all("FaceID Work Shift", pluck="name")
+    for name in shifts:
+        create_device_sync_job("sync_shift", "FaceID Work Shift", name, priority=7)
+    return _ok({"queued": len(shifts)}, message=f"Đã xếp hàng sync {len(shifts)} ca")
 
 
 # ---- Pickup Authorization ----
@@ -496,15 +556,30 @@ def pull_devices_from_controller():
 
 
 @frappe.whitelist()
-def get_sync_status():
+def get_sync_status(person_type=None):
+    person_filters = {}
+    if person_type:
+        person_filters["person_type"] = person_type
     pending = frappe.db.count("FaceID Device Sync Job", {"state": "pending"})
     failed = frappe.db.count("FaceID Device Sync Job", {"state": "failed"})
-    persons_pending = frappe.db.count("FaceID Person", {"sync_status": "pending"})
+    running = frappe.db.count("FaceID Device Sync Job", {"state": "running"})
+    persons_pending = frappe.db.count(
+        "FaceID Person", {**person_filters, "sync_status": "pending"}
+    )
+    persons_synced = frappe.db.count(
+        "FaceID Person", {**person_filters, "sync_status": "synced", "is_active": 1}
+    )
+    persons_on_device = frappe.db.count(
+        "FaceID Person", {**person_filters, "on_device": 1}
+    )
     return _ok(
         {
             "jobs_pending": pending,
             "jobs_failed": failed,
+            "jobs_running": running,
             "persons_pending": persons_pending,
+            "persons_synced": persons_synced,
+            "persons_on_device": persons_on_device,
         }
     )
 
