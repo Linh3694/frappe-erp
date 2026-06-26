@@ -1337,10 +1337,17 @@ scheduler_events = {
     # Attendance Batch Processor - Chạy mỗi lần scheduler tick (khoảng 5-10 giây)
     # Xử lý batch attendance events từ Redis buffer để giảm load database
     "all": [
-        "erp.api.attendance.batch_processor.scheduled_process_attendance_buffer"
+        "erp.api.attendance.batch_processor.scheduled_process_attendance_buffer",
+        "erp.api.faceid.sync_worker.process_pending_device_sync_jobs",
     ],
     "cron": {
-        # Renew subscription mỗi 30 phút
+        # FaceID reconcile pickup + CRM Issue SLA + LMS enrollment (mỗi 15 phút)
+        "*/15 * * * *": [
+            "erp.api.faceid.sync_worker.reconcile_pickup_auth_to_controller",
+            "erp.api.faceid.sync_worker.retry_failed_sync_jobs",
+            "erp.api.crm.sla_scheduler.check_crm_issue_sla",
+            "erp.lms.sync.enrollment_sync.sync_all_sections",
+        ],
         "*/30 * * * *": [
             "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
         ],
@@ -1373,12 +1380,7 @@ scheduler_events = {
         "*/5 7-17 * * 1-6": [
             "erp.api.erp_sis.daily_health_notification.check_stale_health_visits"
         ],
-        # CRM Issue SLA — canh bao sap qua / qua han (15 phut: tranh bo lo Warning voi SLA ngan)
-        "*/15 * * * *": [
-            "erp.api.crm.sla_scheduler.check_crm_issue_sla",
-            "erp.lms.sync.enrollment_sync.sync_all_sections",
-        ],
-        # LMS Phase 6 — engagement score (2:00 AM), digest stub (7:00 AM)
+        # Renew subscription mỗi 30 phút
         "0 2 * * *": [
             "erp.lms.cron.phase6_tasks.compute_engagement_score",
         ],

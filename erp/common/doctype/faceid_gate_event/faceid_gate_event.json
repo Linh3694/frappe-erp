@@ -1,0 +1,89 @@
+{
+ "actions": [],
+ "autoname": "format:FID-EVT-{#####}",
+ "creation": "2026-06-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "serial_key",
+  "controller_event_id",
+  "device",
+  "serial_no",
+  "event_type",
+  "external_code",
+  "occurred_at",
+  "bridged_attendance",
+  "raw_payload"
+ ],
+ "fields": [
+  {
+   "fieldname": "serial_key",
+   "fieldtype": "Data",
+   "label": "Serial key",
+   "unique": 1,
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "controller_event_id",
+   "fieldtype": "Int",
+   "label": "ID event Controller"
+  },
+  {
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "label": "Thiết bị",
+   "options": "FaceID Device"
+  },
+  {
+   "fieldname": "serial_no",
+   "fieldtype": "Int",
+   "label": "Serial No"
+  },
+  {
+   "fieldname": "event_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại event",
+   "options": "attendance\npickup_ok\npickup_deny\ncheckout_ok\ncheckout_deny"
+  },
+  {
+   "fieldname": "external_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã person"
+  },
+  {
+   "fieldname": "occurred_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Thời điểm"
+  },
+  {
+   "default": "0",
+   "fieldname": "bridged_attendance",
+   "fieldtype": "Check",
+   "label": "Đã bridge attendance"
+  },
+  {
+   "fieldname": "raw_payload",
+   "fieldtype": "JSON",
+   "label": "Payload gốc"
+  }
+ ],
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Gate Event",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

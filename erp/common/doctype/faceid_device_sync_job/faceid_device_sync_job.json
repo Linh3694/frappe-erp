@@ -1,0 +1,84 @@
+{
+ "actions": [],
+ "autoname": "format:FID-JOB-{#####}",
+ "creation": "2026-06-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "job_type",
+  "ref_doctype",
+  "ref_name",
+  "payload",
+  "state",
+  "attempts",
+  "priority",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "job_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại job",
+   "options": "upsert_person\ndelete_person\nupsert_shift\nsync_shift\nupsert_pickup\nrevoke_pickup\nreapply_pickup\nprovision_device\nreconcile_pickup",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ref_doctype",
+   "fieldtype": "Data",
+   "label": "DocType nguồn"
+  },
+  {
+   "fieldname": "ref_name",
+   "fieldtype": "Data",
+   "label": "Tên doc nguồn",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "payload",
+   "fieldtype": "Long Text",
+   "label": "Payload JSON"
+  },
+  {
+   "default": "pending",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trạng thái",
+   "options": "pending\nrunning\ndone\nfailed"
+  },
+  {
+   "default": "0",
+   "fieldname": "attempts",
+   "fieldtype": "Int",
+   "label": "Số lần thử"
+  },
+  {
+   "default": "5",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Ưu tiên"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Lỗi"
+  }
+ ],
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Device Sync Job",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

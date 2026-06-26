@@ -1,0 +1,102 @@
+{
+ "actions": [],
+ "autoname": "format:FID-DEV-{#####}",
+ "creation": "2026-06-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "device_name",
+  "ip",
+  "controller_device_id",
+  "gate_type",
+  "campus_id",
+  "is_pickup_gate",
+  "model",
+  "status",
+  "last_seen"
+ ],
+ "fields": [
+  {
+   "fieldname": "device_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên thiết bị",
+   "reqd": 1
+  },
+  {
+   "fieldname": "ip",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "IP",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "controller_device_id",
+   "fieldtype": "Int",
+   "label": "ID trên Controller"
+  },
+  {
+   "fieldname": "gate_type",
+   "fieldtype": "Select",
+   "label": "Loại cổng",
+   "options": "attendance\npickup\nboth",
+   "default": "attendance"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_pickup_gate",
+   "fieldtype": "Check",
+   "label": "Cổng đón (remote-check)"
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "label": "Model"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "unknown\nonline\noffline",
+   "default": "unknown",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "last_seen",
+   "fieldtype": "Datetime",
+   "label": "Lần thấy cuối"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Device",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
