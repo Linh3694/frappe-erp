@@ -143,6 +143,13 @@ def create_device_sync_job(
         "name",
     )
     if active:
+        if payload is not None:
+            frappe.db.set_value(
+                "FaceID Device Sync Job",
+                active,
+                {"payload": json.dumps(payload)},
+                update_modified=True,
+            )
         return active
 
     reusable = frappe.db.get_value(
@@ -158,10 +165,13 @@ def create_device_sync_job(
         order_by="modified desc",
     )
     if reusable:
+        updates: dict = {"state": "pending", "last_error": None}
+        if payload is not None:
+            updates["payload"] = json.dumps(payload)
         frappe.db.set_value(
             "FaceID Device Sync Job",
             reusable,
-            {"state": "pending", "last_error": None},
+            updates,
             update_modified=True,
         )
         _cancel_duplicate_failed_jobs(job_type, ref_doctype, ref_name, reusable)
@@ -290,7 +300,11 @@ def _job_upsert_person(job):
     photo = get_person_photo_bytes(doc)
     if photo:
         gateway_post_file(f"/api/persons/{doc.external_code}/face", photo)
-    gateway_post(f"/api/persons/{doc.external_code}/push", {})
+
+    job_payload = json.loads(job.payload or "{}") if job.payload else {}
+    device_ips = job_payload.get("device_ips")
+    push_body = {"device_ips": device_ips} if device_ips else {}
+    gateway_post(f"/api/persons/{doc.external_code}/push", push_body)
 
     frappe.db.set_value(
         "FaceID Person",
