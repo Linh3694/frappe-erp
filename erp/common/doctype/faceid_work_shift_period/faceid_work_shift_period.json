@@ -1,0 +1,46 @@
+{
+ "actions": [],
+ "creation": "2026-06-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "weekday",
+  "start_time",
+  "end_time"
+ ],
+ "fields": [
+  {
+   "fieldname": "weekday",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Thứ",
+   "options": "1\n2\n3\n4\n5\n6\n7",
+   "reqd": 1
+  },
+  {
+   "fieldname": "start_time",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "Bắt đầu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_time",
+   "fieldtype": "Time",
+   "in_list_view": 1,
+   "label": "Kết thúc",
+   "reqd": 1
+  }
+ ],
+ "istable": 1,
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Work Shift Period",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

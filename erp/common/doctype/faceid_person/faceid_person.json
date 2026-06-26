@@ -1,0 +1,143 @@
+{
+ "actions": [],
+ "autoname": "format:FID-PERSON-{#####}",
+ "creation": "2026-06-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "person_type",
+  "external_code",
+  "display_name",
+  "campus_id",
+  "crm_student",
+  "crm_guardian",
+  "user",
+  "work_shift",
+  "valid_from",
+  "valid_to",
+  "target_devices",
+  "photo_file",
+  "face_status",
+  "sync_status",
+  "last_synced_at",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "person_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại",
+   "options": "student\nguardian\nstaff",
+   "reqd": 1
+  },
+  {
+   "fieldname": "external_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã đồng bộ",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "display_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên hiển thị",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus"
+  },
+  {
+   "fieldname": "crm_student",
+   "fieldtype": "Link",
+   "label": "CRM Student",
+   "options": "CRM Student"
+  },
+  {
+   "fieldname": "crm_guardian",
+   "fieldtype": "Link",
+   "label": "CRM Guardian",
+   "options": "CRM Guardian"
+  },
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "label": "User",
+   "options": "User"
+  },
+  {
+   "fieldname": "work_shift",
+   "fieldtype": "Link",
+   "label": "Ca làm việc",
+   "options": "FaceID Work Shift"
+  },
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Hiệu lực từ"
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Hiệu lực đến"
+  },
+  {
+   "fieldname": "target_devices",
+   "fieldtype": "Table",
+   "label": "Thiết bị đích",
+   "options": "FaceID Person Device"
+  },
+  {
+   "fieldname": "photo_file",
+   "fieldtype": "Attach Image",
+   "label": "Ảnh cache"
+  },
+  {
+   "fieldname": "face_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái ảnh",
+   "options": "none\nuploaded\nsynced",
+   "default": "none"
+  },
+  {
+   "fieldname": "sync_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái sync",
+   "options": "pending\nsynced\nerror",
+   "default": "pending",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "last_synced_at",
+   "fieldtype": "Datetime",
+   "label": "Lần sync cuối"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Lỗi sync"
+  }
+ ],
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Person",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

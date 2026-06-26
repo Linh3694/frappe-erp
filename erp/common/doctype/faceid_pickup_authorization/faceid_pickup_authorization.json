@@ -1,0 +1,104 @@
+{
+ "actions": [],
+ "autoname": "format:FID-PICKUP-{#####}",
+ "creation": "2026-06-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "guardian",
+  "student",
+  "valid_from",
+  "valid_to",
+  "method",
+  "revoked",
+  "controller_auth_id",
+  "sync_status",
+  "last_synced_at",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "guardian",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Phụ huynh (FaceID Person)",
+   "options": "FaceID Person",
+   "reqd": 1
+  },
+  {
+   "fieldname": "student",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Học sinh (FaceID Person)",
+   "options": "FaceID Person",
+   "reqd": 1
+  },
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Từ ngày",
+   "reqd": 1
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Đến ngày",
+   "reqd": 1
+  },
+  {
+   "default": "face",
+   "fieldname": "method",
+   "fieldtype": "Select",
+   "label": "Phương thức",
+   "options": "face\nqr"
+  },
+  {
+   "default": "0",
+   "fieldname": "revoked",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Đã thu hồi"
+  },
+  {
+   "fieldname": "controller_auth_id",
+   "fieldtype": "Int",
+   "label": "ID trên Controller"
+  },
+  {
+   "fieldname": "sync_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái sync",
+   "options": "pending\nsynced\nerror",
+   "default": "pending"
+  },
+  {
+   "fieldname": "last_synced_at",
+   "fieldtype": "Datetime",
+   "label": "Lần sync cuối"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Lỗi sync"
+  }
+ ],
+ "modified": "2026-06-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Pickup Authorization",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
