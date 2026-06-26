@@ -26,7 +26,7 @@ _last_gateway_online: bool | None = None
 
 
 def run_sync_jobs_now(job_names: list[str]) -> dict:
-    """Chạy ngay các job vừa xếp hàng (operator bấm Đồng bộ)."""
+    """Chạy ngay các job vừa xếp hàng (lô nhỏ, ≤ SYNC_INLINE_MAX)."""
     processed = failed = 0
     errors: list[dict] = []
     for name in job_names:
@@ -39,6 +39,29 @@ def run_sync_jobs_now(job_names: list[str]) -> dict:
             failed += 1
             errors.append({"job": name, "error": str(e)[:200]})
     return {"processed": processed, "failed": failed, "errors": errors}
+
+
+def drain_pending_device_sync_jobs(max_batches: int = 5000) -> dict:
+    """Worker nền: xử lý hết job pending/failed sau operator sync hàng loạt."""
+    batches = 0
+    for batches in range(1, max_batches + 1):
+        pending = frappe.db.count(
+            "FaceID Device Sync Job",
+            {"state": ["in", ["pending", "failed"]], "attempts": ["<", MAX_ATTEMPTS]},
+        )
+        if not pending:
+            return {"batches": batches - 1, "remaining": 0}
+        process_pending_device_sync_jobs()
+    remaining = frappe.db.count(
+        "FaceID Device Sync Job",
+        {"state": ["in", ["pending", "failed"]], "attempts": ["<", MAX_ATTEMPTS]},
+    )
+    if remaining:
+        frappe.log_error(
+            title="FaceID drain sync dừng sớm",
+            message=f"Còn {remaining} job sau {max_batches} batch",
+        )
+    return {"batches": max_batches, "remaining": remaining}
 
 
 def create_device_sync_job(

@@ -9,6 +9,9 @@ import frappe
 from frappe.utils import cint
 
 from erp.api.faceid.sync_worker import create_device_sync_job, run_sync_jobs_now
+
+# Lô nhỏ chạy inline trong request; lớn hơn → worker nền (tránh timeout FE)
+SYNC_INLINE_MAX = 5
 from erp.utils.faceid_gateway import gateway_get, gateway_post
 
 
@@ -163,7 +166,7 @@ def sync_persons(person_type=None, campus_id=None, force=0):
     Đồng bộ dữ liệu xuống controller local:
     - is_active=1 → upsert_person (force=1: đẩy lại tất cả đang bật)
     - is_active=0 & on_device=1 → delete_person
-    Chạy job ngay sau khi xếp hàng (operator-driven).
+    Chạy inline nếu ≤ SYNC_INLINE_MAX job; lớn hơn → worker nền (tránh timeout HTTP).
     """
     force = cint(force)
     filters = {}
@@ -198,15 +201,32 @@ def sync_persons(person_type=None, campus_id=None, force=0):
             )
             delete_count += 1
 
-    run_stats = run_sync_jobs_now(job_names) if job_names else {"processed": 0, "failed": 0, "errors": []}
+    total_queued = upsert_count + delete_count
+    async_mode = False
+    run_stats: dict = {"processed": 0, "failed": 0, "errors": []}
+
+    if job_names:
+        if len(job_names) <= SYNC_INLINE_MAX:
+            run_stats = run_sync_jobs_now(job_names)
+        else:
+            async_mode = True
+            frappe.enqueue(
+                "erp.api.faceid.sync_worker.drain_pending_device_sync_jobs",
+                queue="long",
+                timeout=7200,
+                enqueue_after_commit=True,
+            )
+
     processed = run_stats.get("processed", 0)
     failed = run_stats.get("failed", 0)
 
-    if upsert_count == 0 and delete_count == 0:
+    if total_queued == 0:
         msg = "Không có person nào cần đồng bộ (kiểm tra tab loại và trạng thái kích hoạt)"
+    elif async_mode:
+        msg = f"Đã xếp hàng {total_queued} job — đang đồng bộ nền"
     elif failed:
         msg = (
-            f"Đã xử lý {processed}/{upsert_count + delete_count} job; "
+            f"Đã xử lý {processed}/{total_queued} job; "
             f"{failed} lỗi (xem FaceID Device Sync Job hoặc last_error trên person)"
         )
     else:
@@ -218,6 +238,7 @@ def sync_persons(person_type=None, campus_id=None, force=0):
             "delete_queued": delete_count,
             "processed": processed,
             "failed": failed,
+            "async": async_mode,
             "errors": run_stats.get("errors") or [],
         },
         message=msg,
