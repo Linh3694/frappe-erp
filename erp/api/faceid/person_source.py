@@ -102,18 +102,72 @@ def _user_extra_fields() -> list[str]:
     return cols
 
 
+def _find_existing_person(values: dict) -> str | None:
+    """Tìm FaceID Person theo link nguồn, tránh đè chéo loại (HS/NV/PH)."""
+    person_type = values.get("person_type")
+    if person_type == "student" and values.get("crm_student"):
+        found = frappe.db.get_value(
+            "FaceID Person",
+            {"person_type": "student", "crm_student": values["crm_student"]},
+            "name",
+        )
+        if found:
+            return found
+    if person_type == "guardian" and values.get("crm_guardian"):
+        found = frappe.db.get_value(
+            "FaceID Person",
+            {"person_type": "guardian", "crm_guardian": values["crm_guardian"]},
+            "name",
+        )
+        if found:
+            return found
+    if person_type == "staff" and values.get("user"):
+        found = frappe.db.get_value(
+            "FaceID Person",
+            {"person_type": "staff", "user": values["user"]},
+            "name",
+        )
+        if found:
+            return found
+    return frappe.db.get_value(
+        "FaceID Person",
+        {"person_type": person_type, "external_code": values["external_code"]},
+        "name",
+    )
+
+
+def _resolve_external_code_for_insert(values: dict) -> str:
+    """Nếu mã đã dùng bởi loại khác thì thêm prefix để không đè bản ghi."""
+    code = values["external_code"]
+    existing_type = frappe.db.get_value("FaceID Person", {"external_code": code}, "person_type")
+    if not existing_type or existing_type == values["person_type"]:
+        return code
+    prefixes = {"student": "HS", "staff": "NV", "guardian": "PH"}
+    prefix = prefixes.get(values["person_type"], "FID")
+    return f"{prefix}-{code}"
+
+
 def _upsert_person(values: dict) -> tuple[str, str]:
     """
-    Upsert FaceID Person theo external_code.
-    Trả (name, action) với action = 'created' | 'updated' | 'unchanged'.
+    Upsert FaceID Person theo link nguồn + (person_type, external_code).
+    Trả (name, action) với action = 'created' | 'updated' | 'unchanged' | 'skipped_conflict'.
     """
     external_code = values["external_code"]
-    existing = frappe.db.get_value("FaceID Person", {"external_code": external_code}, "name")
+    person_type = values["person_type"]
+    existing = _find_existing_person(values)
     now = frappe.utils.now()
 
     if existing:
         doc = frappe.get_doc("FaceID Person", existing)
+        if doc.person_type != person_type:
+            return doc.name, "skipped_conflict"
         changed = False
+        if doc.external_code != external_code:
+            # Cập nhật mã nếu nguồn đổi (vd employee_code)
+            resolved = _resolve_external_code_for_insert(values)
+            if doc.external_code != resolved:
+                doc.external_code = resolved
+                changed = True
         for key in (
             "display_name",
             "position",
@@ -137,11 +191,12 @@ def _upsert_person(values: dict) -> tuple[str, str]:
         doc.save(ignore_permissions=True)
         return doc.name, "updated" if changed else "unchanged"
 
+    insert_code = _resolve_external_code_for_insert(values)
     doc = frappe.get_doc(
         {
             "doctype": "FaceID Person",
-            "person_type": values["person_type"],
-            "external_code": external_code,
+            "person_type": person_type,
+            "external_code": insert_code,
             "display_name": values["display_name"],
             "position": values.get("position"),
             "department": values.get("department"),
@@ -158,7 +213,8 @@ def _upsert_person(values: dict) -> tuple[str, str]:
     )
     doc.flags.faceid_refresh = 1
     doc.insert(ignore_permissions=True)
-    return doc.name, "created"
+    action = "created_prefixed" if insert_code != external_code else "created"
+    return doc.name, action
 
 
 def refresh_students(campus_id: str | None = None, class_id: str | None = None) -> dict:
@@ -184,7 +240,7 @@ def refresh_students(campus_id: str | None = None, class_id: str | None = None) 
     grade_map = _student_grade_map(student_ids, school_year)
     photo_map = _student_photo_map(student_ids, school_year)
 
-    created = updated = 0
+    created = updated = conflicts = 0
     for s in students:
         if not s.student_code:
             continue
@@ -201,12 +257,19 @@ def refresh_students(campus_id: str | None = None, class_id: str | None = None) 
                 "crm_student": s.name,
             }
         )
-        if action == "created":
+        if action in ("created", "created_prefixed"):
             created += 1
         elif action == "updated":
             updated += 1
+        elif action == "skipped_conflict":
+            conflicts += 1
 
-    return {"created": created, "updated": updated, "total_candidates": len(students)}
+    return {
+        "created": created,
+        "updated": updated,
+        "conflicts": conflicts,
+        "total_candidates": len(students),
+    }
 
 
 def refresh_guardians(campus_id: str | None = None) -> dict:
@@ -219,7 +282,7 @@ def refresh_guardians(campus_id: str | None = None) -> dict:
         fields=["name", "guardian_name", "guardian_id", "guardian_image", "campus_id"],
         limit=10000,
     )
-    created = updated = 0
+    created = updated = conflicts = 0
     for g in guardians:
         if not g.guardian_id:
             continue
@@ -235,11 +298,18 @@ def refresh_guardians(campus_id: str | None = None) -> dict:
                 "crm_guardian": g.name,
             }
         )
-        if action == "created":
+        if action in ("created", "created_prefixed"):
             created += 1
         elif action == "updated":
             updated += 1
-    return {"created": created, "updated": updated, "total_candidates": len(guardians)}
+        elif action == "skipped_conflict":
+            conflicts += 1
+    return {
+        "created": created,
+        "updated": updated,
+        "conflicts": conflicts,
+        "total_candidates": len(guardians),
+    }
 
 
 def refresh_staff() -> dict:
@@ -251,7 +321,7 @@ def refresh_staff() -> dict:
         fields=fields,
         limit=10000,
     )
-    created = updated = 0
+    created = updated = conflicts = 0
     for u in users:
         if not u.employee_code:
             continue
@@ -273,11 +343,18 @@ def refresh_staff() -> dict:
                 "user": u.name,
             }
         )
-        if action == "created":
+        if action in ("created", "created_prefixed"):
             created += 1
         elif action == "updated":
             updated += 1
-    return {"created": created, "updated": updated, "total_candidates": len(users)}
+        elif action == "skipped_conflict":
+            conflicts += 1
+    return {
+        "created": created,
+        "updated": updated,
+        "conflicts": conflicts,
+        "total_candidates": len(users),
+    }
 
 
 def refresh_persons_from_source(

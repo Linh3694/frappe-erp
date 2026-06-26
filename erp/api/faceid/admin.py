@@ -100,7 +100,10 @@ def refresh_persons_from_source(person_type, campus_id=None, class_id=None):
     from erp.api.faceid.person_source import refresh_persons_from_source as _refresh
 
     stats = _refresh(person_type, campus_id, class_id)
-    return _ok(stats, message=f"Đã lấy dữ liệu: {stats.get('created', 0)} mới, {stats.get('updated', 0)} cập nhật")
+    msg = f"Đã lấy dữ liệu: {stats.get('created', 0)} mới, {stats.get('updated', 0)} cập nhật"
+    if stats.get("conflicts"):
+        msg += f", {stats['conflicts']} bỏ qua (trùng mã loại khác)"
+    return _ok(stats, message=msg)
 
 
 @frappe.whitelist()
