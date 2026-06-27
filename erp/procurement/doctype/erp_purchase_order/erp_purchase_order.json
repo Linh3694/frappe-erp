@@ -1,0 +1,275 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:PO-{YYYY}-{#####}",
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "description": "Phiếu Mua sắm Hàng hoá/Dịch vụ (Purchase Order)",
+ "field_order": [
+  "title",
+  "source_prs",
+  "procurement_unit",
+  "column_break_info",
+  "buyer",
+  "campus_id",
+  "suppliers_section",
+  "suppliers",
+  "quotes",
+  "conclusion_section",
+  "selected_supplier_idx",
+  "selection_reason",
+  "has_substitution",
+  "lines_section",
+  "lines",
+  "totals_section",
+  "total_estimated",
+  "saving_vs_pr",
+  "state_section",
+  "workflow_state",
+  "current_seq",
+  "applied_template",
+  "return_reason",
+  "approval_section",
+  "approval_steps",
+  "audit_section",
+  "submitted_by",
+  "submitted_at",
+  "column_break_audit",
+  "approved_by",
+  "approved_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tiêu đề",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "source_prs",
+   "fieldtype": "Table MultiSelect",
+   "label": "PR nguồn (nhiều)",
+   "options": "ERP Purchase Order Source PR",
+   "description": "Các PR mà PO này rút hàng; rỗng = PO standalone"
+  },
+  {
+   "fieldname": "procurement_unit",
+   "fieldtype": "Link",
+   "label": "Phòng Mua hàng",
+   "options": "ERP Organization Unit",
+   "description": "Đơn vị chủ quản luồng PO (1 đơn vị cố định toàn trường)"
+  },
+  {
+   "fieldname": "column_break_info",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "buyer",
+   "fieldtype": "Link",
+   "label": "Nhân viên mua hàng",
+   "options": "User"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus"
+  },
+  {
+   "fieldname": "suppliers_section",
+   "fieldtype": "Section Break",
+   "label": "Nhà cung cấp & báo giá"
+  },
+  {
+   "fieldname": "suppliers",
+   "fieldtype": "Table",
+   "label": "Danh sách NCC",
+   "options": "ERP Purchase Order Supplier"
+  },
+  {
+   "fieldname": "quotes",
+   "fieldtype": "Table",
+   "label": "Báo giá (dòng × NCC)",
+   "options": "ERP Purchase Order Quote"
+  },
+  {
+   "fieldname": "conclusion_section",
+   "fieldtype": "Section Break",
+   "label": "Kết luận chọn NCC"
+  },
+  {
+   "fieldname": "selected_supplier_idx",
+   "fieldtype": "Int",
+   "label": "NCC được chọn (số thứ tự)"
+  },
+  {
+   "fieldname": "selection_reason",
+   "fieldtype": "Text",
+   "label": "Lý do chọn NCC"
+  },
+  {
+   "default": "0",
+   "fieldname": "has_substitution",
+   "fieldtype": "Check",
+   "label": "Có dòng thay thế",
+   "read_only": 1,
+   "description": "=1 nếu có dòng line_action=substitute -> bật bước duyệt thay thế"
+  },
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Hàng hoá"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Dòng",
+   "options": "ERP Purchase Order Line"
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Tổng hợp"
+  },
+  {
+   "fieldname": "total_estimated",
+   "fieldtype": "Currency",
+   "label": "Tổng giá trị (NCC chọn)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "saving_vs_pr",
+   "fieldtype": "Currency",
+   "label": "Saving vs PR",
+   "read_only": 1
+  },
+  {
+   "fieldname": "state_section",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái duyệt"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "workflow_state",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Draft\nPending\nApproved\nReturned\nRejected\nCancelled",
+   "in_list_view": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "current_seq",
+   "fieldtype": "Int",
+   "label": "Nấc hiện tại"
+  },
+  {
+   "fieldname": "applied_template",
+   "fieldtype": "Link",
+   "label": "Luồng đã áp",
+   "options": "ERP Approval Template",
+   "read_only": 1
+  },
+  {
+   "fieldname": "return_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do trả lại"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "approval_section",
+   "fieldtype": "Section Break",
+   "label": "Luồng duyệt (đã resolve)"
+  },
+  {
+   "fieldname": "approval_steps",
+   "fieldtype": "Table",
+   "label": "Bước duyệt",
+   "options": "ERP Approval Step",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin nộp & duyệt"
+  },
+  {
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "label": "Người nộp",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm nộp",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_audit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Người duyệt cuối",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm duyệt",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Procurement",
+ "name": "ERP Purchase Order",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Finance",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "description": "Lịch sử thao tác PR/PO (polymorphic, dùng chung)",
+ "field_order": [
+  "reference_doctype",
+  "reference_name",
+  "action",
+  "detail",
+  "user_email",
+  "user_fullname",
+  "user_avatar"
+ ],
+ "fields": [
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Loại phiếu",
+   "options": "DocType",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Phiếu",
+   "options": "reference_doctype",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "action",
+   "fieldtype": "Data",
+   "label": "Hành động",
+   "in_list_view": 1
+  },
+  { "fieldname": "detail", "fieldtype": "Text", "label": "Chi tiết" },
+  { "fieldname": "user_email", "fieldtype": "Data", "label": "Email" },
+  { "fieldname": "user_fullname", "fieldtype": "Data", "label": "Họ tên" },
+  { "fieldname": "user_avatar", "fieldtype": "Data", "label": "Avatar" }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Procurement",
+ "name": "ERP Procurement History",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "All"
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

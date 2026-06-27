@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "step_order",
+  "kind",
+  "label",
+  "approver_role",
+  "is_optional",
+  "parallel_group",
+  "return_roles",
+  "condition_section",
+  "condition_field",
+  "condition_op",
+  "condition_value"
+ ],
+ "fields": [
+  {
+   "fieldname": "step_order",
+   "fieldtype": "Int",
+   "label": "Thứ tự",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Loại bước",
+   "options": "team_lead\ndepartment_head\nrelated_department\nrole\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "label": "Nhãn hiển thị",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "approver_role",
+   "fieldtype": "Link",
+   "label": "Vai trò duyệt",
+   "options": "Role",
+   "description": "Chỉ dùng cho kind=role / council_*"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_optional",
+   "fieldtype": "Check",
+   "label": "Tuỳ chọn (tự bỏ khi resolver rỗng)"
+  },
+  {
+   "fieldname": "parallel_group",
+   "fieldtype": "Data",
+   "label": "Nhóm song song",
+   "description": "Các bước cùng group chạy song song trong 1 nấc (vd related)"
+  },
+  {
+   "fieldname": "return_roles",
+   "fieldtype": "Small Text",
+   "label": "Vai trò được trả về"
+  },
+  {
+   "fieldname": "condition_section",
+   "fieldtype": "Section Break",
+   "label": "Điều kiện bật bước (field – toán tử – giá trị)"
+  },
+  {
+   "fieldname": "condition_field",
+   "fieldtype": "Data",
+   "label": "Field (header, whitelist)"
+  },
+  {
+   "fieldname": "condition_op",
+   "fieldtype": "Select",
+   "label": "Toán tử",
+   "options": "\n=\n!=\n>\n<\n>=\n<=\nin"
+  },
+  {
+   "fieldname": "condition_value",
+   "fieldtype": "Data",
+   "label": "Giá trị"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Approval Template Step",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

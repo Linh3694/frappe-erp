@@ -23,6 +23,8 @@
   "leaders",
   "members_section",
   "members",
+  "associates_section",
+  "associates",
   "tree_section",
   "lft",
   "rgt",
@@ -106,6 +108,17 @@
    "fieldtype": "Table",
    "label": "Thành viên",
    "options": "ERP Organization Unit Member"
+  },
+  {
+   "fieldname": "associates_section",
+   "fieldtype": "Section Break",
+   "label": "Liên kết không chính thức (dotted-line)"
+  },
+  {
+   "fieldname": "associates",
+   "fieldtype": "Table",
+   "label": "Liên kết",
+   "options": "ERP Organization Unit Associate"
   },
   {
    "collapsible": 1,

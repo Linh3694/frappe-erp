@@ -7,3 +7,4 @@ lms
 inventory_it
 it_support
 finance
+procurement

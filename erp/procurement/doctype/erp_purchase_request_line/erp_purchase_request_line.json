@@ -1,0 +1,127 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item",
+  "item_name",
+  "spec",
+  "uom",
+  "qty_total",
+  "qty_available",
+  "qty_to_buy",
+  "unit_price",
+  "amount",
+  "reason",
+  "line_budget_code",
+  "in_budget",
+  "qty_ordered",
+  "line_status"
+ ],
+ "fields": [
+  {
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "label": "Sản phẩm",
+   "options": "ERP Product",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fetch_from": "item.product_name",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Tên hàng hoá",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "spec",
+   "fieldtype": "Data",
+   "label": "Quy cách"
+  },
+  {
+   "fetch_from": "item.uom",
+   "fieldname": "uom",
+   "fieldtype": "Data",
+   "label": "Đơn vị"
+  },
+  {
+   "fieldname": "qty_total",
+   "fieldtype": "Float",
+   "label": "Tổng yêu cầu"
+  },
+  {
+   "fieldname": "qty_available",
+   "fieldtype": "Float",
+   "label": "Sẵn có"
+  },
+  {
+   "fieldname": "qty_to_buy",
+   "fieldtype": "Float",
+   "label": "Mua bổ sung",
+   "in_list_view": 1
+  },
+  {
+   "fetch_from": "item.standard_rate",
+   "fieldname": "unit_price",
+   "fieldtype": "Currency",
+   "label": "Đơn giá (ước tính)"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Thành tiền",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Text",
+   "label": "Lý do yêu cầu"
+  },
+  {
+   "fieldname": "line_budget_code",
+   "fieldtype": "Link",
+   "label": "Mã ngân sách",
+   "options": "ERP Budget Code"
+  },
+  {
+   "default": "0",
+   "fieldname": "in_budget",
+   "fieldtype": "Check",
+   "label": "Trong ngân sách",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "qty_ordered",
+   "fieldtype": "Float",
+   "label": "Đã đưa vào PO",
+   "read_only": 1
+  },
+  {
+   "default": "Open",
+   "fieldname": "line_status",
+   "fieldtype": "Select",
+   "label": "Tình trạng mua",
+   "options": "Open\nPartial\nClosed",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Procurement",
+ "name": "ERP Purchase Request Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

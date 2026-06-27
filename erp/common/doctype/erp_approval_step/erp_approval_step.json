@@ -1,0 +1,117 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "description": "Bước duyệt đã resolve & đóng băng trên 1 phiếu (PR/PO). Advance chỉ đổi status/is_active.",
+ "field_order": [
+  "seq",
+  "kind",
+  "label",
+  "approver_role",
+  "scope_unit",
+  "parallel_group",
+  "return_roles",
+  "status",
+  "is_active",
+  "acted_section",
+  "acted_by",
+  "acted_at",
+  "comment"
+ ],
+ "fields": [
+  {
+   "fieldname": "seq",
+   "fieldtype": "Int",
+   "label": "Nấc",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Loại bước",
+   "options": "team_lead\ndepartment_head\nrelated_department\nrole\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "label": "Nhãn hiển thị",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "approver_role",
+   "fieldtype": "Data",
+   "label": "Vai trò gate",
+   "description": "Rỗng với bước scope-only (gate theo leader của scope_unit)"
+  },
+  {
+   "fieldname": "scope_unit",
+   "fieldtype": "Link",
+   "label": "Đơn vị (scope)",
+   "options": "ERP Organization Unit",
+   "description": "Rỗng = org-wide (council). Có giá trị = gate theo leader LIVE của unit."
+  },
+  {
+   "fieldname": "parallel_group",
+   "fieldtype": "Data",
+   "label": "Nhóm song song"
+  },
+  {
+   "fieldname": "return_roles",
+   "fieldtype": "Small Text",
+   "label": "Vai trò được trả về"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Pending\nApproved\nSkipped\nRejected",
+   "in_list_view": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Đang chờ (nấc mở)",
+   "description": "1 = thuộc nấc đang mở; dùng cho query hàng chờ SQL"
+  },
+  {
+   "fieldname": "acted_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "acted_by",
+   "fieldtype": "Link",
+   "label": "Người xử lý",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "acted_at",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm",
+   "read_only": 1
+  },
+  {
+   "fieldname": "comment",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Approval Step",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

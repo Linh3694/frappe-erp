@@ -1,0 +1,49 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "department",
+  "department_name",
+  "relation_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Phòng liên quan",
+   "options": "ERP Organization Unit",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fetch_from": "department.unit_name_vn",
+   "fieldname": "department_name",
+   "fieldtype": "Data",
+   "label": "Tên phòng",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "relation_reason",
+   "fieldtype": "Data",
+   "label": "Lý do liên quan",
+   "in_list_view": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Procurement",
+ "name": "ERP Purchase Request Related Department",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

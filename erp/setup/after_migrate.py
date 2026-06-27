@@ -102,6 +102,41 @@ def _seed_it_support_categories():
             frappe.db.rollback()
 
 
+PROCUREMENT_ROLES = ["CFO", "COO", "CEO", "SIS BOD"]
+
+PROCUREMENT_REQUEST_GROUPS = [
+    ("Đồ dùng dạy học", 30),
+    ("Đồ dùng cho sự kiện", 30),
+    ("Bảo trì sửa chữa trang thiết bị", 7),
+    ("Thuê dịch vụ", 30),
+    ("Trang thiết bị cần đặt hàng sản xuất", 60),
+    ("Trang thiết bị có sẵn trên thị trường", 14),
+]
+
+
+def _seed_procurement():
+    """Role duyệt + nhóm yêu cầu mặc định cho module Mua sắm."""
+    try:
+        for role_name in PROCUREMENT_ROLES:
+            if not frappe.db.exists("Role", role_name):
+                frappe.get_doc({"doctype": "Role", "role_name": role_name}).insert(
+                    ignore_permissions=True
+                )
+        for group_name, leadtime in PROCUREMENT_REQUEST_GROUPS:
+            if not frappe.db.exists("ERP Procurement Request Group", group_name):
+                frappe.get_doc(
+                    {
+                        "doctype": "ERP Procurement Request Group",
+                        "group_name": group_name,
+                        "default_leadtime_days": leadtime,
+                        "is_active": 1,
+                    }
+                ).insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+
+
 def execute():
     """Tạo các role cần thiết nếu chưa tồn tại."""
     for role_name in REQUIRED_ROLES:
@@ -113,3 +148,4 @@ def execute():
     _ensure_it_support_ticket_file_folder()
     _ensure_admission_file_folder()
     _seed_it_support_categories()
+    _seed_procurement()
