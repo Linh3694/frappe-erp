@@ -29,6 +29,7 @@ STEP_FIELDS = [
 EDGE_FIELDS = [
     "from_node", "to_node", "edge_kind", "is_default", "label",
     "condition_match", "conditions", "condition_field", "condition_op", "condition_value",
+    "source_handle", "target_handle", "waypoints",
 ]
 
 _ROLE_KINDS = ("council_finance", "council_coo", "council_ceo", "role")
@@ -47,10 +48,11 @@ def _parse_list(value):
 
 
 def _row(src, fields):
-    """Lấy dict theo fields; field 'conditions' parse JSON -> list cho FE."""
+    """Lấy dict theo fields; field JSON (conditions/waypoints) parse -> list cho FE."""
     d = {f: src.get(f) for f in fields}
-    if "conditions" in d:
-        d["conditions"] = _parse_list(d.get("conditions"))
+    for jf in ("conditions", "waypoints"):
+        if jf in d:
+            d[jf] = _parse_list(d.get(jf))
     return d
 
 
@@ -301,6 +303,9 @@ def upsert_template():
             "condition_field": e.get("condition_field"),
             "condition_op": e.get("condition_op"),
             "condition_value": e.get("condition_value"),
+            "source_handle": e.get("source_handle"),
+            "target_handle": e.get("target_handle"),
+            "waypoints": json.dumps(e.get("waypoints") or []),
         })
     doc.save(ignore_permissions=True)
     frappe.db.commit()

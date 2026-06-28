@@ -17,7 +17,11 @@
   "condition_field",
   "condition_op",
   "condition_value",
-  "conditions"
+  "conditions",
+  "routing_section",
+  "source_handle",
+  "target_handle",
+  "waypoints"
  ],
  "fields": [
   { "fieldname": "from_node", "fieldtype": "Data", "label": "Từ node", "reqd": 1, "in_list_view": 1 },
@@ -39,7 +43,11 @@
   },
   { "fieldname": "condition_value", "fieldtype": "Data", "label": "Giá trị (1 điều kiện — legacy)" },
   { "default": "all", "fieldname": "condition_match", "fieldtype": "Select", "label": "Khớp", "options": "all\nany" },
-  { "fieldname": "conditions", "fieldtype": "Long Text", "label": "Điều kiện ghép (JSON list)", "description": "[{field,op,value}]" }
+  { "fieldname": "conditions", "fieldtype": "Long Text", "label": "Điều kiện ghép (JSON list)", "description": "[{field,op,value}]" },
+  { "fieldname": "routing_section", "fieldtype": "Section Break", "label": "Hiển thị đường nối (builder)" },
+  { "fieldname": "source_handle", "fieldtype": "Data", "label": "Cổng nguồn" },
+  { "fieldname": "target_handle", "fieldtype": "Data", "label": "Cổng đích" },
+  { "fieldname": "waypoints", "fieldtype": "Long Text", "label": "Điểm gấp (JSON [{x,y}])" }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,
