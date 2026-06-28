@@ -33,6 +33,7 @@
   "related_departments",
   "approval_section",
   "approval_steps",
+  "approval_edges",
   "totals_section",
   "total_estimated",
   "note",
@@ -196,6 +197,13 @@
    "fieldtype": "Table",
    "label": "Bước duyệt",
    "options": "ERP Approval Step",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approval_edges",
+   "fieldtype": "Long Text",
+   "label": "Cạnh luồng (JSON snapshot)",
+   "hidden": 1,
    "read_only": 1
   },
   {

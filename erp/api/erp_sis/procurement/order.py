@@ -98,7 +98,10 @@ def get_order(name=None):
     name = name or u.get_request_data().get("name")
     if not name or not frappe.db.exists(PO_DT, name):
         return not_found_response("Không tìm thấy PO")
-    return single_item_response(_po_to_dict(frappe.get_doc(PO_DT, name)))
+    doc = frappe.get_doc(PO_DT, name)
+    if not engine.can_view_doc(doc, u.session_email()):
+        return forbidden_response("Không có quyền xem PO này")
+    return single_item_response(_po_to_dict(doc))
 
 
 @frappe.whitelist()
@@ -135,8 +138,10 @@ def upsert_order():
         if not frappe.db.exists(PO_DT, name):
             return not_found_response("Không tìm thấy PO")
         doc = frappe.get_doc(PO_DT, name)
-        if doc.workflow_state not in ("Draft", "Returned"):
-            return error_response("Chỉ sửa được PO Nháp/Bị trả lại")
+        if doc.workflow_state in ("Approved", "Rejected", "Cancelled"):
+            return error_response("Phiếu đã chốt, không sửa được")
+        if not engine.can_edit_doc(doc, me):
+            return forbidden_response("Bạn không có quyền sửa PO này ở bước hiện tại")
     else:
         doc = frappe.new_doc(PO_DT)
         doc.buyer = me
@@ -211,8 +216,8 @@ def submit_order(name=None):
         return error_response("Chưa chọn NCC (KẾT LUẬN)")
     _validate_qty(doc)
 
-    resolved = resolvers.resolve_steps(doc)
-    if not engine.materialize(doc, resolved):
+    nodes, edges = resolvers.resolve_graph(doc)
+    if not engine.materialize_graph(doc, nodes, edges):
         return error_response("Không resolve được luồng duyệt")
     doc.workflow_state = "Pending"
     doc.submitted_by = me

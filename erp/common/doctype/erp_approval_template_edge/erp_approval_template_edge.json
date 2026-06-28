@@ -1,0 +1,48 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-27 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "description": "Cạnh nối 2 node trong luồng duyệt (DAG), có thể kèm điều kiện rẽ nhánh.",
+ "field_order": [
+  "from_node",
+  "to_node",
+  "label",
+  "condition_section",
+  "condition_field",
+  "condition_op",
+  "condition_value"
+ ],
+ "fields": [
+  { "fieldname": "from_node", "fieldtype": "Data", "label": "Từ node", "reqd": 1, "in_list_view": 1 },
+  { "fieldname": "to_node", "fieldtype": "Data", "label": "Đến node", "reqd": 1, "in_list_view": 1 },
+  { "fieldname": "label", "fieldtype": "Data", "label": "Nhãn cạnh", "in_list_view": 1 },
+  {
+   "fieldname": "condition_section",
+   "fieldtype": "Section Break",
+   "label": "Điều kiện rẽ nhánh (field – toán tử – giá trị); rỗng = luôn đi"
+  },
+  { "fieldname": "condition_field", "fieldtype": "Data", "label": "Field" },
+  {
+   "fieldname": "condition_op",
+   "fieldtype": "Select",
+   "label": "Toán tử",
+   "options": "\n=\n!=\n>\n<\n>=\n<=\nin"
+  },
+  { "fieldname": "condition_value", "fieldtype": "Data", "label": "Giá trị" }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Approval Template Edge",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

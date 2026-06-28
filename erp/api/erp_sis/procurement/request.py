@@ -148,6 +148,8 @@ def get_request(name=None):
     if not name or not frappe.db.exists(PR_DT, name):
         return not_found_response("Không tìm thấy PR")
     doc = frappe.get_doc(PR_DT, name)
+    if not engine.can_view_doc(doc, u.session_email()):
+        return forbidden_response("Không có quyền xem PR này")
     return single_item_response(_pr_to_dict(doc))
 
 
@@ -165,10 +167,10 @@ def upsert_request():
         if not frappe.db.exists(PR_DT, name):
             return not_found_response("Không tìm thấy PR")
         doc = frappe.get_doc(PR_DT, name)
-        if doc.workflow_state not in ("Draft", "Returned"):
-            return error_response("Chỉ sửa được PR ở trạng thái Nháp/Bị trả lại")
-        if doc.requested_by != me and not u.is_system_manager(me):
-            return forbidden_response("Không có quyền sửa PR này")
+        if doc.workflow_state in ("Approved", "Rejected", "Cancelled"):
+            return error_response("Phiếu đã chốt, không sửa được")
+        if not engine.can_edit_doc(doc, me):
+            return forbidden_response("Bạn không có quyền sửa PR này ở bước hiện tại")
     else:
         doc = frappe.new_doc(PR_DT)
         doc.requested_by = me
@@ -236,8 +238,8 @@ def submit_request(name=None):
     if not doc.lines:
         return error_response("PR chưa có dòng hàng")
 
-    resolved = resolvers.resolve_steps(doc)
-    if not engine.materialize(doc, resolved):
+    nodes, edges = resolvers.resolve_graph(doc)
+    if not engine.materialize_graph(doc, nodes, edges):
         return error_response("Không resolve được luồng duyệt")
     doc.workflow_state = "Pending"
     doc.submitted_by = me
@@ -301,10 +303,10 @@ def cancel_request(name=None):
         return not_found_response("Không tìm thấy PR")
     me = u.session_email()
     doc = frappe.get_doc(PR_DT, name)
-    if doc.workflow_state not in ("Draft", "Returned"):
-        return error_response("Chỉ huỷ được PR Nháp/Bị trả lại")
-    if doc.requested_by != me and not u.is_system_manager(me):
-        return forbidden_response("Không có quyền huỷ PR này")
+    if doc.workflow_state in ("Approved", "Rejected", "Cancelled"):
+        return error_response("Phiếu đã chốt, không huỷ được")
+    if not engine.can_delete_doc(doc, me):
+        return forbidden_response("Bạn không có quyền huỷ PR này ở bước hiện tại")
     doc.workflow_state = "Cancelled"
     doc.save(ignore_permissions=True)
     engine.append_history(PR_DT, doc.name, "Huỷ")

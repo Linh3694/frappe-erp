@@ -5,14 +5,31 @@
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
+ "description": "Một NODE trong luồng duyệt (KissFlow DAG): người duyệt + ma trận quyền + điều kiện.",
  "field_order": [
-  "step_order",
-  "kind",
+  "node_id",
   "label",
+  "step_order",
+  "column_break_pos",
+  "pos_x",
+  "pos_y",
+  "approver_section",
+  "approver_type",
+  "kind",
   "approver_role",
+  "approver_user",
+  "perm_section",
+  "return_roles",
+  "return_users",
+  "view_roles",
+  "view_users",
+  "edit_roles",
+  "edit_users",
+  "delete_roles",
+  "delete_users",
+  "options_section",
   "is_optional",
   "parallel_group",
-  "return_roles",
   "condition_section",
   "condition_field",
   "condition_op",
@@ -20,18 +37,11 @@
  ],
  "fields": [
   {
-   "fieldname": "step_order",
-   "fieldtype": "Int",
-   "label": "Thứ tự",
-   "in_list_view": 1
-  },
-  {
-   "fieldname": "kind",
-   "fieldtype": "Select",
-   "label": "Loại bước",
-   "options": "team_lead\ndepartment_head\nrelated_department\nrole\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head",
-   "reqd": 1,
-   "in_list_view": 1
+   "fieldname": "node_id",
+   "fieldtype": "Data",
+   "label": "Mã node",
+   "in_list_view": 1,
+   "description": "Định danh node trong luồng (dùng nối cạnh)"
   },
   {
    "fieldname": "label",
@@ -40,11 +50,61 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "step_order",
+   "fieldtype": "Int",
+   "label": "Thứ tự (gợi ý)"
+  },
+  { "fieldname": "column_break_pos", "fieldtype": "Column Break" },
+  { "fieldname": "pos_x", "fieldtype": "Int", "label": "Vị trí X (canvas)" },
+  { "fieldname": "pos_y", "fieldtype": "Int", "label": "Vị trí Y (canvas)" },
+  {
+   "fieldname": "approver_section",
+   "fieldtype": "Section Break",
+   "label": "Người duyệt"
+  },
+  {
+   "default": "dynamic",
+   "fieldname": "approver_type",
+   "fieldtype": "Select",
+   "label": "Kiểu người duyệt",
+   "options": "dynamic\nrole\nuser",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "label": "Resolver động (khi dynamic)",
+   "options": "\nteam_lead\ndepartment_head\nrelated_department\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head"
+  },
+  {
    "fieldname": "approver_role",
    "fieldtype": "Link",
-   "label": "Vai trò duyệt",
-   "options": "Role",
-   "description": "Chỉ dùng cho kind=role / council_*"
+   "label": "Vai trò duyệt (khi role)",
+   "options": "Role"
+  },
+  {
+   "fieldname": "approver_user",
+   "fieldtype": "Link",
+   "label": "Người duyệt cụ thể (khi user)",
+   "options": "User"
+  },
+  {
+   "fieldname": "perm_section",
+   "fieldtype": "Section Break",
+   "label": "Ma trận quyền (role/user, cách nhau dấu phẩy)"
+  },
+  { "fieldname": "return_roles", "fieldtype": "Small Text", "label": "Trả về — Vai trò" },
+  { "fieldname": "return_users", "fieldtype": "Small Text", "label": "Trả về — Người" },
+  { "fieldname": "view_roles", "fieldtype": "Small Text", "label": "Xem — Vai trò" },
+  { "fieldname": "view_users", "fieldtype": "Small Text", "label": "Xem — Người" },
+  { "fieldname": "edit_roles", "fieldtype": "Small Text", "label": "Sửa — Vai trò" },
+  { "fieldname": "edit_users", "fieldtype": "Small Text", "label": "Sửa — Người" },
+  { "fieldname": "delete_roles", "fieldtype": "Small Text", "label": "Xoá — Vai trò" },
+  { "fieldname": "delete_users", "fieldtype": "Small Text", "label": "Xoá — Người" },
+  {
+   "fieldname": "options_section",
+   "fieldtype": "Section Break",
+   "label": "Tuỳ chọn"
   },
   {
    "default": "0",
@@ -55,35 +115,21 @@
   {
    "fieldname": "parallel_group",
    "fieldtype": "Data",
-   "label": "Nhóm song song",
-   "description": "Các bước cùng group chạy song song trong 1 nấc (vd related)"
-  },
-  {
-   "fieldname": "return_roles",
-   "fieldtype": "Small Text",
-   "label": "Vai trò được trả về"
+   "label": "Nhóm song song (legacy linear)"
   },
   {
    "fieldname": "condition_section",
    "fieldtype": "Section Break",
-   "label": "Điều kiện bật bước (field – toán tử – giá trị)"
+   "label": "Điều kiện vào node (field – toán tử – giá trị)"
   },
-  {
-   "fieldname": "condition_field",
-   "fieldtype": "Data",
-   "label": "Field (header, whitelist)"
-  },
+  { "fieldname": "condition_field", "fieldtype": "Data", "label": "Field" },
   {
    "fieldname": "condition_op",
    "fieldtype": "Select",
    "label": "Toán tử",
    "options": "\n=\n!=\n>\n<\n>=\n<=\nin"
   },
-  {
-   "fieldname": "condition_value",
-   "fieldtype": "Data",
-   "label": "Giá trị"
-  }
+  { "fieldname": "condition_value", "fieldtype": "Data", "label": "Giá trị" }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,

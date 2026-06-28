@@ -12,7 +12,9 @@
   "target_doctype",
   "is_active",
   "steps_section",
-  "steps"
+  "steps",
+  "edges_section",
+  "edges"
  ],
  "fields": [
   {
@@ -46,8 +48,19 @@
   {
    "fieldname": "steps",
    "fieldtype": "Table",
-   "label": "Bước",
+   "label": "Node (bước)",
    "options": "ERP Approval Template Step"
+  },
+  {
+   "fieldname": "edges_section",
+   "fieldtype": "Section Break",
+   "label": "Cạnh nối (DAG)"
+  },
+  {
+   "fieldname": "edges",
+   "fieldtype": "Table",
+   "label": "Cạnh",
+   "options": "ERP Approval Template Edge"
   }
  ],
  "index_web_pages_for_search": 1,
