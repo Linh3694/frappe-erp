@@ -14,6 +14,9 @@ ORG_TYPE_DT = "ERP Organization Unit Type"
 PR_DT = "ERP Purchase Request"
 PO_DT = "ERP Purchase Order"
 
+# Node "Người tạo" (gốc luồng) — marker UI, không sinh bước duyệt; đích trả-về = người tạo
+START_KIND = "requester"
+
 # Luồng PR: (Trưởng nhóm tự bỏ) -> Trưởng phòng -> Phòng liên quan (song song) -> CFO -> COO -> CEO
 DEFAULT_PR_STEPS = [
     {"kind": "team_lead", "label": "Trưởng nhóm", "is_optional": 1},
@@ -198,8 +201,12 @@ def _rnode(tnode, doc, **over):
 
 def _resolve_node(tnode, doc):
     """1 template node -> 0+ runtime node dict (expand dynamic)."""
-    at = tnode.get("approver_type")
     kind = tnode.get("kind")
+    # Node "Người tạo" (start): gắn người tạo phiếu, sẽ tự-duyệt khi nộp
+    if kind == "requester":
+        creator = getattr(doc, "requested_by", None) or getattr(doc, "buyer", None)
+        return [_rnode(tnode, doc, approver_type="user", approver_user=creator)]
+    at = tnode.get("approver_type")
     if not at:
         at = "role" if kind in ("council_finance", "council_coo", "council_ceo", "role") else "dynamic"
     if at == "user":
@@ -271,17 +278,30 @@ def resolve_graph(doc):
     for i, s in enumerate(steps):
         tnodes.append({**s, "node_id": s.get("node_id") or f"n{i + 1}"})
 
-    # 2) cạnh ở mức template
+    # start node id(s) — đích trả-về tới đây = người tạo
+    start_ids = {tn["node_id"] for tn in tnodes if tn.get("kind") == START_KIND}
+
+    # 2) cạnh template: tách FORWARD (tiến) vs RETURN (trả về)
+    return_tpl = []
     if edges:
-        tedges = [
-            {
-                "from": e.get("from_node"),
-                "to": e.get("to_node"),
-                "live": engine.edge_passes(e, doc),
-            }
-            for e in edges
-            if e.get("from_node") and e.get("to_node")
+        fwd = [
+            e for e in edges
+            if e.get("from_node") and e.get("to_node") and (e.get("edge_kind") or "forward") != "return"
         ]
+        # live của cạnh thường (non-default) theo điều kiện
+        live = [False if e.get("is_default") else engine.edge_passes(e, doc) for e in fwd]
+        # nguồn có cạnh non-default nào thoả?
+        src_has_live = {}
+        for e, lv in zip(fwd, live):
+            if not e.get("is_default"):
+                src_has_live[e["from_node"]] = src_has_live.get(e["from_node"], False) or lv
+        # cạnh mặc định: live khi cùng nguồn không cạnh thường nào thoả
+        tedges = []
+        for e, lv in zip(fwd, live):
+            if e.get("is_default"):
+                lv = not src_has_live.get(e["from_node"], False)
+            tedges.append({"from": e["from_node"], "to": e["to_node"], "live": lv})
+        return_tpl = [e for e in edges if e.get("from_node") and e.get("to_node") and e.get("edge_kind") == "return"]
     else:
         seqs = _assign_seq(tnodes)
         by_seq = {}
@@ -307,16 +327,33 @@ def resolve_graph(doc):
             rids.append(rid)
         expansion[tn["node_id"]] = rids
 
-    # 4) bypass node rỗng
+    # 4) bypass node rỗng khỏi forward
     empty = {nid for nid, rids in expansion.items() if not rids}
     if empty:
         tedges = _splice_out(tedges, empty)
 
-    # 5) expand cạnh template -> cạnh runtime (cartesian theo expansion)
+    # 5) FORWARD runtime edges
     runtime_edges = []
     for e in tedges:
         for rf in expansion.get(e["from"], []):
             for rt in expansion.get(e["to"], []):
-                runtime_edges.append({"from": rf, "to": rt, "live": e["live"]})
+                runtime_edges.append({"from": rf, "to": rt, "live": e["live"], "kind": "forward"})
+
+    # 6) RETURN runtime edges (đích là start -> "__creator__" = trả về người tạo)
+    for e in return_tpl:
+        targets = ["__creator__"] if e["to_node"] in start_ids else expansion.get(e["to_node"], [])
+        for rf in expansion.get(e["from_node"], []):
+            for rt in targets:
+                runtime_edges.append({
+                    "from": rf,
+                    "to": rt,
+                    "kind": "return",
+                    "is_default": e.get("is_default"),
+                    "condition_field": e.get("condition_field"),
+                    "condition_op": e.get("condition_op"),
+                    "condition_value": e.get("condition_value"),
+                    "conditions": e.get("conditions"),
+                    "condition_match": e.get("condition_match"),
+                })
 
     return runtime_nodes, runtime_edges

@@ -9,15 +9,21 @@
  "field_order": [
   "from_node",
   "to_node",
+  "edge_kind",
+  "is_default",
   "label",
   "condition_section",
+  "condition_match",
   "condition_field",
   "condition_op",
-  "condition_value"
+  "condition_value",
+  "conditions"
  ],
  "fields": [
   { "fieldname": "from_node", "fieldtype": "Data", "label": "Từ node", "reqd": 1, "in_list_view": 1 },
   { "fieldname": "to_node", "fieldtype": "Data", "label": "Đến node", "reqd": 1, "in_list_view": 1 },
+  { "default": "forward", "fieldname": "edge_kind", "fieldtype": "Select", "label": "Loại cạnh", "options": "forward\nreturn", "in_list_view": 1, "description": "forward = tiến luồng; return = trả về (đi khi bấm Trả về)" },
+  { "default": "0", "fieldname": "is_default", "fieldtype": "Check", "label": "Cạnh mặc định", "description": "Đi khi KHÔNG cạnh điều kiện nào khác (cùng nguồn) thoả" },
   { "fieldname": "label", "fieldtype": "Data", "label": "Nhãn cạnh", "in_list_view": 1 },
   {
    "fieldname": "condition_section",
@@ -31,7 +37,9 @@
    "label": "Toán tử",
    "options": "\n=\n!=\n>\n<\n>=\n<=\nin"
   },
-  { "fieldname": "condition_value", "fieldtype": "Data", "label": "Giá trị" }
+  { "fieldname": "condition_value", "fieldtype": "Data", "label": "Giá trị (1 điều kiện — legacy)" },
+  { "default": "all", "fieldname": "condition_match", "fieldtype": "Select", "label": "Khớp", "options": "all\nany" },
+  { "fieldname": "conditions", "fieldtype": "Long Text", "label": "Điều kiện ghép (JSON list)", "description": "[{field,op,value}]" }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,

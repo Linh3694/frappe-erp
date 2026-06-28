@@ -101,24 +101,45 @@ def _apply_op(op, actual, value):
     return eq if op == "=" else (not eq)
 
 
-def step_enabled(step, doc):
-    """Bước có vào luồng theo điều kiện dữ liệu phiếu không."""
-    field = step.get("condition_field")
-    if not field:
+def _clauses_of(obj):
+    """(clauses, match) từ node/edge: ưu tiên list 'conditions', fallback điều kiện đơn."""
+    raw = obj.get("conditions")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            raw = None
+    if isinstance(raw, list) and raw:
+        return raw, (obj.get("condition_match") or "all")
+    if obj.get("condition_field"):
+        return [
+            {"field": obj.get("condition_field"), "op": obj.get("condition_op"), "value": obj.get("condition_value")}
+        ], "all"
+    return [], "all"
+
+
+def eval_conditions(obj, doc):
+    """True nếu node/edge thoả điều kiện ghép (AND='all' / OR='any'); field ngoài whitelist -> bỏ qua."""
+    clauses, match = _clauses_of(obj)
+    checks = []
+    for c in clauses:
+        f = c.get("field")
+        if not f or f not in CONDITION_WHITELIST:
+            continue
+        checks.append(_apply_op(c.get("op"), doc.get(f), c.get("value")))
+    if not checks:
         return True
-    if field not in CONDITION_WHITELIST:
-        return True  # field lạ -> không chặn (an toàn)
-    return _apply_op(step.get("condition_op"), doc.get(field), step.get("condition_value"))
+    return all(checks) if (match or "all") == "all" else any(checks)
+
+
+def step_enabled(step, doc):
+    """Node có vào luồng theo điều kiện dữ liệu phiếu không (hỗ trợ ghép AND/OR)."""
+    return eval_conditions(step, doc)
 
 
 def edge_passes(edge, doc):
-    """Cạnh DAG có điều kiện rẽ nhánh không; rỗng = luôn đi."""
-    field = edge.get("condition_field")
-    if not field:
-        return True
-    if field not in CONDITION_WHITELIST:
-        return True
-    return _apply_op(edge.get("condition_op"), doc.get(field), edge.get("condition_value"))
+    """Cạnh có thoả điều kiện không (rỗng = luôn đi); hỗ trợ ghép AND/OR."""
+    return eval_conditions(edge, doc)
 
 
 # ---------------------------------------------------------------------------
@@ -158,15 +179,21 @@ def get_active_template(target_doctype):
                 "condition_field": s.condition_field,
                 "condition_op": s.condition_op,
                 "condition_value": s.condition_value,
+                "conditions": s.conditions,
+                "condition_match": s.condition_match,
             }
         )
     edges = [
         {
             "from_node": e.from_node,
             "to_node": e.to_node,
+            "edge_kind": e.edge_kind or "forward",
+            "is_default": e.is_default,
             "condition_field": e.condition_field,
             "condition_op": e.condition_op,
             "condition_value": e.condition_value,
+            "conditions": e.conditions,
+            "condition_match": e.condition_match,
         }
         for e in (tpl.edges or [])
     ]
@@ -510,7 +537,10 @@ def active_nodes(doc):
 def materialize_graph(doc, nodes, edges):
     """nodes: list dict đã resolve; edges: list dict {from,to,live}. Đóng băng + propagate."""
     doc.set("approval_steps", [])
+    ts = now()
     for n in nodes:
+        # Node "Người tạo" (start) tự-duyệt ngay khi nộp — chính việc nộp là hành động của họ
+        is_start = n.get("kind") == "requester"
         doc.append(
             "approval_steps",
             {
@@ -530,17 +560,36 @@ def materialize_graph(doc, nodes, edges):
                 "edit_users": n.get("edit_users"),
                 "delete_roles": n.get("delete_roles"),
                 "delete_users": n.get("delete_users"),
-                "status": "Skipped" if n.get("_cond_skip") else "Waiting",
+                "status": "Approved" if is_start else ("Skipped" if n.get("_cond_skip") else "Waiting"),
                 "is_active": 0,
+                "acted_by": n.get("approver_user") if is_start else None,
+                "acted_at": ts if is_start else None,
             },
         )
     doc.approval_edges = json.dumps(
         [
-            {"from": e["from"], "to": e["to"], "live": 1 if e.get("live", True) else 0}
+            {
+                "from": e["from"],
+                "to": e["to"],
+                "live": 1 if e.get("live", True) else 0,
+                "kind": e.get("kind", "forward"),
+                "is_default": 1 if e.get("is_default") else 0,
+                "cf": e.get("condition_field"),
+                "co": e.get("condition_op"),
+                "cv": e.get("condition_value"),
+                "conds": e.get("conditions"),
+                "match": e.get("condition_match"),
+            }
             for e in edges
         ]
     )
     doc.current_seq = 0
+    # node "Người tạo" (start) tự duyệt ngay — đại diện hành vi nộp; mở khoá các bước kế
+    for s in (doc.approval_steps or []):
+        if s.kind == "requester":
+            s.status = "Approved"
+            s.is_active = 0
+            s.acted_by = s.approver_user or None
     _propagate(doc)
     return bool(nodes)
 
@@ -548,7 +597,7 @@ def materialize_graph(doc, nodes, edges):
 def _propagate(doc):
     """Kích hoạt node theo reachability: node ready khi MỌI cạnh-live tới đã xong (AND-join);
     không cạnh-live nào tới (mà có incoming) -> Skipped (dead-path)."""
-    edges = json.loads(doc.get("approval_edges") or "[]")
+    edges = [e for e in json.loads(doc.get("approval_edges") or "[]") if e.get("kind", "forward") != "return"]
     nodes = {s.node_id: s for s in (doc.approval_steps or []) if s.node_id}
     incoming = {nid: [] for nid in nodes}
     for e in edges:
@@ -621,17 +670,85 @@ def _act_approve_dag(doc, email, comment=None):
     return {"final": doc.workflow_state == "Approved", "advanced": True}
 
 
-def _act_return_dag(doc, email, reason=None):
-    if doc.workflow_state != "Pending":
-        frappe.throw("Phiếu không ở trạng thái chờ duyệt.")
-    active = active_nodes(doc)
-    if not any(can_return_node(s, email) for s in active):
-        frappe.throw("Bạn không có quyền trả lại phiếu này.")
+CREATOR_TARGET = "__creator__"
+
+
+def _stored_edge_passes(e, doc):
+    """Điều kiện trên cạnh đã đóng băng (conds ghép, fallback cf/co/cv)."""
+    return eval_conditions(
+        {
+            "conditions": e.get("conds"),
+            "condition_match": e.get("match"),
+            "condition_field": e.get("cf"),
+            "condition_op": e.get("co"),
+            "condition_value": e.get("cv"),
+        },
+        doc,
+    )
+
+
+def _forward_descendants(start_id, edges):
+    """Tập node tới được từ start_id qua cạnh FORWARD (gồm chính start_id)."""
+    fwd = {}
+    for e in edges:
+        if e.get("kind", "forward") == "return":
+            continue
+        fwd.setdefault(e.get("from"), []).append(e.get("to"))
+    seen, stack = set(), [start_id]
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        for nxt in fwd.get(n, []):
+            if nxt not in seen:
+                stack.append(nxt)
+    return seen
+
+
+def _return_to_creator(doc, reason):
     for s in (doc.approval_steps or []):
         s.is_active = 0
         if s.status in ("Pending", "Approved"):
             s.status = "Waiting"
     doc.workflow_state = "Returned"
+    doc.return_reason = reason
+
+
+def _act_return_dag(doc, email, reason=None):
+    if doc.workflow_state != "Pending":
+        frappe.throw("Phiếu không ở trạng thái chờ duyệt.")
+    actor_nodes = [s for s in active_nodes(doc) if can_return_node(s, email)]
+    if not actor_nodes:
+        frappe.throw("Bạn không có quyền trả lại phiếu này.")
+    src = actor_nodes[0]
+
+    all_edges = json.loads(doc.get("approval_edges") or "[]")
+    ret_edges = [e for e in all_edges if e.get("kind") == "return" and e.get("from") == src.node_id]
+    # cạnh có điều kiện trước, cạnh mặc định sau (chỉ đi khi không cạnh nào khác thoả)
+    ordered = [e for e in ret_edges if not e.get("is_default")] + [e for e in ret_edges if e.get("is_default")]
+    target = None
+    for e in ordered:
+        if _stored_edge_passes(e, doc):
+            target = e.get("to")
+            break
+
+    nodes = {s.node_id: s for s in (doc.approval_steps or [])}
+    # Không có cạnh trả về khớp -> trả về người tạo (phiếu về Returned để sửa & nộp lại)
+    if not target or target == CREATOR_TARGET or target not in nodes:
+        _return_to_creator(doc, reason)
+        return
+
+    # Trả về node trung gian: reset nhánh-sau-đích (giữ Skipped), kích hoạt lại đích, phiếu vẫn Pending
+    desc = _forward_descendants(target, all_edges)
+    for s in (doc.approval_steps or []):
+        if s.node_id in desc and s.status in ("Approved", "Pending"):
+            s.status = "Waiting"
+            s.is_active = 0
+            s.acted_by = None
+            s.acted_at = None
+            s.comment = None
+    _propagate(doc)
     doc.return_reason = reason
 
 

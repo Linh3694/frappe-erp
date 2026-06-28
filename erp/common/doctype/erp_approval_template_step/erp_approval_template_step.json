@@ -31,9 +31,11 @@
   "is_optional",
   "parallel_group",
   "condition_section",
+  "condition_match",
   "condition_field",
   "condition_op",
-  "condition_value"
+  "condition_value",
+  "conditions"
  ],
  "fields": [
   {
@@ -74,7 +76,7 @@
    "fieldname": "kind",
    "fieldtype": "Select",
    "label": "Resolver động (khi dynamic)",
-   "options": "\nteam_lead\ndepartment_head\nrelated_department\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head"
+   "options": "\nrequester\nteam_lead\ndepartment_head\nrelated_department\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head"
   },
   {
    "fieldname": "approver_role",
@@ -129,7 +131,9 @@
    "label": "Toán tử",
    "options": "\n=\n!=\n>\n<\n>=\n<=\nin"
   },
-  { "fieldname": "condition_value", "fieldtype": "Data", "label": "Giá trị" }
+  { "fieldname": "condition_value", "fieldtype": "Data", "label": "Giá trị (1 điều kiện — legacy)" },
+  { "default": "all", "fieldname": "condition_match", "fieldtype": "Select", "label": "Khớp", "options": "all\nany" },
+  { "fieldname": "conditions", "fieldtype": "Long Text", "label": "Điều kiện ghép (JSON list)", "description": "[{field,op,value}] — ưu tiên hơn điều kiện đơn" }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,

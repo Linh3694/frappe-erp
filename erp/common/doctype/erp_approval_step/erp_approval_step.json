@@ -36,7 +36,7 @@
  "fields": [
   { "fieldname": "node_id", "fieldtype": "Data", "label": "Mã node", "in_list_view": 1 },
   { "fieldname": "seq", "fieldtype": "Int", "label": "Nấc (legacy linear)" },
-  { "fieldname": "kind", "fieldtype": "Select", "label": "Resolver động", "options": "team_lead\ndepartment_head\nrelated_department\nrole\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head" },
+  { "fieldname": "kind", "fieldtype": "Select", "label": "Resolver động", "options": "requester\nteam_lead\ndepartment_head\nrelated_department\nrole\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head" },
   { "fieldname": "label", "fieldtype": "Data", "label": "Nhãn", "in_list_view": 1 },
   { "default": "dynamic", "fieldname": "approver_type", "fieldtype": "Data", "label": "Kiểu người duyệt" },
   { "fieldname": "approver_role", "fieldtype": "Data", "label": "Vai trò gate" },

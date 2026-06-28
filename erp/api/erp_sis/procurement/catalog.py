@@ -23,10 +23,13 @@ STEP_FIELDS = [
     "approver_type", "approver_role", "approver_user", "is_optional", "parallel_group",
     "return_roles", "return_users", "view_roles", "view_users",
     "edit_roles", "edit_users", "delete_roles", "delete_users",
-    "condition_field", "condition_op", "condition_value",
+    "condition_match", "conditions", "condition_field", "condition_op", "condition_value",
 ]
 
-EDGE_FIELDS = ["from_node", "to_node", "label", "condition_field", "condition_op", "condition_value"]
+EDGE_FIELDS = [
+    "from_node", "to_node", "edge_kind", "is_default", "label",
+    "condition_match", "conditions", "condition_field", "condition_op", "condition_value",
+]
 
 _ROLE_KINDS = ("council_finance", "council_coo", "council_ceo", "role")
 
@@ -41,6 +44,14 @@ def _parse_list(value):
         return parsed if isinstance(parsed, list) else []
     except (ValueError, TypeError):
         return []
+
+
+def _row(src, fields):
+    """Lấy dict theo fields; field 'conditions' parse JSON -> list cho FE."""
+    d = {f: src.get(f) for f in fields}
+    if "conditions" in d:
+        d["conditions"] = _parse_list(d.get("conditions"))
+    return d
 
 
 def _is_manager():
@@ -165,11 +176,8 @@ def _template_dict(doc):
         "title": doc.title,
         "target_doctype": doc.target_doctype,
         "is_active": doc.is_active,
-        "steps": [
-            {f: s.get(f) for f in STEP_FIELDS}
-            for s in sorted(doc.steps, key=lambda x: (x.step_order or 0))
-        ],
-        "edges": [{f: e.get(f) for f in EDGE_FIELDS} for e in (doc.edges or [])],
+        "steps": [_row(s, STEP_FIELDS) for s in sorted(doc.steps, key=lambda x: (x.step_order or 0))],
+        "edges": [_row(e, EDGE_FIELDS) for e in (doc.edges or [])],
     }
 
 
@@ -272,6 +280,8 @@ def upsert_template():
             "edit_users": s.get("edit_users"),
             "delete_roles": s.get("delete_roles"),
             "delete_users": s.get("delete_users"),
+            "condition_match": s.get("condition_match") or "all",
+            "conditions": json.dumps(s.get("conditions") or []),
             "condition_field": s.get("condition_field"),
             "condition_op": s.get("condition_op"),
             "condition_value": s.get("condition_value"),
@@ -283,7 +293,11 @@ def upsert_template():
         doc.append("edges", {
             "from_node": e.get("from_node"),
             "to_node": e.get("to_node"),
+            "edge_kind": e.get("edge_kind") or "forward",
+            "is_default": 1 if e.get("is_default") else 0,
             "label": e.get("label"),
+            "condition_match": e.get("condition_match") or "all",
+            "conditions": json.dumps(e.get("conditions") or []),
             "condition_field": e.get("condition_field"),
             "condition_op": e.get("condition_op"),
             "condition_value": e.get("condition_value"),
@@ -320,6 +334,15 @@ def list_roles():
     rows = frappe.get_all("Role", filters={"disabled": 0}, pluck="name", order_by="name asc")
     skip = {"Guest", "All", "Administrator", "Desk User"}
     return list_response([r for r in rows if r not in skip])
+
+
+@frappe.whitelist()
+def list_campuses():
+    """Danh sách campus (cho dropdown giá trị điều kiện field campus_id)."""
+    if not _is_manager():
+        return forbidden_response("Không có quyền cấu hình")
+    rows = frappe.get_all("SIS Campus", fields=["name", "title_vn"], order_by="title_vn asc")
+    return list_response(rows)
 
 
 @frappe.whitelist()
