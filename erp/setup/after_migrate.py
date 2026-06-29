@@ -170,18 +170,6 @@ def _seed_workflow_registry():
         frappe.db.rollback()
 
 
-def _seed_pr_po_templates():
-    """Di trú PR/PO: tạo template active từ luồng mặc định (giữ chạy y như cũ sau khi bỏ default cứng)."""
-    try:
-        from erp.api.erp_sis.procurement import catalog
-
-        for dt in ("ERP Purchase Request", "ERP Purchase Order"):
-            catalog.seed_default_template(dt)
-        frappe.db.commit()
-    except Exception:
-        frappe.db.rollback()
-
-
 def execute():
     """Tạo các role cần thiết nếu chưa tồn tại."""
     for role_name in REQUIRED_ROLES:
@@ -195,4 +183,3 @@ def execute():
     _seed_it_support_categories()
     _seed_procurement()
     _seed_workflow_registry()
-    _seed_pr_po_templates()

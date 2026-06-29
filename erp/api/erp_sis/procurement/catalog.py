@@ -36,8 +36,6 @@ EDGE_FIELDS = [
 
 PRINCIPAL_FIELDS = ["slot", "principal_type", "ref", "relation", "unit_type", "position", "label"]
 
-_ROLE_KINDS = ("council_finance", "council_coo", "council_ceo", "role")
-
 
 def _parse_list(value):
     if value is None:
@@ -185,54 +183,6 @@ def _template_dict(doc):
         "steps": [_row(s, STEP_FIELDS) for s in sorted(doc.steps, key=lambda x: (x.step_order or 0))],
         "edges": [_row(e, EDGE_FIELDS) for e in (doc.edges or [])],
     }
-
-
-def _default_graph(target_doctype):
-    """Dựng graph mặc định (node_id + edges tuyến tính theo nấc) từ DEFAULT_*_STEPS."""
-    from .resolvers import DEFAULT_PR_STEPS, DEFAULT_PO_STEPS, _assign_seq
-
-    base = DEFAULT_PR_STEPS if target_doctype == "ERP Purchase Request" else DEFAULT_PO_STEPS
-    steps = []
-    for i, s in enumerate(base):
-        node = {k: s.get(k) for k in STEP_FIELDS if k in s}
-        node["node_id"] = f"n{i + 1}"
-        node["step_order"] = i + 1
-        node["pos_x"] = 0
-        node["pos_y"] = i * 140
-        node["approver_type"] = "role" if s.get("kind") in _ROLE_KINDS else "dynamic"
-        steps.append(node)
-
-    seqs = _assign_seq([{"parallel_group": s.get("parallel_group")} for s in base])
-    by_seq = {}
-    for i, sq in enumerate(seqs):
-        by_seq.setdefault(sq, []).append(f"n{i + 1}")
-    order = [by_seq[k] for k in sorted(by_seq)]
-    edges = []
-    for k in range(len(order) - 1):
-        for fr in order[k]:
-            for to in order[k + 1]:
-                edges.append({"from_node": fr, "to_node": to})
-    return {"steps": steps, "edges": edges}
-
-
-def seed_default_template(target_doctype):
-    """Di trú một lần: tạo 1 ERP Approval Template active từ _default_graph nếu doctype chưa có template nào.
-    Dùng cho PR/PO để giữ chạy y như cũ sau khi bỏ luồng mặc định cứng."""
-    if frappe.db.exists(TEMPLATE_DT, {"target_doctype": target_doctype}):
-        return
-    g = _default_graph(target_doctype)
-    doc = frappe.new_doc(TEMPLATE_DT)
-    doc.title = f"Luồng mặc định — {target_doctype}"
-    doc.target_doctype = target_doctype
-    doc.is_active = 1
-    for s in g["steps"]:
-        row = {k: s.get(k) for k in STEP_FIELDS if k in s}
-        row["conditions"] = json.dumps(s.get("conditions") or [])
-        row["principals"] = json.dumps(s.get("principals") or [])
-        doc.append("steps", row)
-    for e in g["edges"]:
-        doc.append("edges", {"from_node": e["from_node"], "to_node": e["to_node"], "edge_kind": "forward"})
-    doc.insert(ignore_permissions=True)
 
 
 @frappe.whitelist()

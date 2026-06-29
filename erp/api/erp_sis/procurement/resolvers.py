@@ -1,8 +1,9 @@
 """
-Resolver luồng duyệt cho PR/PO (phần NGHIỆP VỤ — adapter của engine generic).
+Resolver luồng duyệt GENERIC (KissFlow DAG) — template nodes+edges -> runtime nodes+edges.
 
-DEFAULT_PR_STEPS / DEFAULT_PO_STEPS: CHỈ để catalog.seed_default_template di trú PR/PO 1 lần thành template.
-resolve_graph(doc): template nodes+edges -> (runtime_nodes, runtime_edges) cho engine.materialize_graph().
+Mọi node người-duyệt khai báo bằng "Đối tượng" (Principal) neo Sơ đồ tổ chức; chỉ còn 2 marker
+cấu trúc: Người tạo (requester) + Kết thúc (end). Không còn luồng mặc định cứng / dispatch theo kind.
+resolve_graph(doc) -> (runtime_nodes, runtime_edges) cho engine.materialize_graph().
 """
 
 import frappe
@@ -10,94 +11,15 @@ import frappe
 from ..approval import engine
 from ..approval import principals
 
-ORG_DT = "ERP Organization Unit"
-ORG_TYPE_DT = "ERP Organization Unit Type"
-PR_DT = "ERP Purchase Request"
-PO_DT = "ERP Purchase Order"
-
 # Node "Người tạo" (gốc luồng) — marker UI, không sinh bước duyệt; đích trả-về = người tạo
 START_KIND = "requester"
 # Node "Kết thúc" — marker terminal; tới đây = phiếu Approved (splice khỏi forward)
 END_KIND = "end"
 
-def _return_principals(*role_refs):
-    return [{"slot": "return", "principal_type": "role", "ref": r} for r in role_refs]
-
-
-# Luồng PR: (Trưởng nhóm tự bỏ) -> Trưởng phòng -> Phòng liên quan (song song) -> CFO -> COO -> CEO
-DEFAULT_PR_STEPS = [
-    {"kind": "team_lead", "label": "Trưởng nhóm", "is_optional": 1},
-    {"kind": "department_head", "label": "Trưởng phòng"},
-    {"kind": "related_department", "label": "Phòng liên quan", "parallel_group": "related"},
-    {"kind": "council_finance", "label": "Phòng Tài chính", "approver_role": "CFO", "principals": _return_principals("SIS Finance", "CFO")},
-    {"kind": "council_coo", "label": "COO", "approver_role": "COO", "principals": _return_principals("COO")},
-    {"kind": "council_ceo", "label": "CEO", "approver_role": "CEO", "principals": _return_principals("CEO")},
-]
-
-# Luồng PO: Trưởng phòng mua hàng -> (Trưởng phòng order nếu có thay thế) -> CFO -> COO -> CEO
-DEFAULT_PO_STEPS = [
-    {"kind": "department_head", "label": "Trưởng phòng mua hàng"},
-    {
-        "kind": "order_dept_head",
-        "label": "Trưởng phòng order (thay thế)",
-        "parallel_group": "order",
-        "condition_field": "has_substitution",
-        "condition_op": "=",
-        "condition_value": "1",
-    },
-    {"kind": "council_finance", "label": "Phòng Tài chính", "approver_role": "CFO", "principals": _return_principals("SIS Finance", "CFO")},
-    {"kind": "council_coo", "label": "COO", "approver_role": "COO", "principals": _return_principals("COO")},
-    {"kind": "council_ceo", "label": "CEO", "approver_role": "CEO", "principals": _return_principals("CEO")},
-]
-
-
-def _unit_type_by_order(order):
-    return frappe.db.get_value(
-        ORG_TYPE_DT, {"type_order": order, "is_active": 1}, "name"
-    ) or frappe.db.get_value(ORG_TYPE_DT, {"type_order": order}, "name")
-
-
-def _find_team_unit(routing_unit, user):
-    """Nhóm (type_order=4) trực thuộc routing_unit mà user là member."""
-    if not (routing_unit and user):
-        return None
-    grp_type = _unit_type_by_order(4)
-    if not grp_type:
-        return None
-    rows = frappe.db.sql(
-        """
-        SELECT u.name FROM `tabERP Organization Unit Member` m
-        INNER JOIN `tabERP Organization Unit` u ON m.parent = u.name
-        WHERE m.user = %(user)s AND u.unit_type = %(gt)s
-          AND u.parent_organization_unit = %(ru)s AND u.is_active = 1
-        LIMIT 1
-        """,
-        {"user": user, "gt": grp_type, "ru": routing_unit},
-        as_dict=True,
-    )
-    return rows[0].name if rows else None
-
-
-def _substituted_requesting_depts(doc):
-    depts = []
-    for l in (doc.lines or []):
-        if l.line_action == "substitute" and l.pr_line:
-            pr = frappe.db.get_value("ERP Purchase Request Line", l.pr_line, "parent")
-            if not pr:
-                continue
-            rd = frappe.db.get_value(PR_DT, pr, "requesting_department") or frappe.db.get_value(
-                PR_DT, pr, "routing_unit"
-            )
-            if rd and rd not in depts:
-                depts.append(rd)
-    return depts
-
 
 # ===========================================================================
 # DAG RESOLVE (KissFlow) — template nodes+edges -> runtime nodes + edges
 # ===========================================================================
-
-_COUNCIL_ROLE = {"council_finance": "CFO", "council_coo": "COO", "council_ceo": "CEO"}
 
 
 def _assign_seq(nodes):
@@ -131,15 +53,11 @@ def _perm_principals(tnode):
 
 
 def _rnode(tnode, doc, **over):
-    at = tnode.get("approver_type")
-    kind = tnode.get("kind")
-    if not at:
-        at = "role" if kind in ("council_finance", "council_coo", "council_ceo", "role") else "dynamic"
     d = {
         "node_id": tnode.get("node_id"),
-        "kind": kind,
+        "kind": tnode.get("kind"),
         "label": tnode.get("label"),
-        "approver_type": at,
+        "approver_type": tnode.get("approver_type") or "dynamic",
         "approver_role": tnode.get("approver_role"),
         "approver_user": tnode.get("approver_user"),
         "scope_unit": None,
@@ -157,73 +75,59 @@ def _rnode(tnode, doc, **over):
     return d
 
 
+def _assignee_incomplete(tnode):
+    """Người duyệt khai báo CHƯA đủ để phân giải (lỗi cấu hình luồng) — khác với 'resolve ra 0 người' lúc chạy."""
+    pt = tnode.get("assignee_principal_type")
+    if not pt:
+        return True
+    if pt == "position":
+        return not tnode.get("assignee_position")
+    if pt == "relative":
+        # mọi quan hệ hiện có đều trỏ tới 1 field trên phiếu
+        return not (tnode.get("assignee_relation") and tnode.get("assignee_ref"))
+    # user / role / unit_leader / unit_members / unit_associate: cần ref
+    return not tnode.get("assignee_ref")
+
+
 def _resolve_node(tnode, doc):
-    """1 template node -> 0+ runtime node dict (expand dynamic)."""
+    """1 template node -> 0+ runtime node. Chỉ còn marker requester/end + người duyệt theo Principal."""
     kind = tnode.get("kind")
     # Node "Kết thúc" (end): marker terminal -> splice khỏi forward (tới đây = phiếu Approved)
     if kind == END_KIND:
         return []
     # Node "Người tạo" (start): gắn người tạo phiếu, sẽ tự-duyệt khi nộp
-    if kind == "requester":
-        creator = getattr(doc, "requested_by", None) or getattr(doc, "buyer", None)
+    if kind == START_KIND:
+        creator = getattr(doc, "requested_by", None) or getattr(doc, "buyer", None) or getattr(doc, "owner", None)
         return [_rnode(tnode, doc, approver_type="user", approver_user=creator)]
-    # Người duyệt theo PRINCIPAL (neo Sơ đồ tổ chức) — ưu tiên nếu cấu hình; có thể fan-out nhiều node
-    if tnode.get("assignee_principal_type"):
-        p = {
-            "principal_type": tnode.get("assignee_principal_type"),
-            "ref": tnode.get("assignee_ref"),
-            "relation": tnode.get("assignee_relation"),
-            "unit_type": tnode.get("assignee_unit_type"),
-            "position": tnode.get("assignee_position"),
-        }
-        targets = principals.resolve_principal(p, doc)
-        if not targets and not tnode.get("is_optional"):
-            # giữ semantics cũ: thiếu người resolve -> node rỗng (splice) nếu optional, else vẫn rỗng (an toàn)
+    # Node duyệt phải khai báo người duyệt ĐẦY ĐỦ; thiếu mà KHÔNG đánh dấu tuỳ chọn -> chặn nộp
+    # (tránh node bắt buộc bị splice âm thầm -> auto-bypass). Tuỳ chọn -> bỏ qua êm.
+    if _assignee_incomplete(tnode):
+        if tnode.get("is_optional"):
             return []
-        return [
-            _rnode(
-                tnode,
-                doc,
-                assignee_principal_type=t["principal_type"],
-                scope_unit=t.get("scope_unit"),
-                approver_role=t.get("approver_role"),
-                approver_user=t.get("approver_user"),
-                assignee_position=t.get("position"),
-            )
-            for t in targets
-        ]
-    at = tnode.get("approver_type")
-    if not at:
-        at = "role" if kind in ("council_finance", "council_coo", "council_ceo", "role") else "dynamic"
-    if at == "user":
-        return [_rnode(tnode, doc)]
-    if at == "role":
-        role = tnode.get("approver_role") or _COUNCIL_ROLE.get(kind)
-        return [_rnode(tnode, doc, approver_role=role)]
-    # dynamic
-    if kind == "team_lead":
-        nhom = _find_team_unit(getattr(doc, "routing_unit", None), getattr(doc, "requested_by", None))
-        if nhom and engine.unit_has_leader(nhom):
-            return [_rnode(tnode, doc, scope_unit=nhom)]
-        return []
-    if kind == "department_head":
-        unit = doc.routing_unit if doc.doctype == PR_DT else getattr(doc, "procurement_unit", None)
-        if not unit:
-            if tnode.get("is_optional"):
-                return []
-            frappe.throw("Chưa xác định phòng chủ quản để duyệt.")
-        if not engine.unit_has_leader(unit):
-            if tnode.get("is_optional"):
-                return []
-            frappe.throw("Đơn vị chủ quản chưa gán trưởng — không thể nộp phiếu.")
-        return [_rnode(tnode, doc, scope_unit=unit)]
-    if kind == "related_department":
-        rds = getattr(doc, "related_departments", None) or []
-        return [_rnode(tnode, doc, scope_unit=rd.department) for rd in rds if rd.department]
-    if kind == "order_dept_head":
-        return [_rnode(tnode, doc, scope_unit=d) for d in _substituted_requesting_depts(doc)]
-    # dynamic lạ -> gate theo approver_role nếu có
-    return [_rnode(tnode, doc)]
+        frappe.throw(
+            f"Bước '{tnode.get('label') or tnode.get('node_id')}' chưa chỉ định người duyệt — "
+            "hoàn tất cấu hình luồng duyệt trước khi nộp."
+        )
+    # Người duyệt theo PRINCIPAL (neo Sơ đồ tổ chức) — có thể fan-out nhiều node
+    p = {
+        "principal_type": tnode.get("assignee_principal_type"),
+        "ref": tnode.get("assignee_ref"),
+        "relation": tnode.get("assignee_relation"),
+        "unit_type": tnode.get("assignee_unit_type"),
+        "position": tnode.get("assignee_position"),
+    }
+    return [
+        _rnode(
+            tnode,
+            doc,
+            assignee_principal_type=t["principal_type"],
+            scope_unit=t.get("scope_unit"),
+            approver_role=t.get("approver_role"),
+            approver_user=t.get("approver_user"),
+            assignee_position=t.get("position"),
+        )
+        for t in principals.resolve_principal(p, doc)
+    ]
 
 
 def _splice_out(tedges, empty):

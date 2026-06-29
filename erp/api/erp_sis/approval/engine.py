@@ -355,20 +355,15 @@ def _node_grants(step, perm, email, doc=None):
 
 
 def can_act_node(step, email):
-    """Ai DUYỆT được node: Principal (neo org chart) nếu có; nếu không -> legacy approver_type/scope/role. + org-wide."""
+    """Ai DUYỆT node: org-wide; Principal (neo org chart); hoặc node 'Người tạo' (approver_type=user)."""
     roles = set(frappe.get_roles(email))
     if roles & set(ORG_WIDE_ROLES):
         return True
     if step.get("assignee_principal_type"):
         from . import principals
         return principals.node_assignee_grants(step, email)
-    at = step.approver_type or "dynamic"
-    if at == "user":
+    if (step.approver_type or "dynamic") == "user":
         return bool(step.approver_user) and step.approver_user == email
-    if step.scope_unit:
-        return is_leader_of(step.scope_unit, email)
-    if step.approver_role:
-        return step.approver_role in roles
     return False
 
 
@@ -499,7 +494,9 @@ def _finalize(doc):
         doc.workflow_state = "Pending"
     elif any(s.status == "Rejected" for s in steps):
         doc.workflow_state = "Rejected"
-    elif steps and any(s.status == "Approved" for s in steps):
+    elif steps:
+        # còn lại đều Approved/Skipped -> không còn bước chặn -> DUYỆT
+        # (gồm cả trường hợp mọi bước sau Người tạo đều bị Skipped: tránh kẹt Pending vĩnh viễn)
         doc.workflow_state = "Approved"
         doc.approved_by = frappe.session.user
         doc.approved_at = now()
