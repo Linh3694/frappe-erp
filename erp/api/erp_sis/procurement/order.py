@@ -14,6 +14,7 @@ from erp.utils.api_response import (
 )
 
 from ..approval import engine
+from ..approval import principals
 from . import resolvers
 from . import utils as u
 
@@ -143,6 +144,8 @@ def upsert_order():
         if not engine.can_edit_doc(doc, me):
             return forbidden_response("Bạn không có quyền sửa PO này ở bước hiện tại")
     else:
+        if not principals.can_create(PO_DT, me):
+            return forbidden_response("Bạn không có quyền tạo phiếu loại này")
         doc = frappe.new_doc(PO_DT)
         doc.buyer = me
         doc.workflow_state = "Draft"
@@ -210,6 +213,8 @@ def submit_order(name=None):
     doc = frappe.get_doc(PO_DT, name)
     if doc.workflow_state not in ("Draft", "Returned"):
         return error_response("PO không ở trạng thái nộp được")
+    if not principals.can_create(PO_DT, me, doc):
+        return forbidden_response("Bạn không có quyền nộp phiếu loại này")
     if not doc.lines:
         return error_response("PO chưa có dòng hàng")
     if not doc.selected_supplier_idx:

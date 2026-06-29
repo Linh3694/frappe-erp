@@ -16,6 +16,7 @@ from erp.utils.api_response import (
 from erp.common.doctype.erp_workflow_doctype.erp_workflow_doctype import get_registry, enabled_doctypes
 
 from . import engine
+from . import principals
 
 
 def _u():
@@ -72,6 +73,8 @@ def submit(doctype=None, name=None):
     req_field = reg.get("requester_field")
     if req_field and doc.get(req_field) != me and not u.is_system_manager(me):
         return forbidden_response("Không có quyền nộp phiếu này")
+    if not principals.can_create(doctype, me, doc):
+        return forbidden_response("Bạn không có quyền nộp phiếu loại này")
     nodes, edges = _resolve(doc)
     if not engine.materialize_graph(doc, nodes, edges):
         return error_response("Chưa cấu hình luồng duyệt cho loại phiếu này")

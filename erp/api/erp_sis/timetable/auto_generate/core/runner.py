@@ -21,7 +21,7 @@ AssignmentKey = Tuple[str, str, str, int]
 
 
 class RuleSolverBuilder:
-	"""Kết quả build tương thích ModelBuilder.extract_solution."""
+	"""Builder dựng model CP-SAT + trích lời giải cho solver."""
 
 	def __init__(self, ctx: SolverContext, inp: Any):
 		self.ctx = ctx
@@ -67,29 +67,6 @@ def _configure_and_solve(cp, inp):
 	solver.parameters.log_search_progress = False
 	status = solver.Solve(cp)
 	return solver, status
-
-
-def _apply_legacy_session_soft(ctx: SolverContext) -> None:
-	"""Soft rules JSON cũ từ session (consecutive_bonus, pair exclusions...)."""
-	inp = ctx.inp
-	soft = inp.soft_rules
-	req_map = {(r.class_id, r.timetable_subject_id): r for r in inp.requirements}
-
-	if soft.consecutive_bonus > 0:
-		for c in inp.classes:
-			for ts_id in inp.class_subjects.get(c.name, []):
-				req = req_map.get((c.name, ts_id))
-				if not req or not req.prefer_consecutive:
-					continue
-				for day in inp.working_days:
-					for p_idx in range(ctx.num_periods - 1):
-						k1 = (c.name, ts_id, day, p_idx)
-						k2 = (c.name, ts_id, day, p_idx + 1)
-						if k1 in ctx.x and k2 in ctx.x:
-							both = ctx.model.NewBoolVar(f"leg_consec_{c.name}_{ts_id}_{day}_{p_idx}")
-							ctx.model.AddBoolAnd([ctx.x[k1], ctx.x[k2]]).OnlyEnforceIf(both)
-							ctx.model.AddBoolOr([ctx.x[k1].Not(), ctx.x[k2].Not()]).OnlyEnforceIf(both.Not())
-							ctx.objectives.append(both * soft.consecutive_bonus)
 
 
 def build_and_solve(
@@ -158,7 +135,6 @@ def build_and_solve(
 	apply_subject_max_consecutive_system_cap(ctx, max_consecutive=3)
 	ctx.cur_rule_id = ""
 
-	_apply_legacy_session_soft(ctx)
 	_apply_forbid_solutions(ctx, forbid_solutions or [], min_diff)
 
 	builder = RuleSolverBuilder(ctx, inp)

@@ -68,7 +68,6 @@ class SubjectRequirement:
 	class_id: str
 	periods_per_week: int
 	max_periods_per_day: int = 2
-	prefer_consecutive: bool = False
 	force_pair: bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
@@ -112,7 +111,6 @@ class SoftRules:
 	subject_time_preferences: List[Dict] = field(default_factory=list)
 	teacher_gap_minimization: int = 50
 	workload_balance: int = 50
-	consecutive_bonus: int = 0
 	homeroom_preference: int = 0
 
 
@@ -394,7 +392,6 @@ class TimetableDataCollector:
 				r.class_id,
 				r.periods_per_week,
 				r.max_periods_per_day,
-				r.prefer_consecutive,
 				{t_spread_sql}
 				{enforcement_sql}
 				{enf_weight_sql}
@@ -413,7 +410,6 @@ class TimetableDataCollector:
 			class_id=r["class_id"],
 			periods_per_week=r["periods_per_week"],
 			max_periods_per_day=r["max_periods_per_day"] or 2,
-			prefer_consecutive=bool(r["prefer_consecutive"]),
 			force_pair=bool(r.get("force_pair")),
 			is_heavy=bool(r.get("is_heavy")),
 			program_id=r.get("program_id") or None,
@@ -553,7 +549,6 @@ class TimetableDataCollector:
 			subject_time_preferences=data.get("subject_time_preferences", []),
 			teacher_gap_minimization=data.get("teacher_gap_minimization", 50),
 			workload_balance=data.get("workload_balance", 50),
-			consecutive_bonus=data.get("consecutive_bonus", 0),
 			homeroom_preference=data.get("homeroom_preference", 0),
 		)
 

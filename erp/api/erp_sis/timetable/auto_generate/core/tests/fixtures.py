@@ -45,7 +45,6 @@ class SubjectRequirement:
 	class_id: str
 	periods_per_week: int
 	max_periods_per_day: int = 2
-	prefer_consecutive: bool = False
 	force_pair: bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
@@ -57,7 +56,6 @@ class SubjectRequirement:
 
 @dataclass
 class SoftRules:
-	consecutive_bonus: int = 0
 	teacher_gap_minimization: int = 0
 	workload_balance: int = 0
 	homeroom_preference: int = 0

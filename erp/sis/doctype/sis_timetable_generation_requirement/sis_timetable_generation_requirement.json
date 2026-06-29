@@ -24,7 +24,6 @@
   "periods_per_week",
   "max_periods_per_day",
   "scheduling_section",
-  "prefer_consecutive",
   "force_pair",
   "tier_spread",
   "enforcement",
@@ -86,13 +85,6 @@
    "fieldname": "scheduling_section",
    "fieldtype": "Section Break",
    "label": "Scheduling Options"
-  },
-  {
-   "fieldname": "prefer_consecutive",
-   "fieldtype": "Check",
-   "label": "Prefer Consecutive (Tiết đôi)",
-   "default": 0,
-   "description": "Ưu tiên xếp 2 tiết liên tiếp khi số tiết >= 2"
   },
   {
    "fieldname": "force_pair",

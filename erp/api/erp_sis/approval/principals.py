@@ -218,6 +218,37 @@ def principal_grants(p, email, doc):
 
 
 # ---------------------------------------------------------------------------
+# Quyền TẠO/NỘP phiếu — cấu hình trên node "Người tạo" (slot='create'); rỗng = Tất cả
+# ---------------------------------------------------------------------------
+
+START_KIND = "requester"  # đồng bộ resolvers.START_KIND (tránh import vòng)
+
+
+def creator_principals(target_doctype):
+    """Danh sách Principal 'ai được tạo/nộp' lấy từ node Người tạo của template active. Rỗng = Tất cả."""
+    steps, _edges, _name = engine.get_active_template(target_doctype)
+    out = []
+    for s in (steps or []):
+        if s.get("kind") == START_KIND:
+            for p in (s.get("principals") or []):
+                if p.get("slot") == "create":
+                    out.append(p)
+    return out
+
+
+def can_create(target_doctype, email, doc=None):
+    """True nếu `email` được phép TẠO/NỘP phiếu loại này. Không cấu hình (rỗng) = Tất cả."""
+    cps = creator_principals(target_doctype)
+    if not cps:
+        return True
+    roles = set(frappe.get_roles(email))
+    if roles & set(engine.ORG_WIDE_ROLES):
+        return True
+    ctx = doc if doc is not None else frappe._dict()
+    return any(principal_grants(p, email, ctx) for p in cps)
+
+
+# ---------------------------------------------------------------------------
 # Liệt kê email (cho thông báo / SLA escalation)
 # ---------------------------------------------------------------------------
 

@@ -181,7 +181,6 @@ def normalize_requirement_row(row: dict) -> dict:
 		"timetable_subject_id": row.get("timetable_subject_id"),
 		"periods_per_week": int(row.get("periods_per_week") or 0),
 		"max_periods_per_day": int(row.get("max_periods_per_day") or 2),
-		"prefer_consecutive": bool(row.get("prefer_consecutive")),
 		"force_pair": bool(row.get("force_pair")),
 		"tier_spread": tier_spread if tier_spread in ("strong", "weak") else "weak",
 		# Per-cell tier: mandatory (đủ N cứng) | relaxable (cho thiếu, tính coverage).

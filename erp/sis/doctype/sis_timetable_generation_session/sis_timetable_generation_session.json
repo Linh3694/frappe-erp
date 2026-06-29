@@ -153,7 +153,7 @@
    "fieldtype": "Link",
    "label": "Rule Set",
    "options": "SIS Timetable Rule Set",
-   "description": "Bộ rule data-driven; để trống dùng ModelBuilder P0 mặc định"
+   "description": "Bộ rule data-driven; để trống dùng bộ rule mặc định (default_rules)"
   },
   {
    "fieldname": "rule_overrides",

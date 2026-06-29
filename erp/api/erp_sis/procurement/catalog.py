@@ -300,6 +300,17 @@ def delete_template(name=None):
 
 
 @frappe.whitelist()
+def can_create_doc(target_doctype=None):
+    """FE hỏi: user hiện tại có được TẠO phiếu loại này không (để ẩn/hiện nút Tạo)."""
+    target_doctype = target_doctype or u.get_request_data().get("target_doctype")
+    if not target_doctype:
+        return forbidden_response("Thiếu target_doctype")
+    from ..approval import principals
+
+    return single_item_response({"can_create": principals.can_create(target_doctype, u.session_email())})
+
+
+@frappe.whitelist()
 def list_workflow_doctypes():
     """Doctype đã bật workflow (cho builder chọn loại luồng) — từ sổ đăng ký ERP Workflow Doctype."""
     if not _is_manager():

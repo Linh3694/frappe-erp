@@ -14,6 +14,7 @@ from erp.utils.api_response import (
 )
 
 from ..approval import engine
+from ..approval import principals
 from . import resolvers
 from . import utils as u
 
@@ -172,6 +173,8 @@ def upsert_request():
         if not engine.can_edit_doc(doc, me):
             return forbidden_response("Bạn không có quyền sửa PR này ở bước hiện tại")
     else:
+        if not principals.can_create(PR_DT, me):
+            return forbidden_response("Bạn không có quyền tạo phiếu loại này")
         doc = frappe.new_doc(PR_DT)
         doc.requested_by = me
         doc.requesting_department = u.user_home_unit(me)
@@ -235,6 +238,8 @@ def submit_request(name=None):
         return error_response("PR không ở trạng thái nộp được")
     if doc.requested_by != me and not u.is_system_manager(me):
         return forbidden_response("Không có quyền nộp PR này")
+    if not principals.can_create(PR_DT, me, doc):
+        return forbidden_response("Bạn không có quyền nộp phiếu loại này")
     if not doc.lines:
         return error_response("PR chưa có dòng hàng")
 
