@@ -300,14 +300,6 @@ def delete_template(name=None):
 
 
 @frappe.whitelist()
-def get_default_steps(target_doctype=None):
-    """KHÔNG còn luồng mặc định cứng (quyết định #5): builder mở canvas trống (FE tự thêm Người tạo + Kết thúc)."""
-    if not _is_manager():
-        return forbidden_response("Không có quyền cấu hình")
-    return single_item_response({"steps": [], "edges": []})
-
-
-@frappe.whitelist()
 def list_workflow_doctypes():
     """Doctype đã bật workflow (cho builder chọn loại luồng) — từ sổ đăng ký ERP Workflow Doctype."""
     if not _is_manager():
