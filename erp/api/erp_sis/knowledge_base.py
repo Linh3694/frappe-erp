@@ -137,13 +137,14 @@ def _article_detail(name):
 # ---------------------------------------------------------------------------
 @frappe.whitelist(allow_guest=False)
 def get_knowledge_base_categories():
-    """List all categories for the current campus (flat; build tree on FE)."""
+    """List all categories (flat; build tree on FE).
+
+    Knowledge Base is global internal documentation, so reads are not scoped by
+    campus — every staff member sees the same set regardless of selected campus.
+    """
     try:
-        data = _request_data()
-        campus_id = _resolve_campus(data)
         names = frappe.get_all(
             CATEGORY_DT,
-            filters={"campus_id": campus_id},
             order_by="display_order asc, title_vn asc",
             pluck="name",
         )
@@ -236,11 +237,13 @@ def delete_knowledge_base_category():
 # ---------------------------------------------------------------------------
 @frappe.whitelist(allow_guest=False)
 def get_knowledge_base_articles():
-    """List articles (admin) with optional category/status filters."""
+    """List articles (admin) with optional category/status filters.
+
+    Global documentation — not scoped by campus (see get_knowledge_base_categories).
+    """
     try:
         data = _request_data()
-        campus_id = _resolve_campus(data)
-        filters = {"campus_id": campus_id}
+        filters = {}
         if data.get("category"):
             filters["category"] = data.get("category")
         if data.get("status") and data.get("status") != "all":
@@ -438,21 +441,21 @@ def upload_kb_content_image():
 # ---------------------------------------------------------------------------
 @frappe.whitelist(allow_guest=False)
 def get_published_knowledge_base_tree():
-    """Return the category tree with published articles for the /docs reader."""
-    try:
-        data = _request_data()
-        campus_id = _resolve_campus(data)
+    """Return the category tree with published articles for the /docs reader.
 
+    Global documentation — not scoped by campus.
+    """
+    try:
         categories = frappe.get_all(
             CATEGORY_DT,
-            filters={"campus_id": campus_id, "is_active": 1},
+            filters={"is_active": 1},
             fields=["name", "code", "title_vn", "title_en", "parent_category",
                     "icon", "display_order"],
             order_by="display_order asc, title_vn asc",
         )
         articles = frappe.get_all(
             ARTICLE_DT,
-            filters={"campus_id": campus_id, "status": "published"},
+            filters={"status": "published"},
             fields=["name", "category", "slug", "title_vn", "title_en",
                     "display_order", "published_at"],
             order_by="display_order asc, title_vn asc",
@@ -501,7 +504,6 @@ def get_published_knowledge_base_article():
     """Return the live published content for a (category code, slug)."""
     try:
         data = _request_data()
-        campus_id = _resolve_campus(data)
         category_code = data.get("category_code") or data.get("category")
         slug = data.get("slug")
         if not category_code or not slug:
@@ -511,14 +513,14 @@ def get_published_knowledge_base_article():
             )
 
         category_name = frappe.db.get_value(
-            CATEGORY_DT, {"campus_id": campus_id, "code": category_code}, "name"
+            CATEGORY_DT, {"code": category_code}, "name"
         )
         if not category_name:
             return not_found_response("Category not found")
 
         article_name = frappe.db.get_value(
             ARTICLE_DT,
-            {"campus_id": campus_id, "category": category_name, "slug": slug, "status": "published"},
+            {"category": category_name, "slug": slug, "status": "published"},
             "name",
         )
         if not article_name:
