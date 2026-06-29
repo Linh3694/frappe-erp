@@ -1,0 +1,50 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:target_doctype",
+ "creation": "2026-06-28 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "description": "Sổ đăng ký doctype bật workflow duyệt (cho engine generic). 1 dòng / doctype.",
+ "field_order": [
+  "target_doctype",
+  "is_enabled",
+  "label",
+  "column_break_1",
+  "icon",
+  "module",
+  "fields_section",
+  "requester_field",
+  "title_field",
+  "state_field",
+  "owner_editor_fields"
+ ],
+ "fields": [
+  { "fieldname": "target_doctype", "fieldtype": "Link", "label": "Doctype mục tiêu", "options": "DocType", "reqd": 1, "unique": 1, "in_list_view": 1 },
+  { "default": "1", "fieldname": "is_enabled", "fieldtype": "Check", "label": "Bật workflow", "in_list_view": 1 },
+  { "fieldname": "label", "fieldtype": "Data", "label": "Tên hiển thị", "in_list_view": 1 },
+  { "fieldname": "column_break_1", "fieldtype": "Column Break" },
+  { "fieldname": "icon", "fieldtype": "Data", "label": "Icon (inbox)" },
+  { "fieldname": "module", "fieldtype": "Data", "label": "Nhóm module (inbox)" },
+  { "fieldname": "fields_section", "fieldtype": "Section Break", "label": "Ánh xạ trường chuẩn" },
+  { "fieldname": "requester_field", "fieldtype": "Data", "label": "Trường người tạo", "description": "vd requested_by / buyer — dùng cho relative 'self'/'team_lead'" },
+  { "fieldname": "title_field", "fieldtype": "Data", "label": "Trường tiêu đề", "description": "vd title" },
+  { "default": "workflow_state", "fieldname": "state_field", "fieldtype": "Data", "label": "Trường trạng thái" },
+  { "fieldname": "owner_editor_fields", "fieldtype": "Small Text", "label": "Trường chủ-sở-hữu (CSV)", "description": "vd requested_by,buyer,submitted_by — ai được sửa khi Nháp/Bị trả lại" }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-06-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Workflow Doctype",
+ "owner": "Administrator",
+ "permissions": [
+  { "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1 }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

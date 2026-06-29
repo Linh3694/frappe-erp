@@ -26,11 +26,12 @@
   },
   {
    "fieldname": "target_doctype",
-   "fieldtype": "Select",
+   "fieldtype": "Link",
    "label": "Áp dụng cho",
-   "options": "ERP Purchase Request\nERP Purchase Order",
+   "options": "ERP Workflow Doctype",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "description": "Doctype đã bật workflow (sổ đăng ký ERP Workflow Doctype)"
   },
   {
    "default": "1",

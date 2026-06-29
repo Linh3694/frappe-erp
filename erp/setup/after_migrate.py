@@ -137,6 +137,51 @@ def _seed_procurement():
         frappe.db.rollback()
 
 
+WORKFLOW_REGISTRY = [
+    {
+        "target_doctype": "ERP Purchase Request",
+        "label": "Phiếu Yêu cầu (PR)",
+        "requester_field": "requested_by",
+        "title_field": "title",
+        "owner_editor_fields": "requested_by,submitted_by",
+        "module": "Mua sắm",
+    },
+    {
+        "target_doctype": "ERP Purchase Order",
+        "label": "Phiếu Mua sắm (PO)",
+        "requester_field": "buyer",
+        "title_field": "title",
+        "owner_editor_fields": "buyer,submitted_by",
+        "module": "Mua sắm",
+    },
+]
+
+
+def _seed_workflow_registry():
+    """Đăng ký PR/PO vào sổ workflow (cho engine generic + target_doctype Link)."""
+    try:
+        for r in WORKFLOW_REGISTRY:
+            if not frappe.db.exists("ERP Workflow Doctype", r["target_doctype"]):
+                frappe.get_doc({"doctype": "ERP Workflow Doctype", "is_enabled": 1, **r}).insert(
+                    ignore_permissions=True
+                )
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+
+
+def _seed_pr_po_templates():
+    """Di trú PR/PO: tạo template active từ luồng mặc định (giữ chạy y như cũ sau khi bỏ default cứng)."""
+    try:
+        from erp.api.erp_sis.procurement import catalog
+
+        for dt in ("ERP Purchase Request", "ERP Purchase Order"):
+            catalog.seed_default_template(dt)
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+
+
 def execute():
     """Tạo các role cần thiết nếu chưa tồn tại."""
     for role_name in REQUIRED_ROLES:
@@ -149,3 +194,5 @@ def execute():
     _ensure_admission_file_folder()
     _seed_it_support_categories()
     _seed_procurement()
+    _seed_workflow_registry()
+    _seed_pr_po_templates()

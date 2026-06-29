@@ -20,10 +20,12 @@ TEMPLATE_DT = "ERP Approval Template"
 
 STEP_FIELDS = [
     "node_id", "step_order", "pos_x", "pos_y", "kind", "label",
-    "approver_type", "approver_role", "approver_user", "is_optional", "parallel_group",
-    "return_roles", "return_users", "view_roles", "view_users",
-    "edit_roles", "edit_users", "delete_roles", "delete_users",
+    "approver_type", "approver_role", "approver_user",
+    "assignee_principal_type", "assignee_ref", "assignee_relation", "assignee_unit_type", "assignee_position",
+    "is_optional", "parallel_group",
     "condition_match", "conditions", "condition_field", "condition_op", "condition_value",
+    "principals",
+    "deadline_hours", "escalation", "escalation_after_hours",
 ]
 
 EDGE_FIELDS = [
@@ -31,6 +33,8 @@ EDGE_FIELDS = [
     "condition_match", "conditions", "condition_field", "condition_op", "condition_value",
     "source_handle", "target_handle", "waypoints",
 ]
+
+PRINCIPAL_FIELDS = ["slot", "principal_type", "ref", "relation", "unit_type", "position", "label"]
 
 _ROLE_KINDS = ("council_finance", "council_coo", "council_ceo", "role")
 
@@ -50,7 +54,7 @@ def _parse_list(value):
 def _row(src, fields):
     """Lấy dict theo fields; field JSON (conditions/waypoints) parse -> list cho FE."""
     d = {f: src.get(f) for f in fields}
-    for jf in ("conditions", "waypoints"):
+    for jf in ("conditions", "waypoints", "principals"):
         if jf in d:
             d[jf] = _parse_list(d.get(jf))
     return d
@@ -211,6 +215,26 @@ def _default_graph(target_doctype):
     return {"steps": steps, "edges": edges}
 
 
+def seed_default_template(target_doctype):
+    """Di trú một lần: tạo 1 ERP Approval Template active từ _default_graph nếu doctype chưa có template nào.
+    Dùng cho PR/PO để giữ chạy y như cũ sau khi bỏ luồng mặc định cứng."""
+    if frappe.db.exists(TEMPLATE_DT, {"target_doctype": target_doctype}):
+        return
+    g = _default_graph(target_doctype)
+    doc = frappe.new_doc(TEMPLATE_DT)
+    doc.title = f"Luồng mặc định — {target_doctype}"
+    doc.target_doctype = target_doctype
+    doc.is_active = 1
+    for s in g["steps"]:
+        row = {k: s.get(k) for k in STEP_FIELDS if k in s}
+        row["conditions"] = json.dumps(s.get("conditions") or [])
+        row["principals"] = json.dumps(s.get("principals") or [])
+        doc.append("steps", row)
+    for e in g["edges"]:
+        doc.append("edges", {"from_node": e["from_node"], "to_node": e["to_node"], "edge_kind": "forward"})
+    doc.insert(ignore_permissions=True)
+
+
 @frappe.whitelist()
 def list_templates(target_doctype=None):
     if not _is_manager():
@@ -272,21 +296,22 @@ def upsert_template():
             "approver_type": s.get("approver_type") or "dynamic",
             "approver_role": s.get("approver_role"),
             "approver_user": s.get("approver_user"),
+            "assignee_principal_type": s.get("assignee_principal_type"),
+            "assignee_ref": s.get("assignee_ref"),
+            "assignee_relation": s.get("assignee_relation"),
+            "assignee_unit_type": s.get("assignee_unit_type"),
+            "assignee_position": s.get("assignee_position"),
+            "principals": json.dumps(s.get("principals") or []),
             "is_optional": 1 if s.get("is_optional") else 0,
             "parallel_group": s.get("parallel_group"),
-            "return_roles": s.get("return_roles"),
-            "return_users": s.get("return_users"),
-            "view_roles": s.get("view_roles"),
-            "view_users": s.get("view_users"),
-            "edit_roles": s.get("edit_roles"),
-            "edit_users": s.get("edit_users"),
-            "delete_roles": s.get("delete_roles"),
-            "delete_users": s.get("delete_users"),
             "condition_match": s.get("condition_match") or "all",
             "conditions": json.dumps(s.get("conditions") or []),
             "condition_field": s.get("condition_field"),
             "condition_op": s.get("condition_op"),
             "condition_value": s.get("condition_value"),
+            "deadline_hours": s.get("deadline_hours") or 0,
+            "escalation": s.get("escalation") or "notify",
+            "escalation_after_hours": s.get("escalation_after_hours") or 0,
         })
     doc.set("edges", [])
     for e in _parse_list(data.get("edges")):
@@ -326,10 +351,62 @@ def delete_template(name=None):
 
 @frappe.whitelist()
 def get_default_steps(target_doctype=None):
-    """Graph mặc định (steps + edges) để khởi tạo builder."""
+    """KHÔNG còn luồng mặc định cứng (quyết định #5): builder mở canvas trống (FE tự thêm Người tạo + Kết thúc)."""
     if not _is_manager():
         return forbidden_response("Không có quyền cấu hình")
-    return single_item_response(_default_graph(target_doctype))
+    return single_item_response({"steps": [], "edges": []})
+
+
+@frappe.whitelist()
+def list_workflow_doctypes():
+    """Doctype đã bật workflow (cho builder chọn loại luồng) — từ sổ đăng ký ERP Workflow Doctype."""
+    if not _is_manager():
+        return forbidden_response("Không có quyền cấu hình")
+    rows = frappe.get_all(
+        "ERP Workflow Doctype", filters={"is_enabled": 1}, fields=["target_doctype", "label"], order_by="label asc"
+    )
+    return list_response([{"value": r.target_doctype, "label": r.label or r.target_doctype} for r in rows])
+
+
+@frappe.whitelist()
+def get_condition_fields(target_doctype=None):
+    """Trường điều kiện hợp lệ của target_doctype (generic, lọc theo kiểu trường an toàn)."""
+    if not _is_manager():
+        return forbidden_response("Không có quyền cấu hình")
+    from ..approval import fields as wf_fields
+
+    return list_response(wf_fields.allowed_condition_fields(target_doctype))
+
+
+@frappe.whitelist()
+def get_doc_fields(target_doctype=None):
+    """Mọi field của doctype (cho picker Principal 'tương đối' chọn field Link đơn vị/User/bảng con)."""
+    if not _is_manager():
+        return forbidden_response("Không có quyền cấu hình")
+    from ..approval import fields as wf_fields
+
+    return list_response(wf_fields.all_fields(target_doctype))
+
+
+@frappe.whitelist()
+def search_org_units(term=None, limit=20):
+    """Search đơn vị (cho picker Principal trưởng/thành viên/chức danh đơn vị)."""
+    if not _is_manager():
+        return forbidden_response("Không có quyền cấu hình")
+    term = (term or "").strip()
+    or_filters = None
+    if term:
+        like = f"%{term}%"
+        or_filters = {"unit_name_vn": ["like", like], "unit_code": ["like", like], "name": ["like", like]}
+    rows = frappe.get_all(
+        "ERP Organization Unit",
+        filters={"is_active": 1},
+        or_filters=or_filters,
+        fields=["name", "unit_name_vn"],
+        limit_page_length=int(limit or 20),
+        order_by="unit_name_vn asc",
+    )
+    return list_response(rows)
 
 
 @frappe.whitelist()

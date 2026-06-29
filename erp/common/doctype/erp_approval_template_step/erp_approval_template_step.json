@@ -18,18 +18,21 @@
   "kind",
   "approver_role",
   "approver_user",
+  "assignee_section",
+  "assignee_principal_type",
+  "assignee_ref",
+  "assignee_relation",
+  "assignee_unit_type",
+  "assignee_position",
   "perm_section",
-  "return_roles",
-  "return_users",
-  "view_roles",
-  "view_users",
-  "edit_roles",
-  "edit_users",
-  "delete_roles",
-  "delete_users",
+  "principals",
   "options_section",
   "is_optional",
   "parallel_group",
+  "deadline_section",
+  "deadline_hours",
+  "escalation",
+  "escalation_after_hours",
   "condition_section",
   "condition_match",
   "condition_field",
@@ -76,7 +79,7 @@
    "fieldname": "kind",
    "fieldtype": "Select",
    "label": "Resolver động (khi dynamic)",
-   "options": "\nrequester\nteam_lead\ndepartment_head\nrelated_department\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head"
+   "options": "\nrequester\nend\nteam_lead\ndepartment_head\nrelated_department\ncouncil_finance\ncouncil_coo\ncouncil_ceo\norder_dept_head"
   },
   {
    "fieldname": "approver_role",
@@ -91,18 +94,21 @@
    "options": "User"
   },
   {
+   "fieldname": "assignee_section",
+   "fieldtype": "Section Break",
+   "label": "Người duyệt (Principal — neo Sơ đồ tổ chức)"
+  },
+  { "fieldname": "assignee_principal_type", "fieldtype": "Select", "label": "Loại đối tượng", "options": "\nuser\nrole\nunit_leader\nunit_members\nunit_associate\nposition\nrelative", "description": "Để trống = dùng 'Loại bước' (kind) cũ" },
+  { "fieldname": "assignee_ref", "fieldtype": "Data", "label": "Tham chiếu (user/role/đơn vị/field)" },
+  { "fieldname": "assignee_relation", "fieldtype": "Select", "label": "Quan hệ (khi relative)", "options": "\nself\nleader_of_unit_in_field\nmembers_of_unit_in_field\nparent_department_head\nteam_lead\nleaders_of_units_in_table_field" },
+  { "fieldname": "assignee_unit_type", "fieldtype": "Link", "label": "Loại đơn vị (khi position)", "options": "ERP Organization Unit Type" },
+  { "fieldname": "assignee_position", "fieldtype": "Data", "label": "Chức danh (khi position)" },
+  {
    "fieldname": "perm_section",
    "fieldtype": "Section Break",
-   "label": "Ma trận quyền (role/user, cách nhau dấu phẩy)"
+   "label": "Quyền theo Principal (neo Sơ đồ tổ chức)"
   },
-  { "fieldname": "return_roles", "fieldtype": "Small Text", "label": "Trả về — Vai trò" },
-  { "fieldname": "return_users", "fieldtype": "Small Text", "label": "Trả về — Người" },
-  { "fieldname": "view_roles", "fieldtype": "Small Text", "label": "Xem — Vai trò" },
-  { "fieldname": "view_users", "fieldtype": "Small Text", "label": "Xem — Người" },
-  { "fieldname": "edit_roles", "fieldtype": "Small Text", "label": "Sửa — Vai trò" },
-  { "fieldname": "edit_users", "fieldtype": "Small Text", "label": "Sửa — Người" },
-  { "fieldname": "delete_roles", "fieldtype": "Small Text", "label": "Xoá — Vai trò" },
-  { "fieldname": "delete_users", "fieldtype": "Small Text", "label": "Xoá — Người" },
+  { "fieldname": "principals", "fieldtype": "Long Text", "label": "Quyền theo Principal (JSON: [{slot,principal_type,ref,relation,unit_type,position}])" },
   {
    "fieldname": "options_section",
    "fieldtype": "Section Break",
@@ -119,6 +125,10 @@
    "fieldtype": "Data",
    "label": "Nhóm song song (legacy linear)"
   },
+  { "fieldname": "deadline_section", "fieldtype": "Section Break", "label": "Hạn xử lý (SLA)" },
+  { "fieldname": "deadline_hours", "fieldtype": "Int", "label": "Hạn (giờ kể từ khi vào bước)", "description": "0 = không có hạn" },
+  { "fieldname": "escalation", "fieldtype": "Select", "label": "Khi quá hạn", "options": "none\nnotify\nescalate_up", "default": "notify" },
+  { "fieldname": "escalation_after_hours", "fieldtype": "Int", "label": "Leo thang sau (giờ; 0 = dùng hạn)" },
   {
    "fieldname": "condition_section",
    "fieldtype": "Section Break",

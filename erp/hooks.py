@@ -1345,6 +1345,7 @@ scheduler_events = {
         "*/15 * * * *": [
             "erp.api.faceid.sync_worker.reconcile_pickup_auth_to_controller",
             "erp.api.crm.sla_scheduler.check_crm_issue_sla",
+            "erp.api.erp_sis.approval.sla.check_workflow_deadlines",
             "erp.lms.sync.enrollment_sync.sync_all_sections",
         ],
         "*/30 * * * *": [

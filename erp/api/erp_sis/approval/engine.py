@@ -9,7 +9,9 @@ KHÔNG đóng băng email — chỉ đóng băng cấu trúc (role + scope_unit)
 import json
 
 import frappe
-from frappe.utils import now
+from frappe.utils import add_to_date, now
+
+from . import fields as cond_fields
 
 APPROVAL_STEP_DT = "ERP Approval Step"
 APPROVAL_TEMPLATE_DT = "ERP Approval Template"
@@ -19,17 +21,6 @@ PROC_HISTORY_DT = "ERP Procurement History"
 
 # Role org-wide: duyệt/thấy được mọi bước scoped (đường thoát)
 ORG_WIDE_ROLES = ("System Manager", "SIS BOD")
-
-# Field header được phép dùng trong điều kiện bước (whitelist)
-CONDITION_WHITELIST = {
-    "total_estimated",
-    "total_qty",
-    "request_group",
-    "campus_id",
-    "budget_in_out",
-    "has_substitution",
-    "is_urgent",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +115,7 @@ def eval_conditions(obj, doc):
     checks = []
     for c in clauses:
         f = c.get("field")
-        if not f or f not in CONDITION_WHITELIST:
+        if not f or not cond_fields.field_allowed(getattr(doc, "doctype", None), f):
             continue
         checks.append(_apply_op(c.get("op"), doc.get(f), c.get("value")))
     if not checks:
@@ -146,6 +137,19 @@ def edge_passes(edge, doc):
 # Template active (config) -> step dicts; None nếu chưa cấu hình (dùng DEFAULT)
 # ---------------------------------------------------------------------------
 
+def _json_list(v):
+    """Parse Long Text JSON -> list (an toàn)."""
+    if isinstance(v, list):
+        return v
+    if isinstance(v, str) and v.strip():
+        try:
+            out = json.loads(v)
+            return out if isinstance(out, list) else []
+        except (ValueError, TypeError):
+            return []
+    return []
+
+
 def get_active_template(target_doctype):
     """Trả (steps, edges, name); (None, None, None) nếu chưa cấu hình -> dùng DEFAULT."""
     name = frappe.db.get_value(
@@ -166,16 +170,17 @@ def get_active_template(target_doctype):
                 "approver_type": s.approver_type,
                 "approver_role": s.approver_role,
                 "approver_user": s.approver_user,
+                "assignee_principal_type": s.get("assignee_principal_type"),
+                "assignee_ref": s.get("assignee_ref"),
+                "assignee_relation": s.get("assignee_relation"),
+                "assignee_unit_type": s.get("assignee_unit_type"),
+                "assignee_position": s.get("assignee_position"),
+                "principals": _json_list(s.get("principals")),
+                "deadline_hours": s.get("deadline_hours"),
+                "escalation": s.get("escalation"),
+                "escalation_after_hours": s.get("escalation_after_hours"),
                 "is_optional": s.is_optional,
                 "parallel_group": s.parallel_group,
-                "return_roles": s.return_roles,
-                "return_users": s.return_users,
-                "view_roles": s.view_roles,
-                "view_users": s.view_users,
-                "edit_roles": s.edit_roles,
-                "edit_users": s.edit_users,
-                "delete_roles": s.delete_roles,
-                "delete_users": s.delete_users,
                 "condition_field": s.condition_field,
                 "condition_op": s.condition_op,
                 "condition_value": s.condition_value,
@@ -201,180 +206,19 @@ def get_active_template(target_doctype):
 
 
 # ---------------------------------------------------------------------------
-# SNAPSHOT - materialize resolved steps vào doc.approval_steps
-# ---------------------------------------------------------------------------
-
-def materialize(doc, resolved):
-    """resolved: list dict {kind,label,approver_role,scope_unit,parallel_group,return_roles}.
-    Gán seq (cùng parallel_group -> cùng seq), dedupe (approver_role, scope_unit) liền kề."""
-    # dedupe liền kề
-    cleaned = []
-    for r in resolved:
-        key = (r.get("approver_role") or "", r.get("scope_unit") or "")
-        if cleaned:
-            prev = cleaned[-1]
-            if (prev.get("approver_role") or "", prev.get("scope_unit") or "") == key:
-                continue
-        cleaned.append(r)
-
-    # gán seq
-    seq = 0
-    last_group = None
-    sentinel = 0
-    rows = []
-    for r in cleaned:
-        grp = r.get("parallel_group")
-        if grp and grp == last_group:
-            pass  # cùng nấc
-        else:
-            seq += 1
-            if grp:
-                last_group = grp
-            else:
-                sentinel += 1
-                last_group = ("__solo__", sentinel)
-        rows.append({**r, "seq": seq})
-
-    doc.set("approval_steps", [])
-    for r in rows:
-        doc.append(
-            "approval_steps",
-            {
-                "seq": r["seq"],
-                "kind": r.get("kind"),
-                "label": r.get("label"),
-                "approver_role": r.get("approver_role"),
-                "scope_unit": r.get("scope_unit"),
-                "parallel_group": r.get("parallel_group"),
-                "return_roles": r.get("return_roles"),
-                "status": "Pending",
-                "is_active": 1 if r["seq"] == 1 else 0,
-            },
-        )
-    doc.current_seq = 1 if rows else 0
-    return bool(rows)
-
-
-# ---------------------------------------------------------------------------
-# Gating
-# ---------------------------------------------------------------------------
-
-def can_act_step(row, email):
-    roles = set(frappe.get_roles(email))
-    if row.scope_unit:
-        return is_leader_of(row.scope_unit, email) or bool(roles & set(ORG_WIDE_ROLES))
-    if row.approver_role:
-        return row.approver_role in roles
-    return False
-
-
-def can_return_step(row, email):
-    roles = set(frappe.get_roles(email))
-    rr = (row.return_roles or "").replace("\n", ",")
-    allowed = {r.strip() for r in rr.split(",") if r.strip()}
-    if allowed and (roles & allowed):
-        return True
-    return can_act_step(row, email)
-
-
-def _active_rows(doc):
-    return [r for r in (doc.approval_steps or []) if r.is_active and r.status == "Pending"]
-
-
-def _seq_rows(doc, seq):
-    return [r for r in (doc.approval_steps or []) if r.seq == seq]
-
-
-# ---------------------------------------------------------------------------
-# ADVANCE
+# ADVANCE (DAG — engine duy nhất; nhánh linear cũ đã gỡ)
 # ---------------------------------------------------------------------------
 
 def act_approve(doc, email, comment=None):
-    """Duyệt các bước trong nấc hiện tại mà user có quyền. Trả về dict {final}."""
-    if doc.get("approval_edges"):
-        return _act_approve_dag(doc, email, comment)
-    if doc.workflow_state != "Pending":
-        frappe.throw("Phiếu không ở trạng thái chờ duyệt.")
-    if doc.submitted_by and doc.submitted_by == email:
-        frappe.throw("Người nộp không được tự duyệt (4-mắt).")
-
-    actionable = [r for r in _active_rows(doc) if can_act_step(r, email)]
-    if not actionable:
-        frappe.throw("Bạn không có quyền duyệt bước hiện tại.")
-
-    ts = now()
-    for r in actionable:
-        r.status = "Approved"
-        r.acted_by = email
-        r.acted_at = ts
-        if comment:
-            r.comment = comment
-
-    # nấc hiện tại đã đủ chưa?
-    seq = doc.current_seq
-    seq_rows = _seq_rows(doc, seq)
-    if not all(r.status in ("Approved", "Skipped") for r in seq_rows):
-        return {"final": False, "advanced": False}
-
-    # đẩy nấc
-    return _advance_to_next_seq(doc, seq)
-
-
-def _advance_to_next_seq(doc, seq):
-    for r in _seq_rows(doc, seq):
-        r.is_active = 0
-    next_seq = seq + 1
-    next_rows = _seq_rows(doc, next_seq)
-    if next_rows:
-        for r in next_rows:
-            r.is_active = 1
-        doc.current_seq = next_seq
-        return {"final": False, "advanced": True}
-    # hết nấc -> Approved
-    doc.workflow_state = "Approved"
-    doc.approved_by = frappe.session.user
-    doc.approved_at = now()
-    return {"final": True, "advanced": True}
+    return _act_approve_dag(doc, email, comment)
 
 
 def act_return(doc, email, reason=None):
-    if doc.get("approval_edges"):
-        return _act_return_dag(doc, email, reason)
-    if doc.workflow_state != "Pending":
-        frappe.throw("Phiếu không ở trạng thái chờ duyệt.")
-    seq = doc.current_seq
-    active = _seq_rows(doc, seq)
-    if not any(can_return_step(r, email) for r in active):
-        frappe.throw("Bạn không có quyền trả lại bước hiện tại.")
-    for r in active:
-        r.is_active = 0
-        r.status = "Pending"
-    prev = seq - 1
-    if prev >= 1:
-        for r in _seq_rows(doc, prev):
-            r.status = "Pending"
-            r.is_active = 1
-        doc.current_seq = prev
-    else:
-        doc.current_seq = 0
-        doc.workflow_state = "Returned"
-    doc.return_reason = reason
+    return _act_return_dag(doc, email, reason)
 
 
 def act_reject(doc, email, reason=None):
-    if doc.get("approval_edges"):
-        return _act_reject_dag(doc, email, reason)
-    if doc.workflow_state != "Pending":
-        frappe.throw("Phiếu không ở trạng thái chờ duyệt.")
-    active = _seq_rows(doc, doc.current_seq)
-    if not any(can_return_step(r, email) for r in active):
-        frappe.throw("Bạn không có quyền từ chối phiếu này.")
-    for r in active:
-        if r.status == "Pending":
-            r.status = "Rejected"
-            r.is_active = 0
-    doc.workflow_state = "Rejected"
-    doc.return_reason = reason
+    return _act_reject_dag(doc, email, reason)
 
 
 # ---------------------------------------------------------------------------
@@ -449,10 +293,9 @@ def get_history(ref_doctype, ref_name):
 
 def serialize_steps(doc, email=None):
     email = email or frappe.session.user
-    dag = bool(doc.get("approval_edges"))
     out = []
     for r in (doc.approval_steps or []):
-        gate = can_act_node(r, email) if dag else can_act_step(r, email)
+        gate = can_act_node(r, email)
         can_approve = (
             doc.workflow_state == "Pending"
             and r.is_active
@@ -495,22 +338,30 @@ def serialize_edges(doc):
 # DAG ENGINE (KissFlow) — node + edge; dead-path elimination + AND-join
 # ===========================================================================
 
-def _csv(v):
-    return [x.strip() for x in (v or "").replace("\n", ",").split(",") if x.strip()]
-
-
-def _node_grants(step, perm, email, roles):
-    """perm in ('view','edit','delete','return'): user/role có trong danh sách quyền của node."""
-    rl = _csv(getattr(step, f"{perm}_roles", None))
-    ul = _csv(getattr(step, f"{perm}_users", None))
-    return (email in ul) or bool(set(rl) & set(roles))
+def _node_grants(step, perm, email, doc=None):
+    """perm in ('view','edit','delete','return'): Principal (neo org chart, LIVE) — perm_principals JSON."""
+    raw = step.get("perm_principals") if hasattr(step, "get") else None
+    if not raw or doc is None:
+        return False
+    try:
+        plist = json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return False
+    rows = [p for p in (plist or []) if p.get("slot") == perm]
+    if not rows:
+        return False
+    from . import principals
+    return any(principals.principal_grants(p, email, doc) for p in rows)
 
 
 def can_act_node(step, email):
-    """Ai DUYỆT được node: theo approver_type (dynamic scope/role | role | user) + org-wide."""
+    """Ai DUYỆT được node: Principal (neo org chart) nếu có; nếu không -> legacy approver_type/scope/role. + org-wide."""
     roles = set(frappe.get_roles(email))
     if roles & set(ORG_WIDE_ROLES):
         return True
+    if step.get("assignee_principal_type"):
+        from . import principals
+        return principals.node_assignee_grants(step, email)
     at = step.approver_type or "dynamic"
     if at == "user":
         return bool(step.approver_user) and step.approver_user == email
@@ -521,9 +372,8 @@ def can_act_node(step, email):
     return False
 
 
-def can_return_node(step, email):
-    roles = set(frappe.get_roles(email))
-    if _node_grants(step, "return", email, roles):
+def can_return_node(step, email, doc=None):
+    if _node_grants(step, "return", email, doc):
         return True
     return can_act_node(step, email)
 
@@ -552,14 +402,13 @@ def materialize_graph(doc, nodes, edges):
                 "approver_user": n.get("approver_user"),
                 "scope_unit": n.get("scope_unit"),
                 "parallel_group": n.get("parallel_group"),
-                "return_roles": n.get("return_roles"),
-                "return_users": n.get("return_users"),
-                "view_roles": n.get("view_roles"),
-                "view_users": n.get("view_users"),
-                "edit_roles": n.get("edit_roles"),
-                "edit_users": n.get("edit_users"),
-                "delete_roles": n.get("delete_roles"),
-                "delete_users": n.get("delete_users"),
+                "assignee_principal_type": n.get("assignee_principal_type"),
+                "assignee_ref": n.get("assignee_ref"),
+                "assignee_position": n.get("assignee_position"),
+                "perm_principals": json.dumps(n.get("perm_principals") or []),
+                "deadline_hours": n.get("deadline_hours"),
+                "escalation": n.get("escalation"),
+                "escalation_after_hours": n.get("escalation_after_hours"),
                 "status": "Approved" if is_start else ("Skipped" if n.get("_cond_skip") else "Waiting"),
                 "is_active": 0,
                 "acted_by": n.get("approver_user") if is_start else None,
@@ -594,6 +443,20 @@ def materialize_graph(doc, nodes, edges):
     return bool(nodes)
 
 
+def _activate(s):
+    """Đưa node vào Pending + đóng dấu SLA (activated_at, deadline_at) lần đầu kích hoạt."""
+    s.status = "Pending"
+    s.is_active = 1
+    if not s.get("activated_at"):
+        s.activated_at = now()
+        try:
+            h = int(s.get("deadline_hours") or 0)
+        except (TypeError, ValueError):
+            h = 0
+        if h > 0:
+            s.deadline_at = add_to_date(s.activated_at, hours=h)
+
+
 def _propagate(doc):
     """Kích hoạt node theo reachability: node ready khi MỌI cạnh-live tới đã xong (AND-join);
     không cạnh-live nào tới (mà có incoming) -> Skipped (dead-path)."""
@@ -612,8 +475,7 @@ def _propagate(doc):
                 continue
             inc = incoming.get(nid, [])
             if not inc:  # entry node
-                s.status = "Pending"
-                s.is_active = 1
+                _activate(s)
                 changed = True
                 continue
             live_inc = [e for e in inc if e.get("live")]
@@ -624,8 +486,7 @@ def _propagate(doc):
             preds = [nodes[e["from"]] for e in live_inc if e.get("from") in nodes]
             if preds and all(p.status in ("Approved", "Skipped") for p in preds):
                 if any(p.status == "Approved" for p in preds):
-                    s.status = "Pending"
-                    s.is_active = 1
+                    _activate(s)
                 else:
                     s.status = "Skipped"
                 changed = True
@@ -718,7 +579,7 @@ def _return_to_creator(doc, reason):
 def _act_return_dag(doc, email, reason=None):
     if doc.workflow_state != "Pending":
         frappe.throw("Phiếu không ở trạng thái chờ duyệt.")
-    actor_nodes = [s for s in active_nodes(doc) if can_return_node(s, email)]
+    actor_nodes = [s for s in active_nodes(doc) if can_return_node(s, email, doc)]
     if not actor_nodes:
         frappe.throw("Bạn không có quyền trả lại phiếu này.")
     src = actor_nodes[0]
@@ -756,7 +617,7 @@ def _act_reject_dag(doc, email, reason=None):
     if doc.workflow_state != "Pending":
         frappe.throw("Phiếu không ở trạng thái chờ duyệt.")
     active = active_nodes(doc)
-    if not any(can_return_node(s, email) for s in active):
+    if not any(can_return_node(s, email, doc) for s in active):
         frappe.throw("Bạn không có quyền từ chối phiếu này.")
     for s in active:
         s.status = "Rejected"
@@ -788,7 +649,7 @@ def can_view_doc(doc, email):
     if any(s.acted_by == email for s in steps):
         return True
     for s in active_nodes(doc):
-        if can_act_node(s, email) or can_return_node(s, email) or _node_grants(s, "view", email, roles):
+        if can_act_node(s, email) or can_return_node(s, email, doc) or _node_grants(s, "view", email, doc):
             return True
     return False
 
@@ -802,7 +663,7 @@ def can_edit_doc(doc, email):
     if state in ("Draft", "Returned", None):
         return _is_owner_editor(doc, email)
     if state == "Pending":
-        return any(_node_grants(s, "edit", email, roles) for s in active_nodes(doc))
+        return any(_node_grants(s, "edit", email, doc) for s in active_nodes(doc))
     return False
 
 
@@ -814,5 +675,5 @@ def can_delete_doc(doc, email):
     if state in ("Draft", "Returned", None):
         return _is_owner_editor(doc, email)
     if state == "Pending":
-        return any(_node_grants(s, "delete", email, roles) for s in active_nodes(doc))
+        return any(_node_grants(s, "delete", email, doc) for s in active_nodes(doc))
     return False

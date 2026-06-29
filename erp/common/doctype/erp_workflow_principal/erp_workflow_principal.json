@@ -1,0 +1,39 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-28 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "description": "Đối tượng được chỉ định (Principal) neo trên Sơ đồ tổ chức — dùng cho ô quyền (view/edit/delete/return) và snapshot runtime.",
+ "field_order": [
+  "slot",
+  "principal_type",
+  "ref",
+  "relation",
+  "unit_type",
+  "position",
+  "label"
+ ],
+ "fields": [
+  { "fieldname": "slot", "fieldtype": "Select", "label": "Ô", "options": "assignee\nview\nedit\ndelete\nreturn", "in_list_view": 1 },
+  { "fieldname": "principal_type", "fieldtype": "Select", "label": "Loại đối tượng", "options": "user\nrole\nunit_leader\nunit_members\nunit_associate\nposition\nrelative", "in_list_view": 1 },
+  { "fieldname": "ref", "fieldtype": "Data", "label": "Tham chiếu", "in_list_view": 1, "description": "user email / role / mã đơn vị / tên field tuỳ loại" },
+  { "fieldname": "relation", "fieldtype": "Select", "label": "Quan hệ (khi relative)", "options": "\nself\nleader_of_unit_in_field\nmembers_of_unit_in_field\nparent_department_head\nteam_lead\nleaders_of_units_in_table_field" },
+  { "fieldname": "unit_type", "fieldtype": "Link", "label": "Loại đơn vị (khi position)", "options": "ERP Organization Unit Type" },
+  { "fieldname": "position", "fieldtype": "Data", "label": "Chức danh (khi position)" },
+  { "fieldname": "label", "fieldtype": "Data", "label": "Nhãn" }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-06-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Workflow Principal",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
