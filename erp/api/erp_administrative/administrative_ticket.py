@@ -624,6 +624,16 @@ def _can_read_ticket(doc):
     return False
 
 
+def _can_complete_subtask(tdoc, st):
+    """Đánh dấu hoàn thành công việc con: chỉ PIC công việc con, PIC ticket, hoặc System Manager."""
+    user = frappe.session.user
+    if (getattr(st, "assigned_to", None) or "") == user:
+        return True
+    if (getattr(tdoc, "assigned_to", None) or "") == user:
+        return True
+    return "System Manager" in frappe.get_roles(user)
+
+
 def _append_history(ticket_id, action, user=None, detail=None):
     """Ghi lịch sử; detail = nội dung phụ (trao đổi, tiêu đề CV con, lý do hủy...)."""
     user = user or frappe.session.user
@@ -1473,30 +1483,57 @@ def _notify_hc_assignment_changed(doc, old_assignee, new_assignee, actor_email):
 
 
 def _notify_hc_subtask_assigned(doc, st, actor_email):
-    """Gán công việc con cho người xử lý — báo subtask assignee (giống ticket_assigned)."""
+    """Gán công việc con — báo người được giao (assignee) và người yêu cầu (creator)."""
     new_assignee = (getattr(st, "assigned_to", None) or "").strip()
     if not new_assignee:
         return
     ne = _hc_user_email(new_assignee)
-    actor = (actor_email or "").strip()
-    if not ne or (ne or "").lower() == (actor or "").lower():
+    if not ne:
         return
+    actor = (actor_email or "").strip()
     code = (doc.ticket_code or doc.name or "").strip()
     sub_title = (getattr(st, "title", None) or "").strip()
+    assignee_name = (
+        getattr(st, "assigned_to_fullname", None)
+        or frappe.db.get_value("User", new_assignee, "full_name")
+        or ne
+    ).strip()
     data = _hc_ticket_payload(
         doc,
         "subtask_assigned",
         {"subTaskId": st.name, "subTaskTitle": sub_title},
     )
-    _hc_send_persisted(
-        ne,
-        _("Bạn được giao một công việc con"),
-        _("{0}: {1}").format(f"#{code}", sub_title) if sub_title else f"#{code}",
-        data,
-        exclude_email=actor,
-        doc=doc,
-        stream_notification_type="administrative_ticket_subtask_assigned",
-    )
+
+    # 1) Báo người được giao công việc con.
+    if (ne or "").lower() != (actor or "").lower():
+        _hc_send_persisted(
+            ne,
+            _("Bạn được giao một công việc con"),
+            _("{0}: {1}").format(f"#{code}", sub_title) if sub_title else f"#{code}",
+            data,
+            exclude_email=actor,
+            doc=doc,
+            stream_notification_type="administrative_ticket_subtask_assigned",
+        )
+
+    # 2) Báo người yêu cầu (creator) — trừ khi creator chính là người được giao
+    #    (exclude_email=actor đã tự loại trường hợp creator là người thao tác).
+    creator = (getattr(doc, "creator_email", None) or "").strip()
+    if creator and creator.lower() != (ne or "").lower():
+        body = (
+            _("{0} · Công việc con «{1}» đã giao cho {2}").format(f"#{code}", sub_title, assignee_name)
+            if sub_title
+            else _("{0} · Đã giao công việc con cho {1}").format(f"#{code}", assignee_name)
+        )
+        _hc_send_persisted(
+            creator,
+            _("Công việc con đã được giao người xử lý"),
+            body,
+            data,
+            exclude_email=actor,
+            doc=doc,
+            stream_notification_type="administrative_ticket_subtask_assigned",
+        )
 
 
 def _notify_hc_subtask_status_changed(doc, st, old_status, new_status, actor_email):
@@ -2514,6 +2551,17 @@ def update_ticket():
                     ),
                     {"status": ["invalid"]},
                 )
+            # Task chỉ được kết thúc khi mọi công việc con đã hoàn thành (hoặc đã huỷ).
+            if new_status == "Done":
+                pending_subtasks = frappe.db.count(
+                    SUBTASK_DOCTYPE,
+                    {"ticket": doc.name, "status": ["not in", ["Completed", "Cancelled"]]},
+                )
+                if pending_subtasks:
+                    return validation_error_response(
+                        _("Vui lòng hoàn thành tất cả công việc con trước khi kết thúc ticket"),
+                        {"status": ["subtasks_incomplete"]},
+                    )
             doc.status = new_status
         if staff and "assigned_to" in data:
             at = data.get("assigned_to")
@@ -2727,6 +2775,55 @@ def accept_feedback():
 
 
 @frappe.whitelist(allow_guest=False)
+def get_subtask_assignee_options():
+    """Danh sách nhân viên Vận hành/HC (staff) để chọn làm người thực hiện công việc con."""
+    try:
+        role_rows = frappe.get_all(
+            "Has Role",
+            filters={"parenttype": "User", "role": ["in", list(_STAFF_ROLES)]},
+            fields=["parent"],
+            distinct=True,
+        )
+        user_ids = list({r.parent for r in role_rows if r.parent})
+        if not user_ids:
+            return success_response({"users": []}, "OK")
+        # Chỉ email nội bộ — loại tài khoản hệ thống / phụ huynh khỏi pool chọn PIC.
+        internal_email_domain = "@wellspring.edu.vn"
+        user_meta = frappe.get_meta("User")
+        fieldnames = ["name", "email", "full_name", "user_image", "department"]
+        for fn in ("job_title", "designation"):
+            if user_meta.has_field(fn):
+                fieldnames.append(fn)
+        users = frappe.get_all(
+            "User",
+            fields=fieldnames,
+            filters={
+                "name": ["in", user_ids],
+                "enabled": 1,
+                "email": ["like", f"%{internal_email_domain}"],
+            },
+            order_by="full_name asc",
+        )
+        out = []
+        for u in users:
+            designation = (u.get("job_title") or "").strip() or (u.get("designation") or "").strip()
+            out.append(
+                {
+                    "_id": u.get("name"),
+                    "email": u.get("email") or u.get("name"),
+                    "fullname": u.get("full_name") or u.get("name"),
+                    "avatarUrl": u.get("user_image") or "",
+                    "department": u.get("department") or "",
+                    "jobTitle": designation,
+                }
+            )
+        return success_response({"users": out}, "OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_subtask_assignee_options")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def get_subtasks():
     """Danh sách subtask."""
     try:
@@ -2824,6 +2921,12 @@ def update_subtask():
 
         old_status = st.status
         old_assignee = (st.assigned_to or "").strip()
+
+        # Chỉ PIC công việc con / PIC ticket / System Manager mới được đánh dấu hoàn thành.
+        if status == "Completed" and status != old_status and not _can_complete_subtask(tdoc, st):
+            return forbidden_response(
+                _("Chỉ người thực hiện công việc con hoặc người xử lý ticket mới được đánh dấu hoàn thành")
+            )
 
         status_changed = False
         if status and status != old_status:

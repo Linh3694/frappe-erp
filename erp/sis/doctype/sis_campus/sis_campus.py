@@ -69,8 +69,11 @@ class SISCampus(Document):
     
     def setup_campus_permissions(self, role_name):
         """Setup permissions for all SIS doctypes for this campus role"""
+        # KHÔNG đưa "SIS Campus" vào đây: User Permission tự-tham-chiếu trên chính
+        # doctype SIS Campus sẽ chặn việc tạo campus mới (doc mới name=None không khớp
+        # for_value -> "Not allowed for SIS Campus: None").
         sis_doctypes = [
-            "SIS Campus", "SIS School Year", "SIS Education Stage", "SIS Education Grade",
+            "SIS School Year", "SIS Education Stage", "SIS Education Grade",
             "SIS Academic Program", "SIS Timetable Subject", "SIS Curriculum", "SIS Actual Subject",
             "SIS Subject", "SIS Timetable Column", "SIS Calendar", "SIS Class", "SIS Teacher",
             "SIS Subject Assignment", "SIS Timetable", "SIS Timetable Instance", "SIS Event",
