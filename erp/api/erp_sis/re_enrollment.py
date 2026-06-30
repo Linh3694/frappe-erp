@@ -53,8 +53,8 @@ for _rg_key, _rg_label in NOT_RE_ENROLL_REASON_GROUPS:
 def _check_admin_permission():
     """Kiểm tra quyền admin"""
     user_roles = frappe.get_roles(frappe.session.user)
-    # SIS Sales có full quyền trên module Re-enrollment
-    allowed_roles = ['System Manager', 'SIS BOD', 'SIS Sales']
+    # SIS Sales / SIS Sales Care Admin có full quyền trên module Re-enrollment
+    allowed_roles = ['System Manager', 'SIS BOD', 'SIS Sales', 'SIS Sales Care Admin']
     
     if not any(role in user_roles for role in allowed_roles):
         return False

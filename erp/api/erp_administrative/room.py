@@ -3981,3 +3981,324 @@ def get_room_history():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "room.get_room_history")
         return error_response(str(e))
+
+
+# ==========================================================================
+# Nhật ký thay đổi phòng (Frappe Version) + Xuất danh sách phòng theo mốc thời gian
+# ==========================================================================
+
+# Nhãn tiếng Việt cho các field của phòng (track_changes -> Version)
+_ROOM_CHANGE_FIELD_LABELS = {
+    "title_vn": "Tên phòng (VN)",
+    "title_en": "Tên phòng (EN)",
+    "short_title": "Tên viết tắt",
+    "physical_code": "Mã phòng vật lý",
+    "room_number": "Số phòng",
+    "is_active": "Hoạt động",
+    "needs_review": "Cần rà soát",
+    "capacity": "Sức chứa",
+    "room_type": "Loại phòng",
+    "building_id": "Tòa nhà",
+}
+
+# Nhãn tiếng Việt cho field của bản ghi gán theo năm (Yearly Assignment)
+_YA_CHANGE_FIELD_LABELS = {
+    "display_title_vn": "Tên theo năm (VN)",
+    "display_title_en": "Tên theo năm (EN)",
+    "display_short_title": "Tên viết tắt theo năm",
+    "usage_type": "Loại sử dụng",
+    "class_id": "Lớp",
+    "homeroom_teacher_id": "GVCN",
+    "homeroom_teacher_name": "GVCN (tên)",
+    "vice_homeroom_teacher_id": "GVCN phụ",
+    "status": "Trạng thái",
+    "notes": "Ghi chú",
+}
+
+# Mã loại phòng (Select) -> nhãn tiếng Việt (đồng bộ FE src/constants/roomTypeOptions.ts)
+_ROOM_TYPE_LABELS = {
+    "classroom_room": "Phòng lớp học",
+    "meeting_room": "Phòng họp",
+    "auditorium": "Hội trường",
+    "outdoor": "Sân ngoài trời",
+    "office": "Phòng làm việc",
+    "function_room": "Phòng chức năng",
+}
+
+# Các field chính của phòng cần tái dựng cho bản xuất theo mốc thời gian
+_ROOM_SNAPSHOT_FIELDS = (
+    "physical_code",
+    "room_number",
+    "capacity",
+    "room_type",
+    "building_id",
+    "is_active",
+)
+
+
+def _humanize_room_value(fieldname, value, _building_cache, _user_cache):
+    """Chuyển giá trị thô (mã/0-1/link) sang chuỗi dễ đọc cho nhật ký thay đổi."""
+    if value is None or value == "":
+        return ""
+    if fieldname == "room_type":
+        return _ROOM_TYPE_LABELS.get(value, value)
+    if fieldname in ("is_active", "needs_review"):
+        try:
+            return "Có" if int(value) else "Không"
+        except (TypeError, ValueError):
+            return str(value)
+    if fieldname == "building_id":
+        if value not in _building_cache:
+            _building_cache[value] = (
+                frappe.db.get_value("ERP Administrative Building", value, "title_vn") or value
+            )
+        return _building_cache[value]
+    if fieldname in ("homeroom_teacher_id", "vice_homeroom_teacher_id", "class_id"):
+        # Link tới User / lớp — cố gắng lấy tên hiển thị, fallback giữ nguyên
+        if value not in _user_cache:
+            label = value
+            if fieldname == "class_id":
+                label = frappe.db.get_value("SIS Class", value, "title") or value
+            else:
+                label = frappe.db.get_value("User", value, "full_name") or value
+            _user_cache[value] = label
+        return _user_cache[value]
+    return str(value)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_room_change_history():
+    """Nhật ký thay đổi (diff field-level) của 1 phòng — gộp Version của phòng + các bản gán theo năm.
+
+    Dữ liệu lấy từ Frappe Version (cả ERP Administrative Room và Yearly Assignment đều bật
+    track_changes), nên mọi sửa đổi qua import Excel lẫn sửa tay đều được ghi nhận.
+    """
+    try:
+        args = getattr(frappe.request, "args", None) or {}
+        room_id = (
+            args.get("room_id")
+            or frappe.form_dict.get("room_id")
+            or ""
+        ).strip()
+        if not room_id:
+            return validation_error_response("Thiếu room_id", {"room_id": ["Bắt buộc"]})
+        if not frappe.db.exists("ERP Administrative Room", room_id):
+            return not_found_response(f"Không tìm thấy phòng {room_id}")
+
+        building_cache: Dict[str, str] = {}
+        user_cache: Dict[str, str] = {}
+
+        # 1) Version của chính phòng
+        targets = [("room", "ERP Administrative Room", room_id, None)]
+
+        # 2) Version của các bản gán theo năm thuộc phòng (mỗi năm 1 bản ghi)
+        ya_rows = frappe.get_all(
+            "ERP Administrative Room Yearly Assignment",
+            filters={"room": room_id},
+            fields=["name", "school_year_id"],
+        )
+        sy_titles: Dict[str, str] = {}
+        for ya in ya_rows:
+            sy = ya.get("school_year_id") or ""
+            if sy and sy not in sy_titles:
+                sy_titles[sy] = frappe.db.get_value("SIS School Year", sy, "title_vn") or sy
+            targets.append(("yearly", "ERP Administrative Room Yearly Assignment", ya["name"], sy))
+
+        changes: List[Dict[str, Any]] = []
+        for source, ref_doctype, docname, sy in targets:
+            label_map = _ROOM_CHANGE_FIELD_LABELS if source == "room" else _YA_CHANGE_FIELD_LABELS
+            versions = frappe.get_all(
+                "Version",
+                filters={"ref_doctype": ref_doctype, "docname": docname},
+                fields=["name", "owner", "creation", "data"],
+                order_by="creation desc",
+                limit_page_length=200,
+            )
+            for v in versions:
+                try:
+                    vdata = json.loads(v.get("data") or "{}")
+                except Exception:
+                    continue
+                changed = vdata.get("changed") or []
+                if not changed:
+                    continue
+                owner = v.get("owner")
+                full_name = (
+                    frappe.db.get_value("User", owner, "full_name") if owner else None
+                ) or owner
+                for entry in changed:
+                    # entry = [fieldname, old_value, new_value]
+                    if not isinstance(entry, (list, tuple)) or len(entry) < 3:
+                        continue
+                    fieldname = entry[0]
+                    if fieldname not in label_map:
+                        # Bỏ qua field nội bộ / không quan tâm (idx, modified, …)
+                        continue
+                    changes.append({
+                        "source": source,
+                        "school_year_id": sy,
+                        "school_year_title": sy_titles.get(sy) if sy else None,
+                        "field": fieldname,
+                        "field_label": label_map[fieldname],
+                        "old_value": _humanize_room_value(fieldname, entry[1], building_cache, user_cache),
+                        "new_value": _humanize_room_value(fieldname, entry[2], building_cache, user_cache),
+                        "changed_by": owner,
+                        "changed_by_name": full_name,
+                        "changed_at": str(v.get("creation")),
+                    })
+
+        changes.sort(key=lambda c: c.get("changed_at") or "", reverse=True)
+        return success_response(data=changes, message="OK", meta={"total": len(changes)})
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room.get_room_change_history")
+        return error_response(str(e))
+
+
+def _reconstruct_room_at(ref_doctype, docname, current_values, fields, as_of_dt):
+    """Tái dựng giá trị các field tại mốc as_of bằng cách revert ngược các Version sau mốc.
+
+    Đi từ Version mới nhất -> cũ nhất (creation > as_of), với mỗi field đổi thì gán lại = giá trị cũ.
+    Sau khi xử lý hết, giá trị giữ lại chính là trạng thái tại as_of.
+    """
+    state = dict(current_values)
+    versions = frappe.get_all(
+        "Version",
+        filters={"ref_doctype": ref_doctype, "docname": docname, "creation": [">", as_of_dt]},
+        fields=["data"],
+        order_by="creation desc",
+        limit_page_length=500,
+    )
+    for v in versions:
+        try:
+            vdata = json.loads(v.get("data") or "{}")
+        except Exception:
+            continue
+        for entry in vdata.get("changed") or []:
+            if not isinstance(entry, (list, tuple)) or len(entry) < 3:
+                continue
+            fn = entry[0]
+            if fn in fields:
+                state[fn] = entry[1]  # revert về giá trị cũ
+    return state
+
+
+@frappe.whitelist(methods=["GET"], allow_guest=False)
+def export_rooms_snapshot():
+    """Xuất Excel danh sách phòng theo trạng thái tại 1 mốc thời gian (point-in-time).
+
+    Query: school_year_id (bắt buộc, để lấy tên theo năm), as_of (bắt buộc, mốc thời gian).
+    Tái dựng từ Frappe Version. Giới hạn: chỉ các phòng hiện còn tồn tại; nhãn tòa nhà/loại phòng
+    hiển thị theo tên hiện tại; chỉ có lịch sử từ khi bật track_changes.
+    """
+    args = getattr(frappe.request, "args", None) or {}
+    school_year_id = (
+        args.get("school_year_id") or frappe.form_dict.get("school_year_id") or ""
+    ).strip()
+    as_of_raw = (args.get("as_of") or frappe.form_dict.get("as_of") or "").strip()
+
+    if not as_of_raw:
+        frappe.throw(_("Thiếu mốc thời gian (as_of)"))
+
+    # Chuẩn hoá: 'YYYY-MM-DDTHH:MM' (datetime-local) -> 'YYYY-MM-DD HH:MM:SS'
+    norm = as_of_raw.replace("T", " ").strip()
+    if len(norm) == 10:  # chỉ có ngày -> lấy đến cuối ngày
+        norm = norm + " 23:59:59"
+    elif len(norm) == 16:  # thiếu giây
+        norm = norm + ":00"
+    as_of_dt = get_datetime(norm)
+
+    campus_id = get_current_campus_from_context()
+    if not campus_id:
+        first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+        campus_id = first_campus or "CAMPUS-00001"
+
+    building_rows = frappe.get_all(
+        "ERP Administrative Building",
+        fields=["name", "title_vn"],
+        filters={"campus_id": campus_id},
+    )
+    building_ids = [b["name"] for b in building_rows]
+    building_titles = {b["name"]: (b.get("title_vn") or b["name"]) for b in building_rows}
+
+    rooms = []
+    if building_ids:
+        rooms = frappe.get_all(
+            "ERP Administrative Room",
+            fields=[
+                "name",
+                "physical_code",
+                "room_number",
+                "capacity",
+                "room_type",
+                "building_id",
+                "is_active",
+                "creation",
+            ],
+            filters={"building_id": ["in", building_ids]},
+            order_by="room_number asc",
+        )
+
+    # Map phòng -> bản gán theo năm đã chọn (để lấy tên theo năm)
+    ya_by_room: Dict[str, Dict[str, Any]] = {}
+    if rooms and school_year_id:
+        ya_rows = frappe.get_all(
+            "ERP Administrative Room Yearly Assignment",
+            filters={"room": ["in", [r["name"] for r in rooms]], "school_year_id": school_year_id},
+            fields=["name", "room", "display_title_vn", "creation"],
+        )
+        ya_by_room = {y["room"]: y for y in ya_rows}
+
+    header = ["Mã phòng", "Tên phòng (theo năm)", "Sức chứa", "Loại phòng", "Tòa nhà", "Hoạt động"]
+    table = [header]
+
+    for room in rooms:
+        # Phòng tạo sau mốc -> chưa tồn tại tại thời điểm đó, bỏ qua
+        if room.get("creation") and get_datetime(room["creation"]) > as_of_dt:
+            continue
+
+        current = {fn: room.get(fn) for fn in _ROOM_SNAPSHOT_FIELDS}
+        state = _reconstruct_room_at(
+            "ERP Administrative Room", room["name"], current, set(_ROOM_SNAPSHOT_FIELDS), as_of_dt
+        )
+
+        # Tên theo năm: tái dựng display_title_vn của bản gán năm đã chọn
+        yearly_name = ""
+        ya = ya_by_room.get(room["name"])
+        if ya and ya.get("creation") and get_datetime(ya["creation"]) <= as_of_dt:
+            ya_state = _reconstruct_room_at(
+                "ERP Administrative Room Yearly Assignment",
+                ya["name"],
+                {"display_title_vn": ya.get("display_title_vn")},
+                {"display_title_vn"},
+                as_of_dt,
+            )
+            yearly_name = ya_state.get("display_title_vn") or ""
+
+        ma_phong = state.get("physical_code") or state.get("room_number") or room["name"]
+        room_type_label = _ROOM_TYPE_LABELS.get(state.get("room_type"), state.get("room_type") or "")
+        building_label = building_titles.get(
+            state.get("building_id"),
+            frappe.db.get_value("ERP Administrative Building", state.get("building_id"), "title_vn")
+            or (state.get("building_id") or ""),
+        )
+        try:
+            active_label = "Hiệu lực" if int(state.get("is_active") or 0) else "Ngừng"
+        except (TypeError, ValueError):
+            active_label = ""
+
+        table.append([
+            ma_phong,
+            yearly_name,
+            state.get("capacity") if state.get("capacity") is not None else "",
+            room_type_label,
+            building_label,
+            active_label,
+        ])
+
+    from frappe.utils.xlsxutils import make_xlsx
+
+    xlsx_file = make_xlsx(table, "Danh sach phong")
+    safe_dt = norm.replace(":", "").replace(" ", "_").replace("-", "")
+    frappe.response["filename"] = f"danh-sach-phong-{safe_dt}.xlsx"
+    frappe.response["filecontent"] = xlsx_file.getvalue()
+    frappe.response["type"] = "binary"

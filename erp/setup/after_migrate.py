@@ -5,6 +5,7 @@ import frappe
 REQUIRED_ROLES = [
     "SIS Medical",
     "SIS Finance",
+    "SIS Sales Care Admin",
 ]
 
 # Danh mục ticket IT mặc định — title khớp FE (Overall, Camera, ...)
