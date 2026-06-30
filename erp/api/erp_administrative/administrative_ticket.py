@@ -5,7 +5,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, get_datetime, now_datetime, today
+from frappe.utils import add_to_date, cint, get_datetime, now_datetime, today
 
 from erp.api.erp_administrative.room_activity_log import log_room_activity
 from erp.api.erp_administrative.room_booking import (
@@ -1584,6 +1584,99 @@ def _notify_hc_subtask_status_changed(doc, st, old_status, new_status, actor_ema
         )
 
 
+def _notify_hc_event_reminder(doc, recipient_emails, minutes_before):
+    """Nhắc PIC (task + công việc con) trước giờ bắt đầu sự kiện CSVC."""
+    code = (doc.ticket_code or doc.name or "").strip()
+    est = getattr(doc, "event_start_time", None)
+    when = ""
+    if est:
+        try:
+            when = get_datetime(est).strftime("%H:%M %d/%m")
+        except Exception:
+            when = str(est)
+    room = (getattr(doc, "event_room_id", None) or "").strip()
+    room_label = (frappe.db.get_value("ERP Administrative Room", room, "title") or room) if room else ""
+    data = _hc_ticket_payload(
+        doc,
+        "event_facility_reminder",
+        {"eventStartTime": str(est) if est else "", "minutesBefore": cint(minutes_before)},
+    )
+    body = _("{0} · Sự kiện bắt đầu lúc {1}{2}").format(
+        f"#{code}",
+        when or _("(chưa đặt giờ)"),
+        _(" tại {0}").format(room_label) if room_label else "",
+    )
+    seen = set()
+    for em in recipient_emails:
+        key = (em or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        _hc_send_persisted(
+            em,
+            _("Nhắc: sự kiện sắp bắt đầu"),
+            body,
+            data,
+            doc=doc,
+            stream_notification_type="administrative_ticket_event_reminder",
+        )
+
+
+def send_event_facility_reminders(minutes_before=60):
+    """Scheduler: nhắc PIC (task + công việc con) ~1 tiếng trước giờ bắt đầu sự kiện CSVC.
+
+    Chạy theo cron (mỗi 5 phút). Mỗi ticket chỉ gửi một lần nhờ cờ event_reminder_sent;
+    nếu chưa có PIC nào thì để nguyên cờ và thử lại ở lần quét sau (đến khi qua giờ thì rớt khỏi cửa sổ).
+    """
+    try:
+        minutes_before = cint(minutes_before) or 60
+        now = now_datetime()
+        threshold = add_to_date(now, minutes=minutes_before)
+        active_status = ("Open", "Assigned", "In Progress", "Waiting for Customer")
+        rows = frappe.get_all(
+            DOCTYPE,
+            filters={
+                "is_event_facility": 1,
+                "event_reminder_sent": 0,
+                "status": ["in", active_status],
+                "event_start_time": ["between", [now, threshold]],
+            },
+            fields=["name"],
+        )
+        for r in rows:
+            try:
+                doc = frappe.get_doc(DOCTYPE, r.name)
+                recipients = []
+                pic = _hc_user_email(getattr(doc, "assigned_to", None))
+                if pic:
+                    recipients.append(pic)
+                sub_rows = frappe.get_all(
+                    SUBTASK_DOCTYPE,
+                    filters={"ticket": doc.name, "status": ["!=", "Cancelled"]},
+                    fields=["assigned_to"],
+                )
+                for s in sub_rows:
+                    em = _hc_user_email(s.get("assigned_to"))
+                    if em:
+                        recipients.append(em)
+                if not recipients:
+                    # Chưa có người để nhắc — chờ lần quét sau (chưa đốt cờ).
+                    continue
+                _notify_hc_event_reminder(doc, recipients, minutes_before)
+                frappe.db.set_value(DOCTYPE, doc.name, "event_reminder_sent", 1)
+                frappe.db.commit()
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    "administrative_ticket.send_event_facility_reminders.item",
+                )
+    except Exception:
+        frappe.log_error(
+            frappe.get_traceback(),
+            "administrative_ticket.send_event_facility_reminders",
+        )
+
+
 def _notify_hc_ticket_pickup(doc):
     """Staff nhấn Nhận ticket — báo người tạo; action tách biệt ticket_picked_up (khác gán PIC)."""
     creator = (doc.creator_email or "").strip()
@@ -2420,6 +2513,7 @@ def update_ticket():
             doc.event_room_id = er or None
         if "event_start_time" in data:
             evs = data.get("event_start_time")
+            old_evs = getattr(doc, "event_start_time", None)
             if evs in (None, ""):
                 doc.event_start_time = None
             else:
@@ -2430,6 +2524,9 @@ def update_ticket():
                         _("Định dạng thời gian bắt đầu sự kiện không hợp lệ"),
                         {"event_start_time": ["invalid"]},
                     )
+            # Đổi giờ bắt đầu → re-arm nhắc trước sự kiện.
+            if getattr(doc, "event_start_time", None) != old_evs:
+                doc.event_reminder_sent = 0
         if "event_end_time" in data:
             eve = data.get("event_end_time")
             if eve in (None, ""):

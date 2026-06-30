@@ -17,6 +17,7 @@
   "event_room_id",
   "event_start_time",
   "event_end_time",
+  "event_reminder_sent",
   "area_title",
   "room_id",
   "related_equipment_id",
@@ -117,6 +118,13 @@
    "fieldname": "event_end_time",
    "fieldtype": "Datetime",
    "label": "Kết thúc sự kiện"
+  },
+  {
+   "default": "0",
+   "fieldname": "event_reminder_sent",
+   "fieldtype": "Check",
+   "label": "Đã gửi nhắc trước sự kiện",
+   "read_only": 1
   },
   {
    "fieldname": "area_title",

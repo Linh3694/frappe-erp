@@ -1380,6 +1380,10 @@ scheduler_events = {
         "*/5 7-17 * * 1-6": [
             "erp.api.erp_sis.daily_health_notification.check_stale_health_visits"
         ],
+        # Nhắc PIC (task + công việc con) ~1 tiếng trước giờ bắt đầu sự kiện CSVC (mỗi 5 phút)
+        "*/5 * * * *": [
+            "erp.api.erp_administrative.administrative_ticket.send_event_facility_reminders"
+        ],
         # Renew subscription mỗi 30 phút
         "0 2 * * *": [
             "erp.lms.cron.phase6_tasks.compute_engagement_score",
