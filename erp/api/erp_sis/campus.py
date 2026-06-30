@@ -175,9 +175,8 @@ def get_campuses(only_user: bool = True):
 
 			return list_response(fallback_rows, "Campuses fetched successfully")
 
-		if "System Manager" not in frappe.get_roles(user):
-			frappe.throw(_("Only System Manager can list all campuses"))
-
+		# Mọi user đăng nhập đều được XEM toàn bộ campus (read-only).
+		# Tạo/sửa/xóa vẫn do doctype perms của SIS Campus gác (chỉ System Manager).
 		rows = frappe.get_all(
 			"SIS Campus",
 			fields=["name", "title_vn", "title_en", "short_title"],
