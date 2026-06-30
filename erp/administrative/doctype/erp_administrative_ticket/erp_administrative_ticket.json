@@ -23,6 +23,7 @@
   "related_equipment_id",
   "related_equipment_ids",
   "related_student_ids",
+  "related_staff_ids",
   "description",
   "attachment",
   "attachments",
@@ -152,6 +153,11 @@
    "fieldname": "related_student_ids",
    "fieldtype": "JSON",
    "label": "Học sinh liên quan (mảng student_id)"
+  },
+  {
+   "fieldname": "related_staff_ids",
+   "fieldtype": "JSON",
+   "label": "CBGVNV liên quan (mảng user)"
   },
   {
    "fieldname": "description",

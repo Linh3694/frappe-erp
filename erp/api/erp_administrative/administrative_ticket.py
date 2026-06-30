@@ -55,6 +55,82 @@ def _normalize_related_student_ids(raw):
     return [str(x).strip() for x in raw if x]
 
 
+def _normalize_related_staff_ids(raw):
+    """Chuẩn hoá danh sách user (CBGVNV) từ JSON / list; loại trùng, giữ thứ tự."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return []
+    if not isinstance(raw, list):
+        return []
+    out, seen = [], set()
+    for x in raw:
+        v = str(x).strip()
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+def _org_units_map():
+    """Map name -> {unit_name_vn, is_group, parent} của Sơ đồ tổ chức (đơn vị active)."""
+    units = frappe.get_all(
+        "ERP Organization Unit",
+        filters={"is_active": 1},
+        fields=["name", "unit_name_vn", "is_group", "parent_organization_unit"],
+    )
+    return {u.name: u for u in units}
+
+
+def _resolve_group_department(unit_name, units_map):
+    """Từ đơn vị thành viên, đi lên tới 'phòng ban' (node is_group) gần nhất trong sơ đồ tổ chức."""
+    seen = set()
+    cur = unit_name
+    while cur and cur in units_map and cur not in seen:
+        seen.add(cur)
+        u = units_map[cur]
+        if cint(u.get("is_group")):
+            return (u.get("unit_name_vn") or "").strip() or cur
+        cur = u.get("parent_organization_unit")
+    u = units_map.get(unit_name)
+    return ((u.get("unit_name_vn") if u else "") or "").strip() or (unit_name or "")
+
+
+def _related_staff_detail(user_ids):
+    """Chi tiết CBGVNV liên quan: tên, ảnh, phòng ban (group) từ sơ đồ tổ chức."""
+    ids = [str(x).strip() for x in (user_ids or []) if x]
+    if not ids:
+        return []
+    units_map = _org_units_map()
+    member_rows = frappe.get_all(
+        "ERP Organization Unit Member",
+        filters={"user": ["in", ids]},
+        fields=["user", "parent"],
+    )
+    user_unit = {}
+    for m in member_rows:
+        if m.user and m.user not in user_unit:
+            user_unit[m.user] = m.parent
+    out = []
+    for uid in ids:
+        urow = frappe.db.get_value("User", uid, ["full_name", "user_image", "email"], as_dict=True)
+        unit = user_unit.get(uid)
+        dept = _resolve_group_department(unit, units_map) if unit else ""
+        out.append(
+            {
+                "user_id": uid,
+                "email": (urow.get("email") if urow else "") or uid,
+                "full_name": (urow.get("full_name") if urow else "") or uid,
+                "avatar_url": (urow.get("user_image") if urow else "") or "",
+                "department_name": dept,
+            }
+        )
+    return out
+
+
 def _normalize_related_equipment_ids(raw):
     """Chuẩn hoá mảng name dòng CSVC (ERP Administrative Room Facility Equipment)."""
     if raw is None:
@@ -569,6 +645,9 @@ def _ticket_to_dict(doc, include_feedback=True):
                 if sid and sid in photo_map_rs:
                     row["avatar_url"] = photo_map_rs[sid]
 
+    related_staff_ids = _normalize_related_staff_ids(getattr(doc, "related_staff_ids", None))
+    related_staff_detail = _related_staff_detail(related_staff_ids)
+
     return {
         "_id": doc.name,
         "name": doc.name,
@@ -610,6 +689,8 @@ def _ticket_to_dict(doc, include_feedback=True):
         "related_equipments": related_equipments,
         "related_student_ids": related_student_ids,
         "related_students": related_students_detail,
+        "related_staff_ids": related_staff_ids,
+        "related_staff": related_staff_detail,
     }
 
 
@@ -2052,6 +2133,58 @@ def get_room_event_bookings(room_id=None, range_start=None, range_end=None, excl
 
 
 @frappe.whitelist(allow_guest=False)
+def get_staff_for_ticket():
+    """Danh sách CBGVNV (thành viên sơ đồ tổ chức) cho field 'CBGVNV liên quan' — tên, ảnh, phòng ban."""
+    try:
+        units_map = _org_units_map()
+        member_rows = frappe.get_all(
+            "ERP Organization Unit Member",
+            fields=["user", "full_name", "parent"],
+        )
+        # Dedupe theo user, giữ đơn vị đầu tiên gặp.
+        user_unit = {}
+        user_name = {}
+        for m in member_rows:
+            uid = (m.user or "").strip()
+            if not uid or uid in user_unit:
+                continue
+            # Chỉ lấy thành viên thuộc đơn vị đang active.
+            if m.parent not in units_map:
+                continue
+            user_unit[uid] = m.parent
+            user_name[uid] = (m.full_name or "").strip()
+        if not user_unit:
+            return success_response({"staff": []}, "OK")
+        uids = list(user_unit.keys())
+        urows = frappe.get_all(
+            "User",
+            filters={"name": ["in", uids], "enabled": 1},
+            fields=["name", "email", "full_name", "user_image"],
+        )
+        urow_map = {u.name: u for u in urows}
+        out = []
+        for uid in uids:
+            u = urow_map.get(uid)
+            if not u:
+                # User bị vô hiệu / không tồn tại — bỏ khỏi pool.
+                continue
+            out.append(
+                {
+                    "user_id": uid,
+                    "email": (u.get("email") or "") or uid,
+                    "full_name": (u.get("full_name") or user_name.get(uid) or "") or uid,
+                    "avatar_url": u.get("user_image") or "",
+                    "department_name": _resolve_group_department(user_unit[uid], units_map),
+                }
+            )
+        out.sort(key=lambda r: (r.get("full_name") or "").lower())
+        return success_response({"staff": out}, "OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_staff_for_ticket")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def get_room_equipment_for_ticket(room_id=None):
     """Danh sách thiết bị CSVC theo phòng — dùng form ticket."""
     try:
@@ -2411,6 +2544,9 @@ def create_ticket():
         )
         ticket_row["related_equipment_ids"] = _json_list_field_for_db(related_equipment_ids_merged)
         ticket_row["related_student_ids"] = _json_list_field_for_db(related_student_ids_list)
+        ticket_row["related_staff_ids"] = _json_list_field_for_db(
+            _normalize_related_staff_ids(data.get("related_staff_ids"))
+        )
 
         doc = frappe.get_doc(ticket_row)
         if pic:
@@ -2559,6 +2695,9 @@ def update_ticket():
         if "related_student_ids" in data:
             rlist = _normalize_related_student_ids(data.get("related_student_ids"))
             doc.related_student_ids = _json_list_field_for_db(rlist)
+        if "related_staff_ids" in data:
+            slist = _normalize_related_staff_ids(data.get("related_staff_ids"))
+            doc.related_staff_ids = _json_list_field_for_db(slist)
 
         if cint(getattr(doc, "is_event_facility", 0)):
             eb = (getattr(doc, "event_building_id", None) or "").strip()
