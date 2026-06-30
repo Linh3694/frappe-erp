@@ -153,9 +153,11 @@ def get_award_records(
         if school_year_id:
             filters['school_year_id'] = school_year_id
         
-        if sub_category_type:
-            filters['sub_category_type'] = sub_category_type
-        
+        # NOTE: Cố ý KHÔNG filter theo sub_category_type.
+        # Một hạng mục con được định danh duy nhất bởi (award_category + school_year_id + sub_category_label).
+        # `type` của subcategory có thể bị đổi trong cấu hình (vd: custom -> year) khiến các record cũ
+        # lưu type cũ bị lệch và biến mất khỏi danh sách. Match theo label để không lệ thuộc vào type.
+        # Param sub_category_type vẫn được nhận để tương thích ngược nhưng không dùng để lọc.
         if sub_category_label:
             filters['sub_category_label'] = sub_category_label
         
