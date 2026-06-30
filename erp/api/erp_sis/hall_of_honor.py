@@ -99,7 +99,7 @@ def get_award_categories(campus_id: str = None, is_active: int = 1):
         )
         
     except Exception as e:
-        frappe.log_error(f"Error getting award categories: {str(e)}")
+        frappe.log_error(title="Hall of Honor: get_award_categories", message=frappe.get_traceback())
         return error_response(
             message="Lỗi khi lấy danh sách loại vinh danh",
             code="GET_CATEGORIES_ERROR"
@@ -169,11 +169,7 @@ def get_award_records(
         
         if campus_id:
             filters['campus_id'] = campus_id
-        
-        print("=" * 80)
-        print("🔍 [GET_AWARD_RECORDS] Filters:", filters)
-        print("=" * 80)
-        
+
         records = frappe.get_all(
             'SIS Award Record',
             filters=filters,
@@ -194,9 +190,7 @@ def get_award_records(
         
         if not records:
             return success_response(data=[], message="Không có bản ghi vinh danh nào")
-        
-        print(f"📋 [GET_AWARD_RECORDS] Tìm thấy {len(records)} records")
-        
+
         # ========== BATCH QUERIES để tối ưu performance ==========
         record_names = [r['name'] for r in records]
         
@@ -363,8 +357,12 @@ def get_award_records(
                     },
                     'label_en_map': label_en_map
                 }
-            except Exception as e:
-                print(f"⚠️ Could not load category {cat_id}: {str(e)}")
+            except Exception:
+                import traceback
+                frappe.log_error(
+                    title="Hall of Honor: load category",
+                    message=f"cat_id={cat_id}\n{traceback.format_exc()}",
+                )
         
         # ========== Gắn data vào records ==========
         # Group student entries by parent
@@ -374,19 +372,7 @@ def get_award_records(
             if parent not in student_entries_by_record:
                 student_entries_by_record[parent] = []
             student_entries_by_record[parent].append(entry)
-        
-        # DEBUG: In ra activities từ DB
-        print("\n" + "="*80)
-        print(f"🔍 [DEBUG] Total student entries: {len(all_student_entries)}")
-        print("🔍 [DEBUG] Sample activities data:")
-        for i, entry in enumerate(all_student_entries[:5]):  # In 5 entries
-            act_vn = entry.get('activities_vn')
-            act_en = entry.get('activities_en')
-            print(f"  [{i}] Student {entry.get('student_id')}: ")
-            print(f"      activities_vn={repr(act_vn)}")
-            print(f"      activities_en={repr(act_en)}")
-        print("="*80 + "\n")
-        
+
         # Group class entries by parent
         class_entries_by_record = {}
         for entry in all_class_entries:
@@ -489,23 +475,19 @@ def get_award_records(
                 'month': record.get('month'),
                 'priority': record.get('priority', 0)
             }
-        
-        print(f"✅ [GET_AWARD_RECORDS] Done processing {len(records)} records")
-        print("=" * 80)
-        
+
         return success_response(
             data=records,
             message="Lấy danh sách bản ghi vinh danh thành công"
         )
-        
+
     except Exception as e:
         import traceback
-        error_details = traceback.format_exc()
-        frappe.log_error(f"Error getting award records: {str(e)}\n{error_details}")
-        print("=" * 80)
-        print(f"❌ [GET_AWARD_RECORDS] Error: {str(e)}")
-        print(error_details)
-        print("=" * 80)
+        # Dùng title ngắn (field Title của Error Log giới hạn 140 ký tự); chi tiết để trong message.
+        frappe.log_error(
+            title="Hall of Honor: get_award_records",
+            message=f"{str(e)}\n{traceback.format_exc()}",
+        )
         return error_response(
             message=f"Lỗi khi lấy danh sách bản ghi vinh danh: {str(e)}",
             code="GET_RECORDS_ERROR"
@@ -652,7 +634,7 @@ def get_award_record_detail(name: str):
         )
         
     except Exception as e:
-        frappe.log_error(f"Error getting award record detail: {str(e)}")
+        frappe.log_error(title="Hall of Honor: get_award_record_detail", message=frappe.get_traceback())
         return error_response(
             message="Lỗi khi lấy chi tiết bản ghi vinh danh",
             code="GET_RECORD_DETAIL_ERROR"
@@ -781,7 +763,7 @@ def get_student_honors():
         return success_response(data=result, message="Lấy danh sách vinh danh thành công")
 
     except Exception as e:
-        frappe.log_error(f"Error get_student_honors: {str(e)}")
+        frappe.log_error(title="Hall of Honor: get_student_honors", message=frappe.get_traceback())
         return error_response(
             message=f"Lỗi khi lấy danh sách vinh danh: {str(e)}",
             code="GET_STUDENT_HONORS_ERROR"
@@ -862,7 +844,7 @@ def create_award_record():
         )
         
     except Exception as e:
-        frappe.log_error(f"Error creating award record: {str(e)}")
+        frappe.log_error(title="Hall of Honor: create_award_record", message=frappe.get_traceback())
         return error_response(
             message=str(e) or "Lỗi khi tạo bản ghi vinh danh",
             code="CREATE_RECORD_ERROR"
@@ -930,7 +912,7 @@ def update_award_record():
         )
         
     except Exception as e:
-        frappe.log_error(f"Error updating award record: {str(e)}")
+        frappe.log_error(title="Hall of Honor: update_award_record", message=frappe.get_traceback())
         return error_response(
             message=str(e) or "Lỗi khi cập nhật bản ghi vinh danh",
             code="UPDATE_RECORD_ERROR"
@@ -965,7 +947,7 @@ def delete_award_record():
         )
         
     except Exception as e:
-        frappe.log_error(f"Error deleting award record: {str(e)}")
+        frappe.log_error(title="Hall of Honor: delete_award_record", message=frappe.get_traceback())
         return error_response(
             message="Lỗi khi xóa bản ghi vinh danh",
             code="DELETE_RECORD_ERROR"
@@ -988,12 +970,6 @@ def bulk_import_students():
         else:
             form_data = frappe.form_dict
         
-        # Debug log
-        print("=" * 80)
-        print("🔍 [BULK_IMPORT_STUDENTS] form_data keys:", form_data.keys() if isinstance(form_data, dict) else type(form_data))
-        print("🔍 [BULK_IMPORT_STUDENTS] form_data:", form_data)
-        print("=" * 80)
-            
         award_category = form_data.get('award_category')
         sub_category_data = form_data.get('sub_category_data')
         students_data = form_data.get('students_data')
@@ -1101,13 +1077,7 @@ def bulk_import_students():
         )
         
     except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        frappe.log_error(f"Error bulk importing students: {str(e)}\n{error_details}")
-        print("=" * 80)
-        print(f"❌ [BULK_IMPORT_STUDENTS] Error: {str(e)}")
-        print(error_details)
-        print("=" * 80)
+        frappe.log_error(title="Hall of Honor: bulk_import_students", message=frappe.get_traceback())
         return error_response(
             message=f"Lỗi khi import hàng loạt học sinh: {str(e)}",
             code="BULK_IMPORT_ERROR"
@@ -1234,7 +1204,7 @@ def bulk_import_classes():
         )
         
     except Exception as e:
-        frappe.log_error(f"Error bulk importing classes: {str(e)}")
+        frappe.log_error(title="Hall of Honor: bulk_import_classes", message=frappe.get_traceback())
         return error_response(
             message="Lỗi khi import hàng loạt lớp",
             code="BULK_IMPORT_CLASSES_ERROR"
@@ -1269,7 +1239,7 @@ def get_school_years():
         )
         
     except Exception as e:
-        frappe.log_error(f"Error getting school years: {str(e)}")
+        frappe.log_error(title="Hall of Honor: get_school_years", message=frappe.get_traceback())
         return error_response(
             message="Lỗi khi lấy danh sách năm học",
             code="GET_SCHOOL_YEARS_ERROR"
