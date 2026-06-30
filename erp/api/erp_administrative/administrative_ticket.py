@@ -115,7 +115,12 @@ def _resolve_department_name(unit_name, units_map, type_order_map):
 
 
 def _user_unit_map(user_ids=None):
-    """Map user -> đơn vị thành viên đầu tiên (chỉ tính đơn vị active)."""
+    """Map user -> đơn vị để suy ra phòng ban (chỉ tính đơn vị active).
+
+    Ưu tiên đơn vị mà user là Thành viên; nếu không là Thành viên của đơn vị nào
+    thì lấy đơn vị mà user là Lãnh đạo. Nhờ vậy trưởng đơn vị (chỉ được set ở bảng
+    Lãnh đạo, chưa thêm vào Thành viên) vẫn ra phòng ban.
+    """
     units_map = _org_units_map()
     filters = {"user": ["in", list(user_ids)]} if user_ids else None
     member_rows = frappe.get_all(
@@ -125,6 +130,16 @@ def _user_unit_map(user_ids=None):
     )
     user_unit = {}
     for m in member_rows:
+        uid = (m.user or "").strip()
+        if uid and uid not in user_unit and m.parent in units_map:
+            user_unit[uid] = m.parent
+    # Fallback Lãnh đạo: chỉ áp cho user chưa có đơn vị từ Thành viên.
+    leader_rows = frappe.get_all(
+        "ERP Organization Unit Leader",
+        filters=filters,
+        fields=["user", "parent"],
+    )
+    for m in leader_rows:
         uid = (m.user or "").strip()
         if uid and uid not in user_unit and m.parent in units_map:
             user_unit[uid] = m.parent
