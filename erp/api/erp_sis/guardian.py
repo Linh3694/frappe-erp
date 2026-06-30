@@ -595,6 +595,7 @@ def get_all_guardians(page=1, limit=20):
                     FROM `tabCRM Family Relationship` fr
                     INNER JOIN `tabCRM Family` f ON f.name = fr.parent
                     WHERE fr.guardian IN %(ids)s
+                    GROUP BY fr.guardian, f.name, f.family_code
                     ORDER BY f.family_code ASC
                     """,
                     {"ids": tuple(guardian_ids)},

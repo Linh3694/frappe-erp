@@ -75,50 +75,74 @@ def _normalize_related_staff_ids(raw):
     return out
 
 
+# Cấp "Phòng/Department" trong sơ đồ tổ chức = type_order 2 (loại đơn vị đánh số thứ tự cấp).
+_DEPARTMENT_TYPE_ORDER = 2
+
+
 def _org_units_map():
-    """Map name -> {unit_name_vn, is_group, parent} của Sơ đồ tổ chức (đơn vị active)."""
+    """Map name -> {unit_name_vn, unit_type, parent} của Sơ đồ tổ chức (đơn vị active)."""
     units = frappe.get_all(
         "ERP Organization Unit",
         filters={"is_active": 1},
-        fields=["name", "unit_name_vn", "is_group", "parent_organization_unit"],
+        fields=["name", "unit_name_vn", "unit_type", "parent_organization_unit"],
     )
     return {u.name: u for u in units}
 
 
-def _resolve_group_department(unit_name, units_map):
-    """Từ đơn vị thành viên, đi lên tới 'phòng ban' (node is_group) gần nhất trong sơ đồ tổ chức."""
+def _org_type_order_map():
+    """Map ERP Organization Unit Type -> type_order (thứ tự cấp; nhỏ = cao hơn)."""
+    rows = frappe.get_all("ERP Organization Unit Type", fields=["name", "type_order"])
+    return {r.name: cint(r.type_order) for r in rows}
+
+
+def _resolve_department_name(unit_name, units_map, type_order_map):
+    """Đi lên sơ đồ tổ chức tới đơn vị cấp Phòng (type_order<=2); không có Phòng thì lấy cấp cao hơn."""
     seen = set()
     cur = unit_name
+    last = None
     while cur and cur in units_map and cur not in seen:
         seen.add(cur)
         u = units_map[cur]
-        if cint(u.get("is_group")):
+        last = u
+        order = type_order_map.get(u.get("unit_type"))
+        if order is not None and order <= _DEPARTMENT_TYPE_ORDER:
             return (u.get("unit_name_vn") or "").strip() or cur
         cur = u.get("parent_organization_unit")
-    u = units_map.get(unit_name)
-    return ((u.get("unit_name_vn") if u else "") or "").strip() or (unit_name or "")
+    # Không có cấp Phòng-trở-lên trong nhánh: lấy đơn vị gốc (cấp cao nhất tìm được).
+    if last:
+        return (last.get("unit_name_vn") or "").strip() or (last.get("name") or "")
+    return ""
 
 
-def _related_staff_detail(user_ids):
-    """Chi tiết CBGVNV liên quan: tên, ảnh, phòng ban (group) từ sơ đồ tổ chức."""
-    ids = [str(x).strip() for x in (user_ids or []) if x]
-    if not ids:
-        return []
+def _user_unit_map(user_ids=None):
+    """Map user -> đơn vị thành viên đầu tiên (chỉ tính đơn vị active)."""
     units_map = _org_units_map()
+    filters = {"user": ["in", list(user_ids)]} if user_ids else None
     member_rows = frappe.get_all(
         "ERP Organization Unit Member",
-        filters={"user": ["in", ids]},
+        filters=filters,
         fields=["user", "parent"],
     )
     user_unit = {}
     for m in member_rows:
-        if m.user and m.user not in user_unit:
-            user_unit[m.user] = m.parent
+        uid = (m.user or "").strip()
+        if uid and uid not in user_unit and m.parent in units_map:
+            user_unit[uid] = m.parent
+    return user_unit, units_map
+
+
+def _related_staff_detail(user_ids):
+    """Chi tiết CBGVNV liên quan: tên, ảnh, phòng ban (cấp Phòng) từ sơ đồ tổ chức."""
+    ids = [str(x).strip() for x in (user_ids or []) if x]
+    if not ids:
+        return []
+    user_unit, units_map = _user_unit_map(ids)
+    type_order_map = _org_type_order_map()
     out = []
     for uid in ids:
         urow = frappe.db.get_value("User", uid, ["full_name", "user_image", "email"], as_dict=True)
         unit = user_unit.get(uid)
-        dept = _resolve_group_department(unit, units_map) if unit else ""
+        dept = _resolve_department_name(unit, units_map, type_order_map) if unit else ""
         out.append(
             {
                 "user_id": uid,
@@ -2134,50 +2158,35 @@ def get_room_event_bookings(room_id=None, range_start=None, range_end=None, excl
 
 @frappe.whitelist(allow_guest=False)
 def get_staff_for_ticket():
-    """Danh sách CBGVNV (thành viên sơ đồ tổ chức) cho field 'CBGVNV liên quan' — tên, ảnh, phòng ban."""
+    """Danh sách CBGVNV (toàn bộ user nội bộ active) cho field 'CBGVNV liên quan' — tên, ảnh, phòng ban."""
     try:
-        units_map = _org_units_map()
-        member_rows = frappe.get_all(
-            "ERP Organization Unit Member",
-            fields=["user", "full_name", "parent"],
-        )
-        # Dedupe theo user, giữ đơn vị đầu tiên gặp.
-        user_unit = {}
-        user_name = {}
-        for m in member_rows:
-            uid = (m.user or "").strip()
-            if not uid or uid in user_unit:
-                continue
-            # Chỉ lấy thành viên thuộc đơn vị đang active.
-            if m.parent not in units_map:
-                continue
-            user_unit[uid] = m.parent
-            user_name[uid] = (m.full_name or "").strip()
-        if not user_unit:
-            return success_response({"staff": []}, "OK")
-        uids = list(user_unit.keys())
-        urows = frappe.get_all(
+        # Toàn bộ user nội bộ đang hoạt động — loại tài khoản phụ huynh / email cá nhân.
+        internal_email_domain = "@wellspring.edu.vn"
+        users = frappe.get_all(
             "User",
-            filters={"name": ["in", uids], "enabled": 1},
+            filters={"enabled": 1, "email": ["like", f"%{internal_email_domain}"]},
             fields=["name", "email", "full_name", "user_image"],
+            order_by="full_name asc",
         )
-        urow_map = {u.name: u for u in urows}
+        if not users:
+            return success_response({"staff": []}, "OK")
+        # Phòng ban (cấp Phòng) từ sơ đồ tổ chức — chỉ với user có trong sơ đồ.
+        user_unit, units_map = _user_unit_map()
+        type_order_map = _org_type_order_map()
         out = []
-        for uid in uids:
-            u = urow_map.get(uid)
-            if not u:
-                # User bị vô hiệu / không tồn tại — bỏ khỏi pool.
-                continue
+        for u in users:
+            uid = u.get("name")
+            unit = user_unit.get(uid) or user_unit.get(u.get("email"))
+            dept = _resolve_department_name(unit, units_map, type_order_map) if unit else ""
             out.append(
                 {
                     "user_id": uid,
                     "email": (u.get("email") or "") or uid,
-                    "full_name": (u.get("full_name") or user_name.get(uid) or "") or uid,
+                    "full_name": (u.get("full_name") or "") or uid,
                     "avatar_url": u.get("user_image") or "",
-                    "department_name": _resolve_group_department(user_unit[uid], units_map),
+                    "department_name": dept,
                 }
             )
-        out.sort(key=lambda r: (r.get("full_name") or "").lower())
         return success_response({"staff": out}, "OK")
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_staff_for_ticket")

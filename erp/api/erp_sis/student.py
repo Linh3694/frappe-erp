@@ -124,6 +124,7 @@ def get_all_students(include_all_campuses=0):
                     FROM `tabCRM Family Relationship` fr
                     INNER JOIN `tabCRM Family` f ON f.name = fr.parent
                     WHERE fr.student IN %(ids)s
+                    GROUP BY fr.student, f.name, f.family_code
                     ORDER BY f.family_code ASC
                     """,
                     {"ids": tuple(student_ids)},
@@ -1159,6 +1160,7 @@ def search_students(search_term=None):
                     FROM `tabCRM Family Relationship` fr
                     INNER JOIN `tabCRM Family` f ON f.name = fr.parent
                     WHERE fr.student IN %(ids)s
+                    GROUP BY fr.student, f.name, f.family_code
                     ORDER BY f.family_code ASC
                     """,
                     {"ids": tuple(student_ids)},
