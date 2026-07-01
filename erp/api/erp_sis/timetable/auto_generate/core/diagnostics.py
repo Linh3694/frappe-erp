@@ -24,21 +24,37 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 	solver, _builder, status, ctx = build_and_solve(inp, rs, diagnostic=True)
 
 	if status not in ("OPTIMAL", "FEASIBLE"):
-		# Nới hết relaxable vẫn vô nghiệm => xung đột ở rule cứng. Chạy UNSAT core
-		# (1 lần solve nữa) để lần ra tập rule cứng mâu thuẫn tối thiểu.
+		# Nới hết relaxable vẫn vô nghiệm => xung đột ở ràng buộc cứng còn lại
+		# (pin / slot cấm / nhóm lớp / thứ tự / trùng lịch...).
+		# Số tiết yêu cầu vẫn đo được — KHÔNG trả 0/0 giả (dễ hiểu nhầm "đã đủ").
+		total_required = sum(
+			int(getattr(r, "periods_per_week", 0) or 0)
+			for r in (getattr(inp, "requirements", None) or [])
+		)
+		# 1) UNSAT core: chỉ bắt được rule cứng nào có gắn assumption literal.
 		core = []
 		try:
 			_s, _b, _st, ctx2 = build_and_solve(inp, rs, diagnostic=True, assume_mode=True)
 			core = ctx2.conflict_core
 		except Exception:
 			core = []
+		# 2) Ablation: nếu core rỗng, tắt lần lượt từng họ ràng buộc cứng rồi giải lại;
+		# họ nào bỏ đi thì xếp được chính là nguồn gây vô nghiệm — báo có TÊN.
+		suspects = _core_suspects(core)
+		if not core:
+			try:
+				ablation = _ablation_culprits(inp, rs)
+				if ablation:
+					suspects = ablation
+			except Exception:
+				pass
 		return {
 			"status": status,
 			"feasible_relaxed": False,
 			"coverage_pct": 0.0,
-			"total_required": 0,
+			"total_required": total_required,
 			"total_placed": 0,
-			"total_short": 0,
+			"total_short": total_required,
 			"shortfalls": [],
 			"limit_violations": [],
 			"forbidden_used": [],
@@ -46,7 +62,7 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 			"room_ineligible": [],
 			"force_pair_broken": [],
 			"conflict_core": core,
-			"suspects": _core_suspects(core),
+			"suspects": suspects,
 		}
 
 	report = build_coverage_report(solver, ctx)
@@ -55,6 +71,99 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 	report["conflict_core"] = []
 	report["suspects"] = _summarize_suspects(report)
 	return report
+
+
+# Nhãn thân thiện cho từng họ ràng buộc cứng khi báo cáo ablation.
+_FAMILY_LABELS = {
+	"class_no_overlap": "Mỗi lớp tối đa 1 môn/slot (trùng lịch lớp)",
+	"teacher_no_overlap": "Mỗi GV tối đa 1 lớp/slot (trùng lịch GV)",
+	"teacher_unavailable": "Slot bận của giáo viên",
+	"subject_not_at_slot": "Slot cấm theo môn",
+	"teacher_not_at_slot": "Slot cấm theo giáo viên",
+	"teacher_not_on_day": "Ngày cấm của giáo viên",
+	"pin_class_subject_slot": "Pin lớp + môn + slot",
+	"class_group_simultaneous_subject": "Nhóm lớp cùng môn cùng slot",
+	"subject_before_subject": "Thứ tự môn trong ngày",
+	"subject_max_simultaneous_classes": "Giới hạn số lớp đồng thời",
+	"system_subject_consecutive_cap": "Không quá 3 tiết liền/môn/ngày",
+	"system_teacher_max_consecutive": "Max tiết liên tiếp của giáo viên",
+}
+
+# Các họ đã bị nới thành slack ở diagnostic mode → tắt cũng không đổi tính khả thi;
+# bỏ qua trong ablation để khỏi tốn lượt giải vô ích.
+_RELAXED_IN_DIAGNOSTIC = frozenset({
+	"curriculum_exact_periods", "subject_max_per_day",
+	"teacher_max_periods_per_day", "teacher_max_periods_per_week",
+	"room_max_simultaneous", "room_eligibility", "system_force_pair",
+})
+
+_SYSTEM_FAMILIES = ("system_subject_consecutive_cap", "system_teacher_max_consecutive")
+
+
+def _diag_feasible(inp, rs, *, overrides=None, skip_system=None) -> bool:
+	"""Giải lại ở diagnostic mode (đã nới coverage) và trả True nếu ra được lời giải."""
+	rs_use = rs
+	if overrides is not None:
+		rs_use = RuleSet(name=rs.name, rules=rs.rules, overrides=overrides)
+	_s, _b, st, _c = build_and_solve(inp, rs_use, diagnostic=True, skip_system=skip_system)
+	return st in ("OPTIMAL", "FEASIBLE")
+
+
+def _ablation_culprits(inp, rs, *, max_report: int = 4) -> list:
+	"""Tắt lần lượt từng họ ràng buộc cứng (giữ diagnostic=True) rồi giải lại. Họ nào
+	bỏ đi thì xếp được chính là nguồn gây vô nghiệm → trả list nghi phạm CÓ TÊN.
+
+	Chỉ chạy khi lời giải nới-lỏng đã vô nghiệm và UNSAT core rỗng. Rút ngắn thời
+	gian mỗi lượt giải vì chỉ cần biết khả thi hay không.
+	"""
+	orig_limit = getattr(inp, "solver_time_limit", None)
+	culprits: list = []
+	try:
+		if isinstance(orig_limit, (int, float)) and orig_limit > 8:
+			inp.solver_time_limit = 8
+
+		base_overrides = dict(getattr(rs, "overrides", None) or {})
+		rule_candidates = [
+			r.rule_id for r in rs.effective()
+			if r.kind == "hard" and r.rule_id not in _RELAXED_IN_DIAGNOSTIC
+		]
+		for rid in rule_candidates:
+			if len(culprits) >= max_report:
+				break
+			ov = dict(base_overrides)
+			ov[rid] = {**(ov.get(rid) or {}), "enabled": False}
+			try:
+				if _diag_feasible(inp, rs, overrides=ov):
+					culprits.append(rid)
+			except Exception:
+				continue
+		for fam in _SYSTEM_FAMILIES:
+			if len(culprits) >= max_report:
+				break
+			try:
+				if _diag_feasible(inp, rs, skip_system=frozenset({fam})):
+					culprits.append(fam)
+			except Exception:
+				continue
+	finally:
+		if orig_limit is not None:
+			inp.solver_time_limit = orig_limit
+
+	if not culprits:
+		return []
+	out = []
+	for rid in culprits:
+		label = _FAMILY_LABELS.get(rid, rid)
+		out.append({
+			"rule_id": rid,
+			"verb": "",
+			"scope": {},
+			"message": (
+				f"Bỏ ràng buộc “{label}” thì xếp được → đây là nguồn gây vô nghiệm. "
+				f"Rà lại cấu hình phần này."
+			),
+		})
+	return out
 
 
 def _core_suspects(core: list) -> list:

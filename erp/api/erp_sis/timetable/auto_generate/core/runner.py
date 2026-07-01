@@ -78,6 +78,7 @@ def build_and_solve(
 	objective_pin: Optional[int] = None,
 	diagnostic: bool = False,
 	assume_mode: bool = False,
+	skip_system: Optional[frozenset] = None,
 ):
 	"""Trả về (cp_solver, RuleSolverBuilder, status_name, ctx).
 
@@ -119,20 +120,27 @@ def build_and_solve(
 			for term in verb.build_soft(ctx, subject_set, rule.params, rule.weight):
 				ctx.add_soft(rule.tier, term)
 
+	# Các ràng buộc hệ thống (không có rule_id trong default set). skip_system cho phép
+	# chẩn đoán ablation tắt riêng từng họ để khoanh nguồn gây vô nghiệm.
+	skip = skip_system or frozenset()
+
 	# HC9 legacy: max tiết liên tiếp GV (hard) — chưa tách rule_id riêng trong default set
-	from .verbs.max_consecutive import MaxConsecutive
-	ctx.cur_rule_id = "system_teacher_max_consecutive"
-	MaxConsecutive().apply_hard(ctx, list(inp.teachers.keys()), {"use_teacher_field": True})
+	if "system_teacher_max_consecutive" not in skip:
+		from .verbs.max_consecutive import MaxConsecutive
+		ctx.cur_rule_id = "system_teacher_max_consecutive"
+		MaxConsecutive().apply_hard(ctx, list(inp.teachers.keys()), {"use_teacher_field": True})
 
 	# HC13: force_pair từ ma trận requirement (checkbox Cặp)
-	from .force_pair_constraints import apply_requirement_force_pairs
-	ctx.cur_rule_id = "system_force_pair"
-	apply_requirement_force_pairs(ctx)
+	if "system_force_pair" not in skip:
+		from .force_pair_constraints import apply_requirement_force_pairs
+		ctx.cur_rule_id = "system_force_pair"
+		apply_requirement_force_pairs(ctx)
 
 	# HC14: ràng buộc hệ thống — không môn nào quá 3 tiết liền trong ngày
-	from .subject_consecutive_cap import apply_subject_max_consecutive_system_cap
-	ctx.cur_rule_id = "system_subject_consecutive_cap"
-	apply_subject_max_consecutive_system_cap(ctx, max_consecutive=3)
+	if "system_subject_consecutive_cap" not in skip:
+		from .subject_consecutive_cap import apply_subject_max_consecutive_system_cap
+		ctx.cur_rule_id = "system_subject_consecutive_cap"
+		apply_subject_max_consecutive_system_cap(ctx, max_consecutive=3)
 	ctx.cur_rule_id = ""
 
 	_apply_forbid_solutions(ctx, forbid_solutions or [], min_diff)
