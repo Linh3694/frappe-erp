@@ -1072,14 +1072,13 @@ def _query_filter_options(
 				if vn:
 					yearly_title[ya["room"]] = vn
 
-		return [
-			{
-				"value": r.name,
-				"label": yearly_title.get(r.name) or r.physical_code or r.title_vn or r.name,
-				"code": r.room_type,
-			}
-			for r in rows
-		]
+		out = []
+		for r in rows:
+			label = yearly_title.get(r.name) or r.physical_code or r.title_vn or r.name
+			# Nhãn phụ hiển thị mã phòng (physical_code); ẩn khi trùng chính nhãn để khỏi lặp
+			code = r.physical_code if r.physical_code and r.physical_code != label else None
+			out.append({"value": r.name, "label": label, "code": code})
+		return out
 
 	return []
 
