@@ -1624,7 +1624,7 @@ def _notify_hc_subtask_assigned(doc, st, actor_email):
         {"subTaskId": st.name, "subTaskTitle": sub_title},
     )
 
-    # 1) Báo người được giao công việc con.
+    # 1) Báo người được giao công việc con (push + email).
     if (ne or "").lower() != (actor or "").lower():
         _hc_send_persisted(
             ne,
@@ -1633,6 +1633,11 @@ def _notify_hc_subtask_assigned(doc, st, actor_email):
             data,
             exclude_email=actor,
             doc=doc,
+            email_event_type="subtask_assigned",
+            email_extra={
+                "subTaskTitle": sub_title,
+                "actorName": _hc_full_name_from_user_or_email(actor) if actor else "",
+            },
             stream_notification_type="administrative_ticket_subtask_assigned",
         )
 
@@ -1680,8 +1685,11 @@ def _notify_hc_subtask_status_changed(doc, st, old_status, new_status, actor_ema
         if sub_title
         else _("{0} → «{1}»").format(f"#{code}", status_l)
     )
+    # Công việc con chuyển sang hoàn thành → PIC ticket nhận thêm email.
+    is_completed = (new_status or "").strip().lower() in ("completed", "done")
     recipients = []
     pic = _hc_user_email(getattr(doc, "assigned_to", None))
+    pic_key = (pic or "").strip().lower()
     if pic:
         recipients.append(pic)
     sub_assignee = _hc_user_email(getattr(st, "assigned_to", None))
@@ -1693,6 +1701,15 @@ def _notify_hc_subtask_status_changed(doc, st, old_status, new_status, actor_ema
         if not key or key in seen or key == (actor or "").lower():
             continue
         seen.add(key)
+        # Chỉ PIC ticket nhận email khi công việc con hoàn thành; assignee chỉ nhận push.
+        email_event_type = None
+        email_extra = None
+        if is_completed and key == pic_key:
+            email_event_type = "subtask_completed"
+            email_extra = {
+                "subTaskTitle": sub_title,
+                "actorName": _hc_full_name_from_user_or_email(actor) if actor else "",
+            }
         _hc_send_persisted(
             em,
             title,
@@ -1700,6 +1717,8 @@ def _notify_hc_subtask_status_changed(doc, st, old_status, new_status, actor_ema
             data,
             exclude_email=actor,
             doc=doc,
+            email_event_type=email_event_type,
+            email_extra=email_extra,
             stream_notification_type="administrative_ticket_subtask_status",
         )
 
