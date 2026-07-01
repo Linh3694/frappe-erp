@@ -1035,14 +1035,51 @@ def _query_filter_options(
 			filters["campus_id"] = campus_id
 		if room_type and frappe.db.has_column("ERP Administrative Room", "room_type"):
 			filters["room_type"] = room_type
+
+		or_filters = None
+		if search:
+			matched = set(search_names("ERP Administrative Room", ["title_vn", "physical_code"], search) or [])
+			# Khớp cả tên phòng theo năm học (Room Yearly Assignment.display_title_vn)
+			if school_year_id:
+				ya_names = search_names("ERP Administrative Room Yearly Assignment", ["display_title_vn"], search) or []
+				if ya_names:
+					for ya in frappe.get_all(
+						"ERP Administrative Room Yearly Assignment",
+						filters={"name": ["in", ya_names], "school_year_id": school_year_id},
+						fields=["room"],
+					):
+						if ya.get("room"):
+							matched.add(ya["room"])
+			or_filters = [["name", "in", list(matched) or ["__no_match__"]]]
+
 		rows = frappe.get_all(
 			"ERP Administrative Room",
 			filters=filters,
 			fields=["name", "title_vn", "physical_code", "room_type"],
-			or_filters=[["name", "in", search_names("ERP Administrative Room", ["title_vn", "physical_code"], search) or ["__no_match__"]]] if search else None,
+			or_filters=or_filters,
 			limit_page_length=limit,
 		)
-		return [{"value": r.name, "label": r.physical_code or r.title_vn or r.name, "code": r.room_type} for r in rows]
+
+		# Nhãn hiển thị theo năm học: ưu tiên display_title_vn của bản gán năm (Room Yearly Assignment)
+		yearly_title = {}
+		if school_year_id and rows:
+			for ya in frappe.get_all(
+				"ERP Administrative Room Yearly Assignment",
+				filters={"room": ["in", [r.name for r in rows]], "school_year_id": school_year_id},
+				fields=["room", "display_title_vn"],
+			):
+				vn = (ya.get("display_title_vn") or "").strip()
+				if vn:
+					yearly_title[ya["room"]] = vn
+
+		return [
+			{
+				"value": r.name,
+				"label": yearly_title.get(r.name) or r.physical_code or r.title_vn or r.name,
+				"code": r.room_type,
+			}
+			for r in rows
+		]
 
 	return []
 
