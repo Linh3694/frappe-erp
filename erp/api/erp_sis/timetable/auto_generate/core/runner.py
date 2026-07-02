@@ -94,8 +94,12 @@ def build_and_solve(
 
 	rs = rule_set or build_default_rule_set()
 	cp = cp_model.CpModel()
+	# Ở diagnostic mode mọi ràng buộc phòng đã nới thành slack (không ảnh hưởng
+	# feasibility), còn feasibility-only/assume bỏ luôn objective → biến phòng
+	# (~rooms×classes×slots biến phụ) thành thuần lãng phí build. Bỏ để chẩn đoán nhanh.
+	need_rooms = _needs_room_vars(rs) and not (diagnostic and (feasibility_only or assume_mode))
 	ctx = SolverContext(
-		model=cp, x={}, inp=inp, use_room_vars=_needs_room_vars(rs),
+		model=cp, x={}, inp=inp, use_room_vars=need_rooms,
 		diagnostic=diagnostic, assume_mode=assume_mode,
 	)
 	create_variables(ctx)
