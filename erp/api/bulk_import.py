@@ -1582,8 +1582,29 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     resolution_errors.append(f"Academic Program: '{academic_program_name}'{available_str} {debug_info}")
 
             # Handle homeroom / vice homeroom teacher lookup (Link -> SIS Teacher)
-            # Excel chứa mã đăng nhập giáo viên (user_id, ví dụ 'WT05PR'), KHÔNG phải docname
-            # SIS_TEACHER-xxxxx. Cần resolve về docname, nếu không doc.insert sẽ fail link validation.
+            # Excel chứa MÃ NHÂN VIÊN (ví dụ 'WT87PR'), lưu ở User.employee_code (hoặc employee_id).
+            # SIS Teacher.user_id -> User. Cần: mã NV -> User -> SIS Teacher docname,
+            # nếu không doc.insert sẽ fail link validation.
+            def _teacher_from_user_ids(user_ids):
+                if not user_ids:
+                    return None
+                if campus_id:
+                    hit = frappe.get_all(
+                        "SIS Teacher",
+                        filters={"user_id": ["in", user_ids], "campus_id": campus_id},
+                        fields=["name"],
+                        limit=1,
+                    )
+                    if hit:
+                        return hit[0].name
+                hit = frappe.get_all(
+                    "SIS Teacher",
+                    filters={"user_id": ["in", user_ids]},
+                    fields=["name"],
+                    limit=1,
+                )
+                return hit[0].name if hit else None
+
             def _resolve_teacher(raw_code):
                 code = str(raw_code).strip()
                 if not code or code.lower() == "nan":
@@ -1591,26 +1612,21 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 # Nếu đã là docname SIS Teacher hợp lệ thì dùng luôn
                 if frappe.db.exists("SIS Teacher", code):
                     return code, None
-                # Tra theo user_id (mã đăng nhập) trong campus, rồi fallback không lọc campus
-                teacher_id = None
-                if campus_id:
-                    hit = frappe.get_all(
-                        "SIS Teacher",
-                        filters={"user_id": code, "campus_id": campus_id},
-                        fields=["name"],
-                        limit=1,
-                    )
-                    if hit:
-                        teacher_id = hit[0].name
+                # 1) Mã nhân viên trên User (employee_code / employee_id)
+                user_ids = []
+                for user_field in ["employee_code", "employee_id"]:
+                    try:
+                        users = frappe.get_all(
+                            "User", filters={user_field: code}, fields=["name"], limit=5
+                        )
+                        user_ids.extend(u.name for u in users)
+                    except Exception:
+                        # Field có thể không tồn tại tuỳ cấu hình -> bỏ qua
+                        pass
+                teacher_id = _teacher_from_user_ids(list(dict.fromkeys(user_ids)))
+                # 2) Fallback: coi mã như user_id (đăng nhập) trực tiếp
                 if not teacher_id:
-                    hit = frappe.get_all(
-                        "SIS Teacher",
-                        filters={"user_id": code},
-                        fields=["name"],
-                        limit=1,
-                    )
-                    if hit:
-                        teacher_id = hit[0].name
+                    teacher_id = _teacher_from_user_ids([code])
                 if teacher_id:
                     return teacher_id, None
                 return None, f"Giáo viên (mã '{code}')"
