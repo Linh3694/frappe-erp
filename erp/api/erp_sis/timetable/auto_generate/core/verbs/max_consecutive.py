@@ -51,4 +51,4 @@ class MaxConsecutive(Verb):
 						v = ctx.x.get((c_id, ts_id, day, p))
 						if v is not None:
 							window.append(v)
-				le_limit(ctx, window, max_consec, kind=kind, weight=weight, relaxable=True, tier=tier, tag=f"mc_{t_id}_{day}_{start}")
+				le_limit(ctx, window, max_consec, kind=kind, weight=weight, relaxable=True, tier=tier, tag=f"mc_{t_id}_{day}_{start}", scope={"teacher_id": t_id, "day": day})

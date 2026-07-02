@@ -43,6 +43,7 @@ class RoomMaxSimultaneous(Verb):
 					tag=f"room:{room_id or room_idx}:{day}:{p_idx}",
 					rule_id="room_max_simultaneous",
 					relaxable=True,
+					scope={"room_id": room_id or str(room_idx), "day": day, "period_idx": p_idx},
 				)
 
 	def _limits(self, ctx, params):

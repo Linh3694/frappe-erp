@@ -120,6 +120,7 @@ def pin_var(ctx, v, *, enforcement: str, weight: int, rule_id: str, scope: dict,
 def le_limit(
 	ctx, vars_, limit: int, *, kind: str, weight: int, tag: str,
 	rule_id: str = "", relaxable: bool = False, tier: str = "",
+	scope: dict | None = None,
 ) -> None:
 	"""Ràng buộc sum(vars_) <= limit.
 
@@ -128,6 +129,8 @@ def le_limit(
 	- hard + relaxable + ctx.diagnostic -> nới thành slack phần vượt ở tầng RELAXABLE,
 	  ghi vào ctx.slacks để báo cáo. Dùng cho limit chính sách (teacher/subject/consecutive);
 	  KHÔNG truyền relaxable cho limit vật lý (room capacity).
+	- scope: định danh có cấu trúc (class_id/subject_id/teacher_id/room_id/day...) để
+	  báo cáo hiện tên thay vì bắt UI parse tag kỹ thuật.
 	"""
 	if not vars_:
 		return
@@ -140,7 +143,10 @@ def le_limit(
 	if kind == "hard":
 		# Hard policy đang nới (diagnostic): tầng relaxable, phạt nặng, ghi báo cáo.
 		ctx.add_soft(RELAXABLE, over * (-RELAX_FORBIDDEN_PENALTY))
-		ctx.add_violation(rule_id or ctx.cur_rule_id, "limit", {"tag": tag, "limit": limit}, over)
+		ctx.add_violation(
+			rule_id or ctx.cur_rule_id, "limit",
+			{**(scope or {}), "tag": tag, "limit": limit}, over,
+		)
 	elif tier:
 		# Soft có tier per-entity (vd max liên tiếp theo từng GV).
 		ctx.add_soft(tier, over * (-weight))

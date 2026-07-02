@@ -81,11 +81,43 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 		}
 
 	report = build_coverage_report(solver, ctx)
+	_enrich_labels(report, inp)
 	report["status"] = status
 	report["feasible_relaxed"] = True
 	report["conflict_core"] = []
 	report["suspects"] = _summarize_suspects(report)
 	return report
+
+
+def _label_maps(inp) -> tuple:
+	"""(class, subject, teacher, room) id -> tên hiển thị, từ input đã nạp sẵn."""
+	class_map = {c.name: (c.title or c.name) for c in (getattr(inp, "classes", None) or [])}
+	subject_map = {}
+	for r in (getattr(inp, "requirements", None) or []):
+		if r.timetable_subject_id and r.timetable_subject_title:
+			subject_map[r.timetable_subject_id] = r.timetable_subject_title
+	teacher_map = {
+		t_id: (getattr(t, "full_name", "") or t_id)
+		for t_id, t in (getattr(inp, "teachers", {}) or {}).items()
+	}
+	room_map = {r.name: (r.title or r.name) for r in (getattr(inp, "rooms", None) or [])}
+	return class_map, subject_map, teacher_map, room_map
+
+
+def _enrich_labels(report: dict, inp) -> None:
+	"""Gắn *_label (tên lớp/môn/GV/phòng) vào từng entry để UI hiện tên thay vì ID."""
+	cmap, smap, tmap, rmap = _label_maps(inp)
+	for key in ("shortfalls", "limit_violations", "forbidden_used", "pins_missed",
+	            "room_ineligible", "force_pair_broken"):
+		for row in report.get(key, []) or []:
+			if row.get("class_id"):
+				row["class_label"] = cmap.get(row["class_id"], row["class_id"])
+			if row.get("subject_id"):
+				row["subject_label"] = smap.get(row["subject_id"], row["subject_id"])
+			if row.get("teacher_id"):
+				row["teacher_label"] = tmap.get(row["teacher_id"], row["teacher_id"])
+			if row.get("room_id"):
+				row["room_label"] = rmap.get(row["room_id"], row["room_id"])
 
 
 # Nhãn thân thiện cho từng họ ràng buộc cứng khi báo cáo ablation.
@@ -307,6 +339,10 @@ def _data_contradictions(inp) -> list:
 	from .helpers import class_subject_weekdays, teacher_class_subjects
 
 	out = []
+	cmap, smap, tmap, _rmap = _label_maps(inp)
+	_c = lambda cid: cmap.get(cid, cid)  # noqa: E731
+	_s = lambda sid: smap.get(sid, sid)  # noqa: E731
+	_t = lambda tid: tmap.get(tid, tid)  # noqa: E731
 	pins = [p for p in (getattr(inp, "pinned_slots", None) or [])]
 
 	def _mandatory(obj) -> bool:
@@ -347,7 +383,7 @@ def _data_contradictions(inp) -> list:
 				"rule_id": "pin_class_subject_slot", "verb": "pinned_to_slot",
 				"scope": {"class_id": c_id, "subject_id": ts_id, "day": day, "period_idx": p},
 				"message": (
-					f"Pin bắt buộc lớp {c_id} môn {ts_id} vào {day}/tiết {p + 1} "
+					f"Pin bắt buộc lớp {_c(c_id)} môn {_s(ts_id)} vào {day}/tiết {p + 1} "
 					f"nhưng slot này đang bị PIN CHẶN — bỏ một trong hai."
 				),
 			})
@@ -364,7 +400,7 @@ def _data_contradictions(inp) -> list:
 				"rule_id": "pin_class_subject_slot", "verb": "pinned_to_slot",
 				"scope": {"class_id": c_id, "subject_id": ts_id, "day": day, "period_idx": p},
 				"message": (
-					f"Pin bắt buộc lớp {c_id} môn {ts_id} vào {day} nhưng môn này "
+					f"Pin bắt buộc lớp {_c(c_id)} môn {_s(ts_id)} vào {day} nhưng môn này "
 					f"chỉ được học vào: {', '.join(sorted(allowed)) or '(không ngày nào)'} — sửa pin hoặc ngày học."
 				),
 			})
@@ -395,8 +431,8 @@ def _data_contradictions(inp) -> list:
 						"scope": {"class_id": c_id, "subject_id": ts_id, "teacher_id": t_id,
 						          "day": day, "period_idx": p},
 						"message": (
-							f"Pin bắt buộc lớp {c_id} môn {ts_id} vào {day}/tiết {p + 1} "
-							f"nhưng GV {t_id} bận (bắt buộc) đúng slot này."
+							f"Pin bắt buộc lớp {_c(c_id)} môn {_s(ts_id)} vào {day}/tiết {p + 1} "
+							f"nhưng GV {_t(t_id)} bận (bắt buộc) đúng slot này."
 						),
 					})
 
@@ -409,8 +445,8 @@ def _data_contradictions(inp) -> list:
 				"rule_id": "pin_class_subject_slot", "verb": "pinned_to_slot",
 				"scope": {"class_id": c_id, "day": day, "period_idx": p},
 				"message": (
-					f"Hai pin bắt buộc đụng nhau: lớp {c_id} tại {day}/tiết {p + 1} "
-					f"vừa pin môn {seen[key]} vừa pin môn {ts_id}."
+					f"Hai pin bắt buộc đụng nhau: lớp {_c(c_id)} tại {day}/tiết {p + 1} "
+					f"vừa pin môn {_s(seen[key])} vừa pin môn {_s(ts_id)}."
 				),
 			})
 		else:
@@ -433,83 +469,36 @@ def _core_suspects(core: list) -> list:
 	} for rid in core]
 
 
+def _lb(row: dict, kind: str) -> str:
+	"""Tên hiển thị của lớp/môn/GV/phòng trong 1 entry — rơi về ID nếu chưa gắn label."""
+	return row.get(f"{kind}_label") or row.get(f"{kind}_id") or ""
+
+
 def _summarize_suspects(report: dict) -> list:
-	"""Tóm tắt vi phạm theo dạng list 'nghi phạm' cho UI hiện tại."""
+	"""Nghi phạm cho khung "Điểm vướng" — CHỈ những loại DiagnoseCoverageCard không vẽ
+	(shortfall/limit/force_pair/forbidden/pin đã có bảng cấu trúc riêng trong card,
+	liệt kê lại ở đây chỉ gây trùng lặp)."""
 	out = []
-	for sf in report.get("shortfalls", []):
-		out.append({
-			"rule_id": "curriculum_exact_periods",
-			"verb": "exact_count_per_week",
-			"scope": {"class_id": sf.get("class_id"), "subject_id": sf.get("subject_id")},
-			"message": (
-				f"Lớp {sf.get('class_id')} — môn {sf.get('subject_id')} "
-				f"thiếu {sf.get('short')}/{sf.get('required')} tiết"
-			),
-		})
-	for lv in report.get("limit_violations", []):
-		tag = lv.get("tag", "") or ""
-		if tag.startswith("room:"):
-			# tag = "room:{room_id}:{day}:{period_idx}" — phòng quá tải (đụng room_max).
-			parts = tag.split(":")
-			room = parts[1] if len(parts) > 1 else ""
-			day = parts[2] if len(parts) > 2 else ""
-			period = parts[3] if len(parts) > 3 else ""
-			out.append({
-				"rule_id": lv.get("rule_id", "") or "room_max_simultaneous",
-				"verb": "room_max_simultaneous",
-				"scope": {"room_id": room, "day": day, "period_idx": period},
-				"message": f"Phòng {room} quá tải: thừa {lv.get('over')} lớp tại {day}/tiết {period}",
-			})
-		else:
-			out.append({
-				"rule_id": lv.get("rule_id", ""),
-				"verb": "",
-				"scope": {"tag": tag},
-				"message": f"Vượt giới hạn {tag} thêm {lv.get('over')} tiết",
-			})
 	# Thiếu phòng hợp lệ — gộp theo (lớp, môn) đếm số slot để báo cáo gọn.
 	room_inelig_agg: dict = {}
 	for ri in report.get("room_ineligible", []):
 		key = (ri.get("class_id"), ri.get("subject_id"))
 		room_inelig_agg[key] = room_inelig_agg.get(key, 0) + 1
+	# Nhóm shortfall theo (lớp, môn) đã gộp ở trên; giữ label đầu tiên gặp được.
+	inelig_labels: dict = {}
+	for ri in report.get("room_ineligible", []):
+		key = (ri.get("class_id"), ri.get("subject_id"))
+		if key not in inelig_labels:
+			inelig_labels[key] = (_lb(ri, "class"), _lb(ri, "subject"))
 	for (class_id, subject_id), cnt in room_inelig_agg.items():
+		c_lb, s_lb = inelig_labels.get((class_id, subject_id), (class_id, subject_id))
 		out.append({
 			"rule_id": "room_eligibility",
 			"verb": "room_eligibility",
 			"scope": {"class_id": class_id, "subject_id": subject_id},
 			"message": (
-				f"Lớp {class_id} môn {subject_id}: không còn phòng hợp lệ trống ở {cnt} slot "
+				f"Lớp {c_lb} môn {s_lb}: không còn phòng hợp lệ trống ở {cnt} slot "
 				f"(thiếu phòng hoặc đụng giới hạn room_max)"
-			),
-		})
-	for fp in report.get("force_pair_broken", []):
-		out.append({
-			"rule_id": fp.get("rule_id", "") or "system_force_pair",
-			"verb": "force_pair",
-			"scope": {"class_id": fp.get("class_id"), "subject_id": fp.get("subject_id")},
-			"message": (
-				f"Lớp {fp.get('class_id')} môn {fp.get('subject_id')}: không xếp được cặp tiết "
-				f"(force_pair) — xem lại số tiết/buổi/pin"
-			),
-		})
-	for fb in report.get("forbidden_used", []):
-		out.append({
-			"rule_id": fb.get("rule_id", ""),
-			"verb": "forbidden_at_slots",
-			"scope": {k: fb.get(k) for k in ("teacher_id", "day", "period_idx", "class_id", "subject_id")},
-			"message": (
-				f"Slot hạn chế bị buộc xếp: lớp {fb.get('class_id')} môn {fb.get('subject_id')} "
-				f"{fb.get('day')}/tiết {fb.get('period_idx')}"
-			),
-		})
-	for pm in report.get("pins_missed", []):
-		out.append({
-			"rule_id": pm.get("rule_id", ""),
-			"verb": "pinned_to_slot",
-			"scope": {k: pm.get(k) for k in ("class_id", "subject_id", "day", "period_idx")},
-			"message": (
-				f"Pin mềm không đạt: lớp {pm.get('class_id')} môn {pm.get('subject_id')} "
-				f"không xếp được vào {pm.get('day')}/tiết {pm.get('period_idx')}"
 			),
 		})
 	return out
