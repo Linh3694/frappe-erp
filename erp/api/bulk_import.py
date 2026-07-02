@@ -157,7 +157,9 @@ def get_bulk_import_status():
             "error_file_url": job.error_file_url
         }
 
-        # Attach a small preview of errors so FE can show without opening file
+        # Attach errors so FE can hiển thị toàn bộ mà không cần mở file.
+        # Đọc tối đa PREVIEW_CAP dòng để tránh payload quá lớn với file khổng lồ.
+        PREVIEW_CAP = 500
         try:
             if job.error_file_url and job.error_count:
                 file_url = job.error_file_url
@@ -171,7 +173,7 @@ def get_bulk_import_status():
                     file_path = file_url if file_url.startswith("/") else frappe.get_site_path("public", file_url)
 
                 import pandas as pd
-                df_prev = pd.read_excel(file_path, nrows=5)
+                df_prev = pd.read_excel(file_path, nrows=PREVIEW_CAP)
                 preview = []
                 for _, r in df_prev.iterrows():
                     item = {
