@@ -39,13 +39,15 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 			prescan = _data_contradictions(inp)
 		except Exception:
 			prescan = []
-		# 2) UNSAT core: chỉ bắt được rule cứng nào có gắn assumption literal.
+		# 2) UNSAT core: chỉ có nghĩa khi status là INFEASIBLE thật. UNKNOWN = hết giờ
+		# chưa kết luận — chạy assume pass chỉ tốn thêm 1 lượt giải vô ích.
 		core = []
-		try:
-			_s, _b, _st, ctx2 = build_and_solve(inp, rs, diagnostic=True, assume_mode=True)
-			core = ctx2.conflict_core
-		except Exception:
-			core = []
+		if status == "INFEASIBLE":
+			try:
+				_s, _b, _st, ctx2 = build_and_solve(inp, rs, diagnostic=True, assume_mode=True)
+				core = ctx2.conflict_core
+			except Exception:
+				core = []
 		# 3) Ablation: tắt lần lượt từng họ ràng buộc cứng rồi giải lại (feasibility-only);
 		# họ nào bỏ đi thì xếp được chính là nguồn gây vô nghiệm — báo có TÊN.
 		suspects = list(prescan)

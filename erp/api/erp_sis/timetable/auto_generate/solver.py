@@ -323,9 +323,12 @@ def _execute_diagnose(session_id: str) -> Dict:
 	if val_errors:
 		raise ValueError("; ".join(val_errors[:5]))
 
-	# Giới hạn thời gian mỗi lần solve trong diagnose (2 pha hybrid).
-	if inp.solver_time_limit > 30:
-		inp.solver_time_limit = 30
+	# Giới hạn thời gian mỗi lần solve trong diagnose (2 pha hybrid). Cap 30s cũ làm
+	# pha Maximize timeout trên model lớn → chẩn đoán báo nhầm "vô nghiệm khi đã nới"
+	# dù model xếp được (feasibility check ra nghiệm trong vài giây). Nới lên 120s;
+	# các lượt ablation bên trong vẫn tự cap ngắn riêng.
+	if inp.solver_time_limit > 120:
+		inp.solver_time_limit = 120
 
 	rule_set, _ = TimetableSolver(session_id)._load_rule_set()
 	return _diag(inp, rule_set)
