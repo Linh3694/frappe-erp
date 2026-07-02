@@ -356,6 +356,7 @@ def _build_diagnose_block(report: Optional[Dict], started, *, status: str = "Com
 		"force_pair_broken": report.get("force_pair_broken", []),
 		"conflict_core": report.get("conflict_core", []),
 		"suspects": report.get("suspects", []),
+		"ablation_trace": report.get("ablation_trace", {}),
 	}
 	if error:
 		block["error"] = error

@@ -31,24 +31,36 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 			int(getattr(r, "periods_per_week", 0) or 0)
 			for r in (getattr(inp, "requirements", None) or [])
 		)
-		# 1) UNSAT core: chỉ bắt được rule cứng nào có gắn assumption literal.
+		# 1) Tiền-quét dữ liệu (0 lần giải): pin đụng pin chặn / ngày cấm môn / GV bận.
+		# Bắt được thì chỉ đích danh lớp/môn/slot, khỏi cần ablation.
+		prescan = []
+		try:
+			prescan = _data_contradictions(inp)
+		except Exception:
+			prescan = []
+		# 2) UNSAT core: chỉ bắt được rule cứng nào có gắn assumption literal.
 		core = []
 		try:
 			_s, _b, _st, ctx2 = build_and_solve(inp, rs, diagnostic=True, assume_mode=True)
 			core = ctx2.conflict_core
 		except Exception:
 			core = []
-		# 2) Ablation: nếu core rỗng, tắt lần lượt từng họ ràng buộc cứng rồi giải lại;
+		# 3) Ablation: tắt lần lượt từng họ ràng buộc cứng rồi giải lại (feasibility-only);
 		# họ nào bỏ đi thì xếp được chính là nguồn gây vô nghiệm — báo có TÊN.
-		suspects = _core_suspects(core)
-		if not core:
+		suspects = list(prescan)
+		ablation_trace: dict = {}
+		if core:
+			suspects.extend(_core_suspects(core))
+		elif not suspects:
 			try:
-				ablation = _ablation_culprits(inp, rs)
-				if ablation:
-					suspects = ablation
+				ablation, ablation_trace = _ablation_culprits(inp, rs)
+				suspects.extend(ablation)
 			except Exception:
 				pass
+		if not suspects:
+			suspects = _core_suspects([])
 		return {
+			"ablation_trace": ablation_trace,
 			"status": status,
 			"feasible_relaxed": False,
 			"coverage_pct": 0.0,
@@ -100,61 +112,113 @@ _RELAXED_IN_DIAGNOSTIC = frozenset({
 _SYSTEM_FAMILIES = ("system_subject_consecutive_cap", "system_teacher_max_consecutive")
 
 
-def _diag_feasible(inp, rs, *, overrides=None, skip_system=None) -> bool:
-	"""Giải lại ở diagnostic mode (đã nới coverage) và trả True nếu ra được lời giải."""
+# Thứ tự thử ablation: dữ liệu P0 hay sai trước (pin, slot cấm), vật lý sau cùng.
+_ABLATION_PRIORITY = [
+	"pin_class_subject_slot", "subject_not_at_slot", "teacher_not_at_slot",
+	"teacher_not_on_day", "teacher_unavailable", "class_group_simultaneous_subject",
+	"subject_before_subject", "subject_max_simultaneous_classes",
+]
+_PHYSICAL_LAST = ["class_no_overlap", "teacher_no_overlap"]
+
+
+def _diag_status(inp, rs, *, disabled=frozenset(), skip_system=frozenset()) -> str:
+	"""Giải feasibility-only ở diagnostic mode với 1 tập rule bị tắt. Trả status name."""
 	rs_use = rs
-	if overrides is not None:
-		rs_use = RuleSet(name=rs.name, rules=rs.rules, overrides=overrides)
-	_s, _b, st, _c = build_and_solve(inp, rs_use, diagnostic=True, skip_system=skip_system)
-	return st in ("OPTIMAL", "FEASIBLE")
+	if disabled:
+		ov = dict(getattr(rs, "overrides", None) or {})
+		for rid in disabled:
+			ov[rid] = {**(ov.get(rid) or {}), "enabled": False}
+		rs_use = RuleSet(name=rs.name, rules=rs.rules, overrides=ov)
+	_s, _b, st, _c = build_and_solve(
+		inp, rs_use, diagnostic=True, skip_system=skip_system or None, feasibility_only=True,
+	)
+	return st
 
 
-def _ablation_culprits(inp, rs, *, max_report: int = 4) -> list:
-	"""Tắt lần lượt từng họ ràng buộc cứng (giữ diagnostic=True) rồi giải lại. Họ nào
-	bỏ đi thì xếp được chính là nguồn gây vô nghiệm → trả list nghi phạm CÓ TÊN.
+def _ablation_culprits(inp, rs, *, max_report: int = 4) -> tuple:
+	"""Tắt lần lượt từng họ ràng buộc cứng rồi giải lại (feasibility-only). Họ nào bỏ
+	đi thì xếp được chính là nguồn gây vô nghiệm → trả (suspects, trace).
 
-	Chỉ chạy khi lời giải nới-lỏng đã vô nghiệm và UNSAT core rỗng. Rút ngắn thời
-	gian mỗi lượt giải vì chỉ cần biết khả thi hay không.
+	- Giải feasibility-only (không Maximize) nên mỗi lượt nhanh; UNKNOWN (hết giờ,
+	  không kết luận được) được ghi riêng, KHÔNG coi là "không phải thủ phạm".
+	- Nếu không họ đơn lẻ nào đủ, thử greedy tích luỹ (tắt dần nhiều họ).
 	"""
 	orig_limit = getattr(inp, "solver_time_limit", None)
 	culprits: list = []
+	trace: dict = {}
 	try:
-		if isinstance(orig_limit, (int, float)) and orig_limit > 8:
-			inp.solver_time_limit = 8
+		if isinstance(orig_limit, (int, float)) and orig_limit > 15:
+			inp.solver_time_limit = 15
 
-		base_overrides = dict(getattr(rs, "overrides", None) or {})
-		rule_candidates = [
+		# Baseline: model gốc (chưa tắt gì) giải feasibility-only. Nếu ra nghiệm nghĩa là
+		# lần chẩn đoán chính chỉ hết giờ ở pha Maximize chứ không hề vô nghiệm — báo
+		# thẳng thay vì đổ oan cho một họ ràng buộc.
+		try:
+			base_st = _diag_status(inp, rs)
+		except Exception:
+			base_st = "ERROR"
+		trace["baseline"] = base_st
+		if base_st in ("OPTIMAL", "FEASIBLE"):
+			return ([{
+				"rule_id": "", "verb": "", "scope": {},
+				"message": (
+					"Model thực ra XẾP ĐƯỢC (kiểm tra nhanh ra nghiệm) — lần chẩn đoán chính "
+					"chỉ hết thời gian ở bước tối ưu. Tăng thời gian solver rồi chạy lại."
+				),
+			}], trace)
+
+		effective_ids = [
 			r.rule_id for r in rs.effective()
 			if r.kind == "hard" and r.rule_id not in _RELAXED_IN_DIAGNOSTIC
 		]
-		for rid in rule_candidates:
-			if len(culprits) >= max_report:
-				break
-			ov = dict(base_overrides)
-			ov[rid] = {**(ov.get(rid) or {}), "enabled": False}
-			try:
-				if _diag_feasible(inp, rs, overrides=ov):
-					culprits.append(rid)
-			except Exception:
-				continue
-		for fam in _SYSTEM_FAMILIES:
+		ordered = [rid for rid in _ABLATION_PRIORITY if rid in effective_ids]
+		ordered += [rid for rid in effective_ids if rid not in ordered and rid not in _PHYSICAL_LAST]
+		ordered += [rid for rid in _PHYSICAL_LAST if rid in effective_ids]
+		families = [("rule", rid) for rid in ordered] + [("system", f) for f in _SYSTEM_FAMILIES]
+
+		# Vòng 1: tắt từng họ đơn lẻ.
+		for kind, fam in families:
 			if len(culprits) >= max_report:
 				break
 			try:
-				if _diag_feasible(inp, rs, skip_system=frozenset({fam})):
-					culprits.append(fam)
+				st = _diag_status(
+					inp, rs,
+					disabled=frozenset({fam}) if kind == "rule" else frozenset(),
+					skip_system=frozenset({fam}) if kind == "system" else frozenset(),
+				)
 			except Exception:
-				continue
+				st = "ERROR"
+			trace[fam] = st
+			if st in ("OPTIMAL", "FEASIBLE"):
+				culprits.append(fam)
+
+		# Vòng 2: greedy tích luỹ khi không họ đơn lẻ nào đủ (mâu thuẫn đa-họ).
+		if not culprits:
+			disabled_rules: set = set()
+			skip_sys: set = set()
+			for kind, fam in families:
+				if kind == "rule":
+					disabled_rules.add(fam)
+				else:
+					skip_sys.add(fam)
+				try:
+					st = _diag_status(
+						inp, rs, disabled=frozenset(disabled_rules), skip_system=frozenset(skip_sys),
+					)
+				except Exception:
+					continue
+				if st in ("OPTIMAL", "FEASIBLE"):
+					culprits = sorted(disabled_rules | skip_sys)
+					trace["cumulative"] = "+".join(culprits)
+					break
 	finally:
 		if orig_limit is not None:
 			inp.solver_time_limit = orig_limit
 
-	if not culprits:
-		return []
-	out = []
-	for rid in culprits:
+	suspects = []
+	for rid in culprits[:max_report]:
 		label = _FAMILY_LABELS.get(rid, rid)
-		out.append({
+		suspects.append({
 			"rule_id": rid,
 			"verb": "",
 			"scope": {},
@@ -163,6 +227,135 @@ def _ablation_culprits(inp, rs, *, max_report: int = 4) -> list:
 				f"Rà lại cấu hình phần này."
 			),
 		})
+	if not suspects:
+		unknown = sorted(f for f, st in trace.items() if st == "UNKNOWN")
+		if unknown:
+			labels = ", ".join(_FAMILY_LABELS.get(f, f) for f in unknown[:5])
+			suspects.append({
+				"rule_id": "", "verb": "", "scope": {"inconclusive": unknown},
+				"message": (
+					f"Chưa đủ thời gian để kết luận cho các họ ràng buộc: {labels}. "
+					f"Tăng thời gian solver rồi phân tích lại."
+				),
+			})
+	return suspects, trace
+
+
+def _data_contradictions(inp) -> list:
+	"""Tiền-quét dữ liệu P0 (0 lần giải): pin bắt buộc đụng pin chặn / ngày cấm môn /
+	GV bận / pin khác cùng slot. Trả list nghi phạm chỉ đích danh lớp/môn/slot."""
+	from .helpers import class_subject_weekdays, teacher_class_subjects
+
+	out = []
+	pins = [p for p in (getattr(inp, "pinned_slots", None) or [])]
+
+	def _mandatory(obj) -> bool:
+		return str(getattr(obj, "enforcement", "mandatory") or "mandatory").lower() != "relaxable"
+
+	def _p_idx(pin):
+		return inp.column_period_index.get(pin.timetable_column_id)
+
+	def _classes_of(pin):
+		return [c.name for c in inp.classes if not pin.class_id or c.name == pin.class_id]
+
+	hard_pins = []  # (class_id, ts_id, day, p_idx)
+	for pin in pins:
+		if pin.is_blocking or not _mandatory(pin) or not pin.timetable_subject_id:
+			continue
+		p = _p_idx(pin)
+		if p is None:
+			continue
+		for c_id in _classes_of(pin):
+			hard_pins.append((c_id, pin.timetable_subject_id, pin.day_of_week, p))
+
+	if not hard_pins:
+		return out
+
+	# 1) Pin bắt buộc ↔ pin CHẶN bắt buộc cùng (lớp, slot).
+	blocked = set()
+	for pin in pins:
+		if not pin.is_blocking or not _mandatory(pin):
+			continue
+		p = _p_idx(pin)
+		if p is None:
+			continue
+		for c_id in _classes_of(pin):
+			blocked.add((c_id, pin.day_of_week, p))
+	for (c_id, ts_id, day, p) in hard_pins:
+		if (c_id, day, p) in blocked:
+			out.append({
+				"rule_id": "pin_class_subject_slot", "verb": "pinned_to_slot",
+				"scope": {"class_id": c_id, "subject_id": ts_id, "day": day, "period_idx": p},
+				"message": (
+					f"Pin bắt buộc lớp {c_id} môn {ts_id} vào {day}/tiết {p + 1} "
+					f"nhưng slot này đang bị PIN CHẶN — bỏ một trong hai."
+				),
+			})
+
+	# 2) Pin bắt buộc ↔ ngày không được phép của môn (weekday availability).
+	try:
+		csw = class_subject_weekdays(inp)
+	except Exception:
+		csw = {}
+	for (c_id, ts_id, day, p) in hard_pins:
+		allowed = csw.get((c_id, ts_id))
+		if allowed is not None and day not in allowed:
+			out.append({
+				"rule_id": "pin_class_subject_slot", "verb": "pinned_to_slot",
+				"scope": {"class_id": c_id, "subject_id": ts_id, "day": day, "period_idx": p},
+				"message": (
+					f"Pin bắt buộc lớp {c_id} môn {ts_id} vào {day} nhưng môn này "
+					f"chỉ được học vào: {', '.join(sorted(allowed)) or '(không ngày nào)'} — sửa pin hoặc ngày học."
+				),
+			})
+
+	# 3) Pin bắt buộc ↔ GV bận (mandatory unavailable) đúng slot đó.
+	try:
+		tcs = teacher_class_subjects(inp)
+	except Exception:
+		tcs = {}
+	teachers_of: dict = {}
+	for t_id, lst in tcs.items():
+		for key in lst:
+			teachers_of.setdefault(key, []).append(t_id)
+	for (c_id, ts_id, day, p) in hard_pins:
+		for t_id in teachers_of.get((c_id, ts_id), []):
+			info = inp.teachers.get(t_id)
+			for slot in (getattr(info, "unavailable_slots", None) or []):
+				s_day = slot[0] if isinstance(slot, (list, tuple)) else getattr(slot, "day", None)
+				s_p = slot[1] if isinstance(slot, (list, tuple)) else getattr(slot, "period_idx", None)
+				s_enf = (
+					(slot[2] if len(slot) > 2 else "mandatory")
+					if isinstance(slot, (list, tuple))
+					else getattr(slot, "enforcement", "mandatory")
+				)
+				if s_day == day and s_p == p and str(s_enf or "mandatory").lower() != "relaxable":
+					out.append({
+						"rule_id": "pin_class_subject_slot", "verb": "pinned_to_slot",
+						"scope": {"class_id": c_id, "subject_id": ts_id, "teacher_id": t_id,
+						          "day": day, "period_idx": p},
+						"message": (
+							f"Pin bắt buộc lớp {c_id} môn {ts_id} vào {day}/tiết {p + 1} "
+							f"nhưng GV {t_id} bận (bắt buộc) đúng slot này."
+						),
+					})
+
+	# 4) Hai pin bắt buộc khác môn đụng nhau cùng (lớp, slot).
+	seen: dict = {}
+	for (c_id, ts_id, day, p) in hard_pins:
+		key = (c_id, day, p)
+		if key in seen and seen[key] != ts_id:
+			out.append({
+				"rule_id": "pin_class_subject_slot", "verb": "pinned_to_slot",
+				"scope": {"class_id": c_id, "day": day, "period_idx": p},
+				"message": (
+					f"Hai pin bắt buộc đụng nhau: lớp {c_id} tại {day}/tiết {p + 1} "
+					f"vừa pin môn {seen[key]} vừa pin môn {ts_id}."
+				),
+			})
+		else:
+			seen[key] = ts_id
+
 	return out
 
 

@@ -79,6 +79,7 @@ def build_and_solve(
 	diagnostic: bool = False,
 	assume_mode: bool = False,
 	skip_system: Optional[frozenset] = None,
+	feasibility_only: bool = False,
 ):
 	"""Trả về (cp_solver, RuleSolverBuilder, status_name, ctx).
 
@@ -160,6 +161,12 @@ def build_and_solve(
 				]
 			except Exception:
 				ctx.conflict_core = []
+		return solver, builder, solver.StatusName(status), ctx
+
+	# Feasibility-only: bỏ toàn bộ objective, chỉ hỏi "có nghiệm không" — dùng cho
+	# chẩn đoán ablation (nhanh hơn nhiều so với 2 pha Maximize trên model lớn).
+	if feasibility_only:
+		solver, status = _configure_and_solve(cp, inp)
 		return solver, builder, solver.StatusName(status), ctx
 
 	# Gom objective theo tầng. Flat ctx.objectives = soft "trung tính" (verb append
