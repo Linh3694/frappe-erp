@@ -22,7 +22,7 @@ from .runner import build_and_solve
 def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 	"""Trả dict báo cáo chẩn đoán (1 lần solve, diagnostic mode)."""
 	rs = rule_set or build_default_rule_set()
-	solver, _builder, status, ctx = build_and_solve(inp, rs, diagnostic=True)
+	solver, builder, status, ctx = build_and_solve(inp, rs, diagnostic=True)
 
 	if status not in ("OPTIMAL", "FEASIBLE"):
 		# Nới hết relaxable vẫn vô nghiệm => xung đột ở ràng buộc cứng còn lại
@@ -86,6 +86,12 @@ def diagnose_infeasibility(inp: Any, rule_set: RuleSet | None = None) -> dict:
 	report["feasible_relaxed"] = True
 	report["conflict_core"] = []
 	report["suspects"] = _summarize_suspects(report)
+	# Lời giải nới lỏng chính là bản TKB nháp "tốt nhất có thể" — trả kèm để caller
+	# lưu cho user xem trước (thay vì vứt đi rồi chỉ báo con số %).
+	try:
+		report["draft_slots"] = builder.extract_solution(solver)
+	except Exception:
+		pass
 	return report
 
 

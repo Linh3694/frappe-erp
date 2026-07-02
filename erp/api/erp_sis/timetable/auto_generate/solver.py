@@ -331,7 +331,23 @@ def _execute_diagnose(session_id: str) -> Dict:
 		inp.solver_time_limit = 120
 
 	rule_set, _ = TimetableSolver(session_id)._load_rule_set()
-	return _diag(inp, rule_set)
+	report = _diag(inp, rule_set)
+
+	# Lưu lời giải nới lỏng làm TKB nháp (cùng bảng SIS_TKB_Gen_Result với generate)
+	# để user xem được "98% trông thế nào". Session vẫn giữ status Failed nên không
+	# thể publish (publisher chặn status != Completed); grid ở FE cũng read-only.
+	slots = report.pop("draft_slots", None)
+	if slots:
+		try:
+			TimetableSolver(session_id)._save_results([(0, slots)])
+			report["draft_saved"] = True
+			report["draft_total_slots"] = len(slots)
+		except Exception:
+			frappe.log_error(
+				title="diagnose draft save failed",
+				message=frappe.get_traceback(),
+			)
+	return report
 
 
 def _build_diagnose_block(report: Optional[Dict], started, *, status: str = "Completed", error: str = "") -> dict:
@@ -360,6 +376,8 @@ def _build_diagnose_block(report: Optional[Dict], started, *, status: str = "Com
 		"conflict_core": report.get("conflict_core", []),
 		"suspects": report.get("suspects", []),
 		"ablation_trace": report.get("ablation_trace", {}),
+		"draft_saved": report.get("draft_saved", False),
+		"draft_total_slots": report.get("draft_total_slots", 0),
 	}
 	if error:
 		block["error"] = error
