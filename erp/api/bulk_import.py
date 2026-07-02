@@ -179,7 +179,7 @@ def get_bulk_import_status():
                         "error": str(r.get("__error", "")).strip(),
                     }
                     sample = {}
-                    for key in ["student_code", "student_name", "title", "name", "gender", "date_of_birth"]:
+                    for key in ["student_code", "student_name", "title", "short_title", "name", "gender", "date_of_birth"]:
                         if key in df_prev.columns:
                             val = r.get(key)
                             if not (isinstance(val, float) and pd.isna(val)):
