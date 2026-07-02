@@ -45,7 +45,8 @@ class SubjectRequirement:
 	class_id: str
 	periods_per_week: int
 	max_periods_per_day: int = 2
-	force_pair: bool = False
+	# 3 nấc '' | 'soft' | 'relaxable' | 'hard'; bool legacy (True = hard) vẫn nhận.
+	force_pair: str | bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
 	tier_spread: str = "weak"

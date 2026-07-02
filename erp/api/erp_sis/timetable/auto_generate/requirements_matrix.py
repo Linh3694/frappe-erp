@@ -176,12 +176,18 @@ def normalize_requirement_row(row: dict) -> dict:
 	"""Chuẩn hóa 1 ô ma trận từ DB/API."""
 	enf = (row.get("enforcement") or "mandatory")
 	tier_spread = (row.get("tier_spread") or "weak")
+	# Cặp tiết 3 nấc: ưu tiên force_pair_mode; dữ liệu cũ chỉ có checkbox → hard.
+	fp_mode = (row.get("force_pair_mode") or "").strip().lower()
+	if fp_mode not in ("soft", "relaxable", "hard"):
+		fp_mode = "hard" if row.get("force_pair") else ""
 	return {
 		"class_id": row.get("class_id"),
 		"timetable_subject_id": row.get("timetable_subject_id"),
 		"periods_per_week": int(row.get("periods_per_week") or 0),
 		"max_periods_per_day": int(row.get("max_periods_per_day") or 2),
-		"force_pair": bool(row.get("force_pair")),
+		# Legacy 0/1 giữ đồng bộ cho consumer cũ (int()/bool() đều dùng được).
+		"force_pair": bool(fp_mode),
+		"force_pair_mode": fp_mode,
 		"tier_spread": tier_spread if tier_spread in ("strong", "weak") else "weak",
 		# Per-cell tier: mandatory (đủ N cứng) | relaxable (cho thiếu, tính coverage).
 		"enforcement": enf if enf in ("mandatory", "relaxable") else "mandatory",

@@ -345,6 +345,7 @@ def get_rule_set_requirements_matrix(rule_set_id=None):
 					"periods_per_week": row.periods_per_week,
 					"max_periods_per_day": row.max_periods_per_day,
 					"force_pair": getattr(row, "force_pair", 0),
+					"force_pair_mode": getattr(row, "force_pair_mode", "") or "",
 					"tier_spread": getattr(row, "tier_spread", "weak") or "weak",
 					"enforcement": getattr(row, "enforcement", "mandatory") or "mandatory",
 					"enforcement_weight": int(getattr(row, "enforcement_weight", 1) or 1),
@@ -407,6 +408,8 @@ def save_rule_set_requirements(**kwargs):
 				"max_periods_per_day": norm["max_periods_per_day"],
 				"force_pair": int(norm["force_pair"]),
 			}
+			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "force_pair_mode"):
+				row_out["force_pair_mode"] = norm["force_pair_mode"]
 			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "tier_spread"):
 				row_out["tier_spread"] = norm["tier_spread"]
 			if frappe.db.has_column("SIS Timetable Rule Set Requirement", "enforcement"):

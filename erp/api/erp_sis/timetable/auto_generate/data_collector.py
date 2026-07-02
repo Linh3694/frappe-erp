@@ -68,7 +68,9 @@ class SubjectRequirement:
 	class_id: str
 	periods_per_week: int
 	max_periods_per_day: int = 2
-	force_pair: bool = False
+	# Cặp tiết: '' | 'soft' | 'relaxable' | 'hard' (bool legacy vẫn nhận — True = hard).
+	# Truthiness giữ nguyên cho consumer cũ: mode khác rỗng ~ "có cặp".
+	force_pair: str | bool = False
 	is_heavy: bool = False
 	program_id: Optional[str] = None
 	# Tier per-môn (từ SIS Timetable Subject) cho rải / tiết ưu tiên.
@@ -373,11 +375,16 @@ class TimetableDataCollector:
 	def _get_requirements(self) -> List[SubjectRequirement]:
 		"""Lấy requirements từ session (class x timetable_subject -> periods_per_week)."""
 		has_force_pair = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair")
+		has_fp_mode = frappe.db.has_column("SIS Timetable Generation Requirement", "force_pair_mode")
 		has_is_heavy = frappe.db.has_column("SIS Timetable Subject", "is_heavy")
 		has_curriculum = frappe.db.has_column("SIS Timetable Subject", "curriculum_id")
 		has_enforcement = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement")
 		has_enf_weight = frappe.db.has_column("SIS Timetable Generation Requirement", "enforcement_weight")
 		force_pair_sql = "COALESCE(r.force_pair, 0) as force_pair," if has_force_pair else "0 as force_pair,"
+		force_pair_sql += (
+			" COALESCE(r.force_pair_mode, '') as force_pair_mode,"
+			if has_fp_mode else " '' as force_pair_mode,"
+		)
 		is_heavy_sql = "COALESCE(ts.is_heavy, 0) as is_heavy" if has_is_heavy else "0 as is_heavy"
 		program_sql = "NULLIF(ts.curriculum_id, '') as program_id" if has_curriculum else "NULL as program_id"
 		enforcement_sql = "COALESCE(r.enforcement, 'mandatory') as enforcement," if has_enforcement else "'mandatory' as enforcement,"
@@ -410,7 +417,8 @@ class TimetableDataCollector:
 			class_id=r["class_id"],
 			periods_per_week=r["periods_per_week"],
 			max_periods_per_day=r["max_periods_per_day"] or 2,
-			force_pair=bool(r.get("force_pair")),
+			# 3 nấc: '' | 'soft' | 'relaxable' | 'hard'; dữ liệu cũ chỉ có checkbox → hard.
+			force_pair=(r.get("force_pair_mode") or ("hard" if r.get("force_pair") else "")),
 			is_heavy=bool(r.get("is_heavy")),
 			program_id=r.get("program_id") or None,
 			tier_spread=r.get("tier_spread") or "weak",

@@ -38,6 +38,27 @@ RELAX_SHORT_PENALTY = 1000
 RELAX_OVER_PENALTY = 50
 RELAX_FORBIDDEN_PENALTY = 100  # phạt khi phá 1 ràng buộc relaxable kiểu cấm/giới hạn slot
 
+# Cặp tiết 3 nấc (force_pair_mode): '' = không cặp, soft = ưu tiên nhẹ (tầng weak),
+# relaxable = phá khi bí + báo cáo (pha 1), hard = cứng tuyệt đối như cũ.
+FP_HARD = "hard"
+FP_RELAXABLE = "relaxable"
+FP_SOFT = "soft"
+_VALID_FP_MODES = {FP_HARD, FP_RELAXABLE, FP_SOFT}
+# Phạt MỖI tiết lẻ thừa của cặp hạn chế: trên phá-slot-cấm (100) để solver ưu tiên
+# dùng slot cấm relaxable trước khi phá cặp, dưới bỏ-tiết (1000) để thà phá cặp
+# còn hơn xếp thiếu. Phạt theo SỐ tiết lẻ (không phải cờ cả môn) → vỡ tới đâu
+# tính tới đó, solver vẫn cố ghép những cặp còn lại.
+FP_RELAX_BREAK_PENALTY = 300
+FP_SOFT_WEIGHT = 3  # weight tầng weak cho cặp mềm (cùng cỡ weight rải/cân bằng)
+
+
+def normalize_fp_mode(value) -> str:
+	"""Chuẩn hoá force_pair 3 nấc; nhận cả bool legacy (True = hard, False = '')."""
+	if isinstance(value, str):
+		v = value.strip().lower()
+		return v if v in _VALID_FP_MODES else ""
+	return FP_HARD if value else ""
+
 _VALID_TIERS = {MANDATORY, RELAXABLE, STRONG, WEAK}
 _VALID_ENFORCEMENT = {MANDATORY, RELAXABLE}
 

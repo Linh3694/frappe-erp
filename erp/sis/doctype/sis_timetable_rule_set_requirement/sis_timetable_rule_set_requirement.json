@@ -15,6 +15,7 @@
   "max_periods_per_day",
   "scheduling_section",
   "force_pair",
+  "force_pair_mode",
   "tier_spread",
   "enforcement",
   "enforcement_weight",
@@ -69,6 +70,14 @@
    "fieldtype": "Check",
    "label": "Force Pair",
    "default": 0
+  },
+  {
+   "fieldname": "force_pair_mode",
+   "fieldtype": "Select",
+   "label": "Cặp tiết (3 nấc)",
+   "options": "\nsoft\nrelaxable\nhard",
+   "default": "",
+   "description": "hard = bắt buộc cặp / relaxable = phá khi bí, có báo cáo / soft = ưu tiên nhẹ / rỗng = không cặp."
   },
   {
    "fieldname": "tier_spread",

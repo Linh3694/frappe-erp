@@ -25,6 +25,7 @@
   "max_periods_per_day",
   "scheduling_section",
   "force_pair",
+  "force_pair_mode",
   "tier_spread",
   "enforcement",
   "enforcement_weight",
@@ -91,7 +92,15 @@
    "fieldtype": "Check",
    "label": "Force Pair (Bắt buộc tiết đôi)",
    "default": 0,
-   "description": "Bắt buộc cặp 2 tiết liên tiếp trong buổi. Tiết/tuần chẵn: toàn cặp. Tiết/tuần lẻ: cho phép 1 tiết lẻ."
+   "description": "Legacy — giữ đồng bộ với force_pair_mode (1 khi mode khác rỗng) cho consumer cũ."
+  },
+  {
+   "fieldname": "force_pair_mode",
+   "fieldtype": "Select",
+   "label": "Cặp tiết (3 nấc)",
+   "options": "\nsoft\nrelaxable\nhard",
+   "default": "",
+   "description": "hard = bắt buộc cặp (có thể vô nghiệm) / relaxable = phá khi bí, có báo cáo / soft = ưu tiên nhẹ / rỗng = không cặp."
   },
   {
    "fieldname": "tier_spread",

@@ -184,12 +184,17 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 					)
 		hard_results.append(_hard_result("subject_max_per_day", "Max tiết/ngày/môn", violations))
 
-	# ── Hard: cặp tiết (force_pair từ ma trận) ──
-	pair_failures: List[str] = []
+	# ── Cặp tiết (force_pair từ ma trận) — tách theo 3 nấc ──
+	from .core.tiers import normalize_fp_mode
+
+	pair_failures: Dict[str, List[str]] = {"hard": [], "relaxable": [], "soft": []}
+	modes_present: set = set()
 	num_periods = len(periods)
 	for req in inp.requirements:
-		if not req.force_pair or req.periods_per_week <= 0:
+		mode = normalize_fp_mode(req.force_pair)
+		if not mode or req.periods_per_week <= 0:
 			continue
+		modes_present.add(mode)
 		class_slots = [
 			s for s in slots
 			if s["class_id"] == req.class_id
@@ -205,14 +210,21 @@ def evaluate_draft(session_id: str, variant_index: int = 0) -> Dict:
 		)
 		cls = _class_label(inp, req.class_id)
 		for day, p_idx in raw_violations:
-			pair_failures.append(
+			pair_failures[mode].append(
 				f"{req.timetable_subject_title} — {cls}, {_day_label(day)}, "
 				f"{_period_label(periods, p_idx)}: không có cặp trong buổi"
 			)
-	if pair_failures:
-		hard_results.append(_hard_result("subject_pair_periods", "Cặp tiết bắt buộc", pair_failures))
-	elif any(r.force_pair for r in inp.requirements):
-		hard_results.append(_hard_result("subject_pair_periods", "Cặp tiết bắt buộc", []))
+	if pair_failures["hard"] or "hard" in modes_present:
+		hard_results.append(_hard_result("subject_pair_periods", "Cặp tiết bắt buộc", pair_failures["hard"]))
+	if pair_failures["relaxable"] or "relaxable" in modes_present:
+		# Cặp hạn chế: được phép phá khi bí, nhưng mỗi chỗ phá phải hiện rõ trong báo cáo.
+		hard_results.append(_hard_result(
+			"subject_pair_periods_relaxed", "Cặp tiết (hạn chế) — bị phá", pair_failures["relaxable"],
+		))
+	if "soft" in modes_present:
+		soft_results.append(_soft_result(
+			"subject_pair_periods_soft", "Cặp tiết (ưu tiên)", pair_failures["soft"],
+		))
 
 	# ── Soft: tránh gap GV ──
 	rule = next((r for r in rule_set.rules if r.rule_id == "avoid_teacher_gap"), None)

@@ -740,8 +740,11 @@ def _process_excel_file(job):
         if dry_run:
             message = f"Dry run completed: {success_count} would be imported, {error_count} errors"
 
+        # Chỉ coi là thành công khi thực sự có bản ghi được import.
+        # Trước đây luôn trả success=True nên job bị đánh "Completed" dù 0 dòng vào,
+        # khiến FE báo "thành công" nhưng không có dữ liệu.
         return {
-            "success": True,
+            "success": success_count > 0 or dry_run,
             "message": message,
             "error_file_url": error_file_url
         }
@@ -1201,7 +1204,20 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     break
             
             if not school_year_name:
-                print(f"DEBUG: No school_year_id found in Excel. Will use active school year as default.")
+                # Ưu tiên năm học FE truyền xuống qua options (năm đang chọn/lọc trên màn hình),
+                # tránh gán nhầm vào năm active khác với năm người dùng đang xem.
+                try:
+                    _opts = job.get_options_dict() or {}
+                except Exception:
+                    _opts = {}
+                option_year = _opts.get("academic_year") or _opts.get("school_year_id")
+                if option_year and frappe.db.exists("SIS School Year", option_year):
+                    school_year_id = option_year
+                    doc_data["school_year_id"] = school_year_id
+                    print(f"DEBUG: ✓ Using school year from options: {school_year_id}")
+
+            if not school_year_name and not doc_data.get("school_year_id"):
+                print(f"DEBUG: No school_year_id found in Excel/options. Will use active school year as default.")
                 # Try to get active school year as fallback
                 try:
                     active_year = frappe.get_all(
@@ -1565,6 +1581,102 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                     print(f"DEBUG: ✗ Could not find academic program. Error: Academic Program: '{academic_program_name}'{available_str}")
                     resolution_errors.append(f"Academic Program: '{academic_program_name}'{available_str} {debug_info}")
 
+            # Handle homeroom / vice homeroom teacher lookup (Link -> SIS Teacher)
+            # Excel chứa mã đăng nhập giáo viên (user_id, ví dụ 'WT05PR'), KHÔNG phải docname
+            # SIS_TEACHER-xxxxx. Cần resolve về docname, nếu không doc.insert sẽ fail link validation.
+            def _resolve_teacher(raw_code):
+                code = str(raw_code).strip()
+                if not code or code.lower() == "nan":
+                    return None, None
+                # Nếu đã là docname SIS Teacher hợp lệ thì dùng luôn
+                if frappe.db.exists("SIS Teacher", code):
+                    return code, None
+                # Tra theo user_id (mã đăng nhập) trong campus, rồi fallback không lọc campus
+                teacher_id = None
+                if campus_id:
+                    hit = frappe.get_all(
+                        "SIS Teacher",
+                        filters={"user_id": code, "campus_id": campus_id},
+                        fields=["name"],
+                        limit=1,
+                    )
+                    if hit:
+                        teacher_id = hit[0].name
+                if not teacher_id:
+                    hit = frappe.get_all(
+                        "SIS Teacher",
+                        filters={"user_id": code},
+                        fields=["name"],
+                        limit=1,
+                    )
+                    if hit:
+                        teacher_id = hit[0].name
+                if teacher_id:
+                    return teacher_id, None
+                return None, f"Giáo viên (mã '{code}')"
+
+            homeroom_code = None
+            for key in ["homeroom_teacher", "chủ nhiệm"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    homeroom_code = str(row_data[key]).strip()
+                    break
+            if homeroom_code:
+                homeroom_id, homeroom_err = _resolve_teacher(homeroom_code)
+                if homeroom_id:
+                    doc_data["homeroom_teacher"] = homeroom_id
+                elif homeroom_err:
+                    resolution_errors.append(f"Chủ nhiệm: {homeroom_err}")
+
+            vice_code = None
+            for key in ["vice_homeroom_teacher", "vice_homeroom", "phó chủ nhiệm"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    vice_code = str(row_data[key]).strip()
+                    break
+            if vice_code:
+                vice_id, vice_err = _resolve_teacher(vice_code)
+                if vice_id:
+                    doc_data["vice_homeroom_teacher"] = vice_id
+                elif vice_err:
+                    resolution_errors.append(f"Phó chủ nhiệm: {vice_err}")
+
+            # Handle room lookup (Link -> ERP Administrative Room)
+            room_code = None
+            for key in ["room", "phòng", "phòng học"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    room_code = str(row_data[key]).strip()
+                    break
+            if room_code and room_code.lower() != "nan":
+                room_id = None
+                if frappe.db.exists("ERP Administrative Room", room_code):
+                    room_id = room_code
+                else:
+                    room_base = {"campus_id": campus_id} if campus_id else {}
+                    for field in ["physical_code", "short_title", "room_number", "title_vn", "title_en"]:
+                        rf = room_base.copy()
+                        rf[field] = room_code
+                        rhit = frappe.get_all(
+                            "ERP Administrative Room", filters=rf, fields=["name"], limit=1
+                        )
+                        if rhit:
+                            room_id = rhit[0].name
+                            break
+                    # Fallback không lọc campus
+                    if not room_id:
+                        for field in ["physical_code", "short_title", "room_number"]:
+                            rhit = frappe.get_all(
+                                "ERP Administrative Room",
+                                filters={field: room_code},
+                                fields=["name"],
+                                limit=1,
+                            )
+                            if rhit:
+                                room_id = rhit[0].name
+                                break
+                if room_id:
+                    doc_data["room"] = room_id
+                else:
+                    resolution_errors.append(f"Phòng học (mã '{room_code}')")
+
             # If there are resolution errors, raise a comprehensive error
             print(f"DEBUG: Checking resolution errors. Count: {len(resolution_errors)}, Errors: {resolution_errors}")
             if resolution_errors:
@@ -1750,7 +1862,8 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
             excluded_fields = [
                 "name", "owner", "creation", "modified",
                 "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id",
-                "education_stage", "education_grade", "academic_program", "school_year_id"  # Add SIS Class reference fields
+                "education_stage", "education_grade", "academic_program", "school_year_id",  # SIS Class reference fields
+                "homeroom_teacher", "vice_homeroom_teacher", "room"  # Resolved above from Excel codes -> docname
             ]
             for field in meta.fields:
                 if field.fieldname in row_data and field.fieldname not in excluded_fields:
