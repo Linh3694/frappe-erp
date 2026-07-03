@@ -887,25 +887,35 @@ def get_event_activity_dashboard():
     ]
 
     students: List[Dict[str, Any]] = []
-    if event_id:
-        pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic") and r.get("event_id") == event_id])
-        for row in rows:
-            if row.get("event_id") != event_id:
-                continue
-            pic = row.get("pic") or ""
-            lead_st = row.get("lead_status") or ""
-            students.append(
-                {
-                    "student_name": row.get("student_name") or "—",
-                    "student_dob": row.get("student_dob"),
-                    "lead_status": lead_st,
-                    "event_status": row.get("event_status") or "",
-                    "tuition_paid": _is_lead_tuition_paid(lead_st),
-                    "pic": pic,
-                    "pic_name": pic_map.get(pic, pic) if pic else "—",
-                    "target_grade": row.get("target_grade") or "",
-                }
-            )
+    pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic")])
+    for row in rows:
+        if event_id and row.get("event_id") != event_id:
+            continue
+        pic = row.get("pic") or ""
+        lead_st = row.get("lead_status") or ""
+        ev_date = row.get("event_date")
+        students.append(
+            {
+                "student_name": row.get("student_name") or "—",
+                "student_dob": row.get("student_dob"),
+                "lead_status": lead_st,
+                "event_status": row.get("event_status") or "",
+                "tuition_paid": _is_lead_tuition_paid(lead_st),
+                "pic": pic,
+                "pic_name": pic_map.get(pic, pic) if pic else "—",
+                "target_grade": row.get("target_grade") or "",
+                "event_id": row.get("event_id"),
+                "event_name": row.get("event_name"),
+                "event_date": str(ev_date) if ev_date else "",
+            }
+        )
+    students.sort(
+        key=lambda x: (
+            x.get("event_date") or "",
+            x.get("event_name") or "",
+            x.get("student_name") or "",
+        )
+    )
 
     return success_response(
         {
