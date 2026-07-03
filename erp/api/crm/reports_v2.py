@@ -997,6 +997,35 @@ def get_enrollment_target_progress():
 
 
 # --------------------------------------------------------------------------- #
+# Tổng quan — Kỳ báo cáo (from_date / to_date từ toolbar tab Tổng quan)
+# --------------------------------------------------------------------------- #
+def _overview_period_bounds(args) -> Tuple[Any, Any, Any]:
+    """Trả về (from_date, to_date_effective, as_of_end).
+
+    `to_date_effective` = min(to_date, hôm nay) — snapshot không nhìn vào tương lai.
+    `as_of_end` = cuối ngày effective, dùng tái dựng step/status từ lịch sử."""
+    from frappe.utils import getdate, today
+
+    fd, td, _, _ = r._resolve_period(args)
+    fd = getdate(fd)
+    td_raw = getdate(td)
+    td_eff = min(td_raw, getdate(today()))
+    as_of_end = f"{td_eff} 23:59:59.999999"
+    return fd, td_eff, as_of_end
+
+
+def _overview_period_meta(fd: Any, td_raw: Any, td_eff: Any) -> Dict[str, Any]:
+    """Meta kỳ — mọi endpoint tab Tổng quan trả cùng cấu trúc để UI đồng bộ."""
+    from frappe.utils import getdate
+
+    return {
+        "period_from": str(getdate(fd)),
+        "period_to": str(getdate(td_raw)),
+        "as_of": str(getdate(td_eff)),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Tổng quan — Snapshot as-of (trạng thái tại ngày cuối kỳ, tái dựng từ lịch sử)
 # --------------------------------------------------------------------------- #
 # Thứ tự hiển thị phễu trạng thái QLead (trạng thái chính, không phải test/deal_status)
@@ -1081,8 +1110,8 @@ def get_overview_snapshot():
     """
     check_crm_permission()
     args = frappe.request.args or {}
-    _, td, _, _ = r._resolve_period(args)
-    as_of_end = f"{td} 23:59:59.999999"
+    fd, td_eff, as_of_end = _overview_period_bounds(args)
+    _, td_raw, _, _ = r._resolve_period(args)
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
     rows = _as_of_state_rows(as_of_end, dim_sql, dim_binds)
@@ -1147,13 +1176,14 @@ def get_overview_snapshot():
         for g in sorted(grade_qlead_status.keys(), key=_grade_sort_key)
     ]
 
+    period_meta = _overview_period_meta(fd, td_raw, td_eff)
     return success_response(
         {
             "funnel_qlead": funnel,
             "by_grade_steps": by_grade_steps,
             "by_grade_qlead_status": by_grade_qlead_status,
             "meta": {
-                "as_of": str(td),
+                **period_meta,
                 "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
             },
         }
@@ -1232,11 +1262,12 @@ def get_admission_profile_progress():
     (`attachment`) trong `enrollment_documents`."""
     check_crm_permission()
     args = frappe.request.args or {}
-    _, td, _, _ = r._resolve_period(args)
-    as_of_end = f"{td} 23:59:59.999999"
+    fd, td_eff, as_of_end = _overview_period_bounds(args)
+    _, td_raw, _, _ = r._resolve_period(args)
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
     required_by_grade = _required_profile_types_by_grade()
+    period_meta = _overview_period_meta(fd, td_raw, td_eff)
     if not required_by_grade:
         return success_response(
             {
@@ -1244,7 +1275,7 @@ def get_admission_profile_progress():
                 "by_pic": [],
                 "meta": {
                     "configured": False,
-                    "as_of": str(td),
+                    **period_meta,
                     "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
                 },
             }
@@ -1369,7 +1400,7 @@ def get_admission_profile_progress():
             "by_pic": by_pic,
             "meta": {
                 "configured": True,
-                "as_of": str(td),
+                **period_meta,
                 "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
             },
         }
