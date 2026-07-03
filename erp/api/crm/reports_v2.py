@@ -1193,8 +1193,9 @@ def _required_profile_types_by_grade() -> Dict[str, List[str]]:
 @frappe.whitelist()
 def get_admission_profile_progress():
     """Tiến độ thu hồ sơ nhập học — số HS đã hoàn thiện hồ sơ / tổng HS cần nộp, theo khối
-    và theo PIC. Phạm vi: CRM Lead có target_grade thuộc khối yêu cầu hồ sơ (theo cấu hình
-    CRM Admission Profile Type), bước từ QLead trở lên (QLead/Enrolled).
+    và theo PIC. Phạm vi (mẫu số): CRM Lead có target_grade thuộc khối yêu cầu hồ sơ (theo
+    cấu hình CRM Admission Profile Type) và `step = 'Enrolled'` (HS chính thức — đây là lúc
+    cần nộp hồ sơ nhập học, không tính HS đang ở bước QLead vì chưa tới hạn nộp).
 
     Hoàn thiện 1 loại hồ sơ = có ít nhất 1 tài liệu đã đính kèm (`attachment`) trong
     `enrollment_documents` khớp `document_name` với loại đó (không phụ thuộc checkbox
@@ -1225,7 +1226,7 @@ def get_admission_profile_progress():
                l.`target_grade` AS target_grade,
                IFNULL(TRIM(l.`pic`), '') AS pic
         FROM `tabCRM Lead` l
-        WHERE l.`step` IN ('QLead', 'Enrolled')
+        WHERE l.`step` = 'Enrolled'
           AND l.`target_grade` IN %(grades)s
           AND {dim_sql}
         """,
