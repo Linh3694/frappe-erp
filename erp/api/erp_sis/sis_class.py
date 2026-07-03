@@ -586,6 +586,23 @@ def create_class():
         if not academic_program:
             return validation_error_response({"academic_program": ["Academic program not found or invalid"]})
 
+        # Không cho trùng tên viết tắt (short_title) trong cùng campus + năm học
+        short_title = (data.get("short_title") or "").strip()
+        if short_title:
+            dup = frappe.get_all(
+                "SIS Class",
+                filters={
+                    "short_title": short_title,
+                    "campus_id": campus_id,
+                    "school_year_id": data.get("school_year_id"),
+                },
+                fields=["name", "title"],
+                limit=1,
+            )
+            if dup:
+                dup_msg = f"Tên viết tắt '{short_title}' đã tồn tại trong năm học này (lớp '{dup[0].get('title')}')."
+                return validation_error_response(message=dup_msg, errors={"short_title": [dup_msg]})
+
         # Sanitize select-type fields to avoid validation edge-cases
         raw_class_type = (data.get("class_type") or "").strip()
 
@@ -796,9 +813,34 @@ def update_class(class_id: str = None):
             frappe.logger().info(f"🔄 Updating class {class_id} - homeroom_teacher: '{update_data.get('homeroom_teacher', 'NOT_SET')}' (type: {type(update_data.get('homeroom_teacher', 'NOT_SET')).__name__})")
             frappe.logger().info(f"🔄 Updating class {class_id} - vice_homeroom_teacher: '{update_data.get('vice_homeroom_teacher', 'NOT_SET')}' (type: {type(update_data.get('vice_homeroom_teacher', 'NOT_SET')).__name__})")
         
+        # Không cho trùng tên viết tắt (short_title) trong cùng campus + năm học (trừ chính lớp này)
+        new_short_title = (
+            update_data.get("short_title")
+            if "short_title" in update_data
+            else existing_doc.short_title
+        )
+        new_short_title = (new_short_title or "").strip()
+        if new_short_title:
+            check_campus = update_data.get("campus_id") or existing_doc.campus_id
+            check_year = update_data.get("school_year_id") or existing_doc.school_year_id
+            dup = frappe.get_all(
+                "SIS Class",
+                filters={
+                    "short_title": new_short_title,
+                    "campus_id": check_campus,
+                    "school_year_id": check_year,
+                    "name": ["!=", class_id],
+                },
+                fields=["name", "title"],
+                limit=1,
+            )
+            if dup:
+                dup_msg = f"Tên viết tắt '{new_short_title}' đã tồn tại trong năm học này (lớp '{dup[0].get('title')}')."
+                return validation_error_response(message=dup_msg, errors={"short_title": [dup_msg]})
+
         # Handle class_type separately to avoid validation issues
         raw_class_type = (data.get("class_type") or "").strip()
-        
+
         # Update basic fields first
         if update_data:
             frappe.db.set_value("SIS Class", class_id, update_data)

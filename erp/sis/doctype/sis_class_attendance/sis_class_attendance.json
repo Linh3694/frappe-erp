@@ -23,7 +23,7 @@
   {"fieldname": "student_id", "label": "Student", "fieldtype": "Link", "options": "CRM Student", "reqd": 1},
   {"fieldname": "student_code", "label": "Student Code", "fieldtype": "Data"},
   {"fieldname": "student_name", "label": "Student Name", "fieldtype": "Data"},
-  {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "reqd": 1},
+  {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "search_index": 1, "reqd": 1},
   {"fieldname": "date", "label": "Date", "fieldtype": "Date", "reqd": 1},
   {"fieldname": "period", "label": "Period", "fieldtype": "Data", "reqd": 1},
   {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "present\nabsent\nlate\nexcused", "reqd": 1},

@@ -26,7 +26,7 @@
   {"fieldname": "all_day", "fieldtype": "Check", "label": "All Day", "default": "0"},
   {"fieldname": "column_break_1", "fieldtype": "Column Break"},
   {"fieldname": "reference_doctype", "fieldtype": "Link", "label": "Reference DocType", "options": "DocType"},
-  {"fieldname": "reference_name", "fieldtype": "Dynamic Link", "label": "Reference", "options": "reference_doctype"},
+  {"fieldname": "reference_name", "fieldtype": "Dynamic Link", "label": "Reference", "options": "reference_doctype", "search_index": 1},
   {"fieldname": "campus_id", "fieldtype": "Link", "label": "Campus", "options": "SIS Campus"},
   {"fieldname": "description", "fieldtype": "Small Text", "label": "Description"}
  ]

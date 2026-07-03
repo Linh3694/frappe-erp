@@ -49,6 +49,7 @@
    "fieldtype": "Link",
    "label": "Class",
    "options": "SIS Class",
+   "search_index": 1,
    "description": "Để trống = áp dụng mọi lớp trong session",
    "in_list_view": 1
   },
@@ -121,7 +122,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-05-26 00:00:00.000000",
+ "modified": "2026-07-03 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Timetable Pinned Slot",

@@ -87,6 +87,7 @@
    "in_standard_filter": 1,
    "label": "Lớp",
    "options": "SIS Class",
+   "search_index": 1,
    "reqd": 1
   },
   {
@@ -233,7 +234,7 @@
  "index_web_pages_for_search": 0,
  "istable": 0,
  "links": [],
- "modified": "2025-02-09 10:00:00.000000",
+ "modified": "2026-07-03 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Daily Health Visit",

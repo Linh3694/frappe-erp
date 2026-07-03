@@ -462,14 +462,18 @@ def get_classes_for_education_grade():
 def get_subjects_for_class(class_id: str | None = None):
     """
     Get available subjects for a specific class (for Subject Assignment creation).
-    
-    Returns actual subjects that are taught in this class or assigned to students in this class.
-    
-    ⚡ OPTIMIZED: Single query combining all strategies instead of 3+ separate queries.
-    
+
+    Returns actual subjects that are taught in this class, derived ONLY from
+    Student Subject and Timetable data. Existing Subject Assignment records are
+    intentionally NOT used as a source: otherwise the very first assignment would
+    suppress the education-stage fallback and collapse the dropdown to just the
+    already-assigned subjects.
+
+    ⚡ OPTIMIZED: Single query combining strategies instead of separate queries.
+
     Args:
         class_id: Required class ID
-        
+
     Returns:
         dict: List of actual subjects for the class
     """
@@ -483,35 +487,25 @@ def get_subjects_for_class(class_id: str | None = None):
         if not class_id:
             return validation_error_response("Validation failed", {"class_id": ["Class ID is required"]})
 
-        class_school_year_id = frappe.db.get_value("SIS Class", class_id, "school_year_id")
-
-        # ⚡ BULK QUERY: Combine all strategies in single query
+        # ⚡ BULK QUERY: Combine strategies in single query
         all_subject_ids = frappe.db.sql("""
             -- Strategy 1: Student Subject
             SELECT DISTINCT actual_subject_id FROM `tabSIS Student Subject`
             WHERE class_id = %(class_id)s AND campus_id = %(campus_id)s AND actual_subject_id IS NOT NULL
-            
+
             UNION
-            
-            -- Strategy 2: Subject Assignment
-            SELECT DISTINCT actual_subject_id FROM `tabSIS Subject Assignment`
-            WHERE class_id = %(class_id)s AND campus_id = %(campus_id)s AND actual_subject_id IS NOT NULL
-              AND (%(school_year_id)s IS NULL OR school_year_id = %(school_year_id)s)
-            
-            UNION
-            
-            -- Strategy 3: Timetable Instance Rows (with SIS Subject -> Actual Subject mapping)
+
+            -- Strategy 2: Timetable Instance Rows (with SIS Subject -> Actual Subject mapping)
             SELECT DISTINCT s.actual_subject_id
             FROM `tabSIS Timetable Instance Row` tir
             INNER JOIN `tabSIS Timetable Instance` ti ON tir.parent = ti.name
             INNER JOIN `tabSIS Subject` s ON tir.subject_id = s.name
-            WHERE ti.class_id = %(class_id)s 
-              AND ti.campus_id = %(campus_id)s 
+            WHERE ti.class_id = %(class_id)s
+              AND ti.campus_id = %(campus_id)s
               AND s.actual_subject_id IS NOT NULL
         """, {
             "class_id": class_id,
             "campus_id": campus_id,
-            "school_year_id": class_school_year_id,
         }, as_list=True)
         
         subject_ids_set = {row[0] for row in all_subject_ids if row[0]}

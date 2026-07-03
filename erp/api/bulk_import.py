@@ -1695,6 +1695,30 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 else:
                     resolution_errors.append(f"Phòng học (mã '{room_code}')")
 
+            # Không cho trùng tên viết tắt (short_title) trong cùng campus + năm học.
+            # Vì mỗi dòng insert + commit ngay, check này cũng bắt được trùng giữa các dòng trong file.
+            sc_short_title = None
+            for key in ["short_title", "tên viết tắt"]:
+                if key in row_data and row_data[key] and str(row_data[key]).strip():
+                    sc_short_title = str(row_data[key]).strip()
+                    break
+            sc_year = doc_data.get("school_year_id")
+            if sc_short_title and sc_year:
+                dup = frappe.get_all(
+                    "SIS Class",
+                    filters={
+                        "short_title": sc_short_title,
+                        "campus_id": campus_id,
+                        "school_year_id": sc_year,
+                    },
+                    fields=["name", "title"],
+                    limit=1,
+                )
+                if dup:
+                    resolution_errors.append(
+                        f"Tên viết tắt '{sc_short_title}' đã tồn tại trong năm học (lớp '{dup[0].get('title')}')"
+                    )
+
             # If there are resolution errors, raise a comprehensive error
             print(f"DEBUG: Checking resolution errors. Count: {len(resolution_errors)}, Errors: {resolution_errors}")
             if resolution_errors:

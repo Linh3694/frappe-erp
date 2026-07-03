@@ -17,7 +17,7 @@
   {"fieldname": "video_asset", "fieldtype": "Link", "label": "Video Asset", "options": "LMS Video Asset"},
   {"fieldname": "external_url", "fieldtype": "Data", "label": "External URL"},
   {"fieldname": "content_ref_doctype", "fieldtype": "Link", "label": "Content DocType", "options": "DocType", "hidden": 1},
-  {"fieldname": "content_ref_name", "fieldtype": "Dynamic Link", "label": "Content Ref", "options": "content_ref_doctype"}
+  {"fieldname": "content_ref_name", "fieldtype": "Dynamic Link", "label": "Content Ref", "options": "content_ref_doctype", "search_index": 1}
  ],
  "module": "LMS",
  "name": "LMS Module Item",

@@ -643,6 +643,55 @@ def _load_unavailability_map(rule_set_id: str, teacher_ids: list) -> dict:
 	return out
 
 
+def _load_assigned_periods_for_teachers(doc, teacher_ids: list) -> Dict[str, int]:
+	"""Tổng số tiết dạy/tuần mỗi GV: từ phân công (Subject Assignment) × định biên (ma trận số tiết rule set).
+
+	Với mỗi GV, cộng periods_per_week của các cặp (lớp, môn) mà GV được phân công.
+	"""
+	if not teacher_ids or not doc.school_year_id:
+		return {}
+	if not frappe.db.table_exists("SIS Subject Assignment"):
+		return {}
+
+	# Ma trận định biên: (class_id, timetable_subject_id) -> periods_per_week
+	req_ppw: Dict[tuple, int] = {}
+	for row in doc.get("requirements") or []:
+		if row.class_id and row.timetable_subject_id:
+			req_ppw[(row.class_id, row.timetable_subject_id)] = int(row.periods_per_week or 0)
+	if not req_ppw:
+		return {}
+
+	rows = frappe.db.sql(
+		"""
+		SELECT DISTINCT sa.teacher_id, sa.class_id, s.timetable_subject_id
+		FROM `tabSIS Subject Assignment` sa
+		JOIN `tabSIS Subject` s
+			ON s.actual_subject_id = sa.actual_subject_id
+			AND s.education_stage = %(stage_id)s
+			AND s.campus_id = %(campus_id)s
+		WHERE sa.campus_id = %(campus_id)s
+		  AND sa.school_year_id = %(school_year_id)s
+		  AND sa.teacher_id IN %(teacher_ids)s
+		  AND sa.class_id IS NOT NULL AND sa.class_id != ''
+		  AND s.timetable_subject_id IS NOT NULL AND s.timetable_subject_id != ''
+		""",
+		{
+			"campus_id": doc.campus_id,
+			"stage_id": doc.education_stage_id,
+			"school_year_id": doc.school_year_id,
+			"teacher_ids": teacher_ids,
+		},
+		as_dict=True,
+	)
+
+	totals: Dict[str, int] = {}
+	for r in rows:
+		ppw = req_ppw.get((r["class_id"], r["timetable_subject_id"]))
+		if ppw:
+			totals[r["teacher_id"]] = totals.get(r["teacher_id"], 0) + ppw
+	return totals
+
+
 def _teacher_in_scope(
 	teacher_id: str,
 	campus_id: str,
@@ -679,6 +728,9 @@ def get_teacher_unavailability_config(rule_set_id=None):
 		), rule_set_id, slot_meta)
 		teacher_ids = [t["teacher_id"] for t in teachers]
 		unavailability = _load_unavailability_map(rule_set_id, teacher_ids)
+		assigned_periods = _load_assigned_periods_for_teachers(doc, teacher_ids)
+		for t in teachers:
+			t["assigned_periods_per_week"] = int(assigned_periods.get(t["teacher_id"], 0))
 		limits = teacher_limits_from_slot_meta(slot_meta)
 
 		return single_item_response({

@@ -22,7 +22,7 @@
  ],
  "fields": [
   {"fieldname": "timetable_instance_id", "label": "Timetable Instance", "fieldtype": "Link", "options": "SIS Timetable Instance", "reqd": 1},
-  {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "reqd": 1},
+  {"fieldname": "class_id", "label": "Class", "fieldtype": "Link", "options": "SIS Class", "search_index": 1, "reqd": 1},
   {"fieldname": "log_date", "label": "Date", "fieldtype": "Date"},
   {"fieldname": "period", "label": "Period", "fieldtype": "Data"},
   {"fieldname": "lesson_name", "label": "Lesson Name", "fieldtype": "Data", "description": "Tên bài dạy"},

@@ -78,7 +78,8 @@
    "fieldname": "class_id",
    "fieldtype": "Link",
    "label": "Class",
-   "options": "SIS Class"
+   "options": "SIS Class",
+   "search_index": 1
   },
   {
    "fieldname": "homeroom_teacher_id",
@@ -135,7 +136,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-20 12:00:00.000000",
+ "modified": "2026-07-03 10:00:00.000000",
  "module": "Administrative",
  "name": "ERP Administrative Room Yearly Assignment",
  "owner": "Administrator",

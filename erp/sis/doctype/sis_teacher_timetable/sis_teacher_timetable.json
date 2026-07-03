@@ -86,6 +86,7 @@
    "fieldtype": "Link",
    "label": "Class",
    "options": "SIS Class",
+   "search_index": 1,
    "reqd": 1
   },
   {
@@ -105,7 +106,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "modified": "2024-12-20 10:00:00.000000",
+ "modified": "2026-07-03 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Teacher Timetable",
