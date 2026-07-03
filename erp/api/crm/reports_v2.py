@@ -10,6 +10,7 @@ Tái sử dụng helper từ reports.py: phân quyền theo vai trò (PIC chỉ 
 khoảng thời gian, bộ lọc chiều + bộ lọc động trên trường CRM Lead.
 """
 
+import json
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -990,6 +991,302 @@ def get_enrollment_target_progress():
                 "campus_id": campus_id or None,
                 "target_academic_year": target_academic_year,
                 "pic_restricted_to_self": restricted,
+            },
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Tổng quan — Snapshot as-of (trạng thái tại ngày cuối kỳ, tái dựng từ lịch sử)
+# --------------------------------------------------------------------------- #
+# Thứ tự hiển thị phễu trạng thái QLead (trạng thái chính, không phải test/deal_status)
+_QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Thoa thuan", "Khao sat dau vao", "Lost"]
+
+
+def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Tái dựng step/status của từng CRM Lead tại thời điểm `as_of_end` từ CRM Lead Step History.
+
+    - as_of_step: `new_step` của bản ghi lịch sử mới nhất có `changed_at` <= as_of; nếu chưa có
+      bản ghi nào trước as_of, dùng `old_step` của bản ghi sớm nhất có `changed_at` > as_of (trạng
+      thái đó đã tồn tại từ trước, chưa đổi cho tới lần đổi đầu tiên sau as_of); nếu lead chưa từng
+      có lịch sử, dùng step hiện tại (chưa từng đổi kể từ khi tạo).
+    - as_of_status: tương tự nhưng chỉ xét bản ghi đổi `status` chính — bỏ qua bản ghi đổi
+      test_status/deal_status (lưu dạng "field:value" trong new_status/old_status, khác trường).
+    """
+    binds = {"as_of": as_of_end, **dim_binds}
+    return frappe.db.sql(
+        f"""
+        WITH base_leads AS (
+            SELECT l.`name` AS lead_id, l.`step` AS cur_step, l.`status` AS cur_status,
+                   IFNULL(NULLIF(TRIM(l.`target_grade`), ''), '-') AS target_grade
+            FROM `tabCRM Lead` l
+            WHERE l.`creation` <= %(as_of)s AND {dim_sql}
+        ),
+        step_before AS (
+            SELECT h.`lead` AS lead_id, h.`new_step` AS val,
+                   ROW_NUMBER() OVER (PARTITION BY h.`lead` ORDER BY h.`changed_at` DESC, h.`name` DESC) AS rn
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN base_leads bl ON bl.lead_id = h.`lead`
+            WHERE h.`changed_at` <= %(as_of)s
+        ),
+        step_after AS (
+            SELECT h.`lead` AS lead_id, h.`old_step` AS val,
+                   ROW_NUMBER() OVER (PARTITION BY h.`lead` ORDER BY h.`changed_at` ASC, h.`name` ASC) AS rn
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN base_leads bl ON bl.lead_id = h.`lead`
+            WHERE h.`changed_at` > %(as_of)s
+        ),
+        status_before AS (
+            SELECT h.`lead` AS lead_id, h.`new_status` AS val,
+                   ROW_NUMBER() OVER (PARTITION BY h.`lead` ORDER BY h.`changed_at` DESC, h.`name` DESC) AS rn
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN base_leads bl ON bl.lead_id = h.`lead`
+            WHERE h.`changed_at` <= %(as_of)s
+              AND h.`new_status` NOT LIKE 'test_status:%%'
+              AND h.`new_status` NOT LIKE 'deal_status:%%'
+        ),
+        status_after AS (
+            SELECT h.`lead` AS lead_id, h.`old_status` AS val,
+                   ROW_NUMBER() OVER (PARTITION BY h.`lead` ORDER BY h.`changed_at` ASC, h.`name` ASC) AS rn
+            FROM `tabCRM Lead Step History` h
+            INNER JOIN base_leads bl ON bl.lead_id = h.`lead`
+            WHERE h.`changed_at` > %(as_of)s
+              AND h.`old_status` NOT LIKE 'test_status:%%'
+              AND h.`old_status` NOT LIKE 'deal_status:%%'
+        )
+        SELECT bl.lead_id, bl.target_grade,
+               COALESCE(sb.val, sa.val, bl.cur_step) AS as_of_step,
+               COALESCE(stb.val, sta.val, bl.cur_status) AS as_of_status
+        FROM base_leads bl
+        LEFT JOIN step_before sb ON sb.lead_id = bl.lead_id AND sb.rn = 1
+        LEFT JOIN step_after sa ON sa.lead_id = bl.lead_id AND sa.rn = 1
+        LEFT JOIN status_before stb ON stb.lead_id = bl.lead_id AND stb.rn = 1
+        LEFT JOIN status_after sta ON sta.lead_id = bl.lead_id AND sta.rn = 1
+        """,
+        binds,
+        as_dict=True,
+    )
+
+
+@frappe.whitelist()
+def get_overview_snapshot():
+    """Snapshot trạng thái CRM Lead tại ngày cuối kỳ lọc (`to_date`), tái dựng từ lịch sử
+    chuyển bước — phục vụ tab Tổng quan: phễu trạng thái HS tiềm năng (QLead) và 2 báo cáo
+    theo khối lớp (5 chỉ số theo bước + trạng thái QLead theo khối).
+
+    Khác với `get_status_by_grade` (snapshot hiện tại), endpoint này trả về trạng thái đúng
+    tại thời điểm `to_date` — phù hợp khi user chọn 1 khoảng thời gian trong quá khứ.
+    Chỉ tính 5 nhóm bước (Draft/Lead/QLead/Enrolled/Lost); lead đang ở Verify/Nghi hoc tại
+    thời điểm đó không thuộc phạm vi báo cáo này.
+    """
+    check_crm_permission()
+    args = frappe.request.args or {}
+    _, td, _, _ = r._resolve_period(args)
+    as_of_end = f"{td} 23:59:59.999999"
+    dim_sql, dim_binds = r._where_lead_dimensions_only(args)
+
+    rows = _as_of_state_rows(as_of_end, dim_sql, dim_binds)
+
+    funnel_counts: Dict[str, int] = defaultdict(int)
+    grade_steps: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    grade_qlead_status: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    for row in rows:
+        grade = row["target_grade"]
+        step = row["as_of_step"] or ""
+        status = (row["as_of_status"] or "").strip()
+
+        if step == "Draft":
+            grade_steps[grade]["draft"] += 1
+        elif step == "Lead":
+            if status == "Lost":
+                grade_steps[grade]["lost"] += 1
+            else:
+                grade_steps[grade]["lead"] += 1
+        elif step == "QLead":
+            if status == "Lost":
+                grade_steps[grade]["lost"] += 1
+            else:
+                grade_steps[grade]["qlead"] += 1
+            if status:
+                funnel_counts[status] += 1
+                grade_qlead_status[grade][status] += 1
+        elif step == "Enrolled":
+            grade_steps[grade]["enrolled"] += 1
+
+    def _grade_sort_key(g: str):
+        try:
+            return (0, int(g))
+        except (TypeError, ValueError):
+            return (1, g)
+
+    funnel = [
+        {"status": st, "count": funnel_counts.get(st, 0)}
+        for st in _order_status_values(set(funnel_counts.keys()), _QLEAD_FUNNEL_ORDER)
+    ]
+
+    by_grade_steps = []
+    for g in sorted(grade_steps.keys(), key=_grade_sort_key):
+        m = grade_steps[g]
+        draft, lead, qlead = m.get("draft", 0), m.get("lead", 0), m.get("qlead", 0)
+        enrolled, lost = m.get("enrolled", 0), m.get("lost", 0)
+        by_grade_steps.append(
+            {
+                "target_grade": g,
+                "total": draft + lead + qlead + enrolled + lost,
+                "draft": draft,
+                "lead": lead,
+                "qlead": qlead,
+                "enrolled": enrolled,
+                "lost": lost,
+            }
+        )
+
+    by_grade_qlead_status = [
+        {"target_grade": g, "values": dict(grade_qlead_status[g])}
+        for g in sorted(grade_qlead_status.keys(), key=_grade_sort_key)
+    ]
+
+    return success_response(
+        {
+            "funnel_qlead": funnel,
+            "by_grade_steps": by_grade_steps,
+            "by_grade_qlead_status": by_grade_qlead_status,
+            "meta": {
+                "as_of": str(td),
+                "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
+            },
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Tổng quan — Tiến độ thu hồ sơ nhập học (theo khối, theo PIC)
+# --------------------------------------------------------------------------- #
+def _grades_requiring_profile() -> List[str]:
+    """Danh sách target_grade (dạng số, '1'..'12') có ít nhất 1 loại hồ sơ bắt buộc
+    theo cấu hình CRM Admission Profile Type (applicable_grades: JSON ["Khối 1", ...])."""
+    profile_types = frappe.get_all("CRM Admission Profile Type", fields=["applicable_grades"])
+    grades: set = set()
+    for pt in profile_types:
+        raw = pt.get("applicable_grades")
+        if not raw:
+            continue
+        try:
+            items = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            s = str(it).strip()
+            if s.startswith("Khối "):
+                n = s[len("Khối ") :].strip()
+                if n.isdigit():
+                    grades.add(n)
+    return sorted(grades, key=lambda g: int(g))
+
+
+@frappe.whitelist()
+def get_admission_profile_progress():
+    """Tiến độ thu hồ sơ nhập học — số HS đã hoàn thiện hồ sơ / tổng HS cần nộp, theo khối
+    và theo PIC. Phạm vi: CRM Lead có target_grade thuộc khối yêu cầu hồ sơ (theo cấu hình
+    CRM Admission Profile Type), bước từ QLead trở lên (QLead/Enrolled). Hoàn thiện =
+    `admission_profile_completion_date` đã có (tự tính khi đủ tài liệu bắt buộc, is_submitted=1)."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    dim_sql, dim_binds = r._where_lead_dimensions_only(args)
+
+    grades_in_scope = _grades_requiring_profile()
+    if not grades_in_scope:
+        return success_response(
+            {
+                "by_grade": [],
+                "by_pic": [],
+                "meta": {
+                    "configured": False,
+                    "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
+                },
+            }
+        )
+
+    binds = {"grades": grades_in_scope, **dim_binds}
+
+    grade_rows = frappe.db.sql(
+        f"""
+        SELECT l.`target_grade` AS target_grade,
+               COUNT(*) AS total,
+               SUM(IF(l.`admission_profile_completion_date` IS NOT NULL, 1, 0)) AS completed
+        FROM `tabCRM Lead` l
+        WHERE l.`step` IN ('QLead', 'Enrolled')
+          AND l.`target_grade` IN %(grades)s
+          AND {dim_sql}
+        GROUP BY l.`target_grade`
+        """,
+        binds,
+        as_dict=True,
+    )
+
+    pic_rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+               COUNT(*) AS total,
+               SUM(IF(l.`admission_profile_completion_date` IS NOT NULL, 1, 0)) AS completed
+        FROM `tabCRM Lead` l
+        WHERE l.`step` IN ('QLead', 'Enrolled')
+          AND l.`target_grade` IN %(grades)s
+          AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND {dim_sql}
+        GROUP BY pic
+        """,
+        binds,
+        as_dict=True,
+    )
+
+    def _grade_sort_key(g: str):
+        try:
+            return (0, int(g))
+        except (TypeError, ValueError):
+            return (1, g)
+
+    by_grade = []
+    for row in sorted(grade_rows, key=lambda x: _grade_sort_key(x["target_grade"])):
+        total = int(row["total"] or 0)
+        completed = int(row["completed"] or 0)
+        by_grade.append(
+            {
+                "target_grade": row["target_grade"],
+                "total": total,
+                "completed": completed,
+                "pct": round(100.0 * completed / max(1, total), 2),
+            }
+        )
+
+    user_map = r._batch_user_map([row["pic"] for row in pic_rows])
+    by_pic = []
+    for row in pic_rows:
+        pic = row["pic"]
+        total = int(row["total"] or 0)
+        completed = int(row["completed"] or 0)
+        ud = user_map.get(pic, {})
+        by_pic.append(
+            {
+                "pic": pic,
+                "pic_name": ud.get("full_name") or pic,
+                "total": total,
+                "completed": completed,
+                "pct": round(100.0 * completed / max(1, total), 2),
+            }
+        )
+    by_pic.sort(key=lambda x: x["total"], reverse=True)
+
+    return success_response(
+        {
+            "by_grade": by_grade,
+            "by_pic": by_pic,
+            "meta": {
+                "configured": True,
+                "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
             },
         }
     )
