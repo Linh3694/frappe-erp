@@ -1026,6 +1026,79 @@ def _overview_period_meta(fd: Any, td_raw: Any, td_eff: Any) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
+# Tổng quan — Khối lớp của lead (fallback khi target_grade trống)
+# --------------------------------------------------------------------------- #
+def _sis_grade_map_for_students(student_ids: List[str]) -> Dict[str, str]:
+    """Map CRM Student → khối ('K', '1'..'12') từ lớp Regular trong SIS,
+    ưu tiên năm học mới nhất (start_date). Không map được thì bỏ qua."""
+    from erp.api.crm.enrolled_class_sync import _normalize_grade_to_lead_select
+
+    if not student_ids:
+        return {}
+    rows = frappe.db.sql(
+        """
+        SELECT t.student_id, t.grade_code, t.title_vn
+        FROM (
+            SELECT cs.`student_id` AS student_id, eg.`grade_code` AS grade_code,
+                   eg.`title_vn` AS title_vn,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY cs.`student_id`
+                       ORDER BY sy.`start_date` DESC, cs.`modified` DESC
+                   ) AS rn
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.`class_id` = c.`name`
+            INNER JOIN `tabSIS Education Grade` eg ON c.`education_grade` = eg.`name`
+            LEFT JOIN `tabSIS School Year` sy ON cs.`school_year_id` = sy.`name`
+            WHERE cs.`student_id` IN %(students)s
+              AND (IFNULL(NULLIF(TRIM(c.`class_type`), ''), 'regular') = 'regular')
+        ) t
+        WHERE t.rn = 1
+        """,
+        {"students": student_ids},
+        as_dict=True,
+    )
+    out: Dict[str, str] = {}
+    for row in rows:
+        g = _normalize_grade_to_lead_select(row.get("grade_code"), row.get("title_vn"))
+        if g:
+            out[row["student_id"]] = g
+    return out
+
+
+def _resolve_lead_grade_rows(rows: List[Dict[str, Any]]) -> None:
+    """Gán row['grade'] với fallback: target_grade → current_grade → khối SIS
+    (qua linked_student) → '-'.
+
+    Sửa lỗi báo cáo theo khối dồn hết vào «Khối -»: HS đã nhập học / migrate
+    thường trống target_grade nhưng đã có lớp thật trong SIS."""
+    unresolved_students = sorted(
+        {
+            (row.get("linked_student") or "").strip()
+            for row in rows
+            if not (row.get("target_grade") or "").strip()
+            and not (row.get("current_grade") or "").strip()
+            and (row.get("linked_student") or "").strip()
+        }
+    )
+    sis_map = _sis_grade_map_for_students(unresolved_students)
+    for row in rows:
+        g = (row.get("target_grade") or "").strip() or (row.get("current_grade") or "").strip()
+        if not g:
+            g = sis_map.get((row.get("linked_student") or "").strip(), "")
+        row["grade"] = g or "-"
+
+
+def _grade_display_sort_key(g: str):
+    """Thứ tự hiển thị khối: K → 1..12 → còn lại (chữ) → '-' cuối cùng."""
+    if g == "K":
+        return (0, 0, "")
+    try:
+        return (0, int(g), "")
+    except (TypeError, ValueError):
+        return (2, 0, g) if g == "-" else (1, 0, g)
+
+
+# --------------------------------------------------------------------------- #
 # Tổng quan — Snapshot as-of (trạng thái tại ngày cuối kỳ, tái dựng từ lịch sử)
 # --------------------------------------------------------------------------- #
 # Thứ tự hiển thị phễu trạng thái QLead (trạng thái chính, không phải test/deal_status)
@@ -1047,7 +1120,9 @@ def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -
         f"""
         WITH base_leads AS (
             SELECT l.`name` AS lead_id, l.`step` AS cur_step, l.`status` AS cur_status,
-                   IFNULL(NULLIF(TRIM(l.`target_grade`), ''), '-') AS target_grade
+                   IFNULL(TRIM(l.`target_grade`), '') AS target_grade,
+                   IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
+                   IFNULL(TRIM(l.`linked_student`), '') AS linked_student
             FROM `tabCRM Lead` l
             WHERE l.`creation` <= %(as_of)s AND {dim_sql}
         ),
@@ -1083,7 +1158,7 @@ def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -
               AND h.`old_status` NOT LIKE 'test_status:%%'
               AND h.`old_status` NOT LIKE 'deal_status:%%'
         )
-        SELECT bl.lead_id, bl.target_grade,
+        SELECT bl.lead_id, bl.target_grade, bl.current_grade, bl.linked_student,
                COALESCE(sb.val, sa.val, bl.cur_step) AS as_of_step,
                COALESCE(stb.val, sta.val, bl.cur_status) AS as_of_status
         FROM base_leads bl
@@ -1115,13 +1190,15 @@ def get_overview_snapshot():
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
     rows = _as_of_state_rows(as_of_end, dim_sql, dim_binds)
+    # Khối theo fallback target_grade → current_grade → SIS — tránh dồn vào "Khối -"
+    _resolve_lead_grade_rows(rows)
 
     funnel_counts: Dict[str, int] = defaultdict(int)
     grade_steps: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
     grade_qlead_status: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for row in rows:
-        grade = row["target_grade"]
+        grade = row["grade"]
         step = row["as_of_step"] or ""
         status = (row["as_of_status"] or "").strip()
 
@@ -1143,19 +1220,13 @@ def get_overview_snapshot():
         elif step == "Enrolled":
             grade_steps[grade]["enrolled"] += 1
 
-    def _grade_sort_key(g: str):
-        try:
-            return (0, int(g))
-        except (TypeError, ValueError):
-            return (1, g)
-
     funnel = [
         {"status": st, "count": funnel_counts.get(st, 0)}
         for st in _order_status_values(set(funnel_counts.keys()), _QLEAD_FUNNEL_ORDER)
     ]
 
     by_grade_steps = []
-    for g in sorted(grade_steps.keys(), key=_grade_sort_key):
+    for g in sorted(grade_steps.keys(), key=_grade_display_sort_key):
         m = grade_steps[g]
         draft, lead, qlead = m.get("draft", 0), m.get("lead", 0), m.get("qlead", 0)
         enrolled, lost = m.get("enrolled", 0), m.get("lost", 0)
@@ -1173,7 +1244,7 @@ def get_overview_snapshot():
 
     by_grade_qlead_status = [
         {"target_grade": g, "values": dict(grade_qlead_status[g])}
-        for g in sorted(grade_qlead_status.keys(), key=_grade_sort_key)
+        for g in sorted(grade_qlead_status.keys(), key=_grade_display_sort_key)
     ]
 
     period_meta = _overview_period_meta(fd, td_raw, td_eff)
@@ -1278,25 +1349,30 @@ def get_admission_profile_progress():
             }
         )
 
-    grades_in_scope = sorted(required_by_grade.keys(), key=lambda g: int(g))
-    binds = {"grades": grades_in_scope, "to_date": str(td_eff), **dim_binds}
-    # Lấy trực tiếp step hiện tại — đảm bảo HS Enrolled (và QLead) đang trên hệ thống được tính
+    binds = {"to_date": str(td_eff), **dim_binds}
+    # Lấy trực tiếp step hiện tại — đảm bảo HS Enrolled (và QLead) đang trên hệ thống được tính.
+    # Không lọc khối trong SQL: khối resolve ở Python với fallback current_grade / SIS,
+    # tránh loại nhầm HS nhập học trống target_grade.
     lead_rows = frappe.db.sql(
         f"""
         SELECT l.`name` AS name,
-               TRIM(l.`target_grade`) AS target_grade,
+               IFNULL(TRIM(l.`target_grade`), '') AS target_grade,
+               IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
+               IFNULL(TRIM(l.`linked_student`), '') AS linked_student,
                IFNULL(TRIM(l.`pic`), '') AS pic,
                l.`step` AS step
         FROM `tabCRM Lead` l
         WHERE l.`step` IN ('QLead', 'Enrolled')
           AND IFNULL(l.`status`, '') != 'Lost'
-          AND TRIM(l.`target_grade`) IN %(grades)s
           AND DATE(l.`creation`) <= %(to_date)s
           AND {dim_sql}
         """,
         binds,
         as_dict=True,
     )
+    _resolve_lead_grade_rows(lead_rows)
+    # Chỉ giữ lead có khối thuộc cấu hình loại hồ sơ bắt buộc
+    lead_rows = [row for row in lead_rows if row["grade"] in required_by_grade]
 
     scoped_lead_ids = [row["name"] for row in lead_rows]
     docs_by_lead = _collected_profile_docs_by_lead(scoped_lead_ids)
@@ -1311,7 +1387,7 @@ def get_admission_profile_progress():
     step_counts: Dict[str, int] = defaultdict(int)
 
     for row in lead_rows:
-        grade = (row.get("target_grade") or "").strip()
+        grade = row["grade"]
         required = required_by_grade.get(grade)
         if not required:
             continue
