@@ -753,32 +753,39 @@ def get_entrance_exam_activity_dashboard():
         by_week.append({"week_start": ws, "week_end": we, "exams": exams_list})
 
     students: List[Dict[str, Any]] = []
-    if exam_id or week_start:
-        pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic")])
-        for row in rows:
-            if exam_id and row.get("exam_id") != exam_id:
+    pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic")])
+    for row in rows:
+        if exam_id and row.get("exam_id") != exam_id:
+            continue
+        if week_start:
+            ws, _ = _week_bounds_from_date(row.get("exam_date"))
+            if ws != week_start:
                 continue
-            if week_start:
-                ws, _ = _week_bounds_from_date(row.get("exam_date"))
-                if ws != week_start:
-                    continue
-            pic = row.get("pic") or ""
-            students.append(
-                {
-                    "student_name": row.get("student_name") or "—",
-                    "student_dob": row.get("student_dob"),
-                    "lead_status": row.get("lead_status") or "",
-                    "exam_status": row.get("exam_status") or "",
-                    "ksdv_fee_paid": bool(int(row.get("ksdv_fee_paid") or 0)),
-                    "pic": pic,
-                    "pic_name": pic_map.get(pic, pic) if pic else "—",
-                    "exam_time": row.get("exam_time") or "—",
-                    "target_grade": row.get("target_grade") or "",
-                    "exam_id": row.get("exam_id"),
-                    "exam_name": row.get("exam_name"),
-                }
-            )
-        students.sort(key=lambda x: (x.get("exam_time") or "", x.get("student_name") or ""))
+        pic = row.get("pic") or ""
+        ex_date = row.get("exam_date")
+        students.append(
+            {
+                "student_name": row.get("student_name") or "—",
+                "student_dob": row.get("student_dob"),
+                "lead_status": row.get("lead_status") or "",
+                "exam_status": row.get("exam_status") or "",
+                "ksdv_fee_paid": bool(int(row.get("ksdv_fee_paid") or 0)),
+                "pic": pic,
+                "pic_name": pic_map.get(pic, pic) if pic else "—",
+                "exam_date": str(ex_date) if ex_date else "",
+                "exam_time": row.get("exam_time") or "—",
+                "target_grade": row.get("target_grade") or "",
+                "exam_id": row.get("exam_id"),
+                "exam_name": row.get("exam_name"),
+            }
+        )
+    students.sort(
+        key=lambda x: (
+            x.get("exam_date") or "",
+            x.get("exam_time") or "",
+            x.get("student_name") or "",
+        )
+    )
 
     return success_response(
         {
