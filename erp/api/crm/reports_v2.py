@@ -1192,15 +1192,18 @@ def _required_profile_types_by_grade() -> Dict[str, List[str]]:
 
 @frappe.whitelist()
 def get_admission_profile_progress():
-    """Tiến độ thu hồ sơ nhập học — số HS đã hoàn thiện hồ sơ / tổng HS cần nộp, theo khối
-    và theo PIC. Phạm vi (mẫu số): CRM Lead có target_grade thuộc khối yêu cầu hồ sơ (theo
-    cấu hình CRM Admission Profile Type) và `step = 'Enrolled'` (HS chính thức — đây là lúc
-    cần nộp hồ sơ nhập học, không tính HS đang ở bước QLead vì chưa tới hạn nộp).
+    """Tiến độ thu hồ sơ nhập học — tính theo ĐƠN VỊ VĂN BẢN (không phải theo HS), vì đếm
+    theo HS hoàn thiện 100% sẽ luôn ~0% trong lúc đang thu thập dần từng loại. Phạm vi
+    (mẫu số): CRM Lead có target_grade thuộc khối yêu cầu hồ sơ (theo cấu hình CRM Admission
+    Profile Type) và `step = 'Enrolled'` (HS chính thức — đây là lúc cần nộp hồ sơ nhập học,
+    không tính HS đang ở bước QLead vì chưa tới hạn nộp).
 
-    Hoàn thiện 1 loại hồ sơ = có ít nhất 1 tài liệu đã đính kèm (`attachment`) trong
-    `enrollment_documents` khớp `document_name` với loại đó (không phụ thuộc checkbox
-    `is_submitted`, vì thực tế nhân viên thường chỉ upload mà không tick riêng). Hồ sơ HS
-    hoàn thiện = đủ TẤT CẢ loại hồ sơ bắt buộc theo khối (không phải chỉ 1 trong số đó)."""
+    Tổng cần (total) = số HS chính thức trong khối × số loại hồ sơ bắt buộc của khối đó.
+    Ví dụ: 1515 HS, mỗi HS cần 3 loại hồ sơ → tổng cần = 1515 x 3 = 4545 văn bản.
+    Đã thu (completed) = tổng số loại hồ sơ đã có tài liệu đính kèm (`attachment`) trong
+    `enrollment_documents`, cộng dồn qua tất cả HS (không phụ thuộc checkbox `is_submitted`,
+    vì thực tế nhân viên thường chỉ upload mà không tick riêng). Mỗi loại hồ sơ của 1 HS chỉ
+    tính tối đa 1 (dù có nhiều file) — 1 học sinh cần đủ cả 3 loại thì mới tính là 3/3."""
     check_crm_permission()
     args = frappe.request.args or {}
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
@@ -1254,10 +1257,13 @@ def get_admission_profile_progress():
             if name:
                 docs_by_lead[d["lead_name"]].add(name)
 
-    grade_total: Dict[str, int] = defaultdict(int)
-    grade_completed: Dict[str, int] = defaultdict(int)
-    pic_total: Dict[str, int] = defaultdict(int)
-    pic_completed: Dict[str, int] = defaultdict(int)
+    grade_students: Dict[str, int] = defaultdict(int)
+    grade_total_docs: Dict[str, int] = defaultdict(int)
+    grade_completed_docs: Dict[str, int] = defaultdict(int)
+    grade_students_done: Dict[str, int] = defaultdict(int)
+    pic_students: Dict[str, int] = defaultdict(int)
+    pic_total_docs: Dict[str, int] = defaultdict(int)
+    pic_completed_docs: Dict[str, int] = defaultdict(int)
 
     for row in lead_rows:
         grade = (row.get("target_grade") or "").strip()
@@ -1265,17 +1271,21 @@ def get_admission_profile_progress():
         if not required:
             continue
         have = docs_by_lead.get(row["name"], set())
-        is_completed = all(doc_type in have for doc_type in required)
+        matched = sum(1 for doc_type in required if doc_type in have)
+        needed = len(required)
+        is_fully_done = matched == needed
 
-        grade_total[grade] += 1
-        if is_completed:
-            grade_completed[grade] += 1
+        grade_students[grade] += 1
+        grade_total_docs[grade] += needed
+        grade_completed_docs[grade] += matched
+        if is_fully_done:
+            grade_students_done[grade] += 1
 
         pic = row.get("pic") or ""
         if pic:
-            pic_total[pic] += 1
-            if is_completed:
-                pic_completed[pic] += 1
+            pic_students[pic] += 1
+            pic_total_docs[pic] += needed
+            pic_completed_docs[pic] += matched
 
     def _grade_sort_key(g: str):
         try:
@@ -1284,27 +1294,32 @@ def get_admission_profile_progress():
             return (1, g)
 
     by_grade = []
-    for g in sorted(grade_total.keys(), key=_grade_sort_key):
-        total = grade_total[g]
-        completed = grade_completed.get(g, 0)
+    for g in sorted(grade_students.keys(), key=_grade_sort_key):
+        total = grade_total_docs[g]
+        completed = grade_completed_docs.get(g, 0)
         by_grade.append(
             {
                 "target_grade": g,
+                "students": grade_students[g],
+                "required_types": len(required_by_grade.get(g) or []),
+                "students_completed": grade_students_done.get(g, 0),
                 "total": total,
                 "completed": completed,
                 "pct": round(100.0 * completed / max(1, total), 2),
             }
         )
 
-    user_map = r._batch_user_map(list(pic_total.keys()))
+    user_map = r._batch_user_map(list(pic_students.keys()))
     by_pic = []
-    for pic, total in pic_total.items():
-        completed = pic_completed.get(pic, 0)
+    for pic, students in pic_students.items():
+        total = pic_total_docs[pic]
+        completed = pic_completed_docs.get(pic, 0)
         ud = user_map.get(pic, {})
         by_pic.append(
             {
                 "pic": pic,
                 "pic_name": ud.get("full_name") or pic,
+                "students": students,
                 "total": total,
                 "completed": completed,
                 "pct": round(100.0 * completed / max(1, total), 2),
