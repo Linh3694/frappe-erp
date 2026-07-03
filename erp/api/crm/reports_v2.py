@@ -1190,72 +1190,101 @@ def _required_profile_types_by_grade() -> Dict[str, List[str]]:
     return by_grade
 
 
+# Bước pipeline cần thu hồ sơ nhập học (từ HS tiềm năng trở lên)
+_PROFILE_PROGRESS_STEPS = ("QLead", "Enrolled")
+
+
+def _submitted_profile_docs_by_lead(lead_names: List[str]) -> Dict[str, set]:
+    """Loại hồ sơ đã nộp của từng lead — khớp UI AdmissionProfileSection:
+    có `attachment` và user đã tick `is_submitted=1`."""
+    docs_by_lead: Dict[str, set] = defaultdict(set)
+    if not lead_names:
+        return docs_by_lead
+    doc_rows = frappe.db.sql(
+        """
+        SELECT d.`parent` AS lead_name, d.`document_name` AS document_name
+        FROM `tabCRM Lead Document` d
+        WHERE d.`parenttype` = 'CRM Lead'
+          AND d.`parent` IN %(leads)s
+          AND IFNULL(TRIM(d.`attachment`), '') != ''
+          AND IFNULL(d.`is_submitted`, 0) = 1
+        """,
+        {"leads": lead_names},
+        as_dict=True,
+    )
+    for d in doc_rows:
+        name = (d.get("document_name") or "").strip()
+        if name:
+            docs_by_lead[d["lead_name"]].add(name)
+    return docs_by_lead
+
+
 @frappe.whitelist()
 def get_admission_profile_progress():
-    """Tiến độ thu hồ sơ nhập học — tính theo ĐƠN VỊ VĂN BẢN (không phải theo HS), vì đếm
-    theo HS hoàn thiện 100% sẽ luôn ~0% trong lúc đang thu thập dần từng loại. Phạm vi
-    (mẫu số): CRM Lead có target_grade thuộc khối yêu cầu hồ sơ (theo cấu hình CRM Admission
-    Profile Type) và `step = 'Enrolled'` (HS chính thức — đây là lúc cần nộp hồ sơ nhập học,
-    không tính HS đang ở bước QLead vì chưa tới hạn nộp).
+    """Tiến độ thu hồ sơ nhập học — tính theo đơn vị VĂN BẢN, tổng hợp theo khối dự tuyển và PIC.
 
-    Tổng cần (total) = số HS chính thức trong khối × số loại hồ sơ bắt buộc của khối đó.
-    Ví dụ: 1515 HS, mỗi HS cần 3 loại hồ sơ → tổng cần = 1515 x 3 = 4545 văn bản.
-    Đã thu (completed) = tổng số loại hồ sơ đã có tài liệu đính kèm (`attachment`) trong
-    `enrollment_documents`, cộng dồn qua tất cả HS (không phụ thuộc checkbox `is_submitted`,
-    vì thực tế nhân viên thường chỉ upload mà không tick riêng). Mỗi loại hồ sơ của 1 HS chỉ
-    tính tối đa 1 (dù có nhiều file) — 1 học sinh cần đủ cả 3 loại thì mới tính là 3/3."""
+    Phạm vi (as-of `to_date`): CRM Lead ở bước QLead hoặc Enrolled (không tính Lost), có
+    `target_grade` thuộc khối được cấu hình hồ sơ bắt buộc (CRM Admission Profile Type).
+
+    Mỗi hồ sơ: số văn bản cần nộp = số loại hồ sơ bắt buộc theo khối dự tuyển của HS đó
+    (không dùng chung một con số cho mọi khối). Đã nộp = loại hồ sơ có attachment +
+    `is_submitted=1` trong `enrollment_documents` (khớp màn hình hồ sơ CRM)."""
     check_crm_permission()
     args = frappe.request.args or {}
+    _, td, _, _ = r._resolve_period(args)
+    as_of_end = f"{td} 23:59:59.999999"
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
     required_by_grade = _required_profile_types_by_grade()
-    grades_in_scope = sorted(required_by_grade.keys(), key=lambda g: int(g))
-    if not grades_in_scope:
+    if not required_by_grade:
         return success_response(
             {
                 "by_grade": [],
                 "by_pic": [],
                 "meta": {
                     "configured": False,
+                    "as_of": str(td),
                     "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
                 },
             }
         )
 
-    binds = {"grades": grades_in_scope, **dim_binds}
-    lead_rows = frappe.db.sql(
-        f"""
-        SELECT l.`name` AS name,
-               l.`target_grade` AS target_grade,
-               IFNULL(TRIM(l.`pic`), '') AS pic
-        FROM `tabCRM Lead` l
-        WHERE l.`step` = 'Enrolled'
-          AND l.`target_grade` IN %(grades)s
-          AND {dim_sql}
-        """,
-        binds,
-        as_dict=True,
-    )
+    # Snapshot bước/trạng thái tại cuối kỳ lọc — cùng logic với get_overview_snapshot
+    as_of_rows = _as_of_state_rows(as_of_end, dim_sql, dim_binds)
+    scoped_lead_ids: List[str] = []
+    lead_grade: Dict[str, str] = {}
+    for row in as_of_rows:
+        grade = (row.get("target_grade") or "").strip()
+        if not grade or grade == "-" or grade not in required_by_grade:
+            continue
+        step = (row.get("as_of_step") or "").strip()
+        if step not in _PROFILE_PROGRESS_STEPS:
+            continue
+        if (row.get("as_of_status") or "").strip() == "Lost":
+            continue
+        lead_id = row["lead_id"]
+        scoped_lead_ids.append(lead_id)
+        lead_grade[lead_id] = grade
 
-    # Tài liệu đã đính kèm theo lead — chỉ cần có attachment, không xét is_submitted
-    docs_by_lead: Dict[str, set] = defaultdict(set)
-    lead_names = [row["name"] for row in lead_rows]
-    if lead_names:
-        doc_rows = frappe.db.sql(
-            """
-            SELECT d.`parent` AS lead_name, d.`document_name` AS document_name
-            FROM `tabCRM Lead Document` d
-            WHERE d.`parenttype` = 'CRM Lead'
-              AND d.`parent` IN %(leads)s
-              AND IFNULL(TRIM(d.`attachment`), '') != ''
-            """,
-            {"leads": lead_names},
-            as_dict=True,
-        )
-        for d in doc_rows:
-            name = (d.get("document_name") or "").strip()
-            if name:
-                docs_by_lead[d["lead_name"]].add(name)
+    pic_by_lead: Dict[str, str] = {}
+    if scoped_lead_ids:
+        for lr in frappe.get_all(
+            "CRM Lead",
+            filters={"name": ["in", scoped_lead_ids]},
+            fields=["name", "pic"],
+        ):
+            pic_by_lead[lr["name"]] = (lr.get("pic") or "").strip()
+
+    lead_rows = [
+        {
+            "name": lid,
+            "target_grade": lead_grade[lid],
+            "pic": pic_by_lead.get(lid, ""),
+        }
+        for lid in scoped_lead_ids
+    ]
+
+    docs_by_lead = _submitted_profile_docs_by_lead(scoped_lead_ids)
 
     grade_students: Dict[str, int] = defaultdict(int)
     grade_total_docs: Dict[str, int] = defaultdict(int)
@@ -1333,6 +1362,7 @@ def get_admission_profile_progress():
             "by_pic": by_pic,
             "meta": {
                 "configured": True,
+                "as_of": str(td),
                 "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
             },
         }
