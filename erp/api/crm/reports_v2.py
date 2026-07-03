@@ -1035,25 +1035,35 @@ def get_course_activity_dashboard():
     ]
 
     students: List[Dict[str, Any]] = []
-    if course_id:
-        pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic") and r.get("course_id") == course_id])
-        for row in rows:
-            if row.get("course_id") != course_id:
-                continue
-            pic = row.get("pic") or ""
-            cs = row.get("course_status") or ""
-            students.append(
-                {
-                    "student_name": row.get("student_name") or "—",
-                    "student_dob": row.get("student_dob"),
-                    "lead_bucket": _course_lead_bucket(cs, row.get("lead_status") or "", row.get("lead_step") or ""),
-                    "course_status": cs,
-                    "lead_status": row.get("lead_status") or "",
-                    "pic": pic,
-                    "pic_name": pic_map.get(pic, pic) if pic else "—",
-                    "target_grade": row.get("target_grade") or "",
-                }
-            )
+    pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic")])
+    for row in rows:
+        if course_id and row.get("course_id") != course_id:
+            continue
+        pic = row.get("pic") or ""
+        cs = row.get("course_status") or ""
+        c_date = row.get("event_date")
+        students.append(
+            {
+                "student_name": row.get("student_name") or "—",
+                "student_dob": row.get("student_dob"),
+                "lead_bucket": _course_lead_bucket(cs, row.get("lead_status") or "", row.get("lead_step") or ""),
+                "course_status": cs,
+                "lead_status": row.get("lead_status") or "",
+                "pic": pic,
+                "pic_name": pic_map.get(pic, pic) if pic else "—",
+                "target_grade": row.get("target_grade") or "",
+                "course_id": row.get("course_id"),
+                "course_name": row.get("course_name"),
+                "event_date": str(c_date) if c_date else "",
+            }
+        )
+    students.sort(
+        key=lambda x: (
+            x.get("event_date") or "",
+            x.get("course_name") or "",
+            x.get("student_name") or "",
+        )
+    )
 
     return success_response(
         {
