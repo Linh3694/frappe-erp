@@ -1194,9 +1194,11 @@ def _required_profile_types_by_grade() -> Dict[str, List[str]]:
 _PROFILE_PROGRESS_STEPS = ("QLead", "Enrolled")
 
 
-def _submitted_profile_docs_by_lead(lead_names: List[str]) -> Dict[str, set]:
-    """Loại hồ sơ đã nộp của từng lead — khớp UI AdmissionProfileSection:
-    có `attachment` và user đã tick `is_submitted=1`."""
+def _collected_profile_docs_by_lead(lead_names: List[str]) -> Dict[str, set]:
+    """Loại hồ sơ đã thu của từng lead — có file đính kèm (`attachment`).
+
+    Báo cáo «thu hồ sơ» đo mức đã nhận được tài liệu; checkbox `is_submitted` là bước
+    xác nhận sau (NV thường upload trước, tick sau) nên không dùng làm tử số ở đây."""
     docs_by_lead: Dict[str, set] = defaultdict(set)
     if not lead_names:
         return docs_by_lead
@@ -1207,7 +1209,6 @@ def _submitted_profile_docs_by_lead(lead_names: List[str]) -> Dict[str, set]:
         WHERE d.`parenttype` = 'CRM Lead'
           AND d.`parent` IN %(leads)s
           AND IFNULL(TRIM(d.`attachment`), '') != ''
-          AND IFNULL(d.`is_submitted`, 0) = 1
         """,
         {"leads": lead_names},
         as_dict=True,
@@ -1227,8 +1228,8 @@ def get_admission_profile_progress():
     `target_grade` thuộc khối được cấu hình hồ sơ bắt buộc (CRM Admission Profile Type).
 
     Mỗi hồ sơ: số văn bản cần nộp = số loại hồ sơ bắt buộc theo khối dự tuyển của HS đó
-    (không dùng chung một con số cho mọi khối). Đã nộp = loại hồ sơ có attachment +
-    `is_submitted=1` trong `enrollment_documents` (khớp màn hình hồ sơ CRM)."""
+    (không dùng chung một con số cho mọi khối). Đã thu = loại hồ sơ có file đính kèm
+    (`attachment`) trong `enrollment_documents`."""
     check_crm_permission()
     args = frappe.request.args or {}
     _, td, _, _ = r._resolve_period(args)
@@ -1284,7 +1285,7 @@ def get_admission_profile_progress():
         for lid in scoped_lead_ids
     ]
 
-    docs_by_lead = _submitted_profile_docs_by_lead(scoped_lead_ids)
+    docs_by_lead = _collected_profile_docs_by_lead(scoped_lead_ids)
 
     grade_students: Dict[str, int] = defaultdict(int)
     grade_total_docs: Dict[str, int] = defaultdict(int)
@@ -1311,10 +1312,10 @@ def get_admission_profile_progress():
             grade_students_done[grade] += 1
 
         pic = row.get("pic") or ""
-        if pic:
-            pic_students[pic] += 1
-            pic_total_docs[pic] += needed
-            pic_completed_docs[pic] += matched
+        pic_key = pic if pic else "__unassigned__"
+        pic_students[pic_key] += 1
+        pic_total_docs[pic_key] += needed
+        pic_completed_docs[pic_key] += matched
 
     def _grade_sort_key(g: str):
         try:
@@ -1343,11 +1344,17 @@ def get_admission_profile_progress():
     for pic, students in pic_students.items():
         total = pic_total_docs[pic]
         completed = pic_completed_docs.get(pic, 0)
-        ud = user_map.get(pic, {})
+        if pic == "__unassigned__":
+            pic_name = "Chưa gán PIC"
+            pic_id = ""
+        else:
+            ud = user_map.get(pic, {})
+            pic_name = ud.get("full_name") or pic
+            pic_id = pic
         by_pic.append(
             {
-                "pic": pic,
-                "pic_name": ud.get("full_name") or pic,
+                "pic": pic_id,
+                "pic_name": pic_name,
                 "students": students,
                 "total": total,
                 "completed": completed,
