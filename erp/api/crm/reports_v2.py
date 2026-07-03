@@ -1220,9 +1220,6 @@ def _required_profile_types_by_grade() -> Dict[str, List[str]]:
     return by_grade
 
 
-# Bước pipeline cần thu hồ sơ nhập học (từ HS tiềm năng trở lên)
-_PROFILE_PROGRESS_STEPS = ("QLead", "Enrolled")
-
 
 def _collected_profile_docs_by_lead(lead_names: List[str]) -> Dict[str, set]:
     """Loại hồ sơ đã thu của từng lead — có file đính kèm (`attachment`).
@@ -1254,15 +1251,15 @@ def _collected_profile_docs_by_lead(lead_names: List[str]) -> Dict[str, set]:
 def get_admission_profile_progress():
     """Tiến độ thu hồ sơ nhập học — tính theo đơn vị VĂN BẢN, tổng hợp theo khối dự tuyển và PIC.
 
-    Phạm vi (as-of `to_date`): CRM Lead ở bước QLead hoặc Enrolled (không tính Lost), có
-    `target_grade` thuộc khối được cấu hình hồ sơ bắt buộc (CRM Admission Profile Type).
+    Phạm vi: CRM Lead đang ở bước QLead hoặc Enrolled (trạng thái HIỆN TẠI trên hồ sơ — không
+    dùng snapshot as-of vì dễ bỏ sót HS Enrolled khi lịch sử chuyển bước thiếu hoặc nhập học
+    sau ngày cuối kỳ cũ). Lọc kỳ: hồ sơ tạo trước hoặc bằng cuối kỳ (`to_date`).
 
-    Mỗi hồ sơ: số văn bản cần nộp = số loại hồ sơ bắt buộc theo khối dự tuyển của HS đó
-    (không dùng chung một con số cho mọi khối). Đã thu = loại hồ sơ có file đính kèm
-    (`attachment`) trong `enrollment_documents`."""
+    Mỗi hồ sơ: số văn bản cần nộp = số loại hồ sơ bắt buộc theo khối dự tuyển. Đã thu = có
+    file đính kèm (`attachment`) trong `enrollment_documents`."""
     check_crm_permission()
     args = frappe.request.args or {}
-    fd, td_eff, as_of_end = _overview_period_bounds(args)
+    fd, td_eff, _ = _overview_period_bounds(args)
     _, td_raw, _, _ = r._resolve_period(args)
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
@@ -1281,41 +1278,27 @@ def get_admission_profile_progress():
             }
         )
 
-    # Snapshot bước/trạng thái tại cuối kỳ lọc — cùng logic với get_overview_snapshot
-    as_of_rows = _as_of_state_rows(as_of_end, dim_sql, dim_binds)
-    scoped_lead_ids: List[str] = []
-    lead_grade: Dict[str, str] = {}
-    for row in as_of_rows:
-        grade = (row.get("target_grade") or "").strip()
-        if not grade or grade == "-" or grade not in required_by_grade:
-            continue
-        step = (row.get("as_of_step") or "").strip()
-        if step not in _PROFILE_PROGRESS_STEPS:
-            continue
-        if (row.get("as_of_status") or "").strip() == "Lost":
-            continue
-        lead_id = row["lead_id"]
-        scoped_lead_ids.append(lead_id)
-        lead_grade[lead_id] = grade
+    grades_in_scope = sorted(required_by_grade.keys(), key=lambda g: int(g))
+    binds = {"grades": grades_in_scope, "to_date": str(td_eff), **dim_binds}
+    # Lấy trực tiếp step hiện tại — đảm bảo HS Enrolled (và QLead) đang trên hệ thống được tính
+    lead_rows = frappe.db.sql(
+        f"""
+        SELECT l.`name` AS name,
+               TRIM(l.`target_grade`) AS target_grade,
+               IFNULL(TRIM(l.`pic`), '') AS pic,
+               l.`step` AS step
+        FROM `tabCRM Lead` l
+        WHERE l.`step` IN ('QLead', 'Enrolled')
+          AND IFNULL(l.`status`, '') != 'Lost'
+          AND TRIM(l.`target_grade`) IN %(grades)s
+          AND DATE(l.`creation`) <= %(to_date)s
+          AND {dim_sql}
+        """,
+        binds,
+        as_dict=True,
+    )
 
-    pic_by_lead: Dict[str, str] = {}
-    if scoped_lead_ids:
-        for lr in frappe.get_all(
-            "CRM Lead",
-            filters={"name": ["in", scoped_lead_ids]},
-            fields=["name", "pic"],
-        ):
-            pic_by_lead[lr["name"]] = (lr.get("pic") or "").strip()
-
-    lead_rows = [
-        {
-            "name": lid,
-            "target_grade": lead_grade[lid],
-            "pic": pic_by_lead.get(lid, ""),
-        }
-        for lid in scoped_lead_ids
-    ]
-
+    scoped_lead_ids = [row["name"] for row in lead_rows]
     docs_by_lead = _collected_profile_docs_by_lead(scoped_lead_ids)
 
     grade_students: Dict[str, int] = defaultdict(int)
@@ -1325,12 +1308,16 @@ def get_admission_profile_progress():
     pic_students: Dict[str, int] = defaultdict(int)
     pic_total_docs: Dict[str, int] = defaultdict(int)
     pic_completed_docs: Dict[str, int] = defaultdict(int)
+    step_counts: Dict[str, int] = defaultdict(int)
 
     for row in lead_rows:
         grade = (row.get("target_grade") or "").strip()
         required = required_by_grade.get(grade)
         if not required:
             continue
+        step = (row.get("step") or "").strip()
+        if step:
+            step_counts[step] += 1
         have = docs_by_lead.get(row["name"], set())
         matched = sum(1 for doc_type in required if doc_type in have)
         needed = len(required)
@@ -1401,6 +1388,8 @@ def get_admission_profile_progress():
             "meta": {
                 "configured": True,
                 **period_meta,
+                "students_qlead": step_counts.get("QLead", 0),
+                "students_enrolled": step_counts.get("Enrolled", 0),
                 "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
             },
         }
