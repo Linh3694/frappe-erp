@@ -564,6 +564,492 @@ def get_entrance_exams_report():
 
 
 # --------------------------------------------------------------------------- #
+# Hoạt động V2 — dashboard KSNLTD / Sự kiện / Khóa học (chart + drill-down)
+# --------------------------------------------------------------------------- #
+_DEPOSIT_PAID_LEAD_STATUSES = frozenset({"Deposit", "Paid", "Booked"})
+_TUITION_PAID_LEAD_STATUSES = frozenset({"Paid", "Booked"})
+
+
+def _activity_granularity(args) -> str:
+    gran = (args.get("activity_granularity") or "month").strip().lower()
+    return gran if gran in ("day", "month", "year") else "month"
+
+
+def _activity_dashboard_meta(args, fd, td) -> Dict[str, Any]:
+    return {
+        "period": {"from": str(fd), "to": str(td)},
+        "granularity": _activity_granularity(args),
+        "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
+    }
+
+
+def _grade_sort_key(g: str):
+    try:
+        return (0, int(g))
+    except (TypeError, ValueError):
+        return (1, g or "")
+
+
+def _pic_names_map(pic_ids: List[str]) -> Dict[str, str]:
+    ids = [p for p in pic_ids if p]
+    if not ids:
+        return {}
+    out: Dict[str, str] = {}
+    for u in frappe.get_all("User", filters={"name": ["in", ids]}, fields=["name", "full_name"]):
+        out[u["name"]] = u.get("full_name") or u["name"]
+    return out
+
+
+def _activity_parent_where(args, date_expr: str, *, skip_campus: bool = False) -> Tuple[Any, Any, str, Dict[str, Any], str]:
+    """Chuẩn bị kỳ + điều kiện lọc parent hoạt động."""
+    fd, td, _, _ = r._resolve_period(args)
+    match_sql, match_binds = _activity_student_lead_match(args, "es", "act")
+    binds: Dict[str, Any] = {**match_binds, "d_from": fd, "d_to": td}
+    parts = [f"DATE({date_expr}) BETWEEN %(d_from)s AND %(d_to)s"]
+    campus_id = (args.get("campus_id") or "").strip()
+    if campus_id and not skip_campus:
+        binds["e_campus"] = campus_id
+        parts.append("e.`campus_id` = %(e_campus)s")
+    return fd, td, match_sql, binds, " AND ".join(parts)
+
+
+def _is_lead_deposit_paid(status: Optional[str]) -> bool:
+    return (status or "").strip() in _DEPOSIT_PAID_LEAD_STATUSES
+
+
+def _is_lead_tuition_paid(status: Optional[str]) -> bool:
+    return (status or "").strip() in _TUITION_PAID_LEAD_STATUSES
+
+
+def _course_lead_bucket(course_status: str, lead_status: str, lead_step: str) -> str:
+    """Phân loại HS khóa học: tiềm năng / paid / từ chối."""
+    cs = (course_status or "").strip()
+    ls = (lead_status or "").strip()
+    if cs == "refunded" or ls == "Lost" or ls == "Tu choi":
+        return "tu_choi"
+    if cs == "paid" or _is_lead_tuition_paid(ls):
+        return "paid"
+    return "tiem_nang"
+
+
+def _week_bounds_from_date(d) -> Tuple[str, str]:
+    """Tuần ISO (bắt đầu thứ 2) chứa ngày d."""
+    from datetime import timedelta
+
+    if not d:
+        return "", ""
+    dt = frappe.utils.getdate(d)
+    monday = dt - timedelta(days=dt.weekday())
+    sunday = monday + timedelta(days=6)
+    return str(monday), str(sunday)
+
+
+@frappe.whitelist()
+def get_entrance_exam_activity_dashboard():
+    """Dashboard Khảo sát năng lực toàn diện — theo khối, chuyển đổi paid→enrolled, theo tuần/ca."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    date_expr = "COALESCE(e.`exam_date`, DATE(e.`creation`))"
+    fd, td, match_sql, binds, parent_where = _activity_parent_where(args, date_expr, skip_campus=False)
+
+    exam_id = (args.get("exam_id") or "").strip()
+    week_start = (args.get("week_start") or "").strip()
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT es.`name` AS student_row_id,
+               es.`status` AS exam_status,
+               IFNULL(es.`ksdv_fee_paid`, 0) AS ksdv_fee_paid,
+               es.`crm_lead_id`,
+               e.`name` AS exam_id,
+               e.`exam_name`,
+               {date_expr} AS exam_date,
+               IFNULL(e.`exam_time`, '') AS exam_time,
+               l.`student_name`,
+               l.`student_dob`,
+               IFNULL(l.`status`, '') AS lead_status,
+               IFNULL(l.`step`, '') AS lead_step,
+               TRIM(IFNULL(l.`target_grade`, '')) AS target_grade,
+               IFNULL(l.`pic`, '') AS pic
+        FROM `tabCRM Admission Entrance Exam Student` es
+        INNER JOIN `tabCRM Admission Entrance Exam` e ON e.`name` = es.`entrance_exam_id`
+        INNER JOIN `tabCRM Lead` l ON l.`name` = es.`crm_lead_id`
+        WHERE {parent_where} AND {match_sql}
+        """,
+        binds,
+        as_dict=True,
+    )
+
+    by_grade_map: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"by_status": defaultdict(int), "total": 0, "ksdv_paid": 0, "tested": 0})
+    conv_map: Dict[str, Dict[str, int]] = defaultdict(lambda: {"paid": 0, "enrolled": 0})
+    week_exams: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+
+    for row in rows:
+        grade = row.get("target_grade") or "(Chưa có khối)"
+        st = row.get("exam_status") or ""
+        by_grade_map[grade]["total"] += 1
+        by_grade_map[grade]["by_status"][st] += 1
+        if int(row.get("ksdv_fee_paid") or 0):
+            by_grade_map[grade]["ksdv_paid"] += 1
+            conv_map[grade]["paid"] += 1
+        if st in ("exam_taken", "completed"):
+            by_grade_map[grade]["tested"] += 1
+        if (row.get("lead_step") or "") == "Enrolled" and int(row.get("ksdv_fee_paid") or 0):
+            conv_map[grade]["enrolled"] += 1
+
+        ex_date = row.get("exam_date")
+        if ex_date:
+            ws, we = _week_bounds_from_date(ex_date)
+            wk_key = ws
+            ex_key = row.get("exam_id")
+            if ex_key not in week_exams[wk_key]:
+                week_exams[wk_key][ex_key] = {
+                    "exam_id": ex_key,
+                    "exam_name": row.get("exam_name"),
+                    "exam_date": str(ex_date),
+                    "exam_time": row.get("exam_time") or "",
+                    "registered": 0,
+                    "tested": 0,
+                    "dropped": 0,
+                }
+            slot = week_exams[wk_key][ex_key]
+            if st == "not_attending":
+                slot["dropped"] += 1
+            elif st in ("exam_taken", "completed"):
+                slot["tested"] += 1
+            else:
+                slot["registered"] += 1
+
+    by_grade = []
+    for g in sorted(by_grade_map.keys(), key=_grade_sort_key):
+        m = by_grade_map[g]
+        by_grade.append(
+            {
+                "target_grade": g,
+                "total": m["total"],
+                "by_status": dict(m["by_status"]),
+                "ksdv_paid": m["ksdv_paid"],
+                "tested": m["tested"],
+            }
+        )
+
+    by_grade_conversion = []
+    for g in sorted(conv_map.keys(), key=_grade_sort_key):
+        paid = conv_map[g]["paid"]
+        enrolled = conv_map[g]["enrolled"]
+        by_grade_conversion.append(
+            {
+                "target_grade": g,
+                "paid": paid,
+                "enrolled": enrolled,
+                "conversion_pct": round(100.0 * enrolled / max(1, paid), 2),
+            }
+        )
+
+    by_week = []
+    for ws in sorted(week_exams.keys()):
+        we = str(frappe.utils.add_days(ws, 6))
+        exams_list = sorted(week_exams[ws].values(), key=lambda x: (x.get("exam_date") or "", x.get("exam_time") or ""))
+        by_week.append({"week_start": ws, "week_end": we, "exams": exams_list})
+
+    students: List[Dict[str, Any]] = []
+    if exam_id or week_start:
+        pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic")])
+        for row in rows:
+            if exam_id and row.get("exam_id") != exam_id:
+                continue
+            if week_start:
+                ws, _ = _week_bounds_from_date(row.get("exam_date"))
+                if ws != week_start:
+                    continue
+            pic = row.get("pic") or ""
+            students.append(
+                {
+                    "student_name": row.get("student_name") or "—",
+                    "student_dob": row.get("student_dob"),
+                    "lead_status": row.get("lead_status") or "",
+                    "exam_status": row.get("exam_status") or "",
+                    "ksdv_fee_paid": bool(int(row.get("ksdv_fee_paid") or 0)),
+                    "pic": pic,
+                    "pic_name": pic_map.get(pic, pic) if pic else "—",
+                    "exam_time": row.get("exam_time") or "—",
+                    "target_grade": row.get("target_grade") or "",
+                    "exam_id": row.get("exam_id"),
+                    "exam_name": row.get("exam_name"),
+                }
+            )
+        students.sort(key=lambda x: (x.get("exam_time") or "", x.get("student_name") or ""))
+
+    return success_response(
+        {
+            "by_grade": by_grade,
+            "by_grade_conversion": by_grade_conversion,
+            "by_week": by_week,
+            "students": students,
+            "meta": _activity_dashboard_meta(args, fd, td),
+        }
+    )
+
+
+@frappe.whitelist()
+def get_event_activity_dashboard():
+    """Dashboard Sự kiện — theo tháng, theo khối (1 SK), danh sách HS."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    date_expr = "e.`event_date`"
+    fd, td, match_sql, binds, parent_where = _activity_parent_where(args, date_expr, skip_campus=False)
+
+    event_id = (args.get("event_id") or "").strip()
+    selected_month = (args.get("selected_month") or "").strip()
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT es.`status` AS event_status,
+               es.`crm_lead_id`,
+               e.`name` AS event_id,
+               e.`event_name`,
+               e.`event_date`,
+               l.`student_name`,
+               l.`student_dob`,
+               IFNULL(l.`status`, '') AS lead_status,
+               TRIM(IFNULL(l.`target_grade`, '')) AS target_grade,
+               IFNULL(l.`pic`, '') AS pic
+        FROM `tabCRM Admission Event Student` es
+        INNER JOIN `tabCRM Admission Event` e ON e.`name` = es.`event_id`
+        INNER JOIN `tabCRM Lead` l ON l.`name` = es.`crm_lead_id`
+        WHERE {parent_where} AND {match_sql}
+        """,
+        binds,
+        as_dict=True,
+    )
+
+    month_events: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+    grade_map: Dict[str, Dict[str, int]] = defaultdict(lambda: {"registered": 0, "attended": 0, "deposit_paid": 0})
+
+    for row in rows:
+        ev_id = row.get("event_id")
+        ev_date = row.get("event_date")
+        month_key = str(ev_date)[:7] if ev_date else ""
+        est = row.get("event_status") or ""
+        lead_st = row.get("lead_status") or ""
+
+        if month_key and ev_id:
+            if ev_id not in month_events[month_key]:
+                month_events[month_key][ev_id] = {
+                    "event_id": ev_id,
+                    "event_name": row.get("event_name"),
+                    "event_date": str(ev_date),
+                    "registered": 0,
+                    "attended": 0,
+                    "deposit_paid": 0,
+                }
+            slot = month_events[month_key][ev_id]
+            if est == "registered":
+                slot["registered"] += 1
+            elif est == "attended":
+                slot["attended"] += 1
+                slot["registered"] += 1
+            if _is_lead_deposit_paid(lead_st):
+                slot["deposit_paid"] += 1
+
+        if event_id and row.get("event_id") == event_id:
+            grade = row.get("target_grade") or "(Chưa có khối)"
+            if est == "registered":
+                grade_map[grade]["registered"] += 1
+            elif est == "attended":
+                grade_map[grade]["attended"] += 1
+                grade_map[grade]["registered"] += 1
+            if _is_lead_deposit_paid(lead_st):
+                grade_map[grade]["deposit_paid"] += 1
+
+    by_month = []
+    for mk in sorted(month_events.keys()):
+        if selected_month and mk != selected_month:
+            continue
+        events_list = sorted(month_events[mk].values(), key=lambda x: x.get("event_date") or "")
+        by_month.append({"month": mk, "events": events_list})
+
+    by_grade = [
+        {
+            "target_grade": g,
+            "registered": grade_map[g]["registered"],
+            "attended": grade_map[g]["attended"],
+            "deposit_paid": grade_map[g]["deposit_paid"],
+        }
+        for g in sorted(grade_map.keys(), key=_grade_sort_key)
+    ]
+
+    students: List[Dict[str, Any]] = []
+    if event_id:
+        pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic") and r.get("event_id") == event_id])
+        for row in rows:
+            if row.get("event_id") != event_id:
+                continue
+            pic = row.get("pic") or ""
+            lead_st = row.get("lead_status") or ""
+            students.append(
+                {
+                    "student_name": row.get("student_name") or "—",
+                    "student_dob": row.get("student_dob"),
+                    "lead_status": lead_st,
+                    "event_status": row.get("event_status") or "",
+                    "tuition_paid": _is_lead_tuition_paid(lead_st),
+                    "pic": pic,
+                    "pic_name": pic_map.get(pic, pic) if pic else "—",
+                    "target_grade": row.get("target_grade") or "",
+                }
+            )
+
+    return success_response(
+        {
+            "by_month": by_month,
+            "by_grade": by_grade,
+            "students": students,
+            "meta": _activity_dashboard_meta(args, fd, td),
+        }
+    )
+
+
+@frappe.whitelist()
+def get_course_activity_dashboard():
+    """Dashboard Khóa học khác — funnel theo tháng, theo khối, chuyển đổi paid."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    date_expr = "e.`event_date`"
+    fd, td, match_sql, binds, parent_where = _activity_parent_where(args, date_expr, skip_campus=False)
+
+    course_id = (args.get("course_id") or "").strip()
+    selected_month = (args.get("selected_month") or "").strip()
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT es.`status` AS course_status,
+               es.`crm_lead_id`,
+               e.`name` AS course_id,
+               e.`course_name`,
+               e.`event_date`,
+               l.`student_name`,
+               l.`student_dob`,
+               IFNULL(l.`status`, '') AS lead_status,
+               IFNULL(l.`step`, '') AS lead_step,
+               TRIM(IFNULL(l.`target_grade`, '')) AS target_grade,
+               IFNULL(l.`pic`, '') AS pic
+        FROM `tabCRM Admission Course Student` es
+        INNER JOIN `tabCRM Admission Course` e ON e.`name` = es.`course_id`
+        INNER JOIN `tabCRM Lead` l ON l.`name` = es.`crm_lead_id`
+        WHERE {parent_where} AND {match_sql}
+        """,
+        binds,
+        as_dict=True,
+    )
+
+    month_courses: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+    grade_map: Dict[str, Dict[str, int]] = defaultdict(lambda: {"registered": 0, "attended": 0, "deposit_paid": 0})
+    grade_paid_conv: Dict[str, Dict[str, int]] = defaultdict(lambda: {"paid": 0, "enrolled": 0})
+
+    for row in rows:
+        cs = row.get("course_status") or ""
+        lead_st = row.get("lead_status") or ""
+        lead_step = row.get("lead_step") or ""
+        c_id = row.get("course_id")
+        c_date = row.get("event_date")
+        month_key = str(c_date)[:7] if c_date else ""
+
+        if month_key and c_id:
+            if c_id not in month_courses[month_key]:
+                month_courses[month_key][c_id] = {
+                    "course_id": c_id,
+                    "course_name": row.get("course_name"),
+                    "event_date": str(c_date),
+                    "total_lead": 0,
+                    "potential": 0,
+                    "short_term_paid": 0,
+                    "enrolled": 0,
+                    "lost": 0,
+                }
+            slot = month_courses[month_key][c_id]
+            slot["total_lead"] += 1
+            if cs in ("registered_interest", "trial"):
+                slot["potential"] += 1
+            if cs == "paid":
+                slot["short_term_paid"] += 1
+            if lead_step == "Enrolled":
+                slot["enrolled"] += 1
+            if cs == "refunded" or lead_st == "Lost":
+                slot["lost"] += 1
+
+        if course_id and row.get("course_id") == course_id:
+            grade = row.get("target_grade") or "(Chưa có khối)"
+            grade_map[grade]["registered"] += 1
+            if cs == "attended":
+                grade_map[grade]["attended"] += 1
+            if _is_lead_deposit_paid(lead_st) or cs == "paid":
+                grade_map[grade]["deposit_paid"] += 1
+            if cs == "paid":
+                grade_paid_conv[grade]["paid"] += 1
+                if lead_step == "Enrolled":
+                    grade_paid_conv[grade]["enrolled"] += 1
+
+    by_month = []
+    for mk in sorted(month_courses.keys()):
+        if selected_month and mk != selected_month:
+            continue
+        courses_list = sorted(month_courses[mk].values(), key=lambda x: x.get("event_date") or "")
+        by_month.append({"month": mk, "courses": courses_list})
+
+    by_grade = [
+        {
+            "target_grade": g,
+            "registered": grade_map[g]["registered"],
+            "attended": grade_map[g]["attended"],
+            "deposit_paid": grade_map[g]["deposit_paid"],
+        }
+        for g in sorted(grade_map.keys(), key=_grade_sort_key)
+    ]
+
+    by_grade_paid_conversion = [
+        {
+            "target_grade": g,
+            "paid": grade_paid_conv[g]["paid"],
+            "enrolled": grade_paid_conv[g]["enrolled"],
+            "conversion_pct": round(100.0 * grade_paid_conv[g]["enrolled"] / max(1, grade_paid_conv[g]["paid"]), 2),
+        }
+        for g in sorted(grade_paid_conv.keys(), key=_grade_sort_key)
+    ]
+
+    students: List[Dict[str, Any]] = []
+    if course_id:
+        pic_map = _pic_names_map([r.get("pic") for r in rows if r.get("pic") and r.get("course_id") == course_id])
+        for row in rows:
+            if row.get("course_id") != course_id:
+                continue
+            pic = row.get("pic") or ""
+            cs = row.get("course_status") or ""
+            students.append(
+                {
+                    "student_name": row.get("student_name") or "—",
+                    "student_dob": row.get("student_dob"),
+                    "lead_bucket": _course_lead_bucket(cs, row.get("lead_status") or "", row.get("lead_step") or ""),
+                    "course_status": cs,
+                    "lead_status": row.get("lead_status") or "",
+                    "pic": pic,
+                    "pic_name": pic_map.get(pic, pic) if pic else "—",
+                    "target_grade": row.get("target_grade") or "",
+                }
+            )
+
+    return success_response(
+        {
+            "by_month": by_month,
+            "by_grade": by_grade,
+            "by_grade_paid_conversion": by_grade_paid_conversion,
+            "students": students,
+            "meta": _activity_dashboard_meta(args, fd, td),
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Nguồn — Danh sách Nguồn 1 × ma trận trạng thái (cùng cấu trúc Tổng quan), lọc 3 cấp nguồn
 # --------------------------------------------------------------------------- #
 _SOURCE_STEPS_SQL = "('Lead','QLead','Enrolled','Nghi hoc','Verify','Draft')"
