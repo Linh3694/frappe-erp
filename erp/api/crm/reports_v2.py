@@ -1163,14 +1163,17 @@ def get_overview_snapshot():
 # --------------------------------------------------------------------------- #
 # Tổng quan — Tiến độ thu hồ sơ nhập học (theo khối, theo PIC)
 # --------------------------------------------------------------------------- #
-def _grades_requiring_profile() -> List[str]:
-    """Danh sách target_grade (dạng số, '1'..'12') có ít nhất 1 loại hồ sơ bắt buộc
-    theo cấu hình CRM Admission Profile Type (applicable_grades: JSON ["Khối 1", ...])."""
-    profile_types = frappe.get_all("CRM Admission Profile Type", fields=["applicable_grades"])
-    grades: set = set()
+def _required_profile_types_by_grade() -> Dict[str, List[str]]:
+    """Map target_grade (dạng số, '1'..'12') → danh sách profile_type bắt buộc theo cấu hình
+    CRM Admission Profile Type (applicable_grades: JSON ["Khối 1", ...])."""
+    profile_types = frappe.get_all(
+        "CRM Admission Profile Type", fields=["profile_type", "applicable_grades"]
+    )
+    by_grade: Dict[str, List[str]] = defaultdict(list)
     for pt in profile_types:
+        name = (pt.get("profile_type") or "").strip()
         raw = pt.get("applicable_grades")
-        if not raw:
+        if not name or not raw:
             continue
         try:
             items = json.loads(raw)
@@ -1183,21 +1186,26 @@ def _grades_requiring_profile() -> List[str]:
             if s.startswith("Khối "):
                 n = s[len("Khối ") :].strip()
                 if n.isdigit():
-                    grades.add(n)
-    return sorted(grades, key=lambda g: int(g))
+                    by_grade[n].append(name)
+    return by_grade
 
 
 @frappe.whitelist()
 def get_admission_profile_progress():
     """Tiến độ thu hồ sơ nhập học — số HS đã hoàn thiện hồ sơ / tổng HS cần nộp, theo khối
     và theo PIC. Phạm vi: CRM Lead có target_grade thuộc khối yêu cầu hồ sơ (theo cấu hình
-    CRM Admission Profile Type), bước từ QLead trở lên (QLead/Enrolled). Hoàn thiện =
-    `admission_profile_completion_date` đã có (tự tính khi đủ tài liệu bắt buộc, is_submitted=1)."""
+    CRM Admission Profile Type), bước từ QLead trở lên (QLead/Enrolled).
+
+    Hoàn thiện 1 loại hồ sơ = có ít nhất 1 tài liệu đã đính kèm (`attachment`) trong
+    `enrollment_documents` khớp `document_name` với loại đó (không phụ thuộc checkbox
+    `is_submitted`, vì thực tế nhân viên thường chỉ upload mà không tick riêng). Hồ sơ HS
+    hoàn thiện = đủ TẤT CẢ loại hồ sơ bắt buộc theo khối (không phải chỉ 1 trong số đó)."""
     check_crm_permission()
     args = frappe.request.args or {}
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
-    grades_in_scope = _grades_requiring_profile()
+    required_by_grade = _required_profile_types_by_grade()
+    grades_in_scope = sorted(required_by_grade.keys(), key=lambda g: int(g))
     if not grades_in_scope:
         return success_response(
             {
@@ -1211,37 +1219,62 @@ def get_admission_profile_progress():
         )
 
     binds = {"grades": grades_in_scope, **dim_binds}
-
-    grade_rows = frappe.db.sql(
+    lead_rows = frappe.db.sql(
         f"""
-        SELECT l.`target_grade` AS target_grade,
-               COUNT(*) AS total,
-               SUM(IF(l.`admission_profile_completion_date` IS NOT NULL, 1, 0)) AS completed
+        SELECT l.`name` AS name,
+               l.`target_grade` AS target_grade,
+               IFNULL(TRIM(l.`pic`), '') AS pic
         FROM `tabCRM Lead` l
         WHERE l.`step` IN ('QLead', 'Enrolled')
           AND l.`target_grade` IN %(grades)s
           AND {dim_sql}
-        GROUP BY l.`target_grade`
         """,
         binds,
         as_dict=True,
     )
 
-    pic_rows = frappe.db.sql(
-        f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
-               COUNT(*) AS total,
-               SUM(IF(l.`admission_profile_completion_date` IS NOT NULL, 1, 0)) AS completed
-        FROM `tabCRM Lead` l
-        WHERE l.`step` IN ('QLead', 'Enrolled')
-          AND l.`target_grade` IN %(grades)s
-          AND IFNULL(TRIM(l.`pic`), '') != ''
-          AND {dim_sql}
-        GROUP BY pic
-        """,
-        binds,
-        as_dict=True,
-    )
+    # Tài liệu đã đính kèm theo lead — chỉ cần có attachment, không xét is_submitted
+    docs_by_lead: Dict[str, set] = defaultdict(set)
+    lead_names = [row["name"] for row in lead_rows]
+    if lead_names:
+        doc_rows = frappe.db.sql(
+            """
+            SELECT d.`parent` AS lead_name, d.`document_name` AS document_name
+            FROM `tabCRM Lead Document` d
+            WHERE d.`parenttype` = 'CRM Lead'
+              AND d.`parent` IN %(leads)s
+              AND IFNULL(TRIM(d.`attachment`), '') != ''
+            """,
+            {"leads": lead_names},
+            as_dict=True,
+        )
+        for d in doc_rows:
+            name = (d.get("document_name") or "").strip()
+            if name:
+                docs_by_lead[d["lead_name"]].add(name)
+
+    grade_total: Dict[str, int] = defaultdict(int)
+    grade_completed: Dict[str, int] = defaultdict(int)
+    pic_total: Dict[str, int] = defaultdict(int)
+    pic_completed: Dict[str, int] = defaultdict(int)
+
+    for row in lead_rows:
+        grade = (row.get("target_grade") or "").strip()
+        required = required_by_grade.get(grade)
+        if not required:
+            continue
+        have = docs_by_lead.get(row["name"], set())
+        is_completed = all(doc_type in have for doc_type in required)
+
+        grade_total[grade] += 1
+        if is_completed:
+            grade_completed[grade] += 1
+
+        pic = row.get("pic") or ""
+        if pic:
+            pic_total[pic] += 1
+            if is_completed:
+                pic_completed[pic] += 1
 
     def _grade_sort_key(g: str):
         try:
@@ -1250,24 +1283,22 @@ def get_admission_profile_progress():
             return (1, g)
 
     by_grade = []
-    for row in sorted(grade_rows, key=lambda x: _grade_sort_key(x["target_grade"])):
-        total = int(row["total"] or 0)
-        completed = int(row["completed"] or 0)
+    for g in sorted(grade_total.keys(), key=_grade_sort_key):
+        total = grade_total[g]
+        completed = grade_completed.get(g, 0)
         by_grade.append(
             {
-                "target_grade": row["target_grade"],
+                "target_grade": g,
                 "total": total,
                 "completed": completed,
                 "pct": round(100.0 * completed / max(1, total), 2),
             }
         )
 
-    user_map = r._batch_user_map([row["pic"] for row in pic_rows])
+    user_map = r._batch_user_map(list(pic_total.keys()))
     by_pic = []
-    for row in pic_rows:
-        pic = row["pic"]
-        total = int(row["total"] or 0)
-        completed = int(row["completed"] or 0)
+    for pic, total in pic_total.items():
+        completed = pic_completed.get(pic, 0)
         ud = user_map.get(pic, {})
         by_pic.append(
             {
