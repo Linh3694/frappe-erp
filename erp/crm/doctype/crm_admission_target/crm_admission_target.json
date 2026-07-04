@@ -9,6 +9,12 @@
   "campus_id",
   "target_academic_year",
   "total_enrollment_target",
+  "section_multi_metric_target",
+  "total_profile_target",
+  "total_lead_target",
+  "cb_multi_metric_target",
+  "total_qlead_target",
+  "total_lost_target",
   "notes",
   "section_grade",
   "grade_targets",
@@ -38,6 +44,43 @@
    "label": "Tổng mục tiêu phòng ban",
    "non_negative": 1,
    "read_only": 1
+  },
+  {
+   "fieldname": "section_multi_metric_target",
+   "fieldtype": "Section Break",
+   "label": "Mục tiêu tổng theo chỉ số (Hồ sơ / Lead / Tiềm năng / Lost)"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_profile_target",
+   "fieldtype": "Int",
+   "label": "Mục tiêu Tổng hồ sơ",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "total_lead_target",
+   "fieldtype": "Int",
+   "label": "Mục tiêu Tổng Lead",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "cb_multi_metric_target",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "total_qlead_target",
+   "fieldtype": "Int",
+   "label": "Mục tiêu Học sinh tiềm năng",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "total_lost_target",
+   "fieldtype": "Int",
+   "label": "Mục tiêu Lost (ngưỡng tối đa)",
+   "non_negative": 1
   },
   {
    "fieldname": "notes",

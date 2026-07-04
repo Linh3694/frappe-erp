@@ -1510,6 +1510,292 @@ def get_enrollment_target_progress():
 
 
 # --------------------------------------------------------------------------- #
+# KPI — Báo cáo tổng quát đa chỉ số (Hồ sơ / Lead / Tiềm năng / Chính thức / Lost)
+# --------------------------------------------------------------------------- #
+# "Tổng Lead" = mọi hồ sơ đã qua bước Lead (Lead/QLead/Enrolled) — đồng bộ mapping FE
+_KPI_LEAD_STEPS_SQL = "('Lead','QLead','Enrolled')"
+
+
+def _count_kpi_metrics_snapshot(
+    campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None
+) -> Dict[str, int]:
+    """Snapshot 5 chỉ số KPI phòng ban theo năm học mục tiêu: hồ sơ / lead / qlead / enrolled / lost."""
+    where = ["l.`target_academic_year` = %(tay)s"]
+    binds: Dict[str, Any] = {"tay": target_academic_year}
+    if campus_id:
+        where.append("l.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+    if pic_filter:
+        where.append("l.`pic` = %(pic)s")
+        binds["pic"] = pic_filter
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            COUNT(*) AS total_profiles,
+            SUM(CASE WHEN l.`step` IN {_KPI_LEAD_STEPS_SQL} THEN 1 ELSE 0 END) AS total_leads,
+            SUM(CASE WHEN l.`step` = 'QLead' THEN 1 ELSE 0 END) AS total_qlead,
+            SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS total_enrolled,
+            SUM(CASE WHEN l.`status` = 'Lost' THEN 1 ELSE 0 END) AS total_lost
+        FROM `tabCRM Lead` l
+        WHERE {" AND ".join(where)}
+        """,
+        binds,
+        as_dict=True,
+    )
+    d = rows[0] if rows else {}
+    return {
+        "total_profiles": int(d.get("total_profiles") or 0),
+        "total_leads": int(d.get("total_leads") or 0),
+        "total_qlead": int(d.get("total_qlead") or 0),
+        "total_enrolled": int(d.get("total_enrolled") or 0),
+        "total_lost": int(d.get("total_lost") or 0),
+    }
+
+
+def _count_kpi_metrics_by_pic(
+    campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None
+) -> Dict[str, Dict[str, int]]:
+    """3 chỉ số (lead/qlead/enrolled) theo từng PIC — snapshot theo năm học mục tiêu."""
+    where = [
+        "l.`target_academic_year` = %(tay)s",
+        "IFNULL(TRIM(l.`pic`), '') != ''",
+        f"l.`step` IN {_KPI_LEAD_STEPS_SQL}",
+    ]
+    binds: Dict[str, Any] = {"tay": target_academic_year}
+    if campus_id:
+        where.append("l.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+    if pic_filter:
+        where.append("l.`pic` = %(pic)s")
+        binds["pic"] = pic_filter
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+               l.`step` AS step,
+               COUNT(*) AS cnt
+        FROM `tabCRM Lead` l
+        WHERE {" AND ".join(where)}
+        GROUP BY pic, l.`step`
+        """,
+        binds,
+        as_dict=True,
+    )
+    out: Dict[str, Dict[str, int]] = defaultdict(lambda: {"lead": 0, "qlead": 0, "enrolled": 0})
+    for row in rows:
+        pic = row["pic"]
+        step = row["step"]
+        cnt = int(row["cnt"])
+        # Lead tổng = cộng dồn cả 3 bước (Lead/QLead/Enrolled đều từng qua Lead)
+        out[pic]["lead"] += cnt
+        if step == "QLead":
+            out[pic]["qlead"] += cnt
+        elif step == "Enrolled":
+            out[pic]["enrolled"] += cnt
+    return out
+
+
+@frappe.whitelist()
+def get_kpi_overview():
+    """Báo cáo KPI tổng quát — 5 chỉ số phòng ban (so KPI) + Lead/Tiềm năng/Chính thức theo thành viên (so target)."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    campus_id = (args.get("campus_id") or "").strip()
+    target_academic_year = (args.get("target_academic_year") or "").strip()
+    restricted = r._should_restrict_to_own_pic_only()
+
+    if not target_academic_year:
+        return success_response(
+            {
+                "summary": [],
+                "by_member": [],
+                "meta": {"configured": False, "pic_restricted_to_self": restricted},
+            }
+        )
+
+    pic_eff = r._effective_pic_from_request(args.get("pic")) if restricted else None
+
+    target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
+    dept_targets = {
+        "total_profiles": int(target_doc.total_profile_target or 0) if target_doc else 0,
+        "total_leads": int(target_doc.total_lead_target or 0) if target_doc else 0,
+        "total_qlead": int(target_doc.total_qlead_target or 0) if target_doc else 0,
+        "total_enrolled": int(target_doc.total_enrollment_target or 0) if target_doc else 0,
+        "total_lost": int(target_doc.total_lost_target or 0) if target_doc else 0,
+    }
+
+    actual = _count_kpi_metrics_snapshot(campus_id, target_academic_year, pic_eff)
+
+    summary_defs = [
+        ("total_profiles", "Tổng Hồ sơ"),
+        ("total_leads", "Tổng Lead"),
+        ("total_qlead", "Học sinh Tiềm năng"),
+        ("total_enrolled", "Học sinh Chính thức"),
+        ("total_lost", "Lost"),
+    ]
+    summary = [
+        {
+            "key": key,
+            "label": label,
+            "target": dept_targets[key],
+            "actual": actual[key],
+            "pct": _pct(actual[key], dept_targets[key]),
+        }
+        for key, label in summary_defs
+    ]
+
+    # by_member — target từ member_targets (lead/qlead/enrollment), actual đếm theo PIC
+    member_targets_map: Dict[str, Dict[str, int]] = {}
+    if target_doc:
+        for row in target_doc.member_targets or []:
+            p = (row.pic or "").strip()
+            if p:
+                member_targets_map[p] = {
+                    "lead": int(row.lead_target or 0),
+                    "qlead": int(row.qlead_target or 0),
+                    "enrolled": int(row.enrollment_target or 0),
+                }
+
+    actual_by_pic = _count_kpi_metrics_by_pic(campus_id, target_academic_year, pic_eff)
+
+    all_pics = (
+        set(member_targets_map.keys())
+        | set(actual_by_pic.keys())
+        | set(_get_active_crm_sales_user_names())
+    )
+    if pic_eff:
+        all_pics = {pic_eff}
+
+    user_map = r._batch_user_map(list(all_pics))
+    by_member = []
+    for pic in sorted(all_pics):
+        targets = member_targets_map.get(pic, {"lead": 0, "qlead": 0, "enrolled": 0})
+        act = actual_by_pic.get(pic, {"lead": 0, "qlead": 0, "enrolled": 0})
+        ud = user_map.get(pic, {})
+        by_member.append(
+            {
+                "pic": pic,
+                "pic_name": ud.get("full_name") or pic,
+                "pic_avatar": ud.get("pic_avatar"),
+                "lead": {
+                    "target": targets["lead"],
+                    "actual": act["lead"],
+                    "pct": _pct(act["lead"], targets["lead"]),
+                },
+                "qlead": {
+                    "target": targets["qlead"],
+                    "actual": act["qlead"],
+                    "pct": _pct(act["qlead"], targets["qlead"]),
+                },
+                "enrolled": {
+                    "target": targets["enrolled"],
+                    "actual": act["enrolled"],
+                    "pct": _pct(act["enrolled"], targets["enrolled"]),
+                },
+            }
+        )
+    by_member.sort(key=lambda x: (-x["enrolled"]["actual"], x["pic_name"]))
+
+    return success_response(
+        {
+            "summary": summary,
+            "by_member": by_member,
+            "meta": {
+                "configured": bool(target_doc),
+                "campus_id": campus_id or None,
+                "target_academic_year": target_academic_year,
+                "pic_restricted_to_self": restricted,
+            },
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
+# KPI — Phễu cá nhân theo kỳ (ngày tạo hồ sơ) — báo cáo riêng lẻ từng thành viên
+# --------------------------------------------------------------------------- #
+def _count_kpi_metrics_period(campus_id: str, pic: str, from_date, to_date) -> Dict[str, int]:
+    """5 chỉ số KPI theo PIC trong khoảng ngày tạo hồ sơ (creation) — dùng cho phễu cá nhân."""
+    where = ["DATE(l.`creation`) BETWEEN %(fd)s AND %(td)s", "l.`pic` = %(pic)s"]
+    binds: Dict[str, Any] = {"fd": from_date, "td": to_date, "pic": pic}
+    if campus_id:
+        where.append("l.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            COUNT(*) AS total_profiles,
+            SUM(CASE WHEN l.`step` IN {_KPI_LEAD_STEPS_SQL} THEN 1 ELSE 0 END) AS total_leads,
+            SUM(CASE WHEN l.`step` = 'QLead' THEN 1 ELSE 0 END) AS total_qlead,
+            SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS total_enrolled,
+            SUM(CASE WHEN l.`status` = 'Lost' THEN 1 ELSE 0 END) AS total_lost
+        FROM `tabCRM Lead` l
+        WHERE {" AND ".join(where)}
+        """,
+        binds,
+        as_dict=True,
+    )
+    d = rows[0] if rows else {}
+    return {
+        "total_profiles": int(d.get("total_profiles") or 0),
+        "total_leads": int(d.get("total_leads") or 0),
+        "total_qlead": int(d.get("total_qlead") or 0),
+        "total_enrolled": int(d.get("total_enrolled") or 0),
+        "total_lost": int(d.get("total_lost") or 0),
+    }
+
+
+@frappe.whitelist()
+def get_kpi_member_funnel():
+    """Phễu KPI cá nhân theo kỳ (ngày/tháng/năm): Hồ sơ → Lead → Tiềm năng → Chính thức, kèm Lost."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    campus_id = (args.get("campus_id") or "").strip()
+    restricted = r._should_restrict_to_own_pic_only()
+    pic = r._effective_pic_from_request(args.get("pic"))
+    fd, td, _, _ = r._resolve_period(args)
+
+    if not pic:
+        return success_response(
+            {
+                "funnel": [],
+                "total_lost": 0,
+                "meta": {
+                    "period": {"from": str(fd), "to": str(td)},
+                    "pic": None,
+                    "pic_name": None,
+                    "pic_restricted_to_self": restricted,
+                },
+            }
+        )
+
+    counts = _count_kpi_metrics_period(campus_id, pic, fd, td)
+    ud = r._batch_user_map([pic]).get(pic, {})
+
+    funnel = [
+        {"key": "total_profiles", "label": "Tổng Hồ sơ", "count": counts["total_profiles"]},
+        {"key": "total_leads", "label": "Tổng Lead", "count": counts["total_leads"]},
+        {"key": "total_qlead", "label": "Học sinh Tiềm năng", "count": counts["total_qlead"]},
+        {"key": "total_enrolled", "label": "Học sinh Chính thức", "count": counts["total_enrolled"]},
+    ]
+
+    return success_response(
+        {
+            "funnel": funnel,
+            "total_lost": counts["total_lost"],
+            "meta": {
+                "period": {"from": str(fd), "to": str(td)},
+                "pic": pic,
+                "pic_name": ud.get("full_name") or pic,
+                "pic_avatar": ud.get("pic_avatar"),
+                "pic_restricted_to_self": restricted,
+            },
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Tổng quan — Kỳ báo cáo (from_date / to_date từ toolbar tab Tổng quan)
 # --------------------------------------------------------------------------- #
 def _overview_period_bounds(args) -> Tuple[Any, Any, Any]:

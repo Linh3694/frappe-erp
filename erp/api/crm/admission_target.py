@@ -81,8 +81,14 @@ def _resolve_pic_user(pic_hint: str) -> Optional[str]:
     return None
 
 
+def _non_negative_int(value: Any) -> int:
+    """Ép về Int không âm — dùng chung cho mọi chỉ tiêu KPI."""
+    n = int(value or 0)
+    return n if n > 0 else 0
+
+
 def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
-    """Chuẩn hóa dòng target theo PIC từ payload JSON."""
+    """Chuẩn hóa dòng target theo PIC từ payload JSON — 3 chỉ tiêu: Lead / Tiềm năng / Chính thức."""
     if not rows or not isinstance(rows, (list, tuple)):
         return []
     out: List[Dict[str, Any]] = []
@@ -92,10 +98,12 @@ def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
         pic = _resolve_pic_user(r.get("pic") or "")
         if not pic:
             continue
-        target = int(r.get("enrollment_target") or 0)
-        if target < 0:
-            target = 0
-        row: Dict[str, Any] = {"pic": pic, "enrollment_target": target}
+        row: Dict[str, Any] = {
+            "pic": pic,
+            "enrollment_target": _non_negative_int(r.get("enrollment_target")),
+            "lead_target": _non_negative_int(r.get("lead_target")),
+            "qlead_target": _non_negative_int(r.get("qlead_target")),
+        }
         if r.get("name"):
             row["name"] = r["name"]
         out.append(row)
@@ -129,6 +137,8 @@ def _serialize_target_doc(doc) -> Dict[str, Any]:
             "pic": r.pic,
             "pic_name": user_map.get(r.pic, r.pic),
             "enrollment_target": int(r.enrollment_target or 0),
+            "lead_target": int(r.lead_target or 0),
+            "qlead_target": int(r.qlead_target or 0),
         }
         for r in doc.member_targets or []
     ]
@@ -137,6 +147,10 @@ def _serialize_target_doc(doc) -> Dict[str, Any]:
         "campus_id": d.get("campus_id"),
         "target_academic_year": d.get("target_academic_year"),
         "total_enrollment_target": int(d.get("total_enrollment_target") or 0),
+        "total_profile_target": int(d.get("total_profile_target") or 0),
+        "total_lead_target": int(d.get("total_lead_target") or 0),
+        "total_qlead_target": int(d.get("total_qlead_target") or 0),
+        "total_lost_target": int(d.get("total_lost_target") or 0),
         "notes": d.get("notes") or "",
         "grade_targets": grade_targets,
         "member_targets": member_targets,
@@ -150,6 +164,10 @@ def _empty_config(campus_id: str, target_academic_year: str) -> Dict[str, Any]:
         "campus_id": campus_id,
         "target_academic_year": target_academic_year,
         "total_enrollment_target": 0,
+        "total_profile_target": 0,
+        "total_lead_target": 0,
+        "total_qlead_target": 0,
+        "total_lost_target": 0,
         "notes": "",
         "grade_targets": [],
         "member_targets": [],
@@ -213,6 +231,10 @@ def save_target_config():
             doc.target_academic_year = target_academic_year
 
         doc.notes = notes if notes is not None else doc.notes
+        # Mục tiêu tổng theo chỉ số — nhập tay ở cấp phòng ban (không chia theo khối)
+        for field in ("total_profile_target", "total_lead_target", "total_qlead_target", "total_lost_target"):
+            if field in data:
+                doc.set(field, _non_negative_int(data.get(field)))
         # doc.set() để Frappe ghi đè child table đúng khi cập nhật bản ghi cũ
         doc.set("grade_targets", [])
         for row in grade_rows:

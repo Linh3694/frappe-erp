@@ -8,6 +8,8 @@
  "engine": "InnoDB",
  "field_order": [
   "pic",
+  "lead_target",
+  "qlead_target",
   "enrollment_target"
  ],
  "fields": [
@@ -21,10 +23,26 @@
   },
   {
    "default": "0",
+   "fieldname": "lead_target",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Mục tiêu Tổng Lead",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "qlead_target",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Mục tiêu Học sinh tiềm năng",
+   "non_negative": 1
+  },
+  {
+   "default": "0",
    "fieldname": "enrollment_target",
    "fieldtype": "Int",
    "in_list_view": 1,
-   "label": "Mục tiêu nhập học",
+   "label": "Mục tiêu Học sinh chính thức",
    "non_negative": 1,
    "reqd": 1
   }
