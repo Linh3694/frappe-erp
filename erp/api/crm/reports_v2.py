@@ -1618,11 +1618,11 @@ def get_kpi_overview():
 
     target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
     dept_targets = {
-        "total_profiles": int(target_doc.total_profile_target or 0) if target_doc else 0,
-        "total_leads": int(target_doc.total_lead_target or 0) if target_doc else 0,
-        "total_qlead": int(target_doc.total_qlead_target or 0) if target_doc else 0,
-        "total_enrolled": int(target_doc.total_enrollment_target or 0) if target_doc else 0,
-        "total_lost": int(target_doc.total_lost_target or 0) if target_doc else 0,
+        "total_profiles": int(getattr(target_doc, "total_profile_target", 0) or 0) if target_doc else 0,
+        "total_leads": int(getattr(target_doc, "total_lead_target", 0) or 0) if target_doc else 0,
+        "total_qlead": int(getattr(target_doc, "total_qlead_target", 0) or 0) if target_doc else 0,
+        "total_enrolled": int(getattr(target_doc, "total_enrollment_target", 0) or 0) if target_doc else 0,
+        "total_lost": int(getattr(target_doc, "total_lost_target", 0) or 0) if target_doc else 0,
     }
 
     actual = _count_kpi_metrics_snapshot(campus_id, target_academic_year, pic_eff)
@@ -1652,8 +1652,8 @@ def get_kpi_overview():
             p = (row.pic or "").strip()
             if p:
                 member_targets_map[p] = {
-                    "lead": int(row.lead_target or 0),
-                    "qlead": int(row.qlead_target or 0),
+                    "lead": int(getattr(row, "lead_target", 0) or 0),
+                    "qlead": int(getattr(row, "qlead_target", 0) or 0),
                     "enrolled": int(row.enrollment_target or 0),
                 }
 
