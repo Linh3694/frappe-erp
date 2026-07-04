@@ -1240,6 +1240,186 @@ def get_source_breakdown():
     )
 
 
+@frappe.whitelist()
+def get_source_lead_levels():
+    """Tổng Lead theo nguồn 3 cấp trong kỳ (ngày tạo hồ sơ)."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    fd, td, _, _ = r._resolve_period(args)
+    wsql, binds = r._where_creation_between(fd, td, args)
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            IFNULL(NULLIF(TRIM(ls.`source`), ''), '') AS src1,
+            IFNULL(NULLIF(TRIM(ls.`sub_source`), ''), '') AS src2,
+            IFNULL(NULLIF(TRIM(ls.`source_note`), ''), '') AS src3,
+            COUNT(DISTINCT l.`name`) AS cnt
+        FROM `tabCRM Lead` l
+        INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
+        WHERE {wsql}
+        GROUP BY src1, src2, src3
+        ORDER BY cnt DESC
+        LIMIT 500
+        """,
+        binds,
+        as_dict=True,
+    )
+
+    s1set = {row["src1"] for row in rows if row.get("src1")}
+    s3set = {row["src3"] for row in rows if row.get("src3")}
+    s1_names = r._batch_source_names(list(s1set))
+    note_names: Dict[str, str] = {}
+    if s3set:
+        for n in frappe.get_all(
+            "CRM Source Note",
+            filters={"name": ["in", list(s3set)]},
+            fields=["name", "note_name"],
+        ):
+            note_names[n["name"]] = n.get("note_name") or n["name"]
+
+    out = []
+    for row in rows:
+        s1 = row.get("src1") or ""
+        s2 = row.get("src2") or ""
+        s3 = row.get("src3") or ""
+        out.append(
+            {
+                "src1": s1,
+                "src1_label": s1_names.get(s1, s1) if s1 else "",
+                "src2": s2,
+                "src3": s3,
+                "src3_label": note_names.get(s3, s3) if s3 else "",
+                "count": int(row.get("cnt") or 0),
+            }
+        )
+
+    return success_response(
+        {
+            "rows": out,
+            "meta": {
+                "period": {"from": str(fd), "to": str(td)},
+                "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
+            },
+        }
+    )
+
+
+@frappe.whitelist()
+def get_source_funnel_detail():
+    """Phễu 5 chỉ số + danh sách HS theo Nguồn 1 (creation trong kỳ)."""
+    check_crm_permission()
+    args = frappe.request.args or {}
+    src1 = (args.get("src1") or "").strip()
+    if not src1:
+        frappe.throw("Thiếu tham số src1")
+
+    fd, td, _, _ = r._resolve_period(args)
+    wsql, binds = r._where_creation_between(fd, td, args)
+    binds["fsrc1"] = src1
+    src_filter = "ls.`source` = %(fsrc1)s"
+
+    counts_row = frappe.db.sql(
+        f"""
+        SELECT
+            COUNT(*) AS total_profiles,
+            SUM(CASE WHEN l.`step` IN {_KPI_LEAD_STEPS_SQL} THEN 1 ELSE 0 END) AS total_leads,
+            SUM(CASE WHEN l.`step` = 'QLead' THEN 1 ELSE 0 END) AS total_qlead,
+            SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS total_enrolled,
+            SUM(CASE WHEN l.`status` = 'Lost' THEN 1 ELSE 0 END) AS total_lost
+        FROM `tabCRM Lead` l
+        INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
+        WHERE {src_filter} AND {wsql}
+        """,
+        binds,
+        as_dict=True,
+    )
+    counts = counts_row[0] if counts_row else {}
+
+    student_rows = frappe.db.sql(
+        f"""
+        SELECT l.`name`, l.`student_name`, l.`dob`, l.`step`, l.`status`,
+               l.`pic`, l.`target_grade`, l.`creation`
+        FROM `tabCRM Lead` l
+        INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
+        WHERE {src_filter} AND {wsql}
+        ORDER BY l.`creation` DESC
+        LIMIT 500
+        """,
+        binds,
+        as_dict=True,
+    )
+
+    total_students_row = frappe.db.sql(
+        f"""
+        SELECT COUNT(DISTINCT l.`name`) AS c
+        FROM `tabCRM Lead` l
+        INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
+        WHERE {src_filter} AND {wsql}
+        """,
+        binds,
+        as_dict=True,
+    )
+    total_students = int((total_students_row[0] if total_students_row else {}).get("c") or 0)
+
+    pic_ids = [row["pic"] for row in student_rows if row.get("pic")]
+    pic_map = r._batch_user_map(pic_ids)
+
+    funnel = [
+        {
+            "key": "total_profiles",
+            "label": "Tổng Hồ sơ",
+            "count": int(counts.get("total_profiles") or 0),
+        },
+        {
+            "key": "total_leads",
+            "label": "Tổng Lead",
+            "count": int(counts.get("total_leads") or 0),
+        },
+        {
+            "key": "total_qlead",
+            "label": "Học sinh Tiềm năng",
+            "count": int(counts.get("total_qlead") or 0),
+        },
+        {
+            "key": "total_enrolled",
+            "label": "Học sinh Chính thức",
+            "count": int(counts.get("total_enrolled") or 0),
+        },
+    ]
+
+    students = []
+    for row in student_rows:
+        pic = (row.get("pic") or "").strip()
+        students.append(
+            {
+                "name": row["name"],
+                "full_name": row.get("student_name") or "",
+                "dob": str(row["dob"]) if row.get("dob") else None,
+                "step": row.get("step") or "",
+                "status": row.get("status") or "",
+                "pic": pic,
+                "pic_name": pic_map.get(pic, {}).get("full_name", pic) if pic else "—",
+                "target_grade": row.get("target_grade") or "",
+                "creation": str(row["creation"]) if row.get("creation") else "",
+            }
+        )
+
+    return success_response(
+        {
+            "funnel": funnel,
+            "total_lost": int(counts.get("total_lost") or 0),
+            "students": students,
+            "total_students": total_students,
+            "meta": {
+                "period": {"from": str(fd), "to": str(td)},
+                "src1": src1,
+                "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
+            },
+        }
+    )
+
+
 # --------------------------------------------------------------------------- #
 # KPI — Xếp hạng PIC (cột giống báo cáo nguồn: snapshot × bước + tỉ lệ chuyển đổi)
 # --------------------------------------------------------------------------- #
