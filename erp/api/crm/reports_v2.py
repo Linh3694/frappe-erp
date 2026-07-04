@@ -1373,7 +1373,7 @@ def get_source_funnel_detail():
         },
         {
             "key": "total_leads",
-            "label": "Tổng Lead",
+            "label": "Tổng lead",
             "count": int(counts.get("total_leads") or 0),
         },
         {
@@ -1809,7 +1809,7 @@ def get_kpi_overview():
 
     summary_defs = [
         ("total_profiles", "Tổng Hồ sơ"),
-        ("total_leads", "Tổng Lead"),
+        ("total_leads", "Tổng lead"),
         ("total_qlead", "Học sinh Tiềm năng"),
         ("total_enrolled", "Học sinh Chính thức"),
         ("total_lost", "Lost"),
@@ -1955,7 +1955,7 @@ def get_kpi_member_funnel():
 
     funnel = [
         {"key": "total_profiles", "label": "Tổng Hồ sơ", "count": counts["total_profiles"]},
-        {"key": "total_leads", "label": "Tổng Lead", "count": counts["total_leads"]},
+        {"key": "total_leads", "label": "Tổng lead", "count": counts["total_leads"]},
         {"key": "total_qlead", "label": "Học sinh Tiềm năng", "count": counts["total_qlead"]},
         {"key": "total_enrolled", "label": "Học sinh Chính thức", "count": counts["total_enrolled"]},
     ]
@@ -2445,6 +2445,100 @@ def get_admission_profile_progress():
                 **period_meta,
                 "students_qlead": step_counts.get("QLead", 0),
                 "students_enrolled": step_counts.get("Enrolled", 0),
+                "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
+            },
+        }
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Tổng quan — Giới tính theo khối + phân bố Phường/Xã (HS chính thức Enrolled)
+# --------------------------------------------------------------------------- #
+def _normalize_lead_gender(raw: Optional[str]) -> str:
+    """Chuẩn hóa giới tính CRM Lead → male / female / unknown."""
+    val = (raw or "").strip()
+    if val in ("Nam", "nam", "Male", "male"):
+        return "male"
+    if val in ("Nu", "Nữ", "nu", "Female", "female"):
+        return "female"
+    return "unknown"
+
+
+@frappe.whitelist()
+def get_enrolled_demographics():
+    """Tỉ lệ Nam/Nữ theo khối và phân bố Phường/Xã của HS chính thức (Enrolled).
+
+    Phạm vi: CRM Lead step = Enrolled, tạo trước hoặc bằng cuối kỳ lọc (`to_date`).
+    Giới tính: `student_gender` (Nam/Nu). Địa chỉ: `current_address_ward` (nơi ở hiện nay).
+    Khối: fallback target_grade → current_grade → lớp SIS qua linked_student.
+    """
+    check_crm_permission()
+    args = frappe.request.args or {}
+    fd, td_eff, _ = _overview_period_bounds(args)
+    _, td_raw, _, _ = r._resolve_period(args)
+    dim_sql, dim_binds = r._where_lead_dimensions_only(args)
+    period_meta = _overview_period_meta(fd, td_raw, td_eff)
+
+    lead_rows = frappe.db.sql(
+        f"""
+        SELECT l.`name` AS name,
+               IFNULL(TRIM(l.`student_gender`), '') AS student_gender,
+               IFNULL(TRIM(l.`current_address_ward`), '') AS current_address_ward,
+               IFNULL(TRIM(l.`target_grade`), '') AS target_grade,
+               IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
+               IFNULL(TRIM(l.`linked_student`), '') AS linked_student
+        FROM `tabCRM Lead` l
+        WHERE l.`step` = 'Enrolled'
+          AND IFNULL(l.`status`, '') != 'Lost'
+          AND DATE(l.`creation`) <= %(to_date)s
+          AND {dim_sql}
+        """,
+        {"to_date": str(td_eff), **dim_binds},
+        as_dict=True,
+    )
+    _resolve_lead_grade_rows(lead_rows)
+
+    gender_by_grade_map: Dict[str, Dict[str, int]] = defaultdict(
+        lambda: {"male": 0, "female": 0, "unknown": 0, "total": 0}
+    )
+    ward_counts: Dict[str, int] = defaultdict(int)
+
+    for row in lead_rows:
+        grade = row.get("grade") or "-"
+        bucket = gender_by_grade_map[grade]
+        gender_key = _normalize_lead_gender(row.get("student_gender"))
+        bucket[gender_key] += 1
+        bucket["total"] += 1
+
+        ward_raw = (row.get("current_address_ward") or "").strip()
+        ward_key = ward_raw if ward_raw else "(Chưa có)"
+        ward_counts[ward_key] += 1
+
+    gender_by_grade = []
+    for g in sorted(gender_by_grade_map.keys(), key=_grade_display_sort_key):
+        m = gender_by_grade_map[g]
+        gender_by_grade.append(
+            {
+                "target_grade": g,
+                "male": m["male"],
+                "female": m["female"],
+                "unknown": m["unknown"],
+                "total": m["total"],
+            }
+        )
+
+    by_ward = [
+        {"ward": ward, "count": count}
+        for ward, count in sorted(ward_counts.items(), key=lambda x: (-x[1], x[0].lower()))
+    ]
+
+    return success_response(
+        {
+            "gender_by_grade": gender_by_grade,
+            "by_ward": by_ward,
+            "meta": {
+                **period_meta,
+                "total_enrolled": len(lead_rows),
                 "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
             },
         }
