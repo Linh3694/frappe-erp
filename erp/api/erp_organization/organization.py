@@ -155,10 +155,28 @@ def _group_children(child_doctype, order_by="modified asc"):
         + (["sort_order"] if child_doctype == LEADER_DOCTYPE else []),
         order_by=order_by,
     )
+    _attach_user_images(rows)
     grouped = {}
     for r in rows:
         grouped.setdefault(r.parent, []).append(r)
     return grouped
+
+
+def _attach_user_images(rows):
+    """Gắn ảnh đại diện (user_image) cho từng dòng lãnh đạo/thành viên."""
+    user_ids = {r.get("user") for r in rows if r.get("user")}
+    if not user_ids:
+        return
+    image_map = dict(
+        frappe.get_all(
+            "User",
+            filters={"name": ["in", list(user_ids)]},
+            fields=["name", "user_image"],
+            as_list=True,
+        )
+    )
+    for r in rows:
+        r["user_image"] = image_map.get(r.get("user")) or None
 
 
 def _count_children(child_doctype):
@@ -176,6 +194,8 @@ def get_org_unit_detail(name):
     try:
         doc = frappe.get_doc(UNIT_DOCTYPE, name)
         data = doc.as_dict()
+        _attach_user_images(data.get("leaders") or [])
+        _attach_user_images(data.get("members") or [])
         return success_response(data=data)
     except frappe.DoesNotExistError:
         return error_response(_("Không tìm thấy đơn vị"))
