@@ -62,7 +62,7 @@
    "fieldname": "ward_type",
    "fieldtype": "Select",
    "label": "Loai",
-   "options": "\nXa\nPhuong\nThi tran\nDac khu",
+   "options": "\nXã\nPhường\nThị trấn\nĐặc khu",
    "in_list_view": 1
   },
   {

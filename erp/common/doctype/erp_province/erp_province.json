@@ -43,7 +43,7 @@
    "fieldname": "province_type",
    "fieldtype": "Select",
    "label": "Loai",
-   "options": "\nTinh\nThanh pho Trung uong",
+   "options": "\nTỉnh\nThành phố Trung ương",
    "in_list_view": 1
   },
   {
