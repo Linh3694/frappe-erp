@@ -10,6 +10,5 @@ erp.patches.v1_0.add_crm_report_indexes
 erp.patches.v1_0.normalize_crm_phones_to_e164
 erp.patches.v1_0.backfill_lead_promotions_from_fee_pct
 erp.patches.v1_0.normalize_crm_nationalities
-erp.patches.v1_0.seed_knowledge_base
 erp.patches.v1_0.remove_sis_campus_self_user_permission
 erp.patches.v1_0.backfill_force_pair_mode
