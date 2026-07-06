@@ -2324,6 +2324,28 @@ def get_withdrawal_report():
         """, values, as_dict=True)
         by_reason = [{"reason_group": r.reason_group or "", "count": r.count or 0} for r in reason_rows]
 
+        # ----- (2b) Báo cáo theo Nhóm trường (school_group của trường chuyển đến) -----
+        # Gom HS chuyển trường theo nhóm trường đích; HS dừng học không chuyển trường
+        # rơi vào nhóm rỗng "" (frontend hiển thị "Chưa xác định / Dừng học").
+        school_group_rows = frappe.db.sql(f"""
+            SELECT
+                COALESCE(NULLIF(sch.school_group, ''), '') AS school_group,
+                COUNT(*) AS count,
+                SUM(CASE WHEN re.withdraw_transfer_school IS NOT NULL AND re.withdraw_transfer_school != '' THEN 1 ELSE 0 END) AS transfer,
+                SUM(CASE WHEN re.withdraw_transfer_school IS NULL OR re.withdraw_transfer_school = '' THEN 1 ELSE 0 END) AS stop_only
+            FROM `tabSIS Re-enrollment` re
+            LEFT JOIN `tabCRM School` sch ON re.withdraw_transfer_school = sch.name
+            WHERE {where_clause} AND re.decision = 'not_re_enroll'
+            GROUP BY school_group
+            ORDER BY count DESC
+        """, values, as_dict=True)
+        by_school_group = [{
+            "school_group": r.school_group or "",
+            "count": r.count or 0,
+            "transfer": r.transfer or 0,
+            "stop_only": r.stop_only or 0,
+        } for r in school_group_rows]
+
         # ----- (3) Danh sách HS dừng học/chuyển trường -----
         # Khối lấy qua subquery tương quan (tránh fan-out khi HS có nhiều dòng lớp).
         list_values = dict(values)
@@ -2373,6 +2395,7 @@ def get_withdrawal_report():
             data={
                 "summary": summary,
                 "by_reason": by_reason,
+                "by_school_group": by_school_group,
                 "list": withdrawal_list,
             },
             message="Lấy báo cáo dừng học thành công",
