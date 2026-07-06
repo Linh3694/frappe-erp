@@ -1,0 +1,95 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "field:province_code",
+ "beta": 0,
+ "creation": "2026-07-06 09:00:00.000000",
+ "custom": 0,
+ "description": "Danh muc Tinh/Thanh pho (don vi hanh chinh 2 cap tu 01/07/2025)",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "province_code",
+  "province_name",
+  "province_type",
+  "is_active"
+ ],
+ "fields": [
+  {
+   "fieldname": "province_code",
+   "fieldtype": "Data",
+   "label": "Ma Tinh/Thanh pho",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "province_name",
+   "fieldtype": "Data",
+   "label": "Ten Tinh/Thanh pho",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "province_type",
+   "fieldtype": "Select",
+   "label": "Loai",
+   "options": "\nTinh\nThanh pho Trung uong",
+   "in_list_view": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Dang su dung"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-07-06 09:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "ERP Province",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "province_code",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "province_name",
+ "track_changes": 1
+}

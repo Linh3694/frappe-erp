@@ -60,6 +60,17 @@ _EXPORT_BULK_LEAD_FIELDS = [
 
 _BULK_FLOAT_FIELDS = frozenset()
 
+# Field Link địa giới hành chính (lưu MÃ tỉnh/xã = name ERP Province/ERP Ward).
+# Export: đổi mã -> tên đọc được; Import: đổi tên -> mã (chấp nhận cả mã lẫn tên).
+# Ward phụ thuộc mã tỉnh cùng nhóm địa chỉ nên xử lý riêng, không đi qua vòng lặp chung.
+_LOCATION_ADDRESS_GROUPS = (
+    ("registered_address_province", "registered_address_ward"),
+    ("current_address_province", "current_address_ward"),
+)
+_LOCATION_LINK_FIELDS = frozenset(
+    f for grp in _LOCATION_ADDRESS_GROUPS for f in grp
+)
+
 # Cot tai khoan ngan hang TK1 / TK2 (dong bo bulkUpdateStudentColumns.ts)
 _BANK_FIELD_ORDER = (
     "account_holder_relationship",
@@ -321,6 +332,47 @@ def _spread_bank_accounts_into_export_row(lead_dict):
             lead_dict[xl_col] = _bulk_bank_cell_str(v)
 
 
+def _apply_bulk_location_fields(doc, row):
+    """Resolve cot Tinh/Xa (ten hoac ma) -> ma Link truoc khi ghi.
+
+    Ward phu thuoc ma tinh cung nhom dia chi: uu tien ma tinh moi tren row,
+    fallback ma tinh dang luu tren doc. Gia tri rong -> xoa Link. Khong resolve
+    duoc (ten sai) -> raise de bao loi dong (bulk_update_leads bat va ghi vao errors).
+    """
+    from erp.utils.vn_location import resolve_province_code, resolve_ward_code
+
+    changed = False
+    for prov_field, ward_field in _LOCATION_ADDRESS_GROUPS:
+        prov_code = doc.get(prov_field)
+        if prov_field in row:
+            raw = _parse_bulk_cell(prov_field, row.get(prov_field))
+            if not raw:
+                new_prov = None
+            else:
+                new_prov = resolve_province_code(raw)
+                if not new_prov:
+                    raise ValueError(f"Khong tim thay Tinh/Thanh pho: '{raw}'")
+            if _set_doc_field_if_changed(doc, prov_field, new_prov):
+                changed = True
+            prov_code = new_prov
+
+        if ward_field in row:
+            raw = _parse_bulk_cell(ward_field, row.get(ward_field))
+            if not raw:
+                new_ward = None
+            elif not prov_code:
+                raise ValueError(
+                    f"Can Tinh/Thanh pho hop le truoc khi dat Phuong/Xa: '{raw}'"
+                )
+            else:
+                new_ward = resolve_ward_code(raw, prov_code)
+                if not new_ward:
+                    raise ValueError(f"Khong tim thay Phuong/Xa: '{raw}'")
+            if _set_doc_field_if_changed(doc, ward_field, new_ward):
+                changed = True
+    return changed
+
+
 def _apply_bulk_student_section_fields(doc, row):
     """Doc row dict: chi cap nhat neu key co trong row."""
     changed = False
@@ -336,7 +388,12 @@ def _apply_bulk_student_section_fields(doc, row):
         }
     )
     for field in _EXPORT_BULK_LEAD_FIELDS:
-        if field in skip_named or field in _ALL_TK_BANK_COLS or field in _BULK_LEGACY_BANK_FIELDS:
+        if (
+            field in skip_named
+            or field in _ALL_TK_BANK_COLS
+            or field in _BULK_LEGACY_BANK_FIELDS
+            or field in _LOCATION_LINK_FIELDS
+        ):
             continue
         if field not in row:
             continue
@@ -345,6 +402,8 @@ def _apply_bulk_student_section_fields(doc, row):
             new_val = to_country_or_blank(new_val)
         if _set_doc_field_if_changed(doc, field, new_val):
             changed = True
+    if _apply_bulk_location_fields(doc, row):
+        changed = True
     if _apply_bulk_bank_accounts_from_row(doc, row):
         changed = True
     return changed
@@ -548,6 +607,18 @@ def export_step_leads_for_update():
 
     for lead in leads:
         _spread_bank_accounts_into_export_row(lead)
+
+    # Tinh/Xa la Link (luu MA); xuat ra ten doc duoc de nguoi dung sua tren Excel.
+    # Nhap lai se resolve ten -> ma o _apply_bulk_location_fields.
+    from erp.utils.vn_location import province_name, ward_name
+
+    for lead in leads:
+        for f in ("registered_address_province", "current_address_province"):
+            if lead.get(f):
+                lead[f] = province_name(lead[f])
+        for f in ("registered_address_ward", "current_address_ward"):
+            if lead.get(f):
+                lead[f] = ward_name(lead[f])
 
     all_step_statuses = {s: STEP_STATUSES.get(s, []) for s in CRM_STEPS}
 

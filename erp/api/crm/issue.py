@@ -679,11 +679,14 @@ def _can_create_directly():
 
 def _is_valid_pic_user(pic_email: str, issue_doc=None) -> bool:
     """
-    PIC hop le: user ton tai va thuoc team care (CARE_TEAM_ROLES).
-    PIC la nguoi nhan thuoc team care — khong con lay theo thanh vien phong ban.
+    PIC hop le: user ton tai va nam trong danh sach ung vien PIC (leaders + members
+    nhom Care + leaders phong Tuyen Sinh). Fallback role team care (CARE_TEAM_ROLES)
+    de khong vo tinh chan khi So do to chuc chua cau hinh.
     """
     if not pic_email or not frappe.db.exists("User", pic_email):
         return False
+    if pic_email in set(_issue_pic_candidate_emails()):
+        return True
     return bool(CARE_TEAM_ROLES & set(frappe.get_roles(pic_email)))
 
 
@@ -1056,30 +1059,55 @@ def whoami_crm_issue():
     )
 
 
+def _issue_pic_candidate_emails():
+    """
+    Email ung vien PIC theo So do to chuc:
+    leaders + members cua nhom Care (TS-CARE) + leaders cua phong Tuyen Sinh (don vi cha).
+    Giu thu tu, dedupe.
+    """
+    unit = frappe.db.get_value(
+        ORG_UNIT_DOCTYPE,
+        {"unit_code": TS_CARE_UNIT_CODE},
+        ["name", "parent_organization_unit"],
+        as_dict=True,
+    )
+    if not unit:
+        return []
+    seen, out = set(), []
+
+    def _add(emails):
+        for e in emails or []:
+            if e and e not in seen:
+                seen.add(e)
+                out.append(e)
+
+    _add(_unit_leader_emails(unit.name))
+    _add(_unit_member_emails_only(unit.name))
+    if unit.parent_organization_unit:
+        _add(_unit_leader_emails(unit.parent_organization_unit))
+    return out
+
+
 @frappe.whitelist()
 def get_issue_pic_candidates():
     """
-    Danh sach user co the lam PIC: thanh vien team care (CARE_TEAM_ROLES).
-    PIC la nguoi nhan thuoc team care — khong con lay theo thanh vien phong ban cua issue.
+    Danh sach user co the lam PIC theo So do to chuc:
+    leaders + members cua nhom Care (TS-CARE) + leaders cua phong Tuyen Sinh.
     """
     # Khong dung check_crm_permission: moi user dang nhap can tai dropdown PIC khi tao/sua issue
 
-    user_emails = frappe.get_all(
-        "Has Role",
-        filters={"role": ["in", list(CARE_TEAM_ROLES)], "parenttype": "User"},
-        fields=["parent"],
-        pluck="parent",
-    )
-    emails = set(user_emails or [])
-
+    emails = _issue_pic_candidate_emails()
     if not emails:
         return success_response([])
 
-    users = frappe.get_all(
+    rows = frappe.get_all(
         "User",
-        filters={"name": ["in", list(emails)], "enabled": 1},
+        filters={"name": ["in", emails], "enabled": 1},
         fields=["name as user_id", "full_name", "email", "user_image", "job_title"],
     )
+    # Giu dung thu tu leader Care -> member Care -> leader Tuyen Sinh
+    by_id = {r["user_id"]: r for r in rows}
+    users = [by_id[e] for e in emails if e in by_id]
     return success_response(users)
 
 

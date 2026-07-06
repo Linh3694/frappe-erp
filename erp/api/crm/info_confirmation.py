@@ -300,13 +300,47 @@ def _field_label(group: str | None, fieldname: str) -> str:
     return fieldname
 
 
+# Field Link địa giới hành chính lưu MÃ tỉnh/xã (name ERP Province/ERP Ward);
+# khi hiển thị (email/log) cần đổi mã -> tên đọc được.
+_PROVINCE_CODE_FIELDS = frozenset(
+    {"registered_address_province", "current_address_province"}
+)
+_WARD_CODE_FIELDS = frozenset(
+    {"registered_address_ward", "current_address_ward"}
+)
+
+
+def _display_field_value(fieldname: str, value) -> str:
+    """Giá trị hiển thị của field: đổi mã Tỉnh/Xã -> tên; còn lại giữ nguyên."""
+    v = str(value or "").strip()
+    if not v:
+        return v
+    if fieldname in _PROVINCE_CODE_FIELDS or fieldname in _WARD_CODE_FIELDS:
+        try:
+            from erp.utils.vn_location import province_name, ward_name
+
+            return (
+                province_name(v)
+                if fieldname in _PROVINCE_CODE_FIELDS
+                else ward_name(v)
+            )
+        except Exception:
+            return v
+    return v
+
+
 def _render_changes_rows(changed_fields: dict | None) -> str:
     """Render danh sách field đã đổi (cũ → mới) + ops thành các <li> trong 1 cell."""
     items: list[str] = []
     for item in (changed_fields or {}).get("fields") or []:
-        label = escape_html(_field_label(item.get("group"), item.get("field") or ""))
-        old = escape_html(str(item.get("old") or "").strip() or "(trống)")
-        new = escape_html(str(item.get("new") or "").strip() or "(trống)")
+        fieldname = item.get("field") or ""
+        label = escape_html(_field_label(item.get("group"), fieldname))
+        old = escape_html(
+            _display_field_value(fieldname, item.get("old")).strip() or "(trống)"
+        )
+        new = escape_html(
+            _display_field_value(fieldname, item.get("new")).strip() or "(trống)"
+        )
         items.append(
             f"<li><b>{label}:</b> {old} &rarr; {new}</li>"
         )

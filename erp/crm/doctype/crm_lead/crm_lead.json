@@ -59,13 +59,17 @@
   "bank_accounts",
   "registered_address_section",
   "registered_address_province",
+  "registered_address_province_name",
   "registered_address_ward",
+  "registered_address_ward_name",
   "registered_address_street",
   "registered_address_detail",
   "cb_address_1",
   "current_address_section",
   "current_address_province",
+  "current_address_province_name",
   "current_address_ward",
+  "current_address_ward_name",
   "current_address_street",
   "current_address_detail",
   "additional_info_section",
@@ -372,13 +376,31 @@
   },
   {
    "fieldname": "registered_address_province",
+   "fieldtype": "Link",
+   "label": "Tinh/Thanh pho",
+   "options": "ERP Province"
+  },
+  {
+   "fetch_from": "registered_address_province.province_name",
+   "fieldname": "registered_address_province_name",
    "fieldtype": "Data",
-   "label": "Tinh/Thanh pho"
+   "label": "Ten Tinh/Thanh pho (ho khau)",
+   "read_only": 1,
+   "fetch_if_empty": 0
   },
   {
    "fieldname": "registered_address_ward",
+   "fieldtype": "Link",
+   "label": "Xa/Phuong/Thi Tran",
+   "options": "ERP Ward"
+  },
+  {
+   "fetch_from": "registered_address_ward.ward_name",
+   "fieldname": "registered_address_ward_name",
    "fieldtype": "Data",
-   "label": "Xa/Phuong/Thi Tran"
+   "label": "Ten Xa/Phuong (ho khau)",
+   "read_only": 1,
+   "fetch_if_empty": 0
   },
   {
    "fieldname": "registered_address_street",
@@ -402,13 +424,31 @@
   },
   {
    "fieldname": "current_address_province",
+   "fieldtype": "Link",
+   "label": "Tinh/Thanh pho",
+   "options": "ERP Province"
+  },
+  {
+   "fetch_from": "current_address_province.province_name",
+   "fieldname": "current_address_province_name",
    "fieldtype": "Data",
-   "label": "Tinh/Thanh pho"
+   "label": "Ten Tinh/Thanh pho (noi o hien nay)",
+   "read_only": 1,
+   "fetch_if_empty": 0
   },
   {
    "fieldname": "current_address_ward",
+   "fieldtype": "Link",
+   "label": "Xa/Phuong/Thi Tran",
+   "options": "ERP Ward"
+  },
+  {
+   "fetch_from": "current_address_ward.ward_name",
+   "fieldname": "current_address_ward_name",
    "fieldtype": "Data",
-   "label": "Xa/Phuong/Thi Tran"
+   "label": "Ten Xa/Phuong (noi o hien nay)",
+   "read_only": 1,
+   "fetch_if_empty": 0
   },
   {
    "fieldname": "current_address_street",
