@@ -51,6 +51,10 @@ VALID_ISSUE_RESULTS = frozenset({"Hai long", "Chua hai long"})
 
 # Prefix co dinh cho ma van de (khong con theo Loai van de / CRM Issue Module.code)
 ISSUE_CODE_PREFIX = "VDC"
+
+# unit_code cua don vi Tuyen sinh - Care; PIC fallback ve Leader don vi nay
+# khi Loai van de chua cau hinh thanh vien.
+TS_CARE_UNIT_CODE = "TS-CARE"
 # Muc do hop le - them Khan cap (cao nhat)
 VALID_PRIORITIES = ("Khan cap", "Cao", "Trung binh", "Thap")
 # Nhom van de - team care dien truoc khi duyet
@@ -737,9 +741,49 @@ def _next_care_pic():
     return min(enabled, key=lambda u: counts.get(u, 0))
 
 
+def _module_member_users(issue_module: str):
+    """User (enabled) la thanh vien cua Loai van de (CRM Issue Module.members)."""
+    if not issue_module:
+        return []
+    rows = frappe.get_all(
+        "CRM Issue Module Member",
+        filters={"parent": issue_module, "parenttype": "CRM Issue Module"},
+        pluck="user",
+    )
+    seen, out = set(), []
+    for u in rows or []:
+        if u and u not in seen and frappe.db.get_value("User", u, "enabled"):
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def _least_loaded_pic(users):
+    """Trong danh sach user, chon nguoi dang giu it CRM Issue (pic) nhat."""
+    if not users:
+        return ""
+    counts = {u: frappe.db.count("CRM Issue", {"pic": u}) for u in users}
+    return min(users, key=lambda u: counts.get(u, 0))
+
+
+def _ts_care_leader():
+    """Fallback: Leader (enabled) cua don vi TS-CARE khi Loai van de chua cau hinh PIC."""
+    unit = frappe.db.get_value(ORG_UNIT_DOCTYPE, {"unit_code": TS_CARE_UNIT_CODE}, "name")
+    if not unit:
+        return ""
+    for u in _unit_leader_emails(unit) or []:
+        if u and frappe.db.get_value("User", u, "enabled"):
+            return u
+    return ""
+
+
 def _assign_pic_from_issue_context(doc):
-    """Gan PIC = thanh vien team care (round-robin it viec nhat). PIC khong con theo phong ban."""
-    doc.pic = _next_care_pic() or ""
+    """
+    Gan PIC theo Loai van de (issue_module): thanh vien cua loai do dang giu it CRM Issue nhat.
+    Neu Loai van de chua cau hinh thanh vien -> fallback Leader don vi TS-CARE.
+    """
+    members = _module_member_users(getattr(doc, "issue_module", None))
+    doc.pic = _least_loaded_pic(members) or _ts_care_leader() or ""
 
 
 def _sync_issue_students(doc, data):
