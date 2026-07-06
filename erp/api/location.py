@@ -16,13 +16,6 @@ from erp.utils.api_response import (
 from erp.utils import vn_location
 
 
-# Các cặp field địa chỉ trên CRM Lead cần migrate string -> Link.
-_CRM_LEAD_ADDRESS_PAIRS = [
-	("registered_address_province", "registered_address_ward"),
-	("current_address_province", "current_address_ward"),
-]
-
-
 # ---------------------------------------------------------------------------
 # Đọc danh mục (dropdown + trang cấu hình)
 # ---------------------------------------------------------------------------
@@ -259,121 +252,6 @@ def import_provinces(rows):
 	except Exception as e:
 		frappe.log_error(message=frappe.get_traceback(), title="import_provinces failed")
 		return error_response(str(e))
-
-
-@frappe.whitelist(allow_guest=False)
-def reconcile_crm_lead_addresses(commit=0, blank_unmatched=0, limit=None):
-	"""Migrate string -> Link cho địa chỉ CRM Lead (chạy SAU khi đã seed danh mục).
-
-	Đối chiếu chuỗi tự do hiện có trong các cột địa chỉ với ERP Province/ERP Ward:
-	  - Tỉnh khớp  -> ghi mã tỉnh + tên.
-	  - Xã khớp trong tỉnh đó -> ghi mã xã + tên.
-	Tham số:
-	  - commit=0 (mặc định): DRY-RUN, không ghi gì, chỉ trả về thống kê + mẫu chưa khớp.
-	  - commit=1: ghi giá trị đã khớp.
-	  - blank_unmatched=1: đồng thời xoá rỗng các giá trị KHÔNG khớp (dọn để tránh
-	    LinkValidationError khi lead được lưu về sau). Chỉ dùng ở lần dọn cuối.
-
-	An toàn: idempotent; giá trị đã là mã hợp lệ sẽ bỏ qua. KHÔNG đăng ký trong
-	patches.txt để tránh tự chạy trước khi danh mục được seed (sẽ xoá nhầm dữ liệu).
-	"""
-	do_commit = str(commit) in ("1", "true", "True")
-	do_blank = str(blank_unmatched) in ("1", "true", "True")
-	vn_location.clear_cache()
-
-	stats = {
-		"leads_scanned": 0,
-		"province_matched": 0,
-		"ward_matched": 0,
-		"province_unmatched": 0,
-		"ward_unmatched": 0,
-		"blanked": 0,
-	}
-	unmatched_samples = []
-
-	fields = ["name"]
-	for pf, wf in _CRM_LEAD_ADDRESS_PAIRS:
-		fields += [pf, wf]
-
-	leads = frappe.get_all(
-		"CRM Lead",
-		fields=fields,
-		limit_page_length=int(limit) if limit else 0,
-	)
-
-	for lead in leads:
-		stats["leads_scanned"] += 1
-		updates = {}
-		for pf, wf in _CRM_LEAD_ADDRESS_PAIRS:
-			raw_prov = (lead.get(pf) or "").strip()
-			raw_ward = (lead.get(wf) or "").strip()
-
-			prov_code = None
-			if raw_prov:
-				# đã là mã hợp lệ?
-				if frappe.db.exists("ERP Province", raw_prov):
-					prov_code = raw_prov
-				else:
-					prov_code = vn_location.resolve_province_code(raw_prov)
-				if prov_code:
-					stats["province_matched"] += 1
-					if prov_code != raw_prov:
-						updates[pf] = prov_code
-						updates[pf + "_name"] = frappe.db.get_value(
-							"ERP Province", prov_code, "province_name"
-						)
-				else:
-					stats["province_unmatched"] += 1
-					if len(unmatched_samples) < 100:
-						unmatched_samples.append(
-							{"lead": lead["name"], "field": pf, "value": raw_prov}
-						)
-					if do_blank:
-						updates[pf] = None
-						updates[pf + "_name"] = None
-						stats["blanked"] += 1
-
-			if raw_ward:
-				ward_code = None
-				if frappe.db.exists("ERP Ward", raw_ward):
-					ward_code = raw_ward
-				elif prov_code:
-					ward_code = vn_location.resolve_ward_code(raw_ward, prov_code)
-				if ward_code:
-					stats["ward_matched"] += 1
-					if ward_code != raw_ward:
-						updates[wf] = ward_code
-						updates[wf + "_name"] = frappe.db.get_value(
-							"ERP Ward", ward_code, "ward_name"
-						)
-				else:
-					stats["ward_unmatched"] += 1
-					if len(unmatched_samples) < 100:
-						unmatched_samples.append(
-							{"lead": lead["name"], "field": wf, "value": raw_ward}
-						)
-					if do_blank:
-						updates[wf] = None
-						updates[wf + "_name"] = None
-						stats["blanked"] += 1
-
-		if updates and do_commit:
-			frappe.db.set_value("CRM Lead", lead["name"], updates, update_modified=False)
-
-	if do_commit:
-		frappe.db.commit()
-
-	msg = (
-		("ĐÃ GHI. " if do_commit else "DRY-RUN (chưa ghi). ")
-		+ f"Tỉnh khớp {stats['province_matched']}/"
-		+ f"{stats['province_matched'] + stats['province_unmatched']}, "
-		+ f"Xã khớp {stats['ward_matched']}/"
-		+ f"{stats['ward_matched'] + stats['ward_unmatched']}."
-	)
-	return success_response(
-		{"stats": stats, "unmatched_samples": unmatched_samples},
-		message=msg,
-	)
 
 
 @frappe.whitelist(allow_guest=False)
