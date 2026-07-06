@@ -1338,7 +1338,7 @@ def get_source_funnel_detail():
 
     student_rows = frappe.db.sql(
         f"""
-        SELECT l.`name`, l.`student_name`, l.`dob`, l.`step`, l.`status`,
+        SELECT l.`name`, l.`student_name`, l.`student_dob` AS `dob`, l.`step`, l.`status`,
                l.`pic`, l.`target_grade`, l.`creation`
         FROM `tabCRM Lead` l
         INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
