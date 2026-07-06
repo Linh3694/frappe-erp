@@ -569,15 +569,14 @@ def _process_excel_file(job):
                     "message": "File contains only header row. Please add data starting from row 2."
                 }
 
-        # Row processing logic - handle both cases: with header and without header
-        if skipped_rows == 0:
-            # Already processed single data row case, df is ready
-            pass
-        else:
-            # Normal case: skip header only, dòng 2 trở đi là actual data
-            df = df.iloc[1:]  # Skip header row, start from row 2
+        # Row processing logic
+        # LƯU Ý: pd.read_excel đã dùng dòng 1 (Excel) làm header/tên cột, nên mọi dòng
+        # trong `df` đã là DỮ LIỆU thật (Excel row 2 trở đi). KHÔNG được skip thêm dòng
+        # nào nữa — trước đây `df.iloc[1:]` làm mất dòng data đầu tiên (vd lớp 1A1).
+        # Vẫn giữ skipped_rows = 1 để đánh số dòng lỗi khớp với Excel (1 dòng header +
+        # 1-indexing, xem _process_batch), nhưng không cắt bỏ dòng data nào.
+        if skipped_rows != 0:
             skipped_rows = 1
-            # Bỏ logic kiểm tra và skip sample data - coi dòng 2 là actual data luôn
 
         # Remove completely empty rows
         df = df.dropna(how='all')
