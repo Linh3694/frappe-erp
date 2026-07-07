@@ -659,6 +659,7 @@ def get_entrance_exam_activity_dashboard():
         f"""
         SELECT es.`name` AS student_row_id,
                es.`status` AS exam_status,
+               IFNULL(es.`exam_result`, '') AS exam_result,
                IFNULL(es.`ksdv_fee_paid`, 0) AS ksdv_fee_paid,
                es.`crm_lead_id`,
                e.`name` AS exam_id,
@@ -680,7 +681,7 @@ def get_entrance_exam_activity_dashboard():
         as_dict=True,
     )
 
-    by_grade_map: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"by_status": defaultdict(int), "total": 0, "ksdv_paid": 0, "tested": 0})
+    by_grade_map: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"by_status": defaultdict(int), "by_result": defaultdict(int), "total": 0, "ksdv_paid": 0, "tested": 0})
     conv_map: Dict[str, Dict[str, int]] = defaultdict(lambda: {"paid": 0, "enrolled": 0})
     week_exams: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
@@ -689,6 +690,7 @@ def get_entrance_exam_activity_dashboard():
         st = row.get("exam_status") or ""
         by_grade_map[grade]["total"] += 1
         by_grade_map[grade]["by_status"][st] += 1
+        by_grade_map[grade]["by_result"][row.get("exam_result") or ""] += 1
         if int(row.get("ksdv_fee_paid") or 0):
             by_grade_map[grade]["ksdv_paid"] += 1
             conv_map[grade]["paid"] += 1
@@ -728,6 +730,7 @@ def get_entrance_exam_activity_dashboard():
                 "target_grade": g,
                 "total": m["total"],
                 "by_status": dict(m["by_status"]),
+                "by_result": dict(m["by_result"]),
                 "ksdv_paid": m["ksdv_paid"],
                 "tested": m["tested"],
             }

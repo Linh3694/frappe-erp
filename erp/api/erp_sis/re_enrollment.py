@@ -2231,6 +2231,47 @@ def get_report_breakdown():
                 "sort_order": r.sort_order or 0,
             } for r in stage_rows]
 
+        # ----- (4) Theo PIC (CRM): join re → CRM Lead (linked_student = student_id),
+        # ưu tiên hồ sơ ở bước Enrolled. PIC lấy từ CRM Lead.pic (Link User). -----
+        pic_rows = frappe.db.sql(f"""
+            SELECT
+                COALESCE(t.pic, '') AS pic,
+                COUNT(*) AS total,
+                SUM(CASE WHEN t.decision = 're_enroll' THEN 1 ELSE 0 END) AS re_enroll,
+                SUM(CASE WHEN t.decision = 'not_re_enroll' THEN 1 ELSE 0 END) AS not_re_enroll,
+                SUM(CASE WHEN t.decision = 'considering' OR t.decision = '' OR t.decision IS NULL THEN 1 ELSE 0 END) AS considering
+            FROM (
+                SELECT
+                    re.decision AS decision,
+                    (SELECT l2.pic FROM `tabCRM Lead` l2
+                        WHERE l2.linked_student = re.student_id
+                        ORDER BY (l2.step = 'Enrolled') DESC, l2.modified DESC
+                        LIMIT 1) AS pic
+                FROM `tabSIS Re-enrollment` re
+                WHERE {where_clause}
+            ) t
+            GROUP BY t.pic
+            ORDER BY total DESC
+        """, values, as_dict=True)
+
+        pic_ids = [r.pic for r in pic_rows if r.pic]
+        pic_name_map = {}
+        if pic_ids:
+            for u in frappe.get_all(
+                "User", filters={"name": ["in", pic_ids]}, fields=["name", "full_name"]
+            ):
+                pic_name_map[u.name] = u.full_name or u.name
+
+        by_pic = [{
+            "pic": r.pic or "",
+            "pic_name": pic_name_map.get(r.pic, "") if r.pic else "",
+            "total": r.total or 0,
+            "re_enroll": r.re_enroll or 0,
+            "not_re_enroll": r.not_re_enroll or 0,
+            "considering": r.considering or 0,
+            "re_enroll_rate": _rate(r.re_enroll or 0, r.total or 0),
+        } for r in pic_rows]
+
         logs.append(f"Báo cáo breakdown cho config {config_id}")
         return success_response(
             data={
@@ -2238,6 +2279,7 @@ def get_report_breakdown():
                 "status_breakdown": status_breakdown,
                 "by_stage": by_stage,
                 "by_grade": by_grade,
+                "by_pic": by_pic,
             },
             message="Lấy báo cáo tái ghi danh thành công",
             logs=logs

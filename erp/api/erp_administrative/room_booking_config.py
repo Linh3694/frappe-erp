@@ -62,6 +62,11 @@ def _time_to_str(t):
 		return ""
 	if hasattr(t, "strftime"):
 		return t.strftime("%H:%M:%S")
+	# Frappe trả field Time dạng datetime.timedelta — str() ra "8:00:00" (thiếu zero-pad).
+	# Zero-pad để FE parse đúng (input type=time cần HH:MM 2 chữ số).
+	if hasattr(t, "total_seconds"):
+		total = int(t.total_seconds())
+		return f"{total // 3600:02d}:{(total % 3600) // 60:02d}:{total % 60:02d}"
 	return str(t)
 
 
