@@ -342,6 +342,17 @@ def _count_new_leads(date_from: Any, date_to: Any, args) -> int:
     )
 
 
+def _count_total_profiles(date_from: Any, date_to: Any, args) -> int:
+    """Tổng hồ sơ: mọi hồ sơ (CRM Lead) tạo trong kỳ, không phân biệt bước."""
+    wsql, binds = _where_creation_between(date_from, date_to, args)
+    return int(
+        frappe.db.sql(
+            f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {wsql}",
+            binds,
+        )[0][0]
+    )
+
+
 def _count_enrolled_events(date_from: Any, date_to: Any, args) -> int:
     """Distinct lead nhập học trong kỳ (history + fallback enrollment_date)."""
     dim_sql, dim_binds = _where_lead_dimensions_only(args)
@@ -508,6 +519,7 @@ def _count_qlead_events(date_from: Any, date_to: Any, args) -> int:
 
 
 def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
+    total_profiles = _count_total_profiles(date_from, date_to, args)
     total_leads = _count_new_leads(date_from, date_to, args)
     total_enrolled = _count_enrolled_events(date_from, date_to, args)
     total_lost = _count_lost_events(date_from, date_to, args)
@@ -521,6 +533,7 @@ def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
     count_qlead = _count_qlead_events(date_from, date_to, args)
 
     return {
+        "total_profiles": total_profiles,
         "total_leads": total_leads,
         "count_lead_interested": count_lead_interested,
         "count_qlead": count_qlead,
@@ -647,6 +660,7 @@ def get_overview_kpis():
         "prev_period_label": f"{pdf} — {pdt}",
     }
     changes = {
+        "total_profiles": _pct_change(curr["total_profiles"], prev["total_profiles"]),
         "total_leads": _pct_change(curr["total_leads"], prev["total_leads"]),
         "count_lead_interested": _pct_change(
             curr["count_lead_interested"], prev["count_lead_interested"]

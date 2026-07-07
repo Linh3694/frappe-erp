@@ -151,6 +151,7 @@ def _serialize_target_doc(doc) -> Dict[str, Any]:
         "total_lead_target": int(d.get("total_lead_target") or 0),
         "total_qlead_target": int(d.get("total_qlead_target") or 0),
         "total_lost_target": int(d.get("total_lost_target") or 0),
+        "total_existing_target": int(d.get("total_existing_target") or 0),
         "notes": d.get("notes") or "",
         "grade_targets": grade_targets,
         "member_targets": member_targets,
@@ -168,6 +169,7 @@ def _empty_config(campus_id: str, target_academic_year: str) -> Dict[str, Any]:
         "total_lead_target": 0,
         "total_qlead_target": 0,
         "total_lost_target": 0,
+        "total_existing_target": 0,
         "notes": "",
         "grade_targets": [],
         "member_targets": [],
@@ -232,7 +234,7 @@ def save_target_config():
 
         doc.notes = notes if notes is not None else doc.notes
         # Mục tiêu tổng theo chỉ số — nhập tay ở cấp phòng ban (không chia theo khối)
-        for field in ("total_profile_target", "total_lead_target", "total_qlead_target", "total_lost_target"):
+        for field in ("total_profile_target", "total_lead_target", "total_qlead_target", "total_lost_target", "total_existing_target"):
             if field in data:
                 doc.set(field, _non_negative_int(data.get(field)))
         # doc.set() để Frappe ghi đè child table đúng khi cập nhật bản ghi cũ

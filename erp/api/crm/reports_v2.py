@@ -1891,6 +1891,82 @@ def get_kpi_overview():
     )
 
 
+@frappe.whitelist()
+def get_enrollment_progress_gauge():
+    """Gauge tiến độ tuyển sinh toàn trường (nửa hình tròn).
+
+    - Học sinh hiện hữu (HSHH) = Học sinh chính thức = CRM Lead step='Enrolled'.
+    - Học sinh mới (HSM) = QLead có test_status='De xuat' (KSĐV = Đề xuất)
+      và deal_status IN ('Dat coc','Dong phi') (Thỏa thuận = Đặt cọc / Đóng phí).
+    - kpi_target = Mục tiêu Tổng học sinh hiện hữu (config CRM Admission Target).
+    - ratio = (HSHH + HSM) / kpi_target * 100.
+    Scope theo campus + năm học mục tiêu (snapshot).
+    """
+    check_crm_permission()
+    args = frappe.request.args or {}
+    campus_id = (args.get("campus_id") or "").strip()
+    target_academic_year = (args.get("target_academic_year") or "").strip()
+    restricted = r._should_restrict_to_own_pic_only()
+    pic_eff = r._effective_pic_from_request(args.get("pic")) if restricted else None
+
+    if not target_academic_year:
+        return success_response(
+            {
+                "hshh": 0,
+                "hsm": 0,
+                "kpi_target": 0,
+                "ratio": 0,
+                "meta": {"configured": False, "pic_restricted_to_self": restricted},
+            }
+        )
+
+    where = ["l.`target_academic_year` = %(tay)s"]
+    binds: Dict[str, Any] = {"tay": target_academic_year}
+    if campus_id:
+        where.append("l.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+    if pic_eff:
+        where.append("l.`pic` = %(pic)s")
+        binds["pic"] = pic_eff
+
+    row = frappe.db.sql(
+        f"""
+        SELECT
+            SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS hshh,
+            SUM(CASE WHEN l.`step` = 'QLead'
+                      AND l.`test_status` = 'De xuat'
+                      AND l.`deal_status` IN ('Dat coc', 'Dong phi')
+                     THEN 1 ELSE 0 END) AS hsm
+        FROM `tabCRM Lead` l
+        WHERE {" AND ".join(where)}
+        """,
+        binds,
+        as_dict=True,
+    )
+    d = row[0] if row else {}
+    hshh = int(d.get("hshh") or 0)
+    hsm = int(d.get("hsm") or 0)
+
+    target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
+    kpi_target = int(getattr(target_doc, "total_existing_target", 0) or 0) if target_doc else 0
+    ratio = round((hshh + hsm) / kpi_target * 100, 1) if kpi_target else 0
+
+    return success_response(
+        {
+            "hshh": hshh,
+            "hsm": hsm,
+            "kpi_target": kpi_target,
+            "ratio": ratio,
+            "meta": {
+                "configured": bool(target_doc),
+                "campus_id": campus_id or None,
+                "target_academic_year": target_academic_year,
+                "pic_restricted_to_self": restricted,
+            },
+        }
+    )
+
+
 # --------------------------------------------------------------------------- #
 # KPI — Phễu cá nhân theo kỳ (ngày tạo hồ sơ) — báo cáo riêng lẻ từng thành viên
 # --------------------------------------------------------------------------- #
