@@ -2563,6 +2563,7 @@ def get_enrolled_demographics():
         SELECT l.`name` AS name,
                IFNULL(TRIM(l.`student_gender`), '') AS student_gender,
                IFNULL(TRIM(l.`current_address_ward`), '') AS current_address_ward,
+               IFNULL(TRIM(l.`current_address_ward_name`), '') AS current_address_ward_name,
                IFNULL(TRIM(l.`target_grade`), '') AS target_grade,
                IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
                IFNULL(TRIM(l.`linked_student`), '') AS linked_student
@@ -2581,6 +2582,7 @@ def get_enrolled_demographics():
         lambda: {"male": 0, "female": 0, "unknown": 0, "total": 0}
     )
     ward_counts: Dict[str, int] = defaultdict(int)
+    ward_names: Dict[str, str] = {}
 
     for row in lead_rows:
         grade = row.get("grade") or "-"
@@ -2592,6 +2594,10 @@ def get_enrolled_demographics():
         ward_raw = (row.get("current_address_ward") or "").strip()
         ward_key = ward_raw if ward_raw else "(Chưa có)"
         ward_counts[ward_key] += 1
+        # Ưu tiên tên phường/xã (fetch từ ERP Ward) để hiển thị thay vì mã
+        ward_name = (row.get("current_address_ward_name") or "").strip()
+        if ward_name and ward_key not in ward_names:
+            ward_names[ward_key] = ward_name
 
     gender_by_grade = []
     for g in sorted(gender_by_grade_map.keys(), key=_grade_display_sort_key):
@@ -2607,7 +2613,7 @@ def get_enrolled_demographics():
         )
 
     by_ward = [
-        {"ward": ward, "count": count}
+        {"ward": ward, "ward_name": ward_names.get(ward, ""), "count": count}
         for ward, count in sorted(ward_counts.items(), key=lambda x: (-x[1], x[0].lower()))
     ]
 
