@@ -261,6 +261,51 @@ def get_class_chat_scope_for_teacher(class_id=None, school_year_id=None):
 
 
 @frappe.whitelist(allow_guest=False, methods=["POST"])
+def list_class_chat_sync_targets():
+    """
+    Danh sách (classId, schoolYearId) cho job sync membership của social-service.
+
+    Chỉ trả lớp thuộc năm học đang bật (`SIS School Year.is_enable = 1`) — job dùng danh
+    sách này để TẠO nhóm chat còn thiếu (lớp chưa từng có ai mở chat) và merge roster,
+    thay vì chỉ quét các nhóm đã tồn tại trong Mongo.
+    """
+    try:
+        frappe.only_for(("System Manager",))
+
+        enabled_years = frappe.get_all(
+            "SIS School Year",
+            filters={"is_enable": 1},
+            pluck="name",
+        )
+        if not enabled_years:
+            return success_response(data={"targets": []}, message="OK")
+
+        rows = frappe.get_all(
+            "SIS Class",
+            filters={"school_year_id": ["in", enabled_years]},
+            fields=["name", "school_year_id"],
+            ignore_permissions=True,
+            limit_page_length=0,
+        )
+        targets = [
+            {"classId": r.get("name"), "schoolYearId": r.get("school_year_id")}
+            for r in rows
+            if r.get("name") and r.get("school_year_id")
+        ]
+        return success_response(data={"targets": targets}, message="OK")
+    except frappe.PermissionError:
+        return error_response(message="Chỉ dành cho service account", code="ACCESS_DENIED")
+    except Exception as e:
+        frappe.logger().error(
+            f"[Chat Scope] list_class_chat_sync_targets error: {str(e)}"
+        )
+        return error_response(
+            message=_("Không thể liệt kê lớp cho sync chat"),
+            code="CLASS_CHAT_SYNC_TARGETS_ERROR",
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=["POST"])
 def get_class_chat_scope_for_sync(class_id=None, school_year_id=None):
     """
     Scope ĐẦY ĐỦ cho job sync membership của social-service.
