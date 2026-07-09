@@ -873,7 +873,28 @@ def update_class(class_id: str = None):
             frappe.db.set_value("SIS Class", class_id, "class_type", normalized_ct)
         
         frappe.db.commit()
-        
+
+        # Sync membership nhóm chat khi GVCN/phó GVCN đổi — API này ghi bằng db.set_value
+        # nên doc_events KHÔNG bắn, phải gọi hook trực tiếp.
+        try:
+            homeroom_changed = (
+                "homeroom_teacher" in update_data
+                and (update_data.get("homeroom_teacher") or "") != (existing_doc.homeroom_teacher or "")
+            ) or (
+                "vice_homeroom_teacher" in update_data
+                and (update_data.get("vice_homeroom_teacher") or "") != (existing_doc.vice_homeroom_teacher or "")
+            )
+            if homeroom_changed:
+                from erp.api.erp_sis.chat_membership_hooks import enqueue_chat_membership_sync
+                enqueue_chat_membership_sync(
+                    class_id,
+                    update_data.get("school_year_id") or existing_doc.school_year_id,
+                )
+        except Exception as chat_sync_err:
+            frappe.logger().warning(
+                f"[Chat Membership Hook] update_class enqueue failed {class_id}: {str(chat_sync_err)}"
+            )
+
         # ⚡ CLEAR CACHE: Invalidate teacher classes cache after class update
         cache_result = clear_teacher_dashboard_cache()
         
