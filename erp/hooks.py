@@ -535,10 +535,23 @@ doc_events = {
 		"after_insert": "erp.api.parent_portal.realtime_notification.on_notification_created"
 	},
 	# Cache Invalidation Hooks for Subject Assignment & Timetable
+	# (+ sync membership nhóm chat social-service khi phân công giảng dạy đổi)
 	"SIS Subject Assignment": {
-		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
-		"on_update": "erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
-		"after_delete": "erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change"
+		"after_insert": [
+			"erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
+			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
+		],
+		"on_update": [
+			"erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
+			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
+		],
+		"after_delete": [
+			"erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
+			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
+		],
+		"on_trash": [
+			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
+		]
 	},
 	"SIS Subject": {
 		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_subject_change",
@@ -622,12 +635,14 @@ doc_events = {
 	},
 	"SIS Class": {
 		"after_insert": [
-			"erp.observability.audit.log_create"
+			"erp.observability.audit.log_create",
+			"erp.api.erp_sis.chat_membership_hooks.on_sis_class_change"
 		],
 		"on_update": [
 			"erp.api.erp_administrative.room.sync_class_room_assignment",
 			"erp.api.erp_administrative.room.sync_class_homeroom_teachers_to_room_pic",
-			"erp.observability.audit.log_update"
+			"erp.observability.audit.log_update",
+			"erp.api.erp_sis.chat_membership_hooks.on_sis_class_change"
 		],
 		"on_trash": [
 			"erp.observability.audit.log_delete"
