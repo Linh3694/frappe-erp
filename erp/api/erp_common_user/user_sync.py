@@ -58,7 +58,26 @@ def get_all_enabled_users():
             fields=fields_to_query,
             order_by="name asc"
         )
-        
+
+        # Gắn roles (child table Has Role — frappe.get_all trên User không lấy được):
+        # thiếu roles thì social-service sẽ ghi đè roles=[] trong Mongo mỗi lần cron sync,
+        # làm mất quyền (vd SIS BOD) đã gán. Query 1 lần rồi group theo parent.
+        try:
+            role_rows = frappe.get_all(
+                "Has Role",
+                filters={"parenttype": "User"},
+                fields=["parent", "role"],
+                limit_page_length=0,
+            )
+            roles_by_user = {}
+            for row in role_rows:
+                if row.get("parent") and row.get("role"):
+                    roles_by_user.setdefault(row["parent"], []).append(row["role"])
+            for user in users:
+                user["roles"] = roles_by_user.get(user.get("name"), [])
+        except Exception as e:
+            frappe.logger().error(f"[User Sync] Failed to attach roles: {str(e)}")
+
         # Count by user type
         user_type_stats = {
             'System User': 0,
