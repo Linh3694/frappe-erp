@@ -1345,6 +1345,35 @@ def _hc_ticket_payload(doc, action, extra=None):
     return d
 
 
+def _hc_create_inapp_notification(recipient_user, title, body, data, ref_name):
+    """Tạo bản ghi ERP Notification (trung tâm thông báo web/in-app).
+
+    Nhánh stream (`emit_notify_hc_unified`) chỉ gửi push + email nên web không có
+    thông báo. Hook after_insert của ERP Notification chỉ bắn realtime + unread,
+    KHÔNG gửi push → không trùng push do notification-service gửi.
+    """
+    if not recipient_user:
+        return
+    try:
+        from erp.common.doctype.erp_notification.erp_notification import create_notification
+
+        create_notification(
+            title,
+            body,
+            recipient_user=recipient_user,
+            notification_type="ticket",
+            data=data,
+            reference_doctype=DOCTYPE,
+            reference_name=ref_name,
+        )
+    except Exception as ex:
+        frappe.logger().error(
+            "administrative_ticket: tạo ERP Notification (web) thất bại %s: %s",
+            recipient_user,
+            ex,
+        )
+
+
 def _hc_send_persisted(
     recipient_email,
     title,
@@ -1419,6 +1448,8 @@ def _hc_send_persisted(
             frappe.logger().error(
                 "administrative_ticket: HC stream notify failed %s: %s", em_deliver, ex_unified
             )
+        # Stream chỉ gửi push (+email) → tự tạo ERP Notification để web/in-app có thông báo.
+        _hc_create_inapp_notification(rid, title, body, data, ref_name)
         return
 
     try:
