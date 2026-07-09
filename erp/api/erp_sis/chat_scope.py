@@ -265,9 +265,10 @@ def list_class_chat_sync_targets():
     """
     Danh sách (classId, schoolYearId) cho job sync membership của social-service.
 
-    Chỉ trả lớp thuộc năm học đang bật (`SIS School Year.is_enable = 1`) — job dùng danh
-    sách này để TẠO nhóm chat còn thiếu (lớp chưa từng có ai mở chat) và merge roster,
-    thay vì chỉ quét các nhóm đã tồn tại trong Mongo.
+    Chỉ trả lớp CHÍNH QUY (`class_type = regular`) thuộc năm học đang bật
+    (`SIS School Year.is_enable = 1`) — job dùng danh sách này để TẠO nhóm chat còn thiếu
+    (lớp chưa từng có ai mở chat) và merge roster, thay vì chỉ quét các nhóm đã tồn tại
+    trong Mongo. Lớp mixed/club không auto-tạo nhóm (khớp isRegularScope ở read-path).
     """
     try:
         frappe.only_for(("System Manager",))
@@ -282,7 +283,10 @@ def list_class_chat_sync_targets():
 
         rows = frappe.get_all(
             "SIS Class",
-            filters={"school_year_id": ["in", enabled_years]},
+            filters={
+                "school_year_id": ["in", enabled_years],
+                "class_type": "regular",
+            },
             fields=["name", "school_year_id"],
             ignore_permissions=True,
             limit_page_length=0,
