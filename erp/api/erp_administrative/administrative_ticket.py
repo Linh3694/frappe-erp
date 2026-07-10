@@ -1031,80 +1031,6 @@ def _hc_post_ticket_email(payload):
         frappe.logger().error(f"administrative_ticket: email request failed: {ex}")
 
 
-def _notify_new_admin_ticket_mobile(doc):
-    """
-    Push Expo cho PIC + team leader hạng mục (luôn gộp, dedupe) khi có ticket HC mới.
-    Payload: type=ticket + action=new_ticket_admin → kênh ticket (như Ticket IT).
-    """
-    # Đã gửi push+email qua notification-service trong _hc_notify_new_ticket_via_stream — tránh trùng.
-    if _hc_via_notification_service():
-        return
-    try:
-        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
-    except Exception as e:
-        frappe.logger().warning(f"administrative_ticket: không import send_mobile_notification_persisted: {e}")
-        return
-
-    creator = (doc.creator_email or "").strip()
-    recipient_keys = _hc_new_ticket_recipient_user_keys(doc)
-    code = (doc.ticket_code or doc.name or "").strip()
-    t = (doc.title or "").strip() or code
-    cat = _hc_category_label(doc) or (getattr(doc, "category", None) or "")
-    # Copy mobile mới: [Danh mục] • #MãTicket: Tiêu đề
-    body = _("[{0}] • {1}: {2}").format(cat, f"#{code}", t) if cat else _("{0}: {1}").format(f"#{code}", t)
-    title = _("Có ticket mới cần xử lý")
-    data = _hc_ticket_payload(doc, "new_ticket_admin")
-
-    seen = set()
-    for user_key in recipient_keys:
-        if not user_key or user_key in seen:
-            continue
-        if _hc_is_same_user_as_email(user_key, creator):
-            continue
-        seen.add(user_key)
-        try:
-            send_mobile_notification_persisted(
-                user_key,
-                title,
-                body,
-                data,
-                erp_notification_type="ticket",
-                reference_doctype=DOCTYPE,
-                reference_name=doc.name,
-            )
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: push failed {user_key}: {ex}")
-
-    # Tuỳ chọn: xác nhận đã gửi tới chính người tạo (bật qua site_config)
-    if _hc_administrative_confirm_creator_push_enabled() and creator:
-        uid = frappe.db.get_value("User", {"email": creator}, "name")
-        if uid:
-            title_c = _("Gửi ticket thành công")
-            body_c = _("Ticket {0} đã được gửi. Bộ phận Hành chính sẽ phản hồi bạn trong thời gian sớm nhất.").format(
-                f"#{code}"
-            )
-            data_c = {
-                "type": "new_ticket",
-                "action": "new_ticket",
-                "ticket_kind": "administrative",
-                "ticketId": doc.name,
-                "ticket_id": doc.name,
-                "ticketCode": code,
-            }
-            try:
-                send_mobile_notification_persisted(
-                    uid,
-                    title_c,
-                    body_c,
-                    data_c,
-                    erp_notification_type="ticket",
-                    reference_doctype=DOCTYPE,
-                    reference_name=doc.name,
-                )
-            except Exception as ex:
-                frappe.logger().error(f"administrative_ticket: push creator confirm failed {uid}: {ex}")
-
-
 def _hc_user_email(user_id):
     """Lấy email User (name có thể trùng email đăng nhập)."""
     if not user_id:
@@ -1297,31 +1223,14 @@ def _hc_notify_new_ticket_via_stream(doc):
 
 
 def _hc_send_emails_on_ticket_create(doc):
-    """Xác nhận cho người tạo + thông báo ticket mới cho PIC/leader (cùng logic push)."""
-    if _hc_via_notification_service():
-        _hc_notify_new_ticket_via_stream(doc)
-        return
-    creator = (doc.creator_email or "").strip()
-    if creator:
-        try:
-            _hc_send_ticket_email(doc, "ticket_creation_confirmation", creator, {})
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: email create confirm {ex}")
+    """Ticket HC mới: luôn push + email + inbox qua notification-service (đồng bộ luồng IT).
 
-    # Cùng logic push: PIC + team leader, dedupe theo email
-    seen = set()
-    for user_key in _hc_new_ticket_recipient_user_keys(doc):
-        em = _hc_user_email(user_key)
-        em = (em or "").strip()
-        if not em or em in seen:
-            continue
-        if (creator or "").strip() and (em or "").lower() == (creator or "").strip().lower():
-            continue
-        seen.add(em)
-        try:
-            _hc_send_ticket_email(doc, "new_ticket", em, {})
-        except Exception as ex:
-            frappe.logger().error(f"administrative_ticket: email new ticket {em}: {ex}")
+    Trước đây chỉ đẩy stream khi bật cờ MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY; cờ tắt thì chỉ
+    gửi email → danh sách Thông báo web/mobile in-app (đọc từ notification-service) không có
+    thông báo "ticket mới". Nay luôn qua stream để cả web lẫn in-app mobile đều nhận; push do
+    notification-service phát (thay Expo trực tiếp) nên không trùng.
+    """
+    _hc_notify_new_ticket_via_stream(doc)
 
 
 def _hc_ticket_payload(doc, action, extra=None):
@@ -1413,70 +1322,46 @@ def _hc_send_persisted(
 
     ref_name = (doc.name if doc else None) or (data.get("ticketId") or data.get("ticket_id"))
 
-    if _hc_via_notification_service():
-        try:
-            from erp.common.notification_emit import emit_notify_hc_unified
-        except Exception:
-            frappe.logger().error(
-                "administrative_ticket: import emit_notify_hc_unified failed", exc_info=True
-            )
-            return
-        ch = str(frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications")
-        ep = None
-        if doc and email_event_type and _hc_administrative_ticket_email_enabled():
-            ep = _hc_build_email_service_payload(
-                doc, email_event_type, em_deliver, email_extra or {}
-            )
-        try:
-            if not emit_notify_hc_unified(
-                ch,
-                em_deliver,
-                title,
-                body,
-                data,
-                ep,
-                stream_notification_type,
-                reference_doctype=DOCTYPE,
-                reference_name=ref_name,
-            ):
-                frappe.logger().warning(
-                    "administrative_ticket: emit_notify_hc_unified false — %s / %s",
-                    em_deliver,
-                    stream_notification_type,
-                )
-        except Exception as ex_unified:
-            frappe.logger().error(
-                "administrative_ticket: HC stream notify failed %s: %s", em_deliver, ex_unified
-            )
-        # Stream chỉ gửi push (+email) → tự tạo ERP Notification để web/in-app có thông báo.
-        _hc_create_inapp_notification(rid, title, body, data, ref_name)
-        return
-
+    # Luôn đẩy lên notification-service (Redis stream) — đồng bộ với luồng ticket IT
+    # (_emit_it_unified) vốn publish vô điều kiện. Nhờ vậy cả web (notification inbox mà
+    # useNotifications đọc) lẫn mobile (push do notification-service phát) đều nhận được.
+    # Bỏ nhánh legacy Expo trực tiếp ⇒ tránh trùng push mobile khi đã publish qua stream.
     try:
-        from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
-
-        tid = data.get("ticketId") or data.get("ticket_id")
-        send_mobile_notification_persisted(
-            rid,
+        from erp.common.notification_emit import emit_notify_hc_unified
+    except Exception:
+        frappe.logger().error(
+            "administrative_ticket: import emit_notify_hc_unified failed", exc_info=True
+        )
+        return
+    ch = str(frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications")
+    ep = None
+    if doc and email_event_type and _hc_administrative_ticket_email_enabled():
+        ep = _hc_build_email_service_payload(
+            doc, email_event_type, em_deliver, email_extra or {}
+        )
+    try:
+        if not emit_notify_hc_unified(
+            ch,
+            em_deliver,
             title,
             body,
             data,
-            erp_notification_type="ticket",
+            ep,
+            stream_notification_type,
             reference_doctype=DOCTYPE,
-            reference_name=tid,
-        )
-    except Exception as ex:
-        frappe.logger().error(f"administrative_ticket: HC notify failed {rid}: {ex}")
-    if doc and email_event_type and _hc_administrative_ticket_email_enabled():
-        try:
-            _hc_send_ticket_email(doc, email_event_type, em_deliver, email_extra or {})
-        except Exception as ex_mail:
-            frappe.logger().error(
-                "administrative_ticket: email kèm persisted %s %s: %s",
-                email_event_type,
+            reference_name=ref_name,
+        ):
+            frappe.logger().warning(
+                "administrative_ticket: emit_notify_hc_unified false — %s / %s",
                 em_deliver,
-                ex_mail,
+                stream_notification_type,
             )
+    except Exception as ex_unified:
+        frappe.logger().error(
+            "administrative_ticket: HC stream notify failed %s: %s", em_deliver, ex_unified
+        )
+    # Stream chỉ gửi push (+email) → tự tạo ERP Notification để web/in-app có thông báo.
+    _hc_create_inapp_notification(rid, title, body, data, ref_name)
 
 
 def _notify_hc_user_reply(doc, sender_email, message_snippet: str = ""):
@@ -2651,11 +2536,9 @@ def create_ticket():
             except Exception:
                 frappe.log_error(frappe.get_traceback(), "administrative_ticket.create_ticket.room_booking")
 
-        try:
-            _notify_new_admin_ticket_mobile(frappe.get_doc(DOCTYPE, doc.name))
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), "administrative_ticket._notify_new_admin_ticket_mobile")
-
+        # Thông báo ticket HC mới (push + email + inbox web/mobile) đi qua notification-service
+        # trong _hc_send_emails_on_ticket_create → _hc_notify_new_ticket_via_stream. Không còn
+        # gọi _notify_new_admin_ticket_mobile (Expo trực tiếp) để tránh trùng push mobile.
         try:
             _hc_send_emails_on_ticket_create(frappe.get_doc(DOCTYPE, doc.name))
         except Exception:
