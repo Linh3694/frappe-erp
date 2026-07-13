@@ -1,0 +1,33 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2024-01-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "target_grade"
+ ],
+ "fields": [
+  {
+   "fieldname": "target_grade",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Lop du tuyen",
+   "options": "\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2024-01-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Crm",
+ "name": "CRM Sales Care Member Grade",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

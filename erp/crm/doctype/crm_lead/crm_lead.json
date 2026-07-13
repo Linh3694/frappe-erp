@@ -43,6 +43,7 @@
   "target_grade",
   "cb_student_2",
   "current_school",
+  "study_program",
   "student_note",
   "cb_student_3",
   "student_place_of_birth",
@@ -296,6 +297,12 @@
    "fieldname": "current_school",
    "fieldtype": "Small Text",
    "label": "Trường đang học"
+  },
+  {
+   "fieldname": "study_program",
+   "fieldtype": "Select",
+   "label": "Hệ học",
+   "options": "\nSong bằng\nSong ngữ\nAP\nTài năng"
   },
   {
    "fieldname": "student_note",

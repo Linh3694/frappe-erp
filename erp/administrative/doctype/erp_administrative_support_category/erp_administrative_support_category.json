@@ -9,6 +9,7 @@
  "engine": "InnoDB",
  "field_order": [
   "title",
+  "title_en",
   "ticket_code_prefix",
   "team_leaders"
  ],
@@ -20,6 +21,13 @@
    "label": "T\u00ean danh m\u1ee5c",
    "reqd": 1,
    "unique": 1
+  },
+  {
+   "description": "T\u00ean danh m\u1ee5c hi\u1ec3n th\u1ecb khi giao di\u1ec7n \u1edf ti\u1ebfng Anh. \u0110\u1ec3 tr\u1ed1ng th\u00ec d\u00f9ng t\u00ean ti\u1ebfng Vi\u1ec7t.",
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "T\u00ean danh m\u1ee5c (EN)"
   },
   {
    "description": "D\u00f9ng t\u1ea1o m\u00e3 ticket: PREFIX-0001 (VD: KT \u2192 KT-0001). \u0110\u1ec3 tr\u1ed1ng th\u00ec d\u00f9ng HC-TKT.",

@@ -97,6 +97,41 @@ def _get_active_sis_sales_care_user_names():
     return [r[0] for r in rows] if rows else []
 
 
+def _get_active_users_with_role(role):
+    """Danh sach User (name) co role chi dinh va enabled=1."""
+    rows = frappe.db.sql(
+        """
+        SELECT u.name FROM `tabUser` u
+        INNER JOIN `tabHas Role` r ON r.parent = u.name AND r.parenttype = 'User'
+        WHERE r.role = %s AND IFNULL(u.enabled, 0) = 1
+        ORDER BY u.name
+        """,
+        (role,),
+    )
+    return [r[0] for r in rows] if rows else []
+
+
+def _get_lead_receiver_user_names():
+    """Nhom user nhan lead cho auto-assign.
+
+    Nguon chinh: bang cau hinh CRM Sales Team Member (is_active=1) — chi user con enabled.
+    Fallback khi bang rong (chua cau hinh): user co role SIS Sales Admin va enabled=1.
+    """
+    rows = frappe.db.sql(
+        """
+        SELECT m.user FROM `tabCRM Sales Team Member` m
+        INNER JOIN `tabUser` u ON u.name = m.user
+        WHERE IFNULL(m.is_active, 0) = 1 AND IFNULL(u.enabled, 0) = 1
+        ORDER BY m.user
+        """
+    )
+    users = [r[0] for r in rows] if rows else []
+    if users:
+        return users
+    # Chua cau hinh nhom nhan lead -> fallback ve SIS Sales Admin
+    return _get_active_users_with_role("SIS Sales Admin")
+
+
 def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     """
     Gan PIC mac dinh: user SIS Sales dang dam nhan it ho so CRM Lead nhat (can bang tai / least-loaded).
@@ -107,7 +142,7 @@ def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     if existing:
         return None
 
-    users = _get_active_sis_sales_user_names()
+    users = _get_lead_receiver_user_names()
     if not users:
         return None
 
@@ -125,12 +160,45 @@ def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     return chosen
 
 
+def _get_sales_care_users_for_grade(target_grade):
+    """Nhom user cham soc cho auto-assign theo Lop du tuyen.
+
+    Nguon chinh: CRM Sales Care Member (is_active=1, User enabled) co bang con
+    target_grades chua dung lop du tuyen cua ho so.
+    Fallback (khong cau hinh / khong ai phu trach lop nay / ho so thieu lop):
+      user co role SIS Sales Care Admin va enabled=1.
+    """
+    grade = (str(target_grade).strip() if target_grade is not None else "")
+    if grade:
+        rows = frappe.db.sql(
+            """
+            SELECT DISTINCT m.user
+            FROM `tabCRM Sales Care Member` m
+            INNER JOIN `tabUser` u ON u.name = m.user
+            INNER JOIN `tabCRM Sales Care Member Grade` g
+                ON g.parent = m.name AND g.parenttype = 'CRM Sales Care Member'
+            WHERE IFNULL(m.is_active, 0) = 1 AND IFNULL(u.enabled, 0) = 1
+              AND g.target_grade = %s
+            ORDER BY m.user
+            """,
+            (grade,),
+        )
+        users = [r[0] for r in rows] if rows else []
+        if users:
+            return users
+    # Chua cau hinh / khong ai phu trach lop nay -> fallback SIS Sales Care Admin
+    return _get_active_users_with_role("SIS Sales Care Admin")
+
+
 def assign_pic_sales_care_weight_balance(lead_name, campus_id=None):
     """
-    Khi QLead -> Enrolled: chon PIC team cham soc — user SIS Sales Care dam nhan it ho so nhat.
+    Khi QLead -> Enrolled: chon PIC team cham soc theo Lop du tuyen cua ho so —
+    trong nhom phu trach lop do, chon user dam nhan it ho so nhat (can bang tai).
+    Chua cau hinh / khong ai phu trach -> fallback SIS Sales Care Admin.
     Tra ve email hoac None. Goi doc.pic = pic roi save, khong ghi DB trong ham (tranh TimestampMismatch).
     """
-    users = _get_active_sis_sales_care_user_names()
+    target_grade = frappe.db.get_value("CRM Lead", lead_name, "target_grade")
+    users = _get_sales_care_users_for_grade(target_grade)
     if not users:
         return None
 

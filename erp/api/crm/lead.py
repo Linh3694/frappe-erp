@@ -537,7 +537,7 @@ def create_lead():
         simple_fields = [
             "data_source", "staff_code", "pic", "campus_id",
             "student_name", "student_gender", "student_dob", "student_personal_id_number", "student_code",
-            "current_grade", "target_grade", "current_school", "student_note",
+            "current_grade", "target_grade", "current_school", "study_program", "student_note",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note",
@@ -859,7 +859,7 @@ def update_lead():
         updatable_fields = [
             "data_source", "staff_code", "pic", "campus_id",
             "student_name", "student_gender", "student_dob", "student_personal_id_number", "student_code",
-            "current_grade", "target_grade", "current_school", "student_note",
+            "current_grade", "target_grade", "current_school", "study_program", "student_note",
             "student_place_of_birth", "student_nationality", "student_ethnicity", "student_religion",
             "student_health_insurance_card", "student_initial_medical_registration",
             "student_health_notes", "student_food_allergy", "student_medical_history",

@@ -374,6 +374,7 @@ def _ensure_event_facility_support_category():
         {
             "doctype": "ERP Administrative Support Category",
             "title": "Yêu cầu cơ sở vật chất cho sự kiện",
+            "title_en": "Facility request for events",
             "ticket_code_prefix": "EVT",
         }
     )
@@ -494,10 +495,19 @@ def _user_dict(user_id):
 def _ticket_to_dict(doc, include_feedback=True):
     """Chuyển ERP Administrative Ticket -> payload frontend (tương thích IT ticket)."""
     cat_label = ""
+    cat_label_en = ""
     if doc.category:
-        cat_label = frappe.db.get_value(
-            "ERP Administrative Support Category", doc.category, "title"
-        ) or doc.category
+        cat_row = frappe.db.get_value(
+            "ERP Administrative Support Category",
+            doc.category,
+            ["title", "title_en"],
+            as_dict=True,
+        )
+        if cat_row:
+            cat_label = cat_row.get("title") or doc.category
+            cat_label_en = (cat_row.get("title_en") or "").strip()
+        else:
+            cat_label = doc.category
 
     creator = {
         "fullname": doc.creator_fullname or "",
@@ -697,6 +707,7 @@ def _ticket_to_dict(doc, include_feedback=True):
         "priority": doc.priority or "Medium",
         "category": doc.category,
         "category_label": cat_label,
+        "category_label_en": cat_label_en,
         "notes": doc.notes or "",
         "cancellationReason": doc.cancellation_reason or "",
         "creator": creator,
@@ -1863,13 +1874,14 @@ def get_ticket_categories():
         _ensure_event_facility_support_category()
         rows = frappe.get_all(
             "ERP Administrative Support Category",
-            fields=["name", "title", "ticket_code_prefix"],
+            fields=["name", "title", "title_en", "ticket_code_prefix"],
             order_by="title asc",
         )
         out = [
             {
                 "value": r.name,
                 "label": r.title,
+                "label_en": (r.title_en or "").strip(),
                 "ticket_code_prefix": (r.ticket_code_prefix or "").strip(),
             }
             for r in rows

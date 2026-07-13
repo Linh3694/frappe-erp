@@ -1,45 +1,46 @@
 {
  "actions": [],
- "autoname": "field:school_name",
+ "autoname": "field:user",
  "creation": "2024-01-01 00:00:00.000000",
- "description": "CRM School - Truong hoc",
+ "description": "CRM Sales Care Member - Nguoi cham soc (auto-assign QLead->Enrolled theo lop du tuyen)",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "school_name",
-  "school_group",
-  "address"
+  "user",
+  "is_active",
+  "target_grades"
  ],
  "fields": [
   {
-   "fieldname": "school_name",
-   "fieldtype": "Data",
+   "fieldname": "user",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Tên trường",
+   "label": "User",
+   "options": "User",
    "reqd": 1,
    "unique": 1
   },
   {
-   "fieldname": "school_group",
-   "fieldtype": "Select",
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "Nhóm trường",
-   "options": "Song ngữ liên cấp\nQuốc tế hoàn toàn\nTrường công lập\nChất lượng cao tư thục\nDu học/Định cư\nTrường bán công\nChuyên",
-   "reqd": 0
+   "label": "Active"
   },
   {
-   "fieldname": "address",
-   "fieldtype": "Data",
-   "label": "Address"
+   "fieldname": "target_grades",
+   "fieldtype": "Table",
+   "label": "Lop du tuyen phu trach",
+   "options": "CRM Sales Care Member Grade"
   }
  ],
- "index_web_pages_for_search": 1,
+ "index_web_pages_for_search": 0,
  "istable": 0,
  "links": [],
  "modified": "2024-01-01 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Crm",
- "name": "CRM School",
+ "name": "CRM Sales Care Member",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
@@ -58,9 +59,6 @@
   {
    "create": 1,
    "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
    "read": 1,
    "report": 1,
    "role": "SIS Manager",
@@ -69,17 +67,15 @@
   },
   {
    "create": 1,
+   "delete": 1,
    "read": 1,
-   "role": "Registrar",
+   "report": 1,
+   "role": "SIS Sales Care Admin",
+   "share": 1,
    "write": 1
-  },
-  {
-   "read": 1,
-   "role": "SIS Sales"
   }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "title_field": "school_name"
+ "states": []
 }

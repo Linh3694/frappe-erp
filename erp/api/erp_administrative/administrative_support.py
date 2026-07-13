@@ -64,6 +64,7 @@ def _support_category_to_dict(doc):
     return {
         "name": doc.name,
         "title": doc.title,
+        "title_en": (doc.title_en or "").strip(),
         "ticket_code_prefix": (doc.ticket_code_prefix or "").strip(),
         "team_leaders": leaders,
     }
@@ -206,13 +207,14 @@ def get_all_support_categories():
         _ensure_event_facility_support_category()
         rows = frappe.get_all(
             "ERP Administrative Support Category",
-            fields=["name", "title", "ticket_code_prefix"],
+            fields=["name", "title", "title_en", "ticket_code_prefix"],
             order_by="title asc",
         )
         out = [
             {
                 "name": r.name,
                 "title": r.title,
+                "title_en": (r.title_en or "").strip(),
                 "ticket_code_prefix": (r.ticket_code_prefix or "").strip(),
                 "team_leaders": [],
             }
@@ -246,6 +248,7 @@ def create_support_category():
     try:
         data = _parse_json_body()
         title = (data.get("title") or "").strip()
+        title_en = (data.get("title_en") or data.get("titleEn") or "").strip()
         prefix = (data.get("ticket_code_prefix") or data.get("ticketCodePrefix") or "").strip()
         if not title:
             return validation_error_response(_("Thiếu tên danh mục"), {"title": ["required"]})
@@ -256,6 +259,7 @@ def create_support_category():
             {
                 "doctype": "ERP Administrative Support Category",
                 "title": title,
+                "title_en": title_en or None,
                 "ticket_code_prefix": prefix or None,
                 "team_leaders": [{"user": u} for u in team_ids],
             }
@@ -284,6 +288,8 @@ def update_support_category():
                 if frappe.db.exists("ERP Administrative Support Category", {"title": new_title}):
                     return validation_error_response(_("Tên danh mục đã tồn tại"), {"title": ["duplicate"]})
             doc.title = new_title
+        if "title_en" in data or "titleEn" in data:
+            doc.title_en = (data.get("title_en") or data.get("titleEn") or "").strip() or None
         if "ticket_code_prefix" in data or "ticketCodePrefix" in data:
             p = (data.get("ticket_code_prefix") or data.get("ticketCodePrefix") or "").strip()
             doc.ticket_code_prefix = p or None

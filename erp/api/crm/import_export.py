@@ -35,6 +35,7 @@ _EXPORT_BULK_LEAD_FIELDS = [
     "student_dob",
     "current_grade",
     "current_school",
+    "study_program",
     "target_grade",
     "target_academic_year",
     "student_place_of_birth",
@@ -151,12 +152,29 @@ def _normalize_dob_string(s):
     return s
 
 
+def _normalize_gender_string(raw):
+    """Chuan hoa cot Gioi tinh Excel -> gia tri Select CRM Lead (Nam / Nu).
+
+    Chap nhan Nam/Nu (co hoac khong dau), Male/Female, M/F. Khong khop -> giu nguyen.
+    """
+    s = (str(raw) if raw is not None else "").strip().lower()
+    if not s:
+        return None
+    if s in ("nam", "male", "m", "boy"):
+        return "Nam"
+    if s in ("nu", "nữ", "female", "f", "girl"):
+        return "Nu"
+    return str(raw).strip()
+
+
 def _parse_bulk_cell(field, raw):
     """Chuan hoa gia tri tu Excel / JSON."""
     if raw is None:
         return None
     if isinstance(raw, str) and not raw.strip():
         return None
+    if field == "student_gender":
+        return _normalize_gender_string(raw)
     if field in _BULK_FLOAT_FIELDS:
         try:
             return float(raw)
