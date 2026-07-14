@@ -555,6 +555,22 @@ def _get_event_student_summary(event_id):
     return {"total": total, "registered": registered, "attended": attended, "not_attended": not_attended}
 
 
+def _get_lead_main_source(crm_lead_id):
+    """Nguồn 1 (nguồn chính): source của dòng đầu bảng con CRM Lead Source."""
+    if not crm_lead_id:
+        return ""
+    rows = frappe.get_all(
+        "CRM Lead Source",
+        filters={"parent": crm_lead_id, "parenttype": "CRM Lead"},
+        fields=["source"],
+        order_by="idx asc",
+        limit_page_length=1,
+    )
+    if rows:
+        return rows[0].get("source") or ""
+    return ""
+
+
 @frappe.whitelist()
 def get_event_students():
     """Lấy danh sách học sinh trong sự kiện"""
@@ -610,17 +626,26 @@ def get_event_students():
         lead = frappe.db.get_value(
             "CRM Lead",
             item["crm_lead_id"],
-            ["crm_code", "student_name", "student_dob"],
+            ["crm_code", "student_name", "student_dob", "student_code", "target_grade", "status"],
             as_dict=True,
         )
         if lead:
             item["crm_code"] = lead.get("crm_code") or item["crm_lead_id"]
             item["student_name"] = lead.get("student_name") or "-"
             item["student_dob"] = lead.get("student_dob")
+            item["student_code"] = lead.get("student_code") or ""
+            item["target_grade"] = lead.get("target_grade") or ""
+            # Trạng thái hồ sơ CRM Lead — key riêng, tránh đè `status` sự kiện
+            item["lead_status"] = lead.get("status") or ""
         else:
             item["crm_code"] = item["crm_lead_id"]
             item["student_name"] = "-"
             item["student_dob"] = None
+            item["student_code"] = ""
+            item["target_grade"] = ""
+            item["lead_status"] = ""
+        # Nguồn 1 (nguồn chính) từ bảng con CRM Lead Source
+        item["source_main"] = _get_lead_main_source(item["crm_lead_id"])
         if item.get("modified_by"):
             item["modified_by_name"] = frappe.db.get_value("User", item["modified_by"], "full_name") or item["modified_by"]
         else:
@@ -1041,17 +1066,24 @@ def export_event_report():
         lead = frappe.db.get_value(
             "CRM Lead",
             item["crm_lead_id"],
-            ["crm_code", "student_name", "student_dob"],
+            ["crm_code", "student_name", "student_dob", "student_code", "target_grade", "status"],
             as_dict=True,
         )
         if lead:
             item["crm_code"] = lead.get("crm_code") or item["crm_lead_id"]
             item["student_name"] = lead.get("student_name") or ""
             item["student_dob"] = lead.get("student_dob")
+            item["student_code"] = lead.get("student_code") or ""
+            item["target_grade"] = lead.get("target_grade") or ""
+            item["lead_status"] = lead.get("status") or ""
         else:
             item["crm_code"] = item["crm_lead_id"]
             item["student_name"] = ""
             item["student_dob"] = None
+            item["student_code"] = ""
+            item["target_grade"] = ""
+            item["lead_status"] = ""
+        item["source_main"] = _get_lead_main_source(item["crm_lead_id"])
         item["status_label"] = EVENT_STATUS_MAP.get(item.get("status"), item.get("status", ""))
         if item.get("modified_by"):
             item["modified_by_name"] = frappe.db.get_value("User", item["modified_by"], "full_name") or item["modified_by"]
@@ -1065,6 +1097,10 @@ def export_event_report():
         "crm_code",
         "student_name",
         "student_dob",
+        "student_code",
+        "source_main",
+        "target_grade",
+        "lead_status",
         "status",
         "status_label",
         "modified",
@@ -1393,7 +1429,7 @@ def get_course_students():
         "CRM Admission Course Student",
         filters=filters,
         or_filters=or_filters,
-        fields=["name", "course_id", "crm_lead_id", "status", "regular_class", "modified", "modified_by"],
+        fields=["name", "course_id", "crm_lead_id", "status", "study_duration", "regular_class", "modified", "modified_by"],
         order_by="modified desc",
     )
 
@@ -1404,17 +1440,23 @@ def get_course_students():
         lead = frappe.db.get_value(
             "CRM Lead",
             item["crm_lead_id"],
-            ["crm_code", "student_name", "student_dob"],
+            ["crm_code", "student_name", "student_dob", "student_code", "target_grade", "current_grade"],
             as_dict=True,
         )
         if lead:
             item["crm_code"] = lead.get("crm_code") or item["crm_lead_id"]
             item["student_name"] = lead.get("student_name") or "-"
             item["student_dob"] = lead.get("student_dob")
+            item["student_code"] = lead.get("student_code") or ""
+            item["target_grade"] = lead.get("target_grade") or ""
+            item["current_grade"] = lead.get("current_grade") or ""
         else:
             item["crm_code"] = item["crm_lead_id"]
             item["student_name"] = "-"
             item["student_dob"] = None
+            item["student_code"] = ""
+            item["target_grade"] = ""
+            item["current_grade"] = ""
         # modified_by_name
         if item.get("modified_by"):
             item["modified_by_name"] = frappe.db.get_value("User", item["modified_by"], "full_name") or item["modified_by"]
@@ -1481,6 +1523,8 @@ def update_course_student_classes():
         return not_found_response("Không tìm thấy bản ghi")
     try:
         doc = frappe.get_doc("CRM Admission Course Student", name)
+        if "study_duration" in data:
+            doc.study_duration = (data.get("study_duration") or "").strip() or None
         if "regular_class" in data:
             doc.regular_class = data.get("regular_class") or None
         if "running_class_ids" in data:
@@ -1603,7 +1647,7 @@ def export_course_students_template():
     items = frappe.get_all(
         "CRM Admission Course Student",
         filters={"course_id": course_id},
-        fields=["name", "crm_lead_id", "status", "regular_class"],
+        fields=["name", "crm_lead_id", "status", "study_duration", "regular_class"],
         order_by="modified desc",
     )
     _enrich_course_students_with_classes(items)
@@ -1633,6 +1677,7 @@ def export_course_students_template():
                 "student_name",
                 "student_dob",
                 "status",
+                "thoi_luong_hoc",
                 "lop_chinh_quy",
                 "lop_chay",
             ],
@@ -1642,6 +1687,7 @@ def export_course_students_template():
                 "Tên học sinh",
                 "Ngày sinh",
                 "Trạng thái",
+                "Thời lượng học (Full khóa/Lẻ tuần đầu/Lẻ tuần cuối)",
                 "Lớp CQ (1 tên hoặc mã)",
                 "Lớp chạy (phẩy nếu nhiều)",
             ],
@@ -1652,6 +1698,7 @@ def export_course_students_template():
                     "student_name": r.get("student_name", ""),
                     "student_dob": str(r["student_dob"]) if r.get("student_dob") else "",
                     "status": r.get("status", "registered_interest"),
+                    "thoi_luong_hoc": r.get("study_duration") or "",
                     "lop_chinh_quy": r.get("regular_class_name") or "",
                     "lop_chay": ", ".join(r.get("running_class_names") or []),
                 }
@@ -1713,6 +1760,14 @@ def import_course_students_status():
                 run_col = i
                 break
 
+    dur_col = next((i for i, h in enumerate(hdr) if h in ("thoi_luong_hoc", "study_duration")), None)
+    if dur_col is None:
+        for i, cell in enumerate(raw_header_cells):
+            s = str(cell or "").strip().lower()
+            if "thời lượng" in s:
+                dur_col = i
+                break
+
     if crm_col is None or status_col is None:
         return error_response("Không tìm thấy cột CRM Lead ID và Status. Cần tải template từ nút Nhập liệu.")
 
@@ -1754,6 +1809,23 @@ def import_course_students_status():
         try:
             doc = frappe.get_doc("CRM Admission Course Student", rec)
             doc.status = status
+            if dur_col is not None:
+                dur_cell = row[dur_col] if dur_col < len(row) else None
+                dur_raw = str(dur_cell).strip() if dur_cell is not None else ""
+                if dur_raw == "":
+                    doc.study_duration = None
+                else:
+                    canon = {
+                        "full khóa": "Full khóa",
+                        "full khoa": "Full khóa",
+                        "lẻ tuần đầu": "Lẻ tuần đầu",
+                        "le tuan dau": "Lẻ tuần đầu",
+                        "lẻ tuần cuối": "Lẻ tuần cuối",
+                        "le tuan cuoi": "Lẻ tuần cuối",
+                    }.get(dur_raw.lower())
+                    if canon:
+                        doc.study_duration = canon
+                    # Giá trị không khớp: bỏ qua để không chặn cập nhật trạng thái/lớp
             if touch_classes:
                 final_reg = doc.regular_class
                 final_run = [r.course_class for r in doc.running_classes]
@@ -1803,7 +1875,7 @@ def export_course_report():
     items = frappe.get_all(
         "CRM Admission Course Student",
         filters={"course_id": course_id},
-        fields=["name", "crm_lead_id", "status", "regular_class", "modified", "modified_by"],
+        fields=["name", "crm_lead_id", "status", "study_duration", "regular_class", "modified", "modified_by"],
         order_by="modified desc",
     )
     _enrich_course_students_with_classes(items)
@@ -1811,17 +1883,24 @@ def export_course_report():
         lead = frappe.db.get_value(
             "CRM Lead",
             item["crm_lead_id"],
-            ["crm_code", "student_name", "student_dob"],
+            ["crm_code", "student_name", "student_dob", "student_code", "target_grade", "current_grade"],
             as_dict=True,
         )
         if lead:
             item["crm_code"] = lead.get("crm_code") or item["crm_lead_id"]
             item["student_name"] = lead.get("student_name") or ""
             item["student_dob"] = lead.get("student_dob")
+            item["student_code"] = lead.get("student_code") or ""
+            item["current_grade"] = lead.get("current_grade") or ""
+            # Ẩn lớp dự tuyển khi đã có lớp hiện tại (đồng bộ hiển thị bảng)
+            item["target_grade"] = "" if item["current_grade"] else (lead.get("target_grade") or "")
         else:
             item["crm_code"] = item["crm_lead_id"]
             item["student_name"] = ""
             item["student_dob"] = None
+            item["student_code"] = ""
+            item["current_grade"] = ""
+            item["target_grade"] = ""
         item["status_label"] = STATUS_MAP.get(item.get("status"), item.get("status", ""))
         if item.get("modified_by"):
             item["modified_by_name"] = frappe.db.get_value("User", item["modified_by"], "full_name") or item["modified_by"]
@@ -1834,9 +1913,13 @@ def export_course_report():
                 "crm_code",
                 "student_name",
                 "student_dob",
+                "student_code",
+                "current_grade",
+                "target_grade",
                 "status",
                 "status_label",
                 "class_summary",
+                "study_duration",
                 "modified",
                 "modified_by_name",
             ],

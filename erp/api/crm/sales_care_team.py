@@ -26,15 +26,19 @@ _VALID_TARGET_GRADES = [str(n) for n in range(1, 13)]
 
 def _user_display(user_name):
     u = frappe.db.get_value(
-        "User", user_name, ["name", "full_name", "email", "enabled"], as_dict=True
+        "User", user_name, ["name", "full_name", "email", "enabled", "user_image"], as_dict=True
     )
     if not u:
-        return {"user": user_name, "full_name": user_name, "email": user_name, "enabled": 0}
+        return {
+            "user": user_name, "full_name": user_name, "email": user_name,
+            "enabled": 0, "user_image": "",
+        }
     return {
         "user": u.get("name"),
         "full_name": (u.get("full_name") or u.get("email") or u.get("name")),
         "email": u.get("email") or u.get("name"),
         "enabled": 1 if u.get("enabled") else 0,
+        "user_image": u.get("user_image") or "",
     }
 
 
@@ -87,6 +91,7 @@ def get_sales_care_team():
                 "full_name": info["full_name"],
                 "email": info["email"],
                 "enabled": info["enabled"],
+                "user_image": info["user_image"],
                 "target_grades": _member_grades(m.get("name")),
             }
         )
@@ -99,7 +104,7 @@ def get_eligible_sales_care_users():
     check_crm_permission()
     rows = frappe.db.sql(
         """
-        SELECT DISTINCT u.name, u.full_name, u.email
+        SELECT DISTINCT u.name, u.full_name, u.email, u.user_image
         FROM `tabUser` u
         INNER JOIN `tabHas Role` r ON r.parent = u.name AND r.parenttype = 'User'
         WHERE r.role IN %(roles)s AND IFNULL(u.enabled, 0) = 1
@@ -114,6 +119,7 @@ def get_eligible_sales_care_users():
             "user": r.get("name"),
             "full_name": r.get("full_name") or r.get("email") or r.get("name"),
             "email": r.get("email") or r.get("name"),
+            "user_image": r.get("user_image") or "",
         }
         for r in rows
         if r.get("name") not in existing

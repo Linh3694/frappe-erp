@@ -10,6 +10,7 @@
   "campus_id",
   "crm_lead_id",
   "status",
+  "study_duration",
   "regular_class",
   "running_classes"
  ],
@@ -45,6 +46,12 @@
    "in_list_view": 1,
    "label": "Trạng thái",
    "options": "registered_interest\ntrial\npaid\nattended\ntransferred\nrefunded"
+  },
+  {
+   "fieldname": "study_duration",
+   "fieldtype": "Select",
+   "label": "Thời lượng học",
+   "options": "\nFull khóa\nLẻ tuần đầu\nLẻ tuần cuối"
   },
   {
    "fieldname": "regular_class",

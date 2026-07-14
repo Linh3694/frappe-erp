@@ -89,6 +89,8 @@ def _enrich_lead_flat_fields(data, crm_lead_id):
             "student_name",
             "student_dob",
             "target_grade",
+            "study_program",
+            "status",
             "student_code",
             "guardian_name",
             "guardian_email",
@@ -101,6 +103,9 @@ def _enrich_lead_flat_fields(data, crm_lead_id):
         data["student_name"] = lead.get("student_name") or "-"
         data["student_dob"] = lead.get("student_dob")
         data["target_grade"] = lead.get("target_grade") or ""
+        data["study_program"] = lead.get("study_program") or ""
+        # Trạng thái hồ sơ CRM Lead — key riêng, tránh đè `status` của bản ghi kỳ khảo sát
+        data["lead_status"] = lead.get("status") or ""
         data["student_code"] = lead.get("student_code") or ""
         data["guardian_name"] = lead.get("guardian_name") or ""
         data["guardian_email"] = (lead.get("guardian_email") or "").strip()
@@ -114,6 +119,8 @@ def _enrich_lead_flat_fields(data, crm_lead_id):
         data["student_name"] = "-"
         data["student_dob"] = None
         data["target_grade"] = ""
+        data["study_program"] = ""
+        data["lead_status"] = ""
         data["student_code"] = ""
         data["guardian_name"] = ""
         data["guardian_email"] = ""
@@ -776,7 +783,7 @@ def export_entrance_exam_students_template():
     header_labels = [
         "Mã CRM",
         "Họ tên học sinh",
-        "Trạng thái",
+        "Trạng thái KSĐV",
         "Kết quả thi",
         "Link kết quả",
         "Phí KSĐV",
