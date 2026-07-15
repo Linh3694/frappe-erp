@@ -638,6 +638,130 @@ def delete_assignment():
 
 
 @frappe.whitelist(allow_guest=False)
+def sync_assignments():
+    """Đồng bộ phân công theo lô — phục vụ giao diện ma trận Tòa × Danh mục.
+
+    Nhận:
+      - additions: [{area_title, support_category, pic}] — tạo nếu chưa có,
+        bỏ qua nếu đã tồn tại (skipped), gom lỗi nếu user/danh mục không hợp lệ.
+      - removals:  [{area_title, support_category, pic}] — xoá nếu tồn tại.
+
+    Chỉ đụng đúng các bộ ba được gửi lên (KHÔNG xoá ngoài phạm vi). Commit một
+    lần ở cuối (nguyên tử), rollback khi lỗi hệ thống.
+    Trả về {created, skipped, deleted, errors}.
+    """
+    try:
+        data = _parse_json_body()
+        additions = data.get("additions") or []
+        removals = data.get("removals") or []
+        if not isinstance(additions, list) or not isinstance(removals, list):
+            return validation_error_response(
+                _("Dữ liệu đồng bộ không hợp lệ"), {"additions": ["invalid"]}
+            )
+
+        def _triple(item):
+            area = str((item or {}).get("area_title") or "").strip()
+            cat = str((item or {}).get("support_category") or "").strip()
+            pic = str((item or {}).get("pic") or "").strip()
+            return area, cat, pic
+
+        # Cache danh mục đã xác thực tồn tại (đặc biệt danh mục CSVC sự kiện)
+        ensured_categories = set()
+
+        def _ensure_category(cat):
+            if cat in ensured_categories:
+                return True
+            if cat == EVENT_FACILITY_CATEGORY_NAME:
+                _ensure_event_facility_support_category()
+            ok = bool(frappe.db.exists("ERP Administrative Support Category", cat))
+            if ok:
+                ensured_categories.add(cat)
+            return ok
+
+        created = 0
+        skipped = 0
+        deleted = 0
+        errors = []
+
+        # --- Additions: upsert bỏ qua trùng ---
+        seen_add = set()
+        for item in additions:
+            area, cat, pic = _triple(item)
+            if not area or not cat or not pic:
+                errors.append(
+                    {"area_title": area, "support_category": cat, "pic": pic, "error": "missing_field"}
+                )
+                continue
+            key = (area, cat, pic)
+            if key in seen_add:
+                continue
+            seen_add.add(key)
+
+            if not _ensure_category(cat):
+                errors.append(
+                    {"area_title": area, "support_category": cat, "pic": pic, "error": "invalid_category"}
+                )
+                continue
+            if not frappe.db.exists("User", pic):
+                errors.append(
+                    {"area_title": area, "support_category": cat, "pic": pic, "error": "invalid_user"}
+                )
+                continue
+            if frappe.db.exists(
+                "ERP Administrative Support Assignment",
+                {"area_title": area, "support_category": cat, "pic": pic},
+            ):
+                skipped += 1
+                continue
+
+            doc = frappe.get_doc(
+                {
+                    "doctype": "ERP Administrative Support Assignment",
+                    "area_title": area,
+                    "support_category": cat,
+                    "pic": pic,
+                }
+            )
+            doc.insert(ignore_permissions=False)
+            created += 1
+
+        # --- Removals: xoá đúng bộ ba được gửi (nếu tồn tại) ---
+        seen_del = set()
+        for item in removals:
+            area, cat, pic = _triple(item)
+            if not area or not cat or not pic:
+                continue
+            key = (area, cat, pic)
+            if key in seen_del:
+                continue
+            seen_del.add(key)
+
+            names = frappe.get_all(
+                "ERP Administrative Support Assignment",
+                filters={"area_title": area, "support_category": cat, "pic": pic},
+                pluck="name",
+            )
+            for nm in names:
+                frappe.delete_doc(
+                    "ERP Administrative Support Assignment", nm, ignore_permissions=False
+                )
+                deleted += 1
+
+        frappe.db.commit()
+        return single_item_response(
+            {"created": created, "skipped": skipped, "deleted": deleted, "errors": errors},
+            _("Đã đồng bộ: tạo {0}, bỏ qua {1}, xoá {2}").format(created, skipped, deleted),
+        )
+    except frappe.exceptions.ValidationError as e:
+        frappe.db.rollback()
+        return validation_error_response(str(e), {"error": [str(e)]})
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "administrative_support.sync_assignments")
+        return error_response(str(e))
+
+
+@frappe.whitelist(allow_guest=False)
 def import_assignments_excel():
     """Import Excel: Tên khu vực, Tên danh mục, PIC (email hoặc user id)."""
     try:

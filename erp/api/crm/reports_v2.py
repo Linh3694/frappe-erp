@@ -1501,6 +1501,31 @@ def _get_active_crm_sales_user_names() -> List[str]:
     return [row[0] for row in rows] if rows else []
 
 
+# Nhóm role để tách KPI theo team (Sales / Care)
+_KPI_TEAM_ROLES = {
+    "sales": ("SIS Sales", "SIS Sales Admin"),
+    "care": ("SIS Sales Care", "SIS Sales Care Admin"),
+}
+
+
+def _get_users_with_roles(roles) -> List[str]:
+    """User enabled có bất kỳ role nào trong danh sách (dùng tách KPI Sales/Care)."""
+    role_list = [x for x in (roles or []) if x]
+    if not role_list:
+        return []
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT u.name
+        FROM `tabUser` u
+        INNER JOIN `tabHas Role` hr ON hr.parent = u.name AND hr.parenttype = 'User'
+        WHERE hr.role IN %(roles)s AND IFNULL(u.enabled, 0) = 1
+        ORDER BY u.name
+        """,
+        {"roles": role_list},
+    )
+    return [row[0] for row in rows] if rows else []
+
+
 def _load_target_doc(campus_id: str, target_academic_year: str):
     """Tải doc CRM Admission Target hoặc None."""
     from erp.api.crm.admission_target import _find_target_name
@@ -1786,6 +1811,7 @@ def get_kpi_overview():
     args = frappe.request.args or {}
     campus_id = (args.get("campus_id") or "").strip()
     target_academic_year = (args.get("target_academic_year") or "").strip()
+    team = (args.get("team") or "").strip().lower()
     restricted = r._should_restrict_to_own_pic_only()
 
     if not target_academic_year:
@@ -1842,13 +1868,19 @@ def get_kpi_overview():
 
     actual_by_pic = _count_kpi_metrics_by_pic(campus_id, target_academic_year, pic_eff)
 
-    all_pics = (
-        set(member_targets_map.keys())
-        | set(actual_by_pic.keys())
-        | set(_get_active_crm_sales_user_names())
-    )
-    if pic_eff:
-        all_pics = {pic_eff}
+    if team in _KPI_TEAM_ROLES:
+        # Tách theo role: chỉ thành viên có role của nhóm Sales/Care đang chọn
+        all_pics = set(_get_users_with_roles(_KPI_TEAM_ROLES[team]))
+        if pic_eff:
+            all_pics = all_pics & {pic_eff}
+    else:
+        all_pics = (
+            set(member_targets_map.keys())
+            | set(actual_by_pic.keys())
+            | set(_get_active_crm_sales_user_names())
+        )
+        if pic_eff:
+            all_pics = {pic_eff}
 
     user_map = r._batch_user_map(list(all_pics))
     by_member = []

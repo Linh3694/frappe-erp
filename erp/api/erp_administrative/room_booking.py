@@ -373,6 +373,76 @@ def cancel_room_booking():
         return error_response(str(e))
 
 
+@frappe.whitelist(allow_guest=False)
+def update_room_booking():
+    """Sửa một lượt đặt phòng — CHỈ người đặt, CHỈ lượt KHÔNG gắn ticket (giống cancel).
+
+    Lượt gắn ticket phải sửa ở ticket tương ứng (sync_booking_for_ticket lo đồng bộ).
+    Validate lại phòng/giờ/attendees + chống trùng (loại trừ chính lượt đang sửa) như
+    khi tạo mới, rồi gửi lại lời mời lịch (.ics UPDATE).
+    """
+    try:
+        data = _parse_json_body()
+        booking_id = (data.get("booking_id") or data.get("name") or "").strip()
+        if not booking_id or not frappe.db.exists(BOOKING_DOCTYPE, booking_id):
+            return not_found_response(_("Không tìm thấy lượt đặt phòng"))
+        doc = frappe.get_doc(BOOKING_DOCTYPE, booking_id)
+
+        email = _session_email()
+        if (doc.booked_by_email or "").strip().lower() != (email or "").strip().lower():
+            return forbidden_response(_("Chỉ người đặt phòng mới được sửa lượt đặt này"))
+
+        if (doc.source or "") == "admin_ticket" or doc.source_ticket:
+            return validation_error_response(
+                _("Lượt đặt này gắn với ticket — vui lòng sửa ở ticket tương ứng."),
+                {"source": ["ticket"]},
+            )
+
+        if doc.status == "Cancelled":
+            return validation_error_response(
+                _("Lượt đặt đã huỷ — không thể sửa."), {"status": ["cancelled"]}
+            )
+
+        ctx, err = _validate_booking_payload(data)
+        if err:
+            return err
+        attendee_rows, err_att = _validate_attendees(data.get("attendees"), booker_email=email)
+        if err_att:
+            return err_att
+        ok_cfg, err_cfg = validate_booking_against_config(
+            ctx["room_id"], ctx["start_dt"], ctx["end_dt"]
+        )
+        if not ok_cfg:
+            return err_cfg
+        if _room_booking_conflicts(
+            ctx["room_id"], ctx["start_dt"], ctx["end_dt"], exclude_booking_id=booking_id
+        ):
+            return validation_error_response(
+                _("Khung giờ này đã có người đặt phòng. Vui lòng chọn thời gian khác."),
+                {"end_time": ["conflict"]},
+            )
+
+        doc.title = ctx["title"]
+        doc.description = ctx.get("description") or ""
+        doc.building_id = ctx["building_id"]
+        doc.room_id = ctx["room_id"]
+        doc.start_time = ctx["start_dt"]
+        doc.end_time = ctx["end_dt"]
+        campus_id = frappe.db.get_value("ERP Administrative Room", ctx["room_id"], "campus_id")
+        if campus_id:
+            doc.campus_id = campus_id
+        _apply_attendees_to_doc(doc, attendee_rows)
+        doc.status = "Booked"
+        bump_calendar_sequence(doc)
+        doc.save(ignore_permissions=True)
+        send_booking_invites(doc, method="REQUEST")
+        frappe.db.commit()
+        return success_response(_booking_to_dict(doc), "OK")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "room_booking.update_room_booking")
+        return error_response(str(e))
+
+
 def _booking_to_dict(doc):
     """Bản ghi chi tiết booking trả về cho FE sau khi tạo."""
     return {
@@ -434,6 +504,7 @@ def get_room_bookings(room_id=None, range_start=None, range_end=None, exclude_ti
             fields=[
                 "name",
                 "title",
+                "description",
                 "booked_by_email",
                 "booked_by_fullname",
                 "booked_by_department",
@@ -481,6 +552,7 @@ def get_room_bookings(room_id=None, range_start=None, range_end=None, exclude_ti
                 {
                     "name": r.name,
                     "title": r.title or "",
+                    "description": r.description or "",
                     "booked_by": (r.booked_by_fullname or em).strip(),
                     "booked_by_email": em,
                     "booked_by_department": (r.booked_by_department or "").strip()
