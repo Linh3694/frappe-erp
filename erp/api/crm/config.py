@@ -337,6 +337,48 @@ def delete_admission_profile_type():
     return _crud_delete("CRM Admission Profile Type", get_request_data().get("name"))
 
 
+# --- CRM Admission Event Type (Loại sự kiện) ---
+@frappe.whitelist()
+def get_event_types():
+    """Danh sách loại sự kiện. is_active=1 để lấy loại đang bật cho dropdown tạo sự kiện."""
+    check_crm_permission()
+    is_active = frappe.request.args.get("is_active")
+    filters = {}
+    if is_active is not None and is_active != "":
+        filters["is_active"] = 1 if str(is_active).lower() in ("1", "true", "yes") else 0
+    items = frappe.get_all(
+        "CRM Admission Event Type",
+        filters=filters or None,
+        fields=["name", "type_name", "description", "is_active", "modified"],
+        order_by="type_name asc",
+    )
+    return list_response(items)
+
+
+@frappe.whitelist(methods=["POST"])
+def create_event_type():
+    return _crud_create("CRM Admission Event Type", get_request_data(), "type_name")
+
+
+@frappe.whitelist(methods=["POST"])
+def update_event_type():
+    data = get_request_data()
+    return _crud_update("CRM Admission Event Type", data.get("name"), data)
+
+
+@frappe.whitelist(methods=["POST"])
+def delete_event_type():
+    """Xóa loại sự kiện — chặn nếu đang có sự kiện dùng loại này."""
+    check_crm_permission()
+    name = get_request_data().get("name")
+    if not name:
+        return validation_error_response("Thiếu name", {"name": ["Bắt buộc"]})
+    used = frappe.db.count("CRM Admission Event", {"event_type": name})
+    if used:
+        return error_response(f"Không thể xóa: đang có {used} sự kiện dùng loại này")
+    return _crud_delete("CRM Admission Event Type", name)
+
+
 # --- CRM Referrer ---
 @frappe.whitelist()
 def get_referrers():

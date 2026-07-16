@@ -2234,7 +2234,8 @@ def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -
             SELECT l.`name` AS lead_id, l.`step` AS cur_step, l.`status` AS cur_status,
                    IFNULL(TRIM(l.`target_grade`), '') AS target_grade,
                    IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
-                   IFNULL(TRIM(l.`linked_student`), '') AS linked_student
+                   IFNULL(TRIM(l.`linked_student`), '') AS linked_student,
+                   l.`student_name`, l.`student_dob`, IFNULL(l.`pic`, '') AS pic
             FROM `tabCRM Lead` l
             WHERE l.`creation` <= %(as_of)s AND {dim_sql}
         ),
@@ -2271,6 +2272,7 @@ def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -
               AND h.`old_status` NOT LIKE 'deal_status:%%'
         )
         SELECT bl.lead_id, bl.target_grade, bl.current_grade, bl.linked_student,
+               bl.student_name, bl.student_dob, bl.pic,
                COALESCE(sb.val, sa.val, bl.cur_step) AS as_of_step,
                COALESCE(stb.val, sta.val, bl.cur_status) AS as_of_status
         FROM base_leads bl
@@ -2308,6 +2310,8 @@ def get_overview_snapshot():
     funnel_counts: Dict[str, int] = defaultdict(int)
     grade_steps: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
     grade_qlead_status: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    # Danh sách HS kèm `metric` = đúng ô đã đếm ở `grade_steps` → FE lọc theo khối (cột) + chỉ số (chú thích)
+    students: List[Dict[str, Any]] = []
 
     for row in rows:
         grade = row["grade"]
@@ -2319,23 +2323,43 @@ def get_overview_snapshot():
         elif status == "Thoa thuan":
             status = "Can nhac"
 
+        metric = ""
         if step == "Draft":
             grade_steps[grade]["draft"] += 1
+            metric = "draft"
         elif step == "Lead":
             if status == "Tu choi":
                 grade_steps[grade]["lost"] += 1
+                metric = "lost"
             else:
                 grade_steps[grade]["lead"] += 1
+                metric = "lead"
         elif step == "QLead":
             if status == "Tu choi":
                 grade_steps[grade]["lost"] += 1
+                metric = "lost"
             else:
                 grade_steps[grade]["qlead"] += 1
+                metric = "qlead"
             if status:
                 funnel_counts[status] += 1
                 grade_qlead_status[grade][status] += 1
         elif step == "Enrolled":
             grade_steps[grade]["enrolled"] += 1
+            metric = "enrolled"
+
+        # Chỉ lấy HS thuộc 1 trong 5 ô của báo cáo (bỏ lead ngoài phạm vi: Verify/Nghi hoc…)
+        if metric:
+            students.append(
+                {
+                    "student_name": row.get("student_name") or "",
+                    "student_dob": str(row["student_dob"]) if row.get("student_dob") else None,
+                    "target_grade": grade,
+                    "metric": metric,
+                    "status": status,
+                    "pic": row.get("pic") or "",
+                }
+            )
 
     funnel = [
         {"status": st, "count": funnel_counts.get(st, 0)}
@@ -2364,12 +2388,17 @@ def get_overview_snapshot():
         for g in sorted(grade_qlead_status.keys(), key=_grade_display_sort_key)
     ]
 
+    pic_names = _pic_names_map([s["pic"] for s in students if s["pic"]])
+    for s in students:
+        s["pic_name"] = pic_names.get(s["pic"], "")
+
     period_meta = _overview_period_meta(fd, td_raw, td_eff)
     return success_response(
         {
             "funnel_qlead": funnel,
             "by_grade_steps": by_grade_steps,
             "by_grade_qlead_status": by_grade_qlead_status,
+            "students": students,
             "meta": {
                 **period_meta,
                 "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),

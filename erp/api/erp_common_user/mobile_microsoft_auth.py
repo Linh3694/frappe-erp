@@ -20,6 +20,28 @@ from erp.api.erp_common_user.microsoft_auth import (
 import requests
 
 
+# Internal only: marks a code whose first request is still running. Must never
+# reach the client — the callback translates it into AUTH_IN_PROGRESS.
+IN_PROGRESS_MARKER = "__IN_PROGRESS__"
+
+
+def _cache_result(cache_key, result, expires_in_sec):
+    """Cache a callback result, tolerating a Redis outage but not hiding bugs.
+
+    default=str is required: user_data carries Datetime fields that json.dumps
+    cannot encode. A failure here strands the IN_PROGRESS marker for its full
+    TTL and locks the account out of Microsoft login, so it gets logged rather
+    than swallowed.
+    """
+    try:
+        frappe.cache().set_value(cache_key, json.dumps(result, default=str), expires_in_sec=expires_in_sec)
+    except Exception as e:
+        frappe.log_error(
+            "Mobile Microsoft Auth",
+            f"Failed to cache callback result for {cache_key}: {str(e)}"
+        )
+
+
 def get_microsoft_access_token_with_redirect(code, redirect_uri):
     """Exchange authorization code for access token with custom redirect URI"""
     config = get_microsoft_config()
@@ -117,6 +139,14 @@ def mobile_microsoft_callback(code=None, state=None):
                 try:
                     result = frappe.parse_json(cached)
                     if isinstance(result, dict):
+                        if result.get("error_code") == IN_PROGRESS_MARKER:
+                            # First request for this code is still running. Never surface
+                            # the internal marker itself — it is not a user-facing error.
+                            return {
+                                "success": False,
+                                "error": "Đang xử lý đăng nhập, vui lòng đợi trong giây lát.",
+                                "error_code": "AUTH_IN_PROGRESS"
+                            }
                         return result
                 except Exception:
                     pass
@@ -126,7 +156,7 @@ def mobile_microsoft_callback(code=None, state=None):
                     "error_code": "CODE_REUSED"
                 }
             # Mark as in-progress (short TTL)
-            frappe.cache().set_value(cache_key, json.dumps({"success": False, "error": "IN_PROGRESS"}), expires_in_sec=180)
+            _cache_result(cache_key, {"success": False, "error_code": IN_PROGRESS_MARKER}, 180)
         except Exception:
             pass
         
@@ -186,10 +216,7 @@ def mobile_microsoft_callback(code=None, state=None):
                 "error_code": "TOKEN_EXCHANGE_FAILED",
                 "details": str(e)
             }
-            try:
-                frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=300)
-            except Exception:
-                pass
+            _cache_result(cache_key, result, 300)
             return result
         
         # Get user info from Microsoft Graph
@@ -205,18 +232,17 @@ def mobile_microsoft_callback(code=None, state=None):
                 "error_code": "USER_INFO_FAILED",
                 "details": str(e)
             }
-            try:
-                frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=300)
-            except Exception:
-                pass
+            _cache_result(cache_key, result, 300)
             return result
         
         if not user_email:
-            return {
+            result = {
                 "success": False,
                 "error": "No email found in Microsoft account",
                 "error_code": "NO_EMAIL"
             }
+            _cache_result(cache_key, result, 300)
+            return result
         
         # Skip ERP User Profile - directly check/create Frappe user
         user_profile = None
@@ -235,12 +261,18 @@ def mobile_microsoft_callback(code=None, state=None):
             frappe.logger().info(f"JWT token generated for: {frappe_user.email}")
         except Exception as e:
             frappe.logger().error(f"Failed to generate JWT token: {str(e)}")
-            return {
+            jwt_token = None
+
+        # generate_jwt_token() swallows its own errors and returns None, so a
+        # falsy token — not an exception — is how failure actually arrives here.
+        if not jwt_token:
+            result = {
                 "success": False,
                 "error": "Failed to generate authentication token",
-                "error_code": "TOKEN_GENERATION_FAILED",
-                "details": str(e)
+                "error_code": "TOKEN_GENERATION_FAILED"
             }
+            _cache_result(cache_key, result, 300)
+            return result
         
         # Build user data using the same function as get_current_user() and login()
         # This ensures consistency across all authentication methods
@@ -270,29 +302,23 @@ def mobile_microsoft_callback(code=None, state=None):
             },
             message="Microsoft authentication successful"
         )
-        try:
-            frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=600)
-        except Exception:
-            pass
+        _cache_result(cache_key, result, 600)
         return result
-        
+
     except Exception as e:
         frappe.logger().error(f"Unexpected error in mobile Microsoft callback: {str(e)}")
-        
+
         # Log the full error for debugging
-        frappe.log_error(f"Mobile Microsoft callback error: {str(e)}", "Mobile Microsoft Auth")
-        
+        frappe.log_error("Mobile Microsoft Auth", f"Mobile Microsoft callback error: {str(e)}")
+
         result = {
             "success": False,
             "error": "An unexpected error occurred during authentication",
             "error_code": "UNEXPECTED_ERROR",
             "details": str(e)
         }
-        try:
-            if 'cache_key' in locals():
-                frappe.cache().set_value(cache_key, json.dumps(result), expires_in_sec=300)
-        except Exception:
-            pass
+        if 'cache_key' in locals():
+            _cache_result(cache_key, result, 300)
         return result
 
 
@@ -395,7 +421,7 @@ def mobile_direct_token_auth(microsoft_token):
         )
         
     except Exception as e:
-        frappe.log_error(f"Direct token auth error: {str(e)}", "Mobile Microsoft Auth")
+        frappe.log_error("Mobile Microsoft Auth", f"Direct token auth error: {str(e)}")
         return {
             "success": False,
             "error": "Authentication failed",

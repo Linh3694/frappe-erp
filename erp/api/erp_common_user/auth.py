@@ -9,7 +9,7 @@ from frappe import _
 from frappe.auth import LoginManager
 import secrets
 import jwt
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 import requests
 import json
 from erp.utils.api_response import success_response, error_response
@@ -397,6 +397,19 @@ def get_current_user():
         frappe.throw(_("Error getting user information: {0}").format(str(e)))
 
 
+def _json_safe(value):
+    """Convert Frappe Datetime/Date/Time values to str.
+
+    Callers cache this payload with json.dumps(), which raises TypeError on
+    datetime objects. Frappe's own HTTP encoder handles them, so an unconverted
+    value fails only in the cache layer — silently, wherever that write is
+    wrapped in a bare except.
+    """
+    if isinstance(value, (datetime, date, time, timedelta)):
+        return str(value)
+    return value
+
+
 def build_user_data_response(user_doc):
     """Build user data response from User document"""
     user_data = {
@@ -418,7 +431,7 @@ def build_user_data_response(user_doc):
     
     for field in custom_fields:
         if hasattr(user_doc, field):
-            user_data[field] = getattr(user_doc, field)
+            user_data[field] = _json_safe(getattr(user_doc, field))
     
     # Add roles
     try:

@@ -12,6 +12,7 @@
   "student_count",
   "is_active",
   "school_year_id",
+  "event_type",
   "section_promotions",
   "promotions"
  ],
@@ -59,6 +60,14 @@
    "in_list_view": 1,
    "label": "Năm học",
    "options": "SIS School Year"
+  },
+  {
+   "fieldname": "event_type",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Loại sự kiện",
+   "options": "CRM Admission Event Type"
   },
   {
    "fieldname": "section_promotions",

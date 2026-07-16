@@ -267,6 +267,23 @@ def _event_promotions_meta(event_id):
     return out
 
 
+def _enrich_event_type_name(items):
+    """Bổ sung event_type_name (nhãn loại sự kiện) — Link lưu id CRM-EVT-TYPE-xxxxx"""
+    type_ids = {i.get("event_type") for i in items if i.get("event_type")}
+    labels = {}
+    if type_ids:
+        for r in frappe.get_all(
+            "CRM Admission Event Type",
+            filters={"name": ["in", list(type_ids)]},
+            fields=["name", "type_name"],
+        ):
+            labels[r["name"]] = r["type_name"]
+    for item in items:
+        tid = item.get("event_type")
+        item["event_type_name"] = labels.get(tid) if tid else None
+    return items
+
+
 def _enrich_modified_by_name(items, modified_by_field="modified_by"):
     """Bổ sung modified_by_name (full_name từ User) cho mỗi item"""
     for item in items:
@@ -290,10 +307,11 @@ def get_events():
     items = frappe.get_all(
         "CRM Admission Event",
         filters=filters,
-        fields=["name", "event_name", "event_date", "student_count", "is_active", "school_year_id", "modified", "modified_by"],
+        fields=["name", "event_name", "event_date", "student_count", "is_active", "school_year_id", "event_type", "modified", "modified_by"],
         order_by="modified desc",
     )
     _enrich_modified_by_name(items)
+    _enrich_event_type_name(items)
     return list_response(items)
 
 
@@ -310,6 +328,7 @@ def get_event(event_id=None):
     data = doc.as_dict()
     if doc.modified_by:
         data["modified_by_name"] = frappe.db.get_value("User", doc.modified_by, "full_name") or doc.modified_by
+    _enrich_event_type_name([data])
     # FE chi tiết bảng: tên / phân loại / % từ danh mục CRM Promotion
     data["promotions_catalog"] = _event_promotions_meta(event_id)
     return single_item_response(data, "Thành công")
@@ -329,6 +348,7 @@ def create_event():
         doc.student_count = data.get("student_count", 0) or 0
         doc.is_active = 1 if data.get("is_active", True) else 0
         doc.school_year_id = data.get("school_year_id") or None
+        doc.event_type = data.get("event_type") or None
         if "promotions" in data:
             _append_event_promotions_from_payload(doc, data.get("promotions"))
         doc.insert(ignore_permissions=True)
@@ -361,6 +381,8 @@ def update_event():
             doc.is_active = 1 if data["is_active"] else 0
         if "school_year_id" in data:
             doc.school_year_id = data["school_year_id"] or None
+        if "event_type" in data:
+            doc.event_type = data["event_type"] or None
         if "promotions" in data:
             _append_event_promotions_from_payload(doc, data.get("promotions"))
         doc.save(ignore_permissions=True)
