@@ -264,7 +264,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                     "campus_id": campus_id,
                     "finance_student_id": student.get("finance_student_id"),
                     "guardian_id": key_guardian or None,
-                    "status": "pending"
+                    # Không set status — cột đã bỏ khỏi DocType SIS Re-enrollment
                 })
                 # Skip validation thời gian khi admin tạo records
                 re_doc.flags.skip_config_validation = True
@@ -981,11 +981,17 @@ def get_submissions():
             values["config_id"] = config_id
         
         # Xử lý status đặc biệt: not_submitted = decision IS NULL hoặc rỗng
+        # (DocType không còn cột status — filter pending/approved/rejected theo decision + submitted_at)
         if status == 'not_submitted':
             conditions.append("(re.decision IS NULL OR re.decision = '')")
+        elif status == 'pending':
+            conditions.append("(re.decision IS NOT NULL AND re.decision != '' AND re.submitted_at IS NOT NULL)")
+        elif status in ('approved', 'rejected'):
+            # Không còn workflow duyệt trên cột status — trả rỗng có chủ đích
+            conditions.append("1=0")
         elif status:
-            conditions.append("re.status = %(status)s")
-            values["status"] = status
+            # Bỏ filter cột status không tồn tại
+            logs.append(f"Bỏ qua filter status không hỗ trợ: {status}")
         
         if decision:
             conditions.append("re.decision = %(decision)s")
@@ -1358,7 +1364,8 @@ def get_submission(submission_id=None):
                 "withdraw_transfer_school": submission.withdraw_transfer_school,
                 "withdraw_transfer_school_address": submission.withdraw_transfer_school_address,
                 "agreement_accepted": submission.agreement_accepted,
-                "status": submission.status,
+                # Schema không còn cột status
+                "status": "pending" if submission.submitted_at else None,
                 "submitted_at": str(submission.submitted_at) if submission.submitted_at else None,
                 "modified_by_admin": submission.modified_by_admin,
                 "admin_modified_at": str(submission.admin_modified_at) if submission.admin_modified_at else None,
@@ -1796,7 +1803,7 @@ def update_submission():
                         'reason': submission.not_re_enroll_reason,
                         'school_year': school_year,
                         'submitted_at': str(now()),
-                        'status': submission.status or 'pending',
+                        'status': 'pending',
                         'answers': answers_for_announcement
                     },
                     is_update=True
@@ -1862,7 +1869,7 @@ def bulk_update_status():
         for sub_id in submission_ids:
             try:
                 submission = frappe.get_doc("SIS Re-enrollment", sub_id)
-                submission.status = new_status
+                # Schema không còn cột status — chỉ ghi nhận admin đã chỉnh sửa
                 submission.modified_by_admin = frappe.session.user
                 submission.admin_modified_at = now()
                 submission.save()
@@ -1982,9 +1989,9 @@ def get_statistics():
                 SUM(CASE WHEN re.decision = 'considering' THEN 1 ELSE 0 END) as considering,
                 SUM(CASE WHEN re.decision = 'not_re_enroll' THEN 1 ELSE 0 END) as not_re_enroll,
                 SUM(CASE WHEN re.adjustment_status = 'requested' THEN 1 ELSE 0 END) as adjustment_requested,
-                SUM(CASE WHEN re.status = 'pending' THEN 1 ELSE 0 END) as status_pending,
-                SUM(CASE WHEN re.status = 'approved' THEN 1 ELSE 0 END) as status_approved,
-                SUM(CASE WHEN re.status = 'rejected' THEN 1 ELSE 0 END) as status_rejected,
+                SUM(CASE WHEN re.decision IS NOT NULL AND re.decision != '' AND re.submitted_at IS NOT NULL THEN 1 ELSE 0 END) as status_pending,
+                0 as status_approved,
+                0 as status_rejected,
                 SUM(CASE WHEN re.decision = 're_enroll' AND re.payment_type = 'annual' THEN 1 ELSE 0 END) as payment_annual,
                 SUM(CASE WHEN re.decision = 're_enroll' AND re.payment_type = 'semester' THEN 1 ELSE 0 END) as payment_semester
             FROM `tabSIS Re-enrollment` re
@@ -2591,10 +2598,9 @@ def export_submissions():
                     ELSE ''
                 END as 'Phương thức thanh toán',
                 re.not_re_enroll_reason as 'Lý do không tái ghi danh',
-                CASE re.status
-                    WHEN 'pending' THEN 'Chờ xử lý'
-                    WHEN 'approved' THEN 'Đã duyệt'
-                    WHEN 'rejected' THEN 'Từ chối'
+                CASE
+                    WHEN re.submitted_at IS NOT NULL AND re.decision IS NOT NULL AND re.decision != '' THEN 'Chờ xử lý'
+                    ELSE 'Chưa nộp'
                 END as 'Trạng thái',
                 DATE_FORMAT(re.submitted_at, '%%d/%%m/%%Y %%H:%%i') as 'Ngày nộp'
             FROM `tabSIS Re-enrollment` re
@@ -3083,7 +3089,7 @@ def update_submission_decision():
                         'reason': submission.not_re_enroll_reason,
                         'school_year': school_year,
                         'submitted_at': str(now()),
-                        'status': submission.status or 'pending',
+                        'status': 'pending',
                         'answers': answers_for_announcement  # Câu trả lời khảo sát
                     },
                     is_update=True
