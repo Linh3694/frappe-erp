@@ -120,6 +120,19 @@ def _normalize_availability_payload(raw_rows):
 	return result
 
 
+def _room_yearly_title(room_id, school_year_id=None):
+	"""Tên phòng theo năm học đang active (display_title_vn của yearly assignment)."""
+	sy = (school_year_id or "").strip() or _active_school_year_id()
+	if not room_id or not sy:
+		return ""
+	val = frappe.db.get_value(
+		"ERP Administrative Room Yearly Assignment",
+		{"room": room_id, "school_year_id": sy},
+		"display_title_vn",
+	)
+	return (val or "").strip()
+
+
 def _config_to_dict(doc, *, include_availability=True):
 	room = frappe.db.get_value(
 		"ERP Administrative Room",
@@ -139,6 +152,7 @@ def _config_to_dict(doc, *, include_availability=True):
 		"building_title": (building.get("title_vn") or doc.building_id or "").strip(),
 		"room_id": doc.room_id or "",
 		"room_title": (room.get("title_vn") or room.get("short_title") or doc.room_id or "").strip(),
+		"room_yearly_title": _room_yearly_title(doc.room_id),
 		"room_capacity": room.get("capacity"),
 		"is_active": 1 if doc.is_active else 0,
 		"availability_summary": _summarize_availability(doc),
