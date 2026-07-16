@@ -46,7 +46,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Trạng thái",
-   "options": "new\nschedule_notified\nnot_attending\nexam_taken\ncompleted"
+   "options": "new\nexam_taken\nnot_attending"
   },
   {
    "fieldname": "exam_result",

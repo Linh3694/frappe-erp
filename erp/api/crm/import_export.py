@@ -668,7 +668,7 @@ def bulk_update_leads():
     if not rows:
         return validation_error_response("Khong co du lieu", {"rows": ["Bat buoc"]})
 
-    from erp.api.crm.utils import CRM_STEPS, generate_crm_code
+    from erp.api.crm.utils import CRM_STEPS, generate_crm_code, ensure_crm_code_for_qlead_status
 
     results = {"updated": 0, "skipped": 0, "errors": []}
 
@@ -750,6 +750,7 @@ def bulk_update_leads():
                 if new_status == "Tu choi":
                     doc.reject_reason = reject_reason
                     doc.reject_detail = reject_detail
+                ensure_crm_code_for_qlead_status(doc)
                 changed = True
             elif new_step and new_step != snap_step and not new_status:
                 # Doi buoc nhung khong set status -> tu dong dat status mac dinh

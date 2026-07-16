@@ -28,30 +28,28 @@ def _enrich_modified_by_name(items, modified_by_field="modified_by"):
     return items
 
 
-VALID_ENTRANCE_STATUSES = frozenset(
-    {"new", "schedule_notified", "not_attending", "exam_taken", "completed"}
-)
+# Gộp còn 3 trạng thái: Chưa thi (new; gộp Đã đăng ký + Thông báo lịch thi),
+# Đã thi (exam_taken; gộp Hoàn thành), Không thi (not_attending).
+VALID_ENTRANCE_STATUSES = frozenset({"new", "exam_taken", "not_attending"})
 VALID_EXAM_RESULTS = frozenset({"", "pass", "conditional_pass", "retake", "fail"})
 
 # Nhãn hiển thị Excel nhập liệu — đồng bộ FE (entranceExamLabels)
 _ENTRANCE_STATUS_LABEL_VN = {
-    "new": "Đã đăng ký",
-    "schedule_notified": "Thông báo lịch thi",
-    "not_attending": "Không thi",
+    "new": "Chưa thi",
     "exam_taken": "Đã thi",
-    "completed": "Hoàn thành",
+    "not_attending": "Không thi",
 }
 _ENTRANCE_RESULT_LABEL_VN = {
-    "": "—",
+    "": "Chưa có kết quả",
     "pass": "Đạt",
-    "conditional_pass": "Đạt có điều kiện",
     "retake": "Thi lại",
+    "conditional_pass": "Đạt có điều kiện",
     "fail": "Không đạt",
 }
 
 
 def _export_status_cell(status):
-    return _ENTRANCE_STATUS_LABEL_VN.get(status or "new", status or "Đã đăng ký")
+    return _ENTRANCE_STATUS_LABEL_VN.get(status or "new", status or "Chưa thi")
 
 
 def _export_exam_result_cell(exam_result):
@@ -683,11 +681,12 @@ def _norm_entrance_status_import(val):
         return None
     s = str(val).strip().lower()
     vn = {
+        "chưa thi": "new",
         "đã đăng ký": "new",
-        "thông báo lịch thi": "schedule_notified",
-        "không thi": "not_attending",
+        "thông báo lịch thi": "new",
         "đã thi": "exam_taken",
-        "hoàn thành": "completed",
+        "hoàn thành": "exam_taken",
+        "không thi": "not_attending",
     }
     if s in vn:
         return vn[s]
@@ -706,10 +705,11 @@ def _norm_entrance_exam_result_import(val):
     s = raw.lower()
     vn = {
         "đạt": "pass",
-        "đạt có điều kiện": "conditional_pass",
         "thi lại": "retake",
+        "đạt có điều kiện": "conditional_pass",
         "không đạt": "fail",
         "chưa có": "",
+        "chưa có kết quả": "",
     }
     if s in vn:
         return vn[s]

@@ -11,7 +11,7 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data, validate_step_transition,
-    get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES,
+    get_valid_statuses_for_step, generate_crm_code, ensure_crm_code_for_qlead_status, STEP_STATUSES,
     QLEAD_TEST_STATUSES,
 )
 from erp.api.crm.lead import enrich_lead_dict_with_pic_info
@@ -180,8 +180,9 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
     if target_step == "Verify" and old_step == "Lead":
         doc.status = "Da kiem tra - Trung hoc sinh"
 
-    if target_step == "Lead" and not doc.crm_code:
-        doc.crm_code = generate_crm_code()
+    # Ma ID (crm_code) khong con sinh o buoc Lead — chuyen sang sinh o QLead khi status
+    # = Khao sat/Dat coc/Dong phi (xem ensure_crm_code_for_qlead_status trong change_status).
+    # Giu sinh o Draft->Verify (edge case luong kiem tra trung lap).
     if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
         doc.crm_code = generate_crm_code()
 
@@ -282,6 +283,8 @@ def change_status():
 
         old_status = doc.status
         doc.status = new_status
+        # Sinh Ma ID khi vao QLead status Khao sat/Dat coc/Dong phi (neu chua co)
+        ensure_crm_code_for_qlead_status(doc)
         if new_status == "Tu choi":
             doc.reject_reason = reject_reason
             doc.reject_detail = reject_detail

@@ -244,6 +244,21 @@ def generate_crm_code() -> str:
     return f"CRM-{int(time.time() * 1000) % 10**8:08d}"
 
 
+# Nhom status QLead kich hoat sinh Ma ID (crm_code): Khao sat / Dat coc / Dong phi
+QLEAD_CRM_CODE_TRIGGER_STATUSES = ("Khao sat dau vao", "Dat coc", "Dong phi")
+
+
+def ensure_crm_code_for_qlead_status(doc) -> None:
+    """Sinh Ma ID (crm_code) khi ho so o buoc QLead va status thuoc nhom
+    Khao sat/Dat coc/Dong phi — neu chua co."""
+    if (
+        getattr(doc, "step", None) == "QLead"
+        and getattr(doc, "status", None) in QLEAD_CRM_CODE_TRIGGER_STATUSES
+        and not getattr(doc, "crm_code", None)
+    ):
+        doc.crm_code = generate_crm_code()
+
+
 def get_request_data() -> dict:
     """Lay data tu request (JSON hoac form_dict)"""
     if frappe.request and frappe.request.is_json:
