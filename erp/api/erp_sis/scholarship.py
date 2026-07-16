@@ -324,6 +324,7 @@ def create_scholarship_period():
             "academic_year_id": data['academic_year_id'],
             "campus_id": resolved_campus_id,
             "status": data.get('status', 'Draft'),
+            "show_on_parent_portal": 1 if data.get('show_on_parent_portal') else 0,
             "from_date": data['from_date'],
             "to_date": data['to_date']
         })
@@ -444,11 +445,17 @@ def update_scholarship_period():
         
         # Update các trường cơ bản
         update_fields = ['title', 'title_en', 'academic_year_id', 'campus_id', 'status', 
-                        'from_date', 'to_date']
+                        'from_date', 'to_date', 'show_on_parent_portal']
         
         for field in update_fields:
             if field in data:
-                period_doc.set(field, data[field])
+                value = data[field]
+                if field == 'show_on_parent_portal':
+                    if isinstance(value, str):
+                        value = 1 if value.lower() in ('true', '1', 'yes') else 0
+                    else:
+                        value = 1 if value else 0
+                period_doc.set(field, value)
         
         # Update cấp học
         if 'education_stages' in data:

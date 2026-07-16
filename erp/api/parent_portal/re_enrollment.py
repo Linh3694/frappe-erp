@@ -1079,7 +1079,7 @@ def get_active_config():
                     "student_id": student["name"],
                     "config_id": config.name
                 },
-                ["name", "decision", "payment_type", "status", "submitted_at", "adjustment_status", "adjustment_requested_at",
+                ["name", "decision", "payment_type", "submitted_at", "adjustment_status", "adjustment_requested_at",
                  "selected_discount_id", "selected_discount_name", "selected_discount_percent", "selected_discount_deadline"],
                 as_dict=True
             )
@@ -1093,6 +1093,8 @@ def get_active_config():
                     sub_dict = dict(existing)
                     if sub_dict.get("selected_discount_deadline"):
                         sub_dict["selected_discount_deadline"] = str(sub_dict["selected_discount_deadline"])
+                    # Schema không còn cột status — suy ra cho FE (pending khi đã nộp)
+                    sub_dict["status"] = "pending"
                     student["submission"] = sub_dict
                 else:
                     student["submission"] = None
@@ -1243,7 +1245,8 @@ def get_student_re_enrollment(student_id=None):
             "selected_discount_deadline": str(doc.selected_discount_deadline) if doc.selected_discount_deadline else None,
             "selected_discount_percent": doc.selected_discount_percent,
             "not_re_enroll_reason": doc.not_re_enroll_reason,
-            "status": doc.status,
+            # Schema không còn cột status — FE vẫn nhận pending khi đã nộp
+            "status": "pending" if doc.submitted_at else None,
             "submitted_at": str(doc.submitted_at) if doc.submitted_at else None,
             "adjustment_status": doc.adjustment_status,
             "adjustment_requested_at": str(doc.adjustment_requested_at) if doc.adjustment_requested_at else None,
@@ -1696,7 +1699,7 @@ def get_my_re_enrollments():
             fields=[
                 "name", "config_id", "student_id", "student_name", "student_code",
                 "current_class", "decision", "payment_type", "not_re_enroll_reason",
-                "status", "submitted_at"
+                "submitted_at"
             ],
             order_by="submitted_at desc"
         )
@@ -1721,13 +1724,9 @@ def get_my_re_enrollments():
             if submission.payment_type:
                 submission["payment_display"] = "Đóng theo năm" if submission.payment_type == 'annual' else "Đóng theo kỳ"
             
-            # Status display
-            status_map = {
-                "pending": "Chờ xử lý",
-                "approved": "Đã duyệt",
-                "rejected": "Từ chối"
-            }
-            submission["status_display"] = status_map.get(submission.status, submission.status)
+            # Schema không còn cột status — suy ra cho FE
+            submission["status"] = "pending" if submission.submitted_at else None
+            submission["status_display"] = "Chờ xử lý" if submission.submitted_at else None
         
         logs.append(f"Tìm thấy {len(submissions)} đơn")
         
