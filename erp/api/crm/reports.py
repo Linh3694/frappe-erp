@@ -323,12 +323,13 @@ def _include_tu_choi_lost(args) -> bool:
 
 
 def _lost_event_condition(include_tu_choi: bool) -> str:
+    # Lost -> Tu choi (rename toan he thong): match ca 'Lost' (history cu) lan 'Tu choi' (moi)
     if include_tu_choi:
         return (
-            "(IFNULL(h.`new_status`,'') = 'Lost' "
+            "(IFNULL(h.`new_status`,'') IN ('Lost','Tu choi') "
             "OR IFNULL(h.`new_status`,'') LIKE '%:Tu choi')"
         )
-    return "IFNULL(h.`new_status`,'') = 'Lost'"
+    return "IFNULL(h.`new_status`,'') IN ('Lost','Tu choi')"
 
 
 def _count_new_leads(date_from: Any, date_to: Any, args) -> int:
@@ -411,7 +412,7 @@ def _count_active_pipeline(args) -> int:
         SELECT COUNT(*)
         FROM `tabCRM Lead` l
         WHERE l.`step` IN ('Lead', 'QLead')
-          AND IFNULL(TRIM(l.`status`), '') != 'Lost'
+          AND IFNULL(TRIM(l.`status`), '') NOT IN ('Lost', 'Tu choi')
           AND {dim_sql}
         """,
         dim_binds,
@@ -613,7 +614,7 @@ def _stage_reached_sql(stage: Dict[str, Any]) -> str:
         for v in vals:
             ev = f"deal_status:{v}"
             parts.append(f"hx.`new_status` IN ('{ev}', '{v}')")
-            parts.append(f"lx.`deal_status` = '{v}'")
+            parts.append(f"lx.`status` = '{v}'")
         hist_or = " OR ".join([p for p in parts if "hx." in p])
         lead_or = " OR ".join([p for p in parts if "lx." in p])
         return f"""(
@@ -759,24 +760,12 @@ def get_status_distribution():
         as_dict=True,
     )
 
-    deal_rows = frappe.db.sql(
-        f"""
-        SELECT IFNULL(NULLIF(TRIM(l.`deal_status`), ''), '(Trống)') AS st, COUNT(*) AS c
-        FROM `tabCRM Lead` l
-        WHERE l.`step` = 'QLead' AND {dim_sql}
-        GROUP BY st ORDER BY c DESC
-        """,
-        dim_binds,
-        as_dict=True,
-    )
-
     return success_response(
         {
             "by_step_status": [
                 {"step": r["step"], "status": r["st"], "count": int(r["c"])} for r in status_rows
             ],
             "by_test_status": [{"status": r["st"], "count": int(r["c"])} for r in test_rows],
-            "by_deal_status": [{"status": r["st"], "count": int(r["c"])} for r in deal_rows],
         }
     )
 
@@ -1075,7 +1064,7 @@ def get_breakdown_by_pic():
     active_rows = frappe.db.sql(
         f"""
         SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
-               SUM(IF(l.`step` IN ('Lead','QLead') AND IFNULL(TRIM(l.`status`),'') != 'Lost', 1, 0)) AS qlead_count
+               SUM(IF(l.`step` IN ('Lead','QLead') AND IFNULL(TRIM(l.`status`),'') NOT IN ('Lost','Tu choi'), 1, 0)) AS qlead_count
         FROM `tabCRM Lead` l
         WHERE IFNULL(TRIM(l.`pic`), '') != '' AND {dim_sql}
         GROUP BY pic

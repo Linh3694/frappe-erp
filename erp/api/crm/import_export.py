@@ -747,7 +747,7 @@ def bulk_update_leads():
                     })
                     continue
                 doc.status = new_status
-                if new_status == "Lost":
+                if new_status == "Tu choi":
                     doc.reject_reason = reject_reason
                     doc.reject_detail = reject_detail
                 changed = True
@@ -772,8 +772,8 @@ def bulk_update_leads():
                         doc.step,
                         snap_status,
                         doc.status,
-                        reject_reason=reject_reason if doc.status == "Lost" else None,
-                        reject_detail=reject_detail if doc.status == "Lost" else None,
+                        reject_reason=reject_reason if doc.status == "Tu choi" else None,
+                        reject_detail=reject_detail if doc.status == "Tu choi" else None,
                     )
                 results["updated"] += 1
             else:

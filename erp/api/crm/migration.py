@@ -782,7 +782,7 @@ def fix_migrated_statuses():
         "Follow up": {"QLead": "Follow Up"},
         "Pre-school tour": {"QLead": "Pre-school Tour/ School Tour"},
         "School tour": {"QLead": "Pre-school Tour/ School Tour"},
-        "Fail": {"QLead": "Lost"},
+        "Fail": {"QLead": "Tu choi"},
     }
 
     results = {"updated": 0, "details": [], "dry_run": bool(dry_run)}

@@ -21,14 +21,20 @@ STEP_STATUSES: Dict[str, List[str]] = {
         "Da kiem tra - Bao trung",
         "Da kiem tra - Trung hoc sinh",
     ],
-    "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Lost"],
+    "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Tu choi"],
     # Trang thai chinh buoc QLead (dong bo frontend STEP_STATUSES)
+    # Thoa thuan -> Can nhac; gop deal_status (Dat cho..Bao luu/Chuyen) vao status chinh; Lost -> Tu choi
     "QLead": [
         "Dang cham soc",
         "Dat lich hen",
-        "Thoa thuan",
+        "Can nhac",
+        "Dat cho",
+        "Dat coc",
+        "Dong phi",
+        "Hoan phi",
+        "Bao luu/Chuyen",
         "Khao sat dau vao",
-        "Lost",
+        "Tu choi",
     ],
     # Cho xep lop dat dau: default import Excel khi doi step khong kem status
     "Enrolled": ["Cho xep lop", "Dang hoc", "Dinh chi hoc"],

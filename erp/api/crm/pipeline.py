@@ -12,7 +12,7 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data, validate_step_transition,
     get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES,
-    QLEAD_TEST_STATUSES, QLEAD_DEAL_STATUSES,
+    QLEAD_TEST_STATUSES,
 )
 from erp.api.crm.lead import enrich_lead_dict_with_pic_info
 from erp.api.crm.assignment import (
@@ -217,8 +217,8 @@ def _log_step_change(lead_name, old_step, new_step, old_status, new_status,
             "changed_by": frappe.session.user,
             "changed_at": now()
         }
-        # Lost (trang thai chinh) hoac Tu choi o test_status/deal_status (ghi trong new_status dang field:val)
-        if new_status == "Lost" or (
+        # Tu choi (trang thai chinh) hoac Tu choi o test_status (ghi trong new_status dang field:val)
+        if new_status == "Tu choi" or (
             reject_reason and new_status and "Tu choi" in str(new_status)
         ):
             if reject_reason is not None:
@@ -250,7 +250,7 @@ def _run_create_enrollment_for_lead(lead_name: str, context: str):
 
 @frappe.whitelist(methods=["POST"])
 def change_status():
-    """Chuyen trang thai trong cung 1 step. Khi chuyen sang Lost co the truyen reject_reason, reject_detail."""
+    """Chuyen trang thai trong cung 1 step. Khi chuyen sang Tu choi co the truyen reject_reason, reject_detail."""
     check_crm_permission()
     data = get_request_data()
     
@@ -282,7 +282,7 @@ def change_status():
 
         old_status = doc.status
         doc.status = new_status
-        if new_status == "Lost":
+        if new_status == "Tu choi":
             doc.reject_reason = reject_reason
             doc.reject_detail = reject_detail
         try:
@@ -295,17 +295,17 @@ def change_status():
                 )
 
     frappe.db.commit()
-    
+
     _log_step_change(name, doc.step, doc.step, old_status, new_status,
-                     reject_reason=reject_reason if new_status == "Lost" else None,
-                     reject_detail=reject_detail if new_status == "Lost" else None)
+                     reject_reason=reject_reason if new_status == "Tu choi" else None,
+                     reject_detail=reject_detail if new_status == "Tu choi" else None)
     
     return single_item_response(_lead_payload(doc), f"Da chuyen trang thai sang {new_status}")
 
 
 @frappe.whitelist(methods=["POST"])
 def change_sub_status():
-    """Doi test_status hoac deal_status khi buoc QLead. Tu choi: luu reject_reason/reject_detail."""
+    """Doi test_status khi buoc QLead. Tu choi: luu reject_reason/reject_detail."""
     check_crm_permission()
     data = get_request_data()
 
@@ -325,10 +325,10 @@ def change_sub_status():
             },
         )
 
-    if field not in ("test_status", "deal_status"):
-        return error_response("field phai la test_status hoac deal_status")
+    if field != "test_status":
+        return error_response("field phai la test_status")
 
-    valid = QLEAD_TEST_STATUSES if field == "test_status" else QLEAD_DEAL_STATUSES
+    valid = QLEAD_TEST_STATUSES
     if new_status not in valid:
         return error_response(
             f"Trang thai '{new_status}' khong hop le. Cac gia tri hop le: {', '.join(valid)}"
@@ -742,10 +742,10 @@ def auto_enroll_paid_leads():
     
     academic_year = data.get("academic_year")
     
-    # Buoc QLead: thoa thuan da dong phi / dat coc
+    # Buoc QLead: da dong phi / dat coc (status chinh, sau khi gop deal_status)
     filters = {
         "step": "QLead",
-        "deal_status": ["in", ["Dong phi", "Dat coc"]],
+        "status": ["in", ["Dong phi", "Dat coc"]],
     }
     if academic_year:
         filters["target_academic_year"] = academic_year
@@ -774,7 +774,7 @@ def auto_enroll_paid_leads():
                     if existing:
                         skipped = True
                         break
-                if doc.step != "QLead" or (doc.deal_status or "") not in ("Dong phi", "Dat coc"):
+                if doc.step != "QLead" or (doc.status or "") not in ("Dong phi", "Dat coc"):
                     skipped = True
                     break
                 old_step = doc.step

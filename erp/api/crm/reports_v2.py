@@ -43,7 +43,6 @@ _GRADE_REPORT_STEPS = ["Lead", "QLead", "Enrolled", "Nghi hoc"]
 _GRADE_REPORT_ALWAYS_STEPS = frozenset({"Lead"})
 _NEW_PROFILE_DRAFT_KEY = "Draft|status|"
 _NEW_PROFILE_DRAFT_STATUS = "__draft__"
-_DEAL_STATUS_ORDER = ["Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Tu choi"]
 
 
 def _build_new_profile_group(step_statuses: Dict[str, set]) -> Dict[str, Any]:
@@ -101,14 +100,6 @@ def _build_status_report_groups(
                     {
                         "field": "test_status",
                         "columns": [{"key": f"QLead|test_status|{v}", "status": v} for v in tv],
-                    }
-                )
-            if deal_vals:
-                dv = _order_status_values(deal_vals, _DEAL_STATUS_ORDER)
-                sections.append(
-                    {
-                        "field": "deal_status",
-                        "columns": [{"key": f"QLead|deal_status|{v}", "status": v} for v in dv],
                     }
                 )
         groups.append({"step": step, "sections": sections})
@@ -236,7 +227,6 @@ def get_status_by_grade():
         )
 
     test_rows = _qlead_sub_rows("test_status")
-    deal_rows = _qlead_sub_rows("deal_status")
 
     # Thu thập trạng thái xuất hiện + giá trị theo khối
     step_statuses: Dict[str, set] = defaultdict(set)
@@ -256,12 +246,7 @@ def get_status_by_grade():
         test_vals.add(row["val"])
         values_by_grade[row["grade"]][f"QLead|test_status|{row['val']}"] = int(row["cnt"])
 
-    deal_vals: set = set()
-    for row in deal_rows:
-        deal_vals.add(row["val"])
-        values_by_grade[row["grade"]][f"QLead|deal_status|{row['val']}"] = int(row["cnt"])
-
-    groups = _build_status_report_groups(step_statuses, test_vals, deal_vals)
+    groups = _build_status_report_groups(step_statuses, test_vals, set())
 
     def _grade_sort_key(g: str):
         try:
@@ -995,7 +980,7 @@ def get_course_activity_dashboard():
                 slot["short_term_paid"] += 1
             if lead_step == "Enrolled":
                 slot["enrolled"] += 1
-            if cs == "refunded" or lead_st == "Lost":
+            if cs == "refunded" or lead_st in ("Lost", "Tu choi"):
                 slot["lost"] += 1
 
         if course_id and row.get("course_id") == course_id:
@@ -1191,7 +1176,6 @@ def get_source_breakdown():
         )
 
     test_rows = _qlead_sub_rows_by_src("test_status")
-    deal_rows = _qlead_sub_rows_by_src("deal_status")
 
     step_statuses: Dict[str, set] = defaultdict(set)
     values_by_src: Dict[str, Dict[str, int]] = defaultdict(dict)
@@ -1208,12 +1192,7 @@ def get_source_breakdown():
         test_vals.add(row["val"])
         values_by_src[row["src"]][f"QLead|test_status|{row['val']}"] = int(row["cnt"])
 
-    deal_vals: set = set()
-    for row in deal_rows:
-        deal_vals.add(row["val"])
-        values_by_src[row["src"]][f"QLead|deal_status|{row['val']}"] = int(row["cnt"])
-
-    groups = _build_status_report_groups(step_statuses, test_vals, deal_vals)
+    groups = _build_status_report_groups(step_statuses, test_vals, set())
     src_ids = [k for k in values_by_src if k and k != "(Trống)"]
     src_labels = r._batch_source_names(src_ids)
 
@@ -1329,7 +1308,7 @@ def get_source_funnel_detail():
             SUM(CASE WHEN l.`step` IN {_KPI_LEAD_STEPS_SQL} THEN 1 ELSE 0 END) AS total_leads,
             SUM(CASE WHEN l.`step` = 'QLead' THEN 1 ELSE 0 END) AS total_qlead,
             SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS total_enrolled,
-            SUM(CASE WHEN l.`status` = 'Lost' THEN 1 ELSE 0 END) AS total_lost
+            SUM(CASE WHEN l.`status` IN ('Lost','Tu choi') THEN 1 ELSE 0 END) AS total_lost
         FROM `tabCRM Lead` l
         INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
         WHERE {src_filter} AND {wsql}
@@ -1744,7 +1723,7 @@ def _count_kpi_metrics_snapshot(
             SUM(CASE WHEN l.`step` IN {_KPI_LEAD_STEPS_SQL} THEN 1 ELSE 0 END) AS total_leads,
             SUM(CASE WHEN l.`step` = 'QLead' THEN 1 ELSE 0 END) AS total_qlead,
             SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS total_enrolled,
-            SUM(CASE WHEN l.`status` = 'Lost' THEN 1 ELSE 0 END) AS total_lost
+            SUM(CASE WHEN l.`status` IN ('Lost','Tu choi') THEN 1 ELSE 0 END) AS total_lost
         FROM `tabCRM Lead` l
         WHERE {" AND ".join(where)}
         """,
@@ -1841,7 +1820,7 @@ def get_kpi_overview():
         ("total_leads", "Tổng lead"),
         ("total_qlead", "Học sinh Tiềm năng"),
         ("total_enrolled", "Học sinh Chính thức"),
-        ("total_lost", "Lost"),
+        ("total_lost", "Từ chối"),
     ]
     summary = [
         {
@@ -1970,7 +1949,7 @@ def get_enrollment_progress_gauge():
             SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS hshh,
             SUM(CASE WHEN l.`step` = 'QLead'
                       AND l.`test_status` = 'De xuat'
-                      AND l.`deal_status` IN ('Dat coc', 'Dong phi')
+                      AND l.`status` IN ('Dat coc', 'Dong phi')
                      THEN 1 ELSE 0 END) AS hsm
         FROM `tabCRM Lead` l
         WHERE {" AND ".join(where)}
@@ -2020,7 +1999,7 @@ def _count_kpi_metrics_period(campus_id: str, pic: str, from_date, to_date) -> D
             SUM(CASE WHEN l.`step` IN {_KPI_LEAD_STEPS_SQL} THEN 1 ELSE 0 END) AS total_leads,
             SUM(CASE WHEN l.`step` = 'QLead' THEN 1 ELSE 0 END) AS total_qlead,
             SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS total_enrolled,
-            SUM(CASE WHEN l.`status` = 'Lost' THEN 1 ELSE 0 END) AS total_lost
+            SUM(CASE WHEN l.`status` IN ('Lost','Tu choi') THEN 1 ELSE 0 END) AS total_lost
         FROM `tabCRM Lead` l
         WHERE {" AND ".join(where)}
         """,
@@ -2192,7 +2171,7 @@ def _grade_display_sort_key(g: str):
 # Tổng quan — Snapshot as-of (trạng thái tại ngày cuối kỳ, tái dựng từ lịch sử)
 # --------------------------------------------------------------------------- #
 # Thứ tự hiển thị phễu trạng thái QLead (trạng thái chính, không phải test/deal_status)
-_QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Thoa thuan", "Khao sat dau vao", "Lost"]
+_QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Can nhac", "Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Khao sat dau vao", "Tu choi"]
 
 
 def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -2291,16 +2270,21 @@ def get_overview_snapshot():
         grade = row["grade"]
         step = row["as_of_step"] or ""
         status = (row["as_of_status"] or "").strip()
+        # Chuan hoa code cu -> moi (rename Lost->Tu choi, Thoa thuan->Can nhac) cho pheu nhat quan
+        if status == "Lost":
+            status = "Tu choi"
+        elif status == "Thoa thuan":
+            status = "Can nhac"
 
         if step == "Draft":
             grade_steps[grade]["draft"] += 1
         elif step == "Lead":
-            if status == "Lost":
+            if status == "Tu choi":
                 grade_steps[grade]["lost"] += 1
             else:
                 grade_steps[grade]["lead"] += 1
         elif step == "QLead":
-            if status == "Lost":
+            if status == "Tu choi":
                 grade_steps[grade]["lost"] += 1
             else:
                 grade_steps[grade]["qlead"] += 1
@@ -2453,7 +2437,7 @@ def get_admission_profile_progress():
                l.`step` AS step
         FROM `tabCRM Lead` l
         WHERE l.`step` IN ('QLead', 'Enrolled')
-          AND IFNULL(l.`status`, '') != 'Lost'
+          AND IFNULL(l.`status`, '') NOT IN ('Lost','Tu choi')
           AND DATE(l.`creation`) <= %(to_date)s
           AND {dim_sql}
         """,
@@ -2601,7 +2585,7 @@ def get_enrolled_demographics():
                IFNULL(TRIM(l.`linked_student`), '') AS linked_student
         FROM `tabCRM Lead` l
         WHERE l.`step` = 'Enrolled'
-          AND IFNULL(l.`status`, '') != 'Lost'
+          AND IFNULL(l.`status`, '') NOT IN ('Lost','Tu choi')
           AND DATE(l.`creation`) <= %(to_date)s
           AND {dim_sql}
         """,
