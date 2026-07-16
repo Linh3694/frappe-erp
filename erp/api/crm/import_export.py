@@ -10,7 +10,7 @@ from erp.utils.api_response import (
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data,
     validate_phone_number, normalize_phone_number,
-    get_valid_statuses_for_step,
+    get_valid_statuses_for_step, resolve_status_input, STATUS_LABEL_VN,
     STEP_STATUSES, CRM_STEPS, check_marcom_draft_create_only,
     apply_marcom_pic_policy,
 )
@@ -449,9 +449,10 @@ def download_lead_template():
 
     if step in ("Lead", "QLead"):
         valid_statuses = get_valid_statuses_for_step(step)
+        status_hint = " / ".join(STATUS_LABEL_VN.get(s, s) for s in valid_statuses)
         template_fields.append({
             "field": "status",
-            "label": "Trang thai (%s)" % "/".join(valid_statuses),
+            "label": "Trang thai (%s)" % status_hint,
         })
 
     if step == "Lead":
@@ -524,6 +525,7 @@ def bulk_import_leads():
             raw_status = (row.get("status") or "").strip()
             if raw_status and target_step in ("Lead", "QLead"):
                 valid_statuses = get_valid_statuses_for_step(target_step)
+                raw_status = resolve_status_input(raw_status, valid_statuses)
                 if raw_status in valid_statuses:
                     doc.status = raw_status
             
@@ -668,7 +670,8 @@ def bulk_update_leads():
     if not rows:
         return validation_error_response("Khong co du lieu", {"rows": ["Bat buoc"]})
 
-    from erp.api.crm.utils import CRM_STEPS, generate_crm_code, ensure_crm_code_for_qlead_status
+    from erp.api.crm.utils import CRM_STEPS, generate_crm_code
+    from erp.api.crm.student_code import ensure_student_code_for_qlead_status
 
     results = {"updated": 0, "skipped": 0, "errors": []}
 
@@ -737,8 +740,10 @@ def bulk_update_leads():
             target_step = doc.step
 
             # Validate status theo step hien tai (sau khi doi buoc neu co)
+            valid = STEP_STATUSES.get(target_step, [])
+            if new_status:
+                new_status = resolve_status_input(new_status, valid)
             if new_status and new_status != (doc.status or ""):
-                valid = STEP_STATUSES.get(target_step, [])
                 if valid and new_status not in valid:
                     results["errors"].append({
                         "row": row_num,
@@ -750,7 +755,7 @@ def bulk_update_leads():
                 if new_status == "Tu choi":
                     doc.reject_reason = reject_reason
                     doc.reject_detail = reject_detail
-                ensure_crm_code_for_qlead_status(doc)
+                ensure_student_code_for_qlead_status(doc)
                 changed = True
             elif new_step and new_step != snap_step and not new_status:
                 # Doi buoc nhung khong set status -> tu dong dat status mac dinh

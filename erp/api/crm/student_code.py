@@ -70,6 +70,26 @@ def _generate_code_internal(campus_code, academic_year, grade):
     return f"{campus_code or 'WS1'}{year_code}{grade_code}{seq:03d}"
 
 
+# Nhom status QLead kich hoat sinh ma hoc sinh (student_code): Khao sat / Dat coc / Dong phi
+_QLEAD_STUDENT_CODE_TRIGGER_STATUSES = ("Khao sat dau vao", "Dat coc", "Dong phi")
+
+
+def ensure_student_code_for_qlead_status(doc):
+    """Sinh ma hoc sinh (student_code) khi ho so o buoc QLead va status thuoc nhom
+    Khao sat/Dat coc/Dong phi — neu chua co va chua link student.
+    Campus mac dinh WS1 (dong bo convention hien tai); nam hoc + khoi lay tu ho so."""
+    if (
+        getattr(doc, "step", None) != "QLead"
+        or getattr(doc, "status", None) not in _QLEAD_STUDENT_CODE_TRIGGER_STATUSES
+        or getattr(doc, "student_code", None)
+        or getattr(doc, "linked_student", None)
+    ):
+        return
+    academic_year = getattr(doc, "target_academic_year", None) or ""
+    grade = getattr(doc, "target_grade", None) or getattr(doc, "current_grade", None) or "01"
+    doc.student_code = _generate_code_internal("WS1", academic_year, grade)
+
+
 @frappe.whitelist(methods=["POST"])
 def generate_student_code():
     """Tao ma hoc sinh"""

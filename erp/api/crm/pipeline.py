@@ -11,7 +11,7 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import (
     check_crm_permission, get_request_data, validate_step_transition,
-    get_valid_statuses_for_step, generate_crm_code, ensure_crm_code_for_qlead_status, STEP_STATUSES,
+    get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES,
     QLEAD_TEST_STATUSES,
 )
 from erp.api.crm.lead import enrich_lead_dict_with_pic_info
@@ -91,32 +91,9 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
 
     validate_step_transition(old_step, target_step)
 
-    # Lead -> QLead: sinh ma WS (student_code) som — giong tham so QLead->Enrolled / enroll_lead
-    if old_step == "Lead" and target_step == "QLead":
-        if not doc.student_code and not getattr(doc, "linked_student", None):
-            from erp.api.crm.student_code import _generate_code_internal
-
-            ex = extra_data or {}
-            campus_code = ex.get("campus_code")
-            if not campus_code or (isinstance(campus_code, str) and not str(campus_code).strip()):
-                campus_code = "WS1"
-            else:
-                campus_code = str(campus_code).strip()
-            academic_year = ex.get("academic_year")
-            if academic_year in (None, ""):
-                academic_year = doc.target_academic_year or ""
-            else:
-                academic_year = str(academic_year).strip()
-            grade = ex.get("grade")
-            if grade in (None, ""):
-                grade = doc.target_grade or doc.current_grade or "01"
-            else:
-                grade = str(grade).strip() or "01"
-            doc.student_code = _generate_code_internal(
-                campus_code,
-                academic_year,
-                grade,
-            )
+    # Ma hoc sinh (student_code) khong con sinh khi Lead->QLead — chuyen sang sinh khi
+    # QLead status = Khao sat/Dat coc/Dong phi (xem ensure_student_code_for_qlead_status
+    # trong change_status). QLead->Enrolled ben duoi van sinh (fallback neu chua co).
 
     # QLead -> Enrolled: sinh ma HS (hoc sinh moi) + kiem tra trung Enrolled
     if old_step == "QLead" and target_step == "Enrolled":
@@ -180,9 +157,8 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
     if target_step == "Verify" and old_step == "Lead":
         doc.status = "Da kiem tra - Trung hoc sinh"
 
-    # Ma ID (crm_code) khong con sinh o buoc Lead — chuyen sang sinh o QLead khi status
-    # = Khao sat/Dat coc/Dong phi (xem ensure_crm_code_for_qlead_status trong change_status).
-    # Giu sinh o Draft->Verify (edge case luong kiem tra trung lap).
+    if target_step == "Lead" and not doc.crm_code:
+        doc.crm_code = generate_crm_code()
     if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
         doc.crm_code = generate_crm_code()
 
@@ -283,8 +259,9 @@ def change_status():
 
         old_status = doc.status
         doc.status = new_status
-        # Sinh Ma ID khi vao QLead status Khao sat/Dat coc/Dong phi (neu chua co)
-        ensure_crm_code_for_qlead_status(doc)
+        # Sinh ma hoc sinh khi vao QLead status Khao sat/Dat coc/Dong phi (neu chua co)
+        from erp.api.crm.student_code import ensure_student_code_for_qlead_status
+        ensure_student_code_for_qlead_status(doc)
         if new_status == "Tu choi":
             doc.reject_reason = reject_reason
             doc.reject_detail = reject_detail

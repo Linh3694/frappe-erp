@@ -44,6 +44,58 @@ STEP_STATUSES: Dict[str, List[str]] = {
     "Nghi hoc": ["Tot nghiep", "Bao luu", "Chuyen truong"],
 }
 
+# Nhan tieng Viet cho status CRM Lead (dong bo statusLabels.ts) — dung khi import nhan nhan.
+STATUS_LABEL_VN = {
+    "Moi": "Chưa liên hệ",
+    "Can kiem tra": "Cần kiểm tra",
+    "Trung": "Trùng",
+    "Da kiem tra - Gop ho so": "Đã kiểm tra - Gộp hồ sơ",
+    "Da kiem tra - Gop du lieu": "Đã kiểm tra - Gộp dữ liệu",
+    "Da kiem tra - Bao trung": "Đã kiểm tra - Báo trùng",
+    "Da kiem tra - Trung hoc sinh": "Đã kiểm tra - Trùng học sinh",
+    "Khong nghe may": "Không nghe máy",
+    "Hen gap lai": "Hẹn gọi lại",
+    "Khong nghe may nhieu lan": "Không nghe máy nhiều lần",
+    "Khong co nhu cau": "Không có nhu cầu",
+    "Sau thong tin": "Sai thông tin",
+    "Trung Lead": "Trùng Lead",
+    "Dang cham soc": "Đang chăm sóc",
+    "Dat lich hen": "Đặt lịch hẹn",
+    "Tham gia su kien": "Tham gia sự kiện",
+    "Tham quan truong": "Tham quan trường",
+    "Can nhac": "Cân nhắc",
+    "Dat cho": "Đặt chỗ",
+    "Dat coc": "Đặt cọc",
+    "Dong phi": "Nộp phí",
+    "Hoan phi": "Hoàn phí",
+    "Bao luu/Chuyen": "Nhượng phí",
+    "Khao sat dau vao": "Khảo sát",
+    "Tu choi": "Từ chối",
+    "Cho xep lop": "Chờ xếp lớp",
+    "Dang hoc": "Đang học",
+    "Dinh chi hoc": "Đình chỉ học",
+    "Tot nghiep": "Tốt nghiệp",
+    "Bao luu": "Bảo lưu",
+    "Chuyen truong": "Chuyển trường",
+}
+
+
+def resolve_status_input(raw, valid_statuses):
+    """Chuan hoa status khi import: chap nhan MA CODE hoac NHAN tieng Viet
+    (khong phan biet hoa thuong/khoang trang). Doi chieu nhan trong pham vi
+    `valid_statuses` cua buoc -> tra ve code hop le; neu khong khop tra raw
+    (de validate bao loi ro rang)."""
+    if raw is None:
+        return raw
+    s = str(raw).strip()
+    if s in valid_statuses:
+        return s
+    key = s.lower()
+    for code in valid_statuses:
+        if STATUS_LABEL_VN.get(code, "").strip().lower() == key:
+            return code
+    return s
+
 # Sub-status QLead: khao sat dau vao / thoa thuan (truong test_status, deal_status)
 QLEAD_TEST_STATUSES = ["Dat lich", "Tham gia", "De xuat", "Thi lai", "Tu choi"]
 QLEAD_DEAL_STATUSES = ["Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Tu choi"]
@@ -242,21 +294,6 @@ def generate_crm_code() -> str:
     # Fallback cuoi cung: dung timestamp de tranh deadlock vong lap
     import time
     return f"CRM-{int(time.time() * 1000) % 10**8:08d}"
-
-
-# Nhom status QLead kich hoat sinh Ma ID (crm_code): Khao sat / Dat coc / Dong phi
-QLEAD_CRM_CODE_TRIGGER_STATUSES = ("Khao sat dau vao", "Dat coc", "Dong phi")
-
-
-def ensure_crm_code_for_qlead_status(doc) -> None:
-    """Sinh Ma ID (crm_code) khi ho so o buoc QLead va status thuoc nhom
-    Khao sat/Dat coc/Dong phi — neu chua co."""
-    if (
-        getattr(doc, "step", None) == "QLead"
-        and getattr(doc, "status", None) in QLEAD_CRM_CODE_TRIGGER_STATUSES
-        and not getattr(doc, "crm_code", None)
-    ):
-        doc.crm_code = generate_crm_code()
 
 
 def get_request_data() -> dict:

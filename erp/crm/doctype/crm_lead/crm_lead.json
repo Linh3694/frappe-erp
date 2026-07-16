@@ -182,7 +182,7 @@
    "unique": 1,
    "read_only": 1,
    "in_list_view": 1,
-   "description": "Ma CRM tu dong sinh khi vao QLead status Khao sat/Dat coc/Dong phi (CRM-00001)"
+   "description": "Ma CRM tu dong sinh khi chuyen sang buoc Lead (CRM-00001)"
   },
   {
    "fieldname": "cb_general_1",
