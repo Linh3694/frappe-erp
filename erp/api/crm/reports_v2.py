@@ -554,6 +554,33 @@ def get_entrance_exams_report():
 _DEPOSIT_PAID_LEAD_STATUSES = frozenset({"Deposit", "Paid", "Booked"})
 _TUITION_PAID_LEAD_STATUSES = frozenset({"Paid", "Booked"})
 
+# Lead từ chối — dùng cho segment "Đạt nhưng hủy" (đạt kết quả nhưng lead bị từ chối)
+_DENIED_LEAD_STATUSES = frozenset({"Lost", "Tu choi"})
+# Nhóm "đã đóng phí tham gia khảo sát" cho chart kết quả theo khối (Đặt cọc / Nộp phí)
+_EXAM_PAID_LEAD_STATUSES = frozenset({"Dat coc", "Dong phi"})
+
+
+def _exam_result_segment(exam_result: Optional[str], lead_status: Optional[str]) -> Optional[str]:
+    """Gộp exam_result × lead_status thành 1 segment biểu đồ kết quả theo khối.
+
+    - fail            → 'fail'            (Trượt)
+    - pass/cond + từ chối → 'pass_cancelled' (Đạt nhưng hủy)
+    - pass            → 'pass'            (Đạt)
+    - conditional_pass → 'conditional_pass' (Đạt có điều kiện)
+    - retake          → 'retake'          (Thi lại — không hiển thị mặc định)
+    - '' (chưa có kết quả) → None (bỏ qua)
+    """
+    res = (exam_result or "").strip()
+    if res == "fail":
+        return "fail"
+    if res in ("pass", "conditional_pass"):
+        if (lead_status or "").strip() in _DENIED_LEAD_STATUSES:
+            return "pass_cancelled"
+        return res
+    if res == "retake":
+        return "retake"
+    return None
+
 
 def _activity_granularity(args) -> str:
     gran = (args.get("activity_granularity") or "month").strip().lower()
@@ -666,16 +693,22 @@ def get_entrance_exam_activity_dashboard():
         as_dict=True,
     )
 
-    by_grade_map: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"by_status": defaultdict(int), "by_result": defaultdict(int), "total": 0, "ksdv_paid": 0, "tested": 0})
+    by_grade_map: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"by_status": defaultdict(int), "by_result": defaultdict(int), "result_segments": defaultdict(int), "result_segments_paid": defaultdict(int), "total": 0, "ksdv_paid": 0, "tested": 0})
     conv_map: Dict[str, Dict[str, int]] = defaultdict(lambda: {"paid": 0, "enrolled": 0})
     week_exams: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
     for row in rows:
         grade = row.get("target_grade") or "(Chưa có khối)"
         st = row.get("exam_status") or ""
+        ls = (row.get("lead_status") or "").strip()
         by_grade_map[grade]["total"] += 1
         by_grade_map[grade]["by_status"][st] += 1
         by_grade_map[grade]["by_result"][row.get("exam_result") or ""] += 1
+        seg = _exam_result_segment(row.get("exam_result"), ls)
+        if seg:
+            by_grade_map[grade]["result_segments"][seg] += 1
+            if ls in _EXAM_PAID_LEAD_STATUSES:
+                by_grade_map[grade]["result_segments_paid"][seg] += 1
         if int(row.get("ksdv_fee_paid") or 0):
             by_grade_map[grade]["ksdv_paid"] += 1
             conv_map[grade]["paid"] += 1
@@ -716,6 +749,8 @@ def get_entrance_exam_activity_dashboard():
                 "total": m["total"],
                 "by_status": dict(m["by_status"]),
                 "by_result": dict(m["by_result"]),
+                "result_segments": dict(m["result_segments"]),
+                "result_segments_paid": dict(m["result_segments_paid"]),
                 "ksdv_paid": m["ksdv_paid"],
                 "tested": m["tested"],
             }
@@ -1037,6 +1072,8 @@ def get_course_activity_dashboard():
                 "lead_bucket": _course_lead_bucket(cs, row.get("lead_status") or "", row.get("lead_step") or ""),
                 "course_status": cs,
                 "lead_status": row.get("lead_status") or "",
+                # Cần cho bộ lọc legend "Nhập học" (lead_step == 'Enrolled') ở FE
+                "lead_step": row.get("lead_step") or "",
                 "pic": pic,
                 "pic_name": pic_map.get(pic, pic) if pic else "—",
                 "target_grade": row.get("target_grade") or "",
@@ -2024,13 +2061,14 @@ def get_kpi_member_funnel():
     campus_id = (args.get("campus_id") or "").strip()
     restricted = r._should_restrict_to_own_pic_only()
     pic = r._effective_pic_from_request(args.get("pic"))
-    fd, td, _, _ = r._resolve_period(args)
+    fd, td, pdf, pdt = r._resolve_period(args)
 
     if not pic:
         return success_response(
             {
                 "funnel": [],
                 "total_lost": 0,
+                "total_lost_change": None,
                 "meta": {
                     "period": {"from": str(fd), "to": str(td)},
                     "pic": None,
@@ -2041,19 +2079,24 @@ def get_kpi_member_funnel():
         )
 
     counts = _count_kpi_metrics_period(campus_id, pic, fd, td)
+    prev = _count_kpi_metrics_period(campus_id, pic, pdf, pdt)
     ud = r._batch_user_map([pic]).get(pic, {})
 
+    def _ch(metric: str):
+        return r._pct_change(counts[metric], prev[metric])
+
     funnel = [
-        {"key": "total_profiles", "label": "Tổng Hồ sơ", "count": counts["total_profiles"]},
-        {"key": "total_leads", "label": "Tổng lead", "count": counts["total_leads"]},
-        {"key": "total_qlead", "label": "Học sinh Tiềm năng", "count": counts["total_qlead"]},
-        {"key": "total_enrolled", "label": "Học sinh Chính thức", "count": counts["total_enrolled"]},
+        {"key": "total_profiles", "label": "Tổng Hồ sơ", "count": counts["total_profiles"], "change": _ch("total_profiles")},
+        {"key": "total_leads", "label": "Tổng lead", "count": counts["total_leads"], "change": _ch("total_leads")},
+        {"key": "total_qlead", "label": "Học sinh Tiềm năng", "count": counts["total_qlead"], "change": _ch("total_qlead")},
+        {"key": "total_enrolled", "label": "Học sinh Chính thức", "count": counts["total_enrolled"], "change": _ch("total_enrolled")},
     ]
 
     return success_response(
         {
             "funnel": funnel,
             "total_lost": counts["total_lost"],
+            "total_lost_change": _ch("total_lost"),
             "meta": {
                 "period": {"from": str(fd), "to": str(td)},
                 "pic": pic,
