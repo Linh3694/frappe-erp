@@ -2171,7 +2171,7 @@ def _grade_display_sort_key(g: str):
 # Tổng quan — Snapshot as-of (trạng thái tại ngày cuối kỳ, tái dựng từ lịch sử)
 # --------------------------------------------------------------------------- #
 # Thứ tự hiển thị phễu trạng thái QLead (trạng thái chính, không phải test/deal_status)
-_QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Can nhac", "Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Khao sat dau vao", "Tu choi"]
+_QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Tham gia su kien", "Tham quan truong", "Can nhac", "Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Khao sat dau vao", "Tu choi"]
 
 
 def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -> List[Dict[str, Any]]:

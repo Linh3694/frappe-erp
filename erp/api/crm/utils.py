@@ -21,12 +21,14 @@ STEP_STATUSES: Dict[str, List[str]] = {
         "Da kiem tra - Bao trung",
         "Da kiem tra - Trung hoc sinh",
     ],
-    "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead", "Tu choi"],
+    "Lead": ["Moi", "Khong nghe may", "Hen gap lai", "Khong nghe may nhieu lan", "Khong co nhu cau", "Sau thong tin", "Trung Lead"],
     # Trang thai chinh buoc QLead (dong bo frontend STEP_STATUSES)
     # Thoa thuan -> Can nhac; gop deal_status (Dat cho..Bao luu/Chuyen) vao status chinh; Lost -> Tu choi
     "QLead": [
         "Dang cham soc",
         "Dat lich hen",
+        "Tham gia su kien",
+        "Tham quan truong",
         "Can nhac",
         "Dat cho",
         "Dat coc",
