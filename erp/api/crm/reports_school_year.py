@@ -1804,11 +1804,13 @@ def _count_kpi_metrics_by_pic(
         pic = row["pic"]
         step = row["step"]
         cnt = int(row["cnt"])
-        # Lead tổng = cộng dồn cả 3 bước (Lead/QLead/Enrolled đều từng qua Lead)
+        # Phễu CỘNG DỒN — đếm "đã từng đạt tới mốc này", không phải "đang đứng ở mốc này".
+        # Nhờ vậy lead >= qlead >= enrolled luôn đúng; em đã lên Enrolled vẫn được tính cho
+        # mốc Tiềm năng đã qua, chứ không biến mất khỏi cột đó.
         out[pic]["lead"] += cnt
-        if step == "QLead":
+        if step in ("QLead", "Enrolled"):
             out[pic]["qlead"] += cnt
-        elif step == "Enrolled":
+        if step == "Enrolled":
             out[pic]["enrolled"] += cnt
     return out
 
@@ -1886,11 +1888,27 @@ def get_kpi_overview():
                     "re_enrolled": int(getattr(row, "re_enrollment_target", 0) or 0),
                 }
 
-    actual_by_pic = _count_kpi_metrics_by_pic(
+    # AI đứng trong bảng — theo cột PIC của đội: Sales = pic_sales, Care = pic_care.
+    roster_by_pic = _count_kpi_metrics_by_pic(
         campus_id, target_academic_year, pic_field=pic_field, pic_filter=pic_eff
     )
-    # Tái ghi danh — nguồn khác hẳn 3 mốc phễu (đợt tái ghi danh, không phải CRM Lead step).
-    # Chỉ đội Care mới có chỉ tiêu này nên khỏi truy vấn khi xem đội Sales.
+
+    # SỐ PHỄU (lead/qlead/enrolled) — LUÔN nhóm theo `pic_sales` cho cả hai đội.
+    # Người Care cũng làm tuyển sinh: khi hồ sơ là của họ thì họ tự đặt mình làm `pic_sales`,
+    # nên công tuyển sinh của họ nằm ở cột đó. Nhóm phễu theo `pic_care` là SAI — cột này chỉ
+    # được gán lúc chuyển VÀO Enrolled (pipeline.py: _prepare_advance_step_doc khi
+    # QLead→Enrolled, enroll_lead, auto_enroll_paid_leads), nên bước Lead/QLead không có gì để
+    # khớp => cột Lead ra y hệt cột Học sinh mới và Tiềm năng luôn 0.
+    actual_by_pic = (
+        roster_by_pic
+        if pic_field == "pic_sales"
+        else _count_kpi_metrics_by_pic(
+            campus_id, target_academic_year, pic_field="pic_sales", pic_filter=pic_eff
+        )
+    )
+
+    # Tái ghi danh — nguồn khác hẳn 3 mốc phễu (đợt tái ghi danh, không phải CRM Lead step),
+    # và đây mới là việc gắn với `pic_care`. Sales không có chỉ tiêu này nên khỏi truy vấn.
     re_enroll_by_pic = (
         _count_re_enrollment_by_pic(campus_id, target_academic_year)
         if eff_team == "care"
@@ -1900,7 +1918,9 @@ def get_kpi_overview():
     # Thành viên hiện trong bảng = ai ĐANG có mặt ở cột đó ∪ ai được giao target đội đó.
     # KHÔNG lọc theo role: pic_sales không ràng buộc role (người Care vẫn có thể giữ
     # pic_sales), lọc theo role sẽ đếm mà không hiện => số liệu bốc hơi.
-    all_pics = set(member_targets_map.keys()) | set(actual_by_pic.keys()) | set(re_enroll_by_pic.keys())
+    # Roster theo cột PIC của đội — KHÔNG dùng `actual_by_pic` (luôn theo pic_sales), không thì
+    # bảng Care sẽ lôi vào cả người đội Sales.
+    all_pics = set(member_targets_map.keys()) | set(roster_by_pic.keys()) | set(re_enroll_by_pic.keys())
     if eff_team == "sales":
         all_pics |= set(_get_active_crm_sales_user_names())
     if pic_eff:
