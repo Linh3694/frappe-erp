@@ -1452,7 +1452,9 @@ def _count_enrolled_by_pic(
     return {row["pic"]: int(row["cnt"]) for row in rows}
 
 
-def _pct(actual: int, target: int) -> float:
+def _pct(actual: float, target: float) -> float:
+    """% đạt mục tiêu. Dùng cho cả chỉ tiêu SỐ LƯỢNG (lead/qlead/enrolled) lẫn chỉ tiêu
+    TỶ LỆ (tái ghi danh: mục tiêu giữ 90%, thực tế 85% -> 94% đạt mục tiêu)."""
     if target <= 0:
         return 0.0 if actual <= 0 else 100.0
     return round(100.0 * actual / target, 2)
@@ -1680,28 +1682,34 @@ def _count_enrolled_actual(
     )
 
 
-def _count_re_enrollment_by_pic(campus_id: str, target_academic_year: str) -> Dict[str, int]:
-    """So TAI GHI DANH THUC TE theo PIC — dem ho so da chot `decision='re_enroll'`.
+def _re_enrollment_rate_by_pic(campus_id: str, target_academic_year: str) -> Dict[str, float]:
+    """TY LE tai ghi danh THUC TE theo PIC (%) — `re_enroll / tong ho so duoc giao * 100`.
+
+    Tra ve TY LE chu khong phai so luong, vi muc tieu (`re_enrollment_target`) la Percent:
+    giao chi tieu "giu duoc 90% hoc sinh", khong phai "giu duoc 90 em".
+
+    Mau so = MOI ho so trong dot cua PIC do (moi decision, ke ca 'considering' chua tra loi)
+    => nguoi con nhieu ho so chua chot thi ty le thap, dung y nghia "da giu duoc bao nhieu %".
 
     Nguon: dot tai ghi danh (`SIS Re-enrollment Config`) co `school_year_id` = nam hoc muc
-    tieu. Chi dem quyet dinh 're_enroll' — 'considering' chua phai ket qua.
-
-    PIC = nguoi DANG giu ho so: COALESCE(pic_care, pic_sales), uu tien ho so o buoc Enrolled
-    — copy nguyen pattern cua erp/api/erp_sis/re_enrollment.py (by_pic) de hai bao cao khong
-    ra hai con so khac nhau cho cung mot nguoi.
+    tieu. PIC = nguoi DANG giu ho so: COALESCE(pic_care, pic_sales), uu tien ho so o buoc
+    Enrolled — copy nguyen pattern cua erp/api/erp_sis/re_enrollment.py (by_pic) de hai bao
+    cao khong ra hai con so khac nhau cho cung mot nguoi.
     """
     if not target_academic_year:
         return {}
-    where = ["cfg.`school_year_id` = %(sy)s", "re.`decision` = 're_enroll'"]
+    where = ["cfg.`school_year_id` = %(sy)s"]
     binds: Dict[str, Any] = {"sy": target_academic_year}
     if campus_id:
         where.append("cfg.`campus_id` = %(campus)s")
         binds["campus"] = campus_id
     rows = frappe.db.sql(
         f"""
-        SELECT COALESCE(t.pic, '') AS pic, COUNT(*) AS cnt
+        SELECT COALESCE(t.pic, '') AS pic,
+               COUNT(*) AS total,
+               SUM(CASE WHEN t.decision = 're_enroll' THEN 1 ELSE 0 END) AS re_enroll
         FROM (
-            SELECT (
+            SELECT re.`decision` AS decision, (
                 SELECT COALESCE(l2.`pic_care`, l2.`pic_sales`) FROM `tabCRM Lead` l2
                 WHERE l2.`linked_student` = re.`student_id`
                 ORDER BY (l2.`step` = 'Enrolled') DESC, l2.`modified` DESC
@@ -1717,7 +1725,12 @@ def _count_re_enrollment_by_pic(campus_id: str, target_academic_year: str) -> Di
         binds,
         as_dict=True,
     )
-    return {row["pic"]: int(row["cnt"] or 0) for row in rows}
+    out: Dict[str, float] = {}
+    for row in rows:
+        total = int(row["total"] or 0)
+        # Cung cong thuc `_rate` cua re_enrollment.py (lam tron 1 chu so) de khop bao cao kia.
+        out[row["pic"]] = round(int(row["re_enroll"] or 0) / total * 100, 1) if total else 0.0
+    return out
 
 
 def _count_kpi_metrics_snapshot(
@@ -1885,7 +1898,8 @@ def get_kpi_overview():
                     "lead": int(getattr(row, "lead_target", 0) or 0),
                     "qlead": int(getattr(row, "qlead_target", 0) or 0),
                     "enrolled": int(row.enrollment_target or 0),
-                    "re_enrolled": int(getattr(row, "re_enrollment_target", 0) or 0),
+                    # Percent, không phải Int — chỉ tiêu là TỶ LỆ tái ghi danh.
+                    "re_enrolled": float(getattr(row, "re_enrollment_target", 0) or 0),
                 }
 
     # AI đứng trong bảng — theo cột PIC của đội: Sales = pic_sales, Care = pic_care.
@@ -1909,8 +1923,9 @@ def get_kpi_overview():
 
     # Tái ghi danh — nguồn khác hẳn 3 mốc phễu (đợt tái ghi danh, không phải CRM Lead step),
     # và đây mới là việc gắn với `pic_care`. Sales không có chỉ tiêu này nên khỏi truy vấn.
-    re_enroll_by_pic = (
-        _count_re_enrollment_by_pic(campus_id, target_academic_year)
+    # Giá trị là TỶ LỆ (%), không phải số lượng — khớp `re_enrollment_target` kiểu Percent.
+    re_enroll_rate_by_pic = (
+        _re_enrollment_rate_by_pic(campus_id, target_academic_year)
         if eff_team == "care"
         else {}
     )
@@ -1920,7 +1935,9 @@ def get_kpi_overview():
     # pic_sales), lọc theo role sẽ đếm mà không hiện => số liệu bốc hơi.
     # Roster theo cột PIC của đội — KHÔNG dùng `actual_by_pic` (luôn theo pic_sales), không thì
     # bảng Care sẽ lôi vào cả người đội Sales.
-    all_pics = set(member_targets_map.keys()) | set(roster_by_pic.keys()) | set(re_enroll_by_pic.keys())
+    all_pics = (
+        set(member_targets_map.keys()) | set(roster_by_pic.keys()) | set(re_enroll_rate_by_pic.keys())
+    )
     if eff_team == "sales":
         all_pics |= set(_get_active_crm_sales_user_names())
     if pic_eff:
@@ -1933,7 +1950,9 @@ def get_kpi_overview():
         targets = member_targets_map.get(pic, _EMPTY_TARGETS)
         act = actual_by_pic.get(pic, {"lead": 0, "qlead": 0, "enrolled": 0})
         ud = user_map.get(pic, {})
-        re_actual = re_enroll_by_pic.get(pic, 0)
+        # Cả hai đều là TỶ LỆ (%) — `_pct` ra "đạt bao nhiêu % so với chỉ tiêu tỷ lệ".
+        # Vd: mục tiêu giữ 90%, thực tế giữ 85% => 85/90 = 94% đạt mục tiêu.
+        re_actual = re_enroll_rate_by_pic.get(pic, 0.0)
         re_target = targets.get("re_enrolled", 0)
         by_member.append(
             {

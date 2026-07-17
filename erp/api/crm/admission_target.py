@@ -86,9 +86,22 @@ def _resolve_pic_user(pic_hint: str) -> Optional[str]:
 
 
 def _non_negative_int(value: Any) -> int:
-    """Ép về Int không âm — dùng chung cho mọi chỉ tiêu KPI."""
+    """Ép về Int không âm — dùng chung cho mọi chỉ tiêu KPI dạng SỐ LƯỢNG."""
     n = int(value or 0)
     return n if n > 0 else 0
+
+
+def _percent_0_100(value: Any) -> float:
+    """Ép về Percent trong [0, 100] — cho chỉ tiêu dạng TỶ LỆ (vd. tái ghi danh).
+
+    Chặn trên 100 ngay từ API: tỷ lệ tái ghi danh không thể vượt 100%, nhập nhầm 900 mà
+    lọt xuống DB thì heatmap sẽ hiện ~0% đạt mục tiêu mà không ai hiểu vì sao.
+    """
+    try:
+        n = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(100.0, max(0.0, n))
 
 
 def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
@@ -110,8 +123,9 @@ def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
             "enrollment_target": _non_negative_int(r.get("enrollment_target")),
             "lead_target": _non_negative_int(r.get("lead_target")),
             "qlead_target": _non_negative_int(r.get("qlead_target")),
-            # Chi doi Care dung — thuc te doi chieu lay tu dot tai ghi danh cua nam hoc do.
-            "re_enrollment_target": _non_negative_int(r.get("re_enrollment_target")),
+            # Chi doi Care dung. TY LE (%), khong phai so luong — thuc te doi chieu la ty le
+            # tai ghi danh cua PIC do trong dot tai ghi danh cua nam hoc.
+            "re_enrollment_target": _percent_0_100(r.get("re_enrollment_target")),
         }
         if r.get("name"):
             row["name"] = r["name"]
@@ -149,7 +163,7 @@ def _serialize_target_doc(doc) -> Dict[str, Any]:
             "enrollment_target": int(r.enrollment_target or 0),
             "lead_target": int(r.lead_target or 0),
             "qlead_target": int(r.qlead_target or 0),
-            "re_enrollment_target": int(getattr(r, "re_enrollment_target", 0) or 0),
+            "re_enrollment_target": float(getattr(r, "re_enrollment_target", 0) or 0),
         }
         for r in doc.member_targets or []
     ]

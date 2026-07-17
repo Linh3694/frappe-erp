@@ -59,11 +59,11 @@
   },
   {
    "default": "0",
-   "description": "Chỉ dùng cho đội Care. Thực tế đối chiếu = số hồ sơ SIS Re-enrollment có decision='re_enroll' thuộc đợt tái ghi danh của năm học mục tiêu.",
+   "description": "TỶ LỆ (%), không phải số lượng. Chỉ dùng cho đội Care. Thực tế đối chiếu = tỷ lệ tái ghi danh của PIC đó trong đợt tái ghi danh của năm học mục tiêu: re_enroll / tổng hồ sơ được giao × 100.",
    "fieldname": "re_enrollment_target",
-   "fieldtype": "Int",
+   "fieldtype": "Percent",
    "in_list_view": 1,
-   "label": "Mục tiêu Tái ghi danh",
+   "label": "Mục tiêu Tái ghi danh (%)",
    "non_negative": 1
   }
  ],
