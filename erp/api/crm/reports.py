@@ -337,6 +337,25 @@ def _lost_event_condition(include_tu_choi: bool) -> str:
     return "IFNULL(h.`new_status`,'') IN ('Lost','Tu choi')"
 
 
+def _exclude_migrated_leads_sql(alias: str = "l") -> str:
+    """Loại hồ sơ migrate — học sinh cũ nạp thẳng vào bước cuối, chưa từng đi qua phễu.
+
+    Nhận diện đồng thời 3 dấu hiệu: đang ở Enrolled/Nghi hoc, không có enrollment_date
+    (chỉ pipeline.py set khi chốt thật), và không có dòng CRM Lead Step History nào.
+    Hồ sơ chốt qua pipeline luôn có đủ cả hai nên không bao giờ bị loại; create_lead chỉ
+    tạo được ở Verify/Lead nên cũng nằm ngoài. Dùng cho các nhánh fallback theo
+    `creation` — nơi hồ sơ migrate bị đếm nhầm thành "vào phễu trong kỳ".
+    """
+    return f"""NOT (
+                  {alias}.`step` IN ('Enrolled', 'Nghi hoc')
+                  AND {alias}.`enrollment_date` IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM `tabCRM Lead Step History` hm
+                      WHERE hm.`lead` = {alias}.`name`
+                  )
+              )"""
+
+
 def _count_new_leads(date_from: Any, date_to: Any, args) -> int:
     """Hồ sơ mới: bước Draft (tab Dữ liệu), nhập trong kỳ — chưa chuyển Lead."""
     wsql, binds = _where_creation_between(date_from, date_to, args)
@@ -428,6 +447,7 @@ def _count_active_pipeline(args) -> int:
 def _count_leads_entered_pipeline(date_from: Any, date_to: Any, args) -> int:
     """Lead vào phễu (đạt Lead) trong kỳ — mẫu số tỷ lệ chuyển đổi."""
     dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    mig_sql = _exclude_migrated_leads_sql()
     binds = {"d_from": date_from, "d_to": date_to, **dim_binds}
     row = frappe.db.sql(
         f"""
@@ -444,6 +464,7 @@ def _count_leads_entered_pipeline(date_from: Any, date_to: Any, args) -> int:
             WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
               AND l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Nghi hoc')
               AND {dim_sql}
+              AND {mig_sql}
               AND NOT EXISTS (
                   SELECT 1 FROM `tabCRM Lead Step History` hx
                   WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'Lead'
@@ -557,6 +578,7 @@ def _cohort_leads_subquery(args) -> Tuple[str, Dict[str, Any]]:
     """Subquery trả về lead_id thuộc cohort (vào Lead trong kỳ)."""
     fd, td, _, _ = _resolve_period(args)
     dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    mig_sql = _exclude_migrated_leads_sql()
     binds = {"d_from": fd, "d_to": td, **dim_binds}
     sql = f"""
         SELECT DISTINCT t.lead_id FROM (
@@ -572,6 +594,7 @@ def _cohort_leads_subquery(args) -> Tuple[str, Dict[str, Any]]:
             WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
               AND l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Nghi hoc')
               AND {dim_sql}
+              AND {mig_sql}
               AND NOT EXISTS (
                   SELECT 1 FROM `tabCRM Lead Step History` hx
                   WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'Lead'
@@ -811,6 +834,7 @@ def get_trend():
     )
 
     dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    mig_sql = _exclude_migrated_leads_sql()
     binds_h = {"d_from": fd, "d_to": td, **dim_binds}
     hj = f"DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s AND {dim_sql}"
 
@@ -834,6 +858,7 @@ def get_trend():
         WHERE DATE(l.`creation`) BETWEEN %(d_from)s AND %(d_to)s
           AND l.`step` IN ('Lead', 'QLead', 'Enrolled', 'Nghi hoc')
           AND {dim_sql}
+          AND {mig_sql}
           AND NOT EXISTS (
               SELECT 1 FROM `tabCRM Lead Step History` hx
               WHERE hx.`lead` = l.`name` AND hx.`new_step` = 'Lead'
