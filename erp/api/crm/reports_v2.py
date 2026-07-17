@@ -1589,6 +1589,75 @@ def get_enrollment_target_progress():
 _KPI_LEAD_STEPS_SQL = "('Lead','QLead','Enrolled')"
 
 
+def _is_enabled_school_year(school_year: str) -> bool:
+    """Nam hoc dang bat (is_enable) = nam hien tai."""
+    if not school_year:
+        return False
+    return bool(frappe.db.get_value("SIS School Year", school_year, "is_enable"))
+
+
+def _count_enrolled_actual(
+    campus_id: str, school_year: str, pic_filter: Optional[str] = None
+) -> int:
+    """Hoc sinh chinh thuc THUC TE cua nam hoc — si so, khong phai "tuyen moi duoc bao nhieu".
+
+    `target_academic_year` KHONG model duoc "nam do em co dang hoc khong": moi ho so chi giu
+    duoc MOT gia tri, nen hoc sinh vao tu 2025-2026 roi hoc tiep len 2026-2027 van mai mang
+    nhan 2025-2026. Vi vay chia 2 duong:
+
+    - Nam dang bat (is_enable) = nam hien tai -> dem thang CRM Lead dang o step='Enrolled',
+      KHONG loc theo nam. Day la "so hien tai", khop rail giai doan ben danh sach ho so.
+    - Nam cu -> si so that lay tu lop: SIS Class Student cua nam do, chi lop `regular`.
+      Moi nam hoc sinh duoc xep lop lai nen day moi la ban ghi dung theo tung nam.
+      (Cung pattern voi erp/api/erp_sis/re_enrollment.py: join cs -> c, loc `c.school_year_id`.)
+    """
+    if _is_enabled_school_year(school_year):
+        where = ["l.`step` = 'Enrolled'"]
+        binds: Dict[str, Any] = {}
+        if campus_id:
+            where.append("l.`campus_id` = %(campus)s")
+            binds["campus"] = campus_id
+        if pic_filter:
+            where.append("(l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s)")
+            binds["pic"] = pic_filter
+        return int(
+            frappe.db.sql(
+                f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {' AND '.join(where)}", binds
+            )[0][0]
+            or 0
+        )
+
+    # Nam cu — dem si so tu lop. class_type rong coi nhu 'regular' (khop
+    # enrolled_class_sync.has_regular_class_assignment va re_enrollment.py).
+    where = [
+        "c.`school_year_id` = %(sy)s",
+        "IFNULL(NULLIF(TRIM(c.`class_type`), ''), 'regular') = 'regular'",
+    ]
+    binds = {"sy": school_year}
+    if campus_id:
+        where.append("c.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+    if pic_filter:
+        # Gioi han theo PIC — bac qua CRM Lead lien ket cua chinh hoc sinh do.
+        where.append(
+            "EXISTS (SELECT 1 FROM `tabCRM Lead` l WHERE l.`linked_student` = cs.`student_id` "
+            "AND (l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s))"
+        )
+        binds["pic"] = pic_filter
+    return int(
+        frappe.db.sql(
+            f"""
+            SELECT COUNT(DISTINCT cs.`student_id`)
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON c.`name` = cs.`class_id`
+            WHERE {' AND '.join(where)}
+            """,
+            binds,
+        )[0][0]
+        or 0
+    )
+
+
 def _count_kpi_metrics_snapshot(
     campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None
 ) -> Dict[str, int]:
@@ -1621,7 +1690,9 @@ def _count_kpi_metrics_snapshot(
         "total_profiles": int(d.get("total_profiles") or 0),
         "total_leads": int(d.get("total_leads") or 0),
         "total_qlead": int(d.get("total_qlead") or 0),
-        "total_enrolled": int(d.get("total_enrolled") or 0),
+        # Hoc sinh chinh thuc = si so THUC TE cua nam, khong phai "tuyen moi duoc bao nhieu"
+        # => bo qua SUM(step='Enrolled') loc theo target_academic_year o query tren.
+        "total_enrolled": _count_enrolled_actual(campus_id, target_academic_year, pic_filter),
         "total_lost": int(d.get("total_lost") or 0),
     }
 
@@ -1842,10 +1913,10 @@ def get_enrollment_progress_gauge():
         where.append("(l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s)")
         binds["pic"] = pic_eff
 
+    # HSM (hoc sinh moi) = ho so dang chot cho DUNG nam hoc do => van loc target_academic_year.
     row = frappe.db.sql(
         f"""
         SELECT
-            SUM(CASE WHEN l.`step` = 'Enrolled' THEN 1 ELSE 0 END) AS hshh,
             SUM(CASE WHEN l.`step` = 'QLead'
                       AND l.`test_status` = 'De xuat'
                       AND l.`status` IN ('Dat coc', 'Dong phi')
@@ -1857,8 +1928,9 @@ def get_enrollment_progress_gauge():
         as_dict=True,
     )
     d = row[0] if row else {}
-    hshh = int(d.get("hshh") or 0)
     hsm = int(d.get("hsm") or 0)
+    # HSHH (hoc sinh hien huu) = si so THUC TE: nam dang bat -> so song, nam cu -> theo lop.
+    hshh = _count_enrolled_actual(campus_id, target_academic_year, pic_eff)
 
     target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
     kpi_target = int(getattr(target_doc, "total_existing_target", 0) or 0) if target_doc else 0
