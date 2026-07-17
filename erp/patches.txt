@@ -16,3 +16,4 @@ erp.patches.v1_0.merge_deal_status_into_status
 erp.patches.v1_0.merge_lead_reject_into_no_need
 erp.patches.v1_0.merge_entrance_exam_statuses
 erp.patches.v1_0.split_crm_lead_pic_sales_care
+erp.patches.v1_0.set_target_year_for_migrated_leads
