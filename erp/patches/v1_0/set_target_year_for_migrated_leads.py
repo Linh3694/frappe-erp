@@ -3,7 +3,7 @@
 
 Ho so migrate = hoc sinh cu duoc nap thang vao buoc cuoi, chua tung di qua pheu.
 Nhan dien dong thoi 3 dau hieu (khop `_exclude_migrated_leads_sql` trong
-erp/api/crm/reports.py — sua o day thi phai sua ca ben do):
+erp/api/crm/reports_period.py — sua o day thi phai sua ca ben do):
   1. step IN ('Enrolled', 'Nghi hoc')
   2. enrollment_date IS NULL   — chi pipeline.py set khi chot that
   3. khong co dong CRM Lead Step History nao
