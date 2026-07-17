@@ -26,7 +26,8 @@
   "data_source",
   "staff_code",
   "cb_general_2",
-  "pic",
+  "pic_sales",
+  "pic_care",
   "campus_id",
   "source_section",
   "source",
@@ -204,11 +205,18 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "pic",
+   "fieldname": "pic_sales",
    "fieldtype": "Link",
-   "label": "PIC",
+   "label": "PIC Sales",
    "options": "User",
    "in_list_view": 1
+  },
+  {
+   "fieldname": "pic_care",
+   "fieldtype": "Link",
+   "label": "PIC Care",
+   "options": "User",
+   "description": "Chi gan tu buoc Hoc sinh chinh thuc (Enrolled) tro di"
   },
   {
    "fieldname": "campus_id",

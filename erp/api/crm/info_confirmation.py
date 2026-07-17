@@ -7,7 +7,8 @@ Gồm:
   parent_portal (commit / confirm_no_change) và staff endpoints.
 - Staff endpoints: mở/đóng đợt, theo dõi danh sách, lịch sử, export Excel.
 
-Phạm vi: chỉ Lead `step="Enrolled"`. Noti gửi PIC của HS (CRM Lead.pic), fallback
+Phạm vi: chỉ Lead `step="Enrolled"`. Noti gửi PIC đang giữ hồ sơ (CRM Lead.pic_care,
+rơi về pic_sales nếu trống — xem `current_lead_pic`), fallback
 role `SIS Sales Care`. Ngoài mobile push còn gửi email thông báo (giai đoạn test
 chỉ tới INFO_EDIT_NOTIFICATION_EMAILS).
 """
@@ -188,8 +189,15 @@ def write_log(
 
 
 def _recipients_for_lead(lead_name: str) -> list[str]:
-    """PIC của Lead; fallback toàn bộ user role SIS Sales Care (enabled)."""
-    pic = frappe.db.get_value("CRM Lead", lead_name, "pic") if lead_name else None
+    """PIC đang phụ trách Lead; fallback toàn bộ user role SIS Sales Care (enabled).
+
+    Định tuyến theo bước (quyết định 2.9): trước Enrolled → PIC Sales; từ Enrolled trở đi
+    → PIC Care (nếu trống thì rơi về PIC Sales). Module này vốn chỉ chạy ở step=Enrolled
+    nên thực tế gần như luôn là PIC Care.
+    """
+    from erp.api.crm.utils import current_lead_pic
+
+    pic = current_lead_pic(lead_name) if lead_name else None
     if pic:
         return [pic]
     try:
@@ -584,7 +592,8 @@ def list_confirmation():
         "info_confirmed_at",
         "info_confirmed_by",
         "linked_student",
-        "pic",
+        "pic_sales",
+        "pic_care",
     ]
     rows = frappe.get_all(
         "CRM Lead",
@@ -595,6 +604,10 @@ def list_confirmation():
         limit_page_length=per_page,
         order_by="modified desc",
     )
+    # Giu key `pic` = nguoi DANG giu ho so (module nay chi chay o step=Enrolled nen la
+    # pic_care), khong doi hop dong API voi FE.
+    for row in rows:
+        row["pic"] = row.get("pic_care") or row.get("pic_sales") or ""
     total = len(
         frappe.get_all(
             "CRM Lead",

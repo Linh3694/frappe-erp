@@ -162,16 +162,18 @@ def _prepare_advance_step_doc(name, target_step, extra_data):
     if old_step == "Draft" and target_step == "Verify" and not doc.crm_code:
         doc.crm_code = generate_crm_code()
 
-    if target_step in ("Verify", "Lead") and not doc.pic:
+    if target_step in ("Verify", "Lead") and not doc.pic_sales:
         pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
         if pic:
-            doc.pic = pic
+            doc.pic_sales = pic
 
-    # QLead -> Enrolled: PIC team cham soc (SIS Sales Care, can bang tai). Khong ap dung Nghi hoc -> Enrolled.
+    # QLead -> Enrolled: gan them PIC team cham soc (SIS Sales Care, can bang tai).
+    # KHONG dung Nghi hoc -> Enrolled. `pic_sales` GIU NGUYEN — truoc day bi ghi de o day
+    # nen mat lich su ai chot deal, keo theo KPI Sales sai.
     if old_step == "QLead" and target_step == "Enrolled":
         pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
         if pic_care:
-            doc.pic = pic_care
+            doc.pic_care = pic_care
 
     # Chuyen sang buoc Enrolled: ghi nhan Ngay nhap hoc (Tuyen sinh co the sua lai sau).
     if target_step == "Enrolled" and old_step != "Enrolled":
@@ -529,7 +531,7 @@ def enroll_lead():
             )
         pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
         if pic_care:
-            doc.pic = pic_care
+            doc.pic_care = pic_care
         try:
             doc.save(ignore_permissions=True)
             break
@@ -764,7 +766,7 @@ def auto_enroll_paid_leads():
                 doc.enrollment_date = nowdate()
                 pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
                 if pic_care:
-                    doc.pic = pic_care
+                    doc.pic_care = pic_care
                 try:
                     doc.save(ignore_permissions=True)
                     break

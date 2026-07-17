@@ -8,6 +8,7 @@
  "engine": "InnoDB",
  "field_order": [
   "pic",
+  "team",
   "lead_target",
   "qlead_target",
   "enrollment_target"
@@ -19,6 +20,15 @@
    "in_list_view": 1,
    "label": "PIC",
    "options": "User",
+   "reqd": 1
+  },
+  {
+   "default": "sales",
+   "fieldname": "team",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Đội",
+   "options": "sales\ncare",
    "reqd": 1
   },
   {

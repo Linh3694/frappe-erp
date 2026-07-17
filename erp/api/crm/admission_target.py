@@ -15,6 +15,10 @@ from erp.utils.api_response import (
 )
 from erp.api.crm.utils import check_crm_permission, get_request_data
 
+# Doi cua thanh vien target — khop options field `team` cua CRM Admission Target Member
+# va tham so `team` cua get_kpi_overview.
+_TARGET_TEAMS = ("sales", "care")
+
 # Vai trò được phép cấu hình mục tiêu
 CONFIG_ROLES = [
     "System Manager",
@@ -98,8 +102,11 @@ def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
         pic = _resolve_pic_user(r.get("pic") or "")
         if not pic:
             continue
+        team = (r.get("team") or "").strip().lower()
         row: Dict[str, Any] = {
             "pic": pic,
+            # Doi cua thanh vien — quyet dinh moi chi tieu thuoc bang KPI nao (1.3).
+            "team": team if team in _TARGET_TEAMS else "sales",
             "enrollment_target": _non_negative_int(r.get("enrollment_target")),
             "lead_target": _non_negative_int(r.get("lead_target")),
             "qlead_target": _non_negative_int(r.get("qlead_target")),
@@ -136,6 +143,7 @@ def _serialize_target_doc(doc) -> Dict[str, Any]:
             "name": r.name,
             "pic": r.pic,
             "pic_name": user_map.get(r.pic, r.pic),
+            "team": r.team or "sales",
             "enrollment_target": int(r.enrollment_target or 0),
             "lead_target": int(r.lead_target or 0),
             "qlead_target": int(r.qlead_target or 0),

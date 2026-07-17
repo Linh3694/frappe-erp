@@ -21,12 +21,16 @@ from datetime import datetime, timedelta
 
 # Cot xuat / cap nhat bulk — khoi thong tin hoc sinh (StudentSection) + PIC / buoc / trang thai
 # Dong bo voi frappe-sis-frontend bulkUpdateStudentColumns.ts
+#
+# LUU Y ten cot Excel: cot DB la `pic_sales` nhung file Excel van dung header "PIC (email)"
+# ung voi key `pic` — de file cu import duoc va file xuat ra khong doi (quyet dinh 2.8).
+# Excel KHONG co cot pic_care: pic_care chi gan tu buoc Hoc sinh chinh thuc tro di.
 _EXPORT_BULK_LEAD_FIELDS = [
     "name",
     "crm_code",
     "student_code",
     "student_name",
-    "pic",
+    "pic_sales",
     "step",
     "status",
     "reject_reason",
@@ -400,7 +404,7 @@ def _apply_bulk_student_section_fields(doc, row):
             "crm_code",
             "step",
             "status",
-            "pic",
+            "pic_sales",
             "reject_reason",
             "reject_detail",
         }
@@ -570,11 +574,16 @@ def export_leads():
         fields=[
             "name", "step", "status", "student_name", "student_gender", "student_dob",
             "student_code", "current_grade", "target_grade", "guardian_name",
-            "relationship", "guardian_email", "campus_id", "pic",
+            "relationship", "guardian_email", "campus_id", "pic_sales",
             "data_source", "creation", "modified"
         ],
         order_by="creation desc"
     )
+
+    # Giu ten cot xuat la `pic` (khong doi header file Excel) — xem ghi chu
+    # o _EXPORT_BULK_LEAD_FIELDS.
+    for lead in leads:
+        lead["pic"] = lead.pop("pic_sales", None)
     
     for lead in leads:
         phone = frappe.db.get_value(
@@ -613,9 +622,11 @@ def export_step_leads_for_update():
         limit_page_length=0,
     )
 
-    # Hien thi email trong file Excel (de nguoi dung sua); nhap lai se map ve User.name
+    # Hien thi email trong file Excel (de nguoi dung sua); nhap lai se map ve User.name.
+    # Doi key `pic_sales` (cot DB) -> `pic` (cot Excel) — xem ghi chu o _EXPORT_BULK_LEAD_FIELDS.
     for lead in leads:
-        pic_name = lead.get("pic")
+        pic_name = lead.pop("pic_sales", None)
+        lead["pic"] = pic_name
         if not pic_name:
             continue
         u = frappe.db.get_value("User", pic_name, ["name", "email"], as_dict=True)
@@ -704,6 +715,7 @@ def bulk_update_leads():
 
             changed = _apply_bulk_student_section_fields(doc, row)
 
+            # Cot Excel `pic` -> cot DB `pic_sales` (quyet dinh 2.8).
             new_pic = str(row.get("pic", "")).strip()
             if new_pic:
                 resolved = _resolve_pic_to_user_name(new_pic)
@@ -712,8 +724,8 @@ def bulk_update_leads():
                         "row": row_num,
                         "error": f"PIC '{new_pic}' khong co User tuong ung (dung dung email hoac ten dang nhap nhu trong he thong)"
                     })
-                elif resolved != (doc.pic or ""):
-                    doc.pic = resolved
+                elif resolved != (doc.pic_sales or ""):
+                    doc.pic_sales = resolved
                     changed = True
 
             new_step = str(row.get("step", "")).strip()

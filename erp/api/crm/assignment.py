@@ -1,74 +1,55 @@
 """
-CRM PIC Assignment API - Phan bo PIC round-robin (CRM PIC Config) + can bang tai SIS Sales (assign_pic_sales_weight_balance)
+CRM PIC Assignment API — can bang tai (least-loaded) cho 2 doi:
+  - pic_sales: assign_pic_sales_weight_balance      (nguon: CRM Sales Team Member)
+  - pic_care : assign_pic_sales_care_weight_balance (nguon: CRM Sales Care Member theo khoi)
+
+Khong con round-robin: he cu (assign_pic_internal + CRM PIC Config, chon theo con tro
+current_index) da chet va duoc xoa cung dot tach pic -> pic_sales/pic_care.
 """
 
 import frappe
-from frappe import _
 from erp.utils.api_response import (
-    success_response, error_response, single_item_response,
-    validation_error_response, not_found_response, list_response
+    success_response, error_response,
+    validation_error_response, not_found_response,
 )
 from erp.api.crm.utils import (
     check_crm_permission,
     get_request_data,
     CRM_LEAD_PIC_ELIGIBLE_ROLES,
 )
+from erp.crm.doctype.crm_lead.crm_lead import PIC_CARE_ALLOWED_STEPS
+
+# Chi role nay moi doi duoc cot tuong ung (quyet dinh 2.5 — danh sach DONG,
+# moi role khac deu khong doi duoc, ke ca System Manager).
+PIC_FIELD_EDIT_ROLE = {
+    "pic_sales": "SIS Sales Admin",
+    "pic_care": "SIS Sales Care Admin",
+}
+
+# Buoc con tinh vao "tai dang chay" cua tung doi — HAI DOI KHAC NHAU, khong dung chung.
+#
+# Bat buoc phai loc theo buoc: pic_sales/pic_care nay giu ho so VINH VIEN (khong con bi
+# ghi de khi Enrolled), neu dem het thi tai chi tang khong bao gio giam => least-loaded
+# ngung chia lead cho nguoi lam lau nam, don het cho nguoi moi.
+#
+# Sales lam viec o giai doan TRUOC ban giao; Enrolled/Nghi hoc coi nhu xong.
+_SALES_ACTIVE_STEPS = ("Draft", "Verify", "Lead", "QLead")
+# Care chi cham soc ho so DA nhap hoc; Nghi hoc coi nhu ket thuc.
+# (Neu dung chung bo loc voi Sales thi moi nguoi Care deu ra 0 => min() luon chon theo
+#  alphabet => can bang tai chet.)
+_CARE_ACTIVE_STEPS = ("Enrolled",)
 
 
-@frappe.whitelist()
-def get_pic_config():
-    """Lay cau hinh PIC hien tai"""
-    check_crm_permission()
-    campus_id = frappe.request.args.get("campus_id")
-    
-    if not campus_id:
-        return validation_error_response("Thieu campus_id", {"campus_id": ["Bat buoc"]})
-    
-    config = frappe.db.get_value("CRM PIC Config", {"campus_id": campus_id}, "name")
-    if not config:
-        return success_response({"campus_id": campus_id, "pic_list": [], "current_index": 0})
-    
-    doc = frappe.get_doc("CRM PIC Config", config)
-    return single_item_response(doc.as_dict())
-
-
-@frappe.whitelist(methods=["POST"])
-def update_pic_config():
-    """Cap nhat danh sach PIC (Manager only)"""
-    check_crm_permission(["System Manager", "SIS Manager"])
-    data = get_request_data()
-    
-    campus_id = data.get("campus_id")
-    pic_list = data.get("pic_list", [])
-    
-    if not campus_id:
-        return validation_error_response("Thieu campus_id", {"campus_id": ["Bat buoc"]})
-    
-    try:
-        config_name = frappe.db.get_value("CRM PIC Config", {"campus_id": campus_id}, "name")
-        
-        if config_name:
-            doc = frappe.get_doc("CRM PIC Config", config_name)
-        else:
-            doc = frappe.new_doc("CRM PIC Config")
-            doc.campus_id = campus_id
-            doc.current_index = 0
-        
-        doc.set("pic_list", [])
-        for item in pic_list:
-            doc.append("pic_list", {
-                "user": item.get("user"),
-                "is_active": item.get("is_active", 1)
-            })
-        
-        doc.save(ignore_permissions=True)
-        frappe.db.commit()
-        
-        return single_item_response(doc.as_dict(), "Da cap nhat cau hinh PIC")
-    
-    except Exception as e:
-        frappe.db.rollback()
-        return error_response(f"Loi cap nhat cau hinh PIC: {str(e)}")
+def _running_load(pic_field: str, active_steps, user: str, campus_id=None) -> int:
+    """So ho so DANG CHAY ma `user` phu trach o cot `pic_field`."""
+    filters = {
+        pic_field: user,
+        "docstatus": ["<", 2],
+        "step": ["in", list(active_steps)],
+    }
+    if campus_id:
+        filters["campus_id"] = campus_id
+    return frappe.db.count("CRM Lead", filters=filters)
 
 
 def _get_active_sis_sales_user_names():
@@ -134,11 +115,12 @@ def _get_lead_receiver_user_names():
 
 def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     """
-    Gan PIC mac dinh: user SIS Sales dang dam nhan it ho so CRM Lead nhat (can bang tai / least-loaded).
-    Khong ghi de neu ho so da co pic. campus_id: chi dem ho so cung campus khi co gia tri.
-    Chi tra ve email duoc chon — goi doc.pic = pic roi save, hoac set_value sau insert (khong set_value trong ham).
+    Gan PIC Sales mac dinh: user dang dam nhan it ho so CRM Lead nhat (can bang tai / least-loaded).
+    Khong ghi de neu ho so da co pic_sales. campus_id: chi dem ho so cung campus khi co gia tri.
+    Chi tra ve email duoc chon — goi doc.pic_sales = pic roi save, hoac set_value sau insert
+    (khong set_value trong ham).
     """
-    existing = frappe.db.get_value("CRM Lead", lead_name, "pic")
+    existing = frappe.db.get_value("CRM Lead", lead_name, "pic_sales")
     if existing:
         return None
 
@@ -146,17 +128,12 @@ def assign_pic_sales_weight_balance(lead_name, campus_id=None):
     if not users:
         return None
 
-    counts = {}
-    for u in users:
-        filters = {"pic": u, "docstatus": ["<", 2]}
-        if campus_id:
-            filters["campus_id"] = campus_id
-        counts[u] = frappe.db.count("CRM Lead", filters=filters)
+    counts = {u: _running_load("pic_sales", _SALES_ACTIVE_STEPS, u, campus_id) for u in users}
 
     # Chon user co count nho nhat; hoa: sap xep theo name
     chosen = min(users, key=lambda x: (counts.get(x, 0), x))
     # Khong frappe.db.set_value o day: neu goi truoc doc.save() se lam lech modified -> TimestampMismatch.
-    # Luu qua doc.pic + save (pipeline/merge) hoac set_value sau insert (lead.py).
+    # Luu qua doc.pic_sales + save (pipeline/merge) hoac set_value sau insert (lead.py).
     return chosen
 
 
@@ -192,22 +169,24 @@ def _get_sales_care_users_for_grade(target_grade):
 
 def assign_pic_sales_care_weight_balance(lead_name, campus_id=None):
     """
-    Khi QLead -> Enrolled: chon PIC team cham soc theo Lop du tuyen cua ho so —
-    trong nhom phu trach lop do, chon user dam nhan it ho so nhat (can bang tai).
+    Khi QLead -> Enrolled: chon PIC Care theo Lop du tuyen cua ho so — trong nhom phu trach
+    lop do, chon user dam nhan it ho so nhat (can bang tai).
     Chua cau hinh / khong ai phu trach -> fallback SIS Sales Care Admin.
-    Tra ve email hoac None. Goi doc.pic = pic roi save, khong ghi DB trong ham (tranh TimestampMismatch).
+    Khong ghi de neu ho so da co pic_care (vd. PIC chon tay) — doi xung voi
+    assign_pic_sales_weight_balance; truoc day THIEU guard nay nen phan cong tay bi huy am tham.
+    Tra ve email hoac None. Goi doc.pic_care = pic roi save, khong ghi DB trong ham
+    (tranh TimestampMismatch).
     """
+    existing = frappe.db.get_value("CRM Lead", lead_name, "pic_care")
+    if existing:
+        return None
+
     target_grade = frappe.db.get_value("CRM Lead", lead_name, "target_grade")
     users = _get_sales_care_users_for_grade(target_grade)
     if not users:
         return None
 
-    counts = {}
-    for u in users:
-        filters = {"pic": u, "docstatus": ["<", 2]}
-        if campus_id:
-            filters["campus_id"] = campus_id
-        counts[u] = frappe.db.count("CRM Lead", filters=filters)
+    counts = {u: _running_load("pic_care", _CARE_ACTIVE_STEPS, u, campus_id) for u in users}
 
     chosen = min(users, key=lambda x: (counts.get(x, 0), x))
     # Khong set_value truoc doc.save() (tranh TimestampMismatch) — giong assign_pic_sales_weight_balance
@@ -224,86 +203,37 @@ def _is_valid_crm_lead_pic_user(pic_email: str) -> bool:
     return bool(roles & CRM_LEAD_PIC_ELIGIBLE_ROLES)
 
 
-def assign_pic_internal(lead_name, campus_id):
-    """Phan bo PIC tu dong theo round-robin (internal, khong can whitelist)"""
-    config_name = frappe.db.get_value("CRM PIC Config", {"campus_id": campus_id}, "name")
-    if not config_name:
-        return None
-    
-    config = frappe.get_doc("CRM PIC Config", config_name)
-    active_pics = [item for item in config.pic_list if item.is_active]
-
-    if not active_pics:
-        return None
-
-    # Loai user da bi tat hoat dong (User.enabled=0) du van con is_active trong config
-    candidate_users = [item.user for item in active_pics if item.user]
-    enabled_users = set(
-        frappe.get_all(
-            "User",
-            filters={"name": ["in", candidate_users], "enabled": 1},
-            pluck="name",
-        )
-    ) if candidate_users else set()
-    active_pics = [item for item in active_pics if item.user in enabled_users]
-
-    if not active_pics:
-        return None
-
-    current_index = config.current_index or 0
-    if current_index >= len(active_pics):
-        current_index = 0
-    
-    assigned_pic = active_pics[current_index].user
-    
-    # Cap nhat index
-    config.current_index = (current_index + 1) % len(active_pics)
-    config.save(ignore_permissions=True)
-    
-    # Cap nhat lead
-    frappe.db.set_value("CRM Lead", lead_name, "pic", assigned_pic)
-    
-    return assigned_pic
-
-
-@frappe.whitelist(methods=["POST"])
-def assign_pic():
-    """Phan bo PIC tu dong"""
-    check_crm_permission()
-    data = get_request_data()
-    
-    lead_name = data.get("lead_name")
-    campus_id = data.get("campus_id")
-    
-    if not lead_name or not campus_id:
-        return validation_error_response("Thieu tham so", {
-            "lead_name": ["Bat buoc"] if not lead_name else [],
-            "campus_id": ["Bat buoc"] if not campus_id else []
-        })
-    
-    assigned = assign_pic_internal(lead_name, campus_id)
-    if assigned:
-        frappe.db.commit()
-        return success_response({"pic": assigned}, f"Da phan bo PIC: {assigned}")
-    
-    return error_response("Khong tim thay cau hinh PIC hoac khong co PIC active")
-
-
 @frappe.whitelist(methods=["POST"])
 def reassign_pic():
-    """Chuyen PIC thu cong"""
+    """Chuyen PIC thu cong cho MOT cot cu the.
+
+    `pic_field`: 'pic_sales' | 'pic_care'. Mac dinh 'pic_sales' de tuong thich client cu.
+    Quyen (2.5): chi SIS Sales Admin doi duoc pic_sales, chi SIS Sales Care Admin doi duoc
+    pic_care — moi role khac deu bi tu choi, KE CA System Manager.
+    """
     check_crm_permission()
     data = get_request_data()
-    
+
     lead_name = data.get("lead_name")
     new_pic = data.get("new_pic")
-    
+    pic_field = (data.get("pic_field") or "pic_sales").strip()
+
     if not lead_name or not new_pic:
         return validation_error_response("Thieu tham so", {
             "lead_name": ["Bat buoc"] if not lead_name else [],
             "new_pic": ["Bat buoc"] if not new_pic else []
         })
-    
+
+    if pic_field not in PIC_FIELD_EDIT_ROLE:
+        return validation_error_response(
+            "pic_field khong hop le",
+            {"pic_field": ["Chi nhan 'pic_sales' hoac 'pic_care'"]},
+        )
+
+    required_role = PIC_FIELD_EDIT_ROLE[pic_field]
+    if required_role not in set(frappe.get_roles()):
+        return error_response(f"Chi role {required_role} moi duoc doi {pic_field}")
+
     if not frappe.db.exists("CRM Lead", lead_name):
         return not_found_response(f"Khong tim thay ho so {lead_name}")
 
@@ -313,7 +243,17 @@ def reassign_pic():
             {"new_pic": ["User khong hop le hoac khong co quyen PIC CRM"]},
         )
 
-    frappe.db.set_value("CRM Lead", lead_name, "pic", new_pic)
+    # set_value BO QUA validate() nen phai tu chan rang buoc 2.12 o day
+    # (CRMLead._validate_pic_care_step se khong chay).
+    if pic_field == "pic_care":
+        step = frappe.db.get_value("CRM Lead", lead_name, "step")
+        if step not in PIC_CARE_ALLOWED_STEPS:
+            return error_response(
+                "Khong the gan PIC Care khi ho so chua o buoc Hoc sinh chinh thuc "
+                f"(buoc hien tai: {step or '-'})"
+            )
+
+    frappe.db.set_value("CRM Lead", lead_name, pic_field, new_pic)
     frappe.db.commit()
-    
-    return success_response({"pic": new_pic}, f"Da chuyen PIC sang {new_pic}")
+
+    return success_response({pic_field: new_pic}, f"Da chuyen {pic_field} sang {new_pic}")

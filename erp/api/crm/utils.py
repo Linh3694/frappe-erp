@@ -12,6 +12,30 @@ CRM_STEPS = [
     "Enrolled", "Nghi hoc",
 ]
 
+
+def current_lead_pic(lead_name: str) -> Optional[str]:
+    """PIC dang phu trach ho so — dinh tuyen theo BUOC (quyet dinh 2.9).
+
+    Truoc Enrolled  -> pic_sales.
+    Tu Enrolled tro -> pic_care; neu trong thi roi ve pic_sales.
+
+    Dung cho notification / hien thi "nguoi dang giu ho so". Cac cho can dung SQL thi
+    viet thang COALESCE(pic_care, pic_sales).
+    """
+    from erp.crm.doctype.crm_lead.crm_lead import PIC_CARE_ALLOWED_STEPS
+
+    if not lead_name:
+        return None
+    row = frappe.db.get_value(
+        "CRM Lead", lead_name, ["step", "pic_sales", "pic_care"], as_dict=True
+    )
+    if not row:
+        return None
+    sales = (row.get("pic_sales") or "").strip()
+    if row.get("step") in PIC_CARE_ALLOWED_STEPS:
+        return (row.get("pic_care") or "").strip() or sales or None
+    return sales or None
+
 STEP_STATUSES: Dict[str, List[str]] = {
     "Draft": [],
     "Verify": [
@@ -204,10 +228,14 @@ def check_marcom_draft_create_only(target_step: Optional[str] = None) -> None:
 
 
 def apply_marcom_pic_policy(data: dict) -> None:
-    """Marcom-only: khong cho chi dinh PIC Sales thu cong — mac dinh he thong tu phan cong."""
+    """Marcom-only: khong cho chi dinh PIC thu cong — mac dinh he thong tu phan cong.
+
+    Phai pop CA HAI cot; sot mot cai la thung policy.
+    """
     if not should_restrict_marcom_profile_view():
         return
-    data.pop("pic", None)
+    data.pop("pic_sales", None)
+    data.pop("pic_care", None)
 
 
 def validate_phone_number(phone: str) -> bool:

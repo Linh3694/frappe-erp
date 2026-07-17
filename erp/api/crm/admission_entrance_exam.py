@@ -92,7 +92,8 @@ def _enrich_lead_flat_fields(data, crm_lead_id):
             "student_code",
             "guardian_name",
             "guardian_email",
-            "pic",
+            "pic_sales",
+            "pic_care",
         ],
         as_dict=True,
     )
@@ -107,7 +108,8 @@ def _enrich_lead_flat_fields(data, crm_lead_id):
         data["student_code"] = lead.get("student_code") or ""
         data["guardian_name"] = lead.get("guardian_name") or ""
         data["guardian_email"] = (lead.get("guardian_email") or "").strip()
-        pic = lead.get("pic")
+        # Nguoi DANG giu ho so: pic_care neu da nhap hoc, khong thi pic_sales.
+        pic = lead.get("pic_care") or lead.get("pic_sales")
         data["pic_full_name"] = (
             frappe.db.get_value("User", pic, "full_name") if pic else None
         ) or (pic or "")

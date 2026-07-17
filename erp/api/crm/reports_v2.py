@@ -20,23 +20,11 @@ from erp.utils.api_response import paginated_response, success_response
 from erp.api.crm.utils import check_crm_permission, STEP_STATUSES, QLEAD_TEST_STATUSES, CRM_LEAD_PIC_ELIGIBLE_ROLES
 from erp.api.crm import reports as r
 
-# Trạng thái HS theo loại hoạt động (đồng bộ doctype)
-_EVENT_STUDENT_STATUSES = ["registered", "attended", "not_attended"]
-_COURSE_STUDENT_STATUSES = [
-    "registered_interest",
-    "trial",
-    "paid",
-    "attended",
-    "transferred",
-    "refunded",
-]
-_ENTRANCE_EXAM_STUDENT_STATUSES = [
-    "new",
-    "schedule_notified",
-    "not_attending",
-    "exam_taken",
-    "completed",
-]
+# Cột PIC ứng với từng đội — `team` là công tắc CHỌN CỘT để nhóm số liệu (quyết định 1.1).
+KPI_TEAM_PIC_FIELD = {
+    "sales": "pic_sales",
+    "care": "pic_care",
+}
 
 # Báo cáo trạng thái theo khối — Draft+Verify gộp "Hồ sơ mới", rồi các bước còn lại
 _GRADE_REPORT_STEPS = ["Lead", "QLead", "Enrolled", "Nghi hoc"]
@@ -318,7 +306,7 @@ def get_task_list():
         SELECT n.`name`, n.`title`, n.`assignee`, n.`deadline`,
                n.`is_completed`, n.`communication_method`,
                n.`lead`, n.`campus_id`,
-               l.`student_name`, l.`pic`, l.`step`
+               l.`student_name`, COALESCE(l.`pic_care`, l.`pic_sales`) AS pic, l.`step`
         {base}
         ORDER BY IFNULL(n.`is_completed`,0) ASC, n.`deadline` ASC
         LIMIT %(lim)s OFFSET %(off)s
@@ -377,7 +365,10 @@ def _activity_student_lead_match(args, student_alias: str, prefix: str) -> Tuple
     pic_eff = r._effective_pic_from_request(args.get("pic"))
     if pic_eff:
         binds[f"{prefix}_apic"] = pic_eff
-        parts.append(f"ml.`pic` = %({prefix}_apic)s")
+        # Khớp CẢ HAI cột — hồ sơ người này phụ trách ở bất kỳ vai trò nào (2.2)
+        parts.append(
+            f"(ml.`pic_sales` = %({prefix}_apic)s OR ml.`pic_care` = %({prefix}_apic)s)"
+        )
     r._append_dynamic_lead_filters(parts, binds, args, "ml", f"{prefix}_a")
     if not parts:
         # không có ràng buộc lead → đếm tất cả HS
@@ -388,164 +379,6 @@ def _activity_student_lead_match(args, student_alias: str, prefix: str) -> Tuple
         f"WHERE ml.`name` = {student_alias}.`crm_lead_id` AND {cond})"
     )
     return expr, binds
-
-
-def _activity_report(args, *, doctype: str, student_doctype: str, student_fk: str,
-                     name_field: str, statuses: List[str],
-                     date_field: str = "event_date",
-                     date_coalesce: bool = False,
-                     skip_campus_filter: bool = False,
-                     skip_date_filter: bool = False) -> Dict[str, Any]:
-    fd, td, _, _ = r._resolve_period(args)
-    match_sql, match_binds = _activity_student_lead_match(args, "es", "act")
-
-    # Kỳ khảo sát có thể chưa gán ngày thi — fallback creation để không bị loại khỏi báo cáo
-    date_expr = (
-        f"COALESCE(e.`{date_field}`, DATE(e.`creation`))"
-        if date_coalesce
-        else f"e.`{date_field}`"
-    )
-    ev_where: List[str] = []
-    binds: Dict[str, Any] = {**match_binds}
-    if not skip_date_filter:
-        ev_where.append(f"DATE({date_expr}) BETWEEN %(d_from)s AND %(d_to)s")
-        binds["d_from"] = fd
-        binds["d_to"] = td
-
-    campus_id = (args.get("campus_id") or "").strip()
-    if campus_id and not skip_campus_filter:
-        binds["e_campus"] = campus_id
-        ev_where.append("e.`campus_id` = %(e_campus)s")
-    tay = (args.get("target_academic_year") or "").strip()
-    if tay:
-        binds["e_year"] = tay
-        ev_where.append("e.`school_year_id` = %(e_year)s")
-
-    where_clause = " AND ".join(ev_where) if ev_where else "1=1"
-    status_cols = ",\n".join(
-        f"SUM(CASE WHEN es.`status` = '{st}' AND {match_sql} THEN 1 ELSE 0 END) AS `st_{st}`"
-        for st in statuses
-    )
-
-    rows = frappe.db.sql(
-        f"""
-        SELECT e.`name`, e.`{name_field}` AS title, {date_expr} AS event_date,
-               e.`campus_id`, e.`school_year_id`, e.`is_active`, e.`student_count`,
-               SUM(CASE WHEN es.`name` IS NOT NULL AND {match_sql} THEN 1 ELSE 0 END) AS matched_total,
-               {status_cols}
-        FROM `tab{doctype}` e
-        LEFT JOIN `tab{student_doctype}` es ON es.`{student_fk}` = e.`name`
-        WHERE {where_clause}
-        GROUP BY e.`name`
-        ORDER BY {date_expr} DESC, e.`modified` DESC
-        LIMIT 500
-        """,
-        binds,
-        as_dict=True,
-    )
-
-    campus_ids = list({x["campus_id"] for x in rows if x.get("campus_id")})
-    campus_titles: Dict[str, str] = {}
-    if campus_ids:
-        for c in frappe.get_all(
-            "SIS Campus", filters={"name": ["in", campus_ids]},
-            fields=["name", "title_vn", "short_title"],
-        ):
-            campus_titles[c["name"]] = c.get("title_vn") or c.get("short_title") or c["name"]
-
-    out_rows = []
-    totals = {f"st_{st}": 0 for st in statuses}
-    total_matched = 0
-    for x in rows:
-        by_status = {st: int(x.get(f"st_{st}") or 0) for st in statuses}
-        matched = int(x.get("matched_total") or 0)
-        total_matched += matched
-        for st in statuses:
-            totals[f"st_{st}"] += by_status[st]
-        out_rows.append(
-            {
-                "name": x["name"],
-                "title": x.get("title"),
-                "event_date": x.get("event_date"),
-                "campus_id": x.get("campus_id"),
-                "campus_title": campus_titles.get(x.get("campus_id"), x.get("campus_id")),
-                "school_year_id": x.get("school_year_id"),
-                "is_active": int(x.get("is_active") or 0),
-                "student_count": int(x.get("student_count") or 0),
-                "matched_total": matched,
-                "by_status": by_status,
-            }
-        )
-
-    return {
-        "statuses": statuses,
-        "rows": out_rows,
-        "totals": {
-            "count": len(out_rows),
-            "matched_total": total_matched,
-            "by_status": {st: totals[f"st_{st}"] for st in statuses},
-        },
-        "meta": {
-            "period": {"from": str(fd), "to": str(td)},
-            "pic_restricted_to_self": r._should_restrict_to_own_pic_only(),
-        },
-    }
-
-
-@frappe.whitelist()
-def get_events_report():
-    """Báo cáo Sự kiện — CRM Admission Event + Event Student."""
-    check_crm_permission()
-    args = frappe.request.args or {}
-    return success_response(
-        _activity_report(
-            args,
-            doctype="CRM Admission Event",
-            student_doctype="CRM Admission Event Student",
-            student_fk="event_id",
-            name_field="event_name",
-            statuses=_EVENT_STUDENT_STATUSES,
-        )
-    )
-
-
-@frappe.whitelist()
-def get_courses_report():
-    """Báo cáo hoạt động (Khóa học) — CRM Admission Course + Course Student."""
-    check_crm_permission()
-    args = frappe.request.args or {}
-    return success_response(
-        _activity_report(
-            args,
-            doctype="CRM Admission Course",
-            student_doctype="CRM Admission Course Student",
-            student_fk="course_id",
-            name_field="course_name",
-            statuses=_COURSE_STUDENT_STATUSES,
-        )
-    )
-
-
-@frappe.whitelist()
-def get_entrance_exams_report():
-    """Báo cáo Khảo sát đầu vào — CRM Admission Entrance Exam + Entrance Exam Student."""
-    check_crm_permission()
-    args = frappe.request.args or {}
-    return success_response(
-        _activity_report(
-            args,
-            doctype="CRM Admission Entrance Exam",
-            student_doctype="CRM Admission Entrance Exam Student",
-            student_fk="entrance_exam_id",
-            name_field="exam_name",
-            date_field="exam_date",
-            date_coalesce=True,
-            # Đồng bộ module Khảo sát đầu vào — liệt kê tất cả kỳ, không lọc theo kỳ báo cáo
-            skip_date_filter=True,
-            skip_campus_filter=True,
-            statuses=_ENTRANCE_EXAM_STUDENT_STATUSES,
-        )
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -612,8 +445,14 @@ def _pic_names_map(pic_ids: List[str]) -> Dict[str, str]:
     return out
 
 
-def _activity_parent_where(args, date_expr: str, *, skip_campus: bool = False) -> Tuple[Any, Any, str, Dict[str, Any], str]:
-    """Chuẩn bị kỳ + điều kiện lọc parent hoạt động."""
+def _activity_parent_where(args, date_expr: str, *, skip_campus: bool = False,
+                           with_event_type: bool = False) -> Tuple[Any, Any, str, Dict[str, Any], str]:
+    """Chuẩn bị kỳ + điều kiện lọc parent hoạt động.
+
+    `with_event_type`: chỉ Sự kiện bật — `CRM Admission Event` mới có field
+    `event_type`; Khảo sát đầu vào / Khóa học không có nên để mặc định False.
+    Bỏ trống `event_type` = tất cả loại (gồm cả sự kiện chưa gán loại).
+    """
     fd, td, _, _ = r._resolve_period(args)
     match_sql, match_binds = _activity_student_lead_match(args, "es", "act")
     binds: Dict[str, Any] = {**match_binds, "d_from": fd, "d_to": td}
@@ -622,6 +461,11 @@ def _activity_parent_where(args, date_expr: str, *, skip_campus: bool = False) -
     if campus_id and not skip_campus:
         binds["e_campus"] = campus_id
         parts.append("e.`campus_id` = %(e_campus)s")
+    if with_event_type:
+        event_type = (args.get("event_type") or "").strip()
+        if event_type:
+            binds["e_event_type"] = event_type
+            parts.append("e.`event_type` = %(e_event_type)s")
     return fd, td, match_sql, binds, " AND ".join(parts)
 
 
@@ -683,7 +527,7 @@ def get_entrance_exam_activity_dashboard():
                IFNULL(l.`status`, '') AS lead_status,
                IFNULL(l.`step`, '') AS lead_step,
                TRIM(IFNULL(l.`target_grade`, '')) AS target_grade,
-               IFNULL(l.`pic`, '') AS pic
+               IFNULL(COALESCE(l.`pic_care`, l.`pic_sales`), '') AS pic
         FROM `tabCRM Admission Entrance Exam Student` es
         INNER JOIN `tabCRM Admission Entrance Exam` e ON e.`name` = es.`entrance_exam_id`
         INNER JOIN `tabCRM Lead` l ON l.`name` = es.`crm_lead_id`
@@ -823,11 +667,16 @@ def get_entrance_exam_activity_dashboard():
 
 @frappe.whitelist()
 def get_event_activity_dashboard():
-    """Dashboard Sự kiện — theo tháng, theo khối (1 SK), danh sách HS."""
+    """Dashboard Sự kiện — theo tháng, theo khối (1 SK), danh sách HS.
+
+    Lọc thêm theo `event_type` (Loại sự kiện) nếu client truyền.
+    """
     check_crm_permission()
     args = frappe.request.args or {}
     date_expr = "e.`event_date`"
-    fd, td, match_sql, binds, parent_where = _activity_parent_where(args, date_expr, skip_campus=False)
+    fd, td, match_sql, binds, parent_where = _activity_parent_where(
+        args, date_expr, skip_campus=False, with_event_type=True
+    )
 
     event_id = (args.get("event_id") or "").strip()
     selected_month = (args.get("selected_month") or "").strip()
@@ -843,7 +692,7 @@ def get_event_activity_dashboard():
                l.`student_dob`,
                IFNULL(l.`status`, '') AS lead_status,
                TRIM(IFNULL(l.`target_grade`, '')) AS target_grade,
-               IFNULL(l.`pic`, '') AS pic
+               IFNULL(COALESCE(l.`pic_care`, l.`pic_sales`), '') AS pic
         FROM `tabCRM Admission Event Student` es
         INNER JOIN `tabCRM Admission Event` e ON e.`name` = es.`event_id`
         INNER JOIN `tabCRM Lead` l ON l.`name` = es.`crm_lead_id`
@@ -973,7 +822,7 @@ def get_course_activity_dashboard():
                IFNULL(l.`status`, '') AS lead_status,
                IFNULL(l.`step`, '') AS lead_step,
                TRIM(IFNULL(l.`target_grade`, '')) AS target_grade,
-               IFNULL(l.`pic`, '') AS pic
+               IFNULL(COALESCE(l.`pic_care`, l.`pic_sales`), '') AS pic
         FROM `tabCRM Admission Course Student` es
         INNER JOIN `tabCRM Admission Course` e ON e.`name` = es.`course_id`
         INNER JOIN `tabCRM Lead` l ON l.`name` = es.`crm_lead_id`
@@ -1358,7 +1207,7 @@ def get_source_funnel_detail():
     student_rows = frappe.db.sql(
         f"""
         SELECT l.`name`, l.`student_name`, l.`student_dob` AS `dob`, l.`step`, l.`status`,
-               l.`pic`, l.`target_grade`, l.`creation`
+               COALESCE(l.`pic_care`, l.`pic_sales`) AS pic, l.`target_grade`, l.`creation`
         FROM `tabCRM Lead` l
         INNER JOIN `tabCRM Lead Source` ls ON ls.`parent` = l.`name`
         WHERE {src_filter} AND {wsql}
@@ -1444,19 +1293,26 @@ def get_source_funnel_detail():
 # --------------------------------------------------------------------------- #
 @frappe.whitelist()
 def get_pic_breakdown():
-    """Danh sách PIC (snapshot) × bước + tỉ lệ chuyển đổi — cùng cấu trúc báo cáo nguồn."""
+    """Danh sách PIC (snapshot) × bước + tỉ lệ chuyển đổi — cùng cấu trúc báo cáo nguồn.
+
+    Nhóm theo cột của đội (`team`, quyết định 1.1). Truoc day nhom theo `pic` bi ghi de
+    nen ti le chuyen doi vo nghia: PIC Sales ~0%, PIC Care ~100%.
+    """
     check_crm_permission()
     args = frappe.request.args or {}
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
+    team = (args.get("team") or "").strip().lower()
+    pic_field = KPI_TEAM_PIC_FIELD.get(team, "pic_sales")
+
     rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+        SELECT IFNULL(TRIM(l.`{pic_field}`), '') AS pic,
                l.`step` AS step,
                COUNT(*) AS cnt
         FROM `tabCRM Lead` l
         WHERE l.`step` IN {_SOURCE_STEPS_SQL}
-          AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND IFNULL(TRIM(l.`{pic_field}`), '') != ''
           AND {dim_sql}
         GROUP BY pic, l.`step`
         """,
@@ -1517,31 +1373,6 @@ def _get_active_crm_sales_user_names() -> List[str]:
     return [row[0] for row in rows] if rows else []
 
 
-# Nhóm role để tách KPI theo team (Sales / Care)
-_KPI_TEAM_ROLES = {
-    "sales": ("SIS Sales", "SIS Sales Admin"),
-    "care": ("SIS Sales Care", "SIS Sales Care Admin"),
-}
-
-
-def _get_users_with_roles(roles) -> List[str]:
-    """User enabled có bất kỳ role nào trong danh sách (dùng tách KPI Sales/Care)."""
-    role_list = [x for x in (roles or []) if x]
-    if not role_list:
-        return []
-    rows = frappe.db.sql(
-        """
-        SELECT DISTINCT u.name
-        FROM `tabUser` u
-        INNER JOIN `tabHas Role` hr ON hr.parent = u.name AND hr.parenttype = 'User'
-        WHERE hr.role IN %(roles)s AND IFNULL(u.enabled, 0) = 1
-        ORDER BY u.name
-        """,
-        {"roles": role_list},
-    )
-    return [row[0] for row in rows] if rows else []
-
-
 def _load_target_doc(campus_id: str, target_academic_year: str):
     """Tải doc CRM Admission Target hoặc None."""
     from erp.api.crm.admission_target import _find_target_name
@@ -1574,24 +1405,35 @@ def _count_enrolled_by_grade(campus_id: str, target_academic_year: str) -> Dict[
     return {row["grade"]: int(row["cnt"]) for row in rows}
 
 
-def _count_enrolled_by_pic(campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None) -> Dict[str, int]:
-    """Đếm số lead Enrolled theo PIC (snapshot)."""
+def _count_enrolled_by_pic(
+    campus_id: str,
+    target_academic_year: str,
+    pic_filter: Optional[str] = None,
+    pic_field: str = "pic_sales",
+) -> Dict[str, int]:
+    """Đếm số lead Enrolled theo PIC (snapshot), nhóm theo cột của đội (quyết định 1.1).
+
+    Mặc định `pic_sales`: công nhập học tính cho người CHỐT (quyết định #1).
+    """
+    if pic_field not in KPI_TEAM_PIC_FIELD.values():
+        pic_field = "pic_sales"
+
     where = [
         "l.`step` = 'Enrolled'",
         "l.`target_academic_year` = %(tay)s",
-        "IFNULL(TRIM(l.`pic`), '') != ''",
+        f"IFNULL(TRIM(l.`{pic_field}`), '') != ''",
     ]
     binds: Dict[str, Any] = {"tay": target_academic_year}
     if campus_id:
         where.append("l.`campus_id` = %(campus)s")
         binds["campus"] = campus_id
     if pic_filter:
-        where.append("l.`pic` = %(pic)s")
+        where.append(f"l.`{pic_field}` = %(pic)s")
         binds["pic"] = pic_filter
 
     rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+        SELECT IFNULL(TRIM(l.`{pic_field}`), '') AS pic,
                COUNT(*) AS cnt
         FROM `tabCRM Lead` l
         WHERE {" AND ".join(where)}
@@ -1633,6 +1475,11 @@ def get_enrollment_target_progress():
     restricted = r._should_restrict_to_own_pic_only()
     pic_eff = r._effective_pic_from_request(args.get("pic")) if restricted else None
 
+    # `team` chọn cột nhóm + lọc target theo đội (1.1 + 1.3) — cùng quy ước get_kpi_overview.
+    eff_team = (args.get("team") or "").strip().lower()
+    eff_team = eff_team if eff_team in KPI_TEAM_PIC_FIELD else "sales"
+    pic_field = KPI_TEAM_PIC_FIELD[eff_team]
+
     target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
 
     grade_targets_map: Dict[str, int] = {}
@@ -1646,11 +1493,13 @@ def get_enrollment_target_progress():
         dept_target = int(target_doc.total_enrollment_target or 0)
         for row in target_doc.member_targets or []:
             p = (row.pic or "").strip()
-            if p:
+            if p and (getattr(row, "team", None) or "sales") == eff_team:
                 member_targets_map[p] = int(row.enrollment_target or 0)
 
     actual_by_grade = _count_enrolled_by_grade(campus_id, target_academic_year)
-    actual_by_pic = _count_enrolled_by_pic(campus_id, target_academic_year, pic_eff)
+    actual_by_pic = _count_enrolled_by_pic(
+        campus_id, target_academic_year, pic_eff, pic_field=pic_field
+    )
 
     # by_grade: union grades từ target + actual
     all_grades = sorted(
@@ -1750,7 +1599,7 @@ def _count_kpi_metrics_snapshot(
         where.append("l.`campus_id` = %(campus)s")
         binds["campus"] = campus_id
     if pic_filter:
-        where.append("l.`pic` = %(pic)s")
+        where.append("(l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s)")
         binds["pic"] = pic_filter
 
     rows = frappe.db.sql(
@@ -1778,12 +1627,23 @@ def _count_kpi_metrics_snapshot(
 
 
 def _count_kpi_metrics_by_pic(
-    campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None
+    campus_id: str,
+    target_academic_year: str,
+    pic_filter: Optional[str] = None,
+    pic_field: str = "pic_sales",
 ) -> Dict[str, Dict[str, int]]:
-    """3 chỉ số (lead/qlead/enrolled) theo từng PIC — snapshot theo năm học mục tiêu."""
+    """3 chỉ số (lead/qlead/enrolled) theo từng PIC — snapshot theo năm học mục tiêu.
+
+    `pic_field` = cột nhóm theo đội (quyết định 1.1): 'pic_sales' | 'pic_care'.
+    Nhóm theo `pic_sales` là điều sửa lỗi cốt lõi: trước đây lead Enrolled bị ghi đè
+    `pic` sang người Care nên Sales mất CẢ `lead` lẫn `enrolled` của deal mình chốt.
+    """
+    if pic_field not in KPI_TEAM_PIC_FIELD.values():
+        pic_field = "pic_sales"
+
     where = [
         "l.`target_academic_year` = %(tay)s",
-        "IFNULL(TRIM(l.`pic`), '') != ''",
+        f"IFNULL(TRIM(l.`{pic_field}`), '') != ''",
         f"l.`step` IN {_KPI_LEAD_STEPS_SQL}",
     ]
     binds: Dict[str, Any] = {"tay": target_academic_year}
@@ -1791,12 +1651,12 @@ def _count_kpi_metrics_by_pic(
         where.append("l.`campus_id` = %(campus)s")
         binds["campus"] = campus_id
     if pic_filter:
-        where.append("l.`pic` = %(pic)s")
+        where.append(f"l.`{pic_field}` = %(pic)s")
         binds["pic"] = pic_filter
 
     rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+        SELECT IFNULL(TRIM(l.`{pic_field}`), '') AS pic,
                l.`step` AS step,
                COUNT(*) AS cnt
         FROM `tabCRM Lead` l
@@ -1870,33 +1730,35 @@ def get_kpi_overview():
         for key, label in summary_defs
     ]
 
-    # by_member — target từ member_targets (lead/qlead/enrollment), actual đếm theo PIC
+    # by_member — target từ member_targets (lead/qlead/enrollment), actual đếm theo PIC.
+    # `team` chọn CỘT để nhóm số liệu (pic_sales vs pic_care) — không phải lọc danh sách user.
+    eff_team = team if team in KPI_TEAM_PIC_FIELD else "sales"
+    pic_field = KPI_TEAM_PIC_FIELD[eff_team]
+
     member_targets_map: Dict[str, Dict[str, int]] = {}
     if target_doc:
         for row in target_doc.member_targets or []:
             p = (row.pic or "").strip()
-            if p:
+            # Target giao theo đội (field `team` trên CRM Admission Target Member).
+            if p and (getattr(row, "team", None) or "sales") == eff_team:
                 member_targets_map[p] = {
                     "lead": int(getattr(row, "lead_target", 0) or 0),
                     "qlead": int(getattr(row, "qlead_target", 0) or 0),
                     "enrolled": int(row.enrollment_target or 0),
                 }
 
-    actual_by_pic = _count_kpi_metrics_by_pic(campus_id, target_academic_year, pic_eff)
+    actual_by_pic = _count_kpi_metrics_by_pic(
+        campus_id, target_academic_year, pic_eff, pic_field=pic_field
+    )
 
-    if team in _KPI_TEAM_ROLES:
-        # Tách theo role: chỉ thành viên có role của nhóm Sales/Care đang chọn
-        all_pics = set(_get_users_with_roles(_KPI_TEAM_ROLES[team]))
-        if pic_eff:
-            all_pics = all_pics & {pic_eff}
-    else:
-        all_pics = (
-            set(member_targets_map.keys())
-            | set(actual_by_pic.keys())
-            | set(_get_active_crm_sales_user_names())
-        )
-        if pic_eff:
-            all_pics = {pic_eff}
+    # Thành viên hiện trong bảng = ai ĐANG có mặt ở cột đó ∪ ai được giao target đội đó.
+    # KHÔNG lọc theo role: pic_sales không ràng buộc role (người Care vẫn có thể giữ
+    # pic_sales), lọc theo role sẽ đếm mà không hiện => số liệu bốc hơi.
+    all_pics = set(member_targets_map.keys()) | set(actual_by_pic.keys())
+    if eff_team == "sales":
+        all_pics |= set(_get_active_crm_sales_user_names())
+    if pic_eff:
+        all_pics = all_pics & {pic_eff} if all_pics else {pic_eff}
 
     user_map = r._batch_user_map(list(all_pics))
     by_member = []
@@ -1977,7 +1839,7 @@ def get_enrollment_progress_gauge():
         where.append("l.`campus_id` = %(campus)s")
         binds["campus"] = campus_id
     if pic_eff:
-        where.append("l.`pic` = %(pic)s")
+        where.append("(l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s)")
         binds["pic"] = pic_eff
 
     row = frappe.db.sql(
@@ -2023,7 +1885,10 @@ def get_enrollment_progress_gauge():
 # --------------------------------------------------------------------------- #
 def _count_kpi_metrics_period(campus_id: str, pic: str, from_date, to_date) -> Dict[str, int]:
     """5 chỉ số KPI theo PIC trong khoảng ngày tạo hồ sơ (creation) — dùng cho phễu cá nhân."""
-    where = ["DATE(l.`creation`) BETWEEN %(fd)s AND %(td)s", "l.`pic` = %(pic)s"]
+    where = [
+        "DATE(l.`creation`) BETWEEN %(fd)s AND %(td)s",
+        "(l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s)",
+    ]
     binds: Dict[str, Any] = {"fd": from_date, "td": to_date, "pic": pic}
     if campus_id:
         where.append("l.`campus_id` = %(campus)s")
@@ -2235,7 +2100,8 @@ def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -
                    IFNULL(TRIM(l.`target_grade`), '') AS target_grade,
                    IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
                    IFNULL(TRIM(l.`linked_student`), '') AS linked_student,
-                   l.`student_name`, l.`student_dob`, IFNULL(l.`pic`, '') AS pic
+                   l.`student_name`, l.`student_dob`,
+                   IFNULL(COALESCE(l.`pic_care`, l.`pic_sales`), '') AS pic
             FROM `tabCRM Lead` l
             WHERE l.`creation` <= %(as_of)s AND {dim_sql}
         ),
@@ -2505,7 +2371,7 @@ def get_admission_profile_progress():
                IFNULL(TRIM(l.`target_grade`), '') AS target_grade,
                IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
                IFNULL(TRIM(l.`linked_student`), '') AS linked_student,
-               IFNULL(TRIM(l.`pic`), '') AS pic,
+               IFNULL(TRIM(COALESCE(l.`pic_care`, l.`pic_sales`)), '') AS pic,
                l.`step` AS step
         FROM `tabCRM Lead` l
         WHERE l.`step` IN ('QLead', 'Enrolled')

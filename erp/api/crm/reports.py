@@ -124,8 +124,13 @@ def _append_dimension_filters(
 
     pic_eff = _effective_pic_from_request(args.get("pic"))
     if pic_eff:
+        # Khop CA HAI cot: ho so nguoi nay phu trach o bat ky vai tro nao (quyet dinh 2.2/2.3).
+        # Khong loc rieng theo role vi pic_sales KHONG rang buoc role — nguoi Care van co the
+        # giu pic_sales (chuyen tay / cham hoc sinh chinh thuc), loc theo role se lam mat so lieu.
         binds[f"{p}_pic"] = pic_eff
-        where_parts.append(f"{alias}.`pic` = %({p}_pic)s")
+        where_parts.append(
+            f"({alias}.`pic_sales` = %({p}_pic)s OR {alias}.`pic_care` = %({p}_pic)s)"
+        )
 
     tay = (args.get("target_academic_year") or "").strip()
     if tay:
@@ -1022,9 +1027,9 @@ def get_breakdown_by_pic():
 
     assigned_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic, COUNT(*) AS total_assigned
+        SELECT IFNULL(TRIM(l.`pic_sales`), '') AS pic, COUNT(*) AS total_assigned
         FROM `tabCRM Lead` l
-        WHERE {wsql} AND IFNULL(TRIM(l.`pic`), '') != ''
+        WHERE {wsql} AND IFNULL(TRIM(l.`pic_sales`), '') != ''
         GROUP BY pic
         """,
         binds,
@@ -1033,12 +1038,12 @@ def get_breakdown_by_pic():
 
     enrolled_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic, COUNT(DISTINCT h.`lead`) AS enrolled_count
+        SELECT IFNULL(TRIM(l.`pic_sales`), '') AS pic, COUNT(DISTINCT h.`lead`) AS enrolled_count
         FROM `tabCRM Lead Step History` h
         INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
         WHERE h.`new_step` = 'Enrolled'
           AND DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
-          AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND IFNULL(TRIM(l.`pic_sales`), '') != ''
           AND {dim_sql}
         GROUP BY pic
         """,
@@ -1048,12 +1053,12 @@ def get_breakdown_by_pic():
 
     lost_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic, COUNT(DISTINCT h.`lead`) AS lost_count
+        SELECT IFNULL(TRIM(l.`pic_sales`), '') AS pic, COUNT(DISTINCT h.`lead`) AS lost_count
         FROM `tabCRM Lead Step History` h
         INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
         WHERE DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
           AND {lost_cond}
-          AND IFNULL(TRIM(l.`pic`), '') != ''
+          AND IFNULL(TRIM(l.`pic_sales`), '') != ''
           AND {dim_sql}
         GROUP BY pic
         """,
@@ -1063,10 +1068,10 @@ def get_breakdown_by_pic():
 
     active_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+        SELECT IFNULL(TRIM(l.`pic_sales`), '') AS pic,
                SUM(IF(l.`step` IN ('Lead','QLead') AND IFNULL(TRIM(l.`status`),'') NOT IN ('Lost','Tu choi'), 1, 0)) AS qlead_count
         FROM `tabCRM Lead` l
-        WHERE IFNULL(TRIM(l.`pic`), '') != '' AND {dim_sql}
+        WHERE IFNULL(TRIM(l.`pic_sales`), '') != '' AND {dim_sql}
         GROUP BY pic
         """,
         dim_binds,
@@ -1076,11 +1081,11 @@ def get_breakdown_by_pic():
     hj = f"DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s AND {dim_sql}"
     resp_rows = frappe.db.sql(
         f"""
-        SELECT IFNULL(TRIM(l.`pic`), '') AS pic,
+        SELECT IFNULL(TRIM(l.`pic_sales`), '') AS pic,
             AVG(TIMESTAMPDIFF(SECOND, l.`creation`, h.`changed_at`) / 3600.0) AS avg_hours
         FROM `tabCRM Lead Step History` h
         INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
-        WHERE h.`new_step` = 'QLead' AND IFNULL(TRIM(l.`pic`), '') != ''
+        WHERE h.`new_step` = 'QLead' AND IFNULL(TRIM(l.`pic_sales`), '') != ''
           AND {hj}
         GROUP BY pic
         """,
@@ -1227,7 +1232,8 @@ def get_lost_analysis():
 
     leads = frappe.db.sql(
         f"""
-        SELECT l.`name`, l.`student_name`, l.`pic`, l.`campus_id`,
+        SELECT l.`name`, l.`student_name`,
+               COALESCE(l.`pic_care`, l.`pic_sales`) AS pic, l.`campus_id`,
                l.`reject_reason`, l.`reject_detail`, lb.lost_at
         FROM ({lost_base}) lb
         INNER JOIN `tabCRM Lead` l ON l.`name` = lb.lead_id

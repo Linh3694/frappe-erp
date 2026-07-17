@@ -2239,7 +2239,9 @@ def get_report_breakdown():
             } for r in stage_rows]
 
         # ----- (4) Theo PIC (CRM): join re → CRM Lead (linked_student = student_id),
-        # ưu tiên hồ sơ ở bước Enrolled. PIC lấy từ CRM Lead.pic (Link User). -----
+        # ưu tiên hồ sơ ở bước Enrolled. PIC = người ĐANG giữ hồ sơ:
+        # COALESCE(pic_care, pic_sales) — hồ sơ Enrolled luôn có pic_care nên công tái ghi
+        # danh vẫn tính cho đội Care như trước (quyết định 2.6, giữ nguyên hành vi). -----
         pic_rows = frappe.db.sql(f"""
             SELECT
                 COALESCE(t.pic, '') AS pic,
@@ -2250,7 +2252,7 @@ def get_report_breakdown():
             FROM (
                 SELECT
                     re.decision AS decision,
-                    (SELECT l2.pic FROM `tabCRM Lead` l2
+                    (SELECT COALESCE(l2.pic_care, l2.pic_sales) FROM `tabCRM Lead` l2
                         WHERE l2.linked_student = re.student_id
                         ORDER BY (l2.step = 'Enrolled') DESC, l2.modified DESC
                         LIMIT 1) AS pic

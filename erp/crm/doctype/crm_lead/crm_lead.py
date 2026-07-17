@@ -16,6 +16,10 @@ GENDER_VARIANT_TO_CANONICAL = {
     "f": "Nu",
 }
 
+# Buoc duoc phep co PIC Care. Care chi nhan ban giao tu QLead -> Enrolled; 'Nghi hoc'
+# giu nguyen PIC dang co nen van nam trong danh sach.
+PIC_CARE_ALLOWED_STEPS = ("Enrolled", "Nghi hoc")
+
 
 class CRMLead(Document):
     def after_insert(self):
@@ -69,6 +73,7 @@ class CRMLead(Document):
         self._normalize_student_gender()
         self._normalize_nationalities()
         self._validate_bank_accounts_max_two()
+        self._validate_pic_care_step()
         self._dedupe_lead_emails()
         rows = getattr(self, 'emails', None) or []
         if not rows:
@@ -124,3 +129,15 @@ class CRMLead(Document):
         rows = getattr(self, 'bank_accounts', None) or []
         if len(rows) > 2:
             frappe.throw("Toi da 2 tai khoan thanh toan tren ho so")
+
+    def _validate_pic_care_step(self):
+        """PIC Care chi ton tai tu buoc Hoc sinh chinh thuc (Enrolled) tro di.
+
+        Choke point chung cho moi luong ghi (form, API, import, reassign) — dat o
+        validate() thay vi chan rieng tung luong.
+        """
+        if self.get("pic_care") and self.get("step") not in PIC_CARE_ALLOWED_STEPS:
+            frappe.throw(
+                "Khong the gan PIC Care khi ho so chua o buoc Hoc sinh chinh thuc "
+                f"(buoc hien tai: {self.get('step') or '-'})"
+            )

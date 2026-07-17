@@ -88,16 +88,22 @@ def _owner_full_name_from_user(u):
     )
 
 
-def enrich_lead_dict_with_pic_info(lead_dict):
-    """
-    Bo sung pic_info tu User.pic: full_name, user_image, job_title (neu co cot tren User).
-    Dung cho get_lead va moi response sau save (pipeline) de FE khong mat avatar.
-    """
-    pic = lead_dict.get("pic")
-    if not pic:
-        lead_dict.pop("pic_info", None)
-        return lead_dict
+def _strip_pic_fields_without_role(data: dict) -> None:
+    """Bo cot PIC khoi payload neu user khong co dung role doi cot do (quyet dinh 2.5).
 
+    Bo am tham (giong apply_marcom_pic_policy) thay vi bao loi: cac field khac trong
+    cung payload van duoc cap nhat binh thuong.
+    """
+    from erp.api.crm.assignment import PIC_FIELD_EDIT_ROLE
+
+    user_roles = set(frappe.get_roles())
+    for pic_field, required_role in PIC_FIELD_EDIT_ROLE.items():
+        if required_role not in user_roles:
+            data.pop(pic_field, None)
+
+
+def _build_pic_info(pic):
+    """full_name / user_image / job_title cua mot User PIC. None neu khong tim thay."""
     fields = ["full_name", "user_image"]
     title_field = None
     if frappe.db.has_column("User", "job_title"):
@@ -109,19 +115,33 @@ def enrich_lead_dict_with_pic_info(lead_dict):
 
     pic_user = frappe.db.get_value("User", pic, fields, as_dict=True)
     if not pic_user:
-        return lead_dict
+        return None
 
-    full_name = (pic_user.get("full_name") or "").strip() or pic
     info = {
-        "full_name": full_name,
+        "full_name": (pic_user.get("full_name") or "").strip() or pic,
         "user_image": _get_full_image_url(pic_user.get("user_image")),
     }
     if title_field:
         jt = (pic_user.get(title_field) or "").strip()
         if jt:
             info["job_title"] = jt
+    return info
 
-    lead_dict["pic_info"] = info
+
+def enrich_lead_dict_with_pic_info(lead_dict):
+    """
+    Bo sung pic_sales_info / pic_care_info: full_name, user_image, job_title.
+    Dung cho get_lead va moi response sau save (pipeline) de FE khong mat avatar.
+    """
+    for field, info_key in (("pic_sales", "pic_sales_info"), ("pic_care", "pic_care_info")):
+        pic = lead_dict.get(field)
+        if not pic:
+            lead_dict.pop(info_key, None)
+            continue
+        info = _build_pic_info(pic)
+        if info:
+            lead_dict[info_key] = info
+
     return lead_dict
 
 
@@ -200,11 +220,11 @@ def _parse_lead_filters(raw):
     }
     # Chi cho phep loc tren cac cot da khai bao o FE (FILTER_COLUMNS)
     allowed = {
-        "student_name", "guardian_name", "pic", "step", "status",
+        "student_name", "guardian_name", "pic_sales", "pic_care", "step", "status",
         "test_status", "deal_status", "student_code", "crm_code",
     }
     # Cot text -> ap chuan search chung (bo dau, token, dau tu) qua search_names.
-    # pic/step/status/test_status/deal_status: dropdown gui dung key/id -> khop chinh xac.
+    # pic_*/step/status/test_status/deal_status: dropdown gui dung key/id -> khop chinh xac.
     text_cols = {"student_name", "guardian_name", "student_code", "crm_code"}
 
     out = []
@@ -290,7 +310,10 @@ def get_leads():
     status = frappe.request.args.get("status")
     search = frappe.request.args.get("search")
     campus_id = frappe.request.args.get("campus_id")
+    # `pic` (cu): khop CA HAI cot. `pic_sales`/`pic_care`: khop dung mot cot.
     pic = frappe.request.args.get("pic")
+    pic_sales = frappe.request.args.get("pic_sales")
+    pic_care = frappe.request.args.get("pic_care")
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 20))
     # per_page=0: lấy tất cả (unlimited) - dùng cho dialog thêm học sinh event/course
@@ -307,8 +330,19 @@ def get_leads():
         filters.append(["status", "=", status])
     if campus_id:
         filters.append(["campus_id", "=", campus_id])
+    if pic_sales:
+        filters.append(["pic_sales", "=", pic_sales])
+    if pic_care:
+        filters.append(["pic_care", "=", pic_care])
     if pic:
-        filters.append(["pic", "=", pic])
+        # Ho so nguoi nay phu trach o BAT KY vai tro nao (quyet dinh 2.3).
+        # Dung name-in vi `filters` cua get_all khong dien dat duoc OR long nhau,
+        # con `or_filters` da danh cho search — nhet vao se tron sai logic.
+        pic_names = frappe.db.sql_list(
+            "SELECT name FROM `tabCRM Lead` WHERE `pic_sales` = %(p)s OR `pic_care` = %(p)s",
+            {"p": pic},
+        )
+        filters.append(["name", "in", pic_names or [""]])
 
     # Filter nang cao tu FilterBuilder (FE) — bao gom cot dan xuat primary_phone
     filters += _parse_lead_filters(frappe.request.args.get("filters"))
@@ -363,7 +397,7 @@ def get_leads():
         or_filters=or_filters or None,
         fields=[
             "name", "step", "status", "crm_code", "student_name", "guardian_name",
-            "student_code", "target_grade", "campus_id", "pic",
+            "student_code", "target_grade", "campus_id", "pic_sales", "pic_care",
             "data_source", "modified", "creation", "duplicate_fields", "owner",
             # QLead: tab Hoc sinh tien nang — bang can test_status / deal_status
             "test_status", "deal_status",
@@ -535,7 +569,9 @@ def create_lead():
         
         # Set thong tin co ban
         simple_fields = [
-            "data_source", "staff_code", "pic", "campus_id",
+            # pic_care khong nam o day: chi gan tu buoc Enrolled tro di (rang buoc 2.12),
+            # ho so tao moi luon o Draft/Verify/Lead.
+            "data_source", "staff_code", "pic_sales", "campus_id",
             "student_name", "student_gender", "student_dob", "student_personal_id_number", "student_code",
             "current_grade", "target_grade", "current_school", "study_program", "student_note",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
@@ -606,13 +642,13 @@ def create_lead():
 
             doc.save(ignore_permissions=True)
 
-        # PIC mac dinh (SIS Sales, can bang tai) khi dua vao Verify hoac Lead (tao moi)
-        if not skip_verify and not doc.pic:
+        # PIC Sales mac dinh (can bang tai) khi dua vao Verify hoac Lead (tao moi)
+        if not skip_verify and not doc.pic_sales:
             from erp.api.crm.assignment import assign_pic_sales_weight_balance
 
             pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
             if pic:
-                frappe.db.set_value("CRM Lead", doc.name, "pic", pic)
+                frappe.db.set_value("CRM Lead", doc.name, "pic_sales", pic)
 
         frappe.db.commit()
 
@@ -685,7 +721,8 @@ def clone_lead_for_sibling():
         # Copy thong tin PH / lien he (flat)
         # Không copy lớp đang học / dự tuyển — HS mới nhập riêng (tránh mang mặc định K/1 từ bản ghi cũ)
         for field in [
-            "data_source", "staff_code", "pic", "campus_id",
+            # Khong copy pic_care: ho so ACE tao moi luon o Draft (rang buoc 2.12).
+            "data_source", "staff_code", "pic_sales", "campus_id",
             "guardian_name", "relationship", "guardian_email", "guardian_id_number",
             "guardian_occupation", "guardian_position", "guardian_workplace",
             "guardian_address", "guardian_nationality", "guardian_note", "guardian_dob",
@@ -767,12 +804,12 @@ def clone_lead_for_sibling():
         doc.flags.ignore_validate = True
         doc.save(ignore_permissions=True)
 
-        if not doc.pic:
+        if not doc.pic_sales:
             from erp.api.crm.assignment import assign_pic_sales_weight_balance
 
             pic = assign_pic_sales_weight_balance(doc.name, doc.campus_id)
             if pic:
-                frappe.db.set_value("CRM Lead", doc.name, "pic", pic)
+                frappe.db.set_value("CRM Lead", doc.name, "pic_sales", pic)
 
         frappe.db.commit()
 
@@ -855,9 +892,13 @@ def update_lead():
     
     try:
         doc = frappe.get_doc("CRM Lead", name)
-        
+
+        # PIC chi doi duoc boi dung role (quyet dinh 2.5) — cung quy tac voi reassign_pic.
+        # Khong gate o day thi update_lead thanh duong vong qua mat gate cua reassign_pic.
+        _strip_pic_fields_without_role(data)
+
         updatable_fields = [
-            "data_source", "staff_code", "pic", "campus_id",
+            "data_source", "staff_code", "pic_sales", "pic_care", "campus_id",
             "student_name", "student_gender", "student_dob", "student_personal_id_number", "student_code",
             "current_grade", "target_grade", "current_school", "study_program", "student_note",
             "student_place_of_birth", "student_nationality", "student_ethnicity", "student_religion",

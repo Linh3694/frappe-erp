@@ -174,11 +174,15 @@ def send_duplicate_warning_email():
     if not old_lead_name or not new_lead_name:
         return validation_error_response("Thieu tham so", {})
     
-    old_lead = frappe.db.get_value("CRM Lead", old_lead_name, ["pic", "student_name"], as_dict=True)
-    if not old_lead or not old_lead.get("pic"):
+    from erp.api.crm.utils import current_lead_pic
+
+    old_lead = frappe.db.get_value("CRM Lead", old_lead_name, ["student_name"], as_dict=True)
+    # PIC dang giu ho so cu — dinh tuyen theo buoc (quyet dinh 2.9).
+    old_pic = current_lead_pic(old_lead_name)
+    if not old_lead or not old_pic:
         return error_response("Khong tim thay PIC cua ho so cu")
-    
-    pic_email = frappe.db.get_value("User", old_lead["pic"], "email")
+
+    pic_email = frappe.db.get_value("User", old_pic, "email")
     if not pic_email:
         return error_response("Khong co email PIC")
     

@@ -46,7 +46,7 @@ def _find_matching_leads_by_names(student_name, guardian_name, exclude_draft=Fal
 
     query = """
         SELECT DISTINCT cl.name, cl.step, cl.status, cl.student_name, cl.guardian_name,
-               cl.modified, cl.pic, cl.campus_id
+               cl.modified, COALESCE(cl.pic_care, cl.pic_sales) AS pic, cl.campus_id
         FROM `tabCRM Lead` cl
         WHERE """ + " AND ".join(wheres)
 
@@ -72,7 +72,7 @@ def _find_matching_leads(phone_numbers, student_name=None, guardian_name=None, e
     
     base_query = """
         SELECT DISTINCT cl.name, cl.step, cl.status, cl.student_name, cl.guardian_name,
-               cl.modified, cl.pic, cl.campus_id
+               cl.modified, COALESCE(cl.pic_care, cl.pic_sales) AS pic, cl.campus_id
         FROM `tabCRM Lead` cl
         INNER JOIN `tabCRM Lead Phone` clp ON clp.parent = cl.name
         WHERE clp.phone_number IN ({placeholders})
