@@ -110,6 +110,8 @@ def _normalize_member_rows(rows: Any) -> List[Dict[str, Any]]:
             "enrollment_target": _non_negative_int(r.get("enrollment_target")),
             "lead_target": _non_negative_int(r.get("lead_target")),
             "qlead_target": _non_negative_int(r.get("qlead_target")),
+            # Chi doi Care dung — thuc te doi chieu lay tu dot tai ghi danh cua nam hoc do.
+            "re_enrollment_target": _non_negative_int(r.get("re_enrollment_target")),
         }
         if r.get("name"):
             row["name"] = r["name"]
@@ -147,6 +149,7 @@ def _serialize_target_doc(doc) -> Dict[str, Any]:
             "enrollment_target": int(r.enrollment_target or 0),
             "lead_target": int(r.lead_target or 0),
             "qlead_target": int(r.qlead_target or 0),
+            "re_enrollment_target": int(getattr(r, "re_enrollment_target", 0) or 0),
         }
         for r in doc.member_targets or []
     ]

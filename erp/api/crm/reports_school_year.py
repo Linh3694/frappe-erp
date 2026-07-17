@@ -1680,6 +1680,46 @@ def _count_enrolled_actual(
     )
 
 
+def _count_re_enrollment_by_pic(campus_id: str, target_academic_year: str) -> Dict[str, int]:
+    """So TAI GHI DANH THUC TE theo PIC — dem ho so da chot `decision='re_enroll'`.
+
+    Nguon: dot tai ghi danh (`SIS Re-enrollment Config`) co `school_year_id` = nam hoc muc
+    tieu. Chi dem quyet dinh 're_enroll' — 'considering' chua phai ket qua.
+
+    PIC = nguoi DANG giu ho so: COALESCE(pic_care, pic_sales), uu tien ho so o buoc Enrolled
+    — copy nguyen pattern cua erp/api/erp_sis/re_enrollment.py (by_pic) de hai bao cao khong
+    ra hai con so khac nhau cho cung mot nguoi.
+    """
+    if not target_academic_year:
+        return {}
+    where = ["cfg.`school_year_id` = %(sy)s", "re.`decision` = 're_enroll'"]
+    binds: Dict[str, Any] = {"sy": target_academic_year}
+    if campus_id:
+        where.append("cfg.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+    rows = frappe.db.sql(
+        f"""
+        SELECT COALESCE(t.pic, '') AS pic, COUNT(*) AS cnt
+        FROM (
+            SELECT (
+                SELECT COALESCE(l2.`pic_care`, l2.`pic_sales`) FROM `tabCRM Lead` l2
+                WHERE l2.`linked_student` = re.`student_id`
+                ORDER BY (l2.`step` = 'Enrolled') DESC, l2.`modified` DESC
+                LIMIT 1
+            ) AS pic
+            FROM `tabSIS Re-enrollment` re
+            INNER JOIN `tabSIS Re-enrollment Config` cfg ON cfg.`name` = re.`config_id`
+            WHERE {" AND ".join(where)}
+        ) t
+        WHERE IFNULL(t.pic, '') != ''
+        GROUP BY t.pic
+        """,
+        binds,
+        as_dict=True,
+    )
+    return {row["pic"]: int(row["cnt"] or 0) for row in rows}
+
+
 def _count_kpi_metrics_snapshot(
     campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None
 ) -> Dict[str, int]:
@@ -1843,27 +1883,38 @@ def get_kpi_overview():
                     "lead": int(getattr(row, "lead_target", 0) or 0),
                     "qlead": int(getattr(row, "qlead_target", 0) or 0),
                     "enrolled": int(row.enrollment_target or 0),
+                    "re_enrolled": int(getattr(row, "re_enrollment_target", 0) or 0),
                 }
 
     actual_by_pic = _count_kpi_metrics_by_pic(
-        campus_id, target_academic_year, pic_eff, pic_field=pic_field
+        campus_id, target_academic_year, pic_field=pic_field, pic_filter=pic_eff
+    )
+    # Tái ghi danh — nguồn khác hẳn 3 mốc phễu (đợt tái ghi danh, không phải CRM Lead step).
+    # Chỉ đội Care mới có chỉ tiêu này nên khỏi truy vấn khi xem đội Sales.
+    re_enroll_by_pic = (
+        _count_re_enrollment_by_pic(campus_id, target_academic_year)
+        if eff_team == "care"
+        else {}
     )
 
     # Thành viên hiện trong bảng = ai ĐANG có mặt ở cột đó ∪ ai được giao target đội đó.
     # KHÔNG lọc theo role: pic_sales không ràng buộc role (người Care vẫn có thể giữ
     # pic_sales), lọc theo role sẽ đếm mà không hiện => số liệu bốc hơi.
-    all_pics = set(member_targets_map.keys()) | set(actual_by_pic.keys())
+    all_pics = set(member_targets_map.keys()) | set(actual_by_pic.keys()) | set(re_enroll_by_pic.keys())
     if eff_team == "sales":
         all_pics |= set(_get_active_crm_sales_user_names())
     if pic_eff:
         all_pics = all_pics & {pic_eff} if all_pics else {pic_eff}
 
+    _EMPTY_TARGETS = {"lead": 0, "qlead": 0, "enrolled": 0, "re_enrolled": 0}
     user_map = r._batch_user_map(list(all_pics))
     by_member = []
     for pic in sorted(all_pics):
-        targets = member_targets_map.get(pic, {"lead": 0, "qlead": 0, "enrolled": 0})
+        targets = member_targets_map.get(pic, _EMPTY_TARGETS)
         act = actual_by_pic.get(pic, {"lead": 0, "qlead": 0, "enrolled": 0})
         ud = user_map.get(pic, {})
+        re_actual = re_enroll_by_pic.get(pic, 0)
+        re_target = targets.get("re_enrolled", 0)
         by_member.append(
             {
                 "pic": pic,
@@ -1883,6 +1934,12 @@ def get_kpi_overview():
                     "target": targets["enrolled"],
                     "actual": act["enrolled"],
                     "pct": _pct(act["enrolled"], targets["enrolled"]),
+                },
+                # Chỉ đội Care mới có số; đội Sales luôn 0 (không truy vấn) — FE đừng vẽ cột này cho Sales.
+                "re_enrolled": {
+                    "target": re_target,
+                    "actual": re_actual,
+                    "pct": _pct(re_actual, re_target),
                 },
             }
         )

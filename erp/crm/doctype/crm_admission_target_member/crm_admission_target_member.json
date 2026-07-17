@@ -11,7 +11,8 @@
   "team",
   "lead_target",
   "qlead_target",
-  "enrollment_target"
+  "enrollment_target",
+  "re_enrollment_target"
  ],
  "fields": [
   {
@@ -55,12 +56,21 @@
    "label": "Mục tiêu Học sinh chính thức",
    "non_negative": 1,
    "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Chỉ dùng cho đội Care. Thực tế đối chiếu = số hồ sơ SIS Re-enrollment có decision='re_enroll' thuộc đợt tái ghi danh của năm học mục tiêu.",
+   "fieldname": "re_enrollment_target",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Mục tiêu Tái ghi danh",
+   "non_negative": 1
   }
  ],
  "index_web_pages_for_search": 0,
  "istable": 1,
  "links": [],
- "modified": "2026-06-25 00:00:00.000000",
+ "modified": "2026-07-17 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Crm",
  "name": "CRM Admission Target Member",
