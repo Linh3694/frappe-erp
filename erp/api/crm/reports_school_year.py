@@ -15,7 +15,6 @@ Nguồn (nguồn 1/2/3), Tái ghi danh (tái dùng erp_sis.re_enrollment).
 
 Hạ tầng chung (phân quyền PIC, giải kỳ, lọc chiều + filter động) lấy từ `report_common.py`
 qua alias `r` — KHÔNG phụ thuộc `reports_period.py`.
-Đường dẫn API cũ `erp.api.crm.reports_v2.*` vẫn sống qua vỏ tương thích `reports_v2.py`.
 """
 
 import json
@@ -1613,14 +1612,22 @@ def _count_enrolled_actual(
     duoc MOT gia tri, nen hoc sinh vao tu 2025-2026 roi hoc tiep len 2026-2027 van mai mang
     nhan 2025-2026. Vi vay chia 2 duong:
 
-    - Nam dang bat (is_enable) = nam hien tai -> dem thang CRM Lead dang o step='Enrolled',
-      KHONG loc theo nam. Day la "so hien tai", khop rail giai doan ben danh sach ho so.
+    - Nam dang bat (is_enable) = nam hien tai -> CRM Lead dang o step='Enrolled', KHONG loc
+      theo nam, TRU hoc sinh da ra truong. Day la "so hien tai".
     - Nam cu -> si so that lay tu lop: SIS Class Student cua nam do, chi lop `regular`.
       Moi nam hoc sinh duoc xep lop lai nen day moi la ban ghi dung theo tung nam.
       (Cung pattern voi erp/api/erp_sis/re_enrollment.py: join cs -> c, loc `c.school_year_id`.)
+
+    VI SAO PHAI TRU HOC SINH RA TRUONG: he thong KHONG co buoc "tot nghiep" — em hoc xong
+    lop 12 van giu step='Enrolled' vinh vien. De nguyen thi moi nam si so lai cong them mot
+    lua lop 12, vai nam la con so vo nghia. `_resolve_lead_grade_rows_for_year` danh dau
+    `graduated` cho ai het khoi de len (theo `sort_order`) va chua duoc xep lop nam nay.
+
+    Dung CHUNG duong tinh voi `get_enrolled_demographics` (cung goi ham resolve o tren) de
+    the KPI va chart Nam/Nu KHONG BAO GIO venh nhau — do la ly do khong dem bang COUNT(*).
     """
     if _is_enabled_school_year(school_year):
-        where = ["l.`step` = 'Enrolled'"]
+        where = ["l.`step` = 'Enrolled'", "IFNULL(l.`status`, '') NOT IN ('Lost','Tu choi')"]
         binds: Dict[str, Any] = {}
         if campus_id:
             where.append("l.`campus_id` = %(campus)s")
@@ -1628,12 +1635,19 @@ def _count_enrolled_actual(
         if pic_filter:
             where.append("(l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s)")
             binds["pic"] = pic_filter
-        return int(
-            frappe.db.sql(
-                f"SELECT COUNT(*) FROM `tabCRM Lead` l WHERE {' AND '.join(where)}", binds
-            )[0][0]
-            or 0
+        rows = frappe.db.sql(
+            f"""
+            SELECT l.`name` AS name,
+                   IFNULL(TRIM(l.`linked_student`), '') AS linked_student,
+                   IFNULL(TRIM(l.`target_grade`), '') AS target_grade
+            FROM `tabCRM Lead` l
+            WHERE {' AND '.join(where)}
+            """,
+            binds,
+            as_dict=True,
         )
+        _resolve_lead_grade_rows_for_year(rows, school_year)
+        return sum(1 for row in rows if not row.get("graduated"))
 
     # Nam cu — dem si so tu lop. class_type rong coi nhu 'regular' (khop
     # enrolled_class_sync.has_regular_class_assignment va re_enrollment.py).
@@ -2127,6 +2141,136 @@ def _sis_grade_map_for_students(student_ids: List[str]) -> Dict[str, str]:
     return out
 
 
+def _next_education_grade_map() -> Dict[str, Optional[str]]:
+    """SIS Education Grade -> khoi KE TIEP (cung campus, theo `sort_order`).
+
+    Khoi cuoi cua campus -> None = RA TRUONG. Dung `sort_order` (nguon thu tu khoi chuan
+    cua he thong, xem erp/api/erp_sis/education_grade.py order_by sort_order) thay vi
+    hardcode "grade_code != '12'" nhu re_enrollment.py — de khong vo khi truong doi he khoi.
+    Lay "sort_order nho nhat ma lon hon hien tai" nen ho ga/trung sort_order khong lam sai.
+    """
+    rows = frappe.db.sql(
+        """
+        SELECT eg.`name`, IFNULL(TRIM(eg.`campus_id`), '') AS campus_id,
+               IFNULL(eg.`sort_order`, 0) AS sort_order
+        FROM `tabSIS Education Grade` eg
+        """,
+        as_dict=True,
+    )
+    by_campus: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        by_campus[row["campus_id"]].append(row)
+    out: Dict[str, Optional[str]] = {}
+    for items in by_campus.values():
+        items.sort(key=lambda x: (int(x["sort_order"] or 0), str(x["name"])))
+        for i, item in enumerate(items):
+            out[item["name"]] = items[i + 1]["name"] if i + 1 < len(items) else None
+    return out
+
+
+def _student_regular_class_grades(
+    student_ids: List[str], school_year: str
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Tra ve 2 map student_id -> SIS Education Grade (name):
+
+    - `in_year`    : khoi cua lop regular thuoc DUNG `school_year` (su that — da xep lop)
+    - `before_year`: khoi cua lop regular gan nhat TRUOC `school_year` (de suy khoi ke tiep)
+    """
+    if not student_ids or not school_year:
+        return {}, {}
+    sy_start = frappe.db.get_value("SIS School Year", school_year, "start_date")
+    rows = frappe.db.sql(
+        """
+        SELECT cs.`student_id` AS student_id, c.`education_grade` AS grade,
+               c.`school_year_id` AS sy, sy.`start_date` AS start_date
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON c.`name` = cs.`class_id`
+        LEFT JOIN `tabSIS School Year` sy ON sy.`name` = c.`school_year_id`
+        WHERE cs.`student_id` IN %(students)s
+          AND IFNULL(NULLIF(TRIM(c.`class_type`), ''), 'regular') = 'regular'
+          AND IFNULL(TRIM(c.`education_grade`), '') != ''
+        """,
+        {"students": student_ids},
+        as_dict=True,
+    )
+    in_year: Dict[str, str] = {}
+    before_best: Dict[str, Any] = {}
+    for row in rows:
+        sid = row["student_id"]
+        if row["sy"] == school_year:
+            in_year[sid] = row["grade"]
+            continue
+        if sy_start and row["start_date"] and row["start_date"] < sy_start:
+            prev = before_best.get(sid)
+            if prev is None or row["start_date"] > prev["start_date"]:
+                before_best[sid] = row
+    return in_year, {sid: row["grade"] for sid, row in before_best.items()}
+
+
+def _resolve_lead_grade_rows_for_year(rows: List[Dict[str, Any]], school_year: str) -> None:
+    """Gan row['grade'] theo NAM HOC `school_year`, va row['graduated'] = da ra truong.
+
+    Thang uu tien (tin cay giam dan) — KHONG dung `target_grade` truoc lop that:
+      1. Co lop regular cua DUNG nam do        -> khoi cua lop     (da xep lop)
+      2. Co lop nam truoc, chua co lop nam nay -> khoi KE TIEP theo `sort_order`
+                                                  (HS cu trong gap giua 2 nam hoc).
+                                                  Het khoi (lop 12) -> RA TRUONG, loai.
+      3. Chua co lop nam nao                   -> `target_grade`   (HS moi dang ky)
+      4. Khong suy duoc                        -> 'Chua xep lop'
+
+    Vi sao (1) phai thang `target_grade`: `bulk_import_leads` CO map `target_grade`, nen HS
+    migrate mang `target_grade` cua thoi diem nhap — em da len lop van bi ket o khoi cu.
+    Lop that moi la su that; `target_grade` chi la nguyen vong luc nop ho so.
+
+    Buoc (2) la SUY DIEN, chi song trong gap: xep lop xong thi (1) thang, so tu dung lai.
+    Sai duoc voi HS hoc lai / nghi he chua doi sang 'Nghi hoc' — chap nhan duoc trong mua
+    cao diem, va tot hon la don het vao 'Chua xep lop'.
+    """
+    from erp.api.crm.enrolled_class_sync import _normalize_grade_to_lead_select
+
+    student_ids = sorted(
+        {(row.get("linked_student") or "").strip() for row in rows if (row.get("linked_student") or "").strip()}
+    )
+    in_year, before_year = _student_regular_class_grades(student_ids, school_year)
+    next_map = _next_education_grade_map() if before_year else {}
+
+    # Batch ten khoi -> nhan hien thi ('K', '1'..'12')
+    need = {g for g in list(in_year.values()) + list(before_year.values()) if g}
+    need |= {g for g in (next_map.get(x) for x in before_year.values()) if g}
+    label: Dict[str, str] = {}
+    if need:
+        for eg in frappe.db.sql(
+            "SELECT `name`, `grade_code`, `title_vn` FROM `tabSIS Education Grade` WHERE `name` IN %(n)s",
+            {"n": sorted(need)},
+            as_dict=True,
+        ):
+            norm = _normalize_grade_to_lead_select(eg.get("grade_code"), eg.get("title_vn"))
+            if norm:
+                label[eg["name"]] = norm
+
+    for row in rows:
+        sid = (row.get("linked_student") or "").strip()
+        row["graduated"] = False
+
+        grade_name = in_year.get(sid)
+        if grade_name:  # (1) da xep lop nam nay
+            row["grade"] = label.get(grade_name) or "-"
+            continue
+
+        prev_grade = before_year.get(sid)
+        if prev_grade:  # (2) HS cu trong gap -> suy khoi ke tiep
+            nxt = next_map.get(prev_grade)
+            if not nxt:
+                row["graduated"] = True  # het khoi -> ra truong, khong thuoc nam nay
+                row["grade"] = "-"
+            else:
+                row["grade"] = label.get(nxt) or "Chưa xếp lớp"
+            continue
+
+        # (3) HS moi chua co lop nao -> khoi dang ky; (4) khong suy duoc
+        row["grade"] = (row.get("target_grade") or "").strip() or "Chưa xếp lớp"
+
+
 def _resolve_lead_grade_rows(rows: List[Dict[str, Any]]) -> None:
     """Gán row['grade'] với fallback: target_grade → current_grade → khối SIS
     (qua linked_student) → '-'.
@@ -2584,18 +2728,48 @@ def _normalize_lead_gender(raw: Optional[str]) -> str:
 
 @frappe.whitelist()
 def get_enrolled_demographics():
-    """Tỉ lệ Nam/Nữ theo khối và phân bố Phường/Xã của HS chính thức (Enrolled).
+    """Tỉ lệ Nam/Nữ theo khối và phân bố Phường/Xã của HS chính thức, theo NĂM HỌC.
 
-    Phạm vi: CRM Lead step = Enrolled, tạo trước hoặc bằng cuối kỳ lọc (`to_date`).
-    Giới tính: `student_gender` (Nam/Nu). Địa chỉ: `current_address_ward` (nơi ở hiện nay).
-    Khối: fallback target_grade → current_grade → lớp SIS qua linked_student.
+    Population dùng CHUNG quy tắc với thẻ «Học sinh chính thức» (`_count_enrolled_actual`)
+    để hai chỗ không bao giờ vênh nhau:
+      - Năm đang bật -> mọi CRM Lead step='Enrolled' (bỏ Lost/Từ chối). KHÔNG lọc
+        `target_academic_year`: lọc là mất sạch HS cũ, vì họ mang nhãn năm cũ.
+      - Năm cũ       -> chỉ HS có lớp regular của chính năm đó (đã đóng sổ).
+    HS đã ra trường (hết khối để lên) bị loại — họ vẫn giữ step='Enrolled' vì hệ thống
+    không có bước "tốt nghiệp", để nguyên là sĩ số năm mới bị thổi phồng.
+
+    Giới tính: `student_gender`. Địa chỉ: `current_address_ward`.
+    Khối: xem `_resolve_lead_grade_rows_for_year` (lớp năm đó > suy khối kế tiếp > target_grade).
     """
     check_crm_permission()
-    args = frappe.request.args or {}
+    raw_args = frappe.request.args or {}
+    args = raw_args.to_dict() if hasattr(raw_args, "to_dict") else dict(raw_args)
+    # Năm học là TRỤC của báo cáo này, không phải bộ lọc hồ sơ => pop khỏi args để
+    # `_where_lead_dimensions_only` KHÔNG chèn `l.target_academic_year = ...`.
+    school_year = str(args.pop("target_academic_year", "") or "").strip()
     fd, td_eff, _ = _overview_period_bounds(args)
     _, td_raw, _, _ = r._resolve_period(args)
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
     period_meta = _overview_period_meta(fd, td_raw, td_eff)
+
+    where = [
+        "l.`step` = 'Enrolled'",
+        "IFNULL(l.`status`, '') NOT IN ('Lost','Tu choi')",
+        dim_sql,
+    ]
+    binds: Dict[str, Any] = {**dim_binds}
+    if school_year and not _is_enabled_school_year(school_year):
+        # Năm cũ — chốt theo lớp thật của năm đó, không suy diễn.
+        where.append(
+            """EXISTS (
+                SELECT 1 FROM `tabSIS Class Student` cs
+                INNER JOIN `tabSIS Class` c ON c.`name` = cs.`class_id`
+                WHERE cs.`student_id` = l.`linked_student`
+                  AND c.`school_year_id` = %(sy)s
+                  AND IFNULL(NULLIF(TRIM(c.`class_type`), ''), 'regular') = 'regular'
+            )"""
+        )
+        binds["sy"] = school_year
 
     lead_rows = frappe.db.sql(
         f"""
@@ -2607,15 +2781,16 @@ def get_enrolled_demographics():
                IFNULL(TRIM(l.`current_grade`), '') AS current_grade,
                IFNULL(TRIM(l.`linked_student`), '') AS linked_student
         FROM `tabCRM Lead` l
-        WHERE l.`step` = 'Enrolled'
-          AND IFNULL(l.`status`, '') NOT IN ('Lost','Tu choi')
-          AND DATE(l.`creation`) <= %(to_date)s
-          AND {dim_sql}
+        WHERE {" AND ".join(where)}
         """,
-        {"to_date": str(td_eff), **dim_binds},
+        binds,
         as_dict=True,
     )
-    _resolve_lead_grade_rows(lead_rows)
+    if school_year:
+        _resolve_lead_grade_rows_for_year(lead_rows, school_year)
+        lead_rows = [row for row in lead_rows if not row.get("graduated")]
+    else:
+        _resolve_lead_grade_rows(lead_rows)
 
     gender_by_grade_map: Dict[str, Dict[str, int]] = defaultdict(
         lambda: {"male": 0, "female": 0, "unknown": 0, "total": 0}
