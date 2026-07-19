@@ -33,6 +33,12 @@ KPI_TEAM_PIC_FIELD = {
     "care": "pic_care",
 }
 
+# Status cua buoc Enrolled nghia la "vua chot, CHUA duoc xep lop" = Hoc sinh moi.
+# Khop STEP_STATUSES["Enrolled"] trong erp/api/crm/utils.py = ["Cho xep lop","Dang hoc","Dinh chi hoc"];
+# pipeline.py dat gia tri nay lam mac dinh khi chot, `enrolled_class_sync` doi sang "Dang hoc"
+# khi hoc sinh duoc xep lop Regular.
+_ENROLLED_AWAITING_CLASS = "Cho xep lop"
+
 # Báo cáo trạng thái theo khối — Draft+Verify gộp "Hồ sơ mới", rồi các bước còn lại
 _GRADE_REPORT_STEPS = ["Lead", "QLead", "Enrolled", "Nghi hoc"]
 _GRADE_REPORT_ALWAYS_STEPS = frozenset({"Lead"})
@@ -1412,6 +1418,33 @@ def _count_enrolled_by_grade(campus_id: str, target_academic_year: str) -> Dict[
     return {row["grade"]: int(row["cnt"]) for row in rows}
 
 
+# Trạng thái tính là «đã đóng phí» theo khối — Đặt cọc + Nộp phí (khớp `_EXAM_PAID_LEAD_STATUSES`
+# và biểu đồ «HS đã đóng phí»). Đếm theo trạng thái HIỆN TẠI, không gồm HS đã chuyển sang Enrolled.
+_PAID_LEAD_STATUSES_BY_GRADE = ("Dat coc", "Dong phi")
+
+
+def _count_paid_by_grade(campus_id: str, target_academic_year: str) -> Dict[str, int]:
+    """Đếm số lead đang ở trạng thái đã đóng phí (Đặt cọc/Nộp phí) theo target_grade."""
+    where = ["l.`status` IN %(statuses)s", "l.`target_academic_year` = %(tay)s"]
+    binds: Dict[str, Any] = {"tay": target_academic_year, "statuses": _PAID_LEAD_STATUSES_BY_GRADE}
+    if campus_id:
+        where.append("l.`campus_id` = %(campus)s")
+        binds["campus"] = campus_id
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT IFNULL(NULLIF(TRIM(l.`target_grade`), ''), '-') AS grade,
+               COUNT(*) AS cnt
+        FROM `tabCRM Lead` l
+        WHERE {" AND ".join(where)}
+        GROUP BY grade
+        """,
+        binds,
+        as_dict=True,
+    )
+    return {row["grade"]: int(row["cnt"]) for row in rows}
+
+
 def _count_enrolled_by_pic(
     campus_id: str,
     target_academic_year: str,
@@ -1506,13 +1539,14 @@ def get_enrollment_target_progress():
                 member_targets_map[p] = int(row.enrollment_target or 0)
 
     actual_by_grade = _count_enrolled_by_grade(campus_id, target_academic_year)
+    paid_by_grade = _count_paid_by_grade(campus_id, target_academic_year)
     actual_by_pic = _count_enrolled_by_pic(
         campus_id, target_academic_year, pic_eff, pic_field=pic_field
     )
 
-    # by_grade: union grades từ target + actual
+    # by_grade: union grades từ target + actual + paid
     all_grades = sorted(
-        set(grade_targets_map.keys()) | set(actual_by_grade.keys()),
+        set(grade_targets_map.keys()) | set(actual_by_grade.keys()) | set(paid_by_grade.keys()),
         key=lambda g: (0, int(g)) if g.isdigit() else (1, g),
     )
     by_grade = []
@@ -1522,12 +1556,15 @@ def get_enrollment_target_progress():
             continue
         target = grade_targets_map.get(g, 0)
         actual = actual_by_grade.get(g, 0)
+        paid = paid_by_grade.get(g, 0)
         dept_actual += actual
         by_grade.append(
             {
                 "target_grade": g,
                 "target": target,
                 "actual": actual,
+                # «đã đóng phí» theo khối (Đặt cọc/Nộp phí) — mẫu số cột «Paid/Chỉ tiêu» tab Cá nhân
+                "paid": paid,
                 "pct": _pct(actual, target),
             }
         )
@@ -1606,7 +1643,10 @@ def _is_enabled_school_year(school_year: str) -> bool:
 
 
 def _count_enrolled_actual(
-    campus_id: str, school_year: str, pic_filter: Optional[str] = None
+    campus_id: str,
+    school_year: str,
+    pic_filter: Optional[str] = None,
+    status_in: Optional[Tuple[str, ...]] = None,
 ) -> int:
     """Hoc sinh chinh thuc THUC TE cua nam hoc — si so, khong phai "tuyen moi duoc bao nhieu".
 
@@ -1627,10 +1667,18 @@ def _count_enrolled_actual(
 
     Dung CHUNG duong tinh voi `get_enrolled_demographics` (cung goi ham resolve o tren) de
     the KPI va chart Nam/Nu KHONG BAO GIO venh nhau — do la ly do khong dem bang COUNT(*).
+
+    `status_in`: loc them theo status cua buoc Enrolled — xem STEP_STATUSES["Enrolled"] =
+    ["Cho xep lop", "Dang hoc", "Dinh chi hoc"]. Vd ("Cho xep lop",) = HOC SINH MOI (vua chot,
+    chua duoc xep lop). CHI co tac dung o nam dang bat: nam cu dem theo LOP nen moi hoc sinh
+    trong tap deu da co lop => "cho xep lop" luon rong, tra 0 la dung chu khong phai bug.
     """
     if _is_enabled_school_year(school_year):
         where = ["l.`step` = 'Enrolled'", "IFNULL(l.`status`, '') NOT IN ('Lost','Tu choi')"]
         binds: Dict[str, Any] = {}
+        if status_in:
+            where.append("l.`status` IN %(statuses)s")
+            binds["statuses"] = tuple(status_in)
         if campus_id:
             where.append("l.`campus_id` = %(campus)s")
             binds["campus"] = campus_id
@@ -1650,6 +1698,11 @@ def _count_enrolled_actual(
         )
         _resolve_lead_grade_rows_for_year(rows, school_year)
         return sum(1 for row in rows if not row.get("graduated"))
+
+    # Nam cu — moi hoc sinh trong tap deu lay TU LOP nen deu da duoc xep lop => khong con ai
+    # "cho xep lop". Tra 0 luon, khoi truy van.
+    if status_in:
+        return 0
 
     # Nam cu — dem si so tu lop. class_type rong coi nhu 'regular' (khop
     # enrolled_class_sync.has_regular_class_assignment va re_enrollment.py).
@@ -2002,11 +2055,19 @@ def get_kpi_overview():
 def get_enrollment_progress_gauge():
     """Gauge tiến độ tuyển sinh toàn trường (nửa hình tròn).
 
-    - Học sinh hiện hữu (HSHH) = Học sinh chính thức = CRM Lead step='Enrolled'.
-    - Học sinh mới (HSM) = QLead có test_status='De xuat' (KSĐV = Đề xuất)
-      và deal_status IN ('Dat coc','Dong phi') (Thỏa thuận = Đặt cọc / Đóng phí).
+    HSHH + HSM là hai LÁT CẮT RỜI NHAU của cùng tập Học sinh chính thức, chia theo đã xếp lớp
+    hay chưa — cộng lại đúng bằng thẻ «Học sinh chính thức» (`_count_enrolled_actual`):
+
+    - Học sinh mới (HSM)        = Enrolled + status 'Cho xep lop' — vừa chốt, CHƯA xếp lớp.
+    - Học sinh hiện hữu (HSHH)  = phần còn lại (đã 'Dang hoc' / 'Dinh chi hoc').
     - kpi_target = Mục tiêu Tổng học sinh hiện hữu (config CRM Admission Target).
     - ratio = (HSHH + HSM) / kpi_target * 100.
+
+    `enrolled_class_sync` tự đổi 'Cho xep lop' -> 'Dang hoc' khi hồ sơ được xếp lớp Regular,
+    nên HSM giảm dần về 0 trong lúc xếp lớp — đó là hành vi đúng, không phải số bị mất.
+
+    ĐỪNG lấy HSM từ nhóm QLead (bản cũ đếm QLead + test 'De xuat' + deal 'Dat coc'/'Dong phi'):
+    đó là hồ sơ SẮP chốt, chưa phải học sinh, mà lại bị cộng vào cùng HSHH => thổi phồng tiến độ.
     Scope theo campus + năm học mục tiêu (snapshot).
     """
     check_crm_permission()
@@ -2027,33 +2088,14 @@ def get_enrollment_progress_gauge():
             }
         )
 
-    where = ["l.`target_academic_year` = %(tay)s"]
-    binds: Dict[str, Any] = {"tay": target_academic_year}
-    if campus_id:
-        where.append("l.`campus_id` = %(campus)s")
-        binds["campus"] = campus_id
-    if pic_eff:
-        where.append("(l.`pic_sales` = %(pic)s OR l.`pic_care` = %(pic)s)")
-        binds["pic"] = pic_eff
-
-    # HSM (hoc sinh moi) = ho so dang chot cho DUNG nam hoc do => van loc target_academic_year.
-    row = frappe.db.sql(
-        f"""
-        SELECT
-            SUM(CASE WHEN l.`step` = 'QLead'
-                      AND l.`test_status` = 'De xuat'
-                      AND l.`status` IN ('Dat coc', 'Dong phi')
-                     THEN 1 ELSE 0 END) AS hsm
-        FROM `tabCRM Lead` l
-        WHERE {" AND ".join(where)}
-        """,
-        binds,
-        as_dict=True,
+    # Si so THUC TE cua nam: nam dang bat -> so song, nam cu -> theo lop (da tru HS ra truong).
+    total_enrolled = _count_enrolled_actual(campus_id, target_academic_year, pic_eff)
+    # Hoc sinh MOI = lat cat "chua xep lop" cua chinh tap tren.
+    hsm = _count_enrolled_actual(
+        campus_id, target_academic_year, pic_eff, status_in=(_ENROLLED_AWAITING_CLASS,)
     )
-    d = row[0] if row else {}
-    hsm = int(d.get("hsm") or 0)
-    # HSHH (hoc sinh hien huu) = si so THUC TE: nam dang bat -> so song, nam cu -> theo lop.
-    hshh = _count_enrolled_actual(campus_id, target_academic_year, pic_eff)
+    # Hien huu = phan con lai => hshh + hsm == total_enrolled == the «Hoc sinh chinh thuc».
+    hshh = max(0, total_enrolled - hsm)
 
     target_doc = _load_target_doc(campus_id, target_academic_year) if campus_id else None
     kpi_target = int(getattr(target_doc, "total_existing_target", 0) or 0) if target_doc else 0
@@ -2407,7 +2449,12 @@ def _grade_display_sort_key(g: str):
 _QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Tham gia su kien", "Tham quan truong", "Can nhac", "Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Khao sat dau vao", "Tu choi"]
 
 
-def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _as_of_state_rows(
+    as_of_end: str,
+    dim_sql: str,
+    dim_binds: Dict[str, Any],
+    cohort_from: Any = None,
+) -> List[Dict[str, Any]]:
     """Tái dựng step/status của từng CRM Lead tại thời điểm `as_of_end` từ CRM Lead Step History.
 
     - as_of_step: `new_step` của bản ghi lịch sử mới nhất có `changed_at` <= as_of; nếu chưa có
@@ -2416,8 +2463,15 @@ def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -
       có lịch sử, dùng step hiện tại (chưa từng đổi kể từ khi tạo).
     - as_of_status: tương tự nhưng chỉ xét bản ghi đổi `status` chính — bỏ qua bản ghi đổi
       test_status/deal_status (lưu dạng "field:value" trong new_status/old_status, khác trường).
-    """
+
+    `cohort_from`: nếu truyền, chỉ lấy hồ sơ TẠO trong kỳ [cohort_from, as_of] (cohort «lứa
+    vào trong kỳ» — from_date có tác dụng). Bỏ trống = snapshot toàn pipeline tính đến as_of
+    (hành vi mặc định, tab Nguồn dùng)."""
     binds = {"as_of": as_of_end, **dim_binds}
+    cohort_cond = ""
+    if cohort_from:
+        binds["cohort_from"] = cohort_from
+        cohort_cond = "AND DATE(l.`creation`) >= %(cohort_from)s"
     return frappe.db.sql(
         f"""
         WITH base_leads AS (
@@ -2428,7 +2482,7 @@ def _as_of_state_rows(as_of_end: str, dim_sql: str, dim_binds: Dict[str, Any]) -
                    l.`student_name`, l.`student_dob`,
                    IFNULL(COALESCE(l.`pic_care`, l.`pic_sales`), '') AS pic
             FROM `tabCRM Lead` l
-            WHERE l.`creation` <= %(as_of)s AND {dim_sql}
+            WHERE l.`creation` <= %(as_of)s {cohort_cond} AND {dim_sql}
         ),
         step_before AS (
             SELECT h.`lead` AS lead_id, h.`new_step` AS val,
@@ -2487,6 +2541,10 @@ def get_overview_snapshot():
     tại thời điểm `to_date` — phù hợp khi user chọn 1 khoảng thời gian trong quá khứ.
     Chỉ tính 5 nhóm bước (Draft/Lead/QLead/Enrolled/Lost); lead đang ở Verify/Nghi hoc tại
     thời điểm đó không thuộc phạm vi báo cáo này.
+
+    Tham số `cohort_period` (truthy): chỉ tính lứa hồ sơ TẠO trong kỳ [from_date, to_date] —
+    dùng cho tab Tuyển sinh HS mới để from_date có tác dụng và số khớp thẻ KPI. Bỏ trống =
+    snapshot toàn pipeline tính đến `to_date` (tab Nguồn giữ nguyên).
     """
     check_crm_permission()
     args = frappe.request.args or {}
@@ -2494,7 +2552,8 @@ def get_overview_snapshot():
     _, td_raw, _, _ = r._resolve_period(args)
     dim_sql, dim_binds = r._where_lead_dimensions_only(args)
 
-    rows = _as_of_state_rows(as_of_end, dim_sql, dim_binds)
+    cohort = str(args.get("cohort_period") or "").strip().lower() in ("1", "true", "yes")
+    rows = _as_of_state_rows(as_of_end, dim_sql, dim_binds, cohort_from=fd if cohort else None)
     # Khối theo fallback target_grade → current_grade → SIS — tránh dồn vào "Khối -"
     _resolve_lead_grade_rows(rows)
 

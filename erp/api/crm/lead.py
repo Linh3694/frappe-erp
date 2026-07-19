@@ -17,6 +17,7 @@ from erp.api.crm.utils import (
     lead_visible_to_marcom_viewer, get_marcom_profile_owner_users,
     check_marcom_draft_create_only, apply_marcom_pic_policy,
 )
+from erp.utils.campus_utils import get_current_campus_from_context
 
 
 def _recalculate_admission_profile_completion(doc):
@@ -301,6 +302,102 @@ def _parse_lead_filters(raw):
     return out
 
 
+def _short_year_label(title, start_date=None):
+    """'2026-2027' -> '26-27'. Fallback: suy tu nam cua start_date ('26-27')."""
+    years = re.findall(r"(\d{4})", title or "")
+    if len(years) >= 2:
+        return f"{years[0][2:]}-{years[1][2:]}"
+    if len(years) == 1:
+        y = int(years[0])
+        return f"{str(y)[2:]}-{str(y + 1)[2:]}"
+    if start_date:
+        try:
+            y = int(str(start_date)[:4])
+            return f"{str(y)[2:]}-{str(y + 1)[2:]}"
+        except (ValueError, TypeError):
+            pass
+    return (title or "").strip()
+
+
+def _enrollment_class_years(campus_id=None):
+    """Nam hoc cho 2 cot "Lop" tren danh sach ho so.
+
+    current  = nam active (is_enable=1) moi nhat theo start_date.
+    previous = nam hoc lien truoc current theo start_date.
+
+    Tra ve (current, previous) — moi phan tu la dict SIS School Year hoac None.
+    """
+    if not campus_id:
+        campus_id = get_current_campus_from_context()
+    filters = {"campus_id": campus_id} if campus_id else {}
+    years = frappe.get_all(
+        "SIS School Year",
+        filters=filters,
+        fields=["name", "title_vn", "title_en", "start_date", "is_enable"],
+        order_by="start_date desc",
+    )
+    current = next((y for y in years if y.get("is_enable")), None)
+    if not current and years:
+        current = years[0]
+    previous = None
+    if current and current.get("start_date"):
+        previous = next(
+            (y for y in years if y.get("start_date") and y["start_date"] < current["start_date"]),
+            None,
+        )
+    return current, previous
+
+
+def _enrollment_year_column(year):
+    """Nhan cot "Lop YY-YY" tu 1 ban ghi SIS School Year (hoac None)."""
+    if not year:
+        return None
+    title = year.get("title_vn") or year.get("title_en")
+    return {
+        "name": year["name"],
+        "label": f"Lớp {_short_year_label(title, year.get('start_date'))}",
+    }
+
+
+def _regular_class_by_student(student_ids, school_year_names):
+    """Map (student_id, school_year_id) -> title lop chu nhiem (class_type='regular')."""
+    result = {}
+    if not student_ids or not school_year_names:
+        return result
+    rows = frappe.db.sql(
+        """
+        SELECT cs.student_id, cs.school_year_id, c.title
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+        WHERE cs.student_id IN %(sids)s
+          AND cs.school_year_id IN %(sys)s
+          AND c.class_type = 'regular'
+        """,
+        {"sids": list(student_ids), "sys": list(school_year_names)},
+        as_dict=True,
+    )
+    for r in rows:
+        result[(r["student_id"], r["school_year_id"])] = r["title"]
+    return result
+
+
+@frappe.whitelist()
+def get_enrollment_class_columns():
+    """Nhan 2 cot "Lop" (nam active + nam truoc) cho header danh sach ho so.
+
+    Header doi theo nam active nen FE lay dong tu day thay vi hardcode.
+    """
+    check_crm_permission()
+    campus_id = frappe.request.args.get("campus_id") or get_current_campus_from_context()
+    current, previous = _enrollment_class_years(campus_id)
+    return success_response(
+        data={
+            "current": _enrollment_year_column(current),
+            "previous": _enrollment_year_column(previous),
+        }
+    )
+
+
 @frappe.whitelist()
 def get_leads():
     """Lay danh sach leads voi filter + pagination"""
@@ -399,6 +496,10 @@ def get_leads():
             "name", "step", "status", "crm_code", "student_name", "guardian_name",
             "student_code", "target_grade", "campus_id", "pic_sales", "pic_care",
             "data_source", "modified", "creation", "duplicate_fields", "owner",
+            # Cot Ngay sinh / Gioi tinh (danh sach Hoc sinh chinh thuc)
+            "student_dob", "student_gender",
+            # Join lop theo nam hoc: linked_student -> SIS Class Student
+            "linked_student",
             # QLead: tab Hoc sinh tien nang — bang can test_status / deal_status
             "test_status", "deal_status",
             # Marcom: ly do tu choi khi trang thai Lost / Tu choi
@@ -453,6 +554,20 @@ def get_leads():
             care_map[note["lead"]] = note["last_care_date"]
         for lead in leads:
             lead["last_care_date"] = care_map.get(lead["name"])
+
+    # Lop theo nam hoc (cot "Lop YY-YY" nam active + nam truoc) — chi join khi da co linked_student
+    current_year, prev_year = _enrollment_class_years(campus_id)
+    student_ids = {lead.get("linked_student") for lead in leads if lead.get("linked_student")}
+    sy_names = [y["name"] for y in (current_year, prev_year) if y]
+    class_map = _regular_class_by_student(student_ids, sy_names)
+    for lead in leads:
+        sid = lead.get("linked_student")
+        lead["current_year_class"] = (
+            class_map.get((sid, current_year["name"])) if (sid and current_year) else None
+        )
+        lead["prev_year_class"] = (
+            class_map.get((sid, prev_year["name"])) if (sid and prev_year) else None
+        )
 
     # per_page=0: tra ve all, truyen total de paginated_response tinh total_pages=1
     resp_per_page = total if per_page == 0 else per_page

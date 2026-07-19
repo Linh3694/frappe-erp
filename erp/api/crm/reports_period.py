@@ -163,6 +163,29 @@ def _count_lost_events(date_from: Any, date_to: Any, args) -> int:
     return int(row or 0)
 
 
+def _count_paid_events(date_from: Any, date_to: Any, args) -> int:
+    """Distinct lead chuyển sang trạng thái «Đóng phí» trong kỳ (sự kiện đổi status).
+
+    Khớp cả 2 định dạng lịch sử: `new_status = 'Dong phi'` (status chính sau khi gộp
+    deal_status) và `new_status LIKE '%:Dong phi'` (dữ liệu cũ ghi dạng `deal_status:Dong phi`),
+    giống cách `_lost_event_condition` xử lý «Từ chối»."""
+    dim_sql, dim_binds = _where_lead_dimensions_only(args)
+    binds = {"d_from": date_from, "d_to": date_to, **dim_binds}
+    row = frappe.db.sql(
+        f"""
+        SELECT COUNT(DISTINCT h.`lead`)
+        FROM `tabCRM Lead Step History` h
+        INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
+        WHERE DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
+          AND (IFNULL(h.`new_status`, '') = 'Dong phi'
+               OR IFNULL(h.`new_status`, '') LIKE '%:Dong phi')
+          AND {dim_sql}
+        """,
+        binds,
+    )[0][0]
+    return int(row or 0)
+
+
 def _count_active_pipeline(args) -> int:
     """Snapshot: đang chăm sóc (Lead/QLead, chưa Lost)."""
     dim_sql, dim_binds = _where_lead_dimensions_only(args)
@@ -285,6 +308,7 @@ def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
     total_leads = _count_new_leads(date_from, date_to, args)
     total_enrolled = _count_enrolled_events(date_from, date_to, args)
     total_lost = _count_lost_events(date_from, date_to, args)
+    count_paid = _count_paid_events(date_from, date_to, args)
     active_pipeline = _count_active_pipeline(args)
     entered = _count_leads_entered_pipeline(date_from, date_to, args)
     conv = round(100.0 * total_enrolled / max(1, entered), 2)
@@ -300,6 +324,7 @@ def _kpi_snapshot(date_from: Any, date_to: Any, args) -> Dict[str, Any]:
         "count_lead_interested": count_lead_interested,
         "count_qlead": count_qlead,
         "total_enrolled": total_enrolled,
+        "count_paid": count_paid,
         "total_lost": total_lost,
         "active_pipeline": active_pipeline,
         "total_qlead_active": active_pipeline,
@@ -431,6 +456,7 @@ def get_overview_kpis():
         ),
         "count_qlead": _pct_change(curr["count_qlead"], prev["count_qlead"]),
         "total_enrolled": _pct_change(curr["total_enrolled"], prev["total_enrolled"]),
+        "count_paid": _pct_change(curr["count_paid"], prev["count_paid"]),
         "total_lost": _pct_change(curr["total_lost"], prev["total_lost"]),
         "conversion_rate_pct": _pct_change(
             curr["conversion_rate_pct"], prev["conversion_rate_pct"]
