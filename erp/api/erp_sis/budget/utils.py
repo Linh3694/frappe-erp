@@ -181,7 +181,8 @@ def _user_budget_unit(email=None):
     """Phòng (cấp Phòng) mà user được lập ngân sách:
     - leader của Phòng, hoặc
     - member của Phòng, hoặc
-    - leader của Nhóm trực thuộc một Phòng (lấy Phòng cha).
+    - leader của Nhóm trực thuộc một Phòng (lấy Phòng cha), hoặc
+    - member của Nhóm trực thuộc một Phòng (lấy Phòng cha).
     Trả về name Phòng đầu tiên khớp (mặc định)."""
     email = email or _session_email()
     # 1) Leader của Phòng (giữ tương thích _user_led_unit)
@@ -218,12 +219,27 @@ def _user_budget_unit(email=None):
         {"user": email, "dept_type": dept_type},
         as_dict=True,
     )
+    if rows:
+        return rows[0].name
+    # 4) Member của Nhóm trực thuộc -> Phòng cha
+    rows = frappe.db.sql(
+        """
+        SELECT p.name
+        FROM `tabERP Organization Unit Member` m
+        INNER JOIN `tabERP Organization Unit` u ON m.parent = u.name
+        INNER JOIN `tabERP Organization Unit` p ON u.parent_organization_unit = p.name
+        WHERE m.user = %(user)s AND p.unit_type = %(dept_type)s AND p.is_active = 1
+        LIMIT 1
+        """,
+        {"user": email, "dept_type": dept_type},
+        as_dict=True,
+    )
     return rows[0].name if rows else None
 
 
 def _user_managed_units(email=None):
     """Tất cả Phòng (cấp Phòng) mà user được lập ngân sách:
-    leader/member của Phòng, hoặc leader của Nhóm trực thuộc Phòng.
+    leader/member của Phòng, hoặc leader/member của Nhóm trực thuộc Phòng.
     Trả về danh sách name Phòng (không trùng), giữ thứ tự xuất hiện."""
     email = email or _session_email()
     dept_type = _department_unit_type()
@@ -243,6 +259,11 @@ def _user_managed_units(email=None):
         INNER JOIN `tabERP Organization Unit` u ON l.parent = u.name
         INNER JOIN `tabERP Organization Unit` p ON u.parent_organization_unit = p.name
         WHERE l.user = %(user)s AND p.unit_type = %(dept_type)s AND p.is_active = 1
+        UNION
+        SELECT p.name FROM `tabERP Organization Unit Member` m
+        INNER JOIN `tabERP Organization Unit` u ON m.parent = u.name
+        INNER JOIN `tabERP Organization Unit` p ON u.parent_organization_unit = p.name
+        WHERE m.user = %(user)s AND p.unit_type = %(dept_type)s AND p.is_active = 1
         """,
         {"user": email, "dept_type": dept_type},
         as_dict=True,
@@ -306,14 +327,39 @@ def _is_subgroup_leader_of(department, email=None):
     return bool(rows)
 
 
+def _is_subgroup_member_of(department, email=None):
+    """User là member của một đơn vị con (Nhóm) trực thuộc department."""
+    if not department:
+        return False
+    email = email or _session_email()
+    rows = frappe.db.sql(
+        """
+        SELECT 1
+        FROM `tabERP Organization Unit Member` m
+        INNER JOIN `tabERP Organization Unit` u ON m.parent = u.name
+        WHERE m.user = %(user)s
+          AND u.parent_organization_unit = %(dept)s
+          AND u.is_active = 1
+        LIMIT 1
+        """,
+        {"user": email, "dept": department},
+        as_dict=True,
+    )
+    return bool(rows)
+
+
 def _can_edit_plan_dept(department, email=None):
     """Quyền TẠO/SỬA nháp ngân sách của phòng:
-    leader/member của phòng + leader nhóm trực thuộc (+ System Manager).
+    leader/member của phòng + leader/member nhóm trực thuộc (+ System Manager).
     SIS Finance KHÔNG được sửa (chỉ xem + trả về)."""
     email = email or _session_email()
     if "System Manager" in frappe.get_roles(email):
         return True
-    return _is_member_or_leader_of(department, email) or _is_subgroup_leader_of(department, email)
+    return (
+        _is_member_or_leader_of(department, email)
+        or _is_subgroup_leader_of(department, email)
+        or _is_subgroup_member_of(department, email)
+    )
 
 
 def _is_first_leader(department, email=None):

@@ -64,10 +64,12 @@ def _include_tu_choi_lost(args) -> bool:
 
 def _lost_event_condition(include_tu_choi: bool) -> str:
     # Lost -> Tu choi (rename toan he thong): match ca 'Lost' (history cu) lan 'Tu choi' (moi)
+    # `%%` (khong phai `%`): chuoi nay nhung vao f-string SQL roi chay qua frappe.db.sql(q, binds),
+    # ma buoc do lam `q % binds` nen dau `%` tran se vo (TypeError: not enough arguments).
     if include_tu_choi:
         return (
             "(IFNULL(h.`new_status`,'') IN ('Lost','Tu choi') "
-            "OR IFNULL(h.`new_status`,'') LIKE '%:Tu choi')"
+            "OR IFNULL(h.`new_status`,'') LIKE '%%:Tu choi')"
         )
     return "IFNULL(h.`new_status`,'') IN ('Lost','Tu choi')"
 
@@ -178,7 +180,7 @@ def _count_paid_events(date_from: Any, date_to: Any, args) -> int:
         INNER JOIN `tabCRM Lead` l ON l.`name` = h.`lead`
         WHERE DATE(h.`changed_at`) BETWEEN %(d_from)s AND %(d_to)s
           AND (IFNULL(h.`new_status`, '') = 'Dong phi'
-               OR IFNULL(h.`new_status`, '') LIKE '%:Dong phi')
+               OR IFNULL(h.`new_status`, '') LIKE '%%:Dong phi')
           AND {dim_sql}
         """,
         binds,
