@@ -267,7 +267,9 @@ def clear_attendance_cache(class_id, date):
 		patterns = [
 			f"*attendance:{class_id}:{date}:*",
 			f"*attendance_batch:{class_id}:{date}:*",
-			f"*event_attendance:{class_id}:{date}:*"
+			f"*event_attendance:{class_id}:{date}:*",
+			"*cell_attendance_flags:*",
+			"*week_lesson_status:*",
 		]
 		total_deleted = 0
 		for pattern in patterns:
@@ -297,6 +299,8 @@ def clear_class_log_cache(class_id, date):
 			f"*{HOMEROOM_CLASS_LOGS_CACHE_PREFIX}:*:{date}:*",
 			# Legacy key format (nếu còn key cũ trên Redis)
 			f"*homeroom_class_logs:*:{date}:*",
+			"*lesson_log_status_batch:*",
+			"*week_lesson_status:*",
 		]
 		total_deleted = 0
 		for pattern in patterns:
