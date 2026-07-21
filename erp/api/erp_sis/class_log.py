@@ -53,15 +53,10 @@ def _lesson_log_status_lookup_key(class_id, date, period):
 
 
 def _is_subject_log_complete(subject):
-    """Sổ đầu bài đủ thông tin tiết — logic khớp isClassLogComplete trên FE."""
+    """Sổ đầu bài đã nộp — bản nháp không tính là hoàn thành."""
     if not subject:
         return False
-    if subject.get("is_practise_test") in (1, True):
-        return True
-    lesson_name = (subject.get("lesson_name") or "").strip()
-    lesson_score = subject.get("lesson_score")
-    score = str(lesson_score).strip() if lesson_score is not None else ""
-    return bool(lesson_name and score)
+    return subject.get("is_submitted") in (1, True)
 
 
 def _batch_lesson_log_status_for_items(items):
@@ -116,7 +111,7 @@ def _batch_lesson_log_status_for_items(items):
                 "timetable_instance_id": ["in", instance_ids],
                 "log_date": ["in", dates],
             },
-            fields=["timetable_instance_id", "log_date", "period", "lesson_name", "lesson_score", "is_practise_test"],
+            fields=["timetable_instance_id", "log_date", "period", "lesson_name", "lesson_score", "is_practise_test", "is_submitted"],
         )
         for log in subject_logs:
             inst_id = log.get("timetable_instance_id")
@@ -619,7 +614,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
         subject_rows = frappe.get_all(
             "SIS Class Log Subject",
             filters=filters,
-            fields=["name", "class_id", "general_comment", "lesson_name", "lesson_score", "is_practise_test", "homework_assignment"],
+            fields=["name", "class_id", "general_comment", "lesson_name", "lesson_score", "is_practise_test", "is_submitted", "homework_assignment"],
             limit=1
         )
         if subject_rows:
@@ -629,6 +624,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             lesson_name = subject_rows[0].get('lesson_name')
             lesson_score = subject_rows[0].get('lesson_score')
             is_practise_test = subject_rows[0].get('is_practise_test')
+            is_submitted = subject_rows[0].get('is_submitted')
             homework_assignment = subject_rows[0].get('homework_assignment')
         else:
             # Resolve class from instance
@@ -658,6 +654,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             lesson_name = None
             lesson_score = None
             is_practise_test = 0
+            is_submitted = 0
             homework_assignment = None
 
         # Load student logs
@@ -698,6 +695,7 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
                 "lesson_name": lesson_name,
                 "lesson_score": lesson_score,
                 "is_practise_test": is_practise_test,
+                "is_submitted": is_submitted,
                 "homework_assignment": homework_assignment,
             },
             "students": student_logs
@@ -731,6 +729,7 @@ def save_class_log():
         lesson_name = body.get('lesson_name')
         lesson_score = body.get('lesson_score')
         is_practise_test = body.get('is_practise_test')
+        is_submitted = body.get('is_submitted')
         homework_assignment = body.get('homework_assignment')
         items = body.get('students') or []
         if not timetable_instance:
@@ -797,6 +796,8 @@ def save_class_log():
             update_fields["lesson_score"] = lesson_score
         if is_practise_test is not None:
             update_fields["is_practise_test"] = 1 if is_practise_test else 0
+        if is_submitted is not None:
+            update_fields["is_submitted"] = 1 if is_submitted else 0
         if homework_assignment is not None:
             update_fields["homework_assignment"] = homework_assignment
         
@@ -1131,7 +1132,7 @@ def batch_get_class_logs():
                 "timetable_instance_id": timetable_instance,
                 "log_date": date,
             },
-            fields=["name", "period", "class_id", "general_comment", "lesson_name", "lesson_score", "is_practise_test", "homework_assignment"]
+            fields=["name", "period", "class_id", "general_comment", "lesson_name", "lesson_score", "is_practise_test", "is_submitted", "homework_assignment"]
         )
         
         # Build map: period -> subject (key gốc từ DB)
@@ -1196,6 +1197,7 @@ def batch_get_class_logs():
                         "lesson_name": subject.get('lesson_name'),
                         "lesson_score": subject.get('lesson_score'),
                         "is_practise_test": subject.get('is_practise_test'),
+                        "is_submitted": subject.get('is_submitted'),
                         "homework_assignment": subject.get('homework_assignment')
                     },
                     "students": students

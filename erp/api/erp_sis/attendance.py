@@ -81,6 +81,16 @@ def invalidate_class_attendance_cache(class_id, date_str, period):
 			frappe.logger().warning(f"[attendance] Cache invalidate failed for {cache_key}: {e}")
 
 
+def _is_future_date(date_value):
+	"""Ngày dạy còn ở tương lai — chưa được phép điểm danh."""
+	if not date_value:
+		return False
+	try:
+		return frappe.utils.getdate(date_value) > frappe.utils.getdate(frappe.utils.nowdate())
+	except Exception:
+		return False
+
+
 def _to_bool(val):
 	if isinstance(val, bool):
 		return val
@@ -981,6 +991,11 @@ def save_class_attendance(items=None, overwrite=None):
 
 			if not student_id or not class_id or not date or not period:
 				continue
+			if _is_future_date(date):
+				return error_response(
+					message="Chưa đến ngày dạy nên chưa thể điểm danh",
+					code="ATTENDANCE_DATE_IN_FUTURE",
+				)
 			if status not in ATTENDANCE_STATUSES:
 				status = 'present'
 
