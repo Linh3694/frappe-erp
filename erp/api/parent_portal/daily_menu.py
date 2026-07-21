@@ -365,7 +365,10 @@ def get_buffet_events_by_month(month=None, year=None):
 
                         buffet_events.append({
                             "date": menu.menu_date,
+                            # Giu "name" cho client cu; client moi dung name_vn/name_en de hien thi theo ngon ngu
                             "name": buffet_name_vn or buffet_name_en or "Buffet",
+                            "name_vn": buffet_name_vn,
+                            "name_en": buffet_name_en,
                             "type": "buffet"
                         })
                         break  # Only add one buffet event per day
