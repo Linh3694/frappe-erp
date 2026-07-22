@@ -12,6 +12,7 @@ import frappe
 from frappe.utils import add_to_date, now
 
 from . import fields as cond_fields
+from . import notify
 
 APPROVAL_STEP_DT = "ERP Approval Step"
 APPROVAL_TEMPLATE_DT = "ERP Approval Template"
@@ -434,7 +435,13 @@ def materialize_graph(doc, nodes, edges):
             s.status = "Approved"
             s.is_active = 0
             s.acted_by = s.approver_user or None
-    _propagate(doc)
+    # Lúc dựng đồ thị, caller chưa gán submitted_by và có thể ghi đè workflow_state ngay sau
+    # (xem procurement submit_request) -> chặn noti "đã duyệt/từ chối", chỉ giữ noti bước chờ.
+    doc.flags.wf_materializing = True
+    try:
+        _propagate(doc)
+    finally:
+        doc.flags.wf_materializing = False
     return bool(nodes)
 
 
@@ -462,6 +469,7 @@ def _propagate(doc):
         if e.get("to") in incoming:
             incoming[e["to"]].append(e)
 
+    activated = []
     changed = True
     while changed:
         changed = False
@@ -471,6 +479,7 @@ def _propagate(doc):
             inc = incoming.get(nid, [])
             if not inc:  # entry node
                 _activate(s)
+                activated.append(s)
                 changed = True
                 continue
             live_inc = [e for e in inc if e.get("live")]
@@ -482,14 +491,20 @@ def _propagate(doc):
             if preds and all(p.status in ("Approved", "Skipped") for p in preds):
                 if any(p.status == "Approved" for p in preds):
                     _activate(s)
+                    activated.append(s)
                 else:
                     s.status = "Skipped"
                 changed = True
     _finalize(doc)
+    # Báo sau _finalize để noti mang đúng workflow_state cuối. Mỗi node chỉ vào đây
+    # khi thực sự chuyển Waiting -> Pending (kể cả lần kích hoạt lại sau khi trả về).
+    for s in activated:
+        notify.step_activated(doc, s)
 
 
 def _finalize(doc):
     steps = doc.approval_steps or []
+    prev_state = doc.workflow_state
     if any(s.status == "Pending" for s in steps):
         doc.workflow_state = "Pending"
     elif any(s.status == "Rejected" for s in steps):
@@ -500,6 +515,15 @@ def _finalize(doc):
         doc.workflow_state = "Approved"
         doc.approved_by = frappe.session.user
         doc.approved_at = now()
+
+    if (
+        doc.workflow_state != prev_state
+        and doc.workflow_state in ("Approved", "Rejected")
+        and not doc.flags.get("wf_materializing")
+    ):
+        # Phiếu duyệt xong có thể còn return_reason cũ từ lần trả lại trước -> chỉ kèm khi bị từ chối.
+        reason = doc.get("return_reason") if doc.workflow_state == "Rejected" else None
+        notify.decided(doc, doc.workflow_state, reason)
 
 
 # ---- advance ---------------------------------------------------------------
@@ -571,6 +595,7 @@ def _return_to_creator(doc, reason):
             s.status = "Waiting"
     doc.workflow_state = "Returned"
     doc.return_reason = reason
+    notify.decided(doc, "Returned", reason)
 
 
 def _act_return_dag(doc, email, reason=None):
@@ -621,6 +646,8 @@ def _act_reject_dag(doc, email, reason=None):
         s.is_active = 0
     doc.workflow_state = "Rejected"
     doc.return_reason = reason
+    # Không đi qua _finalize (không gọi _propagate) -> báo tại đây.
+    notify.decided(doc, "Rejected", reason)
 
 
 # ---- enforce quyền per-step (view/edit/delete) -----------------------------

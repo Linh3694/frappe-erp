@@ -6,27 +6,34 @@ Nhân bản mẫu erp/api/crm/sla_scheduler.py. Đăng ký ở hooks.py schedule
 import frappe
 from frappe.utils import getdate, now
 
+from erp.common.notification_emit import emit_staff_notify
+
+from . import notify as wf_notify
 from . import principals
 
 STEP_DT = "ERP Approval Step"
 
 
 def _notify(parenttype, parent, label, recipients):
-    title = f"Quá hạn duyệt: {label or parenttype} · {parent}"
-    for email in {e for e in recipients if e}:
-        try:
-            frappe.get_doc(
-                {
-                    "doctype": "Notification Log",
-                    "for_user": email,
-                    "type": "Alert",
-                    "subject": title,
-                    "document_type": parenttype,
-                    "document_name": parent,
-                }
-            ).insert(ignore_permissions=True)
-        except Exception:
-            frappe.log_error(title=f"WF SLA notify fail {email}", message=frappe.get_traceback())
+    step_label = str(label or "").strip()
+    data = {"doc_doctype": parenttype, "doc_name": parent, "step_label": step_label}
+    url = wf_notify.DOC_URLS.get(parenttype)
+    if url:
+        data["url"] = url
+    body = f"{wf_notify.DOC_LABELS.get(parenttype, parenttype)} {parent} đã quá hạn duyệt"
+    body = f"{body} ở bước {step_label}." if step_label else f"{body}."
+    try:
+        emit_staff_notify(
+            list(recipients or []),
+            "Quá hạn duyệt",
+            body,
+            "approval_overdue",
+            data,
+            reference_doctype=parenttype,
+            reference_name=parent,
+        )
+    except Exception:
+        frappe.log_error(title="WF SLA notify fail", message=frappe.get_traceback())
 
 
 def check_workflow_deadlines():

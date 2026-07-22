@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import now_datetime
 from erp.utils.api_response import success_response, error_response
 from erp.utils.email_service import send_email_via_service
+from erp.common.notification_emit import emit_staff_notify
 from erp.api.erp_sis.health_checkup_images import (
     delete_health_checkup_images_files,
     folder_has_health_checkup_images,
@@ -95,7 +96,7 @@ def _build_email_html(title: str, rows: list[tuple[str, str]], footer: str = "")
 
 
 def _notify_workflow(recipient_emails, subject: str, body_html: str):
-    """Gửi email thông báo workflow đến danh sách người nhận thực tế."""
+    """Gửi email + đẩy vào trung tâm thông báo nhân viên. Lỗi 1 kênh không chặn kênh kia."""
     to_list = [e for e in (recipient_emails or []) if e]
     if not to_list:
         return
@@ -103,6 +104,21 @@ def _notify_workflow(recipient_emails, subject: str, body_html: str):
         send_email_via_service(to_list, subject, body_html)
     except Exception as e:
         frappe.log_error(f"health_checkup notify: {str(e)}")
+
+    # Subject đã đủ mô tả ("[Khám SK] Phiếu bị trả lại — Nguyễn Văn A") -> dùng làm body,
+    # bỏ tiền tố vì tiêu đề noti đã nói rõ nghiệp vụ.
+    try:
+        emit_staff_notify(
+            to_list,
+            "Khám sức khoẻ định kỳ",
+            str(subject or "").replace("[Khám SK]", "").strip(),
+            "health_checkup_workflow",
+            {"url": "/operation/health/exam-approval"},
+        )
+    except Exception:
+        frappe.log_error(
+            title="health_checkup notify in-app", message=frappe.get_traceback()
+        )
 
 
 def _user_emails_with_role(role: str):

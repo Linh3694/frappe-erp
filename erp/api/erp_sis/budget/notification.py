@@ -1,14 +1,19 @@
 """
-Budget - Thông báo qua email (D8: email trước, chưa làm push/realtime/mobile).
+Budget - Thông báo qua email + trung tâm thông báo nhân viên.
 
-Mọi hàm bọc try/except, lỗi gửi mail KHÔNG làm rollback nghiệp vụ.
+Mọi hàm bọc try/except, lỗi gửi KHÔNG làm rollback nghiệp vụ.
 """
 
 import frappe
 
+from erp.common.notification_emit import emit_staff_notify
 
-def _safe_sendmail(recipients, subject, message):
-    """Gửi email an toàn; bỏ qua nếu không có recipient hợp lệ."""
+PLAN_DT = "ERP Budget Plan"
+BUDGET_URL = "/operation/budget"
+
+
+def _safe_sendmail(recipients, subject, message, *, event_type=None, plan=None):
+    """Gửi email an toàn + đẩy in-app; bỏ qua nếu không có recipient hợp lệ."""
     recipients = [r for r in (recipients or []) if r and r != "Administrator"]
     if not recipients:
         return
@@ -21,6 +26,21 @@ def _safe_sendmail(recipients, subject, message):
         )
     except Exception:
         frappe.log_error(frappe.get_traceback(), "Budget Email Error")
+
+    # Subject đã mô tả đủ ("[Ngân sách] Đã nộp: <tên>") -> làm body, bỏ tiền tố vì
+    # tiêu đề noti đã nói rõ nghiệp vụ.
+    try:
+        emit_staff_notify(
+            recipients,
+            "Ngân sách",
+            str(subject or "").replace("[Ngân sách]", "").strip(),
+            event_type or "budget_plan",
+            {"url": BUDGET_URL, "plan_name": getattr(plan, "name", None)},
+            reference_doctype=PLAN_DT if plan is not None else None,
+            reference_name=getattr(plan, "name", None),
+        )
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Budget In-App Notify Error")
 
 
 def _users_with_role(role):
@@ -51,7 +71,7 @@ def notify_plan_submitted(plan, next_step_role, head_email):
     recipients = list(_users_with_role(next_step_role))
     if head_email:
         recipients.append(head_email)
-    _safe_sendmail(recipients, subject, body)
+    _safe_sendmail(recipients, subject, body, event_type="budget_plan_submitted", plan=plan)
 
 
 def notify_plan_advanced(plan, next_step_role):
@@ -62,7 +82,10 @@ def notify_plan_advanced(plan, next_step_role):
         f"<b>{plan.department_name or plan.department}</b> đã qua 1 cấp duyệt, "
         f"đang chờ bạn duyệt."
     )
-    _safe_sendmail(_users_with_role(next_step_role), subject, body)
+    _safe_sendmail(
+        _users_with_role(next_step_role), subject, body,
+        event_type="budget_plan_advanced", plan=plan,
+    )
 
 
 def notify_plan_approved(plan, head_email):
@@ -76,7 +99,7 @@ def notify_plan_approved(plan, head_email):
     recipients = list(_users_with_role("SIS Finance"))
     if head_email:
         recipients.append(head_email)
-    _safe_sendmail(recipients, subject, body)
+    _safe_sendmail(recipients, subject, body, event_type="budget_plan_approved", plan=plan)
 
 
 def notify_plan_returned(plan, head_email, reason):
@@ -87,7 +110,10 @@ def notify_plan_returned(plan, head_email, reason):
         f"<b>{plan.department_name or plan.department}</b> đã bị trả lại.<br>"
         f"Lý do: {reason or '(không có)'}"
     )
-    _safe_sendmail([head_email] if head_email else [], subject, body)
+    _safe_sendmail(
+        [head_email] if head_email else [], subject, body,
+        event_type="budget_plan_returned", plan=plan,
+    )
 
 
 def notify_plan_returned_to_step(plan, step_role, reason):
@@ -98,4 +124,7 @@ def notify_plan_returned_to_step(plan, step_role, reason):
         f"<b>{plan.department_name or plan.department}</b> bị cấp trên trả lại để xem lại.<br>"
         f"Lý do: {reason or '(không có)'}"
     )
-    _safe_sendmail(_users_with_role(step_role), subject, body)
+    _safe_sendmail(
+        _users_with_role(step_role), subject, body,
+        event_type="budget_plan_returned_to_step", plan=plan,
+    )

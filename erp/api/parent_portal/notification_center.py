@@ -416,7 +416,10 @@ def map_db_type_to_frontend(db_type, data):
 		'periodic_health_checkup': 'periodic_health_checkup',
 		'finance_payment': 'finance_payment',
 	}
-	
+
+	# `reminder` (nhắc tái ghi danh / suất ăn) cố ý rơi về 'system': union
+	# NotificationType của web + app chưa có 'reminder', và deep link đã được
+	# generate_action_url lo qua `data.url` nên không cần loại riêng.
 	return type_mapping.get(db_type, 'system')
 
 
@@ -477,7 +480,16 @@ def generate_action_url(notif_type, data, student_id=None):
 		if fsid:
 			return f"/finance/{fsid}"
 		return "/finance"
-	
+
+	# Không có nhánh riêng: dùng `data.url` do producer đặt (vd `reminder` →
+	# /re-enrollment, /menu/registration). Chỉ nhận path nội bộ để không điều
+	# hướng ra ngoài theo dữ liệu không kiểm soát.
+	url = (data or {}).get('url')
+	if isinstance(url, str):
+		url = url.strip()
+		if url.startswith('/') and not url.startswith('//'):
+			return url
+
 	# Default
 	return "/dashboard"
 

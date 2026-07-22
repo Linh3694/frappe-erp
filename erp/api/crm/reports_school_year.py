@@ -367,6 +367,71 @@ def get_task_list():
     return resp
 
 
+@frappe.whitelist()
+def get_task_summary_by_assignee():
+    """Công việc (Nhiem vu) gộp theo account phụ trách — hoàn thành / chưa xong / quá hạn.
+
+    Cùng phạm vi và cùng cách đếm với `get_task_list` (chỉ khác GROUP BY) để hai báo cáo
+    không đá nhau: kỳ tính theo `COALESCE(deadline, creation)`, quá hạn = chưa xong &
+    deadline đã trôi qua.
+
+    Account = `assignee` của việc; việc chưa giao ai thì quy về PIC của hồ sơ
+    (`pic_care` → `pic_sales`) để không rơi vào ô "Không xác định".
+    """
+    check_crm_permission()
+    args = frappe.request.args or {}
+    fd, td, _, _ = r._resolve_period(args)
+    dim_sql, dim_binds = r._where_lead_dimensions_only(args)
+
+    rows = frappe.db.sql(
+        f"""
+        SELECT COALESCE(NULLIF(TRIM(n.`assignee`), ''), NULLIF(TRIM(l.`pic_care`), ''),
+                        NULLIF(TRIM(l.`pic_sales`), ''), '') AS account,
+               COUNT(*) AS total,
+               SUM(IF(IFNULL(n.`is_completed`,0)=1,1,0)) AS completed,
+               SUM(IF(IFNULL(n.`is_completed`,0)=0,1,0)) AS pending,
+               SUM(IF(IFNULL(n.`is_completed`,0)=0
+                      AND n.`deadline` IS NOT NULL
+                      AND n.`deadline` < NOW(),1,0)) AS overdue
+        FROM `tabCRM Lead Note` n
+        INNER JOIN `tabCRM Lead` l ON l.`name` = n.`lead`
+        WHERE n.`category` = 'Nhiem vu'
+          AND DATE(COALESCE(n.`deadline`, n.`creation`)) BETWEEN %(d_from)s AND %(d_to)s
+          AND {dim_sql}
+        GROUP BY account
+        """,
+        {"d_from": fd, "d_to": td, **dim_binds},
+        as_dict=True,
+    )
+
+    user_map = r._batch_user_map([x.get("account") or "" for x in rows])
+    out = []
+    for x in rows:
+        acc = (x.get("account") or "").strip()
+        out.append(
+            {
+                "account": acc,
+                "account_name": user_map.get(acc, {}).get("full_name") or acc or "Chưa giao",
+                "total": int(x.get("total") or 0),
+                "completed": int(x.get("completed") or 0),
+                "pending": int(x.get("pending") or 0),
+                "overdue": int(x.get("overdue") or 0),
+            }
+        )
+    out.sort(key=lambda v: (-v["completed"], -v["total"], v["account_name"]))
+
+    totals = {
+        k: sum(v[k] for v in out) for k in ("total", "completed", "pending", "overdue")
+    }
+    return success_response(
+        {
+            "rows": out,
+            "totals": totals,
+            "meta": {"pic_restricted_to_self": r._should_restrict_to_own_pic_only()},
+        }
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Hoạt động — điều kiện lọc HS theo lead (PIC + filter động), bỏ qua campus/khối
 # (campus/năm lọc ở cấp sự kiện/khóa học)
@@ -1789,7 +1854,15 @@ def _re_enrollment_rate_by_pic(campus_id: str, target_academic_year: str) -> Dic
 def _count_kpi_metrics_snapshot(
     campus_id: str, target_academic_year: str, pic_filter: Optional[str] = None
 ) -> Dict[str, int]:
-    """Snapshot 5 chỉ số KPI phòng ban theo năm học mục tiêu: hồ sơ / lead / qlead / enrolled / lost."""
+    """Snapshot chỉ số KPI phòng ban theo năm học mục tiêu.
+
+    5 chỉ số gốc: hồ sơ / lead / qlead / enrolled / lost.
+    + 2 lát cắt của `total_enrolled` (dùng ĐÚNG công thức của `get_enrollment_progress_gauge`
+    để hai báo cáo không đá nhau):
+      - `total_new`      = Học sinh mới  (Enrolled + status 'Cho xep lop', chưa xếp lớp)
+      - `total_existing` = Học sinh hiện hữu (phần còn lại)
+    Luôn có `total_new + total_existing == total_enrolled`.
+    """
     where = ["l.`target_academic_year` = %(tay)s"]
     binds: Dict[str, Any] = {"tay": target_academic_year}
     if campus_id:
@@ -1814,13 +1887,19 @@ def _count_kpi_metrics_snapshot(
         as_dict=True,
     )
     d = rows[0] if rows else {}
+    # Hoc sinh chinh thuc = si so THUC TE cua nam, khong phai "tuyen moi duoc bao nhieu"
+    # => bo qua SUM(step='Enrolled') loc theo target_academic_year o query tren.
+    total_enrolled = _count_enrolled_actual(campus_id, target_academic_year, pic_filter)
+    total_new = _count_enrolled_actual(
+        campus_id, target_academic_year, pic_filter, status_in=(_ENROLLED_AWAITING_CLASS,)
+    )
     return {
         "total_profiles": int(d.get("total_profiles") or 0),
         "total_leads": int(d.get("total_leads") or 0),
         "total_qlead": int(d.get("total_qlead") or 0),
-        # Hoc sinh chinh thuc = si so THUC TE cua nam, khong phai "tuyen moi duoc bao nhieu"
-        # => bo qua SUM(step='Enrolled') loc theo target_academic_year o query tren.
-        "total_enrolled": _count_enrolled_actual(campus_id, target_academic_year, pic_filter),
+        "total_enrolled": total_enrolled,
+        "total_new": total_new,
+        "total_existing": max(0, total_enrolled - total_new),
         "total_lost": int(d.get("total_lost") or 0),
     }
 
@@ -1883,7 +1962,11 @@ def _count_kpi_metrics_by_pic(
 
 @frappe.whitelist()
 def get_kpi_overview():
-    """Báo cáo KPI tổng quát — 5 chỉ số phòng ban (so KPI) + Lead/Tiềm năng/Chính thức theo thành viên (so target)."""
+    """Báo cáo KPI tổng quát — 7 chỉ số phòng ban (so KPI) + Lead/Tiềm năng/Chính thức theo thành viên (so target).
+
+    `summary` gồm 5 chỉ số phễu gốc + 2 lát cắt của «Học sinh Chính thức» (`total_new` /
+    `total_existing`) để FE vẽ 2 card KPI riêng cho HS mới và HS hiện hữu.
+    """
     check_crm_permission()
     args = frappe.request.args or {}
     campus_id = (args.get("campus_id") or "").strip()
@@ -1915,6 +1998,16 @@ def get_kpi_overview():
         "total_enrolled": int(getattr(target_doc, "total_existing_target", 0) or 0) if target_doc else 0,
         "total_lost": int(getattr(target_doc, "total_lost_target", 0) or 0) if target_doc else 0,
     }
+    # Hai lat cat cua «Hoc sinh chinh thuc» — KHONG co field cau hinh rieng, tach tu 2 muc tieu
+    # san co de tong van khop 1400:
+    #   - Hoc sinh moi      = `total_enrollment_target` (Tong muc tieu phong ban = sum muc tieu
+    #                         theo khoi, tuc chi tieu TUYEN MOI trong nam).
+    #   - Hoc sinh hien huu = muc tieu si so ca truong TRU phan tuyen moi.
+    # Neu chua cau hinh muc tieu theo khoi (=0) thi HSHH nhan tron 1400 va HSM ra 0 — dung y
+    # nghia "chua giao chi tieu tuyen moi", khong phai loi.
+    _new_target = int(getattr(target_doc, "total_enrollment_target", 0) or 0) if target_doc else 0
+    dept_targets["total_new"] = _new_target
+    dept_targets["total_existing"] = max(0, dept_targets["total_enrolled"] - _new_target)
 
     actual = _count_kpi_metrics_snapshot(campus_id, target_academic_year, pic_eff)
 
@@ -1924,6 +2017,9 @@ def get_kpi_overview():
         ("total_qlead", "Học sinh Tiềm năng"),
         ("total_enrolled", "Học sinh Chính thức"),
         ("total_lost", "Từ chối"),
+        # Hai lát cắt rời nhau của «Học sinh Chính thức» — FE vẽ ở 2 card KPI riêng.
+        ("total_new", "Học sinh mới"),
+        ("total_existing", "Học sinh hiện hữu"),
     ]
     summary = [
         {
@@ -2445,8 +2541,11 @@ def _grade_display_sort_key(g: str):
 # --------------------------------------------------------------------------- #
 # Tổng quan — Snapshot as-of (trạng thái tại ngày cuối kỳ, tái dựng từ lịch sử)
 # --------------------------------------------------------------------------- #
-# Thứ tự hiển thị phễu trạng thái QLead (trạng thái chính, không phải test/deal_status)
-_QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Tham gia su kien", "Tham quan truong", "Can nhac", "Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen", "Khao sat dau vao", "Tu choi"]
+# Thứ tự hiển thị phễu trạng thái QLead (trạng thái chính, không phải test/deal_status).
+# Theo flow trạng thái lead của đội tuyển sinh: chăm sóc -> sự kiện/thăm trường -> khảo sát ->
+# cân nhắc -> từ chối -> nhóm tiền. Đồng bộ `QLEAD_FUNNEL_ORDER` trong frontend
+# `src/pages/Admission/Reports/components/qleadFunnelOrder.ts` — sửa 1 nơi thì sửa cả 2.
+_QLEAD_FUNNEL_ORDER = ["Dang cham soc", "Dat lich hen", "Tham gia su kien", "Tham quan truong", "Khao sat dau vao", "Can nhac", "Tu choi", "Dat cho", "Dat coc", "Dong phi", "Hoan phi", "Bao luu/Chuyen"]
 
 
 def _as_of_state_rows(

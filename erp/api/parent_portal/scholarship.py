@@ -10,6 +10,7 @@ from frappe import _
 from frappe.utils import nowdate, getdate, now
 import json
 from erp.utils.email_service import send_email_via_service as _send_email_via_service
+from erp.common.notification_emit import emit_staff_notify
 from erp.utils.api_response import (
     validation_error_response, 
     list_response, 
@@ -176,6 +177,31 @@ def _get_period_deadline_str(period_id):
     return "theo thông báo"
 
 
+def _notify_teacher_scholarship_in_app(teacher_email, student_name, student_code, app):
+    """Ngoài email, đẩy vào trung tâm thông báo nhân viên (chuông SIS + workspace-mobile)."""
+    if not teacher_email:
+        return
+    who = f"{student_name} ({student_code})" if student_code else student_name
+    try:
+        emit_staff_notify(
+            [teacher_email],
+            "Học bổng: đề nghị viết thư giới thiệu",
+            f"Phụ huynh của học sinh {who} đã chọn bạn viết thư giới thiệu học bổng.",
+            "scholarship_recommendation_request",
+            {
+                "url": "/teaching/other/scholarship",
+                "application_id": app.name,
+                "student_id": app.student_id,
+            },
+            reference_doctype="SIS Scholarship Application",
+            reference_name=app.name,
+        )
+    except Exception as e:
+        frappe.logger().warning(
+            f"Scholarship in-app notify failed for {teacher_email}: {str(e)}"
+        )
+
+
 def _send_scholarship_notification_to_teachers(app, student_info, is_new=True):
     """
     Gửi email thông báo đến giáo viên về đơn học bổng mới.
@@ -231,6 +257,8 @@ def _send_scholarship_notification_to_teachers(app, student_info, is_new=True):
                 frappe.logger().info(f"Scholarship notification sent to {teacher_email}")
             else:
                 frappe.logger().warning(f"Failed to send scholarship notification to {teacher_email}: {result.get('message')}")
+
+            _notify_teacher_scholarship_in_app(teacher_email, student_name, student_code, app)
         
     except Exception as e:
         frappe.logger().error(f"Error sending scholarship notification: {str(e)}")
@@ -290,6 +318,8 @@ def _send_email_to_changed_teachers(app, student_info, changed_teachers, logs):
                     logs.append(f"✅ Đã gửi email thông báo đến GV mới: {teacher_email} ({teacher_name})")
                 else:
                     logs.append(f"❌ Không thể gửi email đến {teacher_email}: {result.get('message')}")
+
+                _notify_teacher_scholarship_in_app(teacher_email, student_name, student_code, app)
                     
             except Exception as e:
                 logs.append(f"❌ Lỗi khi gửi email cho GV {teacher_id}: {str(e)}")

@@ -112,6 +112,63 @@ def emit_standard_parent_notification(
     return emit_notify(ch, emails, title, body, data=dict(data or {}), notification_type=event_type)
 
 
+def emit_staff_notify(
+    emails: List[str],
+    title: str,
+    body: str,
+    event_type: str,
+    data: Optional[Dict[str, Any]] = None,
+    *,
+    reference_doctype: Optional[str] = None,
+    reference_name: Optional[str] = None,
+    include_email: bool = False,
+    channel: Optional[str] = None,
+) -> int:
+    """Thông báo cho NHÂN VIÊN — vào hộp thư notification-service (SIS web + workspace-mobile).
+
+    Mỗi người nhận một envelope để `reference_*` và deep link không lẫn nhau.
+    Quy ước: `data["url"]` là route web SIS (`/operation`, `/admission`, `/teaching`, `/school`…)
+    để `resolveNotificationRoute` bên frontend nhận thẳng, không cần map thêm.
+
+    Trả về số envelope publish thành công. Không raise — lỗi gửi KHÔNG được làm hỏng nghiệp vụ.
+    """
+    ch = channel or _notification_channel()
+    chans = ["push", "email"] if include_email else ["push"]
+    seen = set()
+    ok = 0
+    for raw in emails or []:
+        em = str(raw or "").strip().lower()
+        if not em or "@" not in em or em in seen:
+            continue
+        seen.add(em)
+        envelope: Dict[str, Any] = {
+            "service": "erp",
+            "event": event_type,
+            "type": event_type,
+            "kind": "notify.send",
+            "deliver": True,
+            "deliverFromStream": True,
+            "recipients": [em],
+            "title": str(title or "").strip(),
+            "body": str(body or "").strip(),
+            "channel": "push",
+            "channels": chans,
+            "data": {**(data or {}), "type": event_type},
+        }
+        if reference_doctype:
+            envelope["reference_doctype"] = reference_doctype
+        if reference_name:
+            envelope["reference_name"] = reference_name
+        try:
+            if publish(ch, envelope):
+                ok += 1
+        except Exception:
+            frappe.logger().error(
+                f"notification_emit.emit_staff_notify failed for {em}", exc_info=True
+            )
+    return ok
+
+
 def emit_notify_hc_email(
     channel: str,
     recipient_email: str,

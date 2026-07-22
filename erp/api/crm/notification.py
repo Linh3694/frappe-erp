@@ -9,6 +9,7 @@ from erp.utils.api_response import (
     success_response, error_response, validation_error_response, not_found_response
 )
 from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.common.notification_emit import emit_staff_notify
 
 
 def _render_email_template(template_type, context):
@@ -197,7 +198,29 @@ def send_duplicate_warning_email():
         subject = f"Canh bao: Ho so trung lap - {old_lead.get('student_name', '')}"
         content = f"Co ho so moi ({new_lead_name}) trung voi ho so cua ban ({old_lead_name})"
     
+    # Nguoi nhan la PIC (nhan vien) -> ngoai email, day vao trung tam thong bao.
+    # Khac voi email lich thi/ket qua thi: nguoi nhan o do la lead chua co tai khoan.
+    try:
+        emit_staff_notify(
+            [pic_email],
+            "Canh bao ho so trung lap",
+            f"Ho so moi {new_lead_name} trung voi ho so {old_lead_name} "
+            f"cua hoc sinh {old_lead.get('student_name', '')} ban dang giu.",
+            "crm_duplicate_warning",
+            {
+                "url": "/admission/profiles",
+                "old_lead": old_lead_name,
+                "new_lead": new_lead_name,
+            },
+            reference_doctype="CRM Lead",
+            reference_name=old_lead_name,
+        )
+    except Exception:
+        frappe.log_error(
+            title="crm duplicate warning in-app", message=frappe.get_traceback()
+        )
+
     if _send_email([pic_email], subject, content):
         return success_response(message="Da gui email canh bao")
-    
+
     return error_response("Gui email that bai")
