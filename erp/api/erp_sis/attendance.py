@@ -6,7 +6,7 @@ import requests
 from datetime import datetime
 from erp.utils.api_response import success_response, error_response
 from erp.utils.school_day_utils import is_school_instruction_day
-from erp.api.erp_sis.utils.cache_utils import clear_attendance_cache
+from erp.api.erp_sis.utils.cache_utils import clear_attendance_cache, lesson_status_version_signature
 
 
 ATTENDANCE_STATUSES = {"present", "absent", "late", "excused"}
@@ -529,7 +529,9 @@ def batch_get_cell_attendance_flags():
 				]
 			)).encode()
 		).hexdigest()[:12]
-		cache_key = f"cell_attendance_flags:{items_hash}"
+		# Version hoá theo lớp (xem lesson_status_version_signature) — bump khi lưu điểm danh.
+		version_sig = lesson_status_version_signature(items)
+		cache_key = f"cell_attendance_flags:{items_hash}:{version_sig}"
 
 		try:
 			cached_data = frappe.cache().get_value(cache_key)

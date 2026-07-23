@@ -5,7 +5,11 @@ from datetime import datetime as dt, timedelta
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
-from erp.api.erp_sis.utils.cache_utils import clear_class_log_cache, HOMEROOM_CLASS_LOGS_CACHE_PREFIX
+from erp.api.erp_sis.utils.cache_utils import (
+    clear_class_log_cache,
+    HOMEROOM_CLASS_LOGS_CACHE_PREFIX,
+    lesson_status_version_signature,
+)
 
 
 def _get_body():
@@ -1014,7 +1018,9 @@ def batch_get_lesson_log_status():
                 ]
             )).encode()
         ).hexdigest()[:12]
-        cache_key = f"lesson_log_status_batch:{items_hash}"
+        # Version hoá theo lớp (xem lesson_status_version_signature) — bump khi lưu sổ đầu bài.
+        version_sig = lesson_status_version_signature(items)
+        cache_key = f"lesson_log_status_batch:{items_hash}:{version_sig}"
 
         try:
             cached_data = frappe.cache().get_value(cache_key)

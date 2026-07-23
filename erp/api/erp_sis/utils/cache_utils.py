@@ -8,10 +8,77 @@ Centralized cache clearing functions để đảm bảo consistency và dễ mai
 Tất cả cache clearing operations nên sử dụng các hàm trong module này.
 """
 
+import hashlib
+
 import frappe
 
 # Prefix key Redis cho batch homeroom — khớp với batch_get_homeroom_class_logs trong class_log.py
 HOMEROOM_CLASS_LOGS_CACHE_PREFIX = "homeroom_class_logs_v8"
+
+# ---------------------------------------------------------------------------
+# Versioning cache trạng thái tiết (điểm danh + sổ đầu bài) trên lưới TKB tuần
+# ---------------------------------------------------------------------------
+# Các cache batch dưới đây được hash theo CẢ tập ô của tuần nên không thể xoá
+# trúng theo từng tiết. Trước đây phải xoá bằng scan_iter("*week_lesson_status:*")
+# — không đáng tin (site-prefix / kết nối) → trạng thái trễ tới hết TTL 5'.
+#
+# Thay bằng versioning per-class: mỗi lớp giữ 1 số version trong Redis, nhét vào
+# cache key. Lưu điểm danh / sổ đầu bài của lớp nào chỉ cần TĂNG version lớp đó
+# (thao tác 1 key, deterministic, KHÔNG phụ thuộc scan_iter) → mọi cache batch có
+# chứa lớp đó lập tức thành stale, còn cache của lớp khác vẫn giữ (tránh recompute
+# thừa — đúng lo ngại hiệu năng đã nêu ở SIS-120).
+LESSON_STATUS_VERSION_PREFIX = "lesson_status_ver"
+
+
+def _lesson_status_version_key(class_id):
+	return f"{LESSON_STATUS_VERSION_PREFIX}:{class_id}"
+
+
+def get_lesson_status_versions(class_ids):
+	"""Trả {class_id: version_int} (thiếu → 0)."""
+	out = {}
+	cache = frappe.cache()
+	for cid in class_ids:
+		if not cid:
+			continue
+		try:
+			v = cache.get_value(_lesson_status_version_key(cid))
+			out[cid] = int(v) if v is not None else 0
+		except Exception:
+			out[cid] = 0
+	return out
+
+
+def lesson_status_version_signature(items):
+	"""Chữ ký version ổn định theo các lớp có trong `items` — nhét vào cache key.
+
+	Cùng tập lớp + version không đổi → key không đổi (cache hit). Version 1 lớp tăng
+	→ chữ ký đổi → mọi cache batch chứa lớp đó miss và tính lại.
+	"""
+	class_ids = sorted({(i.get("class_id") or "") for i in (items or []) if i.get("class_id")})
+	if not class_ids:
+		return "v0"
+	versions = get_lesson_status_versions(class_ids)
+	raw = ",".join(f"{cid}:{versions.get(cid, 0)}" for cid in class_ids)
+	return "v" + hashlib.md5(raw.encode()).hexdigest()[:8]
+
+
+def bump_lesson_status_version(class_id):
+	"""Tăng version 1 lớp → vô hiệu hoá tức thì mọi cache batch trạng thái chứa lớp này.
+
+	Deterministic, chỉ đụng 1 key — KHÔNG phụ thuộc scan_iter. Dùng get+set (không
+	dùng redis incr trực tiếp để giữ đúng site-prefix + serialize của frappe.cache()).
+	"""
+	if not class_id:
+		return
+	try:
+		cache = frappe.cache()
+		key = _lesson_status_version_key(class_id)
+		cur = cache.get_value(key)
+		nxt = (int(cur) if cur is not None else 0) + 1
+		cache.set_value(key, nxt)
+	except Exception as e:
+		frappe.logger().warning(f"bump_lesson_status_version({class_id}) failed: {e}")
 
 
 def clear_teacher_dashboard_cache():
@@ -264,6 +331,11 @@ def clear_attendance_cache(class_id, date):
 		date: Date string (YYYY-MM-DD)
 	"""
 	try:
+		# ✅ Cơ chế chính: tăng version lớp → cache batch (week_lesson_status /
+		# cell_attendance_flags) chứa lớp này thành stale ngay, không cần scan_iter.
+		bump_lesson_status_version(class_id)
+
+		# Best-effort backup: xoá thêm bằng pattern (dọn key single + phòng khi version key mất).
 		patterns = [
 			f"*attendance:{class_id}:{date}:*",
 			f"*attendance_batch:{class_id}:{date}:*",
@@ -275,7 +347,7 @@ def clear_attendance_cache(class_id, date):
 		for pattern in patterns:
 			deleted = clear_cache_pattern(pattern)
 			total_deleted += deleted
-		
+
 		frappe.logger().info(f"✅ Cleared {total_deleted} attendance cache keys for {class_id}/{date}")
 		return total_deleted
 	except Exception as e:
@@ -292,6 +364,11 @@ def clear_class_log_cache(class_id, date):
 		date: Date string (YYYY-MM-DD)
 	"""
 	try:
+		# ✅ Cơ chế chính: tăng version lớp → cache batch (week_lesson_status /
+		# lesson_log_status_batch) chứa lớp này thành stale ngay, không cần scan_iter.
+		bump_lesson_status_version(class_id)
+
+		# Best-effort backup: xoá thêm bằng pattern (dọn key single + phòng khi version key mất).
 		patterns = [
 			f"*class_log:{class_id}:{date}:*",
 			f"*class_logs_batch:{class_id}:{date}:*",
@@ -306,7 +383,7 @@ def clear_class_log_cache(class_id, date):
 		for pattern in patterns:
 			deleted = clear_cache_pattern(pattern)
 			total_deleted += deleted
-		
+
 		frappe.logger().info(f"✅ Cleared {total_deleted} class log cache keys for {class_id}/{date}")
 		return total_deleted
 	except Exception as e:

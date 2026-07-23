@@ -13,6 +13,7 @@ from erp.api.erp_sis.attendance import (
 	_cell_attendance_lookup_key,
 )
 from erp.api.erp_sis.class_log import _batch_lesson_log_status_for_items
+from erp.api.erp_sis.utils.cache_utils import lesson_status_version_signature
 
 
 def _get_json_body():
@@ -93,7 +94,10 @@ def batch_get_week_lesson_status():
 				]
 			)).encode()
 		).hexdigest()[:12]
-		cache_key = f"week_lesson_status:{items_hash}"
+		# Version hoá theo lớp: lưu điểm danh/sổ đầu bài của lớp nào sẽ bump version lớp đó
+		# → chữ ký đổi → key này miss và tính lại (thay cho việc xoá bằng scan_iter).
+		version_sig = lesson_status_version_signature(items)
+		cache_key = f"week_lesson_status:{items_hash}:{version_sig}"
 
 		try:
 			cached_data = frappe.cache().get_value(cache_key)
