@@ -308,8 +308,12 @@ def mobile_microsoft_callback(code=None, state=None):
     except Exception as e:
         frappe.logger().error(f"Unexpected error in mobile Microsoft callback: {str(e)}")
 
-        # Log the full error for debugging
-        frappe.log_error("Mobile Microsoft Auth", f"Mobile Microsoft callback error: {str(e)}")
+        # Log the full error for debugging (traceback included — str(e) alone
+        # doesn't say which line raised)
+        frappe.log_error(
+            "Mobile Microsoft Auth",
+            f"Mobile Microsoft callback error: {str(e)}\n{frappe.get_traceback()}"
+        )
 
         result = {
             "success": False,

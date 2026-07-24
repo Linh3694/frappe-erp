@@ -44,7 +44,7 @@ def find_user_by_identifier(identifier):
         return None
         
     except Exception as e:
-        frappe.log_error(f"Error finding user by identifier {identifier}: {str(e)}", "User Lookup")
+        frappe.log_error("User Lookup", f"Error finding user by identifier {identifier}: {str(e)}")
         return None
 
 
@@ -169,7 +169,7 @@ def login(email=None, username=None, password=None, provider="local"):
         }
         
     except Exception as e:
-        frappe.log_error(f"Login error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Login error: {str(e)}")
         frappe.throw(_("Login failed: {0}").format(str(e)))
 
 
@@ -237,7 +237,7 @@ def logout():
         }
         
     except Exception as e:
-        frappe.log_error(f"Logout error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Logout error: {str(e)}")
         return {
             "status": "error",
             "message": str(e)
@@ -266,7 +266,7 @@ def forgot_password(email):
         }
         
     except Exception as e:
-        frappe.log_error(f"Forgot password error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Forgot password error: {str(e)}")
         frappe.throw(_("Error sending password reset email: {0}").format(str(e)))
 
 
@@ -299,7 +299,7 @@ def reset_password(token, new_password):
         }
         
     except Exception as e:
-        frappe.log_error(f"Reset password error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Reset password error: {str(e)}")
         frappe.throw(_("Error resetting password: {0}").format(str(e)))
 
 
@@ -327,7 +327,7 @@ def change_password(current_password, new_password):
         }
         
     except Exception as e:
-        frappe.log_error(f"Change password error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Change password error: {str(e)}")
         frappe.throw(_("Error changing password: {0}").format(str(e)))
 
 
@@ -393,7 +393,7 @@ def get_current_user():
         )
         
     except Exception as e:
-        frappe.log_error(f"Get current user error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Get current user error: {str(e)}")
         frappe.throw(_("Error getting user information: {0}").format(str(e)))
 
 
@@ -550,7 +550,7 @@ def generate_jwt_token(user_email):
         return token
 
     except Exception as e:
-        frappe.log_error(f"JWT token generation error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"JWT token generation error: {str(e)}")
         return None
 
 
@@ -607,7 +607,7 @@ def send_password_reset_email(email, token):
         return True
         
     except Exception as e:
-        frappe.log_error(f"Password reset email error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Password reset email error: {str(e)}")
         return False
 
 
@@ -630,7 +630,7 @@ def refresh_token():
         }
         
     except Exception as e:
-        frappe.log_error(f"Token refresh error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Token refresh error: {str(e)}")
         frappe.throw(_("Error refreshing token: {0}").format(str(e)))
 
 
@@ -671,7 +671,7 @@ def update_profile(profile_data):
         }
         
     except Exception as e:
-        frappe.log_error(f"Update profile error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Update profile error: {str(e)}")
         frappe.throw(_("Error updating profile: {0}").format(str(e)))
 
 
@@ -779,7 +779,7 @@ def delete_avatar():
         }
         
     except Exception as e:
-        frappe.log_error(f"Delete avatar error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Delete avatar error: {str(e)}")
         frappe.throw(_("Error deleting avatar: {0}").format(str(e)))
 
 
@@ -844,5 +844,5 @@ def upload_avatar():
         }
         
     except Exception as e:
-        frappe.log_error(f"Upload avatar error: {str(e)}", "Authentication")
+        frappe.log_error("Authentication", f"Upload avatar error: {str(e)}")
         frappe.throw(_("Error uploading avatar: {0}").format(str(e)))

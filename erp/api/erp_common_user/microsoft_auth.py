@@ -602,10 +602,21 @@ def create_or_update_microsoft_user(user_data):
     try:
         # 1. Create/Update Microsoft User record
         existing = frappe.db.get_value("ERP Microsoft User", {"microsoft_id": user_data["id"]})
-        
+
+        if not existing:
+            # Azure objectId đổi khi account bị xóa/tạo lại trên Azure AD, nhưng
+            # UPN/mail giữ nguyên. Nếu chỉ tra theo microsoft_id thì sẽ insert
+            # bản ghi mới và vỡ UNIQUE user_principal_name — phải nhận lại bản
+            # ghi cũ và cập nhật objectId mới.
+            upn = user_data.get("userPrincipalName")
+            mail = user_data.get("mail")
+            existing = (upn and frappe.db.get_value("ERP Microsoft User", {"user_principal_name": upn})) \
+                or (mail and frappe.db.get_value("ERP Microsoft User", {"mail": mail}))
+
         if existing:
             # Update existing user
             ms_user = frappe.get_doc("ERP Microsoft User", existing)
+            ms_user.microsoft_id = user_data["id"]
         else:
             # Create new user
             ms_user = frappe.get_doc({
@@ -891,10 +902,13 @@ def handle_microsoft_user_login(ms_user):
     try:
         # Get email from Microsoft user
         email = ms_user.mail or ms_user.user_principal_name
-        
-        # Check if Frappe user exists with same email
-        if frappe.db.exists("User", email):
-            frappe_user = frappe.get_doc("User", email)
+
+        # Check if Frappe user exists with same email.
+        # exists() tra theo NAME; user bị rename hoặc import với name khác email
+        # sẽ lọt lưới rồi vỡ UNIQUE email khi insert — nên tra thêm theo field.
+        existing_name = frappe.db.exists("User", email) or frappe.db.get_value("User", {"email": email})
+        if existing_name:
+            frappe_user = frappe.get_doc("User", existing_name)
             return frappe_user
         else:
             # Create new Frappe user directly
