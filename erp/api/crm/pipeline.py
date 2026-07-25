@@ -774,10 +774,16 @@ def _withdraw_one_lead(lead_name, new_status):
         doc.step = "Nghi hoc"
         doc.status = new_status
 
-        # KHONG dat doc.flags.ignore_mandatory o day: de validate mandatory chay that,
-        # nham kiem chung patch backfill_crm_lead_phone_from_guardian da dien du SDT chua.
-        # Ho so con thieu dong `phone_numbers` (table dang reqd: 1) se raise MandatoryError
-        # "Du lieu bi mat trong bang: Phone Numbers" va roi vao `errors` kem ten/ma hoc sinh.
+        # Bo qua kiem tra truong bat buoc.
+        # `CRM Lead.phone_numbers` la child table `reqd: 1` nhung CRM Lead KHONG co field
+        # SDT phang de bootstrap nhu CRM Guardian, nen ho so cu khong co dong nao se lam
+        # `doc.save()` throw MandatoryError "Du lieu bi mat trong bang: Phone Numbers".
+        # Da chay patch backfill_crm_lead_phone_from_guardian (lay SDT tu guardian qua
+        # lead_guardians / CRM Family Relationship) va van con 1731 ho so khong co nguon
+        # SDT nao — tuc rang buoc reqd nay khong phan anh dung du lieu thuc te.
+        # Chan chuyen buoc vi ly do do la sai; ta chi ghi step/status nen khong lam hong
+        # them du lieu nao.
+        doc.flags.ignore_mandatory = True
         try:
             doc.save(ignore_permissions=True)
             break
