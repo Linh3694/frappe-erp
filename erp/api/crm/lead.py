@@ -201,6 +201,52 @@ def enrich_lead_dict_with_sibling_lead_links(lead_dict):
     return lead_dict
 
 
+def get_profile_link_for_student(crm_student_name):
+    """Ho so CRM de mo tu man Hoc sinh.
+
+    Cac truong dinh danh hoc sinh (ten, ma, dob, gender, CCCD, campus) do CRM Lead so huu
+    va duoc day mot chieu sang CRM Student boi lead_student_sync — sua thang tren CRM Student
+    se bi ghi de o lan luu Lead ke tiep. Vi vay man Hoc sinh can duong dan sang dung ho so
+    de sua.
+
+    Mot CRM Student co the bi NHIEU CRM Lead tro vao (nghi hoc roi nhap hoc lai): uu tien
+    lead dang o buoc Enrolled, khong co thi lay lead cap nhat gan nhat — cung quy tac chon
+    voi erp/api/erp_sis/re_enrollment.py::_sync_not_re_enroll_to_crm_lead.
+
+    Tra ve dict 3 key (gia tri None neu hoc sinh chua lien ket ho so nao):
+      linked_lead           : docname CRM Lead
+      linked_lead_step      : buoc hien tai cua lead
+      linked_lead_list_slug : segment URL /admission/profiles/list/<slug>/<lead>
+    """
+    empty = {
+        "linked_lead": None,
+        "linked_lead_step": None,
+        "linked_lead_list_slug": None,
+    }
+    sid = str(crm_student_name or "").strip()
+    if not sid:
+        return empty
+
+    leads = frappe.get_all(
+        "CRM Lead",
+        filters={"linked_student": sid},
+        fields=["name", "step"],
+        order_by="modified desc",
+    )
+    if not leads:
+        return empty
+
+    target = next((l for l in leads if l.get("step") == "Enrolled"), leads[0])
+    step = target.get("step")
+    return {
+        "linked_lead": target["name"],
+        "linked_lead_step": step,
+        # Fallback "all" (khong phai "enrolled"): "all" la stage co that tren rail va khong
+        # noi doi ve buoc cua ho so.
+        "linked_lead_list_slug": CRM_STEP_TO_PROFILE_LIST_SLUG.get(step, "all"),
+    }
+
+
 def _parse_lead_filters(raw):
     """Chuyen filter nang cao tu FilterBuilder (JSON) -> danh sach dieu kien Frappe.
 

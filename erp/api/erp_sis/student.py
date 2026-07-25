@@ -397,6 +397,12 @@ def get_student_data():
         except Exception as photo_err:
             frappe.logger().warning(f"⚠️ Error fetching photo for student {student.name}: {str(photo_err)}")
 
+        # Ho so CRM de sua cac truong dinh danh: chung do CRM Lead so huu va duoc day
+        # mot chieu sang CRM Student, sua thang o day se bi ghi de o lan luu Lead ke tiep.
+        from erp.api.crm.lead import get_profile_link_for_student
+
+        profile_link = get_profile_link_for_student(student.name)
+
         return single_item_response(
             data={
                 "name": student.name,
@@ -405,7 +411,8 @@ def get_student_data():
                 "dob": student.dob,
                 "gender": student.gender,
                 "campus_id": student.campus_id,
-                "photo": student_photo
+                "photo": student_photo,
+                **profile_link,
             },
             message="Student fetched successfully"
         )
