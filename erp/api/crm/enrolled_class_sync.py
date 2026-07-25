@@ -87,16 +87,14 @@ def grade_by_student_from_sis(student_ids) -> dict:
         {"sids": sids},
         as_dict=True,
     )
-    # ORDER BY ... DESC -> dong dau tien cua moi hoc sinh la lop moi nhat.
-    # Chi xet DUNG dong do (giong _get_current_grade_from_sis dung LIMIT 1): neu khoi cua
-    # lop moi nhat khong map duoc thi coi nhu khong xac dinh, KHONG roi xuong lop cu hon
-    # vi se cho ra khoi sai.
-    seen = set()
+    # ORDER BY ... DESC -> cac dong cua moi hoc sinh xep tu lop moi nhat den cu nhat.
+    # Lay dong dau tien MAP DUOC khoi, khong dung lai o dong dau: grade_code la du lieu
+    # nhap tay nen co the la ma la; bo qua no de lay lop ke tiep van dung hon la coi nhu
+    # hoc sinh khong xac dinh duoc khoi (se bi bo sot khoi danh sach).
     for r in rows:
         sid = r.get("student_id")
-        if sid in seen:
+        if sid in out:
             continue
-        seen.add(sid)
         grade = _normalize_grade_to_lead_select(r.get("grade_code"), r.get("title_vn"))
         if grade:
             out[sid] = grade

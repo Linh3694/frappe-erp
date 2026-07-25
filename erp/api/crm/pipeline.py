@@ -683,13 +683,16 @@ def _collect_withdraw_candidates(campus_id=None):
       Nhom 1 — current_grade = '12'                     -> Nghi hoc / Tot nghiep
       Nhom 2 — khoi khac + tai ghi danh 'not_re_enroll' -> Nghi hoc / Chuyen truong
 
-    Dung `current_grade` (khoi DANG hoc that, dong bo nguoc tu SIS qua
-    enrolled_class_sync) chu KHONG dung `target_grade` (khoi dang ky luc tuyen sinh,
-    da cu voi hoc sinh hoc nhieu nam).
+    Khoi lop lay THANG tu SIS (grade_by_student_from_sis) cho MOI ho so, khong tin
+    `CRM Lead.current_grade` da denormalize: field do chi duoc sync o vai thoi diem
+    (promote_leads_to_dang_hoc_if_class_assigned) va KHONG BAO GIO bi xoa, nen rat de cu.
+    `current_grade` chi con la fallback khi SIS khong tra ra khoi nao.
 
-    `current_grade` co the con rong (Lead chua duoc sync bao gio). Khi do tra thang
-    SIS bang grade_by_student_from_sis: ham do lay lop Regular MOI NHAT theo start_date
-    nen hoc sinh chua co lop nam nay se tu dong lay lop nam gan nhat truoc do.
+    Ham SIS lay lop Regular MOI NHAT theo start_date, KHONG loc theo nam hoc — chinh la
+    dieu can cho tinh huong chuyen nam: nam active da la 26-27 nhung hoc sinh chua co lop
+    26-27, lop that con o 25-26, van phai nhan dung la khoi 12 cua 25-26.
+
+    KHONG dung `target_grade` (khoi dang ky luc tuyen sinh, da cu voi HS hoc nhieu nam).
 
     Tra ve (graduate_rows, transfer_rows) — moi phan tu la dict lead, da duoc gan
     `current_grade` = khoi da giai quyet (de danh sach xem truoc hien dung khoi that).
@@ -712,22 +715,21 @@ def _collect_withdraw_candidates(campus_id=None):
     # (module kia goi nguoc _log_step_change cua file nay)
     from erp.api.crm.enrolled_class_sync import grade_by_student_from_sis
 
-    # Chi tra SIS cho nhung ho so con thieu khoi — tranh query thua
-    missing_grade_sids = [
-        lead["linked_student"]
-        for lead in leads
-        if not str(lead.get("current_grade") or "").strip() and lead.get("linked_student")
-    ]
-    sis_grades = grade_by_student_from_sis(missing_grade_sids) if missing_grade_sids else {}
+    # Tra SIS cho TAT CA ho so (1 query), khong chi ho so thieu current_grade:
+    # current_grade co the dang giu gia tri cu tu nam truoc.
+    sis_grades = grade_by_student_from_sis(
+        [lead["linked_student"] for lead in leads if lead.get("linked_student")]
+    )
 
     graduate = []
     others = []
     for lead in leads:
-        grade = str(lead.get("current_grade") or "").strip()
-        if not grade:
-            grade = sis_grades.get(lead.get("linked_student"), "")
-            # Ghi nguoc vao row de danh sach xem truoc hien khoi that, khong hien o trong
-            lead["current_grade"] = grade
+        # SIS thang; current_grade chi dung khi SIS khong co lop nao cho hoc sinh
+        grade = sis_grades.get(lead.get("linked_student")) or str(
+            lead.get("current_grade") or ""
+        ).strip()
+        # Ghi nguoc vao row de danh sach xem truoc hien dung khoi da giai quyet
+        lead["current_grade"] = grade
         if grade == _GRADUATING_GRADE:
             graduate.append(lead)
         elif lead.get("linked_student"):
