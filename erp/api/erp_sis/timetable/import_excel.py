@@ -190,14 +190,29 @@ def import_timetable():
                     "total_progress_steps": len(progress_updates)
                 }, "Timetable import completed successfully")
             else:
-                return validation_error_response(
+                errors = result.get('errors', [])
+                warnings = result.get('warnings', [])
+                logs = result.get('logs', [])
+
+                frappe.logger().error(
+                    f"❌ IMPORT FAILED với {len(errors)} lỗi: {errors}"
+                )
+
+                # ⚠️ Frontend đọc danh sách lỗi cụ thể ở errors.errors / errors.warnings
+                # (TimetableImportModal.extractImportLists) — đổi key ở đây thì phải sửa cả FE,
+                # nếu không UI sẽ rơi về message tổng chung chung "Dữ liệu không hợp lệ".
+                # logs đưa lên top-level qua tham số `logs` cho dễ đọc trên tab Network.
+                return error_response(
                     result.get('message', 'Import failed'),
-                    {
-                        "errors": result.get('errors', []),
-                        "logs": result.get('logs', []),
-                        "warnings": result.get('warnings', []),
+                    errors={
+                        "errors": errors,
+                        "warnings": warnings,
+                    },
+                    code="VALIDATION_ERROR",
+                    logs=logs,
+                    debug_info={
                         "stats": result.get('stats', {}),
-                        "progress_history": progress_updates
+                        "progress_history": progress_updates,
                     }
                 )
         else:

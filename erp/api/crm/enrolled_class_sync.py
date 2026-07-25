@@ -156,3 +156,56 @@ def promote_leads_to_dang_hoc_if_class_assigned(crm_student_name: str) -> None:
         doc.status = "Dang hoc"
         doc.save(ignore_permissions=True)
         _log_step_change(lead_name, "Enrolled", "Enrolled", old_status, doc.status)
+
+
+def can_assign_student_to_class(crm_student_name: str) -> tuple[bool, str]:
+    """Kiem tra hoc sinh co duoc XEP LOP MOI khong.
+
+    Dieu kien: CRM Student.enrollment_status == 'Dang hoc' (denormalize tu CRM Lead,
+    tinh boi erp.api.crm.lead_student_sync.compute_enrollment_status).
+    Day la ALLOWLIST — moi gia tri khac, KE CA rong, deu bi chan. Rong la trang thai
+    mac dinh cua HS tao truc tiep qua form Hoc sinh / import Excel (khong co CRM Lead),
+    nen dung denylist ('!= Nghi hoc') se de lot toan bo nhom do.
+
+    Doc bang frappe.db.get_value (KHONG qua cache Redis cua batch_get_students)
+    de khong bao gio quyet dinh tren gia tri stale.
+
+    Tra ve (True, "") hoac (False, <thong bao tieng Viet cho end user>).
+
+    LUU Y: guard nay chi bao phu cac duong di GOI no. Moi duong ghi
+    `tabSIS Class Student` bang raw SQL / frappe.db.set_value se BO QUA guard —
+    xem nhanh MOVE tai erp/api/erp_sis/class_student.py (frappe.db.set_value),
+    da duoc chan o tang API truoc khi vao nhanh do.
+    """
+    sid = str(crm_student_name or "").strip()
+    if not sid:
+        return False, "Thieu ma hoc sinh."
+
+    row = frappe.db.get_value(
+        "CRM Student",
+        sid,
+        ["student_code", "student_name", "enrollment_status"],
+        as_dict=True,
+    )
+    if not row:
+        return False, f"Không tìm thấy hồ sơ học sinh {sid}."
+
+    status = str(row.get("enrollment_status") or "").strip()
+    if status == "Dang hoc":
+        return True, ""
+
+    who = f"{row.get('student_name') or ''} ({row.get('student_code') or sid})".strip()
+    if status == "Nghi hoc":
+        return False, (
+            f"Học sinh {who} đang ở trạng thái Nghỉ học — không thể xếp lớp mới. "
+            f"Nếu học sinh nhập học lại, hãy chuyển hồ sơ CRM về bước Nhập học (Enrolled) trước."
+        )
+    if status == "Chua nhap hoc":
+        return False, (
+            f"Học sinh {who} chưa có hồ sơ CRM ở bước Nhập học (Enrolled) — không thể xếp lớp. "
+            f"Liên hệ Tuyển sinh để chốt hồ sơ trước khi phân lớp."
+        )
+    return False, (
+        f"Học sinh {who} chưa được liên kết hồ sơ tuyển sinh (CRM Lead) — không thể xếp lớp. "
+        f"Liên hệ Tuyển sinh để liên kết hồ sơ."
+    )

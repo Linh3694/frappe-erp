@@ -70,12 +70,20 @@ def check_student_code_availability():
 
 
 @frappe.whitelist(allow_guest=False)
-def get_all_students(include_all_campuses=0):
-    """Get all students without pagination - always returns full dataset"""
+def get_all_students(include_all_campuses=0, only_eligible_for_class=0):
+    """Get all students without pagination - always returns full dataset
+
+    only_eligible_for_class: opt-in, chi tra HS du dieu kien xep lop
+    (CRM Student.enrollment_status = 'Dang hoc'). DEFAULT 0 vi ngoai man Phan lop
+    con 4 caller FE khac phai giu nguyen hanh vi — dac biet danh sach quan ly
+    Hoc sinh (StudentsListV2) PHAI van thay HS da nghi hoc.
+    """
     try:
         include_all_campuses = int(include_all_campuses)
-            
-        frappe.logger().info(f"get_all_students called with: include_all_campuses={include_all_campuses}")
+        # int(x or 0): query param co the la chuoi rong
+        only_eligible_for_class = int(only_eligible_for_class or 0)
+
+        frappe.logger().info(f"get_all_students called with: include_all_campuses={include_all_campuses}, only_eligible_for_class={only_eligible_for_class}")
 
         if include_all_campuses:
             from erp.utils.campus_utils import get_campus_filter_for_all_user_campuses
@@ -83,7 +91,14 @@ def get_all_students(include_all_campuses=0):
         else:
             from erp.utils.campus_utils import get_campus_filter_for_api
             filters = get_campus_filter_for_api()
-        
+
+        if only_eligible_for_class:
+            from erp.api.crm.lead_student_sync import ENROLLMENT_STATUS_STUDYING
+            # filters la dict do campus_utils tra ve — copy truoc khi them key
+            # de khong mutate gia tri cua module khac.
+            filters = dict(filters or {})
+            filters["enrollment_status"] = ENROLLMENT_STATUS_STUDYING
+
         # Always fetch all students - no pagination
         students = frappe.get_all(
             "CRM Student",
@@ -94,6 +109,7 @@ def get_all_students(include_all_campuses=0):
                 "dob",
                 "gender",
                 "campus_id",
+                "enrollment_status",
                 "family_code",
                 # user_image will be added from SIS Photo in enrichment step below
                 "creation",
@@ -1132,6 +1148,7 @@ def search_students(search_term=None):
                 dob,
                 gender,
                 campus_id,
+                enrollment_status,
                 creation,
                 modified
             FROM `tabCRM Student`

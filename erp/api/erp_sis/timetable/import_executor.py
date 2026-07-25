@@ -2513,11 +2513,14 @@ def execute_import_synchronous(file_path: str, metadata: Dict, progress_callback
 		validation_result = validator.validate()
 		
 		if not validation_result["valid"]:
-			frappe.logger().error(f"❌ Validation failed: {validation_result.get('errors')}")
+			validation_errors = validation_result.get("errors", [])
+			frappe.logger().error(f"❌ Validation failed: {validation_errors}")
 			return {
 				"success": False,
-				"message": "Validation failed",
-				"errors": validation_result.get("errors", []),
+				# Giữ tiền tố "Validation failed" để pattern dịch sẵn ở frontend không vỡ,
+				# nhưng thêm số lỗi để message tổng không còn vô nghĩa khi list bị rỗng.
+				"message": f"Validation failed: {len(validation_errors)} lỗi trong file Excel",
+				"errors": validation_errors,
 				"warnings": validation_result.get("warnings", []),
 				"stats": validation_result.get("stats", {}),
 				"logs": []

@@ -19,3 +19,4 @@ erp.patches.v1_0.split_crm_lead_pic_sales_care
 erp.patches.v1_0.set_target_year_for_migrated_leads
 erp.patches.v1_0.add_timetable_status_indexes
 erp.patches.v1_0.backfill_class_log_submitted
+erp.patches.v1_0.backfill_crm_student_enrollment_status

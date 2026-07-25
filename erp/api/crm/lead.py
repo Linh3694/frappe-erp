@@ -348,6 +348,78 @@ def _enrollment_class_years(campus_id=None):
     return current, previous
 
 
+def enrich_lead_dict_with_re_enrollment(lead_dict):
+    """Bo sung trang thai Tai ghi danh cho sidebar ho so (chi doc).
+
+    Nghiep vu: quyet dinh cua DOT tai ghi danh dang chay cho nam active
+    (config.source_school_year_id = nam active); khong co thi lui ve dot cua nam truoc.
+    Nhan nam hien thi la nam DICH (config.school_year_id) — vi cau hoi nghiep vu la
+    "hoc sinh co hoc nam <dich> khong".
+
+    Cac key them vao lead_dict (CHI co o API, KHONG co tren DocType — cung quy uoc
+    voi current_year_class / prev_year_class):
+      re_enrollment_decision    : '' | 're_enroll' | 'considering' | 'not_re_enroll' | None
+      re_enrollment_year_label  : 'XX-XX' (vd '26-27') | None
+      re_enrollment_school_year : docname SIS School Year (nam dich) | None
+      re_enrollment_submission  : docname SIS Re-enrollment | None
+
+    None (khac voi '') = khong co don nao trong pham vi -> FE an hang.
+    '' = co don nhung chua chon quyet dinh -> FE hien "Chua lam don".
+    """
+    lead_dict["re_enrollment_decision"] = None
+    lead_dict["re_enrollment_year_label"] = None
+    lead_dict["re_enrollment_school_year"] = None
+    lead_dict["re_enrollment_submission"] = None
+
+    sid = str(lead_dict.get("linked_student") or "").strip()
+    if not sid:
+        return lead_dict
+
+    # Nam active + nam lien truoc theo campus CUA LEAD (khong theo campus nguoi xem)
+    current, previous = _enrollment_class_years(lead_dict.get("campus_id"))
+    candidates = [y["name"] for y in (current, previous) if y]
+    if not candidates:
+        return lead_dict
+
+    rows = frappe.db.sql(
+        """
+        SELECT r.`name`, r.`decision`,
+               cfg.`source_school_year_id` AS src_year,
+               cfg.`school_year_id`        AS target_year,
+               ty.`title_vn`, ty.`title_en`, ty.`start_date`
+        FROM `tabSIS Re-enrollment` r
+        INNER JOIN `tabSIS Re-enrollment Config` cfg ON cfg.`name` = r.`config_id`
+        LEFT  JOIN `tabSIS School Year` ty ON ty.`name` = cfg.`school_year_id`
+        WHERE r.`student_id` = %(sid)s
+          AND cfg.`source_school_year_id` IN %(years)s
+        ORDER BY ty.`start_date` DESC, r.`modified` DESC
+        """,
+        {"sid": sid, "years": candidates},
+        as_dict=True,
+    )
+    if not rows:
+        return lead_dict
+
+    # ORDER BY ... DESC -> ban ghi dau tien cua moi nam la moi nhat
+    by_src = {}
+    for r in rows:
+        by_src.setdefault(r["src_year"], r)
+
+    for year_name in candidates:  # nam active truoc, roi nam truoc
+        row = by_src.get(year_name)
+        if not row:
+            continue
+        lead_dict["re_enrollment_decision"] = row.get("decision") or ""
+        lead_dict["re_enrollment_school_year"] = row.get("target_year")
+        lead_dict["re_enrollment_year_label"] = _short_year_label(
+            row.get("title_vn") or row.get("title_en"), row.get("start_date")
+        )
+        lead_dict["re_enrollment_submission"] = row.get("name")
+        break
+
+    return lead_dict
+
+
 def _enrollment_year_column(year):
     """Nhan cot "Lop YY-YY" tu 1 ban ghi SIS School Year (hoac None)."""
     if not year:
@@ -593,6 +665,7 @@ def get_lead():
     lead_data = doc.as_dict()
     enrich_lead_dict_with_pic_info(lead_data)
     enrich_lead_dict_with_sibling_lead_links(lead_data)
+    enrich_lead_dict_with_re_enrollment(lead_data)
 
     # Ten nguoi nhap (field "Nguoi nhap"): owner (User id/email) -> full_name
     owner_id = lead_data.get("owner")

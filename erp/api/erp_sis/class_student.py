@@ -483,6 +483,24 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                 message="Student already assigned to this class"
             )
 
+        # RULE: chi hoc sinh dang hoc moi duoc XEP LOP MOI (CRM Student.enrollment_status).
+        # Vi tri dat guard nay quan trong:
+        #  - SAU rule chong trung o tren -> submit lai dong da ton tai van tra success,
+        #    khong pha dong lich su cua HS da nghi hoc (giu lam lich su theo nghiep vu).
+        #  - TRUOC nhanh "regular" ben duoi -> nhanh do dung frappe.db.set_value de CHUYEN
+        #    lop (khong insert doc) nen doctype validate() KHONG chay. Day la diem duy nhat
+        #    chan duoc viec chuyen HS da nghi hoc tu lop A sang lop B.
+        from erp.api.crm.enrolled_class_sync import can_assign_student_to_class
+
+        eligible, block_reason = can_assign_student_to_class(student_id)
+        if not eligible:
+            # return error_response, KHONG frappe.throw: `except Exception` o cuoi ham
+            # nuot moi exception thanh ASSIGN_STUDENT_ERROR chung -> mat thong bao that.
+            return error_response(
+                message=block_reason,
+                code="STUDENT_NOT_ELIGIBLE_FOR_CLASS"
+            )
+
         if class_type == "regular":
             # 2) Regular: ensure ONLY ONE regular class per student per school year (campus-aware)
             existing_regular = frappe.get_all(

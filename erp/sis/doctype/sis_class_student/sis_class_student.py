@@ -7,7 +7,29 @@ from frappe.model.document import Document
 class SISClassStudent(Document):
 	def validate(self):
 		"""Validate before insert/update"""
+		self.validate_student_eligible_for_class()
 		self.validate_no_duplicate_regular_classes()
+
+	def validate_student_eligible_for_class(self):
+		"""Chan XEP LOP MOI cho hoc sinh khong o trang thai dang hoc.
+
+		CHI kiem tra khi INSERT (`self.is_new()`). Dong da ton tai cua HS da nghi hoc
+		duoc GIU LAM LICH SU theo nghiep vu — kiem tra ca luc update se lam vo moi
+		luong re-save tren dong cu (sync mon hoc, sync bus, patch sau nay).
+
+		Day la lop phong thu thu hai: bao phu 2 nhanh reassign cua unassign_student va
+		import Excel phan lop (bulk_import) — `ignore_permissions` KHONG bo qua validate().
+		Nhanh CHUYEN lop trong assign_student dung frappe.db.set_value nen khong qua day,
+		da duoc chan o tang API.
+		"""
+		if not self.is_new() or not self.student_id:
+			return
+
+		from erp.api.crm.enrolled_class_sync import can_assign_student_to_class
+
+		eligible, block_reason = can_assign_student_to_class(self.student_id)
+		if not eligible:
+			frappe.throw(msg=block_reason, title="Không thể xếp lớp")
 
 	def after_insert(self):
 		# Dong bo CRM Lead Enrolled: Cho xep lop -> Dang hoc khi xep lop Regular

@@ -1106,6 +1106,15 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 frappe.logger().error(f"[SIS Class Student] Row {row_num} - Error looking up student: {str(e)}")
                 raise frappe.ValidationError(f"[{doctype}] Lỗi khi tìm học sinh với mã '{student_code}': {str(e)}")
 
+            # Chan xep lop cho HS khong o trang thai dang hoc. Doctype validate() cung chan,
+            # nhung pre-check o day cho thong bao ro theo TUNG DONG Excel thay vi bi boc
+            # trong loi chung "Loi khi tao phan lop..." ben duoi.
+            from erp.api.crm.enrolled_class_sync import can_assign_student_to_class
+
+            _eligible, _block_reason = can_assign_student_to_class(student_id)
+            if not _eligible:
+                raise frappe.ValidationError(f"[{doctype}] Hàng {row_num}: {_block_reason}")
+
             # Handle class_short_title lookup
             class_short_title = None
             for key in ["class_short_title", "classshorttitle", "class short title", "short_title", "short title", "mã lớp", "mã lớp*", "class_name", "class"]:
@@ -1904,7 +1913,8 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 "name", "owner", "creation", "modified",
                 "curriculum_id", "education_stage_id", "timetable_subject_id", "actual_subject_id",
                 "education_stage", "education_grade", "academic_program", "school_year_id",  # SIS Class reference fields
-                "homeroom_teacher", "vice_homeroom_teacher", "room"  # Resolved above from Excel codes -> docname
+                "homeroom_teacher", "vice_homeroom_teacher", "room",  # Resolved above from Excel codes -> docname
+                "enrollment_status"  # CRM Student: field he thong, suy tu CRM Lead — khong cho Excel ghi de
             ]
             for field in meta.fields:
                 if field.fieldname in row_data and field.fieldname not in excluded_fields:

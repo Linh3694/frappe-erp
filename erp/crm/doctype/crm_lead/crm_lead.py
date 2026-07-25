@@ -30,9 +30,31 @@ class CRMLead(Document):
 
     def on_update(self):
         """Moi lan cap nhat Lead: day ho so hoc sinh sang CRM Student da lien ket."""
-        from erp.api.crm.lead_student_sync import sync_linked_crm_student_from_lead
+        from erp.api.crm.lead_student_sync import (
+            sync_enrollment_status_for_student,
+            sync_linked_crm_student_from_lead,
+        )
 
         sync_linked_crm_student_from_lead(self)
+
+        # linked_student vua doi -> student CU mat 1 lead nen trang thai hoc co the doi.
+        # sync_linked_crm_student_from_lead chi xu ly student MOI.
+        before = self.get_doc_before_save()
+        if before:
+            old_sid = str(getattr(before, "linked_student", None) or "").strip()
+            if old_sid and old_sid != str(self.linked_student or "").strip():
+                sync_enrollment_status_for_student(old_sid)
+
+    def after_delete(self):
+        """Xoa Lead (delete_lead, merge ho so) -> student lien ket mat 1 lead nen
+        trang thai hoc co the doi (vd Lead Enrolled duy nhat bi xoa)."""
+        sid = str(getattr(self, "linked_student", None) or "").strip()
+        if not sid:
+            return
+
+        from erp.api.crm.lead_student_sync import sync_enrollment_status_for_student
+
+        sync_enrollment_status_for_student(sid)
 
     def before_save(self):
         """Bootstrap emails child tu guardian_email phang neu chua co dong nao."""

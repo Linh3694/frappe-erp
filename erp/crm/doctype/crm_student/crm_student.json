@@ -23,6 +23,7 @@
   "personal_id_number",
   "gender",
   "campus_id",
+  "enrollment_status",
   "family_information",
   "family_code",
   "family_relationships"
@@ -77,6 +78,15 @@
    "options": "SIS Campus",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "enrollment_status",
+   "fieldtype": "Select",
+   "label": "Enrollment Status",
+   "options": "\nDang hoc\nNghi hoc\nChua nhap hoc",
+   "read_only": 1,
+   "search_index": 1,
+   "description": "Trang thai hoc — TU DONG suy tu CRM Lead (erp/api/crm/lead_student_sync.py). KHONG nhap tay. Rong = chua lien ket ho so tuyen sinh."
   },
   {
    "fieldname": "family_information",
