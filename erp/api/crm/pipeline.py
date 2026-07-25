@@ -19,6 +19,7 @@ from erp.api.crm.assignment import (
     assign_pic_sales_weight_balance,
     assign_pic_sales_care_weight_balance,
 )
+from erp.utils.campus_utils import get_current_campus_from_context
 
 
 def _lead_payload(doc):
@@ -607,6 +608,228 @@ def transfer_to_withdraw():
     _log_step_change(name, old_step, "Nghi hoc", old_status, "Chuyen truong")
     
     return single_item_response(_lead_payload(doc), "Da chuyen sang Nghi hoc")
+
+
+# --- Chuyen hang loat hoc sinh chinh thuc sang Nghi hoc -----------------------------
+
+# Khoi cuoi cap — hoc sinh dang hoc khoi nay chuyen sang Nghi hoc / Tot nghiep.
+_GRADUATING_GRADE = "12"
+
+# Thao tac dien rong (ghi hang loat, kho hoan tac tung ho so) nen chi mo cho cap quan ly,
+# khong mo cho toan bo ALLOWED_ROLES nhu cac API pipeline don le.
+_BULK_WITHDRAW_ROLES = [
+    "System Manager",
+    "SIS Manager",
+    "SIS Sales Admin",
+    "SIS Sales Care Admin",
+]
+
+
+def _re_enrollment_decision_by_student(student_ids, campus_id):
+    """Map linked_student -> decision cua don tai ghi danh dang xet.
+
+    CUNG dinh nghia voi erp.api.crm.lead.enrich_lead_dict_with_re_enrollment (hang
+    "Trang thai Tai ghi danh" tren sidebar ho so): don thuoc dot co
+    source_school_year_id = nam active cua campus, khong co thi lui ve dot nam truoc.
+    Sua o day thi phai sua ca ben do, neu khong UI va hanh dong hang loat se lech nhau.
+
+    Tra ve {} khi thieu du lieu (khong co nam hoc) — KHONG doan bua.
+    """
+    from erp.api.crm.lead import _enrollment_class_years
+
+    out = {}
+    sids = [s for s in (student_ids or []) if s]
+    if not sids:
+        return out
+
+    current, previous = _enrollment_class_years(campus_id)
+    candidates = [y["name"] for y in (current, previous) if y]
+    if not candidates:
+        return out
+
+    rows = frappe.db.sql(
+        """
+        SELECT r.`student_id`, r.`decision`,
+               cfg.`source_school_year_id` AS src_year
+        FROM `tabSIS Re-enrollment` r
+        INNER JOIN `tabSIS Re-enrollment Config` cfg ON cfg.`name` = r.`config_id`
+        LEFT  JOIN `tabSIS School Year` ty ON ty.`name` = cfg.`school_year_id`
+        WHERE r.`student_id` IN %(sids)s
+          AND cfg.`source_school_year_id` IN %(years)s
+        ORDER BY ty.`start_date` DESC, r.`modified` DESC
+        """,
+        {"sids": sids, "years": candidates},
+        as_dict=True,
+    )
+
+    # ORDER BY ... DESC -> ban ghi dau tien cua moi (student, nam nguon) la moi nhat
+    by_student_year = {}
+    for r in rows:
+        by_student_year.setdefault((r["student_id"], r["src_year"]), r)
+
+    for sid in sids:
+        for year_name in candidates:  # nam active truoc, roi nam truoc
+            row = by_student_year.get((sid, year_name))
+            if row:
+                out[sid] = str(row.get("decision") or "")
+                break
+    return out
+
+
+def _collect_withdraw_candidates(campus_id=None):
+    """Tim hoc sinh chinh thuc du dieu kien chuyen sang Nghi hoc.
+
+    Chi xet ho so o buoc 'Enrolled' VA trang thai 'Dang hoc'.
+      Nhom 1 — current_grade = '12'                     -> Nghi hoc / Tot nghiep
+      Nhom 2 — khoi khac + tai ghi danh 'not_re_enroll' -> Nghi hoc / Chuyen truong
+
+    Dung `current_grade` (khoi DANG hoc that, dong bo nguoc tu SIS qua
+    enrolled_class_sync) chu KHONG dung `target_grade` (khoi dang ky luc tuyen sinh,
+    da cu voi hoc sinh hoc nhieu nam). Ho so thieu current_grade khong roi vao nhom 1.
+
+    Tra ve (graduate_rows, transfer_rows) — moi phan tu la dict lead.
+    """
+    filters = {"step": "Enrolled", "status": "Dang hoc"}
+    if campus_id:
+        filters["campus_id"] = campus_id
+
+    leads = frappe.get_all(
+        "CRM Lead",
+        filters=filters,
+        fields=[
+            "name", "student_name", "student_code",
+            "current_grade", "linked_student", "campus_id",
+        ],
+        order_by="student_name asc",
+    )
+
+    graduate = []
+    others = []
+    for lead in leads:
+        if str(lead.get("current_grade") or "").strip() == _GRADUATING_GRADE:
+            graduate.append(lead)
+        elif lead.get("linked_student"):
+            # Khong co linked_student thi khong tra duoc don tai ghi danh -> bo qua
+            others.append(lead)
+
+    # Gom theo campus: nam hoc active duoc xac dinh RIENG cho tung campus
+    by_campus = {}
+    for lead in others:
+        by_campus.setdefault(lead.get("campus_id"), []).append(lead)
+
+    transfer = []
+    for cid, rows in by_campus.items():
+        decisions = _re_enrollment_decision_by_student(
+            [r["linked_student"] for r in rows], cid
+        )
+        transfer.extend(
+            r for r in rows if decisions.get(r["linked_student"]) == "not_re_enroll"
+        )
+
+    return graduate, transfer
+
+
+def _withdraw_one_lead(lead_name, new_status):
+    """Chuyen 1 lead Enrolled/Dang hoc -> Nghi hoc voi status chi dinh.
+
+    Doc lai tu DB moi lan thu: danh sach ung vien duoc tinh truoc do co the da cu
+    (nguoi khac vua doi buoc/trang thai). Raise neu that bai — caller gom vao errors.
+    """
+    old_step = None
+    old_status = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", lead_name)
+        if doc.step != "Enrolled" or doc.status != "Dang hoc":
+            raise frappe.ValidationError(
+                f"Ho so khong con o Enrolled/Dang hoc (hien tai: {doc.step}/{doc.status})"
+            )
+        validate_step_transition(doc.step, "Nghi hoc")
+
+        old_step = doc.step
+        old_status = doc.status
+        doc.step = "Nghi hoc"
+        doc.status = new_status
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                raise
+
+    _log_step_change(lead_name, old_step, "Nghi hoc", old_status, new_status)
+
+
+@frappe.whitelist(methods=["POST"])
+def bulk_withdraw_enrolled_students():
+    """Chuyen hang loat hoc sinh chinh thuc sang buoc Nghi hoc.
+
+    Hai nhom (xem _collect_withdraw_candidates):
+      - Khoi 12 dang hoc                                  -> Nghi hoc / Tot nghiep
+      - Khoi khac dang hoc + "Khong tai ghi danh"         -> Nghi hoc / Chuyen truong
+
+    Tham so (body JSON):
+      dry_run   : "1"/true -> CHI dem, khong ghi gi (man xac nhan tren UI)
+      campus_id : mac dinh lay tu context nguoi dung
+
+    Khong dung bulk_advance_step duoc vi ham do truyen extra_data={} cung nen moi ho so
+    se roi vao cung mot status mac dinh, khong tach duoc Tot nghiep / Chuyen truong.
+
+    Luu y tac dung phu (dung y do): moi doc.save() kich hoat CRM Lead.on_update ->
+    lead_student_sync -> CRM Student.enrollment_status = 'Nghi hoc' -> hoc sinh khong
+    con duoc xep lop moi.
+    """
+    check_crm_permission(_BULK_WITHDRAW_ROLES)
+    data = get_request_data()
+
+    campus_id = data.get("campus_id") or get_current_campus_from_context()
+    raw_dry = data.get("dry_run")
+    dry_run = str(raw_dry).strip().lower() in ("1", "true", "yes") if raw_dry is not None else False
+
+    graduate, transfer = _collect_withdraw_candidates(campus_id)
+
+    def _sample(rows):
+        return [
+            {
+                "name": r["name"],
+                "student_name": r.get("student_name"),
+                "student_code": r.get("student_code"),
+                "current_grade": r.get("current_grade"),
+            }
+            for r in rows[:20]
+        ]
+
+    if dry_run:
+        return success_response(
+            {
+                "graduate_count": len(graduate),
+                "transfer_count": len(transfer),
+                "total": len(graduate) + len(transfer),
+                "graduate_samples": _sample(graduate),
+                "transfer_samples": _sample(transfer),
+            },
+            f"Se chuyen {len(graduate) + len(transfer)} ho so sang buoc Nghi hoc",
+        )
+
+    results = {"graduated": 0, "transferred": 0, "errors": []}
+    for rows, new_status, counter in (
+        (graduate, "Tot nghiep", "graduated"),
+        (transfer, "Chuyen truong", "transferred"),
+    ):
+        for row in rows:
+            try:
+                _withdraw_one_lead(row["name"], new_status)
+                results[counter] += 1
+            except Exception as e:
+                results["errors"].append({"name": row["name"], "error": str(e)})
+
+    frappe.db.commit()
+
+    return success_response(
+        results,
+        f"Da chuyen {results['graduated']} ho so sang Tot nghiep, "
+        f"{results['transferred']} ho so sang Chuyen truong, "
+        f"{len(results['errors'])} loi",
+    )
 
 
 @frappe.whitelist(methods=["POST"])
