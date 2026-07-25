@@ -773,6 +773,15 @@ def _withdraw_one_lead(lead_name, new_status):
         old_status = doc.status
         doc.step = "Nghi hoc"
         doc.status = new_status
+
+        # Bo qua kiem tra truong bat buoc: nhieu ho so cu (import/migrate) khong co dong
+        # nao trong child table `phone_numbers` — table nay dang `reqd: 1` va CRM Lead
+        # KHONG co field SDT phang de bootstrap nhu CRM Guardian, nen `doc.save()` se
+        # throw MandatoryError "Du lieu bi mat trong bang: Phone Numbers".
+        # Day la lo hong du lieu co san, khong lien quan den viec chuyen buoc; chan
+        # chuyen buoc vi ly do do la sai. Ta chi ghi step/status nen khong lam hong
+        # them du lieu nao.
+        doc.flags.ignore_mandatory = True
         try:
             doc.save(ignore_permissions=True)
             break
@@ -844,7 +853,15 @@ def bulk_withdraw_enrolled_students():
                 _withdraw_one_lead(row["name"], new_status)
                 results[counter] += 1
             except Exception as e:
-                results["errors"].append({"name": row["name"], "error": str(e)})
+                # Kem ten/ma hoc sinh: chi co docname CRM-LEAD-xxx thi ops khong tra ra ai
+                results["errors"].append(
+                    {
+                        "name": row["name"],
+                        "student_name": row.get("student_name"),
+                        "student_code": row.get("student_code"),
+                        "error": str(e),
+                    }
+                )
 
     frappe.db.commit()
 
