@@ -201,6 +201,41 @@ def enrich_lead_dict_with_sibling_lead_links(lead_dict):
     return lead_dict
 
 
+def get_profile_links_for_students(crm_student_names):
+    """Ban BULK cua get_profile_link_for_student — {student: {3 key}}.
+
+    Mot query duy nhat, chay tren index (linked_student, step) tao boi patch
+    backfill_crm_student_enrollment_status. Hoc sinh chua lien ket ho so nao thi
+    KHONG co trong dict tra ve (caller tu dien gia tri rong).
+    """
+    out = {}
+    sids = [s for s in (crm_student_names or []) if s]
+    if not sids:
+        return out
+
+    rows = frappe.db.sql(
+        """
+        SELECT `linked_student`, `name`, `step`
+        FROM `tabCRM Lead`
+        WHERE `linked_student` IN %(sids)s
+        ORDER BY (`step` = 'Enrolled') DESC, `modified` DESC
+        """,
+        {"sids": sids},
+        as_dict=True,
+    )
+    for r in rows:
+        sid = r["linked_student"]
+        if sid in out:
+            continue  # ORDER BY dat lead Enrolled (roi moi nhat) len dau moi hoc sinh
+        step = r.get("step")
+        out[sid] = {
+            "linked_lead": r["name"],
+            "linked_lead_step": step,
+            "linked_lead_list_slug": CRM_STEP_TO_PROFILE_LIST_SLUG.get(step, "all"),
+        }
+    return out
+
+
 def get_profile_link_for_student(crm_student_name):
     """Ho so CRM de mo tu man Hoc sinh.
 

@@ -224,7 +224,25 @@ def get_all_students(include_all_campuses=0, only_eligible_for_class=0):
             _enrich_students_current_class_for_batch(students, campus_id_for_class)
         except Exception as e:
             frappe.logger().warning(f"[get_all_students] Failed to enrich class info: {e}")
-        
+
+        # Ho so CRM tuong ung tung hoc sinh — man Hoc sinh la read-only, moi thao tac sua
+        # deu dieu huong sang CRM Lead. 1 query bulk, khong phai N+1.
+        try:
+            from erp.api.crm.lead import get_profile_links_for_students
+
+            links = get_profile_links_for_students([s.get("name") for s in students])
+            for student in students:
+                student.update(
+                    links.get(student.get("name"))
+                    or {
+                        "linked_lead": None,
+                        "linked_lead_step": None,
+                        "linked_lead_list_slug": None,
+                    }
+                )
+        except Exception as e:
+            frappe.logger().warning(f"[get_all_students] Failed to enrich CRM lead links: {e}")
+
         # Always return all students without pagination info
         return success_response(
             data=students,
