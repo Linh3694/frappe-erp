@@ -59,6 +59,50 @@ def _get_current_grade_from_sis(crm_student_name: str) -> str | None:
     return _normalize_grade_to_lead_select(rows[0].get("grade_code"), rows[0].get("title_vn"))
 
 
+def grade_by_student_from_sis(student_ids) -> dict:
+    """Ban BULK cua _get_current_grade_from_sis — map crm_student -> khoi lop ("K", "1".."12").
+
+    Cung quy tac chon: lop Regular, uu tien NAM HOC MOI NHAT (start_date), sau do ban ghi
+    gan lop moi nhat. Nghia la hoc sinh chua co lop nam nay se tu dong lay lop nam gan
+    nhat truoc do — khong can lop cua dung nam hien tai.
+
+    Hoc sinh khong map duoc khoi nao thi KHONG co trong dict tra ve (khong doan bua).
+    """
+    out: dict = {}
+    sids = [s for s in (student_ids or []) if s]
+    if not sids:
+        return out
+
+    rows = frappe.db.sql(
+        """
+        SELECT cs.student_id, eg.grade_code, eg.title_vn
+        FROM `tabSIS Class Student` cs
+        INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+        INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+        LEFT JOIN `tabSIS School Year` sy ON cs.school_year_id = sy.name
+        WHERE cs.student_id IN %(sids)s
+          AND (IFNULL(NULLIF(TRIM(c.class_type), ''), 'regular') = 'regular')
+        ORDER BY sy.start_date DESC, cs.modified DESC
+        """,
+        {"sids": sids},
+        as_dict=True,
+    )
+    # ORDER BY ... DESC -> dong dau tien cua moi hoc sinh la lop moi nhat.
+    # Chi xet DUNG dong do (giong _get_current_grade_from_sis dung LIMIT 1): neu khoi cua
+    # lop moi nhat khong map duoc thi coi nhu khong xac dinh, KHONG roi xuong lop cu hon
+    # vi se cho ra khoi sai.
+    seen = set()
+    for r in rows:
+        sid = r.get("student_id")
+        if sid in seen:
+            continue
+        seen.add(sid)
+        grade = _normalize_grade_to_lead_select(r.get("grade_code"), r.get("title_vn"))
+        if grade:
+            out[sid] = grade
+    return out
+
+
 def sync_current_grade_for_linked_leads(crm_student_name: str) -> None:
     """
     Ghi khoi lop that tu SIS ve field current_grade ("Lop dang hoc")

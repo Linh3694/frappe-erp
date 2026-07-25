@@ -685,9 +685,14 @@ def _collect_withdraw_candidates(campus_id=None):
 
     Dung `current_grade` (khoi DANG hoc that, dong bo nguoc tu SIS qua
     enrolled_class_sync) chu KHONG dung `target_grade` (khoi dang ky luc tuyen sinh,
-    da cu voi hoc sinh hoc nhieu nam). Ho so thieu current_grade khong roi vao nhom 1.
+    da cu voi hoc sinh hoc nhieu nam).
 
-    Tra ve (graduate_rows, transfer_rows) — moi phan tu la dict lead.
+    `current_grade` co the con rong (Lead chua duoc sync bao gio). Khi do tra thang
+    SIS bang grade_by_student_from_sis: ham do lay lop Regular MOI NHAT theo start_date
+    nen hoc sinh chua co lop nam nay se tu dong lay lop nam gan nhat truoc do.
+
+    Tra ve (graduate_rows, transfer_rows) — moi phan tu la dict lead, da duoc gan
+    `current_grade` = khoi da giai quyet (de danh sach xem truoc hien dung khoi that).
     """
     filters = {"step": "Enrolled", "status": "Dang hoc"}
     if campus_id:
@@ -703,10 +708,27 @@ def _collect_withdraw_candidates(campus_id=None):
         order_by="student_name asc",
     )
 
+    # Import trong ham: tranh import vong pipeline <-> enrolled_class_sync
+    # (module kia goi nguoc _log_step_change cua file nay)
+    from erp.api.crm.enrolled_class_sync import grade_by_student_from_sis
+
+    # Chi tra SIS cho nhung ho so con thieu khoi — tranh query thua
+    missing_grade_sids = [
+        lead["linked_student"]
+        for lead in leads
+        if not str(lead.get("current_grade") or "").strip() and lead.get("linked_student")
+    ]
+    sis_grades = grade_by_student_from_sis(missing_grade_sids) if missing_grade_sids else {}
+
     graduate = []
     others = []
     for lead in leads:
-        if str(lead.get("current_grade") or "").strip() == _GRADUATING_GRADE:
+        grade = str(lead.get("current_grade") or "").strip()
+        if not grade:
+            grade = sis_grades.get(lead.get("linked_student"), "")
+            # Ghi nguoc vao row de danh sach xem truoc hien khoi that, khong hien o trong
+            lead["current_grade"] = grade
+        if grade == _GRADUATING_GRADE:
             graduate.append(lead)
         elif lead.get("linked_student"):
             # Khong co linked_student thi khong tra duoc don tai ghi danh -> bo qua
