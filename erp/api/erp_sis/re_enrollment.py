@@ -4257,7 +4257,9 @@ def import_decision_from_excel():
                 "success_count": success_count,
                 "error_count": error_count,
                 "total_count": success_count + error_count,
-                "errors": errors[:50]  # Giới hạn 50 lỗi để tránh response quá lớn
+                # Trả toàn bộ lỗi để FE hiển thị/ xuất Excel đầy đủ — số lỗi tối đa bằng
+                # số dòng trong file nên response vẫn trong tầm kiểm soát.
+                "errors": errors
             },
             message=f"Import hoàn tất: {success_count} thành công, {error_count} lỗi",
             logs=logs

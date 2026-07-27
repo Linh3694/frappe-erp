@@ -142,6 +142,7 @@ def _teacher_snapshot_for_chat(teacher_id, subjects=None):
             "avatarUrl": "",
             "userId": "",
             "userName": "",
+            "phone_number": "",
             "subjects": subjects or [],
         }
     user_id = t.get("user_id")
@@ -150,7 +151,7 @@ def _teacher_snapshot_for_chat(teacher_id, subjects=None):
         user = frappe.db.get_value(
             "User",
             user_id,
-            ["name", "email", "full_name", "user_image"],
+            ["name", "email", "full_name", "user_image", "mobile_no", "phone"],
             as_dict=True,
         )
     return {
@@ -160,6 +161,8 @@ def _teacher_snapshot_for_chat(teacher_id, subjects=None):
         "avatarUrl": (user or {}).get("user_image") or "",
         "userId": user_id or "",
         "userName": (user or {}).get("name") or user_id or "",
+        # SĐT GV — panel thành viên chat hiển thị dưới tên (cùng dạng với PH).
+        "phone_number": (user or {}).get("mobile_no") or (user or {}).get("phone") or "",
         "subjects": subjects or [],
     }
 
