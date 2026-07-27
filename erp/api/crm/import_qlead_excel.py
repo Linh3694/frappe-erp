@@ -336,6 +336,41 @@ def _add_care_note(lead_doc, content, assignee):
 # ---------------------------------------------------------------- doc file
 
 
+def _resolve_path(path):
+    """
+    Chap nhan ca hai kieu duong dan:
+      - duong dan he thong: /home/frappe/.../file.xlsx hoac /tmp/file.xlsx
+      - duong dan file cua Frappe (cai hien tren giao dien): /private/files/... , /files/...
+        -> quy ve sites/<site>/private|public/files/...
+    """
+    import os
+
+    p = (path or "").strip()
+    if not p:
+        frappe.throw("Thieu tham so path")
+    if os.path.isabs(p) and os.path.isfile(p):
+        return p
+
+    tried = [p]
+    for prefix, folder in (("/private/files/", "private"), ("private/files/", "private"),
+                           ("/files/", "public"), ("files/", "public")):
+        if p.startswith(prefix):
+            cand = frappe.get_site_path(folder, "files", p.split("files/", 1)[1])
+            if os.path.isfile(cand):
+                return cand
+            tried.append(cand)
+            break
+    else:
+        # ten file tran -> thu ca hai thu muc
+        for folder in ("private", "public"):
+            cand = frappe.get_site_path(folder, "files", p)
+            if os.path.isfile(cand):
+                return cand
+            tried.append(cand)
+
+    frappe.throw("Khong tim thay file. Da thu:\n  " + "\n  ".join(tried))
+
+
 def _read_rows(path, limit=0):
     import openpyxl
 
@@ -534,10 +569,16 @@ def run(path, dry_run=1, limit=0, commit_every=100):
     dry_run      1 = chi kiem tra va bao cao, KHONG ghi DB (mac dinh)
     limit        chi xu ly N dong dau, 0 = tat ca
     commit_every commit sau moi N ban ghi tao thanh cong
+
+    Khi ghi that, danh sach ban ghi da tao duoc luu ra <path>.import-log.json
+    de con duong lui — xem `undo()`.
     """
     dry_run = int(dry_run)
     limit = int(limit)
     commit_every = int(commit_every) or 100
+
+    path = _resolve_path(path)
+    print(f"  File: {path}")
 
     rows, unknown_cols = _read_rows(path, limit)
     rs = _Resolver()
@@ -546,6 +587,7 @@ def run(path, dry_run=1, limit=0, commit_every=100):
         "total": len(rows), "created": 0, "duplicates": 0, "failed": 0,
         "notes": 0, "guardians_created": 0, "guardians_reused": 0,
         "errors": [], "warnings": [],
+        "created_leads": [], "created_guardians": [],
     }
     if unknown_cols:
         res["warnings"].append(f"Cot khong nhan dang (bo qua): {', '.join(unknown_cols)}")
@@ -593,6 +635,8 @@ def run(path, dry_run=1, limit=0, commit_every=100):
                 })
                 doc.save(ignore_permissions=True)
                 res["guardians_created" if how == "created" else "guardians_reused"] += 1
+                if how == "created":
+                    res["created_guardians"].append(gname)
 
             from erp.api.crm.student_code import ensure_student_code_for_qlead_status
             if not doc.student_code:
@@ -611,6 +655,7 @@ def run(path, dry_run=1, limit=0, commit_every=100):
             )
 
             res["created"] += 1
+            res["created_leads"].append(doc.name)
         except Exception as e:
             try:
                 frappe.db.rollback(save_point=savepoint)
@@ -628,9 +673,92 @@ def run(path, dry_run=1, limit=0, commit_every=100):
 
     if not dry_run:
         frappe.db.commit()
+        res["log_path"] = _write_log(path, res)
 
     _print(res, dry_run)
     return res
+
+
+def _write_log(path, res):
+    """Ghi danh sach ban ghi da tao ra <path>.import-log.json — dau vao cua undo()."""
+    import json
+
+    log_path = f"{path}.import-log.json"
+    payload = {
+        "source": path,
+        "created_leads": res["created_leads"],
+        "created_guardians": res["created_guardians"],
+        "counts": {k: res[k] for k in
+                   ("total", "created", "duplicates", "failed", "notes")},
+        "errors": res["errors"],
+    }
+    try:
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return log_path
+    except OSError as e:
+        frappe.log_error(message=str(e), title="import_qlead_excel: khong ghi duoc log")
+        return None
+
+
+def undo(log_path, dry_run=1):
+    """
+    Go bo dung nhung ban ghi lan chay truoc da tao (doc tu <file>.import-log.json).
+
+        bench --site <site> execute erp.api.crm.import_qlead_excel.undo \
+            --kwargs "{'log_path': '/duong/dan/file.xlsx.import-log.json', 'dry_run': 0}"
+
+    Xoa theo thu tu: CRM Lead Note -> CRM Lead Step History -> CRM Lead -> CRM Guardian.
+    Guardian nao da duoc ho so KHAC tro toi thi giu lai.
+    """
+    import json
+
+    dry_run = int(dry_run)
+    with open(log_path, encoding="utf-8") as f:
+        payload = json.load(f)
+
+    leads = payload.get("created_leads") or []
+    guardians = payload.get("created_guardians") or []
+    out = {"leads": 0, "notes": 0, "history": 0, "guardians": 0, "guardians_kept": 0}
+
+    for name in leads:
+        if not frappe.db.exists("CRM Lead", name):
+            continue
+        out["notes"] += frappe.db.count("CRM Lead Note", {"lead": name})
+        out["history"] += frappe.db.count("CRM Lead Step History", {"lead": name})
+        out["leads"] += 1
+        if dry_run:
+            continue
+        frappe.db.delete("CRM Lead Note", {"lead": name})
+        frappe.db.delete("CRM Lead Step History", {"lead": name})
+        frappe.delete_doc("CRM Lead", name, force=1, ignore_permissions=True,
+                          delete_permanently=True)
+
+    for g in guardians:
+        if not frappe.db.exists("CRM Guardian", g):
+            continue
+        still_used = frappe.db.sql(
+            """SELECT 1 FROM `tabCRM Lead Guardian` WHERE guardian = %s LIMIT 1""", (g,)
+        )
+        if still_used:
+            out["guardians_kept"] += 1
+            continue
+        out["guardians"] += 1
+        if not dry_run:
+            frappe.delete_doc("CRM Guardian", g, force=1, ignore_permissions=True,
+                              delete_permanently=True)
+
+    if not dry_run:
+        frappe.db.commit()
+
+    print("")
+    print("  DRY-RUN undo — khong xoa gi" if dry_run else "  DA XOA")
+    print(f"    CRM Lead            : {out['leads']}")
+    print(f"    CRM Lead Note       : {out['notes']}")
+    print(f"    CRM Lead Step History: {out['history']}")
+    print(f"    CRM Guardian        : {out['guardians']} (giu lai vi con ho so khac dung: {out['guardians_kept']})")
+    print("")
+    return out
 
 
 def _print(res, dry_run):
