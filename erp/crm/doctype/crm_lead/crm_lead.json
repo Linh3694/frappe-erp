@@ -262,7 +262,7 @@
    "fieldname": "student_gender",
    "fieldtype": "Select",
    "label": "Gender",
-   "options": "Nam\nNu"
+   "options": "\nNam\nNu"
   },
   {
    "fieldname": "student_dob",
