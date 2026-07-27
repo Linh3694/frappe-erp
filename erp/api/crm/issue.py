@@ -642,6 +642,169 @@ def _enrich_issue_list_departments(issues):
         r["departments"] = depts
 
 
+def _student_photo_map(student_ids, current_school_year=None):
+    """Map student docname -> URL anh (SIS Photo Active, uu tien nam hoc hien tai)."""
+    if not student_ids:
+        return {}
+    if current_school_year is None:
+        current_school_year = frappe.db.get_value(
+            "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+        )
+    rows = frappe.db.sql(
+        """
+        SELECT student_id, photo
+        FROM `tabSIS Photo`
+        WHERE student_id IN %(ids)s
+          AND type = 'student'
+          AND status = 'Active'
+        ORDER BY
+            CASE WHEN school_year_id = %(year)s THEN 0 ELSE 1 END,
+            upload_date DESC,
+            creation DESC
+        """,
+        {"ids": tuple(student_ids), "year": current_school_year},
+        as_dict=True,
+    )
+    photo_map = {}
+    for row in rows or []:
+        sid = row.get("student_id")
+        url = (row.get("photo") or "").strip()
+        if not sid or not url or sid in photo_map:
+            continue
+        if url.startswith("/files/"):
+            url = frappe.utils.get_url(url)
+        elif not url.startswith("http"):
+            url = frappe.utils.get_url("/files/" + url)
+        photo_map[sid] = url
+    return photo_map
+
+
+def _enrich_issue_list_people(issues):
+    """
+    Gan students_info / guardians_info cho danh sach issue (cot Hoc sinh & Phu huynh lien quan).
+    students_info: [{student, student_name, student_code, class_title, photo}]
+    guardians_info: [{guardian, guardian_name, phone_number}]
+    """
+    if not issues:
+        return
+    names = [r.get("name") for r in issues if r.get("name")]
+    if not names:
+        return
+    try:
+        stud_links = frappe.get_all(
+            "CRM Issue Student",
+            filters={"parent": ["in", names], "parenttype": "CRM Issue"},
+            fields=["parent", "student", "idx"],
+        )
+        guard_links = frappe.get_all(
+            "CRM Issue Guardian",
+            filters={"parent": ["in", names], "parenttype": "CRM Issue"},
+            fields=["parent", "guardian", "idx"],
+        )
+        stud_links = sorted(stud_links or [], key=lambda r: ((r.parent or ""), r.idx or 0))
+        guard_links = sorted(guard_links or [], key=lambda r: ((r.parent or ""), r.idx or 0))
+
+        students_by_issue = {}
+        for r in stud_links:
+            sid = (r.get("student") or "").strip()
+            if not sid:
+                continue
+            bucket = students_by_issue.setdefault(r.get("parent"), [])
+            if sid not in bucket:
+                bucket.append(sid)
+        # Fallback truong phang `student` khi bang con trong (du lieu cu)
+        for r in issues:
+            if not students_by_issue.get(r.get("name")) and (r.get("student") or "").strip():
+                students_by_issue[r.get("name")] = [r["student"].strip()]
+
+        guardians_by_issue = {}
+        for r in guard_links:
+            gid = (r.get("guardian") or "").strip()
+            if not gid:
+                continue
+            bucket = guardians_by_issue.setdefault(r.get("parent"), [])
+            if gid not in bucket:
+                bucket.append(gid)
+
+        all_students = sorted({sid for ids in students_by_issue.values() for sid in ids})
+        all_guardians = sorted({gid for ids in guardians_by_issue.values() for gid in ids})
+
+        student_by_id = {}
+        class_by_student = {}
+        photo_by_student = {}
+        if all_students:
+            for s in (
+                frappe.get_all(
+                    "CRM Student",
+                    filters={"name": ["in", all_students]},
+                    fields=["name", "student_name", "student_code"],
+                )
+                or []
+            ):
+                student_by_id[s["name"]] = s
+            current_sy = frappe.db.get_value(
+                "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+            )
+            if current_sy:
+                class_rows = frappe.db.sql(
+                    """
+                    SELECT cs.student_id, c.title AS class_title
+                    FROM `tabSIS Class Student` cs
+                    INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+                    WHERE cs.student_id IN %(ids)s
+                      AND cs.school_year_id = %(year)s
+                      AND c.school_year_id = %(year)s
+                    """,
+                    {"ids": tuple(all_students), "year": current_sy},
+                    as_dict=True,
+                )
+                for cr in class_rows or []:
+                    sid = cr.get("student_id")
+                    if sid and sid not in class_by_student:
+                        class_by_student[sid] = (cr.get("class_title") or "").strip()
+            photo_by_student = _student_photo_map(all_students, current_sy)
+
+        guardian_by_id = {}
+        if all_guardians:
+            for g in (
+                frappe.get_all(
+                    "CRM Guardian",
+                    filters={"name": ["in", all_guardians]},
+                    fields=["name", "guardian_name", "phone_number"],
+                )
+                or []
+            ):
+                guardian_by_id[g["name"]] = g
+
+        for r in issues:
+            issue_name = r.get("name")
+            r["students_info"] = [
+                {
+                    "student": sid,
+                    "student_name": (student_by_id.get(sid, {}).get("student_name") or "").strip() or sid,
+                    "student_code": (student_by_id.get(sid, {}).get("student_code") or "").strip(),
+                    "class_title": class_by_student.get(sid, ""),
+                    "photo": photo_by_student.get(sid, ""),
+                }
+                for sid in (students_by_issue.get(issue_name) or [])
+            ]
+            r["guardians_info"] = [
+                {
+                    "guardian": gid,
+                    "guardian_name": (guardian_by_id.get(gid, {}).get("guardian_name") or "").strip() or gid,
+                    "phone_number": (guardian_by_id.get(gid, {}).get("phone_number") or "").strip(),
+                }
+                for gid in (guardians_by_issue.get(issue_name) or [])
+            ]
+    except Exception:
+        frappe.log_error(
+            title="_enrich_issue_list_people", message=frappe.get_traceback()
+        )
+        for r in issues:
+            r.setdefault("students_info", [])
+            r.setdefault("guardians_info", [])
+
+
 def _user_roles():
     return set(frappe.get_roles(frappe.session.user))
 
@@ -1234,6 +1397,7 @@ def get_issues():
 
     _enrich_user_info(issues)
     _enrich_issue_list_departments(issues)
+    _enrich_issue_list_people(issues)
     out = paginated_response(issues, page, total, per_page)
     out["can_see_pending_queue_scope"] = list_pending_scope_hint
     out["is_department_member"] = is_department_member
@@ -1301,6 +1465,7 @@ def get_pending_issues():
     )
     _enrich_user_info(issues)
     _enrich_issue_list_departments(issues)
+    _enrich_issue_list_people(issues)
     out = paginated_response(issues, page, total, per_page)
     out["can_see_pending_queue_scope"] = scope_meta
     out["is_department_member"] = dept_flag
