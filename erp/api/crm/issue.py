@@ -568,6 +568,93 @@ def _issue_names_matching_department(dept_name):
     return list(set(n1 or []) | set(n2 or []))
 
 
+def _issue_names_matching_people(search):
+    """
+    CRM Issue khop tu khoa theo NGUOI lien quan (search chay tren toan bo du lieu):
+    hoc sinh (ten / ma HS / lop theo nam hoc cua van de) va phu huynh (ten / SDT).
+    Bao gom ca truong phang `student` / `guardian` cua du lieu cu.
+    """
+    if not search:
+        return set()
+    names = set()
+    try:
+        # 1. Hoc sinh: ten + ma HS (bang con + truong phang)
+        frag, params = build_search_condition(["s.student_name", "s.student_code"], search)
+        if frag:
+            names.update(
+                frappe.db.sql_list(
+                    f"""
+                    SELECT DISTINCT ist.parent
+                    FROM `tabCRM Issue Student` ist
+                    INNER JOIN `tabCRM Student` s ON s.name = ist.student
+                    WHERE ist.parenttype = 'CRM Issue' AND {frag}
+                    """,
+                    params,
+                )
+            )
+            names.update(
+                frappe.db.sql_list(
+                    f"""
+                    SELECT DISTINCT i.name
+                    FROM `tabCRM Issue` i
+                    INNER JOIN `tabCRM Student` s ON s.name = i.student
+                    WHERE {frag}
+                    """,
+                    params,
+                )
+            )
+
+        # 2. Lop chu nhiem cua hoc sinh — theo nam hoc cua chinh van de (fallback nam dang bat)
+        frag_c, params_c = build_search_condition(["c.title"], search)
+        if frag_c:
+            active_sy = _active_school_year() or ""
+            names.update(
+                frappe.db.sql_list(
+                    f"""
+                    SELECT DISTINCT ist.parent
+                    FROM `tabCRM Issue Student` ist
+                    INNER JOIN `tabCRM Issue` i ON i.name = ist.parent
+                    INNER JOIN `tabSIS Class Student` cs ON cs.student_id = ist.student
+                    INNER JOIN `tabSIS Class` c
+                        ON c.name = cs.class_id AND c.school_year_id = cs.school_year_id
+                    WHERE ist.parenttype = 'CRM Issue'
+                      AND cs.school_year_id = IFNULL(NULLIF(TRIM(i.school_year_id), ''), %s)
+                      AND {frag_c}
+                    """,
+                    [active_sy] + params_c,
+                )
+            )
+
+        # 3. Phu huynh: ten + SDT (bang con + truong phang)
+        frag_g, params_g = build_search_condition(["g.guardian_name", "g.phone_number"], search)
+        if frag_g:
+            names.update(
+                frappe.db.sql_list(
+                    f"""
+                    SELECT DISTINCT ig.parent
+                    FROM `tabCRM Issue Guardian` ig
+                    INNER JOIN `tabCRM Guardian` g ON g.name = ig.guardian
+                    WHERE ig.parenttype = 'CRM Issue' AND {frag_g}
+                    """,
+                    params_g,
+                )
+            )
+            names.update(
+                frappe.db.sql_list(
+                    f"""
+                    SELECT DISTINCT i.name
+                    FROM `tabCRM Issue` i
+                    INNER JOIN `tabCRM Guardian` g ON g.name = i.guardian
+                    WHERE {frag_g}
+                    """,
+                    params_g,
+                )
+            )
+    except Exception:
+        frappe.log_error(title="_issue_names_matching_people", message=frappe.get_traceback())
+    return names
+
+
 def _issue_names_visible_to_department_members(dept_docnames):
     """Issue ma user (thuoc mot trong cac phong ban dept_docnames) co lien quan."""
     if not dept_docnames:
@@ -719,6 +806,27 @@ def _student_photo_map(student_ids, current_school_year=None):
             url = frappe.utils.get_url("/files/" + url)
         photo_map[sid] = url
     return photo_map
+
+
+def _enrich_issue_list_school_year(issues):
+    """Gan school_year_title cho danh sach issue (cot/xuat Excel hien nhan thay vi docname)."""
+    if not issues:
+        return
+    ids = sorted({(r.get("school_year_id") or "").strip() for r in issues if r.get("school_year_id")})
+    title_by_id = {}
+    if ids:
+        for y in (
+            frappe.get_all(
+                "SIS School Year",
+                filters={"name": ["in", ids]},
+                fields=["name", "title_vn", "title_en"],
+            )
+            or []
+        ):
+            title_by_id[y["name"]] = (y.get("title_vn") or y.get("title_en") or y["name"]).strip()
+    for r in issues:
+        sy = (r.get("school_year_id") or "").strip()
+        r["school_year_title"] = title_by_id.get(sy, sy)
 
 
 def _enrich_issue_list_people(issues):
@@ -1376,14 +1484,15 @@ def get_issues():
             return out
         name_constraint_sets.append(set(visible))
     if search:
-        # Tim theo ma/tieu de tren TOAN BO du lieu (khong chi trang hien tai):
-        # token + bo dau + dau tu qua helper chung -> dua ve dieu kien name-in.
+        # Tim tren TOAN BO du lieu (khong chi trang hien tai): ma/tieu de + hoc sinh
+        # (ten/ma HS/lop) + phu huynh (ten/SDT) -> dua ve dieu kien name-in.
         search_frag, search_params = build_search_condition(["issue_code", "title"], search)
         matched_names = set()
         if search_frag:
             matched_names.update(
                 frappe.db.sql_list(f"SELECT name FROM `tabCRM Issue` WHERE {search_frag}", search_params)
             )
+        matched_names.update(_issue_names_matching_people(search))
         # Search rong/khong khop -> set rong -> intersection ben duoi tra ve khong co ket qua.
         name_constraint_sets.append(matched_names)
     if name_constraint_sets:
@@ -1433,6 +1542,7 @@ def get_issues():
     _enrich_user_info(issues)
     _enrich_issue_list_departments(issues)
     _enrich_issue_list_people(issues)
+    _enrich_issue_list_school_year(issues)
     out = paginated_response(issues, page, total, per_page)
     out["can_see_pending_queue_scope"] = list_pending_scope_hint
     out["is_department_member"] = is_department_member
@@ -1453,13 +1563,15 @@ def get_pending_issues():
     scope_meta = "all"
     dept_flag = bool(_get_user_crm_issue_department_names(user))
     if search:
-        # Tim theo ma/tieu de tren toan bo hang cho (khong chi trang hien tai).
+        # Tim tren toan bo hang cho: ma/tieu de + hoc sinh + phu huynh lien quan.
         search_frag, search_params = build_search_condition(["issue_code", "title"], search)
-        matched_names = (
+        matched_names = set(
             frappe.db.sql_list(f"SELECT name FROM `tabCRM Issue` WHERE {search_frag}", search_params)
             if search_frag
             else []
         )
+        matched_names.update(_issue_names_matching_people(search))
+        matched_names = list(matched_names)
         if not matched_names:
             out = paginated_response([], page, 0, per_page)
             out["can_see_pending_queue_scope"] = scope_meta
@@ -1502,6 +1614,7 @@ def get_pending_issues():
     _enrich_user_info(issues)
     _enrich_issue_list_departments(issues)
     _enrich_issue_list_people(issues)
+    _enrich_issue_list_school_year(issues)
     out = paginated_response(issues, page, total, per_page)
     out["can_see_pending_queue_scope"] = scope_meta
     out["is_department_member"] = dept_flag
