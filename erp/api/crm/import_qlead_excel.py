@@ -859,6 +859,138 @@ def run(path, dry_run=1, limit=0, commit_every=100, as_of=None, year_floor=None)
     return res
 
 
+_BACKFILL_FIELDS = {
+    "student_gender": "g",              # 'g' = chuoi thuong, controller tu chuan hoa Nu/Nam
+    "student_dob": "d",                 # 'd' = ngay dd/mm/yyyy -> YYYY-MM-DD
+    "current_grade": "s",
+    "target_grade": "s",
+    "current_school": "s",
+}
+
+
+def backfill(path, dry_run=1, fields=None, overwrite=0, commit_every=200):
+    """
+    Cap nhat them thong tin cho ho so DA import (khong tao moi).
+
+        bench --site <site> execute erp.api.crm.import_qlead_excel.backfill \
+            --kwargs "{'path': '/private/files/....xlsx', 'dry_run': 0}"
+
+    path       file .xlsx (sheet «QLead») — chap nhan ca duong dan Frappe
+    dry_run    1 = chi bao cao (mac dinh)
+    fields     danh sach field muon cap nhat; bo trong = ca 5:
+               student_gender, student_dob, current_grade, target_grade, current_school
+    overwrite  0 = chi dien vao o dang TRONG tren ho so (mac dinh, an toan)
+               1 = ghi de ca khi ho so da co gia tri khac
+
+    Doi chieu ho so bang cap (SDT da chuan hoa + ten hoc sinh) — dung rule voi
+    `run()`, nen anh chi em dung chung SDT khong bi lan.
+    """
+    dry_run, overwrite = int(dry_run), int(overwrite)
+    commit_every = int(commit_every) or 200
+    use = list(fields) if fields else list(_BACKFILL_FIELDS)
+    bad = [f for f in use if f not in _BACKFILL_FIELDS]
+    if bad:
+        frappe.throw(f"Field khong ho tro: {bad}. Cho phep: {list(_BACKFILL_FIELDS)}")
+
+    path = _resolve_path(path)
+    print(f"  File: {path}")
+    print(f"  Field: {', '.join(use)} | overwrite={overwrite}")
+
+    rows, _ = _read_rows(path, 0)
+    res = {"total": len(rows), "matched": 0, "updated": 0, "unchanged": 0,
+           "not_found": 0, "errors": [], "per_field": {f: 0 for f in use}}
+
+    # cot Excel -> field CRM (chi 5 field duoc phep)
+    src_key = {
+        "student_gender": "student_gender", "student_dob": "student_dob",
+        "current_grade": "current_grade", "target_grade": "target_grade",
+        "current_school": "current_school",
+    }
+
+    for i, row in enumerate(rows, start=1):
+        rnum = row["_row"]
+        phone = _phone(row.get("g1_phone_1"))
+        sname = _txt(row.get("student_name"))
+        if not phone or not sname:
+            continue
+        lead = _existing_lead(phone, sname)
+        if not lead:
+            res["not_found"] += 1
+            continue
+        res["matched"] += 1
+
+        changes = {}
+        for f in use:
+            raw = row.get(src_key[f])
+            kind = _BACKFILL_FIELDS[f]
+            val = _date(raw) if kind == "d" else _txt(raw)
+            if not val:
+                continue
+            cur = frappe.db.get_value("CRM Lead", lead, f)
+            cur_s = str(cur)[:10] if (kind == "d" and cur) else (str(cur).strip() if cur else "")
+            if cur_s and not overwrite:
+                continue
+            if cur_s == val:
+                continue
+            changes[f] = val
+
+        if not changes:
+            res["unchanged"] += 1
+            continue
+
+        for f in changes:
+            res["per_field"][f] += 1
+        res["updated"] += 1
+        if dry_run:
+            continue
+
+        savepoint = f"bf_{i}"
+        try:
+            frappe.db.savepoint(savepoint)
+            doc = frappe.get_doc("CRM Lead", lead)
+            for f, v in changes.items():
+                doc.set(f, v)
+            # giu validate de controller chuan hoa gioi tinh (Nữ -> Nu) va check Select
+            doc.flags.ignore_mandatory = True
+            doc.save(ignore_permissions=True)
+        except Exception as e:
+            try:
+                frappe.db.rollback(save_point=savepoint)
+            except Exception:
+                pass
+            res["updated"] -= 1
+            for f in changes:
+                res["per_field"][f] -= 1
+            res["errors"].append({"row": rnum, "lead": lead, "error": str(e)[:250]})
+            frappe.log_error(message=frappe.get_traceback() or str(e),
+                             title=f"backfill CRM Lead dong {rnum}")
+
+        if res["updated"] and res["updated"] % commit_every == 0:
+            frappe.db.commit()
+
+    if not dry_run:
+        frappe.db.commit()
+
+    print("")
+    print("=" * 62)
+    print("  DRY-RUN — khong ghi gi vao DB" if dry_run else "  DA GHI VAO DB")
+    print("=" * 62)
+    print(f"  Dong doc duoc      : {res['total']}")
+    print(f"  Khop ho so         : {res['matched']}")
+    print(f"  Khong tim thay     : {res['not_found']}")
+    print(f"  {'Se cap nhat' if dry_run else 'Da cap nhat':<18} : {res['updated']}")
+    print(f"  Khong doi          : {res['unchanged']}")
+    print("  Theo field:")
+    for f, n in res["per_field"].items():
+        print(f"    {f:<18} {n}")
+    if res["errors"]:
+        print(f"\n  Loi ({len(res['errors'])}):")
+        for e in res["errors"][:20]:
+            print(f"    dong {e['row']:>5} {e['lead']}: {e['error']}")
+    print("")
+    return res
+
+
 def _write_log(path, res):
     """Ghi danh sach ban ghi da tao ra <path>.import-log.json — dau vao cua undo()."""
     import json
