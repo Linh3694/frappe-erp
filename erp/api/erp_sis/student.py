@@ -443,19 +443,19 @@ def get_student_data():
         )
 
 
-def _get_homeroom_class_map_for_students(student_ids, campus_id=None):
+def _get_homeroom_class_map_for_students(student_ids, campus_id=None, school_year_id=None):
     """
     Map student_id -> {class_id, class_title} chỉ lớp chủ nhiệm (homeroom):
     - SIS Class.class_type = 'regular' (không lấy mixed/club trên lớp).
     - SIS Class Student: chỉ bản ghi xếp lớp regular (không lấy mixed).
-    Năm học: active theo campus (fallback toàn hệ thống).
+    Năm học: school_year_id nếu truyền, ngược lại active theo campus (fallback toàn hệ thống).
     """
     if not student_ids:
         return {}
     mapping = {}
     try:
-        current_school_year = None
-        if campus_id:
+        current_school_year = (school_year_id or "").strip() or None
+        if not current_school_year and campus_id:
             current_school_year = frappe.db.get_value(
                 "SIS School Year",
                 {"is_enable": 1, "campus_id": campus_id},
@@ -503,9 +503,10 @@ def _get_homeroom_class_map_for_students(student_ids, campus_id=None):
     return mapping
 
 
-def _enrich_students_current_class_for_batch(students, campus_id=None):
+def _enrich_students_current_class_for_batch(students, campus_id=None, school_year_id=None):
     """
     Gán current_class_id / current_class_title — chỉ lớp chủ nhiệm (regular), đồng bộ search_students / Daily Health.
+    school_year_id: lấy lớp theo đúng năm học được chỉ định (mặc định năm học active).
     """
     if not students:
         return
@@ -513,12 +514,16 @@ def _enrich_students_current_class_for_batch(students, campus_id=None):
     if not student_ids:
         return
     try:
-        class_mapping = _get_homeroom_class_map_for_students(student_ids, campus_id)
+        class_mapping = _get_homeroom_class_map_for_students(student_ids, campus_id, school_year_id)
         for s in students:
             sid = s.get("name")
             if sid in class_mapping:
                 s["current_class_id"] = class_mapping[sid]["class_id"]
                 s["current_class_title"] = class_mapping[sid]["class_title"]
+            elif school_year_id:
+                # Năm học chỉ định mà HS không có lớp -> để trống (tránh hiện lớp năm khác)
+                s["current_class_id"] = None
+                s["current_class_title"] = None
     except Exception as e:
         frappe.logger().warning(f"_enrich_students_current_class_for_batch: {e}")
 
@@ -563,6 +568,8 @@ def batch_get_students():
         
         # Get student_ids from request
         student_ids = data.get('student_ids', [])
+        # Tùy chọn: lấy lớp theo đúng năm học (mặc định năm học active)
+        school_year_id = (data.get('school_year_id') or '').strip()
         
         if not student_ids or not isinstance(student_ids, list):
             return validation_error_response(
@@ -601,7 +608,7 @@ def batch_get_students():
         if not missing_ids:
             # All students from cache — vẫn enrich lớp (cache không lưu current_class_title)
             all_cached = list(cached_students.values())
-            _enrich_students_current_class_for_batch(all_cached, campus_id)
+            _enrich_students_current_class_for_batch(all_cached, campus_id, school_year_id)
             return success_response(
                 data=all_cached,
                 message=f"Successfully fetched {len(all_cached)} students (all from cache)",
@@ -698,7 +705,7 @@ def batch_get_students():
         
         # Combine cached and freshly fetched students
         all_students = list(cached_students.values()) + students
-        _enrich_students_current_class_for_batch(all_students, campus_id)
+        _enrich_students_current_class_for_batch(all_students, campus_id, school_year_id)
 
         return success_response(
             data=all_students,

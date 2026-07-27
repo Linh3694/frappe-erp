@@ -341,6 +341,13 @@ def _finalize_issue_api_dict(doc):
     _enrich_issue_students_display(data)
     _enrich_issue_guardians_display(data)
     _enrich_process_logs_accent(data, doc)
+    # Nhan nam hoc cho UI (khong bat client tra cuu them)
+    sy = (data.get("school_year_id") or "").strip()
+    if sy:
+        row = frappe.db.get_value("SIS School Year", sy, ["title_vn", "title_en"], as_dict=True)
+        data["school_year_title"] = (
+            (row.get("title_vn") or row.get("title_en") or sy).strip() if row else sy
+        )
     # Quyen theo session thuc te (tranh lech JWT/Has Role o frontend)
     u = frappe.session.user
     if u and u != "Guest":
@@ -642,14 +649,49 @@ def _enrich_issue_list_departments(issues):
         r["departments"] = depts
 
 
+def _active_school_year():
+    """Docname nam hoc dang bat (is_enable) — mac dinh khi client khong gui school_year_id."""
+    return frappe.db.get_value(
+        "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+    )
+
+
+def _class_titles_by_school_year(pairs):
+    """
+    Lop chu nhiem theo tung nam hoc.
+    pairs: iterable (school_year_id, student_id) -> tra ve {(year, student): class_title}
+    """
+    by_year = {}
+    for year, sid in pairs:
+        if year and sid:
+            by_year.setdefault(year, set()).add(sid)
+    out = {}
+    for year, sids in by_year.items():
+        rows = frappe.db.sql(
+            """
+            SELECT cs.student_id, c.title AS class_title
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+            WHERE cs.student_id IN %(ids)s
+              AND cs.school_year_id = %(year)s
+              AND c.school_year_id = %(year)s
+            """,
+            {"ids": tuple(sids), "year": year},
+            as_dict=True,
+        )
+        for cr in rows or []:
+            key = (year, cr.get("student_id"))
+            if cr.get("student_id") and key not in out:
+                out[key] = (cr.get("class_title") or "").strip()
+    return out
+
+
 def _student_photo_map(student_ids, current_school_year=None):
     """Map student docname -> URL anh (SIS Photo Active, uu tien nam hoc hien tai)."""
     if not student_ids:
         return {}
     if current_school_year is None:
-        current_school_year = frappe.db.get_value(
-            "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
-        )
+        current_school_year = _active_school_year()
     rows = frappe.db.sql(
         """
         SELECT student_id, photo
@@ -730,8 +772,13 @@ def _enrich_issue_list_people(issues):
         all_guardians = sorted({gid for ids in guardians_by_issue.values() for gid in ids})
 
         student_by_id = {}
-        class_by_student = {}
+        # Lop lay theo nam hoc cua chinh van de (fallback nam hoc dang bat)
+        class_by_year_student = {}
         photo_by_student = {}
+        current_sy = _active_school_year()
+        year_by_issue = {
+            r.get("name"): (r.get("school_year_id") or "").strip() or current_sy for r in issues
+        }
         if all_students:
             for s in (
                 frappe.get_all(
@@ -742,26 +789,11 @@ def _enrich_issue_list_people(issues):
                 or []
             ):
                 student_by_id[s["name"]] = s
-            current_sy = frappe.db.get_value(
-                "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
+            class_by_year_student = _class_titles_by_school_year(
+                (year_by_issue.get(issue_name), sid)
+                for issue_name, sids in students_by_issue.items()
+                for sid in sids
             )
-            if current_sy:
-                class_rows = frappe.db.sql(
-                    """
-                    SELECT cs.student_id, c.title AS class_title
-                    FROM `tabSIS Class Student` cs
-                    INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
-                    WHERE cs.student_id IN %(ids)s
-                      AND cs.school_year_id = %(year)s
-                      AND c.school_year_id = %(year)s
-                    """,
-                    {"ids": tuple(all_students), "year": current_sy},
-                    as_dict=True,
-                )
-                for cr in class_rows or []:
-                    sid = cr.get("student_id")
-                    if sid and sid not in class_by_student:
-                        class_by_student[sid] = (cr.get("class_title") or "").strip()
             photo_by_student = _student_photo_map(all_students, current_sy)
 
         guardian_by_id = {}
@@ -783,7 +815,7 @@ def _enrich_issue_list_people(issues):
                     "student": sid,
                     "student_name": (student_by_id.get(sid, {}).get("student_name") or "").strip() or sid,
                     "student_code": (student_by_id.get(sid, {}).get("student_code") or "").strip(),
-                    "class_title": class_by_student.get(sid, ""),
+                    "class_title": class_by_year_student.get((year_by_issue.get(issue_name), sid), ""),
                     "photo": photo_by_student.get(sid, ""),
                 }
                 for sid in (students_by_issue.get(issue_name) or [])
@@ -1125,9 +1157,8 @@ def _enrich_issue_students_display(data):
         )
         name_to_display = {s["name"]: (s.get("student_name") or "").strip() for s in (stud_rows or [])}
         class_by_student = {}
-        current_sy = frappe.db.get_value(
-            "SIS School Year", {"is_enable": 1}, "name", order_by="start_date desc"
-        )
+        # Lop theo nam hoc cua van de (fallback nam hoc dang bat)
+        current_sy = (data.get("school_year_id") or "").strip() or _active_school_year()
         if current_sy:
             class_rows = frappe.db.sql(
                 """
@@ -1295,6 +1326,7 @@ def get_issues():
     lead_name = frappe.request.args.get("lead_name")
     status = frappe.request.args.get("status")
     issue_module = frappe.request.args.get("issue_module")
+    school_year_id = (frappe.request.args.get("school_year_id") or "").strip()
     approval_status = frappe.request.args.get("approval_status")
     department = frappe.request.args.get("department")
     pic = (frappe.request.args.get("pic") or "").strip()
@@ -1312,6 +1344,8 @@ def get_issues():
         filters["status"] = status
     if issue_module:
         filters["issue_module"] = issue_module
+    if school_year_id:
+        filters["school_year_id"] = school_year_id
     if approval_status:
         filters["approval_status"] = approval_status
     if pic:
@@ -1373,6 +1407,7 @@ def get_issues():
             "issue_code",
             "title",
             "issue_module",
+            "school_year_id",
             "status",
             "result",
             "priority",
@@ -1442,6 +1477,7 @@ def get_pending_issues():
             "issue_code",
             "title",
             "issue_module",
+            "school_year_id",
             "status",
             "result",
             "priority",
@@ -1655,6 +1691,13 @@ def create_issue():
 
         occurred_at = _normalize_issue_date(data.get("occurred_at"))
         doc.occurred_at = occurred_at
+        # Nam hoc: client gui; thieu -> nam hoc dang bat (mobile/API cu)
+        school_year_id = (data.get("school_year_id") or "").strip() or _active_school_year()
+        if school_year_id and not frappe.db.exists("SIS School Year", school_year_id):
+            return validation_error_response(
+                "Nam hoc khong hop le", {"school_year_id": ["Khong ton tai"]}
+            )
+        doc.school_year_id = school_year_id or ""
         doc.lead = data.get("lead") or ""
         _sync_issue_students(doc, data)
         _sync_issue_guardians(doc, data)
@@ -1942,6 +1985,14 @@ def update_issue():
 
         if "occurred_at" in data:
             doc.occurred_at = _normalize_issue_date(data.get("occurred_at"))
+
+        if "school_year_id" in data:
+            sy = (data.get("school_year_id") or "").strip()
+            if sy and not frappe.db.exists("SIS School Year", sy):
+                return validation_error_response(
+                    "Nam hoc khong hop le", {"school_year_id": ["Khong ton tai"]}
+                )
+            doc.school_year_id = sy
 
         if "priority" in data and (data.get("priority") or "").strip() not in VALID_PRIORITIES:
             return validation_error_response("Muc do khong hop le", {"priority": ["Khong hop le"]})
