@@ -873,7 +873,8 @@ _BACKFILL_FIELDS = {
 }
 
 
-def backfill(path, dry_run=1, fields=None, overwrite=0, commit_every=200):
+def backfill(path, dry_run=1, fields=None, overwrite=0, clear_missing=None,
+             commit_every=200):
     """
     Cap nhat them thong tin cho ho so DA import (khong tao moi).
 
@@ -886,6 +887,11 @@ def backfill(path, dry_run=1, fields=None, overwrite=0, commit_every=200):
                student_gender, student_dob, current_grade, target_grade, current_school
     overwrite  0 = chi dien vao o dang TRONG tren ho so (mac dinh, an toan)
                1 = ghi de ca khi ho so da co gia tri khac
+    clear_missing  danh sach field: khi FILE khong co du lieu ma ho so lai dang co
+               gia tri thi XOA gia tri do. Dung cho truong hop Frappe tu gan mac dinh:
+               Select nao khong co dong trong dau `options` se duoc
+               frappe.model.create_new gan option dau tien cho MOI doc moi
+               (vd student_gender = 'Nam'), tao ra du lieu khong ai nhap.
 
     Doi chieu ho so bang cap (SDT da chuan hoa + ten hoc sinh) — dung rule voi
     `run()`, nen anh chi em dung chung SDT khong bi lan.
@@ -896,14 +902,19 @@ def backfill(path, dry_run=1, fields=None, overwrite=0, commit_every=200):
     bad = [f for f in use if f not in _BACKFILL_FIELDS]
     if bad:
         frappe.throw(f"Field khong ho tro: {bad}. Cho phep: {list(_BACKFILL_FIELDS)}")
+    clear = set(clear_missing or [])
+    if not clear <= set(use):
+        frappe.throw(f"clear_missing phai nam trong fields: {sorted(clear - set(use))}")
 
     path = _resolve_path(path)
     print(f"  File: {path}")
-    print(f"  Field: {', '.join(use)} | overwrite={overwrite}")
+    print(f"  Field: {', '.join(use)} | overwrite={overwrite}"
+          + (f" | clear_missing={sorted(clear)}" if clear else ""))
 
     rows, _ = _read_rows(path, 0)
     res = {"total": len(rows), "matched": 0, "updated": 0, "unchanged": 0,
-           "not_found": 0, "errors": [], "per_field": {f: 0 for f in use}}
+           "not_found": 0, "errors": [], "per_field": {f: 0 for f in use},
+           "cleared": {}}
 
     # cot Excel -> field CRM (chi 5 field duoc phep)
     src_key = {f: f for f in _BACKFILL_FIELDS}
@@ -925,9 +936,14 @@ def backfill(path, dry_run=1, fields=None, overwrite=0, commit_every=200):
             raw = row.get(src_key[f])
             kind = _BACKFILL_FIELDS[f]
             val = _date(raw) if kind == "d" else _txt(raw)
-            if not val:
-                continue
             cur = frappe.db.get_value("CRM Lead", lead, f)
+            if not val:
+                # file khong co du lieu: mac dinh bo qua, tru khi duoc yeu cau don
+                # gia tri rac do Frappe tu gan (xem clear_missing).
+                if f in clear and cur:
+                    changes[f] = ""
+                    res["cleared"][f] = res["cleared"].get(f, 0) + 1
+                continue
             cur_s = str(cur)[:10] if (kind == "d" and cur) else (str(cur).strip() if cur else "")
             if cur_s and not overwrite:
                 continue
@@ -983,7 +999,9 @@ def backfill(path, dry_run=1, fields=None, overwrite=0, commit_every=200):
     print(f"  Khong doi          : {res['unchanged']}")
     print("  Theo field:")
     for f, n in res["per_field"].items():
-        print(f"    {f:<18} {n}")
+        cl = res["cleared"].get(f, 0)
+        extra = f"   (trong do XOA gia tri rac: {cl})" if cl else ""
+        print(f"    {f:<18} {n}{extra}")
     if res["errors"]:
         print(f"\n  Loi ({len(res['errors'])}):")
         for e in res["errors"][:20]:
