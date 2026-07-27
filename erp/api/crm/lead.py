@@ -5,7 +5,7 @@ CRM Lead API - CRUD Ho So Tuyen Sinh
 import re
 import frappe
 from frappe import _
-from erp.utils.search import build_search_condition, search_names
+from erp.utils.search import build_search_condition, matches_search, search_names
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
     single_item_response, list_response, validation_error_response, not_found_response
@@ -16,6 +16,7 @@ from erp.api.crm.utils import (
     should_restrict_marcom_profile_view, marcom_profile_owner_filters,
     lead_visible_to_marcom_viewer, get_marcom_profile_owner_users,
     check_marcom_draft_create_only, apply_marcom_pic_policy,
+    STATUS_LABEL_VN, STEP_LABEL_VN, GENDER_LABEL_VN,
 )
 from erp.utils.campus_utils import get_current_campus_from_context
 
@@ -282,11 +283,198 @@ def get_profile_link_for_student(crm_student_name):
     }
 
 
-def _parse_lead_filters(raw):
+# ── Helper cho search/filter theo COT HIEN THI cua danh sach ho so ───────────────
+# Cot dan xuat (khong phai cot DB tren CRM Lead): current_year_class / prev_year_class
+# (join SIS Class Student), last_care_date (max creation CRM Lead Note), owner & pic_*
+# (hien thi ho ten -> User). Moi truong hop deu quy ve dieu kien `name in/not in`.
+
+def _sql_in_placeholders(values):
+    """('%s, %s, %s', [v1, v2, v3]) — dung positional param cho frappe.db.sql."""
+    values = list(values)
+    return ", ".join(["%s"] * len(values)), values
+
+
+def _enum_keys_matching(label_map, query):
+    """Key enum khop query theo NHAN tieng Viet hoac theo chinh key (bo dau, khop dau tu).
+
+    Vi status/step luu key ASCII ('Dang hoc') con nguoi dung go nhan ('Đang học'),
+    khong the so khop truc tiep tren cot -> doi chieu qua label map roi loc theo key.
+    Bo qua query 1 ky tu: khop dau tu se trung gan het enum -> ket qua vo nghia.
+    """
+    if not query or len(str(query).strip()) < 2:
+        return []
+    return [
+        key for key, label in label_map.items()
+        if matches_search(label, query) or matches_search(key, query)
+    ]
+
+
+def _class_year_names(campus_id=None):
+    """(name nam active, name nam lien truoc) — None neu khong xac dinh duoc."""
+    current, previous = _enrollment_class_years(campus_id)
+    return (
+        current["name"] if current else None,
+        previous["name"] if previous else None,
+    )
+
+
+def _lead_names_by_class(year_names, title_condition, title_params):
+    """Lead co lop chu nhiem thuoc `year_names` va title khop dieu kien truyen vao."""
+    year_names = [y for y in (year_names or []) if y]
+    if not year_names or not title_condition:
+        return []
+    year_ph, year_params = _sql_in_placeholders(year_names)
+    return frappe.db.sql_list(
+        f"""
+        SELECT DISTINCT l.`name`
+        FROM `tabCRM Lead` l
+        INNER JOIN `tabSIS Class Student` cs ON cs.`student_id` = l.`linked_student`
+        INNER JOIN `tabSIS Class` c ON c.`name` = cs.`class_id` AND c.`class_type` = 'regular'
+        WHERE cs.`school_year_id` IN ({year_ph}) AND {title_condition}
+        """,
+        year_params + list(title_params),
+    )
+
+
+def _lead_names_by_class_search(search, campus_id=None):
+    """Search chung: lop cua nam active HOAC nam truoc khop query (token + bo dau)."""
+    frag, params = build_search_condition(["c.title"], search)
+    if not frag:
+        return []
+    return _lead_names_by_class(_class_year_names(campus_id), frag, params)
+
+
+def _user_ids_by_name_search(query):
+    """User id (email) co ho ten/email khop query — cho cot PIC & Nguoi nhap."""
+    return [u for u in (search_names("User", ["full_name", "name"], query) or []) if u]
+
+
+def _lead_names_by_user_columns(user_ids, columns):
+    """Lead co bat ky cot user nao (pic_sales/pic_care/owner) nam trong `user_ids`."""
+    user_ids = [u for u in (user_ids or []) if u]
+    if not user_ids or not columns:
+        return []
+    ph, params = _sql_in_placeholders(user_ids)
+    where = " OR ".join([f"`{col}` IN ({ph})" for col in columns])
+    return frappe.db.sql_list(
+        f"SELECT `name` FROM `tabCRM Lead` WHERE {where}",
+        params * len(columns),
+    )
+
+
+def _lead_names_by_dob_text(search):
+    """Ngay sinh khop chuoi nguoi dung go — so tren dinh dang hien thi dd/MM/yyyy.
+
+    Cho phep go mot phan ('19/08', '2009') vi cot hien thi la dd/MM/yyyy — nhung phai
+    du "ra dang ngay" (co dau phan cach hoac >= 4 chu so), tranh mot vai chu so le
+    khop gan het du lieu.
+    """
+    q = str(search or "").strip().replace("-", "/").replace(".", "/")
+    digits = [ch for ch in q if ch.isdigit()]
+    if not q or not digits or (len(digits) < 4 and "/" not in q):
+        return []
+    return frappe.db.sql_list(
+        "SELECT `name` FROM `tabCRM Lead` "
+        "WHERE `student_dob` IS NOT NULL "
+        "AND DATE_FORMAT(`student_dob`, '%%d/%%m/%%Y') LIKE %s",
+        [f"%{q}%"],
+    )
+
+
+def _lead_names_by_enum_labels(search):
+    """Lead co status/step/gioi tinh/khao sat dau vao khop NHAN nguoi dung go."""
+    conds, params = [], []
+    status_keys = _enum_keys_matching(STATUS_LABEL_VN, search)
+    if status_keys:
+        ph, vals = _sql_in_placeholders(status_keys)
+        conds.append(f"`status` IN ({ph})")
+        params += vals
+        # test_status/deal_status dung chung tap nhan voi status
+        conds.append(f"`test_status` IN ({ph})")
+        params += vals
+    step_keys = _enum_keys_matching(STEP_LABEL_VN, search)
+    if step_keys:
+        ph, vals = _sql_in_placeholders(step_keys)
+        conds.append(f"`step` IN ({ph})")
+        params += vals
+    gender_keys = _enum_keys_matching(GENDER_LABEL_VN, search)
+    if gender_keys:
+        ph, vals = _sql_in_placeholders(gender_keys)
+        conds.append(f"`student_gender` IN ({ph})")
+        params += vals
+    if not conds:
+        return []
+    return frappe.db.sql_list(
+        f"SELECT `name` FROM `tabCRM Lead` WHERE {' OR '.join(conds)}",
+        params,
+    )
+
+
+def _day_bounds(value):
+    """'YYYY-MM-DD' -> ('YYYY-MM-DD 00:00:00', 'YYYY-MM-DD 23:59:59'); None neu khong hop le."""
+    day = str(value or "").strip()[:10]
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+        return None
+    return f"{day} 00:00:00", f"{day} 23:59:59"
+
+
+def _datetime_day_conditions(field, op, value):
+    """Loc cot Datetime bang MOT ngay (FE gui yyyy-MM-dd) -> dieu kien theo khoang ngay."""
+    bounds = _day_bounds(value)
+    if not bounds:
+        return []
+    start, end = bounds
+    if op == "is":
+        return [[field, ">=", start], [field, "<=", end]]
+    if op == "is_not":
+        names = frappe.db.sql_list(
+            f"SELECT `name` FROM `tabCRM Lead` WHERE `{field}` >= %s AND `{field}` <= %s",
+            [start, end],
+        )
+        return [["name", "not in", names]] if names else []
+    if op == "gt":
+        return [[field, ">", end]]
+    if op == "gte":
+        return [[field, ">=", start]]
+    if op == "lt":
+        return [[field, "<", start]]
+    if op == "lte":
+        return [[field, "<=", end]]
+    return []
+
+
+def _lead_names_by_last_care_date(op, value):
+    """Lead co ngay cham soc gan nhat (max creation cua CRM Lead Note) khop dieu kien ngay."""
+    bounds = _day_bounds(value)
+    if not bounds:
+        return []
+    start, end = bounds
+    if op in ("is", "is_not"):
+        having, params = "MAX(`creation`) >= %s AND MAX(`creation`) <= %s", [start, end]
+    elif op == "gt":
+        having, params = "MAX(`creation`) > %s", [end]
+    elif op == "gte":
+        having, params = "MAX(`creation`) >= %s", [start]
+    elif op == "lt":
+        having, params = "MAX(`creation`) < %s", [start]
+    elif op == "lte":
+        having, params = "MAX(`creation`) <= %s", [end]
+    else:
+        return []
+    return frappe.db.sql_list(
+        f"SELECT `lead` FROM `tabCRM Lead Note` GROUP BY `lead` HAVING {having}",
+        params,
+    )
+
+
+def _parse_lead_filters(raw, campus_id=None):
     """Chuyen filter nang cao tu FilterBuilder (JSON) -> danh sach dieu kien Frappe.
 
     Moi dieu kien FE: {"column", "operator", "value"}.
-    Ho tro cot dan xuat `primary_phone` (tra cuu qua bang con CRM Lead Phone).
+    FE dung dung cac cot DANG HIEN THI tren bang lam cot loc, nen o day phai ho tro
+    ca cac cot DAN XUAT (khong co tren DocType): `primary_phone` (bang con CRM Lead
+    Phone), `current_year_class`/`prev_year_class` (join SIS Class Student),
+    `last_care_date` (max creation CRM Lead Note), `owner` (ho ten tren User).
     """
     if not raw:
         return []
@@ -300,14 +488,19 @@ def _parse_lead_filters(raw):
         "starts_with": "like", "ends_with": "like",
         "gt": ">", "lt": "<", "gte": ">=", "lte": "<=",
     }
-    # Chi cho phep loc tren cac cot da khai bao o FE (FILTER_COLUMNS)
+    # Chi cho phep loc tren cac cot da khai bao o FE (buildCrmFilterColumns)
     allowed = {
         "student_name", "guardian_name", "pic_sales", "pic_care", "step", "status",
         "test_status", "deal_status", "student_code", "crm_code",
+        # Cot hien thi o buoc Hoc sinh chinh thuc / Kiem tra trung lap / Du lieu
+        "student_dob", "student_gender", "duplicate_fields", "creation", "modified",
     }
     # Cot text -> ap chuan search chung (bo dau, token, dau tu) qua search_names.
-    # pic_*/step/status/test_status/deal_status: dropdown gui dung key/id -> khop chinh xac.
+    # pic_*/step/status/test_status/deal_status/student_gender: dropdown gui dung key/id
+    # -> khop chinh xac. duplicate_fields luu chuoi nhieu key -> LIKE.
     text_cols = {"student_name", "guardian_name", "student_code", "crm_code"}
+    # Cot Datetime: FE gui MOT ngay (yyyy-MM-dd) -> so theo khoang ngay, khong so bang
+    datetime_cols = {"creation", "modified"}
 
     out = []
     for c in conditions:
@@ -360,7 +553,52 @@ def _parse_lead_filters(raw):
                 out.append(["name", "in", names or ["__no_match__"]])
             continue
 
+        # Cot dan xuat: Lop nam active / nam truoc -> join SIS Class Student
+        if field in ("current_year_class", "prev_year_class"):
+            current_year, prev_year = _class_year_names(campus_id)
+            year = current_year if field == "current_year_class" else prev_year
+            # Luon tim theo dieu kien KHANG DINH roi moi phu dinh tren `name`, vi
+            # "khong chua" phai bao gom ca ho so khong co lop o nam do.
+            title_op = "=" if op in ("is", "is_not") else "like"
+            names = list({
+                n for n in _lead_names_by_class([year], f"c.`title` {title_op} %s", [cmp_val]) if n
+            })
+            # `is_not`/`not_contains`: ke ca ho so chua co lop nam do -> phu dinh tren name
+            if op in ("is_not", "not_contains"):
+                if names:
+                    out.append(["name", "not in", names])
+            else:
+                out.append(["name", "in", names or ["__no_match__"]])
+            continue
+
+        # Cot dan xuat: Nguoi nhap hien thi ho ten -> doi chieu qua User roi loc tren owner
+        if field == "owner":
+            names = list({
+                n for n in _lead_names_by_user_columns(_user_ids_by_name_search(val), ["owner"]) if n
+            })
+            if op in ("is_not", "not_contains"):
+                if names:
+                    out.append(["name", "not in", names])
+            else:
+                out.append(["name", "in", names or ["__no_match__"]])
+            continue
+
+        # Cot dan xuat: Ngay cham soc gan nhat = max creation cua CRM Lead Note
+        if field == "last_care_date":
+            names = list({n for n in _lead_names_by_last_care_date(op, val) if n})
+            if op == "is_not":
+                if names:
+                    out.append(["name", "not in", names])
+            else:
+                out.append(["name", "in", names or ["__no_match__"]])
+            continue
+
         if field not in allowed:
+            continue
+
+        # Cot Datetime loc theo ngay -> khoang [00:00:00, 23:59:59] cua ngay do
+        if field in datetime_cols:
+            out += _datetime_day_conditions(field, op, val)
             continue
 
         # Cot text: chuan search chung (bo dau, token, dau tu) -> dieu kien tren `name`
@@ -501,14 +739,28 @@ def enrich_lead_dict_with_re_enrollment(lead_dict):
     return lead_dict
 
 
-def _enrollment_year_column(year):
-    """Nhan cot "Lop YY-YY" tu 1 ban ghi SIS School Year (hoac None)."""
+def _regular_class_titles(school_year_name, campus_id=None):
+    """Title lop chu nhiem cua 1 nam hoc — cho dropdown loc theo cot "Lop"."""
+    if not school_year_name:
+        return []
+    filters = {"school_year_id": school_year_name, "class_type": "regular"}
+    if campus_id:
+        filters["campus_id"] = campus_id
+    rows = frappe.get_all("SIS Class", filters=filters, fields=["title"], order_by="title asc")
+    return [r["title"] for r in rows if r.get("title")]
+
+
+def _enrollment_year_column(year, campus_id=None):
+    """Nhan cot "Lop YY-YY" + danh sach lop cua nam do (hoac None)."""
     if not year:
         return None
     title = year.get("title_vn") or year.get("title_en")
     return {
         "name": year["name"],
         "label": f"Lớp {_short_year_label(title, year.get('start_date'))}",
+        # FE dung lam options dropdown khi loc theo cot "Lop" (gia tri = title, dung
+        # bang gia tri hien thi trong o bang -> khong can map them)
+        "classes": _regular_class_titles(year["name"], campus_id),
     }
 
 
@@ -536,17 +788,18 @@ def _regular_class_by_student(student_ids, school_year_names):
 
 @frappe.whitelist()
 def get_enrollment_class_columns():
-    """Nhan 2 cot "Lop" (nam active + nam truoc) cho header danh sach ho so.
+    """Nhan 2 cot "Lop" (nam active + nam truoc) + danh sach lop cua tung nam.
 
-    Header doi theo nam active nen FE lay dong tu day thay vi hardcode.
+    Header doi theo nam active nen FE lay dong tu day thay vi hardcode;
+    `classes` dung lam options dropdown khi loc theo cot "Lop".
     """
     check_crm_permission()
     campus_id = frappe.request.args.get("campus_id") or get_current_campus_from_context()
     current, previous = _enrollment_class_years(campus_id)
     return success_response(
         data={
-            "current": _enrollment_year_column(current),
-            "previous": _enrollment_year_column(previous),
+            "current": _enrollment_year_column(current, campus_id),
+            "previous": _enrollment_year_column(previous, campus_id),
         }
     )
 
@@ -594,8 +847,8 @@ def get_leads():
         )
         filters.append(["name", "in", pic_names or [""]])
 
-    # Filter nang cao tu FilterBuilder (FE) — bao gom cot dan xuat primary_phone
-    filters += _parse_lead_filters(frappe.request.args.get("filters"))
+    # Filter nang cao tu FilterBuilder (FE) — bao gom cac cot dan xuat (SDT, Lop, …)
+    filters += _parse_lead_filters(frappe.request.args.get("filters"), campus_id)
 
     # SIS Marcom-only: chi ho so do user co role Marcom nhap (owner)
     if should_restrict_marcom_profile_view():
@@ -603,8 +856,11 @@ def get_leads():
 
     or_filters = []
     if search:
-        # Tim ten/ma: token + bo dau + dau tu qua helper chung (raw SQL tren tabCRM Lead)
+        # Search phu MOI cot dang hien thi tren bang. Cot nao khong so khop truc tiep
+        # tren `tabCRM Lead` (SDT, Lop, PIC/Nguoi nhap, enum hien thi bang nhan tieng
+        # Viet) thi tra ra `name` rieng roi gop lai — cuoi cung ve 1 dieu kien name-in.
         match_names = set()
+        # Ten/ma: token + bo dau + dau tu qua helper chung (raw SQL tren tabCRM Lead)
         search_frag, search_params = build_search_condition(
             ["student_name", "guardian_name", "name", "student_code", "crm_code"],
             search,
@@ -625,6 +881,18 @@ def get_leads():
                 pluck="parent",
             )
             match_names.update(p for p in phone_parents if p)
+        # Cot Lop (nam active / nam truoc): join SIS Class Student — vd go "5A2"
+        match_names.update(n for n in _lead_names_by_class_search(search, campus_id) if n)
+        # Cot PIC Sales / PIC Care / Nguoi nhap: hien thi ho ten, luu user id -> tra User
+        user_ids = _user_ids_by_name_search(search)
+        if user_ids:
+            match_names.update(
+                n for n in _lead_names_by_user_columns(user_ids, ["pic_sales", "pic_care", "owner"]) if n
+            )
+        # Cot Ngay sinh: so tren dinh dang hien thi dd/MM/yyyy (cho phep go mot phan)
+        match_names.update(n for n in _lead_names_by_dob_text(search) if n)
+        # Cot Trang thai / Buoc / Gioi tinh / Khao sat dau vao: go NHAN tieng Viet
+        match_names.update(n for n in _lead_names_by_enum_labels(search) if n)
         # Luon dua ve 1 dieu kien name-in; rong -> sentinel de tra ve khong co ket qua
         or_filters = [["name", "in", list(match_names) if match_names else ["__no_match__"]]]
 

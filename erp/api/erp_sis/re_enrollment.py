@@ -241,6 +241,7 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                 guardian_map[row.student] = row.guardian
 
         # Tạo records cho từng học sinh
+        updated_count = 0
         for student in students:
             try:
                 # Kiểm tra đã có record chưa
@@ -248,10 +249,18 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
                     "config_id": config_id,
                     "student_id": student.student_id
                 })
-                
+
                 if existing:
+                    # Đơn đã có → cập nhật lại thông tin sao chép từ CRM Student
+                    # (mã học sinh / tên / lớp có thể đã đổi sau khi đơn được tạo)
+                    updated_count += _refresh_student_snapshot(
+                        existing,
+                        student,
+                        guardian_map.get(student.student_id),
+                        logs
+                    )
                     continue
-                
+
                 # Tạo record mới (chưa có decision, chưa submit)
                 key_guardian = guardian_map.get(student.student_id)
                 re_doc = frappe.get_doc({
@@ -274,15 +283,79 @@ def _auto_create_student_records(config_id, source_school_year_id, campus_id, lo
             except Exception as e:
                 logs.append(f"Lỗi tạo record cho {student.student_code}: {str(e)}")
                 continue
-        
+
+        if updated_count > 0:
+            logs.append(f"Đã cập nhật lại thông tin cho {updated_count} đơn đã có")
+
         frappe.db.commit()
-        
+
     except Exception as e:
         logs.append(f"Lỗi auto-create records: {str(e)}")
         frappe.log_error(frappe.get_traceback(), "Auto Create Re-enrollment Records Error")
         deleted_count = 0
-    
-    return {"created_count": created_count, "deleted_count": deleted_count}
+        updated_count = 0
+
+    return {
+        "created_count": created_count,
+        "deleted_count": deleted_count,
+        "updated_count": updated_count,
+    }
+
+
+def _refresh_student_snapshot(re_name, student, key_guardian, logs):
+    """Cập nhật lại thông tin học sinh đã sao chép sang đơn tái ghi danh.
+
+    student_code / student_name / current_class trên SIS Re-enrollment là bản sao tại
+    thời điểm tạo đơn (fetch_from chỉ chạy khi lưu doc), nên khi CRM Student đổi Mã học
+    sinh thì đơn cũ vẫn giữ mã cũ. Sync phải ghi đè lại các field này.
+
+    Không đụng tới quyết định / thông tin phụ huynh đã nhập.
+
+    Returns:
+        1 nếu có thay đổi, 0 nếu không.
+    """
+    current = frappe.db.get_value(
+        "SIS Re-enrollment",
+        re_name,
+        ["student_code", "student_name", "current_class", "finance_student_id", "guardian_id"],
+        as_dict=True
+    )
+    if not current:
+        return 0
+
+    updates = {}
+
+    if student.get("student_code") and current.student_code != student.get("student_code"):
+        updates["student_code"] = student.get("student_code")
+
+    if student.get("student_name") and current.student_name != student.get("student_name"):
+        updates["student_name"] = student.get("student_name")
+
+    new_class = student.get("class_title") or student.get("class_name")
+    if new_class and current.current_class != new_class:
+        updates["current_class"] = new_class
+
+    # Các link chỉ điền khi đang trống — không ghi đè dữ liệu admin đã gán
+    finance_student_id = student.get("finance_student_id")
+    if finance_student_id and not current.finance_student_id:
+        updates["finance_student_id"] = finance_student_id
+
+    if key_guardian and not current.guardian_id:
+        updates["guardian_id"] = key_guardian
+
+    if not updates:
+        return 0
+
+    # Dùng db.set_value để không chạy lại validate (đợt có thể đã đóng) và không
+    # đánh dấu "admin đã sửa" cho đơn phụ huynh đã nộp
+    frappe.db.set_value("SIS Re-enrollment", re_name, updates, update_modified=False)
+
+    if "student_code" in updates:
+        logs.append(
+            f"Cập nhật mã học sinh: {current.student_code or '(trống)'} → {updates['student_code']} ({re_name})"
+        )
+
+    return 1
 
 
 def _sync_not_re_enroll_to_crm_lead(submission, logs=None):
@@ -2889,20 +2962,24 @@ def sync_students():
         
         created_count = result.get("created_count", 0)
         deleted_count = result.get("deleted_count", 0)
-        
+        updated_count = result.get("updated_count", 0)
+
         # Tạo message phù hợp
         messages = []
         if created_count > 0:
             messages.append(f"Tạo thêm {created_count} đơn mới")
+        if updated_count > 0:
+            messages.append(f"Cập nhật thông tin {updated_count} đơn (mã học sinh, tên, lớp)")
         if deleted_count > 0:
             messages.append(f"Xóa {deleted_count} học sinh lớp 12 (chưa submit)")
-        
+
         message = "Đã đồng bộ thành công. " + ", ".join(messages) if messages else "Danh sách đã đồng bộ, không có thay đổi."
-        
+
         return success_response(
             data={
                 "created_count": created_count,
                 "deleted_count": deleted_count,
+                "updated_count": updated_count,
                 "config_id": config_id
             },
             message=message,

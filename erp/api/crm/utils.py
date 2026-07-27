@@ -103,6 +103,27 @@ STATUS_LABEL_VN = {
     "Chuyen truong": "Chuyển trường",
 }
 
+# Nhan tieng Viet cho buoc pipeline (field `step`) — dong bo statusLabels.ts (CRM_STEP_LABELS).
+# Dung cho search theo NHAN hien thi tren danh sach ho so.
+STEP_LABEL_VN = {
+    "Draft": "Dữ liệu",
+    "Verify": "Kiểm tra trùng lặp",
+    "NewProfile": "Hồ sơ mới",
+    "Lead": "Tổng lead",
+    "QLead": "Học sinh tiềm năng",
+    "Enrolled": "Nhập học",
+    "Re-Enroll": "Tái ghi danh (cũ)",
+    "Nghi hoc": "Nghỉ học",
+    "Withdraw": "Nghỉ học",
+    "Graduated": "Nghỉ học",
+}
+
+# Nhan tieng Viet cho gioi tinh (field `student_gender`).
+GENDER_LABEL_VN = {
+    "Nam": "Nam",
+    "Nu": "Nữ",
+}
+
 
 def resolve_status_input(raw, valid_statuses):
     """Chuan hoa status khi import: chap nhan MA CODE hoac NHAN tieng Viet
