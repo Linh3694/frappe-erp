@@ -23,7 +23,8 @@ Chong trung theo cap (SDT da chuan hoa + ten hoc sinh) nen:
 
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from datetime import time as dtime
 
 import frappe
 from frappe.utils import flt
@@ -126,10 +127,11 @@ _G1_TO_LEAD = {
     "g1_note": "guardian_note",
 }
 
+# campus_id khong nam day: phai qua _Resolver.campus() de doi ten/short title -> docname.
 _LEAD_SIMPLE_FIELDS = (
     "student_name", "student_gender", "student_personal_id_number", "student_code",
     "current_grade", "target_grade", "current_school", "study_program",
-    "target_semester", "student_note", "campus_id", "data_source", "staff_code",
+    "target_semester", "student_note", "data_source", "staff_code",
 )
 _PCT_FIELDS = ("tuition_fee_pct", "service_fee_pct", "dev_fee_pct", "ksdv_pct")
 
@@ -214,6 +216,7 @@ class _Resolver:
         self._source = {}
         self._source_note = {}
         self._year = {}
+        self._campus = {}
 
     def user(self, raw):
         s = _txt(raw)
@@ -248,6 +251,31 @@ class _Resolver:
 
     def source_note(self, raw):
         return self._by_name_or_field("CRM Source Note", "note_name", raw, self._source_note)
+
+    def campus(self, raw):
+        """
+        CRM Lead.campus_id la Link -> SIS Campus, luu DOCNAME (CAMPUS-00001).
+        Nguoi nhap thuong ghi Short Title ("WSHN 01") hoac ten day du, nen nhan ca:
+        docname | short_title | title_vn | title_en (bo qua hoa/thuong va khoang trang).
+        """
+        s = _txt(raw)
+        if not s:
+            return None
+        if s in self._campus:
+            return self._campus[s]
+        found = s if frappe.db.exists("SIS Campus", s) else None
+        if not found:
+            key = " ".join(s.split()).lower()
+            for row in frappe.get_all(
+                "SIS Campus", fields=["name", "short_title", "title_vn", "title_en"],
+                limit_page_length=0,
+            ):
+                if any(" ".join(str(row.get(f) or "").split()).lower() == key
+                       for f in ("short_title", "title_vn", "title_en")):
+                    found = row["name"]
+                    break
+        self._campus[s] = found
+        return found
 
     def school_year(self, raw):
         s = _txt(raw)
@@ -313,24 +341,152 @@ def _get_or_create_guardian(row, dry_run):
     return doc.name, "created"
 
 
-def _add_care_note(lead_doc, content, assignee):
-    """Nhat ky cham soc -> mot CRM Lead Note (category Lich su, da hoan thanh)."""
+# ---------------------------------------------------------------- nhat ky cham soc
+
+# Moi muc bat dau bang «dd/m» dau dong: "9/6:", "09/06 :", "16/10-", co the kem nam.
+_ENTRY_RX = re.compile(r"^\s*(\d{1,2})\s*[/.\-]\s*(\d{1,2})(?:\s*[/.\-]\s*(\d{2,4}))?\s*[:：\-]?\s*")
+
+# Suy phuong thuc lien he tu noi dung (Select cua CRM Lead Note).
+_METHOD_HINTS = (
+    ("Zalo", ("zalo", "ntin", "nhan tin", "nhắn tin")),
+    ("Email", ("email", "mail", "gui thu", "gửi thư")),
+    ("Gap truc tiep", ("school tour", "schooltour", "open day", "openday", "tham quan",
+                       "den truong", "đến trường", "gap truc tiep", "gặp trực tiếp",
+                       "hoi thao", "hội thảo", "den tham", "đến thăm")),
+)
+
+
+def _guess_method(text):
+    low = unicodedata.normalize("NFC", (text or "")).lower()
+    for method, keys in _METHOD_HINTS:
+        if any(k in low for k in keys):
+            return method
+    return "Goi dien"
+
+
+def _parse_care_entries(body):
+    """
+    Tach nhat ky thanh cac muc. Tra ve list theo DUNG thu tu trong file
+    (moi nhat truoc): [{'d','m','y','text','tag'}], d/m = None neu muc khong co ngay.
+    Dong khong mo dau bang ngay duoc noi vao muc phia tren.
+    """
+    entries, cur = [], None
+    for line in (body or "").splitlines():
+        if not line.strip():
+            continue
+        m = _ENTRY_RX.match(line)
+        if m:
+            if cur:
+                entries.append(cur)
+            yr = m.group(3)
+            if yr and len(yr) == 2:
+                yr = "20" + yr
+            cur = {
+                "d": int(m.group(1)), "m": int(m.group(2)),
+                "y": int(yr) if yr else None,
+                "tag": f"{int(m.group(1)):02d}/{int(m.group(2)):02d}",
+                "text": line[m.end():].strip(),
+            }
+        elif cur:
+            cur["text"] = (cur["text"] + "\n" + line.strip()).strip()
+        else:
+            cur = {"d": None, "m": None, "y": None, "tag": "", "text": line.strip()}
+    if cur:
+        entries.append(cur)
+    return entries
+
+
+def _assign_years(entries, as_of, year_floor):
+    """
+    Log ghi moi-nhat-truoc nhung KHONG ghi nam. Di tu tren (moi) xuong duoi (cu),
+    chan tran bang `as_of`; moi khi ngay lai "tien len" so voi muc truoc thi lui 1 nam.
+    Muc nao ghi ro nam thi dung lam moc neo.
+
+    Tra ve (list date|None cung do dai entries, suspicious: bool).
+    `suspicious` = co muc bi day xuong duoi `year_floor` -> thu tu trong file kha nang
+    bi PIC ghi lon hoac sai ngay; date bi kep lai o floor va can review tay.
+    """
+    out, prev, suspicious = [], as_of, False
+    for e in entries:
+        if not e["d"]:
+            out.append(None)
+            continue
+        try:
+            if e["y"]:
+                cand = date(e["y"], e["m"], e["d"])
+                # nam nhap tay cung co the sai (gap '2028' trong du lieu that):
+                # ngoai khoang hop le thi bo, quay ve suy tu vi tri.
+                if not (year_floor <= cand <= as_of):
+                    suspicious = True
+                    cand = date(prev.year, e["m"], e["d"])
+                    if cand > prev:
+                        cand = date(prev.year - 1, e["m"], e["d"])
+            else:
+                cand = date(prev.year, e["m"], e["d"])
+                if cand > prev:
+                    cand = date(prev.year - 1, e["m"], e["d"])
+        except ValueError:          # 32/13, 30/02…
+            out.append(None)
+            continue
+        if cand > as_of:
+            suspicious = True
+            cand = as_of
+        if cand < year_floor:
+            suspicious = True
+            cand = year_floor
+        out.append(cand)
+        prev = cand
+    return out, suspicious
+
+
+def _add_care_notes(lead_doc, content, assignee, as_of, year_floor):
+    """
+    Tao mot CRM Lead Note cho TUNG muc trong nhat ky, lui `creation` ve ngay suy ra
+    de tab ghi chu hien dung thu tu thoi gian (get_notes sort theo creation desc).
+
+    Frappe luon ghi creation = now() luc insert, nen phai UPDATE lai sau do
+    (update_modified=False de khong dung vao `modified`).
+
+    Tra ve (so note da tao, suspicious).
+    """
     body = _txt(content)
     if not body:
-        return False
-    first = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
-    frappe.get_doc({
-        "doctype": "CRM Lead Note",
-        "lead": lead_doc.name,
-        "campus_id": lead_doc.campus_id,
-        "category": "Lich su",
-        "title": (first[:130] or "Nhat ky cham soc (import)"),
-        "communication_method": "Goi dien",
-        "content": body.replace("\n", "<br>"),
-        "assignee": assignee or frappe.session.user,
-        "is_completed": 1,
-    }).insert(ignore_permissions=True)
-    return True
+        return 0, False
+
+    entries = _parse_care_entries(body)
+    if not entries:
+        return 0, False
+    dates, suspicious = _assign_years(entries, as_of, year_floor)
+
+    # muc khong co ngay -> gan cung ngay muc co ngay gan nhat (uu tien phia duoi)
+    fallback = next((d for d in dates if d), as_of)
+
+    made = 0
+    for i, (e, d) in enumerate(zip(entries, dates)):
+        text = e["text"].strip()
+        if not text:
+            continue
+        tag = e["tag"] or "không rõ ngày"
+        title = f"{tag} — {text.splitlines()[0]}"[:135]
+        note = frappe.get_doc({
+            "doctype": "CRM Lead Note",
+            "lead": lead_doc.name,
+            "campus_id": lead_doc.campus_id,
+            "category": "Lich su",
+            "title": title,
+            "communication_method": _guess_method(text),
+            "content": text.replace("\n", "<br>"),
+            "assignee": assignee or frappe.session.user,
+            "is_completed": 1,
+        })
+        note.insert(ignore_permissions=True)
+
+        # 12:00 tru i giay: cung mot ngay thi muc moi hon van dung truoc
+        stamp = datetime.combine(d or fallback, dtime(12, 0, 0)) - timedelta(seconds=i)
+        frappe.db.set_value("CRM Lead Note", note.name, "creation", stamp,
+                            update_modified=False)
+        made += 1
+    return made, suspicious
 
 
 # ---------------------------------------------------------------- doc file
@@ -463,9 +619,11 @@ def _validate(row, rs):
         errs.append(f"Nam hoc khong khop SIS School Year: {yr_raw!r}")
     out["year"] = yr
 
-    cid = _txt(row.get("campus_id"))
-    if cid and not frappe.db.exists("SIS Campus", cid):
-        errs.append(f"Campus khong ton tai: {cid!r}")
+    cid_raw = _txt(row.get("campus_id"))
+    campus = rs.campus(cid_raw) if cid_raw else None
+    if cid_raw and not campus:
+        errs.append(f"Campus khong khop SIS Campus (docname/short_title/ten): {cid_raw!r}")
+    out["campus"] = campus
 
     if status == "Tu choi" and not _txt(row.get("reject_reason")):
         out["warn_no_reject_reason"] = True
@@ -511,6 +669,8 @@ def _build_lead(row, resolved, rs):
         doc.target_academic_year = resolved["year"]
     if resolved["pic"]:
         doc.pic_sales = resolved["pic"]
+    if resolved["campus"]:
+        doc.campus_id = resolved["campus"]
 
     for f in _PCT_FIELDS:
         v = _pct(row.get(f))
@@ -563,22 +723,30 @@ def _build_lead(row, resolved, rs):
 # ---------------------------------------------------------------- entry point
 
 
-def run(path, dry_run=1, limit=0, commit_every=100):
+def run(path, dry_run=1, limit=0, commit_every=100, as_of=None, year_floor=None):
     """
     path         duong dan file .xlsx (sheet «QLead»)
     dry_run      1 = chi kiem tra va bao cao, KHONG ghi DB (mac dinh)
     limit        chi xu ly N dong dau, 0 = tat ca
     commit_every commit sau moi N ban ghi tao thanh cong
+    as_of        'YYYY-MM-DD' — tran tren khi suy nam cho nhat ky (mac dinh: hom nay)
+    year_floor   'YYYY-MM-DD' — san duoi; muc bi day xuong duoi moc nay se bi kep lai
+                 va ho so duoc danh dau can review (mac dinh: 2024-07-01)
 
     Khi ghi that, danh sach ban ghi da tao duoc luu ra <path>.import-log.json
     de con duong lui — xem `undo()`.
     """
+    from frappe.utils import getdate, nowdate
+
     dry_run = int(dry_run)
     limit = int(limit)
     commit_every = int(commit_every) or 100
+    as_of_d = getdate(as_of) if as_of else getdate(nowdate())
+    floor_d = getdate(year_floor) if year_floor else date(2024, 7, 1)
 
     path = _resolve_path(path)
     print(f"  File: {path}")
+    print(f"  Suy nam nhat ky: tran {as_of_d} / san {floor_d}")
 
     rows, unknown_cols = _read_rows(path, limit)
     rs = _Resolver()
@@ -587,7 +755,7 @@ def run(path, dry_run=1, limit=0, commit_every=100):
         "total": len(rows), "created": 0, "duplicates": 0, "failed": 0,
         "notes": 0, "guardians_created": 0, "guardians_reused": 0,
         "errors": [], "warnings": [],
-        "created_leads": [], "created_guardians": [],
+        "created_leads": [], "created_guardians": [], "note_review": [],
     }
     if unknown_cols:
         res["warnings"].append(f"Cot khong nhan dang (bo qua): {', '.join(unknown_cols)}")
@@ -611,8 +779,15 @@ def run(path, dry_run=1, limit=0, commit_every=100):
 
         if dry_run:
             res["created"] += 1
-            if _txt(row.get("care_log")):
-                res["notes"] += 1
+            entries = _parse_care_entries(_txt(row.get("care_log")))
+            entries = [e for e in entries if e["text"].strip()]
+            if entries:
+                _, susp = _assign_years(entries, as_of_d, floor_d)
+                res["notes"] += len(entries)
+                if susp:
+                    res["note_review"].append(
+                        {"row": rnum, "student": _txt(row.get("student_name")),
+                         "entries": len(entries)})
             g, how = _get_or_create_guardian(row, dry_run=1)
             if g:
                 res["guardians_created" if how == "created" else "guardians_reused"] += 1
@@ -644,8 +819,13 @@ def run(path, dry_run=1, limit=0, commit_every=100):
                 if doc.student_code:
                     doc.save(ignore_permissions=True)
 
-            if _add_care_note(doc, row.get("care_log"), resolved["pic"]):
-                res["notes"] += 1
+            n_notes, susp = _add_care_notes(
+                doc, row.get("care_log"), resolved["pic"], as_of_d, floor_d)
+            res["notes"] += n_notes
+            if susp:
+                res["note_review"].append(
+                    {"row": rnum, "lead": doc.name,
+                     "student": doc.student_name, "entries": n_notes})
 
             from erp.api.crm.pipeline import _log_step_change
             _log_step_change(
@@ -691,6 +871,7 @@ def _write_log(path, res):
         "counts": {k: res[k] for k in
                    ("total", "created", "duplicates", "failed", "notes")},
         "errors": res["errors"],
+        "note_review": res.get("note_review") or [],
     }
     try:
         with open(log_path, "w", encoding="utf-8") as f:
@@ -770,8 +951,15 @@ def _print(res, dry_run):
     print(f"  {'Se tao' if dry_run else 'Da tao':<24}: {res['created']}")
     print(f"  Trung (bo qua)          : {res['duplicates']}")
     print(f"  Loi                     : {res['failed']}")
-    print(f"  Ghi chu cham soc        : {res['notes']}")
+    print(f"  Ghi chu cham soc (muc)  : {res['notes']}")
     print(f"  CRM Guardian moi / dung lai: {res['guardians_created']} / {res['guardians_reused']}")
+    nr = res.get("note_review") or []
+    if nr:
+        print(f"\n  Ho so co ngay nhat ky DANG NGO ({len(nr)}) — nen review tay:")
+        for x in nr[:25]:
+            print(f"    dong {x['row']:>5}: {x.get('student','')[:34]:<36} {x['entries']} muc")
+        if len(nr) > 25:
+            print(f"    … con {len(nr) - 25}")
     if res["warnings"]:
         print(f"\n  Canh bao ({len(res['warnings'])}):")
         for w in res["warnings"][:20]:

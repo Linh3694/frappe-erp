@@ -747,7 +747,14 @@ def _regular_class_titles(school_year_name, campus_id=None):
     if campus_id:
         filters["campus_id"] = campus_id
     rows = frappe.get_all("SIS Class", filters=filters, fields=["title"], order_by="title asc")
-    return [r["title"] for r in rows if r.get("title")]
+    # Gia tri loc la title (dung bang gia tri hien thi trong o) -> bo trung
+    seen, titles = set(), []
+    for r in rows:
+        title = (r.get("title") or "").strip()
+        if title and title not in seen:
+            seen.add(title)
+            titles.append(title)
+    return titles
 
 
 def _enrollment_year_column(year, campus_id=None):
