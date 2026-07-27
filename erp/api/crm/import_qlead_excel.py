@@ -70,7 +70,11 @@ COLUMNS = {
     "Hệ học": "study_program",
     "Năm học dự tuyển": "target_academic_year",
     "Học kỳ dự tuyển": "target_semester",
-    "Ghi chú học sinh": "student_note",
+    # Cung tro vao student_note (Small Text). KHONG dung
+    # student_special_characteristics: field do la Data/varchar(140), du lieu that
+    # co o dai toi 3.264 ky tu nen se bi cat cut.
+    "Lưu ý đặc biệt về HS/PH": "student_note",
+    "Ghi chú học sinh": "student_note",        # tieu de cu, giu de file cu van chay
     # tu choi
     "Lý do từ chối (nhóm)": "reject_reason",
     "Mô tả chi tiết từ chối": "reject_detail",
@@ -865,6 +869,7 @@ _BACKFILL_FIELDS = {
     "current_grade": "s",
     "target_grade": "s",
     "current_school": "s",
+    "student_note": "s",
 }
 
 
@@ -901,11 +906,7 @@ def backfill(path, dry_run=1, fields=None, overwrite=0, commit_every=200):
            "not_found": 0, "errors": [], "per_field": {f: 0 for f in use}}
 
     # cot Excel -> field CRM (chi 5 field duoc phep)
-    src_key = {
-        "student_gender": "student_gender", "student_dob": "student_dob",
-        "current_grade": "current_grade", "target_grade": "target_grade",
-        "current_school": "current_school",
-    }
+    src_key = {f: f for f in _BACKFILL_FIELDS}
 
     for i, row in enumerate(rows, start=1):
         rnum = row["_row"]
