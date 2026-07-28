@@ -171,6 +171,35 @@ def _create_crm_student(lead_doc):
     return student
 
 
+def _same_person_name(a, b):
+    """So khop ten hoc sinh: bo dau, gop khoang trang, khong phan biet hoa thuong."""
+    from erp.utils.search import strip_accents
+
+    def norm(x):
+        return " ".join(strip_accents(str(x or "")).lower().split())
+
+    return bool(norm(a)) and norm(a) == norm(b)
+
+
+def find_existing_student_by_code(code):
+    """CRM Student dang giu ma HS nay, hoac None.
+
+    `CRM Student.student_code` la UNIQUE. Ho so nhap tu Excel (hoac lan nhap hoc truoc)
+    co the da tao san hoc sinh trong khi `CRM Lead.linked_student` van rong — insert
+    them se dinh IntegrityError 1062 "Duplicate entry ... for key 'student_code'".
+    """
+    code = str(code or "").strip()
+    if not code:
+        return None
+    rows = frappe.get_all(
+        "CRM Student",
+        filters={"student_code": code},
+        fields=["name", "student_name", "family_code"],
+        limit=1,
+    )
+    return rows[0] if rows else None
+
+
 def _create_crm_guardian(lead_doc, family_code=""):
     """Tao CRM Guardian tu CRM Lead (family_code cap nhat sau khi co CRM Family)."""
     phone = _get_primary_phone(lead_doc)
@@ -248,7 +277,37 @@ def run_create_enrollment_records(lead_name: str):
         )
 
     try:
-        student = _create_crm_student(lead_doc)
+        # Ma HS da thuoc ve mot CRM Student -> tai su dung, KHONG insert trung.
+        # Chi tai su dung khi ten khop: trung ma nhung khac ten la du lieu sai, tu gan
+        # se noi ho so vao nham hoc sinh — de nguoi dung xu ly tay.
+        existing = find_existing_student_by_code(lead_doc.student_code)
+        if existing:
+            if not _same_person_name(existing.get("student_name"), _coerce_student_name(lead_doc)):
+                return error_response(
+                    f"Ma hoc sinh {str(lead_doc.student_code).strip()} da thuoc ve "
+                    f"'{existing.get('student_name')}' ({existing['name']}). "
+                    f"Kiem tra lai ma hoc sinh truoc khi nhap hoc."
+                )
+            student = frappe.get_doc("CRM Student", existing["name"])
+            if student.family_code:
+                # Hoc sinh da co gia dinh — chi can noi ho so vao hoc sinh do
+                lead_doc.linked_student = student.name
+                lead_doc.save(ignore_permissions=True)
+
+                from erp.api.crm.enrolled_class_sync import (
+                    promote_leads_to_dang_hoc_if_class_assigned,
+                )
+
+                promote_leads_to_dang_hoc_if_class_assigned(student.name)
+                frappe.db.commit()
+
+                return success_response({
+                    "student": student.name,
+                    "family_code": student.family_code,
+                    "reused_student": True,
+                }, "Da lien ket ho so voi hoc sinh da co")
+        else:
+            student = _create_crm_student(lead_doc)
 
         linked = _pick_linked_guardian_row(lead_doc)
         if linked and frappe.db.exists("CRM Guardian", linked["guardian"]):
@@ -298,7 +357,13 @@ def run_create_enrollment_records(lead_name: str):
 
     except Exception as e:
         frappe.db.rollback()
-        frappe.log_error(f"Loi tao enrollment records cho {lead_name}: {str(e)}")
+        # title PHAI ngan: Error Log.method la Data(140) — truyen 1 tham so vi tri thi
+        # Frappe hieu do la title, chuoi dai se nem CharacterLengthExceededError NGAY
+        # TRONG except, nuot mat loi that va khong ghi duoc Error Log nao.
+        frappe.log_error(
+            title="Loi tao enrollment records",
+            message=f"lead={lead_name}: {str(e)}",
+        )
         return error_response(f"Loi tao enrollment records: {str(e)}")
 
 

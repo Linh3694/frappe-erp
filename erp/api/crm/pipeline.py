@@ -214,18 +214,34 @@ def _run_create_enrollment_for_lead(lead_name: str, context: str):
     """
     Tao CRM Student tu lead. Phai truyen lead_name truc tiep: request JSON
     khi advance_step khong co lead_name trong body, nen create_enrollment_records() tung that bai.
+
+    Tra ve (ok, message). Caller cu bo qua gia tri tra ve (van chi ghi log nhu truoc);
+    luong chuyen hang loat dung no de bao that bai ra ket qua thay vi bao "thanh cong"
+    trong khi ho so khong he co CRM Student.
+
+    Luu y: khi that bai, run_create_enrollment_records da rollback — ke ca thay doi
+    step/status cua chinh lead nay neu chua commit.
     """
     try:
         from erp.api.crm.enrollment import run_create_enrollment_records
 
         res = run_create_enrollment_records(lead_name)
         if not res.get("success"):
+            msg = res.get("message", "")
             frappe.log_error(
-                title=f"Loi tao enrollment ({context})",
-                message=f"lead={lead_name}: {res.get('message', '')}",
+                title=f"Loi tao enrollment ({context})"[:140],
+                message=f"lead={lead_name}: {msg}",
             )
+            return False, msg
+        return True, ""
     except Exception as e:
-        frappe.log_error(f"Loi tao enrollment ({context}): {str(e)}")
+        # title PHAI ngan (Error Log.method la Data(140)) — chuoi dai se nem
+        # CharacterLengthExceededError ngay trong except va nuot mat loi that.
+        frappe.log_error(
+            title=f"Loi tao enrollment ({context})"[:140],
+            message=f"lead={lead_name}: {str(e)}",
+        )
+        return False, str(e)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -944,7 +960,11 @@ def _enroll_one_lead(lead_name, allowed_statuses, context):
     _sync_lead_guardians_to_family_if_needed(doc)
 
     if not doc.linked_student:
-        _run_create_enrollment_for_lead(lead_name, context)
+        # That bai o day = ho so KHONG co CRM Student; run_create_enrollment_records da
+        # rollback (ke ca doi step ben tren) nen phai bao loi, khong duoc tinh la xong.
+        ok, msg = _run_create_enrollment_for_lead(lead_name, context)
+        if not ok:
+            raise frappe.ValidationError(msg or "Khong tao duoc ho so hoc sinh")
     else:
         try:
             from erp.api.crm.enrolled_class_sync import (
@@ -953,7 +973,13 @@ def _enroll_one_lead(lead_name, allowed_statuses, context):
 
             promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
         except Exception as e:
-            frappe.log_error(f"Loi dong bo trang thai enrolled ({context}): {str(e)}")
+            frappe.log_error(
+                title="Loi dong bo trang thai enrolled",
+                message=f"context={context} lead={lead_name}: {str(e)}",
+            )
+        # Chot ngay: nhanh nay khong goi run_create_enrollment_records nen chua commit,
+        # mot ho so sau do that bai se rollback va xoa luon ket qua cua ho so nay.
+        frappe.db.commit()
 
     return True
 
@@ -961,15 +987,23 @@ def _enroll_one_lead(lead_name, allowed_statuses, context):
 def _collect_enroll_candidates(campus_id=None):
     """Tim ho so QLead da nop phi du dieu kien chuyen sang Hoc sinh chinh thuc.
 
-    Tra ve (linked_rows, new_rows, skipped_rows):
-      linked_rows  — da co linked_student            -> chi chuyen buoc
-      new_rows     — chua co linked_student          -> se tao ho so hoc sinh moi
-      skipped_rows — hoc sinh da co ho so khac o buoc Enrolled -> bo qua
+    Tra ve dict 5 nhom:
+      linked   — da co linked_student                        -> chi chuyen buoc
+      reuse    — chua lien ket, ma HS da co CRM Student CUNG TEN -> se noi vao HS do
+      new      — chua lien ket, ma HS chua ton tai           -> se tao ho so hoc sinh moi
+      conflict — ma HS da thuoc ve hoc sinh KHAC TEN         -> se loi, phai xu ly tay
+      skipped  — hoc sinh da co ho so khac o buoc Enrolled   -> bo qua
 
-    Nhom "da co ho so Enrolled" tra bang MOT query (thay vi db.exists tung ho so) —
-    danh sach nop phi co the hang tram dong. Ung vien deu dang o QLead nen khong the
-    tu nam trong tap Enrolled, khong can loai tru chinh no.
+    Tach `reuse`/`conflict` ngay o buoc dem vi `CRM Student.student_code` la UNIQUE:
+    ho so nhap tu Excel thuong da co san CRM Student trong khi lead chua lien ket, cu
+    insert them la dinh IntegrityError 1062. Man xac nhan phai noi dung truoc khi ghi.
+
+    Cac tap doi chieu deu tra bang MOT query (khong db.exists tung dong) — danh sach
+    nop phi co the hang tram ho so. Ung vien deu dang o QLead nen khong the tu nam
+    trong tap Enrolled, khong can loai tru chinh no.
     """
+    from erp.api.crm.enrollment import _same_person_name
+
     filters = {"step": "QLead", "status": ["in", list(_BULK_ENROLL_STATUSES)]}
     if campus_id:
         filters["campus_id"] = campus_id
@@ -997,17 +1031,41 @@ def _collect_enroll_candidates(campus_id=None):
             if sid
         }
 
-    linked, new_students, skipped = [], [], []
+    codes = [
+        str(lead.get("student_code") or "").strip()
+        for lead in leads
+        if not lead.get("linked_student") and str(lead.get("student_code") or "").strip()
+    ]
+    students_by_code = {}
+    if codes:
+        for row in frappe.get_all(
+            "CRM Student",
+            filters={"student_code": ["in", codes]},
+            fields=["name", "student_name", "student_code"],
+        ):
+            students_by_code[str(row["student_code"]).strip()] = row
+
+    groups = {"linked": [], "reuse": [], "new": [], "conflict": [], "skipped": []}
     for lead in leads:
         sid = lead.get("linked_student")
         if sid and sid in already_enrolled:
-            skipped.append(lead)
-        elif sid:
-            linked.append(lead)
-        else:
-            new_students.append(lead)
+            groups["skipped"].append(lead)
+            continue
+        if sid:
+            groups["linked"].append(lead)
+            continue
 
-    return linked, new_students, skipped
+        existing = students_by_code.get(str(lead.get("student_code") or "").strip())
+        if not existing:
+            groups["new"].append(lead)
+        elif _same_person_name(existing.get("student_name"), lead.get("student_name")):
+            groups["reuse"].append(lead)
+        else:
+            lead["conflict_student"] = existing["name"]
+            lead["conflict_student_name"] = existing.get("student_name")
+            groups["conflict"].append(lead)
+
+    return groups
 
 
 @frappe.whitelist(methods=["POST"])
@@ -1031,7 +1089,9 @@ def bulk_enroll_paid_leads():
     raw_dry = data.get("dry_run")
     dry_run = str(raw_dry).strip().lower() in ("1", "true", "yes") if raw_dry is not None else False
 
-    linked, new_students, skipped = _collect_enroll_candidates(campus_id)
+    groups = _collect_enroll_candidates(campus_id)
+    linked, reuse, new_students = groups["linked"], groups["reuse"], groups["new"]
+    conflict, skipped = groups["conflict"], groups["skipped"]
 
     def _sample(rows):
         return [
@@ -1040,27 +1100,34 @@ def bulk_enroll_paid_leads():
                 "student_name": r.get("student_name"),
                 "student_code": r.get("student_code"),
                 "target_grade": r.get("target_grade"),
+                "conflict_student_name": r.get("conflict_student_name"),
             }
             for r in rows[:20]
         ]
 
     if dry_run:
-        total = len(linked) + len(new_students)
+        total = len(linked) + len(reuse) + len(new_students)
         return success_response(
             {
                 "linked_count": len(linked),
+                "reuse_count": len(reuse),
                 "new_student_count": len(new_students),
+                "conflict_count": len(conflict),
                 "skipped_count": len(skipped),
                 "total": total,
                 "linked_samples": _sample(linked),
+                "reuse_samples": _sample(reuse),
                 "new_student_samples": _sample(new_students),
+                "conflict_samples": _sample(conflict),
                 "skipped_samples": _sample(skipped),
             },
             f"Se chuyen {total} ho so sang buoc Hoc sinh chinh thuc",
         )
 
     results = {"enrolled": 0, "skipped": len(skipped), "errors": []}
-    for row in linked + new_students:
+    # `conflict` van chay: bien ban ghi ro ai trung ma voi ai trong danh sach loi,
+    # thay vi im lang bo qua roi ops khong biet con ho so ton dong.
+    for row in linked + reuse + new_students + conflict:
         try:
             if _enroll_one_lead(row["name"], _BULK_ENROLL_STATUSES, "bulk_enroll_paid_leads"):
                 results["enrolled"] += 1
