@@ -1351,7 +1351,8 @@ def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", overwrite=0,
                     touched = True
 
             # khoi guardian_* phang: uu tien Me, khong co thi Bo
-            if with_phone and (ow or not _txt(doc.guardian_name)):
+            # Chot chan o CAP FIELD (xem ghi chu trong backfill_family).
+            if with_phone:
                 pick = next((g for g in with_phone if g["label"] == "Mẹ"), with_phone[0])
                 wrote = False
                 for val, fld in (
@@ -1640,7 +1641,10 @@ def backfill_family(path, dry_run=1, overwrite=0, commit_every=50):
                     touched = True
 
             p1 = next((g for g in people if g["slot"] == 1), None)
-            if p1 and (ow or not _txt(doc.guardian_name)):
+            # Chot chan «CRM thang» phai o CAP FIELD, khong phai cap khoi: neu gac ca
+            # khoi bang guardian_name thi ho so nao da co ten se khong bao gio duoc
+            # dien guardian_email/CCCD/nghe nghiep dang trong.
+            if p1:
                 for val, fld in ((p1["name"], "guardian_name"), (p1["rel"], "relationship"),
                                  (p1["email"], "guardian_email"),
                                  (p1["cccd"], "guardian_id_number"),
