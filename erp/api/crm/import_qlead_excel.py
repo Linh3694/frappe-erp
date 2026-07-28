@@ -324,7 +324,7 @@ def _get_or_create_guardian(row, dry_run):
         "doctype": "CRM Guardian",
         "guardian_id": gid,
         "guardian_name": name,
-        "phone_number": phone,
+        "phone_number": e164,
         "email": (_emails(row.get("g2_email")) or [""])[0],
         "id_number": _txt(row.get("g2_id_number")),
         "occupation": _txt(row.get("g2_occupation")),
@@ -1181,10 +1181,23 @@ def _guardian_doc_for(name, phone, cccd, email, job, pos, work, overwrite=0):
       overwrite=0 -> chi dien them field dang trong,
       overwrite=1 -> HSM ghi de.
     """
-    existing = frappe.db.get_value("CRM Guardian", {"phone_number": phone}, "name")
+    # CRM Guardian.phone_number luu dang +84xxxxxxxxx (erp_sis.guardian
+    # .validate_vietnamese_phone_number doi 0... -> +84...). File Excel dung 0...,
+    # neu tra cuu/ghi bang 0... thi KHONG BAO GIO tim thay ban ghi cu -> lan nao cung
+    # tao guardian moi va email/CCCD tren ban ghi that khong duoc cap nhat.
+    e164 = normalize_phone_number(phone) or phone
+    existing = frappe.db.get_value("CRM Guardian", {"phone_number": e164}, "name")
+    legacy = None
+    if not existing:
+        # ban ghi do chinh script nay tao sai dinh dang o lan chay truoc
+        legacy = frappe.db.get_value("CRM Guardian", {"phone_number": phone}, "name")
+        existing = legacy
     if existing:
         g = frappe.get_doc("CRM Guardian", existing)
         changed = False
+        if legacy and _txt(g.phone_number) != e164:
+            g.phone_number = e164          # chuan hoa lai ban ghi cu
+            changed = True
         for val, fld in ((name, "guardian_name"), (email, "email"), (cccd, "id_number"),
                          (job, "occupation"), (pos, "position"), (work, "workplace")):
             if val and (overwrite or not _txt(g.get(fld))) and _txt(g.get(fld)) != val:
