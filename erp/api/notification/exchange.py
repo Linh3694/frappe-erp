@@ -122,6 +122,9 @@ def _base_chat_data(event_data):
 		"messageId": str(event_data.get("messageId") or ""),
 		"senderName": event_data.get("senderName") or "",
 		"senderEmail": event_data.get("senderEmail") or "",
+		# 'text' | 'poll' — client phân biệt tin bình chọn. KHÔNG đổi "type" ở trên: giá trị mới
+		# phải được thêm vào map kênh Android ở erp/api/erp_sis/mobile_push_notification.py.
+		"messageKind": event_data.get("messageKind") or "text",
 		"url": f"/feature/chat?conversation={conv_id}" if conv_id else "/feature/chat",
 	}
 

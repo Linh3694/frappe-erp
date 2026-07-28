@@ -463,10 +463,17 @@ def get_subjects_for_class(class_id: str | None = None):
     """
     Get available subjects for a specific class (for Subject Assignment creation).
 
-    Returns actual subjects that are taught in this class, derived ONLY from
-    Student Subject and Timetable data. Existing Subject Assignment records are
-    intentionally NOT used as a source: otherwise the very first assignment would
-    suppress the education-stage fallback and collapse the dropdown to just the
+    Returns the UNION of:
+      1. subjects derived from Student Subject / Timetable data of this class, and
+      2. every actual subject belonging to the class's education stage.
+
+    (2) is applied unconditionally, not as an empty-set fallback: a class whose
+    timetable is only partially built would otherwise collapse the dropdown to
+    just the few subjects already scheduled, while a class with no timetable at
+    all would show the full stage list. Both must behave the same.
+
+    Existing Subject Assignment records are intentionally NOT used as a source:
+    otherwise the very first assignment would narrow the dropdown to just the
     already-assigned subjects.
 
     ⚡ OPTIMIZED: Single query combining strategies instead of separate queries.
@@ -503,30 +510,23 @@ def get_subjects_for_class(class_id: str | None = None):
             WHERE ti.class_id = %(class_id)s
               AND ti.campus_id = %(campus_id)s
               AND s.actual_subject_id IS NOT NULL
+
+            UNION
+
+            -- Strategy 3: All actual subjects of the class's education stage
+            SELECT DISTINCT asub.name
+            FROM `tabSIS Class` c
+            INNER JOIN `tabSIS Education Grade` eg ON c.education_grade = eg.name
+            INNER JOIN `tabSIS Actual Subject` asub
+                ON asub.education_stage_id = eg.education_stage_id
+            WHERE c.name = %(class_id)s
+              AND asub.campus_id = %(campus_id)s
         """, {
             "class_id": class_id,
             "campus_id": campus_id,
         }, as_list=True)
-        
-        subject_ids_set = {row[0] for row in all_subject_ids if row[0]}
 
-        # If no subjects found, fallback to all subjects for the class's education stage
-        if not subject_ids_set:
-            class_info = frappe.db.get_value(
-                "SIS Class", class_id, 
-                ["education_grade"], as_dict=True
-            )
-            if class_info and class_info.education_grade:
-                education_stage = frappe.db.get_value(
-                    "SIS Education Grade", class_info.education_grade, 
-                    "education_stage_id"
-                )
-                if education_stage:
-                    fallback_subjects = frappe.db.sql("""
-                        SELECT name FROM `tabSIS Actual Subject`
-                        WHERE education_stage_id = %s AND campus_id = %s
-                    """, (education_stage, campus_id), as_list=True)
-                    subject_ids_set = {row[0] for row in fallback_subjects if row[0]}
+        subject_ids_set = {row[0] for row in all_subject_ids if row[0]}
 
         if not subject_ids_set:
             return list_response([], "No subjects found for this class")
