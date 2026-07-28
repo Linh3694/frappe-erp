@@ -1734,3 +1734,163 @@ def backfill_family(path, dry_run=1, overwrite=0, commit_every=50):
             print(f"    r{e['row']:>4} {e['student'][:28]:<30} {e['error']}")
     print("")
     return res
+
+
+# ==================================================================================
+# Don du lieu: guardian bi nhan doi do bug dinh dang SDT
+# ==================================================================================
+
+# Moi cho trong he thong tro tro toi CRM Guardian — phai chuyen het truoc khi xoa
+# ban ghi trung, neu khong se de lai Link mo coi.
+_GUARDIAN_REFS = (
+    ("CRM Family Relationship", "guardian"),
+    ("CRM Info Confirmation Log", "guardian"),
+    ("CRM Issue", "guardian"),
+    ("CRM Issue Guardian", "guardian"),
+    ("CRM Lead", "info_confirmed_by"),
+    ("CRM Lead Guardian", "guardian"),
+    ("FaceID Person", "crm_guardian"),
+    ("Feedback", "guardian"),
+    ("Portal API Error", "guardian"),
+    ("Portal Guardian Activity", "guardian"),
+    ("SIS Re-enrollment", "guardian_id"),
+    ("SIS Scholarship Application", "guardian_id"),
+    ("SIS Student Leave Request", "parent_id"),
+)
+
+
+def fix_guardian_phone_duplicates(dry_run=1, commit_every=50):
+    """
+    Gop cac CRM Guardian bi nhan doi vi SDT luu sai dinh dang.
+
+        bench --site <site> execute \
+            erp.api.crm.import_qlead_excel.fix_guardian_phone_duplicates \
+            --kwargs "{'dry_run': 0}"
+
+    Lan chay dau cua backfill tra cuu guardian bang chuoi '0xxxxxxxxx' trong khi he
+    thong luu '+84xxxxxxxxx', nen da tao ban ghi moi cho nguoi da co san. Ket qua:
+    hai CRM Guardian cung mot nguoi, va ho so co hai dong `lead_guardians`.
+
+    Voi moi ban ghi con SDT dang '0...':
+      - co ban ghi '+84...' tuong ung -> chuyen moi tham chieu sang ban ghi do,
+        bo sung field con trong cho no, roi XOA ban ghi '0...',
+      - khong co -> chi chuan hoa phone_number ve '+84...'.
+    Cuoi cung don cac dong `lead_guardians` trung (cung ho so + cung guardian).
+    """
+    dry_run = int(dry_run)
+    commit_every = int(commit_every) or 50
+
+    olds = frappe.db.sql(
+        """SELECT name, guardian_name, phone_number, email, id_number, occupation,
+                  position, workplace
+           FROM `tabCRM Guardian` WHERE phone_number LIKE '0%'""", as_dict=True)
+
+    res = {"scanned": len(olds), "merged": 0, "normalized": 0, "refs_moved": 0,
+           "dup_rows_removed": 0, "details": [], "errors": []}
+    print(f"  Guardian con SDT dang '0...': {len(olds)}")
+
+    for i, o in enumerate(olds, start=1):
+        e164 = normalize_phone_number(o["phone_number"])
+        keeper = frappe.db.get_value(
+            "CRM Guardian", {"phone_number": e164, "name": ["!=", o["name"]]}, "name")
+
+        if not keeper:
+            res["normalized"] += 1
+            res["details"].append(
+                {"action": "normalize", "guardian": o["name"],
+                 "name": o["guardian_name"], "phone": f'{o["phone_number"]} -> {e164}'})
+            if not dry_run:
+                frappe.db.set_value("CRM Guardian", o["name"], "phone_number", e164,
+                                    update_modified=False)
+            continue
+
+        moved = 0
+        for dt, fld in _GUARDIAN_REFS:
+            try:
+                moved += frappe.db.count(dt, {fld: o["name"]})
+            except Exception:
+                continue
+        res["merged"] += 1
+        res["refs_moved"] += moved
+        res["details"].append(
+            {"action": "merge", "from": o["name"], "into": keeper,
+             "name": o["guardian_name"], "phone": e164, "refs": moved})
+        if dry_run:
+            continue
+
+        sp = f"gmerge_{i}"
+        try:
+            frappe.db.savepoint(sp)
+            # bo sung field con trong cho ban ghi giu lai
+            k = frappe.get_doc("CRM Guardian", keeper)
+            ch = False
+            for src, fld in (("guardian_name", "guardian_name"), ("email", "email"),
+                             ("id_number", "id_number"), ("occupation", "occupation"),
+                             ("position", "position"), ("workplace", "workplace")):
+                v = _txt(o.get(src))
+                if v and not _txt(k.get(fld)):
+                    k.set(fld, v)
+                    ch = True
+            if ch:
+                k.flags.ignore_validate = True
+                k.flags.ignore_mandatory = True
+                k.save(ignore_permissions=True)
+
+            for dt, fld in _GUARDIAN_REFS:
+                try:
+                    frappe.db.sql(
+                        f"UPDATE `tab{dt}` SET `{fld}` = %s WHERE `{fld}` = %s",
+                        (keeper, o["name"]))
+                except Exception:
+                    continue
+            frappe.delete_doc("CRM Guardian", o["name"], force=1,
+                              ignore_permissions=True, delete_permanently=True)
+        except Exception as e:
+            try:
+                frappe.db.rollback(save_point=sp)
+            except Exception:
+                pass
+            res["merged"] -= 1
+            res["errors"].append({"guardian": o["name"], "error": str(e)[:250]})
+            frappe.log_error(message=frappe.get_traceback() or str(e),
+                             title=f"fix_guardian_phone_duplicates {o['name']}")
+
+        if res["merged"] and res["merged"] % commit_every == 0:
+            frappe.db.commit()
+
+    # --- don dong lead_guardians trung (cung parent + cung guardian)
+    dups = frappe.db.sql(
+        """SELECT parent, guardian, COUNT(*) n, MIN(name) keep
+           FROM `tabCRM Lead Guardian`
+           GROUP BY parent, guardian HAVING n > 1""", as_dict=True)
+    res["dup_rows_removed"] = sum(d["n"] - 1 for d in dups)
+    if not dry_run:
+        for d in dups:
+            frappe.db.sql(
+                """DELETE FROM `tabCRM Lead Guardian`
+                   WHERE parent = %s AND guardian = %s AND name != %s""",
+                (d["parent"], d["guardian"], d["keep"]))
+        frappe.db.commit()
+
+    print("")
+    print("=" * 62)
+    print("  DRY-RUN — khong ghi gi vao DB" if dry_run else "  DA GHI VAO DB")
+    print("=" * 62)
+    print(f"  Guardian quet             : {res['scanned']}")
+    print(f"  {'Se gop' if dry_run else 'Da gop':<25} : {res['merged']}")
+    print(f"  Chi chuan hoa SDT         : {res['normalized']}")
+    print(f"  Tham chieu chuyen sang    : {res['refs_moved']}")
+    print(f"  Dong lead_guardians trung : {res['dup_rows_removed']}")
+    for d in res["details"][:30]:
+        if d["action"] == "merge":
+            print(f"    GOP  {d['name'][:26]:<28} {d['phone']:<16} {d['from']} -> {d['into']} ({d['refs']} ref)")
+        else:
+            print(f"    CHUAN {d['name'][:26]:<28} {d['phone']}")
+    if len(res["details"]) > 30:
+        print(f"    … con {len(res['details']) - 30}")
+    if res["errors"]:
+        print(f"\n  Loi ({len(res['errors'])}):")
+        for e in res["errors"][:20]:
+            print(f"    {e['guardian']}: {e['error']}")
+    print("")
+    return res
