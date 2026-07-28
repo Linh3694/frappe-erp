@@ -875,6 +875,217 @@ def bulk_withdraw_enrolled_students():
     )
 
 
+# --- Chuyen hang loat ho so da nop phi sang Hoc sinh chinh thuc --------------------
+
+# Chi ho so DA NOP PHI moi duoc chuyen hang loat. "Dat coc" van phai chuyen tay
+# (enroll_lead) vi chua chac chan nhap hoc.
+_BULK_ENROLL_STATUSES = ("Dong phi",)
+
+# Cung nhom quyen voi chuyen hang loat sang Nghi hoc: ghi hang loat, kho hoan tac tung ho so.
+_BULK_ENROLL_ROLES = _BULK_WITHDRAW_ROLES
+
+
+def _enroll_one_lead(lead_name, allowed_statuses, context):
+    """Chuyen 1 ho so QLead (status thuoc allowed_statuses) -> Enrolled / Cho xep lop.
+
+    Doc lai tu DB moi lan thu: danh sach ung vien duoc tinh truoc do co the da cu
+    (nguoi khac vua doi buoc/trang thai).
+
+    Tra ve True neu da chuyen, False neu BO QUA (khong con du dieu kien, hoac hoc sinh
+    da co ho so khac o buoc Enrolled). Raise neu that bai — caller gom vao errors.
+    KHONG commit: caller commit mot lan sau vong lap.
+    """
+    doc = None
+    old_step = None
+    old_status = None
+    for attempt in range(2):
+        doc = frappe.get_doc("CRM Lead", lead_name)
+        if doc.step != "QLead" or (doc.status or "") not in allowed_statuses:
+            return False
+        if doc.linked_student and frappe.db.exists(
+            "CRM Lead",
+            {
+                "linked_student": doc.linked_student,
+                "step": "Enrolled",
+                "name": ["!=", doc.name],
+            },
+        ):
+            return False
+
+        validate_step_transition(doc.step, "Enrolled")
+
+        old_step = doc.step
+        old_status = doc.status
+        doc.step = "Enrolled"
+        doc.status = "Cho xep lop"
+        doc.enrollment_date = nowdate()
+        # Sinh ma HS neu chua co — dong bo enroll_lead / _prepare_advance_step_doc.
+        # Ho so nop phi thuong da co ma (ensure_student_code_for_qlead_status trong
+        # change_status), nhung ho so import/backfill thi chua.
+        if not doc.student_code and not doc.linked_student:
+            from erp.api.crm.student_code import _generate_code_internal
+
+            doc.student_code = _generate_code_internal(
+                "WS1",
+                doc.target_academic_year or "",
+                doc.target_grade or "01",
+            )
+        pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
+        if pic_care:
+            doc.pic_care = pic_care
+        try:
+            doc.save(ignore_permissions=True)
+            break
+        except frappe.TimestampMismatchError:
+            if attempt == 1:
+                raise
+
+    _log_step_change(lead_name, old_step, "Enrolled", old_status, "Cho xep lop")
+    _sync_lead_guardians_to_family_if_needed(doc)
+
+    if not doc.linked_student:
+        _run_create_enrollment_for_lead(lead_name, context)
+    else:
+        try:
+            from erp.api.crm.enrolled_class_sync import (
+                promote_leads_to_dang_hoc_if_class_assigned,
+            )
+
+            promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
+        except Exception as e:
+            frappe.log_error(f"Loi dong bo trang thai enrolled ({context}): {str(e)}")
+
+    return True
+
+
+def _collect_enroll_candidates(campus_id=None):
+    """Tim ho so QLead da nop phi du dieu kien chuyen sang Hoc sinh chinh thuc.
+
+    Tra ve (linked_rows, new_rows, skipped_rows):
+      linked_rows  — da co linked_student            -> chi chuyen buoc
+      new_rows     — chua co linked_student          -> se tao ho so hoc sinh moi
+      skipped_rows — hoc sinh da co ho so khac o buoc Enrolled -> bo qua
+
+    Nhom "da co ho so Enrolled" tra bang MOT query (thay vi db.exists tung ho so) —
+    danh sach nop phi co the hang tram dong. Ung vien deu dang o QLead nen khong the
+    tu nam trong tap Enrolled, khong can loai tru chinh no.
+    """
+    filters = {"step": "QLead", "status": ["in", list(_BULK_ENROLL_STATUSES)]}
+    if campus_id:
+        filters["campus_id"] = campus_id
+
+    leads = frappe.get_all(
+        "CRM Lead",
+        filters=filters,
+        fields=[
+            "name", "student_name", "student_code",
+            "target_grade", "linked_student", "campus_id",
+        ],
+        order_by="student_name asc",
+    )
+
+    linked_ids = [lead["linked_student"] for lead in leads if lead.get("linked_student")]
+    already_enrolled = set()
+    if linked_ids:
+        already_enrolled = {
+            sid
+            for sid in frappe.get_all(
+                "CRM Lead",
+                filters={"linked_student": ["in", linked_ids], "step": "Enrolled"},
+                pluck="linked_student",
+            )
+            if sid
+        }
+
+    linked, new_students, skipped = [], [], []
+    for lead in leads:
+        sid = lead.get("linked_student")
+        if sid and sid in already_enrolled:
+            skipped.append(lead)
+        elif sid:
+            linked.append(lead)
+        else:
+            new_students.append(lead)
+
+    return linked, new_students, skipped
+
+
+@frappe.whitelist(methods=["POST"])
+def bulk_enroll_paid_leads():
+    """Chuyen hang loat ho so da nop phi sang buoc Hoc sinh chinh thuc.
+
+    Chi xet ho so o buoc 'QLead' VA trang thai 'Dong phi' (Nop phi) — xem
+    _collect_enroll_candidates.
+
+    Tham so (body JSON):
+      dry_run   : "1"/true -> CHI dem, khong ghi gi (man xac nhan tren UI)
+      campus_id : mac dinh lay tu context nguoi dung
+
+    Luu y tac dung phu (dung y do): moi ho so chuyen buoc se sinh ma hoc sinh (neu chua
+    co), tao ho so hoc sinh + gia dinh, gan PIC cham soc va dong bo trang thai lop.
+    """
+    check_crm_permission(_BULK_ENROLL_ROLES)
+    data = get_request_data()
+
+    campus_id = data.get("campus_id") or get_current_campus_from_context()
+    raw_dry = data.get("dry_run")
+    dry_run = str(raw_dry).strip().lower() in ("1", "true", "yes") if raw_dry is not None else False
+
+    linked, new_students, skipped = _collect_enroll_candidates(campus_id)
+
+    def _sample(rows):
+        return [
+            {
+                "name": r["name"],
+                "student_name": r.get("student_name"),
+                "student_code": r.get("student_code"),
+                "target_grade": r.get("target_grade"),
+            }
+            for r in rows[:20]
+        ]
+
+    if dry_run:
+        total = len(linked) + len(new_students)
+        return success_response(
+            {
+                "linked_count": len(linked),
+                "new_student_count": len(new_students),
+                "skipped_count": len(skipped),
+                "total": total,
+                "linked_samples": _sample(linked),
+                "new_student_samples": _sample(new_students),
+                "skipped_samples": _sample(skipped),
+            },
+            f"Se chuyen {total} ho so sang buoc Hoc sinh chinh thuc",
+        )
+
+    results = {"enrolled": 0, "skipped": len(skipped), "errors": []}
+    for row in linked + new_students:
+        try:
+            if _enroll_one_lead(row["name"], _BULK_ENROLL_STATUSES, "bulk_enroll_paid_leads"):
+                results["enrolled"] += 1
+            else:
+                results["skipped"] += 1
+        except Exception as e:
+            # Kem ten/ma hoc sinh: chi co docname CRM-LEAD-xxx thi ops khong tra ra ai
+            results["errors"].append(
+                {
+                    "name": row["name"],
+                    "student_name": row.get("student_name"),
+                    "student_code": row.get("student_code"),
+                    "error": str(e),
+                }
+            )
+
+    frappe.db.commit()
+
+    return success_response(
+        results,
+        f"Da chuyen {results['enrolled']} ho so sang Hoc sinh chinh thuc, "
+        f"{results['skipped']} ho so bo qua, {len(results['errors'])} loi",
+    )
+
+
 @frappe.whitelist(methods=["POST"])
 def reserve_enrollment():
     """Bao luu: giu o buoc Enrolled (khong con buoc Re-Enroll trong pipeline)"""
@@ -999,65 +1210,19 @@ def auto_enroll_paid_leads():
         filters["target_academic_year"] = academic_year
     
     leads = frappe.get_all("CRM Lead", filters=filters, fields=["name"])
-    
+
     enrolled_count = 0
     errors = []
     for lead in leads:
         try:
-            lead_name = lead["name"]
-            skipped = False
-            old_step = None
-            old_status = None
-            for attempt in range(2):
-                doc = frappe.get_doc("CRM Lead", lead_name)
-                if doc.linked_student:
-                    existing = frappe.db.exists(
-                        "CRM Lead",
-                        {
-                            "linked_student": doc.linked_student,
-                            "step": "Enrolled",
-                            "name": ["!=", doc.name],
-                        },
-                    )
-                    if existing:
-                        skipped = True
-                        break
-                if doc.step != "QLead" or (doc.status or "") not in ("Dong phi", "Dat coc"):
-                    skipped = True
-                    break
-                old_step = doc.step
-                old_status = doc.status
-                doc.step = "Enrolled"
-                doc.status = "Cho xep lop"
-                doc.enrollment_date = nowdate()
-                pic_care = assign_pic_sales_care_weight_balance(doc.name, doc.campus_id)
-                if pic_care:
-                    doc.pic_care = pic_care
-                try:
-                    doc.save(ignore_permissions=True)
-                    break
-                except frappe.TimestampMismatchError:
-                    if attempt == 1:
-                        raise
-            if skipped or old_step is None:
-                continue
-            _log_step_change(doc.name, old_step, "Enrolled", old_status, "Cho xep lop")
-            _sync_lead_guardians_to_family_if_needed(doc)
-            if not doc.linked_student:
-                _run_create_enrollment_for_lead(doc.name, "auto_enroll_paid_leads")
-            else:
-                try:
-                    from erp.api.crm.enrolled_class_sync import (
-                        promote_leads_to_dang_hoc_if_class_assigned,
-                    )
-
-                    promote_leads_to_dang_hoc_if_class_assigned(doc.linked_student)
-                except Exception as e:
-                    frappe.log_error(f"Loi dong bo enrolled (auto_enroll): {str(e)}")
-            enrolled_count += 1
+            # Dung chung _enroll_one_lead voi bulk_enroll_paid_leads — khac moi tap status
+            if _enroll_one_lead(
+                lead["name"], ("Dong phi", "Dat coc"), "auto_enroll_paid_leads"
+            ):
+                enrolled_count += 1
         except Exception as e:
             errors.append({"name": lead["name"], "error": str(e)})
-    
+
     frappe.db.commit()
     return success_response(
         {"enrolled": enrolled_count, "errors": errors},
