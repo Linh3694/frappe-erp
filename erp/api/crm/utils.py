@@ -273,19 +273,27 @@ def normalize_phone_number(phone: str) -> str:
 
     Nguoi dung nhap 0xxxxxxxxx; he thong luu + dedup theo +84xxxxxxxxx.
     Ham idempotent: ap dung lai tren gia tri da chuan hoa van giu nguyen.
+
+    Chi coi "84" o dau la MA QUOC GIA khi co dau "+" hoac khi chuoi du dai
+    (84 + 9 chu so = 11). Dau so 084x/083x cua Viet Nam rat de bi nham: Excel
+    cat mat so 0 dau thi "0847288688" con "847288688" — neu cat tiep "84" se ra
+    "+847288688", mot so khong ton tai, va ho so do khong bao gio doi chieu duoc.
     """
     if not phone:
         return ""
     cleaned = phone.strip().replace(" ", "").replace("-", "")
-    if cleaned.startswith("+"):
+    had_plus = cleaned.startswith("+")
+    if had_plus:
         cleaned = cleaned[1:]
     if not cleaned:
         return ""
     if cleaned.startswith("0"):
-        cleaned = "84" + cleaned[1:]
-    elif not cleaned.startswith("84"):
-        cleaned = "84" + cleaned
-    return "+" + cleaned
+        core = cleaned[1:]
+    elif cleaned.startswith("84") and (had_plus or len(cleaned) >= 11):
+        core = cleaned[2:]
+    else:
+        core = cleaned
+    return "+84" + core
 
 
 def get_valid_statuses_for_step(step: str) -> List[str]:
