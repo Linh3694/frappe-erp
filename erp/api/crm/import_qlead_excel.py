@@ -196,7 +196,10 @@ def _emails(v):
     out = []
     for p in re.split(r"[\s,;/]+", s):
         p = p.strip()
-        if p and re.fullmatch(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}", p) and p not in out:
+        # Chi nhan ky tu ASCII: Frappe validate email chat hon, du lieu that co o
+        # 'nguyenhuonggiãng7@gmail.com' — regex cu cho qua roi ca DONG bi rollback.
+        if p and re.fullmatch(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", p) \
+                and p not in out:
             out.append(p)
     return out
 
