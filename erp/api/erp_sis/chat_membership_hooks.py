@@ -175,6 +175,16 @@ def _enqueue_for_students(student_ids):
         enqueue_chat_membership_sync(class_id, school_year_id)
 
 
+def enqueue_chat_membership_sync_for_students(student_ids):
+    """Bắn sync theo danh sách HS — cho luồng nghiệp vụ tự gọi (không qua doc-event).
+
+    Dùng khi handler sửa child table bằng SQL trực tiếp nên `get_doc_before_save()` không
+    còn phản ánh bản trước (vd `family.update_family_members`): doc-event không nhìn thấy
+    HS bị gỡ, phải truyền HỢP (HS cũ ∪ HS mới) vào đây.
+    """
+    _enqueue_for_students(student_ids)
+
+
 def _students_linked_to_guardian(guardian_docname):
     """HS liên kết PH theo BẢNG (mọi parent: CRM Family / CRM Student / CRM Guardian).
 

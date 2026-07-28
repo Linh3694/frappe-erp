@@ -799,10 +799,13 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
         # CRITICAL: Get old guardians BEFORE deleting relationships
         # để có thể cleanup những guardians bị remove khỏi family
         old_guardians = set()
+        old_students = set()
         for rel in family_doc.relationships:
             if rel.guardian:
                 old_guardians.add(rel.guardian)
-        
+            if rel.student:
+                old_students.add(rel.student)
+
         # CRITICAL: Delete ALL old relationships from database first
         # This prevents deleted guardians from still receiving notifications
         frappe.db.sql("""
@@ -885,6 +888,23 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                         frappe.logger().info(f"✅ Cleaned up guardian {removed_guardian_id}")
                     except Exception as cleanup_error:
                         frappe.logger().error(f"❌ Error cleaning up guardian {removed_guardian_id}: {str(cleanup_error)}")
+
+        # Sync thành viên nhóm chat lớp. KHÔNG dựa được vào doc-event `on_family_change`:
+        # child rows đã bị DELETE thẳng bằng SQL TRƯỚC `family_doc.save()` nên
+        # `get_doc_before_save()` đọc lại từ DB ra rỗng ⇒ hook không thấy HS/PH bị gỡ.
+        # Truyền HỢP (HS cũ ∪ HS mới) để lớp của HS bị gỡ khỏi gia đình cũng được reconcile.
+        try:
+            from erp.api.erp_sis.chat_membership_hooks import (
+                enqueue_chat_membership_sync_for_students,
+            )
+
+            new_students = {rel.get("student") for rel in relationships if rel.get("student")}
+            enqueue_chat_membership_sync_for_students(old_students | new_students | set(students or []))
+        except Exception as sync_error:
+            # Sync là side-effect — không được chặn luồng lưu gia đình.
+            frappe.logger().warning(
+                f"[Family] enqueue chat membership sync failed for {family_id}: {str(sync_error)}"
+            )
 
         frappe.db.commit()
 
