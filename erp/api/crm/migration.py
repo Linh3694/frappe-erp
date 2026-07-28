@@ -12,6 +12,7 @@ from erp.utils.api_response import (
     paginated_response, list_response, validation_error_response
 )
 from erp.api.crm.utils import check_crm_permission, get_request_data, generate_crm_code
+from erp.utils.relationship_types import normalize as normalize_relationship
 
 
 REVERSE_GENDER_MAP = {
@@ -20,13 +21,9 @@ REVERSE_GENDER_MAP = {
     "others": "",
 }
 
-REVERSE_RELATIONSHIP_MAP = {
-    "Father": "Bo",
-    "Mother": "Me",
-    "Guardian": "Nguoi giam ho",
-    "Grandfather": "Ong",
-    "Grandmother": "Ba",
-}
+# Quan he luu bang ma EN lowercase o ca hai phia (CRM Family Relationship va
+# CRM Lead.relationship) -> chi can normalize, khong con map nguoc sang tieng Viet.
+# Xem erp/utils/relationship_types.py.
 
 # Trung voi add_lead_sibling (mode=existing) trong lead.py
 DEFAULT_SIBLING_SCHOOL = "Wellspring Hà Nội"
@@ -247,9 +244,7 @@ def _build_lead_from_student(
         lead_data["guardian_email"] = guardian_doc.email or ""
         # CCCD thuc te nam o field id_number; guardian_id la ma unique cua doc (vd GRD-00001)
         lead_data["guardian_id_number"] = getattr(guardian_doc, "id_number", "") or ""
-        lead_data["relationship"] = REVERSE_RELATIONSHIP_MAP.get(
-            relationship_type, relationship_type or ""
-        )
+        lead_data["relationship"] = normalize_relationship(relationship_type)
 
         if guardian_doc.phone_number:
             lead_data["phone_numbers"] = [{

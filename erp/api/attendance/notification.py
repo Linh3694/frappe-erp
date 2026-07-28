@@ -11,6 +11,7 @@ from datetime import datetime
 from erp.common.doctype.erp_notification.erp_notification import create_notification
 from erp.api.parent_portal.realtime_notification import emit_notification_to_user, emit_unread_count_update
 from erp.api.parent_portal.push_notification import send_push_notification
+from erp.utils.relationship_types import get_label as get_relationship_label
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
 
 
@@ -442,7 +443,9 @@ def get_student_guardians(student_code):
 	Get guardians for a student from CRM Family Relationship
 
 	Returns:
-		List of dicts: [{"name": "Guardian Name", "email": "guardian@email.com", "relation": "Father"}]
+		List of dicts: [{"name": "Guardian Name", "email": "guardian@email.com",
+		                 "relation": "Bố", "relation_code": "father"}]
+		`relation` la nhan hien thi (gui thang toi phu huynh), `relation_code` la ma chuan.
 	"""
 	try:
 		# FIX: Case-insensitive lookup cho student_code
@@ -491,7 +494,8 @@ def get_student_guardians(student_code):
 						"name": rel.guardian_name or rel.guardian,
 						"email": system_email,
 						"personal_email": rel.guardian_email,
-						"relation": rel.relationship_type,
+						"relation": get_relationship_label(rel.relationship_type),
+						"relation_code": rel.relationship_type,
 						"is_primary": rel.key_person,
 						"guardian_doc": rel.guardian,
 						"guardian_id": rel.guardian_id

@@ -19,6 +19,7 @@ from erp.api.crm.utils import (
     STATUS_LABEL_VN, STEP_LABEL_VN, GENDER_LABEL_VN,
 )
 from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.relationship_types import normalize as normalize_relationship
 
 
 def _recalculate_admission_profile_completion(doc):
@@ -1303,7 +1304,7 @@ def clone_lead_for_sibling():
         for lg in getattr(src, "lead_guardians", None) or []:
             doc.append("lead_guardians", {
                 "guardian": lg.guardian,
-                "relationship_type": lg.get("relationship_type") or "",
+                "relationship_type": normalize_relationship(lg.get("relationship_type")),
                 "is_primary_contact": int(lg.get("is_primary_contact") or 0),
             })
 
@@ -1328,7 +1329,7 @@ def clone_lead_for_sibling():
                 {
                     "sibling_name": sn,
                     "student_code": row.get("student_code") or "",
-                    "relationship_type": row.get("relationship_type") or "",
+                    "relationship_type": normalize_relationship(row.get("relationship_type")),
                     "dob": row.get("dob"),
                     "school": row.get("school") or "",
                 },
@@ -1369,7 +1370,7 @@ def clone_lead_for_sibling():
         src_reload.append("lead_siblings", {
             "sibling_name": student_name,
             "student_code": "",
-            "relationship_type": (data.get("relationship_type") or "").strip(),
+            "relationship_type": normalize_relationship(data.get("relationship_type")),
             "dob": student_dob,
             "school": school_ace,
         })
@@ -2063,7 +2064,7 @@ def add_lead_guardian():
         guardian_doc.flags.ignore_validate = True
         guardian_doc.insert(ignore_permissions=True)
         guardian_name_doc = guardian_doc.name
-        relationship_type = guardian_data.get("relationship_type", "")
+        relationship_type = normalize_relationship(guardian_data.get("relationship_type"))
     else:
         # mode = existing
         existing = data.get("existing_guardian") or data.get("guardian")
@@ -2072,7 +2073,7 @@ def add_lead_guardian():
         if not frappe.db.exists("CRM Guardian", existing):
             return not_found_response(f"Khong tim thay CRM Guardian {existing}")
         guardian_name_doc = existing
-        relationship_type = data.get("relationship_type", "")
+        relationship_type = normalize_relationship(data.get("relationship_type"))
 
     if not guardian_name_doc:
         return error_response("Khong tao/chon duoc guardian")
@@ -2128,11 +2129,14 @@ def add_lead_guardian():
 
     # Neu co linked_family + linked_student -> them CRM Family Relationship
     if getattr(doc, "linked_family", None) and doc.linked_student:
+        # CRM Family Relationship.relationship_type la reqd=1 -> phai co gia tri.
+        # Dialog "Them thanh vien" hien chua thu quan he, nen fallback "other".
+        family_relationship_type = relationship_type or "other"
         family_doc = frappe.get_doc("CRM Family", doc.linked_family)
         family_doc.append("relationships", {
             "student": doc.linked_student,
             "guardian": guardian_name_doc,
-            "relationship_type": relationship_type or "other",
+            "relationship_type": family_relationship_type,
             "key_person": 1 if is_first else 0,
             "access": 1,
         })
@@ -2145,7 +2149,7 @@ def add_lead_guardian():
         student_doc.append("family_relationships", {
             "student": doc.linked_student,
             "guardian": guardian_name_doc,
-            "relationship_type": relationship_type or "other",
+            "relationship_type": family_relationship_type,
             "key_person": 1 if is_first else 0,
             "access": 1,
         })
@@ -2156,7 +2160,7 @@ def add_lead_guardian():
         guardian_doc.append("student_relationships", {
             "student": doc.linked_student,
             "guardian": guardian_name_doc,
-            "relationship_type": relationship_type or "other",
+            "relationship_type": family_relationship_type,
             "key_person": 1 if is_first else 0,
             "access": 1,
         })
@@ -2279,6 +2283,7 @@ def update_lead_guardian():
     doc = frappe.get_doc("CRM Lead", name)
     relationship_type = updates.get("relationship_type")
     if relationship_type is not None:
+        relationship_type = normalize_relationship(relationship_type)
         lead_guardians = getattr(doc, "lead_guardians", None) or []
         for lg in lead_guardians:
             if lg.get("guardian") == guardian_name:
@@ -2390,7 +2395,7 @@ def remove_lead_guardian():
         doc.guardian_name = g_doc.guardian_name
         doc.guardian_email = g_doc.email or ""
         doc.guardian_id_number = getattr(g_doc, "id_number", None) or ""
-        doc.relationship = next_primary.get("relationship_type", "")
+        doc.relationship = normalize_relationship(next_primary.get("relationship_type"))
         doc.guardian_occupation = getattr(g_doc, "occupation", None) or ""
         doc.guardian_position = getattr(g_doc, "position", None) or ""
         doc.guardian_workplace = getattr(g_doc, "workplace", None) or ""
@@ -2447,7 +2452,7 @@ def add_lead_sibling():
         doc.append("lead_siblings", {
             "sibling_name": student.student_name,
             "student_code": student.student_code or "",
-            "relationship_type": data.get("relationship_type", ""),
+            "relationship_type": normalize_relationship(data.get("relationship_type")),
             "dob": str(student.dob) if student.dob else None,
             "school": "Wellspring Hà Nội",
         })
@@ -2460,7 +2465,7 @@ def add_lead_sibling():
         doc.append("lead_siblings", {
             "sibling_name": s_name,
             "student_code": sibling_data.get("student_code", ""),
-            "relationship_type": sibling_data.get("relationship_type", ""),
+            "relationship_type": normalize_relationship(sibling_data.get("relationship_type")),
             "dob": sibling_data.get("dob"),
             "school": sibling_data.get("school", ""),
         })
@@ -2494,7 +2499,7 @@ def update_lead_sibling():
             if "student_code" in updates:
                 row.student_code = updates.get("student_code", "")
             if "relationship_type" in updates:
-                row.relationship_type = updates.get("relationship_type", "")
+                row.relationship_type = normalize_relationship(updates.get("relationship_type"))
             if "dob" in updates:
                 row.dob = updates.get("dob")
             if "school" in updates:

@@ -12,6 +12,7 @@ from erp.utils.api_response import (
 )
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.search import build_search_condition
+from erp.utils.relationship_types import normalize as normalize_relationship
 
 
 def _find_existing_family_for_student(student_id: str, exclude_family: str | None = None):
@@ -467,16 +468,7 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
                 if not relationship_value:
                     raise frappe.ValidationError(_(f"{info['relationship']} bắt buộc"))
 
-                relationship_map = {
-                    'bố': 'dad', 'bo': 'dad', 'cha': 'dad', 'father': 'dad',
-                    'mẹ': 'mom', 'me': 'mom', 'mother': 'mom',
-                    'ông': 'grandparent', 'ba': 'grandparent', 'bà': 'grandparent', 'grandparent': 'grandparent',
-                    'anh': 'sibling', 'chị': 'sibling', 'em': 'sibling', 'sibling': 'sibling',
-                    'cô': 'uncle_aunt', 'chú': 'uncle_aunt', 'dì': 'uncle_aunt', 'bác': 'uncle_aunt', 'uncle': 'uncle_aunt', 'aunt': 'uncle_aunt',
-                    'nuôi': 'foster_parent', 'foster': 'foster_parent', 'cha nuôi': 'foster_parent', 'mẹ nuôi': 'foster_parent',
-                }
-                key = relationship_value.lower().strip()
-                relationship_code = relationship_map.get(key, relationship_value)
+                relationship_code = normalize_relationship(relationship_value)
 
                 main_flag = (_stringify_cell(_get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "main"))) or '').lower() == 'y'
                 view_flag = (_stringify_cell(_get_raw_value(row, normalized_columns, _guardian_key_variants(idx, "view"))) or '').lower() != 'n'
@@ -787,7 +779,7 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
             family_doc.append("relationships", {
                 "student": rel.get("student"),
                 "guardian": rel.get("guardian"),
-                "relationship_type": rel.get("relationship_type", ""),
+                "relationship_type": normalize_relationship(rel.get("relationship_type")),
                 "key_person": int(rel.get("key_person", False)),
                 "access": int(rel.get("access", True)),
             })
@@ -813,7 +805,7 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                         student_doc.append("family_relationships", {
                             "student": student_id,
                             "guardian": rel.get("guardian"),
-                            "relationship_type": rel.get("relationship_type", ""),
+                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
                             "key_person": int(rel.get("key_person", False)),
                             "access": int(rel.get("access", False)),
                         })
@@ -830,7 +822,7 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                         guardian_doc.append("student_relationships", {
                             "student": rel.get("student"),
                             "guardian": guardian_id,
-                            "relationship_type": rel.get("relationship_type", ""),
+                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
                             "key_person": int(rel.get("key_person", False)),
                             "access": int(rel.get("access", False)),
                         })
@@ -1307,7 +1299,7 @@ def create_family():
             family_doc.append("relationships", {
                 "student": rel.get("student"),
                 "guardian": rel.get("guardian"),
-                "relationship_type": rel.get("relationship_type", ""),
+                "relationship_type": normalize_relationship(rel.get("relationship_type")),
                 "key_person": int(rel.get("key_person", False)),
                 "access": int(rel.get("access", True))
             })
@@ -1331,7 +1323,7 @@ def create_family():
                         student_doc.append("family_relationships", {
                             "student": student_id,
                             "guardian": rel.get("guardian"),
-                            "relationship_type": rel.get("relationship_type", ""),
+                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
                             "key_person": int(rel.get("key_person", False)),
                             "access": int(rel.get("access", False))
                         })
@@ -1359,7 +1351,7 @@ def create_family():
                         guardian_doc.append("student_relationships", {
                             "student": rel.get("student"),
                             "guardian": guardian_id,
-                            "relationship_type": rel.get("relationship_type", ""),
+                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
                             "key_person": int(rel.get("key_person", False)),
                             "access": int(rel.get("access", False))
                         })

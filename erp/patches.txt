@@ -22,3 +22,4 @@ erp.patches.v1_0.backfill_class_log_submitted
 erp.patches.v1_0.backfill_crm_student_enrollment_status
 erp.patches.v1_0.backfill_crm_lead_phone_from_guardian
 erp.patches.v1_0.backfill_crm_issue_school_year
+erp.patches.v1_0.normalize_family_relationship_types

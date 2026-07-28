@@ -12,17 +12,8 @@ from erp.utils.api_response import (
     validation_error_response, not_found_response
 )
 from erp.api.crm.utils import check_crm_permission, get_request_data
+from erp.utils.relationship_types import normalize as normalize_relationship
 
-
-RELATIONSHIP_MAP = {
-    "Bo": "Father",
-    "Me": "Mother",
-    "Nguoi giam ho": "Guardian",
-    # Gia dien UI tieng Viet (tab Gia dinh / lead_guardians)
-    "Bố": "Father",
-    "Mẹ": "Mother",
-    "Người giám hộ": "Guardian",
-}
 
 GENDER_MAP = {
     "Nam": "male",
@@ -120,15 +111,11 @@ def _pick_linked_guardian_row(lead_doc):
 
 
 def _relationship_type_for_family(lead_row_rel, lead_doc):
-    """Chuan hoa relationship_type cho CRM Family Relationship."""
-    r = str(lead_row_rel or "").strip()
+    """Chuan hoa relationship_type cho CRM Family Relationship (ma EN lowercase)."""
+    r = normalize_relationship(lead_row_rel)
     if r:
-        if r in RELATIONSHIP_MAP:
-            return RELATIONSHIP_MAP[r]
         return r
-    return RELATIONSHIP_MAP.get(
-        lead_doc.relationship or "", lead_doc.relationship or "Guardian"
-    )
+    return normalize_relationship(lead_doc.relationship) or "guardian"
 
 
 def _get_primary_phone(lead_doc):
@@ -319,9 +306,7 @@ def run_create_enrollment_records(lead_name: str):
         else:
             # Khong co lead_guardians: tao Guardian tu cac truong legacy tren lead
             guardian_doc = _create_crm_guardian(lead_doc, "")
-            relationship_type = RELATIONSHIP_MAP.get(
-                lead_doc.relationship or "", lead_doc.relationship or "Guardian"
-            )
+            relationship_type = normalize_relationship(lead_doc.relationship) or "guardian"
 
         family = _create_crm_family_enrollment(
             student.name, guardian_doc.name, relationship_type

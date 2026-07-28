@@ -10,6 +10,7 @@ import frappe
 from frappe import _
 from frappe.utils import now, get_datetime, add_to_date
 from erp.utils.search import search_names
+from erp.utils.relationship_types import get_label as get_relationship_label
 from datetime import datetime, timedelta
 import json
 from erp.utils.api_response import (
@@ -405,7 +406,9 @@ def admin_get():
                     student_info = {
                         "name": student_name,
                         "student_id": student_code or relationship.student,  # student_code from CRM Student, fallback to CRM Student ID
+                        # Ma chuan + nhan hien thi: client khong phai tu map
                         "relationship": relationship.relationship_type,
+                        "relationship_label": get_relationship_label(relationship.relationship_type),
                         "class_name": class_name,
                         "program": program,
                         "photo": student_photo,
