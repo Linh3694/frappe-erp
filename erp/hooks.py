@@ -536,12 +536,18 @@ doc_events = {
 	},
 	# Cache Invalidation Hooks for Subject Assignment & Timetable
 	# (+ sync membership nhóm chat social-service khi phân công giảng dạy đổi)
+	# LƯU Ý: `doc_events` là một dict literal — key trùng thì bản SAU ghi đè bản TRƯỚC
+	# và bản trước chết lặng. Audit log của 2 doctype dưới đây đã từng nằm ở entry trùng
+	# phía sau và giết mất cache-invalidation + sync chat; nay gộp vào đúng một entry.
+	# Thêm handler mới thì APPEND vào đây, đừng tạo entry thứ hai.
 	"SIS Subject Assignment": {
 		"after_insert": [
+			"erp.observability.audit.log_create",
 			"erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
 			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
 		],
 		"on_update": [
+			"erp.observability.audit.log_update",
 			"erp.api.erp_sis.utils.assignment_cache.on_subject_assignment_change",
 			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
 		],
@@ -550,13 +556,25 @@ doc_events = {
 			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
 		],
 		"on_trash": [
+			"erp.observability.audit.log_delete",
 			"erp.api.erp_sis.chat_membership_hooks.on_subject_assignment_change"
 		]
 	},
 	"SIS Subject": {
-		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_subject_change",
-		"on_update": "erp.api.erp_sis.utils.assignment_cache.on_subject_change",
-		"after_delete": "erp.api.erp_sis.utils.assignment_cache.on_subject_change"
+		"after_insert": [
+			"erp.observability.audit.log_create",
+			"erp.api.erp_sis.utils.assignment_cache.on_subject_change"
+		],
+		"on_update": [
+			"erp.observability.audit.log_update",
+			"erp.api.erp_sis.utils.assignment_cache.on_subject_change"
+		],
+		"after_delete": [
+			"erp.api.erp_sis.utils.assignment_cache.on_subject_change"
+		],
+		"on_trash": [
+			"erp.observability.audit.log_delete"
+		]
 	},
 	"SIS Timetable Instance Row": {
 		"after_insert": "erp.api.erp_sis.utils.assignment_cache.on_timetable_instance_row_change",
@@ -600,15 +618,19 @@ doc_events = {
 			"erp.observability.audit.log_delete"
 		]
 	},
+	# (+ sync membership nhóm chat social-service khi HS vào/ra lớp)
 	"SIS Class Student": {
 		"after_insert": [
-			"erp.observability.audit.log_create"
+			"erp.observability.audit.log_create",
+			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change"
 		],
 		"on_update": [
-			"erp.observability.audit.log_update"
+			"erp.observability.audit.log_update",
+			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change"
 		],
 		"on_trash": [
-			"erp.observability.audit.log_delete"
+			"erp.observability.audit.log_delete",
+			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change"
 		]
 	},
 	"SIS Class Attendance": {
@@ -649,17 +671,6 @@ doc_events = {
 		]
 	},
 	"SIS Teacher": {
-		"after_insert": [
-			"erp.observability.audit.log_create"
-		],
-		"on_update": [
-			"erp.observability.audit.log_update"
-		],
-		"on_trash": [
-			"erp.observability.audit.log_delete"
-		]
-	},
-	"SIS Subject": {
 		"after_insert": [
 			"erp.observability.audit.log_create"
 		],
@@ -781,17 +792,6 @@ doc_events = {
 		]
 	},
 	"SIS Calendar": {
-		"after_insert": [
-			"erp.observability.audit.log_create"
-		],
-		"on_update": [
-			"erp.observability.audit.log_update"
-		],
-		"on_trash": [
-			"erp.observability.audit.log_delete"
-		]
-	},
-	"SIS Subject Assignment": {
 		"after_insert": [
 			"erp.observability.audit.log_create"
 		],
@@ -992,11 +992,19 @@ doc_events = {
 	"SIS Library Event": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
 	},
+	# Sync membership nhóm chat social-service khi thông tin/liên kết PH-HS đổi.
+	# `CRM Family Relationship` và `CRM Guardian Email` là child doctype (istable=1) —
+	# doc-event trên child không chạy đáng tin, nên hook gắn vào các parent giữ chúng.
 	"CRM Guardian": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
+		"on_update": "erp.api.erp_sis.chat_membership_hooks.on_guardian_change",
 	},
 	"CRM Family": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
+		"on_update": "erp.api.erp_sis.chat_membership_hooks.on_family_change",
+	},
+	"CRM Student": {
+		"on_update": "erp.api.erp_sis.chat_membership_hooks.on_student_change",
 	},
 	"CRM Admission Course": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
