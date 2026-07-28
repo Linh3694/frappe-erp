@@ -1173,10 +1173,27 @@ def _name_key(s):
     return " ".join(re.sub(r"[^A-Za-z0-9 ]", " ", s).split()).lower()
 
 
-def _guardian_doc_for(name, phone, cccd, email, job, pos, work):
-    """get-or-create CRM Guardian theo SDT (khoa tu nhien, dong bo add_lead_guardian)."""
+def _guardian_doc_for(name, phone, cccd, email, job, pos, work, overwrite=0):
+    """
+    get-or-create CRM Guardian theo SDT (khoa tu nhien, dong bo add_lead_guardian).
+
+    Guardian dung chung giua anh chi em nen khi tim thay ban ghi cu:
+      overwrite=0 -> chi dien them field dang trong,
+      overwrite=1 -> HSM ghi de.
+    """
     existing = frappe.db.get_value("CRM Guardian", {"phone_number": phone}, "name")
     if existing:
+        g = frappe.get_doc("CRM Guardian", existing)
+        changed = False
+        for val, fld in ((name, "guardian_name"), (email, "email"), (cccd, "id_number"),
+                         (job, "occupation"), (pos, "position"), (work, "workplace")):
+            if val and (overwrite or not _txt(g.get(fld))) and _txt(g.get(fld)) != val:
+                g.set(fld, val)
+                changed = True
+        if changed:
+            g.flags.ignore_validate = True
+            g.flags.ignore_mandatory = True
+            g.save(ignore_permissions=True)
         return existing, "reused"
     gid = f"{_slug(name)}-{frappe.generate_hash(length=6)}"
     while frappe.db.exists("CRM Guardian", {"guardian_id": gid}):
@@ -1192,21 +1209,31 @@ def _guardian_doc_for(name, phone, cccd, email, job, pos, work):
     return doc.name, "created"
 
 
-def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", commit_every=50):
+def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", overwrite=0,
+                 commit_every=50):
     """
     Dong bo thong tin gia dinh tu sheet HSM vao ho so CRM da co.
 
         bench --site <site> execute erp.api.crm.import_qlead_excel.backfill_hsm \
             --kwargs "{'path': '/private/files/....xlsx'}"
 
-    Chi CONG THEM, khong xoa du lieu dang co:
+    Cong them:
       - Bo / Me / Nguoi giam ho CO SDT  -> CRM Guardian + dong trong `lead_guardians`
       - SDT cua ho                      -> them vao `phone_numbers` neu chua co
-      - Me (khong co thi Bo)            -> dien khoi guardian_* phang neu dang trong
-      - Anh chi em                      -> `lead_siblings` (chi them khi bang dang rong)
+      - Me (khong co thi Bo)            -> khoi guardian_* phang
+      - Anh chi em                      -> `lead_siblings` (gop theo ten)
       - Ghi chu suc khoe/tam ly         -> `student_health_notes`
       - NGUOI THIEU SDT                 -> KHONG tao Guardian; ten + thong tin duoc
                                            ghi noi tiep vao `student_note`
+
+    overwrite  0 (mac dinh) = CRM thang: field nao CRM da co gia tri thi giu nguyen,
+                 HSM chi dien vao cho dang trong.
+               1 = HSM thang: ghi de khoi guardian_* phang, ghi chu suc khoe, va
+                 cap nhat lai document CRM Guardian dung chung khi HSM co du lieu moi.
+
+    Du overwrite=1 van KHONG BAO GIO xoa dong: `lead_guardians`, `phone_numbers`,
+    `lead_siblings` chi duoc them; anh chi em / phu huynh chi co o CRM ma HSM khong
+    co thi giu nguyen.
 
     Doi chieu hoc sinh theo ten da chuan hoa, trong pham vi buoc QLead + status
     truyen vao (mac dinh «Dong phi») nen khong lan sang ho so khac.
@@ -1214,9 +1241,11 @@ def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", commit_every=50
     import openpyxl
 
     dry_run = int(dry_run)
+    ow = int(overwrite)
     commit_every = int(commit_every) or 50
     path = _resolve_path(path)
     print(f"  File: {path}")
+    print(f"  overwrite={ow} ({'HSM thang' if ow else 'CRM thang — chi dien cho trong'})")
 
     wb = openpyxl.load_workbook(path, data_only=True)
     sname = sheet or HSM_SHEET
@@ -1303,7 +1332,8 @@ def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", commit_every=50
                            for p in (doc.phone_numbers or [])}
             for i, g in enumerate(with_phone):
                 gname, how = _guardian_doc_for(g["name"], g["phone"], g["cccd"],
-                                               g["email"], g["job"], g["pos"], g["work"])
+                                               g["email"], g["job"], g["pos"], g["work"],
+                                               overwrite=ow)
                 res["guardians_created" if how == "created" else "guardians_reused"] += 1
                 if gname not in linked:
                     doc.append("lead_guardians", {
@@ -1321,35 +1351,44 @@ def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", commit_every=50
                     touched = True
 
             # khoi guardian_* phang: uu tien Me, khong co thi Bo
-            if not _txt(doc.guardian_name) and with_phone:
+            if with_phone and (ow or not _txt(doc.guardian_name)):
                 pick = next((g for g in with_phone if g["label"] == "Mẹ"), with_phone[0])
-                doc.guardian_name = pick["name"]
-                if pick["rel"] and not _txt(doc.relationship):
-                    doc.relationship = pick["rel"]
-                if pick["email"] and not _txt(doc.guardian_email):
-                    doc.guardian_email = pick["email"]
-                if pick["cccd"] and not _txt(doc.guardian_id_number):
-                    doc.guardian_id_number = pick["cccd"]
-                for src, fld in (("job", "guardian_occupation"), ("pos", "guardian_position"),
-                                 ("work", "guardian_workplace")):
-                    if pick[src] and not _txt(doc.get(fld)):
-                        doc.set(fld, pick[src])
-                res["flat_filled"] += 1
-                touched = True
+                wrote = False
+                for val, fld in (
+                    (pick["name"], "guardian_name"), (pick["rel"], "relationship"),
+                    (pick["email"], "guardian_email"), (pick["cccd"], "guardian_id_number"),
+                    (pick["job"], "guardian_occupation"), (pick["pos"], "guardian_position"),
+                    (pick["work"], "guardian_workplace"),
+                ):
+                    if val and (ow or not _txt(doc.get(fld))) and _txt(doc.get(fld)) != val:
+                        doc.set(fld, val)
+                        wrote = True
+                if wrote:
+                    res["flat_filled"] += 1
+                    touched = True
 
             # Gop theo TEN thay vi bo qua ca bang khi da co dong: giu nguyen anh chi em
             # CRM dang co, dong thoi khong danh roi nguoi ma HSM co them.
-            have_sib = {_name_key(s.sibling_name) for s in (doc.lead_siblings or [])}
+            have_sib = {_name_key(s.sibling_name): s for s in (doc.lead_siblings or [])}
             for s in siblings:
                 k = _name_key(s["sibling_name"])
-                if k in have_sib:
+                row = have_sib.get(k)
+                if row is not None:
+                    # da co dong nay: chi bo sung ngay sinh / truong con thieu
+                    # (hoac ghi de khi overwrite) — khong bao gio xoa dong.
+                    for fld in ("dob", "school"):
+                        v = s.get(fld)
+                        if v and (ow or not _txt(row.get(fld))) and _txt(row.get(fld)) != v:
+                            row.set(fld, v)
+                            touched = True
                     continue
                 doc.append("lead_siblings", s)
-                have_sib.add(k)
+                have_sib[k] = doc.lead_siblings[-1]
                 res["siblings"] += 1
                 touched = True
 
-            if health and not _txt(doc.student_health_notes):
+            if health and (ow or not _txt(doc.student_health_notes)) \
+                    and _txt(doc.student_health_notes) != health:
                 doc.student_health_notes = health
                 res["health_notes"] += 1
                 touched = True
