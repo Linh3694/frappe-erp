@@ -1176,6 +1176,26 @@ def _name_key(s):
     return " ".join(re.sub(r"[^A-Za-z0-9 ]", " ", s).split()).lower()
 
 
+def _add_child_contact(doc, table, key_field, value):
+    """
+    Them mot dong vao bang con lien lac cua CRM Guardian neu chua co.
+
+    Phai tu lam thay vi trong cho CRMGuardian.before_save(): ta save voi
+    flags.ignore_validate = True, ma Frappe `return` ngay tai co do trong
+    run_before_save_methods() nen ca validate() LAN before_save() bi bo qua —
+    _migrate_flat_contacts_if_needed() khong chay, bang con `emails`/`phone_numbers`
+    rong, giao dien hien "Chua co du lieu" du field vo huong da co gia tri.
+    """
+    v = _txt(value)
+    if not v:
+        return False
+    cur = [_txt(r.get(key_field)).lower() for r in (doc.get(table) or [])]
+    if v.lower() in cur:
+        return False
+    doc.append(table, {key_field: v, "is_primary": 0 if cur else 1})
+    return True
+
+
 def _guardian_doc_for(name, phone, cccd, email, job, pos, work, overwrite=0):
     """
     get-or-create CRM Guardian theo SDT (khoa tu nhien, dong bo add_lead_guardian).
@@ -1206,6 +1226,10 @@ def _guardian_doc_for(name, phone, cccd, email, job, pos, work, overwrite=0):
             if val and (overwrite or not _txt(g.get(fld))) and _txt(g.get(fld)) != val:
                 g.set(fld, val)
                 changed = True
+        if _add_child_contact(g, "emails", "email_address", email):
+            changed = True
+        if _add_child_contact(g, "phone_numbers", "phone_number", e164):
+            changed = True
         if changed:
             g.flags.ignore_validate = True
             g.flags.ignore_mandatory = True
@@ -1219,6 +1243,8 @@ def _guardian_doc_for(name, phone, cccd, email, job, pos, work, overwrite=0):
         "phone_number": phone, "email": email or "", "id_number": cccd or "",
         "occupation": job or "", "position": pos or "", "workplace": work or "",
     })
+    _add_child_contact(doc, "emails", "email_address", email)
+    _add_child_contact(doc, "phone_numbers", "phone_number", e164)
     doc.flags.ignore_validate = True
     doc.flags.ignore_mandatory = True
     doc.insert(ignore_permissions=True)
