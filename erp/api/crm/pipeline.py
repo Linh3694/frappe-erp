@@ -960,10 +960,14 @@ def _enroll_one_lead(lead_name, allowed_statuses, context):
     _sync_lead_guardians_to_family_if_needed(doc)
 
     if not doc.linked_student:
-        # That bai o day = ho so KHONG co CRM Student; run_create_enrollment_records da
-        # rollback (ke ca doi step ben tren) nen phai bao loi, khong duoc tinh la xong.
         ok, msg = _run_create_enrollment_for_lead(lead_name, context)
         if not ok:
+            # PHAI tu rollback: run_create_enrollment_records chi rollback trong khoi
+            # `except`, con cac duong `return error_response(...)` (trung ma HS khac ten,
+            # thieu student_code, sai buoc) thoat ra ma KHONG rollback. Khi do doi step
+            # ben tren van con treo va se bi frappe.db.commit() cuoi vong lap ghi xuong
+            # -> ho so nam o Enrolled ma khong he co CRM Student.
+            frappe.db.rollback()
             raise frappe.ValidationError(msg or "Khong tao duoc ho so hoc sinh")
     else:
         try:
