@@ -1124,3 +1124,289 @@ def _print(res, dry_run):
         if len(res["errors"]) > 40:
             print(f"    … con {len(res['errors']) - 40}")
     print("")
+
+
+# ==================================================================================
+# Bo sung ho so gia dinh tu sheet «HSM_ NEW ENROLLED STDS»
+# (danh sach hoc sinh moi nhap hoc — nguon chuan cho thong tin bo/me/NGH/anh chi em)
+# ==================================================================================
+
+HSM_SHEET = "HSM_ NEW ENROLLED STDS"
+HSM_HEADER_ROW = 3
+
+# Cot theo chi so (1-based) — sheet co header gop nhieu tang nen bam vi tri cho chac.
+_HSM_STUDENT = 6
+_HSM_HEALTH_NOTE = 94                       # «Ghi chú đặc biệt (Sức khoẻ/Tâm lý)»
+_HSM_SIBLING_BASES = (77, 80, 83)           # moi khoi: ten / ngay sinh / truong hoc
+_HSM_GUARDIANS = (
+    # (nhan, cot ten, sdt, cccd, email, nghe nghiep, chuc vu, noi lam viec, quan he)
+    ("Bố", 53, 56, 55, 57, 58, 59, 60, None),
+    ("Mẹ", 62, 65, 64, 66, 67, 68, 69, None),
+    ("Người giám hộ", 72, 75, 74, 76, None, None, None, 73),
+)
+
+
+def _hsm_phone(v):
+    """SDT trong HSM: Excel hay cat mat so 0 dau, va co o la '#VALUE!'."""
+    if v in (None, ""):
+        return ""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        d = str(int(v))
+    else:
+        s = str(v)
+        if s.strip().startswith("#"):        # #VALUE! / #N/A
+            return ""
+        d = re.sub(r"\D", "", re.split(r"[/,;\n]", s)[0])
+    if d.startswith("84") and len(d) == 11:
+        d = "0" + d[2:]
+    elif len(d) == 9:
+        d = "0" + d
+    return d if re.fullmatch(r"0\d{9}", d) else ""
+
+
+def _name_key(s):
+    """Khoa doi chieu ten: bo dau, bo phan trong ngoac (biet danh), gop khoang trang."""
+    s = re.sub(r"\(.*?\)", " ", str(s or ""))
+    s = unicodedata.normalize("NFD", s)
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+    s = s.replace("đ", "d").replace("Đ", "D")
+    return " ".join(re.sub(r"[^A-Za-z0-9 ]", " ", s).split()).lower()
+
+
+def _guardian_doc_for(name, phone, cccd, email, job, pos, work):
+    """get-or-create CRM Guardian theo SDT (khoa tu nhien, dong bo add_lead_guardian)."""
+    existing = frappe.db.get_value("CRM Guardian", {"phone_number": phone}, "name")
+    if existing:
+        return existing, "reused"
+    gid = f"{_slug(name)}-{frappe.generate_hash(length=6)}"
+    while frappe.db.exists("CRM Guardian", {"guardian_id": gid}):
+        gid = f"{_slug(name)}-{frappe.generate_hash(length=6)}"
+    doc = frappe.get_doc({
+        "doctype": "CRM Guardian", "guardian_id": gid, "guardian_name": name,
+        "phone_number": phone, "email": email or "", "id_number": cccd or "",
+        "occupation": job or "", "position": pos or "", "workplace": work or "",
+    })
+    doc.flags.ignore_validate = True
+    doc.flags.ignore_mandatory = True
+    doc.insert(ignore_permissions=True)
+    return doc.name, "created"
+
+
+def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", commit_every=50):
+    """
+    Dong bo thong tin gia dinh tu sheet HSM vao ho so CRM da co.
+
+        bench --site <site> execute erp.api.crm.import_qlead_excel.backfill_hsm \
+            --kwargs "{'path': '/private/files/....xlsx'}"
+
+    Chi CONG THEM, khong xoa du lieu dang co:
+      - Bo / Me / Nguoi giam ho CO SDT  -> CRM Guardian + dong trong `lead_guardians`
+      - SDT cua ho                      -> them vao `phone_numbers` neu chua co
+      - Me (khong co thi Bo)            -> dien khoi guardian_* phang neu dang trong
+      - Anh chi em                      -> `lead_siblings` (chi them khi bang dang rong)
+      - Ghi chu suc khoe/tam ly         -> `student_health_notes`
+      - NGUOI THIEU SDT                 -> KHONG tao Guardian; ten + thong tin duoc
+                                           ghi noi tiep vao `student_note`
+
+    Doi chieu hoc sinh theo ten da chuan hoa, trong pham vi buoc QLead + status
+    truyen vao (mac dinh «Dong phi») nen khong lan sang ho so khac.
+    """
+    import openpyxl
+
+    dry_run = int(dry_run)
+    commit_every = int(commit_every) or 50
+    path = _resolve_path(path)
+    print(f"  File: {path}")
+
+    wb = openpyxl.load_workbook(path, data_only=True)
+    sname = sheet or HSM_SHEET
+    if sname not in wb.sheetnames:
+        frappe.throw(f"Khong co sheet {sname!r}. Co: {wb.sheetnames}")
+    ws = wb[sname]
+
+    # index ho so dich
+    leads = frappe.get_all("CRM Lead", filters={"step": STEP, "status": status},
+                           fields=["name", "student_name", "crm_code"],
+                           limit_page_length=0)
+    idx = {}
+    for l in leads:
+        idx.setdefault(_name_key(l["student_name"]), []).append(l)
+    print(f"  Ho so {STEP}/{status}: {len(leads)}")
+
+    res = {"hsm_rows": 0, "matched": 0, "not_found": [], "ambiguous": [],
+           "guardians_created": 0, "guardians_reused": 0, "guardian_rows": 0,
+           "phones_added": 0, "siblings": 0, "health_notes": 0,
+           "no_phone_noted": 0, "flat_filled": 0, "updated": 0, "errors": []}
+
+    for r in range(HSM_HEADER_ROW + 1, ws.max_row + 1):
+        sn = _txt(ws.cell(r, _HSM_STUDENT).value)
+        if not sn:
+            continue
+        res["hsm_rows"] += 1
+        hit = idx.get(_name_key(sn)) or []
+        if not hit:
+            res["not_found"].append({"row": r, "student": sn})
+            continue
+        if len(hit) > 1:
+            res["ambiguous"].append({"row": r, "student": sn,
+                                     "leads": [x["crm_code"] for x in hit]})
+            continue
+        lead_name = hit[0]["name"]
+        res["matched"] += 1
+
+        # ---- gom nguoi
+        with_phone, without_phone = [], []
+        for lbl, c_name, c_tel, c_cccd, c_mail, c_job, c_pos, c_work, c_rel in _HSM_GUARDIANS:
+            nm = _txt(ws.cell(r, c_name).value)
+            if not nm:
+                continue
+            rel = _txt(ws.cell(r, c_rel).value) if c_rel else lbl
+            info = {
+                "label": lbl, "rel": rel or lbl, "name": nm,
+                "phone": _hsm_phone(ws.cell(r, c_tel).value),
+                "cccd": _txt(ws.cell(r, c_cccd).value) if c_cccd else "",
+                "email": (_emails(ws.cell(r, c_mail).value) or [""])[0] if c_mail else "",
+                "job": _txt(ws.cell(r, c_job).value) if c_job else "",
+                "pos": _txt(ws.cell(r, c_pos).value) if c_pos else "",
+                "work": _txt(ws.cell(r, c_work).value) if c_work else "",
+            }
+            (with_phone if info["phone"] else without_phone).append(info)
+
+        siblings = []
+        for base in _HSM_SIBLING_BASES:
+            snm = _txt(ws.cell(r, base).value)
+            if not snm:
+                continue
+            siblings.append({
+                "sibling_name": snm,
+                "dob": _date(ws.cell(r, base + 1).value),
+                "school": _txt(ws.cell(r, base + 2).value),
+            })
+        health = _txt(ws.cell(r, _HSM_HEALTH_NOTE).value)
+
+        if dry_run:
+            res["guardian_rows"] += len(with_phone)
+            res["no_phone_noted"] += len(without_phone)
+            res["siblings"] += len(siblings)
+            res["health_notes"] += 1 if health else 0
+            res["updated"] += 1
+            continue
+
+        sp = f"hsm_{r}"
+        try:
+            frappe.db.savepoint(sp)
+            doc = frappe.get_doc("CRM Lead", lead_name)
+            touched = False
+
+            linked = {g.guardian for g in (doc.lead_guardians or [])}
+            have_phones = {(p.phone_number or "").strip()
+                           for p in (doc.phone_numbers or [])}
+            for i, g in enumerate(with_phone):
+                gname, how = _guardian_doc_for(g["name"], g["phone"], g["cccd"],
+                                               g["email"], g["job"], g["pos"], g["work"])
+                res["guardians_created" if how == "created" else "guardians_reused"] += 1
+                if gname not in linked:
+                    doc.append("lead_guardians", {
+                        "guardian": gname, "relationship_type": g["rel"],
+                        "is_primary_contact": 0, "display_order": i + 1,
+                    })
+                    linked.add(gname)
+                    res["guardian_rows"] += 1
+                    touched = True
+                e164 = normalize_phone_number(g["phone"])
+                if e164 and e164 not in have_phones:
+                    doc.append("phone_numbers", {"phone_number": e164, "is_primary": 0})
+                    have_phones.add(e164)
+                    res["phones_added"] += 1
+                    touched = True
+
+            # khoi guardian_* phang: uu tien Me, khong co thi Bo
+            if not _txt(doc.guardian_name) and with_phone:
+                pick = next((g for g in with_phone if g["label"] == "Mẹ"), with_phone[0])
+                doc.guardian_name = pick["name"]
+                doc.relationship = pick["rel"]
+                if pick["email"] and not _txt(doc.guardian_email):
+                    doc.guardian_email = pick["email"]
+                if pick["cccd"] and not _txt(doc.guardian_id_number):
+                    doc.guardian_id_number = pick["cccd"]
+                for src, fld in (("job", "guardian_occupation"), ("pos", "guardian_position"),
+                                 ("work", "guardian_workplace")):
+                    if pick[src] and not _txt(doc.get(fld)):
+                        doc.set(fld, pick[src])
+                res["flat_filled"] += 1
+                touched = True
+
+            if siblings and not (doc.lead_siblings or []):
+                for s in siblings:
+                    doc.append("lead_siblings", s)
+                res["siblings"] += len(siblings)
+                touched = True
+
+            if health and not _txt(doc.student_health_notes):
+                doc.student_health_notes = health
+                res["health_notes"] += 1
+                touched = True
+
+            if without_phone:
+                lines = ["[HSM] Người thân KHÔNG có số điện thoại — chưa tạo hồ sơ phụ huynh:"]
+                for g in without_phone:
+                    bits = [f"{g['rel']}: {g['name']}"]
+                    for lbl2, v in (("CCCD", g["cccd"]), ("email", g["email"]),
+                                    ("nghề", g["job"]), ("nơi làm việc", g["work"])):
+                        if v:
+                            bits.append(f"{lbl2} {v}")
+                    lines.append("  - " + " | ".join(bits))
+                block = "\n".join(lines)
+                cur = _txt(doc.student_note)
+                if "[HSM] Người thân KHÔNG có số điện thoại" not in cur:
+                    doc.student_note = (cur + "\n\n" + block).strip() if cur else block
+                    res["no_phone_noted"] += len(without_phone)
+                    touched = True
+
+            if touched:
+                doc.flags.ignore_mandatory = True
+                doc.save(ignore_permissions=True)
+                res["updated"] += 1
+        except Exception as e:
+            try:
+                frappe.db.rollback(save_point=sp)
+            except Exception:
+                pass
+            res["errors"].append({"row": r, "student": sn, "error": str(e)[:250]})
+            frappe.log_error(message=frappe.get_traceback() or str(e),
+                             title=f"backfill_hsm dong {r}")
+
+        if res["updated"] and res["updated"] % commit_every == 0:
+            frappe.db.commit()
+
+    if not dry_run:
+        frappe.db.commit()
+
+    print("")
+    print("=" * 62)
+    print("  DRY-RUN — khong ghi gi vao DB" if dry_run else "  DA GHI VAO DB")
+    print("=" * 62)
+    print(f"  Dong HSM doc duoc       : {res['hsm_rows']}")
+    print(f"  Khop ho so              : {res['matched']}")
+    print(f"  Khong tim thay ho so    : {len(res['not_found'])}")
+    print(f"  Ten trung (bo qua)      : {len(res['ambiguous'])}")
+    print(f"  {'Se cap nhat' if dry_run else 'Da cap nhat':<23} : {res['updated']}")
+    print(f"  Dong lead_guardians     : {res['guardian_rows']}")
+    if not dry_run:
+        print(f"  CRM Guardian moi/dung lai: {res['guardians_created']} / {res['guardians_reused']}")
+        print(f"  SDT them vao ho so      : {res['phones_added']}")
+        print(f"  Dien khoi guardian phang: {res['flat_filled']}")
+    print(f"  Dong anh chi em         : {res['siblings']}")
+    print(f"  Ghi chu suc khoe        : {res['health_notes']}")
+    print(f"  Nguoi THIEU SDT -> ghi chu: {res['no_phone_noted']}")
+    for lbl, key_ in (("Khong tim thay", "not_found"), ("Ten trung", "ambiguous")):
+        if res[key_]:
+            print(f"\n  {lbl}:")
+            for x in res[key_][:20]:
+                print(f"    HSM r{x['row']:>4} {x['student'][:40]}")
+    if res["errors"]:
+        print(f"\n  Loi ({len(res['errors'])}):")
+        for e in res["errors"][:20]:
+            print(f"    r{e['row']:>4} {e['student'][:28]:<30} {e['error']}")
+    print("")
+    return res
