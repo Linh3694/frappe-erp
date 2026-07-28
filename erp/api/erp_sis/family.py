@@ -33,6 +33,38 @@ def _find_existing_family_for_student(student_id: str, exclude_family: str | Non
     return result[0] if result else None
 
 
+def _contact_emails_by_guardian(guardian_names):
+    """Email liên lạc THẬT của PH — bảng con `CRM Guardian Email` (ưu tiên is_primary).
+
+    `CRM Guardian.email` là email định danh/đăng nhập: PH tạo từ CRM Lead mà không khai email
+    sẽ mang địa chỉ sinh tự động (vd `no-id-crm-lead-6199805@parent.wellspring.edu.vn`) —
+    không được dùng để hiển thị. Trả {guardian_docname: email} cho PH có email hợp lệ.
+    """
+    guardian_names = [name for name in (guardian_names or []) if name]
+    if not guardian_names:
+        return {}
+
+    rows = frappe.db.sql(
+        """
+        SELECT parent, email_address, is_primary, idx
+        FROM `tabCRM Guardian Email`
+        WHERE parent IN %(guardian_names)s AND IFNULL(email_address, '') != ''
+        ORDER BY is_primary DESC, idx ASC
+        """,
+        {"guardian_names": tuple(guardian_names)},
+        as_dict=True,
+    ) or []
+
+    emails = {}
+    for row in rows:
+        parent = row.get("parent")
+        email = (row.get("email_address") or "").strip()
+        # ORDER BY đã đưa email chính lên đầu → dòng đầu tiên của mỗi PH là email cần lấy.
+        if parent and email and parent not in emails:
+            emails[parent] = email
+    return emails
+
+
 def build_guardians_by_student_ids(student_ids):
     """
     Nội bộ server: cùng cấu trúc với get_guardians_by_students.data.guardians.
@@ -70,6 +102,8 @@ def build_guardians_by_student_ids(student_ids):
         as_dict=True,
     ) or []
 
+    contact_emails = _contact_emails_by_guardian([row.get("name") for row in rows])
+
     guardian_map = {}
     for row in rows:
         key = row.get("name") or row.get("guardian_id") or row.get("email")
@@ -85,7 +119,10 @@ def build_guardians_by_student_ids(student_ids):
             "name": row.get("name"),
             "guardian_id": row.get("guardian_id"),
             "guardian_name": row.get("guardian_name"),
+            # `email` giữ nguyên vai trò ĐỊNH DANH (matchKeys / participant matching);
+            # `contact_email` mới là email hiển thị cho người dùng.
             "email": row.get("email"),
+            "contact_email": contact_emails.get(row.get("name")),
             "portalEmail": portal_email,
             "guardian_image": row.get("guardian_image"),
             "phone_number": row.get("phone_number"),
