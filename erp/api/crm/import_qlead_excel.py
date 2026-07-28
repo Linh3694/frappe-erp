@@ -1324,7 +1324,8 @@ def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", commit_every=50
             if not _txt(doc.guardian_name) and with_phone:
                 pick = next((g for g in with_phone if g["label"] == "Mẹ"), with_phone[0])
                 doc.guardian_name = pick["name"]
-                doc.relationship = pick["rel"]
+                if pick["rel"] and not _txt(doc.relationship):
+                    doc.relationship = pick["rel"]
                 if pick["email"] and not _txt(doc.guardian_email):
                     doc.guardian_email = pick["email"]
                 if pick["cccd"] and not _txt(doc.guardian_id_number):
@@ -1336,10 +1337,16 @@ def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", commit_every=50
                 res["flat_filled"] += 1
                 touched = True
 
-            if siblings and not (doc.lead_siblings or []):
-                for s in siblings:
-                    doc.append("lead_siblings", s)
-                res["siblings"] += len(siblings)
+            # Gop theo TEN thay vi bo qua ca bang khi da co dong: giu nguyen anh chi em
+            # CRM dang co, dong thoi khong danh roi nguoi ma HSM co them.
+            have_sib = {_name_key(s.sibling_name) for s in (doc.lead_siblings or [])}
+            for s in siblings:
+                k = _name_key(s["sibling_name"])
+                if k in have_sib:
+                    continue
+                doc.append("lead_siblings", s)
+                have_sib.add(k)
+                res["siblings"] += 1
                 touched = True
 
             if health and not _txt(doc.student_health_notes):
