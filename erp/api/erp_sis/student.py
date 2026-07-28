@@ -1430,6 +1430,232 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
         )
 
 
+# ============================================================================
+# Phân quyền xem hồ sơ học sinh (/profile/student/:id)
+# ============================================================================
+# Mô hình:
+#   - Role quản trị      -> xem tất cả tab (kể cả tab nhạy cảm: Gia đình)
+#   - Role nghiệp vụ     -> xem hồ sơ như hiện tại, KHÔNG có tab nhạy cảm
+#   - GVCN / Phó CN      -> xem tất cả tab của học sinh lớp mình
+#   - GV có dạy học sinh -> xem hồ sơ (Học tập/Kỉ luật/Y Tế), KHÔNG có tab nhạy cảm
+#   - GV không liên quan -> không xem được hồ sơ
+
+# Toàn quyền trên mọi hồ sơ học sinh
+STUDENT_PROFILE_FULL_ACCESS_ROLES = [
+    "Administrator",
+    "System Manager",
+    "SIS Manager",
+    "SIS BOD",
+]
+
+# Khối tuyển sinh / vận hành: giữ nguyên quyền xem hồ sơ như trước khi siết,
+# nhưng không được mở tab nhạy cảm nếu không kiêm role quản trị.
+STUDENT_PROFILE_STAFF_ROLES = [
+    "Registrar",
+    "SIS Sales",
+    "SIS Sales Care",
+    "SIS Sales Admin",
+    "SIS Sales Care Admin",
+    "SIS Administrative",
+    "SIS Medical",
+    "SIS Library",
+    "SIS Marcom",
+    "SIS IT",
+]
+
+
+def _resolve_student_school_year(school_year_id=None, campus_id=None):
+    """Năm học dùng để xét phạm vi GVCN/GV bộ môn (mặc định: năm đang bật)."""
+    if school_year_id:
+        return school_year_id
+
+    if not campus_id:
+        campus_id = get_current_campus_from_context() or "campus-1"
+
+    try:
+        return frappe.db.get_value(
+            "SIS School Year",
+            filters={"is_enable": 1, "campus_id": campus_id},
+            fieldname="name"
+        )
+    except Exception:
+        return None
+
+
+def resolve_student_access(student_id, school_year_id=None):
+    """
+    Xác định phạm vi truy cập hồ sơ của user hiện tại với một học sinh.
+
+    Trả về dict:
+        can_view            -- được mở hồ sơ học sinh hay không
+        can_view_sensitive  -- được xem tab nhạy cảm (Gia đình) hay không
+        is_homeroom         -- là GVCN hoặc Phó CN lớp của học sinh (năm đang xét)
+        is_teaching         -- có dạy lớp mà học sinh đang học (năm đang xét)
+        school_year_id      -- năm học đã dùng để xét
+        reason              -- lý do (debug/UI)
+
+    Lưu ý phạm vi năm học:
+    - can_view xét trên MỌI năm học. GV từng chủ nhiệm/dạy học sinh vẫn mở được
+      hồ sơ, nhờ vậy đổi năm học trong trang không bị khoá cứng cả trang.
+    - can_view_sensitive xét theo năm đang chọn (fallback mọi năm nếu học sinh
+      chưa có bản ghi lớp cho năm đó) — tab Gia đình khoá/mở theo năm, không
+      chặn toàn trang.
+    """
+    access = {
+        "can_view": False,
+        "can_view_sensitive": False,
+        "is_homeroom": False,
+        "is_teaching": False,
+        "school_year_id": school_year_id,
+        "reason": "No access",
+    }
+
+    if not student_id:
+        access["reason"] = "Student ID is required"
+        return access
+
+    user_roles = frappe.get_roles(frappe.session.user)
+
+    if any(role in user_roles for role in STUDENT_PROFILE_FULL_ACCESS_ROLES):
+        access.update({
+            "can_view": True,
+            "can_view_sensitive": True,
+            "reason": "Full access role",
+        })
+        return access
+
+    campus_id = get_current_campus_from_context() or "campus-1"
+    target_year = _resolve_student_school_year(school_year_id, campus_id)
+    access["school_year_id"] = target_year
+
+    # Quan hệ GVCN / GV bộ môn (tính cả khi user kiêm role nghiệp vụ)
+    teacher_ids = [
+        t.name for t in frappe.get_all(
+            "SIS Teacher",
+            filters={"user_id": frappe.session.user},
+            fields=["name"]
+        )
+    ]
+
+    if teacher_ids:
+        # Toàn bộ lớp học sinh từng học (mọi năm)
+        all_classes = frappe.db.sql("""
+            SELECT
+                c.name as class_id,
+                c.class_type,
+                c.homeroom_teacher,
+                c.vice_homeroom_teacher,
+                cs.school_year_id
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
+            WHERE cs.student_id = %(student_id)s
+        """, {"student_id": student_id}, as_dict=True) or []
+
+        # Lớp của năm đang xét; nếu năm đó chưa có bản ghi thì fallback toàn bộ
+        # để không chặn nhầm GVCN khi dữ liệu lớp chưa được xếp cho năm mới.
+        year_classes = all_classes
+        if target_year:
+            filtered = [c for c in all_classes if c.get("school_year_id") == target_year]
+            if filtered:
+                year_classes = filtered
+
+        def _is_homeroom_of(classes):
+            return any(
+                c.get("homeroom_teacher") in teacher_ids or c.get("vice_homeroom_teacher") in teacher_ids
+                for c in classes
+                if (c.get("class_type") or "").lower() == "regular"
+            )
+
+        access["is_homeroom"] = _is_homeroom_of(year_classes)
+
+        year_class_ids = [c.get("class_id") for c in year_classes if c.get("class_id")]
+        access["is_teaching"] = bool(
+            year_class_ids and _is_teaching_any_class(teacher_ids, year_class_ids)
+        )
+
+        if access["is_homeroom"]:
+            access.update({
+                "can_view": True,
+                "can_view_sensitive": True,
+                "reason": "Homeroom or vice-homeroom teacher",
+            })
+            return access
+
+        if access["is_teaching"]:
+            access.update({
+                "can_view": True,
+                "reason": "Subject teacher of student's class",
+            })
+            return access
+
+        # Quan hệ ở năm học khác: chỉ đủ để mở hồ sơ, không mở tab nhạy cảm
+        # (bỏ qua nếu năm đang xét đã bao trọn danh sách lớp — khỏi truy vấn lại)
+        all_class_ids = [c.get("class_id") for c in all_classes if c.get("class_id")]
+        if year_classes is not all_classes and (
+            _is_homeroom_of(all_classes)
+            or (all_class_ids and _is_teaching_any_class(teacher_ids, all_class_ids))
+        ):
+            access.update({
+                "can_view": True,
+                "reason": "Homeroom or subject teacher in another school year",
+            })
+            return access
+
+    if any(role in user_roles for role in STUDENT_PROFILE_STAFF_ROLES):
+        access.update({
+            "can_view": True,
+            "reason": "Staff role",
+        })
+        return access
+
+    access["reason"] = "Not homeroom or subject teacher of this student"
+    return access
+
+
+def _is_teaching_any_class(teacher_ids, class_ids):
+    """GV có được phân công dạy một trong các lớp của học sinh không."""
+    if not teacher_ids or not class_ids:
+        return False
+
+    params = {"teacher_ids": teacher_ids, "class_ids": class_ids}
+
+    try:
+        assignment = frappe.db.sql("""
+            SELECT 1
+            FROM `tabSIS Subject Assignment`
+            WHERE teacher_id IN %(teacher_ids)s
+                AND class_id IN %(class_ids)s
+            LIMIT 1
+        """, params)
+        if assignment:
+            return True
+    except Exception:
+        frappe.log_error(
+            title="Student access: subject assignment check failed",
+            message=frappe.get_traceback()
+        )
+
+    # Fallback: phân công qua thời khoá biểu (giống cách auth.py dựng teacher_info)
+    try:
+        timetable = frappe.db.sql("""
+            SELECT 1
+            FROM `tabSIS Timetable Instance Row` r
+            INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
+            WHERE (r.teacher_1_id IN %(teacher_ids)s OR r.teacher_2_id IN %(teacher_ids)s)
+                AND i.class_id IN %(class_ids)s
+            LIMIT 1
+        """, params)
+        if timetable:
+            return True
+    except Exception:
+        frappe.log_error(
+            title="Student access: timetable check failed",
+            message=frappe.get_traceback()
+        )
+
+    return False
+
+
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def get_student_profile():
     """
@@ -1501,7 +1727,16 @@ def get_student_profile():
                 message="Không tìm thấy thông tin học sinh",
                 code="STUDENT_NOT_FOUND"
             )
-        
+
+        # Chỉ GVCN/Phó CN, GV có dạy học sinh, hoặc các role quản trị/nghiệp vụ
+        # mới được mở hồ sơ. GV không liên quan bị chặn ngay từ đây.
+        access = resolve_student_access(student_id, school_year_id)
+        if not access.get("can_view"):
+            return forbidden_response(
+                message="Bạn không có quyền xem hồ sơ của học sinh này",
+                code="NO_STUDENT_ACCESS"
+            )
+
         # Determine school year to use (cần xác định trước để lấy ảnh theo năm học)
         if not school_year_id:
             # Get current school year if not provided
@@ -1741,10 +1976,10 @@ def get_student_profile():
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
 def check_homeroom_teacher_permission():
     """
-    Check if current user has permission to view student's family/services tabs.
-    Permission granted if:
-    - User is homeroom teacher or vice-homeroom teacher of student's regular class
-    - User has role SIS Manager or SIS BOD
+    Trả phạm vi truy cập hồ sơ của user hiện tại với một học sinh.
+
+    - has_permission: được xem tab nhạy cảm (Gia đình) — giữ tên cũ cho tương thích
+    - can_view_profile / is_homeroom / is_teaching: dùng cho việc ẩn/hiện tab
     """
     try:
         # Get student_id from request
@@ -1777,72 +2012,172 @@ def check_homeroom_teacher_permission():
         if not student_id:
             return error_response(message="Student ID is required")
 
-        current_user = frappe.session.user
-        
-        # Check if user has SIS Manager or SIS BOD role
-        user_roles = frappe.get_roles(current_user)
-        if "SIS Manager" in user_roles or "SIS BOD" in user_roles:
-            return success_response(
-                data={"has_permission": True, "reason": "SIS Manager or SIS BOD role"},
-                message="Permission granted"
-            )
-
-        # Get teacher record(s) for current user
-        teacher_records = frappe.get_all(
-            "SIS Teacher",
-            filters={"user_id": current_user},
-            fields=["name"]
+        school_year_id = (
+            pick(form, ['school_year_id', 'schoolYearId'])
+            or pick(local_form, ['school_year_id', 'schoolYearId'])
+            or pick(request_args, ['school_year_id', 'schoolYearId'])
+            or pick(payload, ['school_year_id', 'schoolYearId'])
         )
 
-        if not teacher_records:
-            return success_response(
-                data={"has_permission": False, "reason": "Not a teacher"},
-                message="Permission denied"
-            )
-
-        teacher_ids = [t.name for t in teacher_records]
-
-        # Get student's regular class
-        student_class = frappe.db.sql("""
-            SELECT 
-                c.name as class_id,
-                c.homeroom_teacher,
-                c.vice_homeroom_teacher
-            FROM `tabSIS Class Student` cs
-            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
-            WHERE cs.student_id = %(student_id)s
-                AND c.class_type = 'Regular'
-            LIMIT 1
-        """, {"student_id": student_id}, as_dict=True)
-
-        if not student_class:
-            return success_response(
-                data={"has_permission": False, "reason": "Student has no regular class"},
-                message="Permission denied"
-            )
-
-        class_doc = student_class[0]
-        
-        # Check if teacher is homeroom or vice-homeroom
-        is_homeroom = (
-            class_doc.homeroom_teacher in teacher_ids or 
-            class_doc.vice_homeroom_teacher in teacher_ids
-        )
-
-        if is_homeroom:
-            return success_response(
-                data={"has_permission": True, "reason": "Homeroom or vice-homeroom teacher"},
-                message="Permission granted"
-            )
+        access = resolve_student_access(student_id, school_year_id)
 
         return success_response(
-            data={"has_permission": False, "reason": "Not homeroom teacher of student's class"},
-            message="Permission denied"
+            data={
+                "has_permission": access["can_view_sensitive"],
+                "can_view_profile": access["can_view"],
+                "is_homeroom": access["is_homeroom"],
+                "is_teaching": access["is_teaching"],
+                "school_year_id": access["school_year_id"],
+                "reason": access["reason"],
+            },
+            message="Permission granted" if access["can_view_sensitive"] else "Permission denied"
         )
 
     except Exception as e:
-        frappe.log_error(f"Error checking homeroom teacher permission: {str(e)}")
+        frappe.log_error(
+            title="Error checking student profile permission",
+            message=frappe.get_traceback()
+        )
         return error_response(
             message="Error checking permission",
             code="CHECK_PERMISSION_ERROR"
+        )
+
+
+@frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
+def get_student_family():
+    """
+    Thông tin gia đình của học sinh cho tab "Gia đình" ở hồ sơ học sinh.
+
+    Khác với erp.api.erp_sis.family.* (dùng chung cho module Tuyển sinh, không
+    giới hạn theo học sinh), API này chỉ trả dữ liệu khi user có quyền xem tab
+    nhạy cảm của đúng học sinh đó (GVCN/Phó CN hoặc role quản trị).
+    """
+    try:
+        form = getattr(frappe, 'form_dict', None) or {}
+        local_form = getattr(frappe.local, 'form_dict', None) or {}
+        request_args = getattr(getattr(frappe, 'request', None), 'args', None) or {}
+        request_data = getattr(getattr(frappe, 'request', None), 'data', None)
+
+        payload = {}
+        if request_data:
+            try:
+                body = request_data.decode('utf-8') if isinstance(request_data, bytes) else request_data
+                payload = json.loads(body) if body else {}
+            except Exception:
+                pass
+
+        def pick(d, keys):
+            for k in keys:
+                if d and d.get(k):
+                    return d.get(k)
+            return None
+
+        student_id = (
+            pick(form, ['student_id', 'id'])
+            or pick(local_form, ['student_id', 'id'])
+            or pick(request_args, ['student_id', 'id'])
+            or pick(payload, ['student_id', 'id'])
+        )
+        school_year_id = (
+            pick(form, ['school_year_id', 'schoolYearId'])
+            or pick(local_form, ['school_year_id', 'schoolYearId'])
+            or pick(request_args, ['school_year_id', 'schoolYearId'])
+            or pick(payload, ['school_year_id', 'schoolYearId'])
+        )
+
+        if not student_id:
+            return error_response(message="Student ID is required")
+
+        access = resolve_student_access(student_id, school_year_id)
+        if not access.get("can_view_sensitive"):
+            return forbidden_response(
+                message="Bạn không có quyền xem thông tin gia đình của học sinh này",
+                code="NO_FAMILY_ACCESS"
+            )
+
+        # Gia đình của học sinh (một học sinh thường chỉ thuộc một gia đình)
+        families = frappe.db.sql("""
+            SELECT f.name, f.family_code
+            FROM `tabCRM Family` f
+            INNER JOIN `tabCRM Family Relationship` fr ON fr.parent = f.name
+            WHERE fr.student = %(student_id)s
+            GROUP BY f.name, f.family_code
+            ORDER BY f.family_code ASC
+            LIMIT 1
+        """, {"student_id": student_id}, as_dict=True)
+
+        if not families:
+            return success_response(data=None, message="Student has no family record")
+
+        family = families[0]
+
+        relationships = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"parent": family.get("name")},
+            fields=["student", "guardian", "relationship_type", "key_person", "access"],
+        ) or []
+
+        students = {}
+        guardians = {}
+        student_ids = list({r["student"] for r in relationships if r.get("student")})
+        guardian_ids = list({r["guardian"] for r in relationships if r.get("guardian")})
+
+        if student_ids:
+            for s in frappe.get_all(
+                "CRM Student",
+                filters={"name": ["in", student_ids]},
+                fields=["name", "student_name", "student_code", "dob", "gender", "family_code"],
+            ):
+                students[s.name] = s
+
+        if guardian_ids:
+            for g in frappe.get_all(
+                "CRM Guardian",
+                filters={"name": ["in", guardian_ids]},
+                fields=["name", "guardian_name", "guardian_id", "family_code", "phone_number", "email"],
+            ):
+                guardians[g.name] = g
+
+            # Lien lac cua phu huynh nam o BANG CON (CRM Guardian Email / Phone) — do la
+            # noi giao dien CRM ghi va doc. Field vo huong `email`/`phone_number` chi la
+            # ban legacy, chi duoc dong bo trong CRMGuardian.validate() nen ban ghi nao
+            # duoc ghi voi flags.ignore_validate se de trong. Uu tien dong primary cua
+            # bang con, thieu thi moi roi ve field vo huong.
+            for child_dt, value_field, flat_field in (
+                ("CRM Guardian Email", "email_address", "email"),
+                ("CRM Guardian Phone", "phone_number", "phone_number"),
+            ):
+                for row in frappe.get_all(
+                    child_dt,
+                    filters={"parent": ["in", guardian_ids]},
+                    fields=["parent", value_field, "is_primary"],
+                    order_by="is_primary desc, idx asc",
+                ):
+                    g = guardians.get(row.get("parent"))
+                    if not g:
+                        continue
+                    val = (row.get(value_field) or "").strip()
+                    if val and not (g.get(flat_field) or "").strip():
+                        g[flat_field] = val
+
+        return success_response(
+            data={
+                "name": family.get("name"),
+                "family_code": family.get("family_code"),
+                "relationships": relationships,
+                "students": students,
+                "guardians": guardians,
+            },
+            message="Family fetched successfully"
+        )
+
+    except Exception as e:
+        frappe.log_error(
+            title="Error fetching student family",
+            message=frappe.get_traceback()
+        )
+        return error_response(
+            message="Error fetching student family",
+            code="FETCH_STUDENT_FAMILY_ERROR"
         )
