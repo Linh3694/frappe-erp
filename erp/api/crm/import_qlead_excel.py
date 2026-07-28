@@ -1456,3 +1456,261 @@ def backfill_hsm(path, sheet=None, dry_run=1, status="Dong phi", overwrite=0,
             print(f"    r{e['row']:>4} {e['student'][:28]:<30} {e['error']}")
     print("")
     return res
+
+
+# ==================================================================================
+# Bo sung ho so gia dinh tu CHINH file mau (sheet QLead) — dung khi du lieu HSM da
+# duoc ghep san vao file bang cac cot PH1/PH2/PH3, ACE1-3, «Ghi chú sức khoẻ/tâm lý».
+# ==================================================================================
+
+_FAM_GUARDIAN_SLOTS = (
+    (1, "PH1: SĐT chính *"),
+    (2, "PH2: SĐT chính"),
+    (3, "PH3: SĐT chính"),
+)
+# Bac cua buoc — trung ten thi uu tien ho so da di xa nhat trong pipeline.
+_STEP_RANK = {s: i for i, s in enumerate(
+    ["Draft", "Verify", "Lead", "QLead", "Enrolled", "Nghi hoc"])}
+
+
+def _fam_cell(ws, r, J, header):
+    j = J.get(header)
+    return _txt(ws.cell(r, j).value) if j else ""
+
+
+def _find_lead_flexible(phones, student_name, cache):
+    """
+    Tim ho so bang BAT KY so nao tren dong + ten hoc sinh; khong duoc thi doi chieu
+    rieng theo ten.
+
+    KHONG loc theo `step`: ho so «Nop phi» sau khi len Hoc sinh chinh thuc se doi
+    sang step Enrolled, loc cung se tra ve rong. Trung ten thi lay ho so o buoc xa
+    nhat (Enrolled > QLead > ...), thay vi bo qua.
+    """
+    key = " ".join((student_name or "").split()).lower()
+    if not key:
+        return None, "thieu ten hoc sinh"
+
+    for p in phones:
+        rows = frappe.db.sql(
+            """
+            SELECT DISTINCT cl.name, cl.step FROM `tabCRM Lead` cl
+            INNER JOIN `tabCRM Lead Phone` clp ON clp.parent = cl.name
+            WHERE clp.phone_number = %s
+              AND LOWER(TRIM(IFNULL(cl.student_name,''))) = %s
+            """,
+            (normalize_phone_number(p), key), as_dict=True)
+        if len(rows) == 1:
+            return rows[0]["name"], None
+        if len(rows) > 1:
+            rows.sort(key=lambda x: _STEP_RANK.get(x["step"], -1), reverse=True)
+            return rows[0]["name"], None
+
+    if key not in cache:
+        cache[key] = frappe.db.sql(
+            """
+            SELECT name, step FROM `tabCRM Lead`
+            WHERE LOWER(TRIM(IFNULL(student_name,''))) = %s
+            """, (key,), as_dict=True)
+    rows = cache[key]
+    if not rows:
+        return None, "khong tim thay ho so"
+    rows.sort(key=lambda x: _STEP_RANK.get(x["step"], -1), reverse=True)
+    return rows[0]["name"], None
+
+
+def backfill_family(path, dry_run=1, overwrite=0, commit_every=50):
+    """
+    Doc sheet «QLead» cua file mau v3 va bo sung ho so gia dinh cho lead da co.
+
+        bench --site <site> execute erp.api.crm.import_qlead_excel.backfill_family \
+            --kwargs "{'path': '/private/files/....xlsx'}"
+
+    Doc: PH1/PH2/PH3 (ho ten + SDT chinh/phu + email/CCCD/nghe/chuc vu/noi cong tac),
+    ACE1-3 (anh chi em), «Ghi chú sức khoẻ/tâm lý».
+
+    Ghi (khong bao gio xoa dong):
+      - moi khoi PH co ten + SDT -> CRM Guardian + dong `lead_guardians`
+      - moi SDT tren dong        -> `phone_numbers` neu chua co
+      - PH1                      -> khoi guardian_* phang
+      - ACE                      -> `lead_siblings` (gop theo ten)
+      - ghi chu SK               -> `student_health_notes`
+
+    overwrite  0 = CRM thang (chi dien cho trong) | 1 = file thang.
+
+    Doi chieu qua `_find_lead_flexible`: thu moi SDT tren dong, khong loc theo buoc.
+    """
+    import openpyxl
+
+    dry_run, ow = int(dry_run), int(overwrite)
+    commit_every = int(commit_every) or 50
+    path = _resolve_path(path)
+    print(f"  File: {path}")
+    print(f"  overwrite={ow} ({'file thang' if ow else 'CRM thang'})")
+
+    ws = openpyxl.load_workbook(path, data_only=True)["QLead"]
+    J = {_txt(ws.cell(HEADER_ROW, j).value): j for j in range(1, ws.max_column + 1)}
+    missing_cols = [h for _, h in _FAM_GUARDIAN_SLOTS if h not in J]
+    if missing_cols:
+        frappe.throw(f"File thieu cot: {missing_cols}")
+
+    res = {"rows": 0, "matched": 0, "not_found": [], "updated": 0,
+           "guardian_rows": 0, "guardians_created": 0, "guardians_reused": 0,
+           "phones_added": 0, "siblings": 0, "health_notes": 0, "errors": []}
+    name_cache = {}
+
+    for r in range(FIRST_DATA_ROW, ws.max_row + 1):
+        sn = _fam_cell(ws, r, J, "Họ tên học sinh *")
+        if not sn or sn.startswith(EXAMPLE_PREFIX):
+            continue
+        res["rows"] += 1
+
+        phones = []
+        for slot, main_h in _FAM_GUARDIAN_SLOTS:
+            for h in (main_h, f"PH{slot}: SĐT phụ"):
+                v = _fam_cell(ws, r, J, h)
+                if v and validate_phone_number(v) and v not in phones:
+                    phones.append(v)
+
+        lead, err = _find_lead_flexible(phones, sn, name_cache)
+        if not lead:
+            res["not_found"].append({"row": r, "student": sn, "error": err})
+            continue
+        res["matched"] += 1
+
+        people = []
+        for slot, main_h in _FAM_GUARDIAN_SLOTS:
+            nm = _fam_cell(ws, r, J, f"PH{slot}: Họ tên phụ huynh")
+            ph = _fam_cell(ws, r, J, main_h)
+            if not nm or not ph or not validate_phone_number(ph):
+                continue
+            people.append({
+                "slot": slot, "name": nm, "phone": ph,
+                "rel": _fam_cell(ws, r, J, f"PH{slot}: Quan hệ với HS"),
+                "email": (_emails(_fam_cell(ws, r, J, f"PH{slot}: Email")) or [""])[0],
+                "cccd": _fam_cell(ws, r, J, f"PH{slot}: Số CCCD/Hộ chiếu"),
+                "job": _fam_cell(ws, r, J, f"PH{slot}: Nghề nghiệp"),
+                "pos": _fam_cell(ws, r, J, f"PH{slot}: Chức vụ"),
+                "work": _fam_cell(ws, r, J, f"PH{slot}: Nơi công tác"),
+            })
+        sibs = []
+        for i in (1, 2, 3):
+            nm = _fam_cell(ws, r, J, f"ACE{i}: Họ và tên")
+            if nm:
+                sibs.append({
+                    "sibling_name": nm,
+                    "dob": _date(_fam_cell(ws, r, J, f"ACE{i}: Ngày sinh (dd/mm/yyyy)")),
+                    "school": _fam_cell(ws, r, J, f"ACE{i}: Trường học"),
+                })
+        health = _fam_cell(ws, r, J, "Ghi chú sức khoẻ/tâm lý")
+
+        if dry_run:
+            res["guardian_rows"] += len(people)
+            res["siblings"] += len(sibs)
+            res["health_notes"] += 1 if health else 0
+            res["updated"] += 1
+            continue
+
+        sp = f"fam_{r}"
+        try:
+            frappe.db.savepoint(sp)
+            doc = frappe.get_doc("CRM Lead", lead)
+            touched = False
+
+            linked = {g.guardian for g in (doc.lead_guardians or [])}
+            have = {(p.phone_number or "").strip() for p in (doc.phone_numbers or [])}
+            for g in people:
+                gname, how = _guardian_doc_for(g["name"], g["phone"], g["cccd"], g["email"],
+                                               g["job"], g["pos"], g["work"], overwrite=ow)
+                res["guardians_created" if how == "created" else "guardians_reused"] += 1
+                if gname not in linked:
+                    doc.append("lead_guardians", {
+                        "guardian": gname, "relationship_type": g["rel"],
+                        "is_primary_contact": 1 if g["slot"] == 1 else 0,
+                        "display_order": g["slot"]})
+                    linked.add(gname)
+                    res["guardian_rows"] += 1
+                    touched = True
+            for p in phones:
+                e164 = normalize_phone_number(p)
+                if e164 and e164 not in have:
+                    doc.append("phone_numbers", {"phone_number": e164, "is_primary": 0})
+                    have.add(e164)
+                    res["phones_added"] += 1
+                    touched = True
+
+            p1 = next((g for g in people if g["slot"] == 1), None)
+            if p1 and (ow or not _txt(doc.guardian_name)):
+                for val, fld in ((p1["name"], "guardian_name"), (p1["rel"], "relationship"),
+                                 (p1["email"], "guardian_email"),
+                                 (p1["cccd"], "guardian_id_number"),
+                                 (p1["job"], "guardian_occupation"),
+                                 (p1["pos"], "guardian_position"),
+                                 (p1["work"], "guardian_workplace")):
+                    if val and (ow or not _txt(doc.get(fld))) and _txt(doc.get(fld)) != val:
+                        doc.set(fld, val)
+                        touched = True
+
+            have_sib = {_name_key(s.sibling_name): s for s in (doc.lead_siblings or [])}
+            for s in sibs:
+                k = _name_key(s["sibling_name"])
+                if k in have_sib:
+                    row_ = have_sib[k]
+                    for fld in ("dob", "school"):
+                        v = s.get(fld)
+                        if v and (ow or not _txt(row_.get(fld))) and _txt(row_.get(fld)) != v:
+                            row_.set(fld, v)
+                            touched = True
+                    continue
+                doc.append("lead_siblings", s)
+                have_sib[k] = doc.lead_siblings[-1]
+                res["siblings"] += 1
+                touched = True
+
+            if health and (ow or not _txt(doc.student_health_notes)) \
+                    and _txt(doc.student_health_notes) != health:
+                doc.student_health_notes = health
+                res["health_notes"] += 1
+                touched = True
+
+            if touched:
+                doc.flags.ignore_mandatory = True
+                doc.save(ignore_permissions=True)
+                res["updated"] += 1
+        except Exception as e:
+            try:
+                frappe.db.rollback(save_point=sp)
+            except Exception:
+                pass
+            res["errors"].append({"row": r, "student": sn, "error": str(e)[:250]})
+            frappe.log_error(message=frappe.get_traceback() or str(e),
+                             title=f"backfill_family dong {r}")
+
+        if res["updated"] and res["updated"] % commit_every == 0:
+            frappe.db.commit()
+
+    if not dry_run:
+        frappe.db.commit()
+
+    print("")
+    print("=" * 62)
+    print("  DRY-RUN — khong ghi gi vao DB" if dry_run else "  DA GHI VAO DB")
+    print("=" * 62)
+    print(f"  Dong doc duoc        : {res['rows']}")
+    print(f"  Khop ho so           : {res['matched']}")
+    print(f"  Khong tim thay       : {len(res['not_found'])}")
+    print(f"  {'Se cap nhat' if dry_run else 'Da cap nhat':<20} : {res['updated']}")
+    print(f"  Dong lead_guardians  : {res['guardian_rows']}")
+    if not dry_run:
+        print(f"  Guardian moi/dung lai: {res['guardians_created']} / {res['guardians_reused']}")
+        print(f"  SDT them vao         : {res['phones_added']}")
+    print(f"  Dong anh chi em      : {res['siblings']}")
+    print(f"  Ghi chu suc khoe     : {res['health_notes']}")
+    for x in res["not_found"][:20]:
+        print(f"    r{x['row']:>4} {x['student'][:34]:<36} {x['error']}")
+    if res["errors"]:
+        print(f"\n  Loi ({len(res['errors'])}):")
+        for e in res["errors"][:20]:
+            print(f"    r{e['row']:>4} {e['student'][:28]:<30} {e['error']}")
+    print("")
+    return res
