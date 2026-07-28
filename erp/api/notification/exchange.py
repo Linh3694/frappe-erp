@@ -104,6 +104,10 @@ def _handle_chat_event_async(event_type, event_data):
 			_handle_chat_message_reaction(event_data)
 		elif event_type == "message_recalled":
 			_handle_chat_message_recalled(event_data)
+		elif event_type == "poll_reminder":
+			_handle_chat_poll_lifecycle(event_data, kind="reminder")
+		elif event_type == "poll_closed":
+			_handle_chat_poll_lifecycle(event_data, kind="closed")
 		else:
 			frappe.logger().warning(f"⚠️ [Exchange Async] Unknown event_type: {event_type}")
 	except Exception as e:
@@ -204,6 +208,94 @@ def _handle_new_chat_message(event_data):
 			)
 		except Exception as be:
 			frappe.logger().error(f"❌ [Exchange] Bulk Expo failed: {be}")
+
+
+def _handle_chat_poll_lifecycle(event_data, kind):
+	"""Nhắc trước hạn / báo kết thúc bình chọn — in-app (ERP Notification + realtime) + push.
+
+	Đi cùng đường với _handle_new_chat_message để phụ huynh và nhân viên đều nhận được;
+	`data.type` phải nằm trong map kênh Android ở erp/api/erp_sis/mobile_push_notification.py,
+	nếu không push sẽ rơi khỏi kênh "chat".
+	"""
+	recipient_emails = event_data.get("recipientEmails") or []
+	if not isinstance(recipient_emails, list):
+		recipient_emails = []
+	recipient_emails = [e for e in recipient_emails if e]
+	if not recipient_emails:
+		frappe.logger().info(f"🗳️ [Exchange] poll_{kind}: no recipients")
+		return
+
+	question = (event_data.get("messagePreview") or "").strip()
+	title_push = _("Bình chọn")
+	if kind == "reminder":
+		notif_type = "chat_poll_reminder"
+		body_push = (
+			_('Sắp hết hạn: "%(q)s" — bạn chưa bình chọn') % {"q": question}
+			if question
+			else _("Một bình chọn sắp hết hạn — bạn chưa bình chọn")
+		)
+	else:
+		notif_type = "chat_poll_closed"
+		body_push = (
+			_('Đã kết thúc: "%(q)s"') % {"q": question}
+			if question
+			else _("Một bình chọn đã kết thúc")
+		)
+	body_push = body_push[:200]
+
+	base = _base_chat_data(event_data)
+	base["type"] = notif_type
+	base["messageKind"] = "poll"
+
+	expo_targets = []
+
+	for recipient_email in recipient_emails:
+		merged = {**base}
+		try:
+			notif_doc = create_notification(
+				title=title_push,
+				message=body_push,
+				recipient_user=recipient_email,
+				notification_type="system",
+				priority="medium",
+				data=merged,
+				channel="push",
+				event_timestamp=frappe.utils.now(),
+			)
+			nid = notif_doc.name if hasattr(notif_doc, "name") else None
+		except Exception as ne:
+			frappe.logger().error(f"❌ [Exchange] poll_{kind} notification {recipient_email}: {ne}")
+			nid = None
+
+		try:
+			emit_notification_to_user(
+				recipient_email,
+				{
+					"id": nid or f"POLL-{frappe.generate_hash(length=8)}",
+					"type": notif_type,
+					"title": title_push,
+					"message": body_push,
+					"status": "unread",
+					"priority": "medium",
+					"created_at": frappe.utils.now(),
+					"data": merged,
+				},
+			)
+			unread = get_unread_count(recipient_email)
+			emit_unread_count_update(recipient_email, unread)
+		except Exception as re:
+			frappe.logger().error(f"❌ [Exchange] poll_{kind} realtime {recipient_email}: {re}")
+
+		expo_targets.append({"email": recipient_email, "data": dict(merged)})
+
+	if expo_targets:
+		try:
+			res = send_mobile_notifications_bulk(expo_targets, title_push, body_push)
+			frappe.logger().info(
+				f"🗳️ [Exchange] poll_{kind} bulk Expo: {res.get('success_count', 0)}/{res.get('total_messages', 0)}"
+			)
+		except Exception as be:
+			frappe.logger().error(f"❌ [Exchange] poll_{kind} bulk Expo failed: {be}")
 
 
 def _handle_chat_message_reaction(event_data):

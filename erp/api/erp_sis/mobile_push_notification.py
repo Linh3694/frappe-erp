@@ -840,7 +840,11 @@ def _build_expo_message(token_doc, title, body, data):
         channel_id = "crm_issue"
         sound_name = "default"
     # Wave 3: kênh Trao đổi chat + Nhật ký (Wislife) trên Android
-    elif notification_type in ("chat", "chat_message", "chat_message_reaction", "chat_message_recalled"):
+    elif notification_type in (
+        "chat", "chat_message", "chat_message_reaction", "chat_message_recalled",
+        # Vòng đời bình chọn trong nhóm chat — cùng kênh "chat".
+        "chat_poll_reminder", "chat_poll_closed",
+    ):
         channel_id = "chat"
         sound_name = "default"
     elif notification_type and (
