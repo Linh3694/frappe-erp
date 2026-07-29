@@ -845,13 +845,19 @@ doc_events = {
 	},
 	"SIS News Article": {
 		"after_insert": [
-			"erp.observability.audit.log_create"
+			"erp.observability.audit.log_create",
+			# Anh bia va anh nhung trong noi dung len CDN ngay khi bai duoc tao.
+			# Gan vao doctype chu khong vao `File`: 30/31 anh tin tuc khong co
+			# File doc nao. Xem erp/common/sis_content_store.py
+			"erp.common.sis_content_store.on_doc_update"
 		],
 		"on_update": [
-			"erp.observability.audit.log_update"
+			"erp.observability.audit.log_update",
+			"erp.common.sis_content_store.on_doc_update"
 		],
 		"on_trash": [
-			"erp.observability.audit.log_delete"
+			"erp.observability.audit.log_delete",
+			"erp.common.sis_content_store.on_doc_trash"
 		]
 	},
 	"Daily Menu": {
@@ -995,6 +1001,16 @@ doc_events = {
 	},
 	"SIS Library Title": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
+		"after_insert": "erp.common.sis_content_store.on_doc_update",
+		"on_update": "erp.common.sis_content_store.on_doc_update",
+		"on_trash": "erp.common.sis_content_store.on_doc_trash",
+	},
+	# Anh mon an len CDN. Gan vao doctype chu khong vao `File`: 419/565 anh thuc
+	# don khong co File doc nao — controller ghi thang byte xuong dia.
+	"SIS Menu Category": {
+		"after_insert": "erp.common.sis_content_store.on_doc_update",
+		"on_update": "erp.common.sis_content_store.on_doc_update",
+		"on_trash": "erp.common.sis_content_store.on_doc_trash",
 	},
 	"SIS Library Event": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
