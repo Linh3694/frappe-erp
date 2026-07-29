@@ -22,6 +22,14 @@ MS_ADMIN_SYNC_ACTIVE_KEY = "ms_admin_sync_job:active"
 MS_ADMIN_SYNC_JOB_TTL = 86400
 MS_ADMIN_RENAME_JOB_TIMEOUT = 900
 
+# Graph đòi phản hồi webhook trong ~3 giây, nên phần đồng bộ user phải chạy nền.
+MS_WEBHOOK_QUEUE = "short"
+MS_WEBHOOK_JOB_TIMEOUT = 1800
+
+# Timeout mặc định cho mọi lời gọi Graph/OAuth: thiếu timeout thì worker treo tới
+# khi gunicorn giết (-t 60), kéo theo cả request đăng nhập của người khác.
+MS_HTTP_TIMEOUT = 20
+
 
 def _require_it_admin() -> None:
 	"""Chỉ SIS IT / System Manager được gọi admin sync từ FE."""
@@ -287,16 +295,24 @@ def microsoft_callback(code, state):
         # Login or create Frappe user
         frappe_user = handle_microsoft_user_login(ms_user)
 
-        # Cập nhật trực tiếp các trường trên User từ Microsoft
+        # Cập nhật trực tiếp các trường trên User từ Microsoft.
+        # `create_or_update_microsoft_user` ở trên thường đã đồng bộ xong, nên chỉ
+        # lưu khi còn lệch thật — tránh một lần giữ khoá tabDefaultValue vô ích.
         try:
             if frappe_user and user_info:
+                before = _snapshot_user_fields(frappe_user)
                 if hasattr(frappe_user, 'department') and user_info.get("department"):
                     frappe_user.department = user_info.get("department")
                 if hasattr(frappe_user, 'designation') and user_info.get("jobTitle"):
                     frappe_user.designation = user_info.get("jobTitle")
                 _apply_microsoft_identity_fields(frappe_user, ms_user, user_info)
-                frappe_user.flags.ignore_permissions = True
-                frappe_user.save()
+                after = _snapshot_user_fields(frappe_user)
+                if any(
+                    _normalize_field_value(before.get(f)) != _normalize_field_value(after.get(f))
+                    for f in after
+                ):
+                    frappe_user.flags.ignore_permissions = True
+                    frappe_user.save()
         except Exception:
             pass
         
@@ -522,7 +538,7 @@ def get_microsoft_access_token(code):
         "grant_type": "authorization_code"
     }
     
-    response = requests.post(token_url, data=data)
+    response = requests.post(token_url, data=data, timeout=MS_HTTP_TIMEOUT)
     
     if response.status_code != 200:
         raise Exception(f"Token request failed: {response.text}")
@@ -561,7 +577,11 @@ def get_microsoft_user_info(access_token):
     # Include all fields we need for sync (same as get_all_microsoft_users)
     fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
     
-    response = requests.get(f"https://graph.microsoft.com/v1.0/me?$select={fields}", headers=headers)
+    response = requests.get(
+        f"https://graph.microsoft.com/v1.0/me?$select={fields}",
+        headers=headers,
+        timeout=MS_HTTP_TIMEOUT,
+    )
     
     if response.status_code != 200:
         raise Exception(f"User info request failed: {response.text}")
@@ -605,7 +625,7 @@ def _is_user_in_allowed_groups(user_id: str, app_headers: dict) -> bool:
     try:
         url = f"https://graph.microsoft.com/v1.0/users/{user_id}/checkMemberGroups"
         payload = {"groupIds": allowed}
-        resp = requests.post(url, headers=app_headers, json=payload)
+        resp = requests.post(url, headers=app_headers, json=payload, timeout=MS_HTTP_TIMEOUT)
         if resp.status_code != 200:
             return False
         data = resp.json() or {}
@@ -733,7 +753,7 @@ def find_or_create_frappe_user(ms_user, user_data):
                 local_user = frappe.get_doc("User", existing_by_ms)
                 update_frappe_user(local_user, ms_user, user_data)
                 try:
-                    if hasattr(ms_user, "mapped_user_id"):
+                    if hasattr(ms_user, "mapped_user_id") and ms_user.mapped_user_id != local_user.name:
                         ms_user.mapped_user_id = local_user.name
                         ms_user.flags.ignore_permissions = True
                         ms_user.save()
@@ -840,9 +860,41 @@ def create_frappe_user(ms_user, user_data):
         return None
 
 
+# Các field Microsoft được phép ghi đè lên User — dùng để so trước/sau khi gán.
+_MS_SYNCED_USER_FIELDS = (
+    "first_name", "last_name", "full_name", "enabled", "middle_name",
+    "department", "job_title", "designation", "location", "mobile_no", "phone",
+    "microsoft_id", "employee_code", "provider",
+)
+
+
+def _normalize_field_value(value):
+    """None và chuỗi rỗng coi như nhau, tránh báo "đã đổi" chỉ vì kiểu dữ liệu."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _snapshot_user_fields(user_doc) -> dict:
+    """Chụp giá trị các field Microsoft đồng bộ để phát hiện thay đổi thật."""
+    return {
+        field: user_doc.get(field)
+        for field in _MS_SYNCED_USER_FIELDS
+        if hasattr(user_doc, field)
+    }
+
+
 def update_frappe_user(user_doc, ms_user, user_data):
-    """Update existing Frappe user with Microsoft data"""
+    """Update existing Frappe user with Microsoft data.
+
+    Chỉ `save()` khi có field đổi thật. Mỗi `User.save()` giữ khoá ghi trên một
+    dòng `tabDefaultValue` dùng chung (Frappe gọi `ask_pass_update` trong
+    `User.validate`), nên lưu vô ích sẽ làm mọi thao tác lưu User khác xếp hàng.
+    """
     try:
+        before = _snapshot_user_fields(user_doc)
         # Update basic info
         new_first = user_data.get("givenName") or user_doc.first_name
         new_last = user_data.get("surname") or user_doc.last_name
@@ -883,6 +935,14 @@ def update_frappe_user(user_doc, ms_user, user_data):
             pass
 
         _apply_microsoft_identity_fields(user_doc, ms_user, user_data)
+
+        after = _snapshot_user_fields(user_doc)
+        changed = [
+            field for field in after
+            if _normalize_field_value(before.get(field)) != _normalize_field_value(after.get(field))
+        ]
+        if not changed:
+            return user_doc
 
         user_doc.flags.ignore_permissions = True
         user_doc.save()
@@ -1219,6 +1279,40 @@ def microsoft_webhook():
     if not notifications:
         return Response(json.dumps({"status": "ok", "received": 0}), mimetype="application/json", status=202)
 
+    # Graph ngắt kết nối nếu không nhận phản hồi trong ~3 giây rồi gửi lại
+    # notification. Xử lý đồng bộ ngay trong request từng khiến Graph retry liên
+    # tục, mỗi retry thêm một User.save() tranh khoá dòng `tabDefaultValue` dùng
+    # chung → đăng nhập đứng 50–60 giây. Nay trả 202 ngay, việc nặng đẩy sang nền.
+    queued = False
+    try:
+        frappe.enqueue(
+            "erp.api.erp_common_user.microsoft_auth._process_microsoft_notifications",
+            queue=MS_WEBHOOK_QUEUE,
+            timeout=MS_WEBHOOK_JOB_TIMEOUT,
+            notifications=notifications,
+            debug_enabled=bool(debug_enabled),
+        )
+        queued = True
+    except Exception as enqueue_error:
+        _logger = _get_webhook_logger()
+        if _logger:
+            _logger.info(f"Enqueue notifications job failed: {enqueue_error}")
+
+    return Response(
+        json.dumps({"status": "ok", "received": len(notifications), "queued": queued}),
+        mimetype="application/json",
+        status=202,
+    )
+
+
+def _process_microsoft_notifications(notifications: list, debug_enabled: bool = False) -> int:
+    """Worker nền: đồng bộ user theo change notification của Microsoft Graph.
+
+    Commit sau từng notification: mọi `User.save()` của Frappe đều chạy
+    `SELECT ... FOR UPDATE` trên một dòng `tabDefaultValue` dùng chung, giữ khoá
+    tới khi commit. Gom nhiều user trong một transaction sẽ chặn toàn bộ thao tác
+    lưu User khác của hệ thống, kể cả đăng nhập.
+    """
     app_token = get_microsoft_app_token()
     headers = {"Authorization": f"Bearer {app_token}", "Content-Type": "application/json"}
     fields = "id,displayName,givenName,surname,userPrincipalName,mail,jobTitle,department,officeLocation,businessPhones,mobilePhone,employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
@@ -1256,7 +1350,11 @@ def microsoft_webhook():
 
             # Fetch latest user data from Graph
             stage = "graph_fetch"
-            resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{user_id}?$select={fields}", headers=headers)
+            resp = requests.get(
+                f"https://graph.microsoft.com/v1.0/users/{user_id}?$select={fields}",
+                headers=headers,
+                timeout=MS_HTTP_TIMEOUT,
+            )
             if resp.status_code != 200:
                 try:
                     body_preview = resp.text[:500] if hasattr(resp, 'text') else ''
@@ -1309,11 +1407,11 @@ def microsoft_webhook():
             email = user_data.get('mail') or user_data.get('userPrincipalName')
             existed = bool(email and frappe.db.exists('User', email))
 
+            # `find_or_create_frappe_user` đã cập nhật user local; gọi
+            # `update_frappe_user` lần nữa ở đây chỉ nhân đôi lần tranh khoá.
             stage = "find_or_create_frappe_user"
             local_user = find_or_create_frappe_user(ms_user, user_data)
             if local_user:
-                stage = "update_frappe_user"
-                update_frappe_user(local_user, ms_user, user_data)
                 try:
                     msg = f"Processed user change id={user_id} email={email} existed={existed}"
                     if debug_enabled:
@@ -1330,7 +1428,13 @@ def microsoft_webhook():
                 except Exception:
                     pass
             processed += 1
+            # Nhả khoá ngay sau mỗi user thay vì giữ tới hết cả lô
+            frappe.db.commit()
         except Exception as e:
+            try:
+                frappe.db.rollback()
+            except Exception:
+                pass
             # Ghi lại lỗi xử lý 1 notification để chẩn đoán vì sao processed không tăng
             try:
                 import traceback as _tb
@@ -1351,14 +1455,15 @@ def microsoft_webhook():
                 pass
             continue
 
-    # Kèm thêm debug_info khi bật debug để hỗ trợ chẩn đoán nhanh
-    resp_payload = {"status": "ok", "received": len(notifications), "processed": processed}
-    try:
-        if debug_enabled:
-            resp_payload["debug"] = debug_info
-    except Exception:
-        pass
-    return Response(json.dumps(resp_payload), mimetype="application/json", status=202)
+    _logger = _get_webhook_logger()
+    if _logger:
+        try:
+            _logger.info(f"Job done: received={len(notifications)} processed={processed}")
+            if debug_enabled and debug_info:
+                _logger.info(f"Job debug: {json.dumps(debug_info)[:2000]}")
+        except Exception:
+            pass
+    return processed
 
 
 @frappe.whitelist()
@@ -1393,7 +1498,11 @@ def sync_one_microsoft_user(identifier: str):
         )
 
         # Có thể truy vấn /users/{idOrUPN}
-        resp = requests.get(f"https://graph.microsoft.com/v1.0/users/{identifier}?$select={fields}", headers=headers)
+        resp = requests.get(
+            f"https://graph.microsoft.com/v1.0/users/{identifier}?$select={fields}",
+            headers=headers,
+            timeout=MS_HTTP_TIMEOUT,
+        )
         if resp.status_code != 200:
             frappe.throw(_(f"Graph fetch failed: {resp.text}"))
 
@@ -1401,6 +1510,7 @@ def sync_one_microsoft_user(identifier: str):
         ms_user = create_or_update_microsoft_user(user_data)
         email = user_data.get("mail") or user_data.get("userPrincipalName")
 
+        # find_or_create_frappe_user đã cập nhật user local, không lưu lại lần nữa
         local_user = find_or_create_frappe_user(ms_user, user_data)
         if not local_user:
             return success_response(
@@ -1408,7 +1518,6 @@ def sync_one_microsoft_user(identifier: str):
                 data={"status": "success", "email": email}
             )
 
-        update_frappe_user(local_user, ms_user, user_data)
         return success_response(
             data={
                 "email": email,
@@ -1501,11 +1610,11 @@ def admin_sync_one_microsoft_user(identifier: str | None = None):
 		)
 
 		ms_user = create_or_update_microsoft_user(user_data)
+		# find_or_create_frappe_user đã cập nhật user local, không lưu lại lần nữa
 		local_user = find_or_create_frappe_user(ms_user, user_data)
 		if not local_user:
 			return error_response("Lưu ERP Microsoft User được nhưng không tạo/map được User local")
 
-		update_frappe_user(local_user, ms_user, user_data)
 		action = "updated" if existed_local else "created"
 
 		# Email trên Microsoft có thể đã được IT sửa lại; User.name dưới Frappe là email
@@ -1743,7 +1852,7 @@ def _graph_get_with_retry(url: str, headers: dict, retries: int = 3):
 
 	last = None
 	for attempt in range(retries):
-		last = requests.get(url, headers=headers)
+		last = requests.get(url, headers=headers, timeout=MS_HTTP_TIMEOUT)
 		if last.status_code in (429, 500, 502, 503, 504):
 			time.sleep(1.5 * (attempt + 1))
 			continue
@@ -1806,17 +1915,19 @@ def _run_microsoft_group_sync_job(job_id: str) -> None:
 							existed = bool(email and frappe.db.exists("User", email))
 
 						ms_user = create_or_update_microsoft_user(member)
+						# find_or_create_frappe_user đã cập nhật user local
 						local_user = find_or_create_frappe_user(ms_user, member)
 						if local_user:
-							update_frappe_user(local_user, ms_user, member)
 							if existed:
 								job["updated"] += 1
 							else:
 								job["created"] += 1
 						job["processed"] += 1
+						# Commit từng user để nhả khoá tabDefaultValue, không giữ
+						# tới hết lô — nếu không, mọi đăng nhập sẽ xếp hàng chờ.
+						frappe.db.commit()
 						if job["processed"] % 10 == 0:
 							_write_sync_job(job_id, job)
-							frappe.db.commit()
 					except Exception:
 						job["errors"] += 1
 
