@@ -3,6 +3,12 @@
 Ngày: 2026-07-29  
 Nhánh: `main` (không tạo nhánh mới, không push)
 
+Commits:
+- `017851d6` — việc 1 (upload bìa → CDN)
+- `0f28c88b` — việc 2 + 4 (clear_cache có điều kiện; trash an toàn)
+- `eb67b1c3` — việc 3 (siết key ảnh học sinh)
+- `e548ab85` — báo cáo này
+
 ## Tóm tắt
 
 Bốn phát hiện từ buổi review đã được sửa. Mọi nhánh CDN nuốt lỗi; không ghi `public/files`; khóa SIS vẫn là đường dẫn tương đối đầy đủ.
