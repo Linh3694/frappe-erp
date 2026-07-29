@@ -17,9 +17,15 @@ Moi nhom dang ky mot "domain" gom:
     key_from_url  cach suy khoa tu phan sau `/files/`
 
 Hai nhom suy khoa KHAC NHAU va day la co y:
-    anh hoc sinh : basename        — ten `WS<ma>.jpg` von duy nhat
+    anh hoc sinh : ten file o NGAY GOC `files/` — tu choi duong dan co thu muc
+                   con, neu khong mot bia sach `/files/<ten>` trung ten anh hoc
+                   sinh se bi ky sang bucket anh hoc sinh (sai bucket, sai anh).
+                   Nhom nay duyet TRUOC nen no thang neu nhan bua.
     noi dung SIS : duong dan day du — `SUON19.jpg` ton tai o CA `files/` lan
                                       `files/Menu_Categories/`, noi dung khac nhau
+
+Rang buoc tren KHONG cuu duoc truong hop hai nhom trung ten khi CA HAI cung nam
+o goc `files/`. Phai do trung ten tren du lieu that truoc khi bat nhom thu vien.
 """
 
 import json
