@@ -584,13 +584,15 @@ doc_events = {
 	# Logging hooks for audit trail
 	"File": {
 		"after_insert": [
-			"erp.observability.audit.log_file_upload"
+			"erp.observability.audit.log_file_upload",
+			"erp.common.scholarship_store.on_file_insert"
 		],
 		"on_update": [
 			"erp.observability.audit.log_file_update"
 		],
 		"on_trash": [
-			"erp.observability.audit.log_file_delete"
+			"erp.observability.audit.log_file_delete",
+			"erp.common.scholarship_store.on_file_trash"
 		]
 	},
 	"Student": {
