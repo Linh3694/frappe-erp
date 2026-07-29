@@ -15,6 +15,18 @@ import urllib.parse
 from erp.utils.api_response import success_response, error_response
 from erp.api.utils import format_vietnamese_name
 
+ADMIN_SYNC_ROLES = ("System Manager", "SIS IT")
+
+
+def _require_it_admin() -> None:
+	"""Chỉ SIS IT / System Manager được gọi admin sync từ FE."""
+	roles = frappe.get_roles(frappe.session.user)
+	if not any(r in roles for r in ADMIN_SYNC_ROLES):
+		frappe.throw(
+			_("Chỉ System Manager hoặc SIS IT được đồng bộ Microsoft"),
+			frappe.PermissionError,
+		)
+
 
 def _extract_origin(url: str | None) -> str | None:
     """Trả về origin ở dạng scheme://host[:port] từ 1 URL/Origin bất kỳ.
@@ -707,6 +719,22 @@ def find_or_create_frappe_user(ms_user, user_data):
                 return local_user
             except frappe.DoesNotExistError:
                 pass
+        
+        # 1b. Tìm theo microsoft_id (tránh tạo trùng khi email local ≠ UPN MS)
+        ms_id = user_data.get("id") or getattr(ms_user, "microsoft_id", None)
+        if ms_id:
+            existing_by_ms = frappe.db.get_value("User", {"microsoft_id": ms_id})
+            if existing_by_ms:
+                local_user = frappe.get_doc("User", existing_by_ms)
+                update_frappe_user(local_user, ms_user, user_data)
+                try:
+                    if hasattr(ms_user, "mapped_user_id"):
+                        ms_user.mapped_user_id = local_user.name
+                        ms_user.flags.ignore_permissions = True
+                        ms_user.save()
+                except Exception:
+                    pass
+                return local_user
         
         # 2. Tìm theo email
         email = user_data.get("mail") or user_data.get("userPrincipalName")
