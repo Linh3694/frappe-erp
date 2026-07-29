@@ -29,22 +29,37 @@ from erp.common.sis_content_cdn import GROUPS, PREFIX, clear_cache
 MAX_DIM = {"news": 1600, "menu": 1024, "library": 1024}
 QUALITY = 82
 
-# Chi rut gia tri thuoc tinh src (bat dau bang /files/), KHONG quet chuoi /files/
-# tu do trong HTML. Quet tu do se: (1) cat ngang ten file co dau cach vi \s nam
-# trong lop phu dinh; (2) nhiem URL mien ngoai kieu https://example.com/files/...
-# vao allowlist ky. Ranh gioi dau nhay cua src giu nguyen dau cach trong path.
+# Chi rut anh nhung qua src HTML hoac cu phap markdown ![alt](/files/...),
+# KHONG quet chuoi /files/ tu do trong van ban. Quet tu do se: (1) cat ngang ten
+# file co dau cach vi \s nam trong lop phu dinh; (2) nhiem URL mien ngoai kieu
+# https://example.com/files/... vao allowlist ky. Path phai BAT DAU bang /files/.
+# Ranh gioi dau nhay / ngoac tron giu nguyen dau cach trong path; tieu de
+# markdown tuy chon ("...") sau path khong dua vao ket qua.
 _HTML_IMG_RE = re.compile(
     r"""src\s*=\s*(["'])(/files/(?:(?!\1).)+\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))\1""",
+    re.IGNORECASE,
+)
+_MD_IMG_RE = re.compile(
+    r"""!\[[^\]]*\]\((/files/(?:(?!\)).)+\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))(?:\s+"[^"]*")?\)""",
     re.IGNORECASE,
 )
 
 
 def extract_html_urls(html):
-    """URL anh nhung trong HTML soan thao (tin tuc)."""
+    """URL anh nhung trong noi dung bai viet tin tuc.
+
+    Nhan ca HTML (`src="/files/..."`) va markdown (`![...](/files/...)`) vi trinh
+    soan `@uiw/react-md-editor` chen anh bang markdown, trong khi bai cu / HTML
+    van con `src`. Hai nhanh gop chung; chi path bat dau bang `/files/` (khong
+    chap nhan URL tuyet doi mien ngoai).
+    """
     if not html or not isinstance(html, str):
         return set()
-    # group(2) = path; group(1) chi la dau nhay bao nhiem
-    return {m.group(2) for m in _HTML_IMG_RE.finditer(html)}
+    # HTML: group(2) = path; group(1) chi la dau nhay bao nhiem
+    urls = {m.group(2) for m in _HTML_IMG_RE.finditer(html)}
+    # Markdown: group(1) = path (da loai tieu de tuy chon)
+    urls.update(m.group(1) for m in _MD_IMG_RE.finditer(html))
+    return urls
 
 
 def collect_urls(groups=None):

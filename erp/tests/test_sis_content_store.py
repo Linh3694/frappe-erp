@@ -41,6 +41,49 @@ class TestExtractHtmlUrls(unittest.TestCase):
         self.assertEqual(sis_content_store.extract_html_urls(""), set())
         self.assertEqual(sis_content_store.extract_html_urls(None), set())
 
+    def test_markdown_anh_nhung(self):
+        md = "![anh](/files/News_Articles/a.jpg)"
+        self.assertEqual(
+            sis_content_store.extract_html_urls(md),
+            {"/files/News_Articles/a.jpg"},
+        )
+
+    def test_markdown_mo_ta_rong(self):
+        self.assertEqual(
+            sis_content_store.extract_html_urls("![](/files/b.png)"),
+            {"/files/b.png"},
+        )
+
+    def test_markdown_duong_dan_co_dau_cach(self):
+        md = "![x](/files/News_Articles/Lop 1A1.jpg)"
+        self.assertEqual(
+            sis_content_store.extract_html_urls(md),
+            {"/files/News_Articles/Lop 1A1.jpg"},
+        )
+
+    def test_markdown_co_tieu_de(self):
+        # Tieu de tuy chon sau path khong duoc dinh vao ket qua
+        md = '![x](/files/c.webp "tieu de cua anh")'
+        self.assertEqual(
+            sis_content_store.extract_html_urls(md),
+            {"/files/c.webp"},
+        )
+
+    def test_markdown_bo_qua_url_mien_ngoai(self):
+        md = "![x](https://example.com/files/x.jpg)"
+        self.assertEqual(sis_content_store.extract_html_urls(md), set())
+
+    def test_van_ban_tran_khong_quet_files(self):
+        html = "<p>doan van co /files/a.jpg</p>"
+        self.assertEqual(sis_content_store.extract_html_urls(html), set())
+
+    def test_tron_html_src_va_markdown(self):
+        mixed = '<img src="/files/a.jpg"> va ![x](/files/b.png)'
+        self.assertEqual(
+            sis_content_store.extract_html_urls(mixed),
+            {"/files/a.jpg", "/files/b.png"},
+        )
+
 
 class TestShrink(unittest.TestCase):
     def _jpeg(self, w, h):
