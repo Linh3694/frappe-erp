@@ -312,11 +312,14 @@ def get_award_records(
                         if ':' in desc:
                             candidate = desc.split(':', 1)[1].strip()
                             if candidate:
-                                import os
                                 import unicodedata
+                                from erp.common.student_photo_cdn import object_exists
                                 normalized = unicodedata.normalize('NFC', candidate)
-                                public_path = frappe.get_site_path("public", "files", normalized)
-                                if os.path.exists(public_path):
+                                # Kiem tra ca tren CDN chu khong chi tren dia:
+                                # anh lop da duoc niem khoi public/files de dong
+                                # lo hong (CDN-STATUS.md muc 7b), chi kiem dia se
+                                # lam anh lop bien mat.
+                                if object_exists(normalized):
                                     photo_url = f"/files/{normalized}"
                     
                     if photo_url:

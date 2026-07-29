@@ -18,7 +18,7 @@
 | **Hồ sơ học bổng (Frappe → CDN, signed URL)** | ✅ **Chạy production — lỗ hổng §7 đã vá** |
 | Ký URL phía Python trong Frappe | ✅ Chạy production (`erp/common/cdn_sign.py`) |
 | Video remux `+faststart` + poster | ❌ Chưa làm |
-| **Ảnh chân dung học sinh** | ⏳ **Đã lên CDN, chưa niêm — xem §7b** |
+| **Ảnh chân dung học sinh** | ✅ **Chạy production — lỗ hổng §7b đã vá** |
 | Thư viện, thực đơn, tin tức | ❌ Chưa làm |
 | Phase 3 (upload thẳng lên CDN) | ❌ Chưa làm |
 | Phase 4 (dọn dẹp) | ❌ Chưa làm — user quyết **giữ fallback tới ~giữa 2027** |
@@ -295,7 +295,7 @@ seal-scholarship.py --rollback /srv/backup/scholarship-sealed-20260729-130655
 
 ---
 
-## 7b. Ảnh chân dung học sinh — đang vá (2026-07-29)
+## 7b. Ảnh chân dung học sinh — lỗ hổng đã vá (2026-07-29)
 
 **Phát hiện 2026-07-29 khi rà mục 10.2. Nghiêm trọng hơn lỗ hổng học bổng (§7) vì có thể liệt kê hàng loạt.**
 
@@ -332,17 +332,48 @@ Tệ hơn: response `200` với mã có thật và `404` với mã không có bi
 | `location /student-photos/` trên nginx VM3 (prefix, không regex) | ✅ |
 | Migrate **3.281 file / 2,1 GB** được `tabSIS Photo` tham chiếu | ✅ |
 | Ký tại `after_request` — `erp/common/student_photo_cdn.py` | ✅ |
-| **Niêm file gốc khỏi `public/files`** | ❌ **chưa — lỗ hổng vẫn mở** |
+| Niêm **6.257 file** khỏi `public/files` | ✅ |
 | Hook `File.after_insert` cho ảnh mới | ❌ chưa |
 | Timer niêm định kỳ | ❌ chưa |
 
-Hiện ảnh phát được qua **cả hai** đường (CDN đã ký và `/files/` công khai). An toàn để dừng ở đây, nhưng **lỗ hổng chưa đóng** cho tới khi niêm.
+Kiểm chứng từ máy ngoài, không đăng nhập — đúng ba URL từng dùng để chứng minh lỗ hổng:
+
+```
+GET /files/WS11420471.jpg  →  404
+GET /files/WS11910099.jpg  →  404
+GET /files/WS12407002.jpg  →  404
+```
+
+File cũ niêm tại `/srv/backup/student-photos-sealed-20260729-144737` (nằm ngoài `public/`). Rollback:
+
+```bash
+seal-student-photos.py --rollback /srv/backup/student-photos-sealed-20260729-144737
+```
+
+⚠️ **Chưa có hook và timer cho ảnh MỚI.** Ảnh upload sau thời điểm này vẫn nằm trong `public/files` và vẫn lộ cho tới khi hai việc đó xong.
 
 ### Vì sao ký ở `after_request` chứ không tại từng điểm đọc
 
 Học bổng chỉ có 5 điểm ký nên làm tường minh là hợp lý. Ảnh học sinh rà được **33 chỗ trên 21 file**, mỗi chỗ một hình dạng (đơn lẻ, batch, lồng trong dict khác). Và sau khi niêm, **bất kỳ đường nào bị sót đều thành ảnh vỡ** — chứ không phải chỉ hiện sai như bug thứ tự năm học. Bọc ở ranh giới response thì không đường nào lọt, kể cả đường thêm sau này.
 
 Chỉ ký file **đã migrate**: danh sách tên lấy từ chính `tabSIS Photo`, cache 5 phút. Không đoán theo mẫu tên file — ảnh lớp (`Lớp 4A5….jpg`) không theo mẫu `WS<mã>` nào cả.
+
+### Hai đường không trả JSON — hook không phủ được
+
+Hook `after_request` chỉ ký response JSON. Hai chỗ đọc **thẳng byte từ đĩa**, niêm xong là hỏng:
+
+| Nơi | Xử lý |
+|---|---|
+| `hall_of_honor.py` — nhánh phục hồi ảnh lớp từ `description` | ✅ Đổi `os.path.exists` → `student_photo_cdn.object_exists()`, kiểm cả trên CDN |
+| `faceid/photo.py` — `_read_file_bytes` đẩy byte xuống nhận diện khuôn mặt | ⏸️ Bỏ qua theo yêu cầu |
+
+Bài học: khi ký ở ranh giới response, phải rà riêng các đường trả **byte** thay vì trả **URL** — chúng vô hình với hook.
+
+### Chuẩn hoá Unicode
+
+Ảnh lớp có tên tiếng Việt (`Lớp 1A1.jpg`) và **NFC ≠ NFD** với mọi tên loại này. Hook lấy tên từ DB, script migrate lấy từ DB, nên hai bên khớp. Đã kiểm chứng 6/6 ảnh tên tiếng Việt trả `200` qua đúng đường hook đi.
+
+Nếu sau này có đường nào lấy tên từ **hệ thống tệp** thay vì DB thì phải `unicodedata.normalize('NFC', ...)` trước — `hall_of_honor.py` đã làm sẵn việc đó, không phải ngẫu nhiên.
 
 ### Ba tham chiếu hỏng có sẵn
 

@@ -70,6 +70,56 @@ def clear_cache():
         pass
 
 
+def object_exists(name):
+    """Anh co ton tai (tren dia HOAC tren CDN) khong.
+
+    Can cho cac nhanh dung `os.path.exists` de quyet dinh co hien anh hay khong.
+    Sau khi niem, file khong con trong `public/files` nua nen kiem tra dia se
+    tra False va anh bien mat — khong crash, nhung mat chuc nang.
+
+    Ket qua duoc cache vi cac nhanh nay thuong chay trong vong lap.
+    """
+    if not name or ".." in name:
+        return False
+    try:
+        disk = os.path.join(frappe.get_site_path("public", "files"), name)
+        if os.path.isfile(disk):
+            return True
+
+        key = f"erp:student_photo:exists:{name}"
+        cached = frappe.cache().get_value(key)
+        if cached is not None:
+            return cached
+
+        conf = cdn_sign.load_conf()
+        if not conf:
+            return False
+
+        import boto3
+        from botocore.config import Config
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=conf["CDN_S3_ENDPOINT"],
+            aws_access_key_id=conf["CDN_ACCESS_KEY"],
+            aws_secret_access_key=conf["CDN_SECRET_KEY"],
+            region_name="us-east-1",
+            config=Config(s3={"addressing_style": "path"}, retries={"max_attempts": 1}),
+        )
+        try:
+            s3.head_object(
+                Bucket=conf.get("CDN_BUCKET_STUDENT_PHOTOS", "cdn-student-photos"),
+                Key=f"{PREFIX}/{name}",
+            )
+            found = True
+        except Exception:
+            found = False
+        frappe.cache().set_value(key, found, expires_in_sec=CACHE_TTL)
+        return found
+    except Exception:
+        return False
+
+
 def _sign_in_text(text, names):
     """Thay moi `/files/<ten da migrate>` bang URL da ky."""
     def repl(m):
