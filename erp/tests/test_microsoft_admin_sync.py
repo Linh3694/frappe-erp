@@ -146,5 +146,30 @@ class TestFetchMicrosoftUserPayload(unittest.TestCase):
 				mock_frappe.throw.assert_called_once()
 
 
+class TestSyncJobCache(unittest.TestCase):
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	def test_write_and_read_job(self, mock_frappe):
+		from erp.api.erp_common_user import microsoft_auth as m
+
+		store = {}
+		cache = MagicMock()
+		cache.set_value.side_effect = lambda k, v, expires_in_sec=None: store.__setitem__(k, v)
+		cache.get_value.side_effect = lambda k: store.get(k)
+		mock_frappe.cache.return_value = cache
+
+		payload = {
+			"job_id": "job1",
+			"status": "queued",
+			"processed": 0,
+			"created": 0,
+			"updated": 0,
+			"errors": 0,
+			"message": "",
+			"started_by": "it@x.com",
+		}
+		m._write_sync_job("job1", payload)
+		self.assertEqual(m._read_sync_job("job1")["status"], "queued")
+
+
 if __name__ == "__main__":
 	unittest.main()

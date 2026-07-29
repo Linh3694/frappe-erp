@@ -12,10 +12,13 @@ from datetime import timedelta
 import secrets
 import base64
 import urllib.parse
+import uuid
 from erp.utils.api_response import success_response, error_response
 from erp.api.utils import format_vietnamese_name
 
 ADMIN_SYNC_ROLES = ("System Manager", "SIS IT")
+MS_ADMIN_SYNC_ACTIVE_KEY = "ms_admin_sync_job:active"
+MS_ADMIN_SYNC_JOB_TTL = 86400
 
 
 def _require_it_admin() -> None:
@@ -1518,6 +1521,191 @@ def admin_sync_one_microsoft_user(identifier: str | None = None):
 		raise
 	except Exception as e:
 		frappe.log_error("Microsoft Admin Sync One", str(e))
+		return error_response(str(e))
+
+
+def _job_cache_key(job_id: str) -> str:
+	return f"ms_admin_sync_job:{job_id}"
+
+
+def _write_sync_job(job_id: str, payload: dict) -> None:
+	frappe.cache().set_value(
+		_job_cache_key(job_id),
+		payload,
+		expires_in_sec=MS_ADMIN_SYNC_JOB_TTL,
+	)
+
+
+def _read_sync_job(job_id: str) -> dict | None:
+	return frappe.cache().get_value(_job_cache_key(job_id))
+
+
+def _graph_get_with_retry(url: str, headers: dict, retries: int = 3):
+	"""GET Graph với retry ngắn cho 429/5xx."""
+	import time
+
+	last = None
+	for attempt in range(retries):
+		last = requests.get(url, headers=headers)
+		if last.status_code in (429, 500, 502, 503, 504):
+			time.sleep(1.5 * (attempt + 1))
+			continue
+		return last
+	return last
+
+
+def _run_microsoft_group_sync_job(job_id: str) -> None:
+	"""Worker: sync members các group trong microsoft_group_ids, cập nhật tiến độ cache."""
+	job = _read_sync_job(job_id) or {
+		"job_id": job_id,
+		"status": "running",
+		"processed": 0,
+		"created": 0,
+		"updated": 0,
+		"errors": 0,
+		"message": "",
+		"started_by": "",
+	}
+	job["status"] = "running"
+	_write_sync_job(job_id, job)
+
+	try:
+		groups = _get_allowed_group_ids()
+		if not groups:
+			job["status"] = "failed"
+			job["message"] = "Chưa cấu hình microsoft_group_ids"
+			_write_sync_job(job_id, job)
+			frappe.cache().delete_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			return
+
+		token = get_microsoft_app_token()
+		headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+		seen: set[str] = set()
+		page_size = 100
+
+		for gid in groups:
+			url = (
+				f"https://graph.microsoft.com/v1.0/groups/{gid}/members"
+				f"?$select={MS_USER_SELECT_FIELDS}&$top={page_size}"
+			)
+			while url:
+				resp = _graph_get_with_retry(url, headers)
+				if resp.status_code != 200:
+					raise Exception(f"Graph members {gid}: {resp.status_code} {resp.text[:300]}")
+				data = resp.json() or {}
+				for member in data.get("value") or []:
+					try:
+						if not (member.get("userPrincipalName") or member.get("mail")):
+							continue
+						uid = member.get("id")
+						if not uid or uid in seen:
+							continue
+						seen.add(uid)
+
+						ms_id = member.get("id")
+						existed = bool(ms_id and frappe.db.get_value("User", {"microsoft_id": ms_id}))
+						if not existed:
+							email = member.get("mail") or member.get("userPrincipalName")
+							existed = bool(email and frappe.db.exists("User", email))
+
+						ms_user = create_or_update_microsoft_user(member)
+						local_user = find_or_create_frappe_user(ms_user, member)
+						if local_user:
+							update_frappe_user(local_user, ms_user, member)
+							if existed:
+								job["updated"] += 1
+							else:
+								job["created"] += 1
+						job["processed"] += 1
+						if job["processed"] % 10 == 0:
+							_write_sync_job(job_id, job)
+							frappe.db.commit()
+					except Exception:
+						job["errors"] += 1
+
+				url = data.get("@odata.nextLink")
+
+		job["status"] = "success"
+		job["message"] = (
+			f"Xong: processed={job['processed']}, created={job['created']}, "
+			f"updated={job['updated']}, errors={job['errors']}"
+		)
+		_write_sync_job(job_id, job)
+		frappe.db.commit()
+	except Exception as e:
+		job["status"] = "failed"
+		job["message"] = str(e)[:500]
+		_write_sync_job(job_id, job)
+		frappe.log_error("Microsoft Admin Group Sync", str(e))
+	finally:
+		frappe.cache().delete_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+
+
+@frappe.whitelist(methods=["POST"])
+def admin_start_microsoft_group_sync() -> dict:
+	"""Enqueue sync members microsoft_group_ids (1 job active)."""
+	try:
+		_require_it_admin()
+		cache = frappe.cache()
+		active_id = cache.get_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+		if active_id:
+			existing = _read_sync_job(active_id)
+			if existing and existing.get("status") in ("queued", "running"):
+				return success_response(
+					data=existing,
+					message="Đã có job đồng bộ đang chạy",
+				)
+
+		job_id = str(uuid.uuid4())
+		payload = {
+			"job_id": job_id,
+			"status": "queued",
+			"processed": 0,
+			"created": 0,
+			"updated": 0,
+			"errors": 0,
+			"message": "",
+			"started_by": frappe.session.user,
+		}
+		_write_sync_job(job_id, payload)
+		cache.set_value(
+			MS_ADMIN_SYNC_ACTIVE_KEY,
+			job_id,
+			expires_in_sec=MS_ADMIN_SYNC_JOB_TTL,
+		)
+
+		frappe.enqueue(
+			"erp.api.erp_common_user.microsoft_auth._run_microsoft_group_sync_job",
+			job_id=job_id,
+			queue="long",
+			timeout=3600,
+		)
+		return success_response(data=payload, message="Đã xếp hàng đồng bộ Microsoft group")
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Start Sync", str(e))
+		return error_response(str(e))
+
+
+@frappe.whitelist()
+def admin_get_microsoft_sync_job(job_id: str | None = None) -> dict:
+	"""Poll trạng thái job sync group."""
+	try:
+		_require_it_admin()
+		job_id = job_id or frappe.form_dict.get("job_id")
+		if not job_id:
+			active = frappe.cache().get_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			if not active:
+				return success_response(data=None, message="Không có job đang chạy")
+			job_id = active
+		job = _read_sync_job(job_id)
+		if not job:
+			return error_response("Không tìm thấy job", code="NOT_FOUND")
+		return success_response(data=job)
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
 		return error_response(str(e))
 
 
