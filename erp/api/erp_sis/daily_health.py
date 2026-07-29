@@ -479,32 +479,11 @@ def get_daily_health_visits():
         for visit in visits:
             student_photo = None
             try:
-                # Ưu tiên lấy ảnh theo năm học hiện tại
-                if current_school_year:
-                    photos = frappe.get_all(
-                        "SIS Photo",
-                        filters={
-                            "student_id": visit.get("student_id"),
-                            "school_year_id": current_school_year
-                        },
-                        fields=["photo"],
-                        order_by="creation desc",
-                        limit=1
-                    )
-                    if photos and photos[0].get("photo"):
-                        student_photo = photos[0]["photo"]
-                
-                # Fallback - lấy ảnh mới nhất nếu không có ảnh năm học
-                if not student_photo:
-                    photos = frappe.get_all(
-                        "SIS Photo",
-                        filters={"student_id": visit.get("student_id")},
-                        fields=["photo"],
-                        order_by="creation desc",
-                        limit=1
-                    )
-                    if photos and photos[0].get("photo"):
-                        student_photo = photos[0]["photo"]
+                # `creation desc` khong dong bien voi nam hoc — xem
+                # erp/common/student_photo.py
+                from erp.common.student_photo import get_photo_url
+
+                student_photo = get_photo_url(visit.get("student_id"), current_school_year)
             except Exception as photo_err:
                 frappe.logger().warning(f"Error fetching photo for student {visit.get('student_id')}: {str(photo_err)}")
             
@@ -3449,15 +3428,13 @@ def get_class_health_examinations():
             # Fallback - lấy ảnh mới nhất cho các student chưa có ảnh
             missing_ids = [sid for sid in student_ids if sid not in student_photos]
             if missing_ids:
-                photos = frappe.get_all(
-                    "SIS Photo",
-                    filters={"student_id": ["in", missing_ids]},
-                    fields=["student_id", "photo"],
-                    order_by="creation desc"
-                )
-                for p in photos:
-                    if p.student_id and p.photo and p.student_id not in student_photos:
-                        student_photos[p.student_id] = p.photo
+                # Sap theo nam hoc chu khong theo `creation` — xem
+                # erp/common/student_photo.py
+                from erp.common.student_photo import get_photo_urls
+
+                for sid, ph in get_photo_urls(missing_ids).items():
+                    if sid not in student_photos:
+                        student_photos[sid] = ph
         
         # Group theo student
         student_data = {}

@@ -54,7 +54,15 @@ PREFIX = "student-photos"
 # Da dinh dung loi nay tren production 2026-07-29.
 #
 # Nhom 1 nuot ca origin (neu co) de bi thay het; nhom 2 la ten file.
-_FILES_RE = re.compile(r'((?:https?://[^"\\\s]*?)?/files/)([^"\\\s]+)')
+#
+# Ten file duoc phep chua DAU CACH (`Lớp 1A1.jpg`) nen khong loai \s o nhom 2 —
+# da tung sua nham va lam anh lop khong duoc ky. Nhung de tranh nuot qua xa khi
+# mot chuoi chua hai URL, nhom 2 dung lazy va phai ket thuc bang duoi anh.
+_FILES_RE = re.compile(
+    r'((?:https?://[^"\\\s]*?)?/files/)'
+    r'([^"\\]+?\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))',
+    re.IGNORECASE,
+)
 
 
 def _migrated_names():

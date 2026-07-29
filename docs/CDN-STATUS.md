@@ -375,6 +375,24 @@ Bài học: khi ký ở ranh giới response, phải rà riêng các đường t
 
 Nếu sau này có đường nào lấy tên từ **hệ thống tệp** thay vì DB thì phải `unicodedata.normalize('NFC', ...)` trước — `hall_of_honor.py` đã làm sẵn việc đó, không phải ngẫu nhiên.
 
+### Hai lỗi lộ ra sau khi bật (đã sửa)
+
+**1. URL đầy đủ không được ký.** `batch_get_students`, `global_search` và một số endpoint khác gọi `frappe.utils.get_url()` nên trả `https://prod.sis.wellspring.edu.vn/files/WS….jpg`. Regex ban đầu chỉ bắt phần `/files/…`, để lại origin, sinh ra `https://prod.sis…https://media…` — URL vỡ.
+
+Regex hiện tại nuốt cả origin. Ba ràng buộc phải giữ đồng thời:
+
+| Ràng buộc | Vì sao |
+|---|---|
+| Origin **không** chứa dấu cách | để không nuốt sang chuỗi khác |
+| Tên file **được** chứa dấu cách | `Lớp 1A1.jpg` — sửa nhầm chỗ này làm ảnh lớp mất chữ ký |
+| Kết thúc bằng đuôi ảnh | chặn trường hợp một chuỗi chứa hai URL bị nuốt mất cái đầu |
+
+**2. Truy vấn ORM vô hình với grep.** Đợt sửa bug thứ tự năm học ban đầu grep chuỗi `` `tabSIS Photo` `` nên chỉ thấy SQL thô. Các chỗ dùng ORM viết `frappe.get_all("SIS Photo", …)` — **tên doctype chứ không phải tên bảng** — nên không bị bắt, và lệnh gọi lại trải nhiều dòng nên grep một dòng cũng sót.
+
+Rà lại bằng regex nhiều dòng: **12 chỗ ORM**, tất cả `order_by="creation desc"`. Bốn chỗ có bug thật (không lọc theo một năm cụ thể) đã đổi sang `student_photo.get_photo_url()`; tám chỗ còn lại đã lọc theo một năm hoặc lấy doc theo tên nên không ảnh hưởng.
+
+> **Bài học chung:** rà theo tên bảng SQL là chưa đủ trong Frappe. Phải rà cả `frappe.get_all` / `get_list` / `db.get_value` với **tên doctype**, và bằng regex nhiều dòng.
+
 ### Ba tham chiếu hỏng có sẵn
 
 `/files/Lớp 2A4.jpg`, `Lớp 3A2.jpg`, `Lớp 3A4.jpg` — có trong `tabSIS Photo` nhưng **không tồn tại trên đĩa**, đã trả 404 từ trước khi làm gì. Không phải do migrate.
