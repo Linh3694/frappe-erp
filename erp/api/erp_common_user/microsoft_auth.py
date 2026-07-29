@@ -1584,7 +1584,16 @@ def admin_rename_user_email(current_email: str | None = None, new_email: str | N
 				"Email mới thuộc một tài khoản Microsoft khác — không đổi để tránh sai dữ liệu"
 			)
 
-		frappe.rename_doc("User", current_email, new_email, ignore_permissions=True)
+		# frappe.rename_doc (top-level) không nhận ignore_permissions → gọi hàm gốc.
+		from frappe.model.rename_doc import rename_doc as _rename_doc
+
+		_rename_doc(
+			doctype="User",
+			old=current_email,
+			new=new_email,
+			ignore_permissions=True,
+			show_alert=False,
+		)
 		renamed = frappe.get_doc("User", new_email)
 		if renamed.email != new_email:
 			renamed.email = new_email

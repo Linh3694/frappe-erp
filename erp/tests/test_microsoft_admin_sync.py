@@ -33,7 +33,13 @@ def _load_microsoft_auth_module():
 		frappe_stub = MagicMock()
 		frappe_stub.whitelist.side_effect = lambda *args, **kwargs: lambda fn: fn
 		sys.modules["frappe"] = frappe_stub
-	for stub in ("erp.utils", "erp.utils.api_response", "erp.api.utils"):
+	for stub in (
+		"frappe.model",
+		"frappe.model.rename_doc",
+		"erp.utils",
+		"erp.utils.api_response",
+		"erp.api.utils",
+	):
 		if stub not in sys.modules:
 			sys.modules[stub] = MagicMock()
 
@@ -241,6 +247,122 @@ class TestStartMicrosoftGroupSync(unittest.TestCase):
 		failed_payload = cache.set_value.call_args_list[-1].args[1]
 		self.assertEqual(failed_payload["status"], "failed")
 		self.assertIn("Redis queue unavailable", failed_payload["message"])
+
+
+class TestAdminRenameUserEmail(unittest.TestCase):
+	"""Case IT sửa email trên MS: rename User local, nhưng phải an toàn."""
+
+	def _mock_error(self, mock_error):
+		mock_error.side_effect = lambda message, **kwargs: {"message": message, **kwargs}
+
+	def _as_it_admin(self, mock_frappe):
+		mock_frappe.session.user = "it@wellspring.edu.vn"
+		mock_frappe.get_roles.return_value = ["SIS IT"]
+		mock_frappe.PermissionError = PermissionError
+		mock_frappe.form_dict = {}
+
+	@patch("frappe.model.rename_doc.rename_doc")
+	@patch("erp.api.erp_common_user.microsoft_auth.error_response")
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	def test_blocks_when_new_email_already_exists(self, mock_frappe, mock_error, mock_rename):
+		from erp.api.erp_common_user import microsoft_auth as m
+
+		self._as_it_admin(mock_frappe)
+		self._mock_error(mock_error)
+		mock_frappe.db.exists.return_value = True
+
+		result = m.admin_rename_user_email("old@x.vn", "new@x.vn")
+
+		self.assertIn("đã tồn tại", result["message"])
+		mock_rename.assert_not_called()
+
+	@patch("frappe.model.rename_doc.rename_doc")
+	@patch("erp.api.erp_common_user.microsoft_auth._fetch_microsoft_user_payload")
+	@patch("erp.api.erp_common_user.microsoft_auth.get_microsoft_app_token")
+	@patch("erp.api.erp_common_user.microsoft_auth.error_response")
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	def test_blocks_when_new_email_belongs_to_other_ms_account(
+		self,
+		mock_frappe,
+		mock_error,
+		mock_token,
+		mock_fetch,
+		mock_rename,
+	):
+		from erp.api.erp_common_user import microsoft_auth as m
+
+		self._as_it_admin(mock_frappe)
+		self._mock_error(mock_error)
+		mock_frappe.db.exists.side_effect = lambda _dt, name: name == "old@x.vn"
+		local_user = MagicMock()
+		local_user.microsoft_id = "ms-1"
+		mock_frappe.get_doc.return_value = local_user
+		mock_token.return_value = "token"
+		mock_fetch.return_value = {"id": "ms-2"}
+
+		result = m.admin_rename_user_email("old@x.vn", "new@x.vn")
+
+		self.assertIn("tài khoản Microsoft khác", result["message"])
+		mock_rename.assert_not_called()
+
+	@patch("frappe.model.rename_doc.rename_doc")
+	@patch("erp.api.erp_common_user.microsoft_auth._fetch_microsoft_user_payload")
+	@patch("erp.api.erp_common_user.microsoft_auth.get_microsoft_app_token")
+	@patch("erp.api.erp_common_user.microsoft_auth.success_response")
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	def test_renames_and_updates_mapping_when_same_ms_identity(
+		self,
+		mock_frappe,
+		mock_success,
+		mock_token,
+		mock_fetch,
+		mock_rename,
+	):
+		from erp.api.erp_common_user import microsoft_auth as m
+
+		self._as_it_admin(mock_frappe)
+		mock_success.side_effect = lambda data=None, message=None, **kwargs: {
+			"data": data,
+			"message": message,
+		}
+		mock_frappe.db.exists.side_effect = lambda _dt, name: name == "old@x.vn"
+		local_user = MagicMock()
+		local_user.microsoft_id = "ms-1"
+		renamed = MagicMock()
+		renamed.email = "old@x.vn"
+		mock_frappe.get_doc.side_effect = [local_user, renamed]
+		mock_frappe.db.get_value.return_value = "MSU-001"
+		mock_token.return_value = "token"
+		mock_fetch.return_value = {"id": "ms-1"}
+
+		result = m.admin_rename_user_email("old@x.vn", "new@x.vn")
+
+		mock_rename.assert_called_once_with(
+			doctype="User",
+			old="old@x.vn",
+			new="new@x.vn",
+			ignore_permissions=True,
+			show_alert=False,
+		)
+		self.assertEqual(renamed.email, "new@x.vn")
+		mock_frappe.db.set_value.assert_called_once_with(
+			"ERP Microsoft User", "MSU-001", "mapped_user_id", "new@x.vn"
+		)
+		self.assertEqual(result["data"]["email"], "new@x.vn")
+
+	@patch("frappe.model.rename_doc.rename_doc")
+	@patch("erp.api.erp_common_user.microsoft_auth.error_response")
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	def test_rejects_same_email(self, mock_frappe, mock_error, mock_rename):
+		from erp.api.erp_common_user import microsoft_auth as m
+
+		self._as_it_admin(mock_frappe)
+		self._mock_error(mock_error)
+
+		result = m.admin_rename_user_email("a@x.vn", "A@x.vn")
+
+		self.assertIn("trùng email hiện tại", result["message"])
+		mock_rename.assert_not_called()
 
 
 if __name__ == "__main__":
