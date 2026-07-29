@@ -120,6 +120,31 @@ class TestFetchMicrosoftUserPayload(unittest.TestCase):
 		self.assertEqual(payload["id"], "abc")
 		self.assertEqual(mock_get.call_count, 2)
 
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	@patch("erp.api.erp_common_user.microsoft_auth.requests.get")
+	def test_does_not_fallback_on_non_404_errors(self, mock_get, mock_frappe):
+		from erp.api.erp_common_user.microsoft_auth import _fetch_microsoft_user_payload
+
+		def _raise_on_throw(msg, *args, **kwargs):
+			raise Exception(str(msg))
+
+		mock_frappe.throw.side_effect = _raise_on_throw
+
+		for status_code in (401, 500):
+			with self.subTest(status_code=status_code):
+				mock_get.reset_mock()
+				mock_frappe.throw.reset_mock()
+				mock_get.return_value = MagicMock(
+					status_code=status_code,
+					text=f'{{"error":{{"code":"Err{status_code}"}}}}',
+				)
+
+				with self.assertRaises(Exception):
+					_fetch_microsoft_user_payload("user@wellspring.edu.vn", {"Authorization": "Bearer x"})
+
+				mock_get.assert_called_once()
+				mock_frappe.throw.assert_called_once()
+
 
 if __name__ == "__main__":
 	unittest.main()

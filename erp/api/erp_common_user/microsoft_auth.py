@@ -1430,6 +1430,17 @@ MS_USER_SELECT_FIELDS = (
 )
 
 
+def _is_graph_user_not_found(resp) -> bool:
+	"""Chỉ 404 hoặc Request_ResourceNotFound mới được fallback $filter."""
+	if resp.status_code == 404:
+		return True
+	try:
+		code = ((resp.json() or {}).get("error") or {}).get("code") or ""
+		return code == "Request_ResourceNotFound"
+	except Exception:
+		return False
+
+
 def _fetch_microsoft_user_payload(identifier: str, headers: dict) -> dict:
 	"""Lấy 1 user Graph theo objectId/UPN/email; fallback $filter khi /users/{id} 404."""
 	import urllib.parse
@@ -1442,6 +1453,9 @@ def _fetch_microsoft_user_payload(identifier: str, headers: dict) -> dict:
 	resp = requests.get(url, headers=headers)
 	if resp.status_code == 200:
 		return resp.json()
+
+	if not _is_graph_user_not_found(resp):
+		frappe.throw(_(f"Graph fetch failed: {resp.text}"))
 
 	# Fallback filter mail / UPN (case typo email local)
 	safe = ident.replace("'", "''")
