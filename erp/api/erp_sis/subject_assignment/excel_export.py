@@ -28,7 +28,7 @@ from .excel_template import (
 	COL_TEACHER_NAME,
 	build_workbook,
 )
-from .utils import get_user_code_field
+from .utils import get_teacher_directory, get_user_code_field
 
 
 def _get_param(name: str) -> Optional[str]:
@@ -115,8 +115,13 @@ def build_catalog(
 	campus_id: str,
 	school_year_id: str,
 	education_stage_id: str,
-) -> Dict[str, List[str]]:
-	"""Danh mục giá trị hợp lệ để người dùng copy thay vì gõ tay."""
+) -> List[Dict]:
+	"""
+	Danh mục giá trị hợp lệ để người dùng copy thay vì gõ tay.
+
+	Khối giáo viên có hai cột (Họ tên + Mã GV): mã là thứ hệ thống đọc, nhưng người điền
+	chỉ nhớ tên — không có cột tên thì không tra được mã của đúng người.
+	"""
 	classes = frappe.db.sql(
 		"""
 		SELECT COALESCE(NULLIF(c.short_title, ''), c.title) AS title
@@ -142,28 +147,28 @@ def build_catalog(
 		order_by="title_vn asc",
 	)
 
-	code_field = get_user_code_field()
-	teacher_codes: List[str] = []
-	if code_field:
-		rows = frappe.db.sql(
-			f"""
-			SELECT DISTINCT u.`{code_field}` AS code
-			FROM `tabSIS Teacher` t
-			INNER JOIN `tabUser` u ON u.name = t.user_id
-			WHERE t.campus_id = %(campus_id)s AND u.`{code_field}` IS NOT NULL
-				AND u.`{code_field}` != ''
-			ORDER BY code ASC
-			""",
-			{"campus_id": campus_id},
-			as_dict=True,
-		)
-		teacher_codes = [r["code"] for r in rows]
+	# Tái dùng danh bạ đã chuẩn hoá tên và sắp theo họ, thay vì query riêng ở đây —
+	# giữ tên trong Danh mục khớp đúng tên ở sheet Phân công.
+	teachers = [
+		[row.get("full_name") or "", row.get("teacher_code") or ""]
+		for row in get_teacher_directory(campus_id)
+		if row.get("teacher_code")
+	]
 
-	return {
-		"Lớp hợp lệ": [c["title"] for c in classes if c.get("title")],
-		"Môn học hợp lệ": [s["title_vn"] for s in subjects if s.get("title_vn")],
-		"Giáo viên hợp lệ (Mã GV)": teacher_codes,
-	}
+	return [
+		{
+			"headers": ["Lớp hợp lệ"],
+			"rows": [[c["title"]] for c in classes if c.get("title")],
+		},
+		{
+			"headers": ["Môn học hợp lệ"],
+			"rows": [[s["title_vn"]] for s in subjects if s.get("title_vn")],
+		},
+		{
+			"headers": ["Họ tên giáo viên", "Mã GV"],
+			"rows": teachers,
+		},
+	]
 
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])

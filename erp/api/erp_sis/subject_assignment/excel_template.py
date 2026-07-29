@@ -94,7 +94,7 @@ def normalize_lookup(value) -> str:
 def build_workbook(
 	rows: List[Dict],
 	meta: Dict,
-	catalog: Optional[Dict[str, List[str]]] = None,
+	catalog: Optional[List[Dict]] = None,
 ):
 	"""
 	Dựng workbook theo template.
@@ -102,7 +102,10 @@ def build_workbook(
 	Args:
 		rows: list dict theo đúng HEADERS (giá trị ngày là date hoặc None)
 		meta: {"campus": str, "school_year": str, "education_stage": str, "exported_at": str}
-		catalog: {"Lớp hợp lệ": [...], "Môn học hợp lệ": [...], "Giáo viên hợp lệ (Mã GV)": [...]}
+		catalog: danh sách khối cho sheet Danh mục, mỗi khối một hoặc nhiều cột:
+			[{"headers": ["Họ tên giáo viên", "Mã GV"], "rows": [["Lê Hoàng Anh", "WT136PR"], ...]}]
+			Khối nhiều cột dùng cho danh sách giáo viên — người điền cần thấy tên bên cạnh
+			mã thì mới tra được mã của đúng người.
 
 	Returns:
 		openpyxl.Workbook
@@ -215,19 +218,30 @@ def build_workbook(
 	cat = wb.create_sheet(SHEET_CATALOG)
 	col = 1
 	max_len = 0
-	for title, values in (catalog or {}).items():
-		header = cat.cell(row=1, column=col, value=title)
-		header.font = Font(name=FONT_NAME, size=10, bold=True, color="FFFFFF")
-		header.fill = hdr_fill
-		header.alignment = Alignment(horizontal="center", vertical="center")
-		header.border = border
-		for idx, value in enumerate(values, start=2):
-			cell = cat.cell(row=idx, column=col, value=value)
-			cell.font = Font(name=FONT_NAME, size=10)
-			cell.border = border
-		cat.column_dimensions[get_column_letter(col)].width = 36
-		max_len = max(max_len, len(values))
-		col += 2  # chừa một cột trống giữa các khối cho dễ đọc
+	for block in catalog or []:
+		headers = block.get("headers") or []
+		block_rows = block.get("rows") or []
+
+		for offset, title in enumerate(headers):
+			header = cat.cell(row=1, column=col + offset, value=title)
+			header.font = Font(name=FONT_NAME, size=10, bold=True, color="FFFFFF")
+			header.fill = hdr_fill
+			header.alignment = Alignment(horizontal="center", vertical="center")
+			header.border = border
+			# Cột mã hẹp hơn cột tên/tên môn cho cân
+			cat.column_dimensions[get_column_letter(col + offset)].width = (
+				36 if len(headers) == 1 or offset == 0 else 16
+			)
+
+		for row_idx, values in enumerate(block_rows, start=2):
+			for offset in range(len(headers)):
+				value = values[offset] if offset < len(values) else None
+				cell = cat.cell(row=row_idx, column=col + offset, value=value)
+				cell.font = Font(name=FONT_NAME, size=10)
+				cell.border = border
+
+		max_len = max(max_len, len(block_rows))
+		col += len(headers) + 1  # chừa một cột trống giữa các khối cho dễ đọc
 
 	note = cat.cell(
 		row=max_len + 3,
