@@ -39,10 +39,21 @@ class TestFilesRegex(unittest.TestCase):
         self.assertEqual(self._match('"/files/Lop 1A1.jpg"'), ["/files/Lop 1A1.jpg"])
 
     def test_van_ban_truoc_co_dau_cach_khong_bi_nuot(self):
-        # Rang buoc (a): origin khong chua dau cach — van ban dung truoc /files/
-        # khong bi keo vao match (tung lam vo anh tren production).
-        text = "anh hoc sinh /files/WS123.jpg"
-        self.assertEqual(self._match(text), ["/files/WS123.jpg"])
+        # Khoa \s trong lop ky tu cua nhom origin ((?:https?://[^"\\\s]*?)?).
+        # Neu thieu \s, regex bat dau tu http dung truoc va nuot ca khoang trang
+        # sang URL /files/ ke sau — match thanh mot chuoi dai sai.
+        # URL tuong doi thuan ("... /files/...") khong khoa duoc: match bat dau
+        # ngay tai /files/, van ban dung truoc khong bao gio vao nhom origin.
+        text = (
+            "https://evil.example/path with space "
+            "https://prod.sis.wellspring.edu.vn/files/WS123.jpg"
+        )
+        self.assertEqual(
+            self._match(text),
+            ["https://prod.sis.wellspring.edu.vn/files/WS123.jpg"],
+        )
+        text2 = "see https://a.example/foo bar/files/WS123.jpg"
+        self.assertEqual(self._match(text2), ["/files/WS123.jpg"])
 
     def test_bat_duoc_duong_dan_co_thu_muc_con(self):
         self.assertEqual(
