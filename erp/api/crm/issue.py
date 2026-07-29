@@ -104,6 +104,22 @@ CRM_ISSUE_LIST_EXTRA_ROLES = frozenset(
     }
 )
 
+# Bao cao tong hop (get_issue_report): so lieu la TOAN HE THONG nen khong mo cho
+# CRM_ISSUE_LIST_EXTRA_ROLES / Campus * (SIS Teacher, Marcom, IT, Library, User...).
+# Gom Care + BOD + doi Sales vi trang Bao cao tuyen sinh (tab Van de) mo cho ca
+# ADMISSION_ALLOWED_ROLES ben web. Metric tren trang Van de chung hep hon (Care + BOD):
+# frontend chan bang CRM_ISSUE_FULL_LIST_TAB_ROLES.
+CRM_ISSUE_REPORT_ROLES = frozenset(
+    {
+        "System Manager",
+        "SIS BOD",
+        "SIS Sales Care",
+        "SIS Sales Care Admin",
+        "SIS Sales",
+        "SIS Sales Admin",
+    }
+)
+
 # Viền log (sales): khong gom SIS BOD. SIS Sales = user thuong -> nhan label theo don vi neu thuoc Team.
 LOG_ACCENT_SALES_ROLES = frozenset(
     {
@@ -285,6 +301,14 @@ def _can_access_crm_issue_list() -> bool:
     if CRM_ISSUE_LIST_EXTRA_ROLES & roles:
         return True
     return False
+
+
+def _can_access_crm_issue_report() -> bool:
+    """Bao cao tong hop: chi Care + BOD. Hep hon _can_access_crm_issue_list vi so lieu la toan he thong."""
+    u = frappe.session.user
+    if not u or u == "Guest":
+        return False
+    return bool(CRM_ISSUE_REPORT_ROLES & set(frappe.get_roles(u)))
 
 
 def _compute_log_accent(logged_by: str, issue_doc) -> str:
@@ -566,6 +590,21 @@ def _issue_names_matching_department(dept_name):
         pluck="parent",
     )
     return list(set(n1 or []) | set(n2 or []))
+
+
+def _issue_names_mine(user):
+    """CRM Issue cua user: la PIC HOAC nguoi tao.
+
+    Tra ve set ten (khong phai filter dict) vi day la dieu kien OR — frappe.db.count
+    khong nhan or_filters nen phai quy ve name-in giong department/search.
+    `created_by_user` trong tren ban ghi cu -> fallback `owner` (nguoi tao chuan Frappe).
+    """
+    if not user or user == "Guest":
+        return set()
+    names = set()
+    for field in ("pic", "created_by_user", "owner"):
+        names.update(frappe.get_all("CRM Issue", filters={field: user}, pluck="name") or [])
+    return names
 
 
 def _issue_names_matching_people(search):
@@ -1440,6 +1479,8 @@ def get_issues():
     department = frappe.request.args.get("department")
     pic = (frappe.request.args.get("pic") or "").strip()
     only_my_departments = frappe.request.args.get("only_my_departments")
+    # Tab "Cua toi": PIC HOAC nguoi tao (pic= chi loc rieng PIC, giu lai cho callsite cu)
+    mine = frappe.request.args.get("mine")
     search = (frappe.request.args.get("search") or "").strip()
     page = int(frappe.request.args.get("page", 1))
     per_page = int(frappe.request.args.get("per_page", 20))
@@ -1484,6 +1525,14 @@ def get_issues():
             out["is_department_member"] = is_department_member
             return out
         name_constraint_sets.append(set(visible))
+    if mine and str(mine).lower() in ("1", "true", "yes"):
+        my_names = _issue_names_mine(user)
+        if not my_names:
+            out = paginated_response([], page, 0, per_page)
+            out["can_see_pending_queue_scope"] = list_pending_scope_hint
+            out["is_department_member"] = is_department_member
+            return out
+        name_constraint_sets.append(my_names)
     if search:
         # Tim tren TOAN BO du lieu (khong chi trang hien tai): ma/tieu de + hoc sinh
         # (ten/ma HS/lop) + phu huynh (ten/SDT) -> dua ve dieu kien name-in.

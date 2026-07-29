@@ -743,7 +743,7 @@ def get_family_details(family_id=None, family_code=None):
             message="Family details fetched successfully"
         )
     except Exception as e:
-        frappe.log_error(f"Error fetching family details: {str(e)}")
+        frappe.log_error("get_family_details failed", frappe.get_traceback(with_context=True))
         return error_response(
             message="Error fetching family details",
             code="FETCH_FAMILY_ERROR"
@@ -788,17 +788,74 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
             )
 
         family_doc = frappe.get_doc("CRM Family", family_id)
+
+        # ------------------------------------------------------------------
+        # VALIDATE XONG HẾT RỒI MỚI GHI.
+        # Handler này báo lỗi bằng response 200 (không raise) nên Frappe vẫn COMMIT
+        # transaction ở cuối request (sync_database, frappe/app.py) — validate SAU câu
+        # DELETE bên dưới sẽ để lại gia đình rỗng mà API vẫn báo thất bại.
+        # ------------------------------------------------------------------
+        normalized_relationships = []
+        for idx, rel in enumerate(relationships):
+            if not isinstance(rel, dict):
+                return validation_error_response(
+                    message=f"Dữ liệu quan hệ không hợp lệ ở dòng {idx + 1}",
+                    errors={"relationships": [f"Row {idx + 1} is not an object"]}
+                )
+
+            student_id = str(rel.get("student") or "").strip()
+            guardian_id = str(rel.get("guardian") or "").strip()
+            relationship_type = normalize_relationship(rel.get("relationship_type"))
+
+            # student / guardian / relationship_type đều `reqd: 1` trên child doctype
+            # CRM Family Relationship. `ignore_validate` KHÔNG tắt _validate_mandatory,
+            # nên thiếu là `save()` ném MandatoryError sau khi dữ liệu cũ đã bị xoá.
+            missing = [
+                field
+                for field, value in (
+                    ("student", student_id),
+                    ("guardian", guardian_id),
+                    ("relationship_type", relationship_type),
+                )
+                if not value
+            ]
+            if missing:
+                return validation_error_response(
+                    message=f"Thiếu thông tin quan hệ ở dòng {idx + 1}",
+                    errors={field: ["Required"] for field in missing}
+                )
+
+            normalized_relationships.append({
+                "student": student_id,
+                "guardian": guardian_id,
+                "relationship_type": relationship_type,
+                # Client gửi null thì int(None) ném TypeError — ép qua bool trước.
+                "key_person": int(bool(rel.get("key_person"))),
+                "access": int(True if rel.get("access") is None else bool(rel.get("access"))),
+            })
+
         # Validate key person: must have at least 1
-        key_person_count = sum(1 for rel in relationships if rel.get("key_person"))
+        key_person_count = sum(1 for rel in normalized_relationships if rel["key_person"])
         if key_person_count == 0:
             return validation_error_response(
                 message="Phải chọn ít nhất 1 người liên lạc chính",
                 errors={"key_person": ["Required"]}
             )
 
+        # HS không được thuộc gia đình khác — kiểm tra TRƯỚC khi xoá quan hệ cũ.
+        for student_id in students:
+            if not frappe.db.exists("CRM Student", student_id):
+                continue
+            existing_fam = _find_existing_family_for_student(student_id, exclude_family=family_id)
+            if existing_fam:
+                return validation_error_response(
+                    message=f"Student already belongs to family {existing_fam['family_code']}",
+                    errors={"student": [existing_fam['family_code']]}
+                )
+
         # Log key person count for debugging
         frappe.logger().info(f"Key person count for family: {key_person_count}")
-        frappe.logger().info(f"Total relationships: {len(relationships)}")
+        frappe.logger().info(f"Total relationships: {len(normalized_relationships)}")
 
         # Note: Allow multiple key persons for flexibility in family structures
         # Previously enforced "Only one key person allowed" but removed for business flexibility
@@ -818,88 +875,73 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
             if rel.student:
                 old_students.add(rel.student)
 
-        # CRITICAL: Delete ALL old relationships from database first
-        # This prevents deleted guardians from still receiving notifications
-        frappe.db.sql("""
-            DELETE FROM `tabCRM Family Relationship`
-            WHERE parent = %s
-        """, (family_id,))
-        
-        # Reset relationships in doc and add new ones
-        family_doc.set("relationships", [])
-        for rel in relationships:
-            family_doc.append("relationships", {
-                "student": rel.get("student"),
-                "guardian": rel.get("guardian"),
-                "relationship_type": normalize_relationship(rel.get("relationship_type")),
-                "key_person": int(rel.get("key_person", False)),
-                "access": int(rel.get("access", True)),
-            })
-        family_doc.flags.ignore_validate = True
-        family_doc.save(ignore_permissions=True)
+        # Toàn bộ phần ghi nằm trong savepoint: exception giữa chừng phải rollback, nếu
+        # không Frappe vẫn commit trạng thái nửa vời (đã xoá quan hệ cũ, chưa ghi quan hệ
+        # mới) vì handler trả lỗi bằng response 200 chứ không raise.
+        savepoint = "update_family_members"
+        frappe.db.savepoint(savepoint)
+        try:
+            # CRITICAL: Delete ALL old relationships from database first
+            # This prevents deleted guardians from still receiving notifications
+            frappe.db.sql("""
+                DELETE FROM `tabCRM Family Relationship`
+                WHERE parent = %s
+            """, (family_id,))
 
-        # Update students and guardians docs similar to create_family
-        family_code = getattr(family_doc, 'family_code', family_doc.name)
+            # Reset relationships in doc and add new ones
+            family_doc.set("relationships", [])
+            for rel in normalized_relationships:
+                family_doc.append("relationships", dict(rel))
+            family_doc.flags.ignore_validate = True
+            family_doc.save(ignore_permissions=True)
 
-        for student_id in students:
-            if frappe.db.exists("CRM Student", student_id):
-                existing_fam = _find_existing_family_for_student(student_id, exclude_family=family_id)
-                if existing_fam:
-                    return validation_error_response(
-                        message=f"Student already belongs to family {existing_fam['family_code']}",
-                        errors={"student": [existing_fam['family_code']]}
-                    )
-                student_doc = frappe.get_doc("CRM Student", student_id)
-                student_doc.family_code = family_code
-                student_doc.set("family_relationships", [])
-                for rel in relationships:
-                    if rel.get("student") == student_id:
-                        student_doc.append("family_relationships", {
-                            "student": student_id,
-                            "guardian": rel.get("guardian"),
-                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
-                            "key_person": int(rel.get("key_person", False)),
-                            "access": int(rel.get("access", False)),
-                        })
-                student_doc.flags.ignore_validate = True
-                student_doc.save(ignore_permissions=True)
+            # Update students and guardians docs similar to create_family
+            family_code = getattr(family_doc, 'family_code', family_doc.name)
 
-        for guardian_id in guardians:
-            if frappe.db.exists("CRM Guardian", guardian_id):
-                guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
-                guardian_doc.family_code = family_code
-                guardian_doc.set("student_relationships", [])
-                for rel in relationships:
-                    if rel.get("guardian") == guardian_id:
-                        guardian_doc.append("student_relationships", {
-                            "student": rel.get("student"),
-                            "guardian": guardian_id,
-                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
-                            "key_person": int(rel.get("key_person", False)),
-                            "access": int(rel.get("access", False)),
-                        })
-                guardian_doc.flags.ignore_validate = True
-                guardian_doc.save(ignore_permissions=True)
+            for student_id in students:
+                if frappe.db.exists("CRM Student", student_id):
+                    student_doc = frappe.get_doc("CRM Student", student_id)
+                    student_doc.family_code = family_code
+                    student_doc.set("family_relationships", [])
+                    for rel in normalized_relationships:
+                        if rel["student"] == student_id:
+                            student_doc.append("family_relationships", dict(rel))
+                    student_doc.flags.ignore_validate = True
+                    student_doc.save(ignore_permissions=True)
 
-        # CRITICAL FIX: Cleanup guardians đã bị remove khỏi family
-        # Clear family_code và student_relationships của họ
-        new_guardians = set(guardians)
-        removed_guardians = old_guardians - new_guardians
-        
-        if removed_guardians:
-            frappe.logger().info(f"🧹 Cleaning up {len(removed_guardians)} removed guardians from family {family_id}")
-            for removed_guardian_id in removed_guardians:
-                if frappe.db.exists("CRM Guardian", removed_guardian_id):
-                    try:
-                        removed_guardian_doc = frappe.get_doc("CRM Guardian", removed_guardian_id)
-                        # Clear family_code và student_relationships
-                        removed_guardian_doc.family_code = None
-                        removed_guardian_doc.set("student_relationships", [])
-                        removed_guardian_doc.flags.ignore_validate = True
-                        removed_guardian_doc.save(ignore_permissions=True)
-                        frappe.logger().info(f"✅ Cleaned up guardian {removed_guardian_id}")
-                    except Exception as cleanup_error:
-                        frappe.logger().error(f"❌ Error cleaning up guardian {removed_guardian_id}: {str(cleanup_error)}")
+            for guardian_id in guardians:
+                if frappe.db.exists("CRM Guardian", guardian_id):
+                    guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
+                    guardian_doc.family_code = family_code
+                    guardian_doc.set("student_relationships", [])
+                    for rel in normalized_relationships:
+                        if rel["guardian"] == guardian_id:
+                            guardian_doc.append("student_relationships", dict(rel))
+                    guardian_doc.flags.ignore_validate = True
+                    guardian_doc.save(ignore_permissions=True)
+
+            # CRITICAL FIX: Cleanup guardians đã bị remove khỏi family
+            # Clear family_code và student_relationships của họ
+            new_guardians = set(guardians)
+            removed_guardians = old_guardians - new_guardians
+
+            if removed_guardians:
+                frappe.logger().info(f"🧹 Cleaning up {len(removed_guardians)} removed guardians from family {family_id}")
+                for removed_guardian_id in removed_guardians:
+                    if frappe.db.exists("CRM Guardian", removed_guardian_id):
+                        try:
+                            removed_guardian_doc = frappe.get_doc("CRM Guardian", removed_guardian_id)
+                            # Clear family_code và student_relationships
+                            removed_guardian_doc.family_code = None
+                            removed_guardian_doc.set("student_relationships", [])
+                            removed_guardian_doc.flags.ignore_validate = True
+                            removed_guardian_doc.save(ignore_permissions=True)
+                            frappe.logger().info(f"✅ Cleaned up guardian {removed_guardian_id}")
+                        except Exception as cleanup_error:
+                            frappe.logger().error(f"❌ Error cleaning up guardian {removed_guardian_id}: {str(cleanup_error)}")
+        except Exception:
+            frappe.db.rollback(save_point=savepoint)
+            raise
 
         # Sync thành viên nhóm chat lớp. KHÔNG dựa được vào doc-event `on_family_change`:
         # child rows đã bị DELETE thẳng bằng SQL TRƯỚC `family_doc.save()` nên
@@ -910,7 +952,7 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                 enqueue_chat_membership_sync_for_students,
             )
 
-            new_students = {rel.get("student") for rel in relationships if rel.get("student")}
+            new_students = {rel["student"] for rel in normalized_relationships}
             enqueue_chat_membership_sync_for_students(old_students | new_students | set(students or []))
         except Exception as sync_error:
             # Sync là side-effect — không được chặn luồng lưu gia đình.
@@ -918,17 +960,34 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                 f"[Family] enqueue chat membership sync failed for {family_id}: {str(sync_error)}"
             )
 
-        frappe.db.commit()
+        # `frappe.db.commit()` chạy after_commit callbacks (realtime `notify_update`,
+        # `frappe.enqueue(enqueue_after_commit=True)` của hook chat) SAU khi SQL COMMIT
+        # đã xong. Lỗi ở đó nghĩa là dữ liệu ĐÃ lưu — không được báo "cập nhật thất bại".
+        try:
+            frappe.db.commit()
+        except Exception as commit_error:
+            frappe.logger().warning(
+                f"[Family] post-commit side effect failed for {family_id}: {str(commit_error)}"
+            )
+            frappe.log_error(
+                "update_family_members post-commit",
+                frappe.get_traceback(with_context=True),
+            )
 
         return success_response(
             data={"family_id": family_doc.name},
             message="Family members updated successfully"
         )
     except Exception as e:
-        frappe.log_error(f"Error updating family members: {str(e)}")
+        # Title phải ngắn và cố định: `Error Log.method` chỉ chứa 140 ký tự, nhét str(e)
+        # vào title có thể làm chính câu log_error ném CharacterLengthExceededError.
+        frappe.log_error("update_family_members failed", frappe.get_traceback(with_context=True))
         return error_response(
             message="Error updating family members",
-            code="UPDATE_FAMILY_ERROR"
+            code="UPDATE_FAMILY_ERROR",
+            debug_info={"exception": type(e).__name__, "detail": str(e)[:500]}
+            if frappe.conf.get("developer_mode")
+            else None
         )
 def _resolve_guardian_phone(guardian_id, scalar_phone, phone_map):
     """SĐT giám hộ: ưu tiên child table CRM Guardian Phone, fallback trường phẳng."""
@@ -1555,6 +1614,7 @@ def update_family(family_id=None, relationship=None, key_person=None, access=Non
         )
         
     except Exception as e:
+        frappe.log_error("update_family failed", frappe.get_traceback(with_context=True))
         return error_response(
             message="Error updating family",
             code="UPDATE_FAMILY_ERROR"
@@ -1611,7 +1671,7 @@ def delete_family():
         )
         
     except Exception as e:
-        frappe.log_error(f"Error deleting family: {str(e)}")
+        frappe.log_error("delete_family failed", frappe.get_traceback(with_context=True))
         return error_response(
             message="Error deleting family",
             code="DELETE_FAMILY_ERROR"

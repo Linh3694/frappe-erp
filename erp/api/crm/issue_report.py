@@ -28,7 +28,7 @@ from erp.utils.api_response import (
     error_response,
     validation_error_response,
 )
-from erp.api.crm.issue import _can_access_crm_issue_list
+from erp.api.crm.issue import _can_access_crm_issue_report
 
 # Trang thai "dang xu ly" (chua dong) vs "da xu ly" (dong)
 OPEN_STATUSES = ("Cho duyet", "Tiep nhan", "Dang xu ly")
@@ -90,7 +90,7 @@ def get_issue_report():
     """
     logs = []
     try:
-        if not _can_access_crm_issue_list():
+        if not _can_access_crm_issue_report():
             return error_response("Ban khong co quyen truy cap bao cao van de", logs=logs)
 
         granularity = (frappe.request.args.get("granularity") or "month").strip().lower()
