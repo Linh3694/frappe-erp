@@ -813,30 +813,19 @@ def upload_avatar():
         if file_size > max_size:
             frappe.throw(_("File size too large. Maximum allowed: 5MB"))
         
-        # Create filename
-        import uuid
-        import os
-        file_id = str(uuid.uuid4())
-        filename = f"{file_id}.{file_extension or 'jpg'}"
-        
-        # Create Avatar directory if it doesn't exist
-        upload_dir = frappe.get_site_path("public", "files", "Avatar")
-        if not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-        
-        # Save file
-        file_path = os.path.join(upload_dir, filename)
+        # Ghi qua avatar_store — nơi duy nhất xử lý ảnh, lưu đĩa, đẩy CDN và
+        # cập nhật User. Trước đây khối này ghi thẳng byte gốc (không resize,
+        # không strip EXIF) và dùng frappe.db.set_value nên không kích hoạt
+        # doc_events ⇒ microservices không biết avatar đã đổi.
+        from erp.common import avatar_store
+
         avatar_file.stream.seek(0)
-        with open(file_path, 'wb') as f:
-            f.write(avatar_file.stream.read())
-        
-        # Create file URL
-        avatar_url = f"/files/Avatar/{filename}"
-        
-        # Update User.user_image
-        frappe.db.set_value("User", frappe.session.user, "user_image", avatar_url)
-        frappe.db.commit()
-        
+        avatar_url = avatar_store.save_avatar(
+            avatar_file.stream.read(),
+            frappe.session.user,
+            ext=file_extension or 'jpg',
+        )
+
         return {
             "status": "success",
             "message": _("Avatar uploaded successfully"),
