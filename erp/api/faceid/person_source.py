@@ -81,7 +81,9 @@ def _student_photo_map(student_ids: list[str], school_year: str | None) -> dict[
           AND type = 'student'
           AND status = 'Active'
           AND photo IS NOT NULL AND photo != ''
-        ORDER BY {year_order} upload_date DESC, creation DESC
+        ORDER BY {year_order}
+                 (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
+                 upload_date DESC, creation DESC
         """,
         tuple(params),
         as_dict=True,

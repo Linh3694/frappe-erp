@@ -186,6 +186,7 @@ def get_all_students(include_all_campuses=0, only_eligible_for_class=0):
                             AND status = 'Active'
                         ORDER BY 
                             CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+                            (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                             upload_date DESC,
                             creation DESC
                     """, {"student_ids": student_ids_for_photos, "current_year": current_school_year}, as_dict=True)
@@ -402,6 +403,7 @@ def get_student_data():
                     AND status = 'Active'
                 ORDER BY 
                     CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                    (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                     upload_date DESC,
                     creation DESC
                 LIMIT 1
@@ -665,6 +667,7 @@ def batch_get_students():
                         AND status = 'Active'
                     ORDER BY 
                         CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+                        (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                         upload_date DESC,
                         creation DESC
                 """, {"student_ids": student_ids_for_photos, "current_year": current_school_year}, as_dict=True)
@@ -1263,6 +1266,7 @@ def search_students(search_term=None):
                     SELECT student_id, photo FROM `tabSIS Photo`
                     WHERE student_id IN %(ids)s AND type = 'student' AND status = 'Active'
                     ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                             (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                              upload_date DESC, creation DESC
                     """,
                     {"ids": tuple(student_ids), "sy": current_sy or ""},
@@ -1396,6 +1400,7 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
                         FROM `tabSIS Photo`
                         WHERE student_id IN %(ids)s AND type = 'student' AND status = 'Active'
                         ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                                 (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                                  upload_date DESC, creation DESC
                     """, {"ids": student_ids, "sy": school_year_id}, as_dict=True)
                     photo_map = {}

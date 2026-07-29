@@ -836,7 +836,8 @@ def get_students_for_bus_selection(search_term=None, school_year_id=None):
 					WHERE student_id IN %(student_ids)s
 						AND type = 'student'
 						AND status = 'Active'
-					ORDER BY upload_date DESC
+					ORDER BY (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
+					         upload_date DESC
 				""", {"student_ids": student_ids}, as_dict=True)
 
 				# Create photo mapping
@@ -905,6 +906,7 @@ def get_student_photo_url(student_code: str, campus_id: str, school_year_id: str
 			AND status = 'Active'
 			ORDER BY 
 				CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+				(SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
 				upload_date DESC, 
 				creation DESC
 			LIMIT 1

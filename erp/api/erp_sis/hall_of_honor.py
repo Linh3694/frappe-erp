@@ -229,7 +229,8 @@ def get_award_records(
                 WHERE sp.student_id IN %(student_ids)s
                 AND sp.school_year_id IN %(school_year_ids)s
                 AND sp.type = 'student'
-                ORDER BY sp.upload_date DESC
+                ORDER BY (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = sp.school_year_id) DESC,
+                         sp.upload_date DESC
             """, {'student_ids': student_ids, 'school_year_ids': school_year_ids}, as_dict=True)
             
             # Recover từ File attachment nếu photo field là None
@@ -272,7 +273,8 @@ def get_award_records(
                 FROM `tabSIS Photo` sp
                 WHERE sp.class_id IN %(class_ids)s
                 AND sp.type = 'class'
-                ORDER BY sp.upload_date DESC
+                ORDER BY (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = sp.school_year_id) DESC,
+                         sp.upload_date DESC
             """, {'class_ids': class_ids}, as_dict=True)
             
             # Nếu photo field là None, thử recover từ File attachment
@@ -560,6 +562,7 @@ def get_award_record_detail(name: str):
                     CASE WHEN school_year_id = %s THEN 0
                          WHEN school_year_id = %s THEN 1
                          ELSE 2 END,
+                    (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                     upload_date DESC,
                     creation DESC
                 LIMIT 1
@@ -616,6 +619,7 @@ def get_award_record_detail(name: str):
                     CASE WHEN school_year_id = %s THEN 0
                          WHEN school_year_id = %s THEN 1
                          ELSE 2 END,
+                    (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                     upload_date DESC,
                     creation DESC
                 LIMIT 1

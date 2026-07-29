@@ -31,6 +31,7 @@ def get_student_photo_bytes(crm_student: str) -> bytes | None:
         WHERE student_id = %(sid)s AND type = 'student' AND status = 'Active'
         ORDER BY
             CASE WHEN school_year_id = %(year)s THEN 0 ELSE 1 END,
+            (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
             upload_date DESC, creation DESC
         LIMIT 1
         """,
@@ -71,6 +72,7 @@ def get_student_photo_url(crm_student: str) -> str | None:
         WHERE student_id = %(sid)s AND type = 'student' AND status = 'Active'
         ORDER BY
             CASE WHEN school_year_id = %(year)s THEN 0 ELSE 1 END,
+            (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
             upload_date DESC, creation DESC
         LIMIT 1
         """,
