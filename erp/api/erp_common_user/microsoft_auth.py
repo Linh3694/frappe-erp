@@ -1422,6 +1422,91 @@ def sync_one_microsoft_user(identifier: str):
         frappe.log_error("Microsoft Manual Sync", f"sync_one_microsoft_user error: {str(e)}")
         frappe.throw(_(f"Error: {str(e)}"))
 
+
+MS_USER_SELECT_FIELDS = (
+	"id,displayName,givenName,surname,userPrincipalName,mail,"
+	"jobTitle,department,officeLocation,businessPhones,mobilePhone,"
+	"employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+)
+
+
+def _fetch_microsoft_user_payload(identifier: str, headers: dict) -> dict:
+	"""Lấy 1 user Graph theo objectId/UPN/email; fallback $filter khi /users/{id} 404."""
+	import urllib.parse
+
+	ident = (identifier or "").strip()
+	if not ident:
+		frappe.throw(_("Missing identifier"))
+
+	url = f"https://graph.microsoft.com/v1.0/users/{urllib.parse.quote(ident)}?$select={MS_USER_SELECT_FIELDS}"
+	resp = requests.get(url, headers=headers)
+	if resp.status_code == 200:
+		return resp.json()
+
+	# Fallback filter mail / UPN (case typo email local)
+	safe = ident.replace("'", "''")
+	filt = urllib.parse.quote(f"mail eq '{safe}' or userPrincipalName eq '{safe}'")
+	filter_url = (
+		f"https://graph.microsoft.com/v1.0/users?$select={MS_USER_SELECT_FIELDS}&$filter={filt}"
+	)
+	resp2 = requests.get(filter_url, headers=headers)
+	if resp2.status_code == 200:
+		values = (resp2.json() or {}).get("value") or []
+		if values:
+			return values[0]
+
+	frappe.throw(_("Không tìm thấy trên Microsoft: {0}").format(ident))
+
+
+@frappe.whitelist(methods=["POST"])
+def admin_sync_one_microsoft_user(identifier: str | None = None):
+	"""IT sync 1 user từ Graph (role-gated)."""
+	try:
+		_require_it_admin()
+		identifier = identifier or frappe.form_dict.get("identifier")
+		if not identifier:
+			return error_response("Thiếu identifier (email/UPN/objectId)")
+
+		token = get_microsoft_app_token()
+		headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+		user_data = _fetch_microsoft_user_payload(identifier, headers)
+
+		ms_id = user_data.get("id")
+		existed_local = bool(
+			ms_id and frappe.db.get_value("User", {"microsoft_id": ms_id})
+		) or bool(
+			frappe.db.exists(
+				"User",
+				user_data.get("mail") or user_data.get("userPrincipalName") or "",
+			)
+		)
+
+		ms_user = create_or_update_microsoft_user(user_data)
+		local_user = find_or_create_frappe_user(ms_user, user_data)
+		if not local_user:
+			return error_response("Lưu ERP Microsoft User được nhưng không tạo/map được User local")
+
+		update_frappe_user(local_user, ms_user, user_data)
+		action = "updated" if existed_local else "created"
+		return success_response(
+			data={
+				"action": action,
+				"email": local_user.name,
+				"microsoft_email": user_data.get("mail") or user_data.get("userPrincipalName"),
+				"microsoft_id": ms_id,
+				"department": user_data.get("department"),
+				"job_title": user_data.get("jobTitle"),
+				"employee_code": user_data.get("employeeId"),
+			},
+			message="Đồng bộ Microsoft thành công",
+		)
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Sync One", str(e))
+		return error_response(str(e))
+
+
 @frappe.whitelist()
 def create_users_subscription():
     """Tạo subscription cho resource `users` để nhận realtime notifications.

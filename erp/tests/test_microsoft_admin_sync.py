@@ -100,5 +100,26 @@ class TestFindOrCreateMicrosoftId(unittest.TestCase):
 		mock_frappe.get_doc.assert_called_with("User", "robert.tuner@wellspring.edu.vn")
 
 
+class TestFetchMicrosoftUserPayload(unittest.TestCase):
+	@patch("erp.api.erp_common_user.microsoft_auth.requests.get")
+	def test_falls_back_to_filter_on_404(self, mock_get):
+		from erp.api.erp_common_user.microsoft_auth import _fetch_microsoft_user_payload
+
+		not_found = MagicMock(status_code=404, text='{"error":{"code":"Request_ResourceNotFound"}}')
+		ok = MagicMock(status_code=200)
+		ok.json.return_value = {
+			"value": [{
+				"id": "abc",
+				"mail": "robert.turner@wellspring.edu.vn",
+				"userPrincipalName": "robert.turner@wellspring.edu.vn",
+			}]
+		}
+		mock_get.side_effect = [not_found, ok]
+
+		payload = _fetch_microsoft_user_payload("robert.tuner@wellspring.edu.vn", {"Authorization": "Bearer x"})
+		self.assertEqual(payload["id"], "abc")
+		self.assertEqual(mock_get.call_count, 2)
+
+
 if __name__ == "__main__":
 	unittest.main()
