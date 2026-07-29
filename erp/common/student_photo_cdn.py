@@ -43,9 +43,18 @@ CACHE_KEY = "erp:student_photo:migrated_names"
 CACHE_TTL = 300
 PREFIX = "student-photos"
 
-# Bat `/files/<ten>` trong chuoi JSON da escape. Ten file khong chua dau ngoac
-# kep nen dung duoc regex don gian.
-_FILES_RE = re.compile(r'/files/([^"\\]+)')
+# Bat ca hai dang URL anh xuat hien trong response:
+#
+#     /files/WS123.jpg                                        (tuong doi)
+#     https://prod.sis.wellspring.edu.vn/files/WS123.jpg      (day du)
+#
+# Dang day du sinh ra tu `frappe.utils.get_url()` — vd `batch_get_students`,
+# `global_search`. Neu regex chi bat phan `/files/...` thi origin bi bo lai va
+# ket qua thanh `https://prod.sis...https://media...` — URL vo, anh khong hien.
+# Da dinh dung loi nay tren production 2026-07-29.
+#
+# Nhom 1 nuot ca origin (neu co) de bi thay het; nhom 2 la ten file.
+_FILES_RE = re.compile(r'((?:https?://[^"\\\s]*?)?/files/)([^"\\\s]+)')
 
 
 def _migrated_names():
@@ -123,10 +132,11 @@ def object_exists(name):
 def _sign_in_text(text, names):
     """Thay moi `/files/<ten da migrate>` bang URL da ky."""
     def repl(m):
-        raw = m.group(1)
+        raw = m.group(2)
         name = os.path.basename(urllib.parse.unquote(raw))
         if name not in names:
             return m.group(0)
+        # Thay TOAN BO match (ke ca origin o nhom 1), khong chi phan ten file
         signed = cdn_sign.sign_path(f"/{PREFIX}/{name}")
         # Dang trong chuoi JSON nen phai escape lai dau `/` khong can, nhung `&`
         # va ky tu unicode thi json.dumps da xu ly o buoc goi — o day ta thay
