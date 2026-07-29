@@ -1,7 +1,9 @@
 """Kiem tra thu thap URL va nen anh — phan khong can DB."""
 
 import io
+import types
 import unittest
+from unittest import mock
 
 from erp.common import sis_content_store
 
@@ -158,6 +160,66 @@ class TestShrink(unittest.TestCase):
 
     def test_du_lieu_hong_tra_none_chu_khong_throw(self):
         self.assertIsNone(sis_content_store.shrink(b"khong phai anh", 1024))
+
+
+class TestOnDocUpdateClearCache(unittest.TestCase):
+    """Viec 2: chi xoa cache allowlist khi co it nhat mot lan day thanh cong."""
+
+    def _doc(self, cover="/files/Library/BookCover/a.jpg"):
+        return types.SimpleNamespace(
+            doctype="SIS Library Title",
+            name="TITLE-1",
+            get=lambda field, _c=cover: _c if field == "cover_image" else None,
+        )
+
+    def test_khong_xoa_cache_khi_day_that_bai(self):
+        cleared = []
+        with mock.patch.object(sis_content_store, "push_url", return_value=False), mock.patch(
+            "erp.common.sis_content_store.clear_cache", side_effect=lambda: cleared.append(1)
+        ):
+            sis_content_store.on_doc_update(self._doc())
+        self.assertEqual(cleared, [])
+
+    def test_xoa_cache_khi_day_thanh_cong(self):
+        cleared = []
+        with mock.patch.object(sis_content_store, "push_url", return_value=True), mock.patch(
+            "erp.common.sis_content_store.clear_cache", side_effect=lambda: cleared.append(1)
+        ):
+            sis_content_store.on_doc_update(self._doc())
+        self.assertEqual(cleared, [1])
+
+
+class TestOnDocTrashSharedUrls(unittest.TestCase):
+    """Viec 4: khong go anh van con tai lieu khac tham chieu."""
+
+    def _doc(self, name, cover):
+        return types.SimpleNamespace(
+            doctype="SIS Library Title",
+            name=name,
+            get=lambda field, _c=cover: _c if field == "cover_image" else None,
+        )
+
+    def test_giu_object_khi_con_tham_chieu(self):
+        shared = "/files/Library/BookCover/shared.jpg"
+        removed = []
+        with mock.patch.object(
+            sis_content_store, "collect_urls", return_value={shared}
+        ), mock.patch.object(
+            sis_content_store, "remove_url", side_effect=lambda u: removed.append(u)
+        ), mock.patch("erp.common.sis_content_store.clear_cache"):
+            sis_content_store.on_doc_trash(self._doc("TITLE-1", shared))
+        self.assertEqual(removed, [])
+
+    def test_go_object_khi_khong_con_tham_chieu(self):
+        only = "/files/Library/BookCover/only.jpg"
+        removed = []
+        with mock.patch.object(
+            sis_content_store, "collect_urls", return_value=set()
+        ), mock.patch.object(
+            sis_content_store, "remove_url", side_effect=lambda u: removed.append(u)
+        ), mock.patch("erp.common.sis_content_store.clear_cache"):
+            sis_content_store.on_doc_trash(self._doc("TITLE-1", only))
+        self.assertEqual(removed, [only])
 
 
 if __name__ == "__main__":

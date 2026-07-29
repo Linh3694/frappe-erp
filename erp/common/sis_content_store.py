@@ -66,26 +66,41 @@ def extract_html_urls(html):
     return urls
 
 
-def collect_urls(groups=None):
+def collect_urls(groups=None, exclude_name=None):
     """NGUON SU THAT DUY NHAT: field tren doctype + anh nhung trong HTML.
 
     Dung chung cho migrate, diff, va allowlist ky. KHONG doc `tabFile` — `tabFile`
     lech rat xa so voi field (xem docstring dau file).
+
+    `exclude_name`: bo qua mot ban ghi (vd doc dang trash — handler chay TRUOC
+    khi ban ghi bien mat nen van con trong ket qua neu khong loai).
     """
     groups = groups if groups is not None else list(GROUPS)
     urls = set()
     for group in groups:
         doctype, fields, html_fields = GROUPS[group]
+        excl = " AND `name` != %(exclude_name)s" if exclude_name else ""
+        params = {"exclude_name": exclude_name} if exclude_name else ()
         for field in fields:
-            rows = frappe.db.sql(
+            query = (
                 f"SELECT DISTINCT `{field}` FROM `tab{doctype}` "
-                f"WHERE `{field}` LIKE '/files/%%' AND `{field}` <> ''"
+                f"WHERE `{field}` LIKE '/files/%%' AND `{field}` <> ''{excl}"
+            )
+            rows = (
+                frappe.db.sql(query, params)
+                if exclude_name
+                else frappe.db.sql(query)
             )
             urls.update(r[0].strip() for r in rows if r and r[0])
         for field in html_fields:
-            rows = frappe.db.sql(
+            query = (
                 f"SELECT `{field}` FROM `tab{doctype}` "
-                f"WHERE `{field}` LIKE '%%/files/%%'"
+                f"WHERE `{field}` LIKE '%%/files/%%'{excl}"
+            )
+            rows = (
+                frappe.db.sql(query, params)
+                if exclude_name
+                else frappe.db.sql(query)
             )
             for r in rows:
                 if r and r[0]:
@@ -220,7 +235,11 @@ def _urls_of_doc(doc, group):
 
 
 def on_doc_update(doc, method=None):
-    """Day anh cua doc len CDN ngay, roi xoa cache allowlist.
+    """Day anh cua doc len CDN ngay, roi xoa cache allowlist neu day thanh cong.
+
+    Chi clear cache khi co it nhat mot lan day thanh cong. Neu day that bai ma
+    van clear, allowlist dung lai tu DB (co url moi) va ky URL tro toi object
+    khong ton tai — nguoc chieu khoang ho an toan (URL /files/ con hien tu dia).
 
     Nuot loi co chu y: day CDN hong khong duoc lam gay viec luu bai viet hay mon an.
     """
@@ -228,20 +247,33 @@ def on_doc_update(doc, method=None):
         group = _group_of(doc.doctype)
         if not group:
             return
+        any_pushed = False
         for url in _urls_of_doc(doc, group):
-            push_url(url, group)
-        clear_cache()
+            if push_url(url, group):
+                any_pushed = True
+        if any_pushed:
+            clear_cache()
     except Exception as e:  # noqa: BLE001
         frappe.log_error(f"Hook day CDN loi ({doc.doctype}): {e}", "SIS Content Store")
 
 
 def on_doc_trash(doc, method=None):
+    """Go anh khoi CDN chi khi khong con tai lieu nao khac tham chieu.
+
+    Hai bai viet cung nhung mot anh: xoa mot bai khong duoc lam vo anh o bai con.
+    Handler chay TRUOC khi ban ghi bien mat — phai exclude doc dang trash.
+    """
     try:
         group = _group_of(doc.doctype)
         if not group:
             return
-        for url in _urls_of_doc(doc, group):
-            remove_url(url)
+        doc_urls = _urls_of_doc(doc, group)
+        if not doc_urls:
+            return
+        still_used = collect_urls([group], exclude_name=doc.name)
+        for url in doc_urls:
+            if url not in still_used:
+                remove_url(url)
         clear_cache()
     except Exception as e:  # noqa: BLE001
         frappe.log_error(f"Hook xoa CDN loi ({doc.doctype}): {e}", "SIS Content Store")
