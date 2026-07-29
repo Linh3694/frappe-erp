@@ -17,9 +17,9 @@
 | Avatar (Frappe → CDN) | ✅ Chạy production |
 | **Hồ sơ học bổng (Frappe → CDN, signed URL)** | ✅ **Chạy production — lỗ hổng §7 đã vá** |
 | Ký URL phía Python trong Frappe | ✅ Chạy production (`erp/common/cdn_sign.py`) |
-| Video remux `+faststart` + poster | ❌ Chưa làm |
+| Video remux `+faststart` + poster | ✅ Chạy production (2026-07-29) |
 | **Ảnh chân dung học sinh** | ✅ **Chạy production — lỗ hổng §7b đã vá** |
-| Thư viện, thực đơn, tin tức | ❌ Chưa làm |
+| Thư viện, thực đơn, tin tức | 🟡 Đã nén tại chỗ (−52%); chưa đưa lên CDN |
 | Phase 3 (upload thẳng lên CDN) | ❌ Chưa làm |
 | Phase 4 (dọn dẹp) | ❌ Chưa làm — user quyết **giữ fallback tới ~giữa 2027** |
 
@@ -230,6 +230,9 @@ Tất cả đều đo trên production, không phải suy đoán.
 | Học bổng — vòng đời file mới | 4/4: hở trước khi niêm→200, sau khi niêm người lạ→**404**, người hợp lệ→**200** |
 | Học bổng — trước/sau khi vá | 3 URL công khai: **200 → 404** (đo từ máy ngoài, không cookie) |
 | Học bổng — timer idempotent | Chạy lại: 0 đẩy, 0 chuyển, 0 mất hạn, không sinh thư mục rỗng |
+| **Video remux** — `scripts/test-video-cdn.js` trên prod | **7/7**: `moov` từ byte 48.289 → **36** (trước `mdat`), poster `_poster.webp` 4,5 KB có trên MinIO, `-map 0` giữ đủ luồng hình+tiếng, URL đã ký → `200` |
+| **Nén thư viện/thực đơn/tin tức** | 1.471 file, **1.023 MB → 487 MB (−52%)**, 0 file mất |
+| Nén — ảnh còn hiển thị được (đo từ máy ngoài) | 10/10 `200` và giải mã được, cạnh dài đúng 1024px, gồm tên có dấu cách và tiếng Việt |
 
 ---
 
@@ -467,8 +470,10 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 2. **⚠️ GẤP — Vá lỗ hổng ảnh học sinh (§7b).** Đã rà xong 2026-07-29: 3.326 ảnh chân dung có URL suy ra được từ mã học sinh, liệt kê hàng loạt được. Thư viện/thực đơn/tin tức rà cùng lượt: tên file không chứa thông tin cá nhân, độ nhạy cảm thấp, có thể xếp sau.
 
 ### Đã lên kế hoạch, chưa làm
-3. **Video remux `+faststart` + poster** — cần cài `ffmpeg` trên VM microservices (đã xác nhận **chưa có**).
-4. **Migrate theo chức năng** — còn lại: ảnh học sinh → thư viện/thực đơn/tin tức → nhóm chưa phân loại (phải phân loại trước, không migrate mù). Học bổng đã xong, dùng làm khuôn mẫu: `cdn_sign` + `*_store` + timer niêm.
+3. ~~**Video remux `+faststart` + poster**~~ — ✅ xong 2026-07-29 (`69f4623`). ffmpeg 6.1.1 trên VM microservices. Poster lưu dưới dạng variant `_poster.webp` **cùng hash với video**, nên client suy ra đường dẫn từ URL video, không cần thêm field DB. Không nhánh nào `throw`: remux lỗi ⇒ dùng bản gốc, poster lỗi ⇒ feed hơi trống chứ video vẫn phát. Kiểm chứng lại bất cứ lúc nào bằng `scripts/test-video-cdn.js` trong repo social-service — script tự dọn object thử. **Chưa làm Phase 2** (transcode 720p): chỉ đáng làm nếu video chat vượt ~0,5 GB/ngày.
+4. **Migrate theo chức năng** — còn lại: thư viện/thực đơn/tin tức → nhóm chưa phân loại (phải phân loại trước, không migrate mù). Học bổng và ảnh học sinh đã xong, dùng làm khuôn mẫu: `cdn_sign` + `*_store` + timer niêm.
+
+   Thư viện/thực đơn/tin tức **đã nén tại chỗ xong 2026-07-29**: 1.471 file, **1.023 MB → 487 MB (−52%)**, giữ nguyên tên và định dạng nên `tabFile.file_url` không đổi và không URL nào chết. Bản gốc ở `/srv/backup/sis-content-orig-20260729-155235/` (1,1 GB), rollback bằng `compress-sis-content.py --rollback <thư mục>`. Đưa ba nhóm này lên CDN là **bước riêng, tuỳ chọn** — nén chỉ giảm dung lượng, migrate mới giảm tải máy chủ SIS. Ba nhóm không nhạy cảm nên không cần niêm, không cần signed URL.
 5. **Hook `after_request` toàn cục cho `user_image`** — chỉ cần nếu muốn cắt storage ở Frappe. `user_image` xuất hiện **227 lần** nên không ký từng chỗ được. Học bổng không cần vì chỉ có 5 điểm ký.
 6. **Phase 3** — upload thẳng lên CDN qua presigned PUT. Cần sửa client web + mobile. Làm xong sẽ khử luôn khoảng hở 5 phút của học bổng.
 7. ~~Nén ảnh legacy của chat~~ — ✅ xong 2026-07-29. Nén **54 file, 68,8 MB → 17,0 MB (−75%)**. Ghi đè tại chính khoá cũ, **không** sinh khoá mới và **không** đụng DB — nếu đổi DB sang khoá mới thì tắt `CDN_ENABLED` sẽ không quay về được đường đĩa, mất luôn đảm bảo rollback của §11. Bản gốc vẫn nguyên trong `uploads/` nên sai thì `mc mirror` lại là xong. Giữ nguyên định dạng (không đổi sang WebP) để khoá `.jpg` không chứa byte WebP. Còn **4 file HEIC** chưa nén được — PIL cần `pillow-heif`; hai trong số đó mang đuôi `.jpg` nhưng nội dung là HEIC, nên script nhận diện bằng **magic byte** chứ không theo đuôi file.
@@ -479,7 +484,11 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 9. ~~`apps/erp` chưa commit~~ — ✅ đã commit và push 2026-07-29 (`e8deb030` avatar, `57878df2` học bổng). Prod vẫn ở dạng file rời chưa pull; khi pull hãy theo §11, đã đối chiếu md5 và 9/9 file khớp.
 10. ~~`ecosystem.config.js` PORT 5010 → 5040~~ — ✅ xong 2026-07-29. Đã đồng bộ **ba nguồn**: `ecosystem.config.js` (cả `env` lẫn `env_production`), `config.env` trên prod, và PM2 đang chạy. Quả mìn đã gỡ.
 11. ~~`.gitignore` thiếu `logs/`~~ — ✅ xong 2026-07-29.
-12. `supervisor` trên VM Frappe báo FATAL 2 mục redis (`frappe-bench-redis-cache`, `-queue`) — có sẵn từ trước, redis thật chạy riêng ở port 11000/13000. Vô hại nhưng nên dọn.
+12. ~~`supervisor` trên VM Frappe báo FATAL 2 mục redis~~ — ✅ xong 2026-07-29. **Ghi chú cũ sai nguyên nhân.** Redis thật **không** ở port 11000/13000 mà là redis ngoài `172.16.20.120:6379` (`redis_cache`/`redis_queue`/`redis_socketio` trong `common_site_config.json`, 105 client, dữ liệu ở db1/db2/db10/db11). Hai redis ở 11000/13000 **rỗng hoàn toàn** — `dbsize 0`, client duy nhất là chính `redis-cli`.
+
+    Nguyên nhân FATAL: hai tiến trình `redis-server` **mồ côi** (PPID=1, chạy từ 30/06) giữ sẵn hai port, nên bản do supervisor quản lý không bind được — log ghi rõ `Could not create server TCP listening socket … Address already in use`. Đã `kill` hai tiến trình mồ côi rồi `supervisorctl start frappe-bench-redis:`; cả hai chuyển sang `RUNNING`. Ping trước và sau đều `200`.
+
+    Không bỏ hai mục này khỏi supervisor dù chúng vô dụng: `bench setup supervisor` sẽ sinh lại, nên lệch config chỉ đẩy việc sang lần sau.
 13. `CDN_LINK_SECRET` từng hiện ra trong output terminal khi đọc nginx snippet lúc làm việc này. Không rời khỏi máy Linh, nhưng nếu muốn chặt chẽ thì xoay secret theo §9.
 
 ---
@@ -643,6 +652,9 @@ ssh cdn 'curl -sf 127.0.0.1:9000/minio/health/live && echo MINIO-OK; systemctl i
 ssh cdn 'ssh micro "curl -s 127.0.0.1:5040/health"'
 ssh cdn 'ssh frappe "curl -s -o /dev/null -w \"%{http_code}\n\" https://prod.sis.wellspring.edu.vn/api/method/ping"'
 
+# Độ trễ Frappe — PHẢI đo từ máy ngoài, xem cảnh báo bên dưới
+curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' https://prod.sis.wellspring.edu.vn/api/method/ping
+
 # Thống kê traffic CDN
 ssh cdn 'SINCE=$(date -d "-30 min" +%Y-%m-%dT%H:%M:%S); gawk -F"\t" -v s="$SINCE" "\$1>=s && \$5 ~ /^\/social-/ {tot++; st[\$2]++; c[\$3]++} END {print \"tong:\", tot+0; for(k in st) print \"  HTTP \"k\": \"st[k]; for(k in c) print \"  cache \"k\": \"c[k]}" /var/log/nginx/cdn.access.log'
 
@@ -666,4 +678,9 @@ ssh cdn 'ssh frappe "cd /srv/app/frappe-bench/sites && sudo -u frappe env SITE=p
 # Học bổng — lỗ hổng phải đóng: mong đợi 404
 curl -s -o /dev/null -w '%{http_code}\n' \
   "https://prod.sis.wellspring.edu.vn/files/1_YLE%20Flyers_Ngo%20Chuc%20An_4A6.jpg"
+
+# Video — pipeline faststart + poster (7/7, tự dọn object thử)
+ssh cdn 'ssh micro "cd /srv/app/social-service && node scripts/test-video-cdn.js"'
 ```
+
+⚠️ **Đừng kết luận độ trễ bằng `curl` chạy bên trong VM Frappe.** Gọi hostname công khai từ chính máy đó đi qua hairpin NAT: đã đo **29 s, timeout 2/3 lần**, trong khi cùng lúc đo từ máy ngoài chỉ **31–66 ms** và log ứng dụng ghi request thật 3–35 ms. Lấy mã trạng thái thì được, đo thời gian thì sai — đã một lần tưởng là sự cố production.
