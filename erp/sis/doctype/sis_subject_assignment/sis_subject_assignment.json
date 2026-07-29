@@ -57,6 +57,7 @@
    "fieldtype": "Link",
    "label": "Teacher",
    "options": "SIS Teacher",
+   "search_index": 1,
    "reqd": 1,
    "in_list_view": 1
   },
@@ -74,6 +75,7 @@
    "fieldtype": "Link",
    "label": "Actual Subject",
    "options": "SIS Actual Subject",
+   "search_index": 1,
    "reqd": 1,
    "in_list_view": 1
   },
@@ -122,21 +124,7 @@
  "index_web_pages_for_search": 1,
  "istable": 0,
  "links": [],
- "indices": [
-  {
-   "unique": 1,
-   "fields": "teacher_id,class_id,actual_subject_id,campus_id,school_year_id"
-  },
-  {
-   "unique": 0,
-   "fields": "campus_id,class_id,actual_subject_id,school_year_id"
-  },
-  {
-   "unique": 0,
-   "fields": "teacher_id,campus_id,school_year_id"
-  }
- ],
- "modified": "2026-07-03 10:00:00.000000",
+ "modified": "2026-07-29 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Sis",
  "name": "SIS Subject Assignment",

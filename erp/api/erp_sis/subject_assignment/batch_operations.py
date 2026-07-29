@@ -19,6 +19,14 @@ import time
 from typing import Dict, List, Optional, Callable
 from functools import wraps
 from .timetable_sync_v2 import sync_assignment_to_timetable
+from .assignment_validator import (
+	fetch_existing_ranges,
+	find_overlaps_in_batch,
+	format_range,
+	make_key,
+	ranges_overlap,
+	resolve_effective_range,
+)
 from erp.api.erp_sis.utils.cache_utils import clear_teacher_dashboard_cache
 
 
@@ -386,27 +394,81 @@ def validate_all_assignments(teacher_id: str, assignments: List[Dict]) -> Dict:
 					errors.append(f"Assignment {idx}: start_date required for from_date assignment")
 					continue
 	
-	# Check for duplicates within the batch (same teacher + class + subject)
-	seen_keys = {}
+	# ===== Chống chồng lấn theo khoảng ngày (SIS-161) =====
+	# Cùng (giáo viên, lớp, môn, năm học) ĐƯỢC PHÉP có nhiều đợt — chỉ chặn khi các
+	# khoảng ngày giao nhau. Trước đây chỗ này so key không có ngày tháng nên đợt thứ
+	# hai của cùng một giáo viên luôn bị coi là trùng.
+	# Kiểm tra hai tầng: trong chính lô đang gửi, và với dữ liệu đã có trong DB.
+	pending = []
+	deleted_ids = set()
 	for idx, assignment in enumerate(assignments):
 		if assignment.get("action") == "delete":
+			if assignment.get("assignment_id"):
+				deleted_ids.add(assignment["assignment_id"])
 			continue
-		
-		key = (
-			teacher_id,
-			assignment.get("class_id"),
-			assignment.get("actual_subject_id"),
-			assignment.get("school_year_id"),
+
+		pending.append({
+			"index": idx,
+			"teacher_id": teacher_id,
+			"class_id": assignment.get("class_id"),
+			"actual_subject_id": assignment.get("actual_subject_id"),
+			"school_year_id": assignment.get("school_year_id"),
+			"application_type": assignment.get("application_type", "full_year"),
+			"start_date": assignment.get("start_date"),
+			"end_date": assignment.get("end_date"),
+			"assignment_id": assignment.get("assignment_id"),
+		})
+
+	# Tầng 1: các dòng trong lô đè lên nhau
+	for conflict in find_overlaps_in_batch(pending):
+		errors.append(
+			f"Assignment {conflict['index']}: khoảng {conflict['range']} chồng lên "
+			f"assignment {conflict['other_index']} ({conflict['other_range']}) "
+			f"— cùng giáo viên, lớp và môn"
 		)
-		
-		if key in seen_keys:
-			errors.append(
-				f"Assignment {idx}: Duplicate assignment "
-				f"(same as assignment {seen_keys[key]})"
+
+	# Tầng 2: đè lên phân công đã có trong DB.
+	# Bỏ qua chính bản ghi đang sửa và các bản ghi bị xoá ngay trong lô này, nếu không
+	# thao tác "xoá đợt cũ + thêm đợt mới đè lên" sẽ bị chặn oan.
+	if pending:
+		existing = fetch_existing_ranges(
+			[
+				make_key(
+					row["teacher_id"],
+					row["class_id"],
+					row["actual_subject_id"],
+					row["school_year_id"],
+				)
+				for row in pending
+			],
+			campus_id=teacher_campus,
+		)
+
+		for row in pending:
+			key = make_key(
+				row["teacher_id"],
+				row["class_id"],
+				row["actual_subject_id"],
+				row["school_year_id"],
 			)
-		else:
-			seen_keys[key] = idx
-	
+			start, end = resolve_effective_range(
+				row["start_date"],
+				row["end_date"],
+				row["application_type"],
+				row["school_year_id"],
+			)
+
+			for other in existing.get(key, []):
+				if other["name"] == row["assignment_id"] or other["name"] in deleted_ids:
+					continue
+				if ranges_overlap(start, end, other["_start"], other["_end"]):
+					errors.append(
+						f"Assignment {row['index']}: khoảng "
+						f"{format_range(start, end, row['school_year_id'])} chồng lên phân công "
+						f"đã có {other['name']} "
+						f"({format_range(other['_start'], other['_end'], row['school_year_id'])})"
+					)
+
 	return {
 		"valid": len(errors) == 0,
 		"errors": errors

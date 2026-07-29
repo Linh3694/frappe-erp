@@ -5,10 +5,86 @@
 Utility functions for Subject Assignment module
 """
 
-from typing import Optional
+from typing import Dict, List, Optional
 
 import frappe
 from frappe import _
+
+
+def get_user_code_field() -> Optional[str]:
+	"""
+	Tên cột mã nhân viên trên doctype User.
+
+	Mã GV không nằm trên SIS Teacher mà trên User (đồng bộ từ Microsoft `employeeId`).
+	Tuỳ cấu hình site, cột có thể là `employee_code`, `employee_id`, hoặc không tồn tại —
+	nên phải dò thay vì hardcode, giống cách bulk_import.py đang làm.
+	"""
+	for field in ("employee_code", "employee_id"):
+		try:
+			if frappe.db.has_column("User", field):
+				return field
+		except Exception:
+			continue
+	return None
+
+
+def get_teacher_directory(campus_id: str) -> List[Dict]:
+	"""
+	Danh bạ giáo viên của một campus: teacher_id, họ tên hiển thị, mã GV.
+
+	Dùng chung cho export (điền cột Mã GV) và import (tra mã GV ngược về teacher_id),
+	để hai chiều không bao giờ lệch nhau về cách lấy tên/mã.
+	"""
+	if not campus_id:
+		return []
+
+	code_field = get_user_code_field()
+	code_select = f"u.`{code_field}`" if code_field else "NULL"
+
+	return frappe.db.sql(
+		f"""
+		SELECT
+			t.name AS teacher_id,
+			t.user_id,
+			COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id) AS full_name,
+			{code_select} AS teacher_code
+		FROM `tabSIS Teacher` t
+		LEFT JOIN `tabUser` u ON u.name = t.user_id
+		WHERE t.campus_id = %(campus_id)s
+		ORDER BY full_name ASC
+		""",
+		{"campus_id": campus_id},
+		as_dict=True,
+	)
+
+
+def build_teacher_code_lookup(campus_id: str) -> Dict[str, str]:
+	"""
+	Bảng tra mã GV (chuẩn hoá hoa/thường + trim) -> teacher_id.
+
+	Nhận cả user_id (email) làm khoá phụ để file cũ điền email vẫn dùng được.
+	Mã xuất hiện ở nhiều giáo viên thì bỏ hẳn khỏi bảng tra — thà báo "không tìm thấy"
+	còn hơn gán nhầm phân công cho người khác.
+	"""
+	lookup: Dict[str, str] = {}
+	duplicated = set()
+
+	for row in get_teacher_directory(campus_id):
+		for raw in (row.get("teacher_code"), row.get("user_id")):
+			if not raw:
+				continue
+			key = str(raw).strip().lower()
+			if not key:
+				continue
+			if key in lookup and lookup[key] != row["teacher_id"]:
+				duplicated.add(key)
+			else:
+				lookup[key] = row["teacher_id"]
+
+	for key in duplicated:
+		lookup.pop(key, None)
+
+	return lookup
 
 
 def get_active_school_year_for_campus(campus_id: str) -> Optional[str]:

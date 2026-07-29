@@ -217,6 +217,13 @@ from .date_override_handler import (
     delete_teacher_override_rows
 )
 
+# Excel export / import (SIS-162)
+# ⚠️ Frontend gọi endpoint qua đường dẫn cấp package
+# (/api/method/erp.api.erp_sis.subject_assignment.<hàm>) nên hàm phải được re-export ở đây,
+# import trong module con thôi là chưa đủ.
+from .excel_export import export_subject_assignments
+from .excel_import import import_subject_assignments
+
 # Utilities (internal)
 from .utils import fix_subject_linkages
 
@@ -261,6 +268,10 @@ __all__ = [
     'enqueue_materialized_view_sync',
     'batch_sync_assignments',
     
+    # Excel export / import
+    'export_subject_assignments',
+    'import_subject_assignments',
+
     # Internal functions
     'create_date_override_row',
     'calculate_dates_in_range',

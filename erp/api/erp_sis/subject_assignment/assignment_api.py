@@ -28,6 +28,7 @@ from .timetable_sync_v2 import (
     sync_assignment_to_timetable,
     batch_sync_assignments
 )
+from .assignment_validator import validate_no_overlap
 from .date_override_handler import delete_teacher_override_rows
 from .utils import (
     fix_subject_linkages,
@@ -558,33 +559,32 @@ def create_subject_assignment():
                     )
                 validate_school_year_matches_class(school_year_id, cid)
 
-                filters = {
-                    "teacher_id": teacher_id,
-                    "actual_subject_id": sid,
-                    "campus_id": campus_id,
-                    "school_year_id": school_year_id,
-                }
-                if cid:
-                    filters["class_id"] = cid
-                
-                # Check for duplicate
-                if application_type == "full_year":
-                    existing = frappe.db.exists("SIS Subject Assignment", filters)
-                    if existing:
-                        skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
-                        continue
-                elif application_type == "from_date" and start_date:
-                    # Check if there's a conflicting full_year assignment
-                    filters_full_year = {**filters, "application_type": "full_year"}
-                    existing_full_year = frappe.db.exists("SIS Subject Assignment", filters_full_year)
-                    if existing_full_year:
-                        skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing_full_year, "reason": "conflicts with full_year"})
-                        continue
-                else:
-                    existing = frappe.db.exists("SIS Subject Assignment", filters)
-                    if existing:
-                        skipped_duplicates.append({"teacher_id": teacher_id, "class_id": cid, "subject_id": sid, "existing_id": existing})
-                        continue
+                # Chống chồng lấn (SIS-161). Nhiều đợt cho cùng giáo viên + lớp + môn là
+                # hợp lệ, chỉ chặn khi khoảng ngày giao nhau.
+                # ⚠️ Luật nằm ở assignment_validator.validate_no_overlap — đừng viết lại
+                # ở đây. Bản cũ chặn theo key không có ngày: nhánh full_year bỏ qua cả khi
+                # bản ghi đang có chỉ là một đợt, còn nhánh from_date lại không hề so
+                # chồng ngày giữa các đợt với nhau.
+                overlap = validate_no_overlap(
+                    teacher_id=teacher_id,
+                    class_id=cid,
+                    actual_subject_id=sid,
+                    start_date=start_date,
+                    end_date=end_date,
+                    school_year_id=school_year_id,
+                    campus_id=campus_id,
+                    application_type=application_type,
+                )
+                if not overlap["valid"]:
+                    skipped_duplicates.append({
+                        "teacher_id": teacher_id,
+                        "class_id": cid,
+                        "subject_id": sid,
+                        "existing_id": overlap["overlaps"][0]["name"],
+                        # Lý do cụ thể để FE hiển thị, không còn bỏ qua im lặng.
+                        "reason": overlap["message"],
+                    })
+                    continue
 
                 # Create assignment with date fields and weekdays
                 assignment_data = {
@@ -621,11 +621,17 @@ def create_subject_assignment():
         # frappe.db.commit()
 
         # VALIDATION: If ALL assignments were skipped (all duplicates), return error
+        # Trả kèm lý do từng dòng thay vì chỉ một câu tổng — trước đây người dùng bấm lưu
+        # xong không biết vì sao phân công của mình không được tạo (SIS-161).
         if len(created_names) == 0 and len(skipped_duplicates) > 0:
+            reasons = [
+                item.get("reason") or "Đã tồn tại phân công trùng khoảng thời gian"
+                for item in skipped_duplicates
+            ]
             return validation_error_response(
-                message="Tất cả phân công đã tồn tại",
+                message="Không tạo được phân công nào",
                 errors={
-                    "duplicate": [f"Tất cả {len(skipped_duplicates)} phân công đã tồn tại trong hệ thống"],
+                    "duplicate": reasons,
                     "skipped_duplicates": skipped_duplicates
                 }
             )
