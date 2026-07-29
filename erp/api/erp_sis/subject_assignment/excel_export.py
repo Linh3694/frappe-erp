@@ -15,6 +15,7 @@ from typing import Dict, List, Optional
 import frappe
 from frappe.utils import now_datetime
 
+from erp.api.utils import format_person_display_name
 from erp.utils.api_response import error_response, forbidden_response
 from erp.utils.campus_utils import get_current_campus_from_context
 
@@ -59,14 +60,17 @@ def collect_export_rows(
 	code_field = get_user_code_field()
 	code_select = f"u.`{code_field}`" if code_field else "NULL"
 
-	return frappe.db.sql(
+	rows = frappe.db.sql(
 		f"""
 		SELECT
 			sa.name AS assignment_id,
 			sa.application_type,
 			sa.start_date,
 			sa.end_date,
-			COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id) AS teacher_name,
+			u.first_name,
+			u.last_name,
+			u.full_name,
+			t.user_id,
 			{code_select} AS teacher_code,
 			subj.title_vn AS subject_title,
 			COALESCE(NULLIF(c.short_title, ''), c.title) AS class_title,
@@ -80,8 +84,7 @@ def collect_export_rows(
 		WHERE sa.campus_id = %(campus_id)s
 			AND sa.school_year_id = %(school_year_id)s
 			AND eg.education_stage_id = %(education_stage_id)s
-		ORDER BY teacher_name ASC, eg.sort_order ASC, class_title ASC,
-			subject_title ASC, sa.start_date ASC
+		ORDER BY eg.sort_order ASC, class_title ASC, subject_title ASC, sa.start_date ASC
 		""",
 		{
 			"campus_id": campus_id,
@@ -90,6 +93,22 @@ def collect_export_rows(
 		},
 		as_dict=True,
 	)
+
+	# Tên hiển thị dựng từ first_name/last_name, không lấy thẳng full_name (xem
+	# format_person_display_name — full_name của Frappe bị ngược thứ tự với dữ liệu SSO).
+	for row in rows:
+		row["teacher_name"] = format_person_display_name(
+			row.get("first_name"),
+			row.get("last_name"),
+			row.get("full_name"),
+			fallback=row.get("user_id"),
+		)
+
+	# Sắp xếp theo tên ĐÃ chuẩn hoá; nếu để SQL sắp theo full_name thì file sẽ xếp theo
+	# tên gọi ('Anh', 'Dung', 'Duyên'…) thay vì theo họ.
+	rows.sort(key=lambda r: (r.get("teacher_name") or "").lower())
+
+	return rows
 
 
 def build_catalog(

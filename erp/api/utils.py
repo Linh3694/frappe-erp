@@ -78,6 +78,41 @@ def format_vietnamese_name(name: str) -> str:
     return name
 
 
+def format_person_display_name(
+    first_name: Optional[str],
+    last_name: Optional[str],
+    full_name: Optional[str] = None,
+    fallback: Optional[str] = None,
+) -> str:
+    """
+    Tên hiển thị chuẩn Việt Nam, dựng từ first_name/last_name của doctype User.
+
+    Frappe ghép full_name = first_name + last_name (kiểu Tây), trong khi dữ liệu SSO của
+    trường lưu TÊN GỌI ở first_name và HỌ + ĐỆM ở last_name. Kết quả là full_name bị ngược:
+
+        first_name='Anh', last_name='Lê Hoàng'  -> full_name 'Anh Lê Hoàng'
+        đúng ra phải là                            'Lê Hoàng Anh'
+
+    Vì vậy dựng lại từ hai cột có cấu trúc thay vì đoán từ chuỗi full_name.
+    ⚠️ Đừng thay bằng format_vietnamese_name() cho trường hợp này: hàm đó chỉ nhận ra họ ở
+    đầu hoặc cuối chuỗi, gặp 'Anh Lê Hoàng' nó thấy 'Hoàng' ở cuối và đảo thành
+    'Hoàng Anh Lê'.
+
+    Tên nước ngoài được giữ nguyên thứ tự: 'John' + 'Smith' -> 'John Smith', vì 'Smith'
+    không nằm trong danh sách họ Việt Nam.
+    """
+    first = (first_name or "").strip()
+    last = (last_name or "").strip()
+
+    if first and last:
+        # Chỉ đảo khi từ đầu của last_name đúng là một họ Việt Nam
+        if is_vietnamese_surname(last.split()[0]):
+            return f"{last} {first}"
+        return f"{first} {last}"
+
+    return (full_name or "").strip() or first or last or (fallback or "")
+
+
 # ========================================================================
 # Standard CRUD Utilities
 # ========================================================================

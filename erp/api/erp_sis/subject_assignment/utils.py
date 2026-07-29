@@ -38,24 +38,40 @@ def get_teacher_directory(campus_id: str) -> List[Dict]:
 	if not campus_id:
 		return []
 
+	from erp.api.utils import format_person_display_name
+
 	code_field = get_user_code_field()
 	code_select = f"u.`{code_field}`" if code_field else "NULL"
 
-	return frappe.db.sql(
+	rows = frappe.db.sql(
 		f"""
 		SELECT
 			t.name AS teacher_id,
 			t.user_id,
-			COALESCE(NULLIF(u.full_name, ''), u.first_name, t.user_id) AS full_name,
+			u.first_name,
+			u.last_name,
+			u.full_name AS raw_full_name,
 			{code_select} AS teacher_code
 		FROM `tabSIS Teacher` t
 		LEFT JOIN `tabUser` u ON u.name = t.user_id
 		WHERE t.campus_id = %(campus_id)s
-		ORDER BY full_name ASC
 		""",
 		{"campus_id": campus_id},
 		as_dict=True,
 	)
+
+	# full_name của Frappe = first_name + last_name nên bị ngược với dữ liệu SSO của trường
+	# ('Anh Lê Hoàng' thay vì 'Lê Hoàng Anh') — dựng lại từ hai cột có cấu trúc.
+	for row in rows:
+		row["full_name"] = format_person_display_name(
+			row.get("first_name"),
+			row.get("last_name"),
+			row.get("raw_full_name"),
+			fallback=row.get("user_id"),
+		)
+
+	rows.sort(key=lambda r: (r.get("full_name") or "").lower())
+	return rows
 
 
 def build_teacher_code_lookup(campus_id: str) -> Dict[str, str]:
