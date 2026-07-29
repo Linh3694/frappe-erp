@@ -5,19 +5,15 @@ Ba rang buoc cua regex tung lam vo production nen moi rang buoc co mot test rien
 
 import unittest
 
-from erp.common import files_cdn
+from erp.common import files_cdn, student_photo_cdn
 
 
 def _domain(keys, prefix="student-photos", key_from_url=None):
-    import os
-    import urllib.parse
-
     return {
         "name": "test",
         "prefix": prefix,
         "keys": set(keys),
-        "key_from_url": key_from_url
-        or (lambda raw: os.path.basename(urllib.parse.unquote(raw))),
+        "key_from_url": key_from_url or student_photo_cdn.key_from_url,
     }
 
 
@@ -95,6 +91,52 @@ class TestSignText(unittest.TestCase):
         self.assertIn("https://cdn/sis-content/Menu_Categories/SUON19.jpg", out)
         # Ban o goc `files/` la file KHAC, khong duoc ky lay
         self.assertIn('"b":"/files/SUON19.jpg"', out)
+
+
+class TestStudentPhotoKhongTranhSisSubdir(unittest.TestCase):
+    """Viec 3: nhom hoc sinh khong nhan path co thu muc con.
+
+    Truoc day basename(`Menu_Categories/X.jpg`) = `X.jpg` trung allowlist hoc sinh
+    thi ky nham sang kho student-photos. Anh hoc sinh o goc van ky binh thuong.
+    """
+
+    def test_path_co_thu_muc_con_bi_bo_qua(self):
+        self.assertIsNone(student_photo_cdn.key_from_url("Menu_Categories/SameName.jpg"))
+        self.assertIsNone(student_photo_cdn.key_from_url("Library/BookCover/a.jpg"))
+
+    def test_anh_hoc_sinh_o_goc_van_nhan(self):
+        self.assertEqual(student_photo_cdn.key_from_url("WS123.jpg"), "WS123.jpg")
+        self.assertEqual(student_photo_cdn.key_from_url("Lop 1A1.jpg"), "Lop 1A1.jpg")
+
+    def test_sis_subdir_trung_ten_khong_bi_hoc_sinh_ky(self):
+        # Nhom hoc sinh dung TRUOC; neu con nhan basename thi se ky nham.
+        student = _domain(["SameName.jpg"], prefix="student-photos")
+        import urllib.parse
+
+        sis = {
+            "name": "sis-content",
+            "prefix": "sis-content",
+            "keys": {"Menu_Categories/SameName.jpg"},
+            "key_from_url": lambda raw: urllib.parse.unquote(raw),
+        }
+        text = (
+            '{"a":"/files/Menu_Categories/SameName.jpg",'
+            '"b":"/files/WS123.jpg"}'
+        )
+        # Allowlist hoc sinh co SameName.jpg VA WS123.jpg
+        student["keys"] = {"SameName.jpg", "WS123.jpg"}
+        out = files_cdn.sign_text(
+            text,
+            [student, sis],
+            signer=lambda p, expires=None: f"https://cdn{p}?e=1&s=x",
+        )
+        # SIS subdir di dung kho sis-content, khong bi student-photos nuot
+        self.assertIn(
+            "https://cdn/sis-content/Menu_Categories/SameName.jpg?e=1&s=x", out
+        )
+        self.assertNotIn("student-photos/SameName.jpg", out)
+        # Anh hoc sinh o goc van ky nhu cu
+        self.assertIn("https://cdn/student-photos/WS123.jpg?e=1&s=x", out)
 
 
 if __name__ == "__main__":

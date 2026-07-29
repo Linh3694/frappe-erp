@@ -114,17 +114,40 @@ def object_exists(name):
         return False
 
 
+def key_from_url(raw):
+    """Suy khoa tu phan sau `/files/`. Chi nhan path KHONG co thu muc con.
+
+    Anh hoc sinh von nam thang trong `files/` (khong o thu muc con). Neu chap
+    nhan path co `/` roi lay basename, URL SIS kieu `Menu_Categories/X.jpg`
+    trung ten anh hoc sinh se bi ky nham sang kho student-photos (nhom hoc sinh
+    dung truoc trong bo ky chung).
+
+    Gioi han: hai file o CUNG thu muc goc trung ten van tranh nhau theo thu tu
+    domain — siet nay khong xu ly duoc. Van can do trung ten tren du lieu that.
+    """
+    if not raw:
+        return None
+    key = urllib.parse.unquote(raw)
+    if not key or ".." in key:
+        return None
+    # Chi nhan path khong chua `/` — anh hoc sinh von o goc files/
+    if "/" in key:
+        return None
+    return key
+
+
 def get_domain():
     """Domain cho bo ky chung — xem erp/common/files_cdn.py.
 
-    Suy khoa theo BASENAME: ten `WS<ma hoc sinh>.jpg` von duy nhat, va anh lop
-    (`Lớp 4A5....jpg`) cung nam thang trong `files/`.
+    Suy khoa theo ten file o goc `files/`: ten `WS<ma hoc sinh>.jpg` von duy
+    nhat, va anh lop (`Lớp 4A5....jpg`) cung nam thang trong `files/`. Path co
+    thu muc con bi bo qua (xem `key_from_url`).
     """
     return {
         "name": "student-photos",
         "prefix": PREFIX,
         "keys": _migrated_names(),
-        "key_from_url": lambda raw: os.path.basename(urllib.parse.unquote(raw)),
+        "key_from_url": key_from_url,
         # None = dung cua so mac dinh nhu truoc, khong doi hanh vi
         "expiry": None,
     }
