@@ -543,7 +543,7 @@ def get_microsoft_app_token():
         "grant_type": "client_credentials"
     }
     
-    response = requests.post(token_url, data=data)
+    response = requests.post(token_url, data=data, timeout=15)
     
     if response.status_code != 200:
         raise Exception(f"App token request failed: {response.text}")
@@ -1455,7 +1455,7 @@ def _fetch_microsoft_user_payload(identifier: str, headers: dict) -> dict:
 		frappe.throw(_("Missing identifier"))
 
 	url = f"https://graph.microsoft.com/v1.0/users/{urllib.parse.quote(ident)}?$select={MS_USER_SELECT_FIELDS}"
-	resp = requests.get(url, headers=headers)
+	resp = requests.get(url, headers=headers, timeout=20)
 	if resp.status_code == 200:
 		return resp.json()
 
@@ -1468,7 +1468,7 @@ def _fetch_microsoft_user_payload(identifier: str, headers: dict) -> dict:
 	filter_url = (
 		f"https://graph.microsoft.com/v1.0/users?$select={MS_USER_SELECT_FIELDS}&$filter={filt}"
 	)
-	resp2 = requests.get(filter_url, headers=headers)
+	resp2 = requests.get(filter_url, headers=headers, timeout=20)
 	if resp2.status_code == 200:
 		values = (resp2.json() or {}).get("value") or []
 		if values:
