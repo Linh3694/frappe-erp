@@ -67,63 +67,81 @@ def get_room_webhook_endpoints():
 
 def trigger_user_webhooks(doc, event):
 	"""
-	Trigger webhooks khi User được insert/update/delete
-	Gửi ĐẦY ĐỦ user data đến ticket service
+	Trigger webhooks khi User được insert/update/delete.
+
+	Gửi qua background job: gọi HTTP đồng bộ trong request cycle từng làm mọi
+	thao tác lưu User chậm hàng chục giây khi service đích không phản hồi.
 	"""
 	try:
-		# Get webhook endpoints
 		endpoints = get_webhook_endpoints()
-		
+
 		if not endpoints:
 			frappe.logger().debug("[User Hooks] No webhook endpoints configured")
 			return
-			
+
 		frappe.logger().info(
-			f"🔔 [User Hooks] Triggering {len(endpoints)} webhooks for User {doc.name} - Event: {event}"
+			f"🔔 [User Hooks] Queue webhook job for User {doc.name} - Event: {event}"
 		)
-		
-		# Build FULL user payload - đảm bảo gửi đầy đủ tất cả fields
-		user_payload = {
-			"name": doc.name,
-			"email": doc.email,
-			"full_name": doc.full_name or doc.name,
-			"first_name": getattr(doc, 'first_name', None),
-			"middle_name": getattr(doc, 'middle_name', None),
-			"last_name": getattr(doc, 'last_name', None),
-			"user_image": getattr(doc, 'user_image', None),
-			"enabled": getattr(doc, 'enabled', 1),
-			"disabled": getattr(doc, 'disabled', 0),
-			"user_type": getattr(doc, 'user_type', None),
-			"department": getattr(doc, 'department', None),
-			"location": getattr(doc, 'location', None),
-			"job_title": getattr(doc, 'job_title', None),
-			"designation": getattr(doc, 'designation', None),
-			"employee_code": getattr(doc, 'employee_code', None),
-			"microsoft_id": getattr(doc, 'microsoft_id', None),
-			"docstatus": getattr(doc, 'docstatus', 0),
-			"roles": [],
-			"creation": str(doc.creation) if doc.creation else None,
-			"modified": str(doc.modified) if doc.modified else None
-		}
-		
-		# Get user roles
-		try:
-			user_roles = frappe.get_all(
-				"Has Role",
-				filters={"parent": doc.name},
-				fields=["role"]
-			)
-			user_payload["roles"] = [r.role for r in user_roles if r.role]
-		except Exception as e:
-			frappe.logger().error(f"Failed to fetch roles: {str(e)}")
-		
-		# Webhook payload format
-		webhook_data = {
-			"doc": user_payload,
-			"event": event
-		}
-		
-		# Send to each endpoint
+		frappe.enqueue(
+			"erp.common.user_hooks.process_user_webhooks_async",
+			queue=frappe.conf.get("USER_WEBHOOK_QUEUE", "short"),
+			timeout=int(frappe.conf.get("USER_WEBHOOK_JOB_TIMEOUT_SECONDS", 180)),
+			enqueue_after_commit=True,
+			webhook_data=_build_user_webhook_payload(doc, event),
+		)
+	except Exception as e:
+		frappe.logger().error(f"❌ [User Hooks] Error enqueueing webhooks: {str(e)}")
+
+
+def _build_user_webhook_payload(doc, event):
+	"""Snapshot dữ liệu User để worker nền dùng sau khi transaction đã commit."""
+	user_payload = {
+		"name": doc.name,
+		"email": doc.email,
+		"full_name": doc.full_name or doc.name,
+		"first_name": getattr(doc, 'first_name', None),
+		"middle_name": getattr(doc, 'middle_name', None),
+		"last_name": getattr(doc, 'last_name', None),
+		"user_image": getattr(doc, 'user_image', None),
+		"enabled": getattr(doc, 'enabled', 1),
+		"disabled": getattr(doc, 'disabled', 0),
+		"user_type": getattr(doc, 'user_type', None),
+		"department": getattr(doc, 'department', None),
+		"location": getattr(doc, 'location', None),
+		"job_title": getattr(doc, 'job_title', None),
+		"designation": getattr(doc, 'designation', None),
+		"employee_code": getattr(doc, 'employee_code', None),
+		"microsoft_id": getattr(doc, 'microsoft_id', None),
+		"docstatus": getattr(doc, 'docstatus', 0),
+		"roles": [],
+		"creation": str(doc.creation) if doc.creation else None,
+		"modified": str(doc.modified) if doc.modified else None
+	}
+
+	try:
+		user_roles = frappe.get_all(
+			"Has Role",
+			filters={"parent": doc.name},
+			fields=["role"]
+		)
+		user_payload["roles"] = [r.role for r in user_roles if r.role]
+	except Exception as e:
+		frappe.logger().error(f"Failed to fetch roles: {str(e)}")
+
+	return {"doc": user_payload, "event": event}
+
+
+def process_user_webhooks_async(webhook_data):
+	"""Worker nền: gửi webhook User sau khi transaction đã commit."""
+	try:
+		endpoints = get_webhook_endpoints()
+		if not endpoints:
+			frappe.logger().debug("[User Hooks] No webhook endpoints configured")
+			return
+
+		user_name = (webhook_data.get("doc") or {}).get("name")
+		frappe.logger().info(f"🚀 [User Hooks] Processing async webhooks for User {user_name}")
+
 		for endpoint in endpoints:
 			try:
 				send_user_webhook(endpoint, webhook_data)
@@ -132,7 +150,7 @@ def trigger_user_webhooks(doc, event):
 					f"❌ [User Hooks] Failed to send webhook to {endpoint.get('name')}: {str(e)}"
 				)
 	except Exception as e:
-		frappe.logger().error(f"❌ [User Hooks] Error triggering webhooks: {str(e)}")
+		frappe.logger().error(f"❌ [User Hooks] Async worker error: {str(e)}")
 
 
 def send_user_webhook(endpoint, data):
@@ -162,7 +180,7 @@ def send_user_webhook(endpoint, data):
 			url,
 			json=data,
 			headers=headers,
-			timeout=10
+			timeout=int(frappe.conf.get("USER_WEBHOOK_TIMEOUT_SECONDS", 5))
 		)
 		
 		if response.status_code >= 200 and response.status_code < 300:

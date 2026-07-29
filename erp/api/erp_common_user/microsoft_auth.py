@@ -20,6 +20,7 @@ from erp.api.utils import format_vietnamese_name
 ADMIN_SYNC_ROLES = ("System Manager", "SIS IT")
 MS_ADMIN_SYNC_ACTIVE_KEY = "ms_admin_sync_job:active"
 MS_ADMIN_SYNC_JOB_TTL = 86400
+MS_ADMIN_RENAME_JOB_TIMEOUT = 900
 
 
 def _require_it_admin() -> None:
@@ -1584,6 +1585,73 @@ def admin_rename_user_email(current_email: str | None = None, new_email: str | N
 				"Email mới thuộc một tài khoản Microsoft khác — không đổi để tránh sai dữ liệu"
 			)
 
+		# rename_doc phải cập nhật link field trên hàng chục doctype + clear cache nên
+		# thường vượt timeout của request → chạy nền, FE poll theo job_id.
+		job_id = frappe.generate_hash(length=12)
+		job = {
+			"job_id": job_id,
+			"status": "queued",
+			"old_email": current_email,
+			"email": new_email,
+			"microsoft_id": local_ms_id,
+			"message": "Đang xếp hàng đổi email…",
+			"started_by": frappe.session.user,
+		}
+		_write_rename_job(job_id, job)
+		try:
+			frappe.enqueue(
+				"erp.api.erp_common_user.microsoft_auth._run_user_email_rename_job",
+				queue="long",
+				timeout=MS_ADMIN_RENAME_JOB_TIMEOUT,
+				job_id_param=job_id,
+				current_email=current_email,
+				new_email=new_email,
+			)
+		except Exception as e:
+			job["status"] = "failed"
+			job["message"] = f"Không thể xếp hàng job đổi email: {e}"
+			_write_rename_job(job_id, job)
+			return error_response(job["message"])
+
+		return success_response(
+			data=job,
+			message=f"Đang đổi email: {current_email} → {new_email}",
+		)
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Rename Email", str(e))
+		return error_response(str(e))
+
+
+def _rename_job_cache_key(job_id: str) -> str:
+	return f"ms_admin_rename_job:{job_id}"
+
+
+def _write_rename_job(job_id: str, payload: dict) -> None:
+	frappe.cache().set_value(
+		_rename_job_cache_key(job_id),
+		payload,
+		expires_in_sec=MS_ADMIN_SYNC_JOB_TTL,
+	)
+
+
+def _read_rename_job(job_id: str) -> dict | None:
+	return frappe.cache().get_value(_rename_job_cache_key(job_id))
+
+
+def _run_user_email_rename_job(job_id_param: str, current_email: str, new_email: str) -> None:
+	"""Worker: rename User + đồng bộ mapping, cập nhật tiến độ vào cache."""
+	job = _read_rename_job(job_id_param) or {
+		"job_id": job_id_param,
+		"old_email": current_email,
+		"email": new_email,
+	}
+	job["status"] = "running"
+	job["message"] = "Đang cập nhật các liên kết tới user…"
+	_write_rename_job(job_id_param, job)
+
+	try:
 		# frappe.rename_doc (top-level) không nhận ignore_permissions → gọi hàm gốc.
 		from frappe.model.rename_doc import rename_doc as _rename_doc
 
@@ -1594,30 +1662,49 @@ def admin_rename_user_email(current_email: str | None = None, new_email: str | N
 			ignore_permissions=True,
 			show_alert=False,
 		)
-		renamed = frappe.get_doc("User", new_email)
-		if renamed.email != new_email:
-			renamed.email = new_email
-			renamed.flags.ignore_permissions = True
-			renamed.save()
+		if frappe.db.get_value("User", new_email, "email") != new_email:
+			frappe.db.set_value("User", new_email, "email", new_email)
 
 		# Cập nhật mapping trên ERP Microsoft User để lần sync sau khớp ngay
-		ms_user_name = frappe.db.get_value("ERP Microsoft User", {"microsoft_id": local_ms_id})
+		ms_id = job.get("microsoft_id") or frappe.db.get_value("User", new_email, "microsoft_id")
+		ms_user_name = (
+			frappe.db.get_value("ERP Microsoft User", {"microsoft_id": ms_id}) if ms_id else None
+		)
 		if ms_user_name:
 			frappe.db.set_value("ERP Microsoft User", ms_user_name, "mapped_user_id", new_email)
 
 		frappe.db.commit()
+		job["status"] = "success"
+		job["message"] = f"Đã đổi email: {current_email} → {new_email}"
+		_write_rename_job(job_id_param, job)
 		frappe.logger("microsoft_sync").info(
-			f"renamed User {current_email} -> {new_email} by {frappe.session.user}"
+			f"renamed User {current_email} -> {new_email} by {job.get('started_by')}"
 		)
+	except Exception as e:
+		frappe.db.rollback()
+		job["status"] = "failed"
+		job["message"] = f"Đổi email thất bại: {e}"
+		_write_rename_job(job_id_param, job)
+		frappe.log_error("Microsoft Admin Rename Email Job", str(e))
 
-		return success_response(
-			data={"old_email": current_email, "email": new_email, "microsoft_id": local_ms_id},
-			message=f"Đã đổi email: {current_email} → {new_email}",
-		)
+
+@frappe.whitelist(methods=["GET"])
+def admin_get_user_rename_job(job_id: str | None = None):
+	"""FE poll tiến độ job đổi email."""
+	try:
+		_require_it_admin()
+		job_id = job_id or frappe.form_dict.get("job_id")
+		if not job_id:
+			return error_response("Thiếu job_id")
+
+		job = _read_rename_job(job_id)
+		if not job:
+			return error_response("Không tìm thấy job (có thể đã hết hạn)")
+		return success_response(data=job, message=job.get("message") or "")
 	except frappe.PermissionError:
 		raise
 	except Exception as e:
-		frappe.log_error("Microsoft Admin Rename Email", str(e))
+		frappe.log_error("Microsoft Admin Rename Job Status", str(e))
 		return error_response(str(e))
 
 
