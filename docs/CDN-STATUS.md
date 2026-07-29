@@ -18,7 +18,7 @@
 | **Hồ sơ học bổng (Frappe → CDN, signed URL)** | ✅ **Chạy production — lỗ hổng §7 đã vá** |
 | Ký URL phía Python trong Frappe | ✅ Chạy production (`erp/common/cdn_sign.py`) |
 | Video remux `+faststart` + poster | ❌ Chưa làm |
-| **Ảnh chân dung học sinh** | ⚠️ **Chưa vá — đang lộ, xem §7b** |
+| **Ảnh chân dung học sinh** | ⏳ **Đã lên CDN, chưa niêm — xem §7b** |
 | Thư viện, thực đơn, tin tức | ❌ Chưa làm |
 | Phase 3 (upload thẳng lên CDN) | ❌ Chưa làm |
 | Phase 4 (dọn dẹp) | ❌ Chưa làm — user quyết **giữ fallback tới ~giữa 2027** |
@@ -295,7 +295,7 @@ seal-scholarship.py --rollback /srv/backup/scholarship-sealed-20260729-130655
 
 ---
 
-## 7b. ⚠️ CHƯA VÁ — Ảnh chân dung học sinh, URL suy ra được từ mã học sinh
+## 7b. Ảnh chân dung học sinh — đang vá (2026-07-29)
 
 **Phát hiện 2026-07-29 khi rà mục 10.2. Nghiêm trọng hơn lỗ hổng học bổng (§7) vì có thể liệt kê hàng loạt.**
 
@@ -323,6 +323,30 @@ Trong **6.211 file tên `WS*`** công khai, **3.326 file (54%)** có dạng `WS<
 Không gian tìm kiếm **rất nhỏ**: chỉ **20 tiền tố 3 chữ số** xuất hiện (`112`–`125` là chính), mã dài 8 số ⇒ khoảng 1,4 triệu tổ hợp. Quét hết trong vài giờ ở tốc độ vừa phải.
 
 Tệ hơn: response `200` với mã có thật và `404` với mã không có biến endpoint này thành **oracle xác nhận mã học sinh nào tồn tại**, kể cả khi không lấy được ảnh.
+
+### Tiến độ
+
+| Bước | Trạng thái |
+|---|---|
+| Bucket `cdn-student-photos` + policy `127.0.0.1` + IAM | ✅ |
+| `location /student-photos/` trên nginx VM3 (prefix, không regex) | ✅ |
+| Migrate **3.281 file / 2,1 GB** được `tabSIS Photo` tham chiếu | ✅ |
+| Ký tại `after_request` — `erp/common/student_photo_cdn.py` | ✅ |
+| **Niêm file gốc khỏi `public/files`** | ❌ **chưa — lỗ hổng vẫn mở** |
+| Hook `File.after_insert` cho ảnh mới | ❌ chưa |
+| Timer niêm định kỳ | ❌ chưa |
+
+Hiện ảnh phát được qua **cả hai** đường (CDN đã ký và `/files/` công khai). An toàn để dừng ở đây, nhưng **lỗ hổng chưa đóng** cho tới khi niêm.
+
+### Vì sao ký ở `after_request` chứ không tại từng điểm đọc
+
+Học bổng chỉ có 5 điểm ký nên làm tường minh là hợp lý. Ảnh học sinh rà được **33 chỗ trên 21 file**, mỗi chỗ một hình dạng (đơn lẻ, batch, lồng trong dict khác). Và sau khi niêm, **bất kỳ đường nào bị sót đều thành ảnh vỡ** — chứ không phải chỉ hiện sai như bug thứ tự năm học. Bọc ở ranh giới response thì không đường nào lọt, kể cả đường thêm sau này.
+
+Chỉ ký file **đã migrate**: danh sách tên lấy từ chính `tabSIS Photo`, cache 5 phút. Không đoán theo mẫu tên file — ảnh lớp (`Lớp 4A5….jpg`) không theo mẫu `WS<mã>` nào cả.
+
+### Ba tham chiếu hỏng có sẵn
+
+`/files/Lớp 2A4.jpg`, `Lớp 3A2.jpg`, `Lớp 3A4.jpg` — có trong `tabSIS Photo` nhưng **không tồn tại trên đĩa**, đã trả 404 từ trước khi làm gì. Không phải do migrate.
 
 ### Hướng vá
 
