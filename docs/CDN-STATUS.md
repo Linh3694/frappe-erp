@@ -471,14 +471,14 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 4. **Migrate theo chức năng** — còn lại: ảnh học sinh → thư viện/thực đơn/tin tức → nhóm chưa phân loại (phải phân loại trước, không migrate mù). Học bổng đã xong, dùng làm khuôn mẫu: `cdn_sign` + `*_store` + timer niêm.
 5. **Hook `after_request` toàn cục cho `user_image`** — chỉ cần nếu muốn cắt storage ở Frappe. `user_image` xuất hiện **227 lần** nên không ký từng chỗ được. Học bổng không cần vì chỉ có 5 điểm ký.
 6. **Phase 3** — upload thẳng lên CDN qua presigned PUT. Cần sửa client web + mobile. Làm xong sẽ khử luôn khoảng hở 5 phút của học bổng.
-7. **Nén ảnh legacy của chat** — 36 file đang phục vụ với dung lượng trung bình **1,78 MB** (lớn nhất 2,7 MB), trong khi ảnh qua pipeline mới chỉ 41 KB. Phụ huynh dùng 4G tải các ảnh này rất chậm: p95 đo được 0,268s so với 0,082s trung bình. `CDN-Design.md` §9 đã chủ ý hoãn việc này ở lần migrate đầu; giờ hệ thống đã ổn định thì làm được. Sinh key mới + cập nhật DB, cần `--dry-run` đầy đủ.
+7. ~~Nén ảnh legacy của chat~~ — ✅ xong 2026-07-29. Nén **54 file, 68,8 MB → 17,0 MB (−75%)**. Ghi đè tại chính khoá cũ, **không** sinh khoá mới và **không** đụng DB — nếu đổi DB sang khoá mới thì tắt `CDN_ENABLED` sẽ không quay về được đường đĩa, mất luôn đảm bảo rollback của §11. Bản gốc vẫn nguyên trong `uploads/` nên sai thì `mc mirror` lại là xong. Giữ nguyên định dạng (không đổi sang WebP) để khoá `.jpg` không chứa byte WebP. Còn **4 file HEIC** chưa nén được — PIL cần `pillow-heif`; hai trong số đó mang đuôi `.jpg` nhưng nội dung là HEIC, nên script nhận diện bằng **magic byte** chứ không theo đuôi file.
 8. **Dọn 22.817 dòng `tabFile` thừa** và 552 bản avatar trùng — không gấp, gộp vào đợt dọn cuối.
 9. ~~Thêm ngưỡng cảnh báo cho bucket học bổng~~ — ✅ xong 2026-07-29. `cdn-checks.sh` nay phân tích **theo từng bucket** (`social-posts`, `social-chat`, `social-avatars`, `scholarship`), khoá alert dạng `signdeny-<bucket>` nên mỗi bucket dedup và báo phục hồi độc lập.
 
 ### Việc nhỏ
 9. ~~`apps/erp` chưa commit~~ — ✅ đã commit và push 2026-07-29 (`e8deb030` avatar, `57878df2` học bổng). Prod vẫn ở dạng file rời chưa pull; khi pull hãy theo §11, đã đối chiếu md5 và 9/9 file khớp.
-10. `ecosystem.config.js` của social-service — sửa `PORT` 5010 → 5040 cho khớp thực tế.
-11. `.gitignore` của social-service thiếu `logs/`.
+10. ~~`ecosystem.config.js` PORT 5010 → 5040~~ — ✅ xong 2026-07-29. Đã đồng bộ **ba nguồn**: `ecosystem.config.js` (cả `env` lẫn `env_production`), `config.env` trên prod, và PM2 đang chạy. Quả mìn đã gỡ.
+11. ~~`.gitignore` thiếu `logs/`~~ — ✅ xong 2026-07-29.
 12. `supervisor` trên VM Frappe báo FATAL 2 mục redis (`frappe-bench-redis-cache`, `-queue`) — có sẵn từ trước, redis thật chạy riêng ở port 11000/13000. Vô hại nhưng nên dọn.
 13. `CDN_LINK_SECRET` từng hiện ra trong output terminal khi đọc nginx snippet lúc làm việc này. Không rời khỏi máy Linh, nhưng nếu muốn chặt chẽ thì xoay secret theo §9.
 
