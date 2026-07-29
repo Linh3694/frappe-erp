@@ -2121,10 +2121,17 @@ def add_lead_guardian():
         doc.guardian_nationality = getattr(g_doc, "nationality", None) or ""
         doc.guardian_note = getattr(g_doc, "note", None) or ""
         doc.guardian_dob = getattr(g_doc, "dob", None)
-        if g_doc.phone_number:
+        # Lay SDT tu child table (nguon su that) chu khong tu field phang: dong nay ghi
+        # du lieu ben sang CRM Lead Phone, khong nen phu thuoc vao thu tu sync cua mirror.
+        # _get_guardian_phones da uu tien phone_numbers va fallback field phang cho
+        # guardian chua migrate.
+        from erp.api.erp_sis.guardian import _derive_primary_phone_from_rows
+
+        guardian_phone = _derive_primary_phone_from_rows(_get_guardian_phones(g_doc))
+        if guardian_phone:
             # Cap nhat phone_numbers neu chua co
             if not doc.phone_numbers or len(doc.phone_numbers) == 0:
-                doc.append("phone_numbers", {"phone_number": g_doc.phone_number, "is_primary": 1})
+                doc.append("phone_numbers", {"phone_number": guardian_phone, "is_primary": 1})
         doc.save(ignore_permissions=True)
 
     # Neu co linked_family + linked_student -> them CRM Family Relationship
@@ -2771,6 +2778,27 @@ def reorder_lead_guardians():
 
 # === Guardian Phone APIs (nhiều số/guardian, 1 số chính) ===
 
+def _sync_guardian_flat_phone(g_doc, clear_when_empty=False):
+    """Dong bo CRM Guardian.phone_number tu row is_primary cua child table.
+
+    Child table phone_numbers la nguon su that; field phang chi la ban mirror de list,
+    filter va dedup doc nhanh ma khong phai join. Cac endpoint duoi day deu save voi
+    flags.ignore_validate nen CRMGuardian.validate() bi bo qua — phai sync tay truoc
+    moi lan save, neu khong field phang se dung im o gia tri luc tao guardian trong khi
+    child table da doi.
+
+    clear_when_empty chi bat khi child table rong la ket qua that su cua thao tac (xoa
+    so cuoi cung). Mac dinh tat de khong dong vao guardian cu chua migrate — nhung ban
+    ghi chi co field phang, chua co child row nao — vi ghi de se xoa mat so duy nhat cua ho.
+    """
+    from erp.api.erp_sis.guardian import _derive_primary_phone_from_rows
+
+    rows = getattr(g_doc, "phone_numbers", None) or []
+    if not rows and not clear_when_empty:
+        return
+    g_doc.phone_number = _derive_primary_phone_from_rows(rows)
+
+
 @frappe.whitelist(methods=["POST"])
 def add_guardian_phone():
     """Them so dien thoai cho Guardian. Neu la so dau tien thi tu dong la so chinh."""
@@ -2796,6 +2824,7 @@ def add_guardian_phone():
     # Migration: neu co phone_number cu nhung chua co phone_numbers -> them vao truoc
     if not existing and getattr(g_doc, "phone_number", None):
         g_doc.append("phone_numbers", {"phone_number": g_doc.phone_number, "is_primary": 1})
+        _sync_guardian_flat_phone(g_doc)
         g_doc.flags.ignore_validate = True
         g_doc.save(ignore_permissions=True)
         g_doc.reload()
@@ -2816,6 +2845,7 @@ def add_guardian_phone():
 
     is_first = len(existing) == 0
     g_doc.append("phone_numbers", {"phone_number": formatted, "is_primary": 1 if is_first else 0})
+    _sync_guardian_flat_phone(g_doc)
     g_doc.flags.ignore_validate = True
     g_doc.save(ignore_permissions=True)
     frappe.db.commit()
@@ -2854,6 +2884,8 @@ def remove_guardian_phone():
     # Neu xoa so chinh va con so khac -> dat so dau tien lam chinh
     if was_primary and g_doc.phone_numbers:
         g_doc.phone_numbers[0].is_primary = 1
+    # Xoa het so thi field phang phai ve rong theo, khong giu lai so vua bi xoa.
+    _sync_guardian_flat_phone(g_doc, clear_when_empty=True)
     g_doc.flags.ignore_validate = True
     g_doc.save(ignore_permissions=True)
     frappe.db.commit()
@@ -2878,6 +2910,7 @@ def set_guardian_primary_phone():
     rows = getattr(g_doc, "phone_numbers", None) or []
     for r in rows:
         r.is_primary = 1 if r.get("name") == phone_row_name else 0
+    _sync_guardian_flat_phone(g_doc)
     g_doc.flags.ignore_validate = True
     g_doc.save(ignore_permissions=True)
     frappe.db.commit()

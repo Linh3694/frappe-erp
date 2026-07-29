@@ -36,7 +36,9 @@ class CRMGuardian(Document):
             frappe.throw("A guardian cannot be both key person and parent account")
 
         self._dedupe_child_emails_case_insensitive()
-        self._enforce_single_primary('phone_numbers', 'phone_number', 'phone')
+        # Legacy field cua SDT ten la 'phone_number' (khong phai 'phone') — truyen sai ten
+        # thi hasattr() ben trong nuot im lang va field phang khong bao gio duoc sync.
+        self._enforce_single_primary('phone_numbers', 'phone_number', 'phone_number')
         self._enforce_single_primary('emails', 'email_address', 'email')
 
     def _dedupe_child_emails_case_insensitive(self):
