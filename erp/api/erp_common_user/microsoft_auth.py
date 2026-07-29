@@ -11,6 +11,7 @@ from datetime import datetime
 from datetime import timedelta
 import secrets
 import base64
+import pickle
 import urllib.parse
 import uuid
 from erp.utils.api_response import success_response, error_response
@@ -1540,6 +1541,19 @@ def _read_sync_job(job_id: str) -> dict | None:
 	return frappe.cache().get_value(_job_cache_key(job_id))
 
 
+def _acquire_sync_job_lock(job_id: str) -> bool:
+	"""Giữ lock active bằng Redis SET NX kèm TTL trong một lệnh atomic."""
+	cache = frappe.cache()
+	return bool(
+		cache.set(
+			name=cache.make_key(MS_ADMIN_SYNC_ACTIVE_KEY),
+			value=pickle.dumps(job_id),
+			nx=True,
+			ex=MS_ADMIN_SYNC_JOB_TTL,
+		)
+	)
+
+
 def _graph_get_with_retry(url: str, headers: dict, retries: int = 3):
 	"""GET Graph với retry ngắn cho 429/5xx."""
 	import time
@@ -1647,16 +1661,15 @@ def admin_start_microsoft_group_sync() -> dict:
 	try:
 		_require_it_admin()
 		cache = frappe.cache()
-		active_id = cache.get_value(MS_ADMIN_SYNC_ACTIVE_KEY)
-		if active_id:
-			existing = _read_sync_job(active_id)
-			if existing and existing.get("status") in ("queued", "running"):
-				return success_response(
-					data=existing,
-					message="Đã có job đồng bộ đang chạy",
-				)
-
 		job_id = str(uuid.uuid4())
+		if not _acquire_sync_job_lock(job_id):
+			active_id = cache.get_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			existing = _read_sync_job(active_id) if active_id else None
+			return success_response(
+				data=existing or {"job_id": active_id, "status": "queued"},
+				message="Đã có job đồng bộ đang chạy",
+			)
+
 		payload = {
 			"job_id": job_id,
 			"status": "queued",
@@ -1667,19 +1680,24 @@ def admin_start_microsoft_group_sync() -> dict:
 			"message": "",
 			"started_by": frappe.session.user,
 		}
-		_write_sync_job(job_id, payload)
-		cache.set_value(
-			MS_ADMIN_SYNC_ACTIVE_KEY,
-			job_id,
-			expires_in_sec=MS_ADMIN_SYNC_JOB_TTL,
-		)
+		try:
+			_write_sync_job(job_id, payload)
+			frappe.enqueue(
+				"erp.api.erp_common_user.microsoft_auth._run_microsoft_group_sync_job",
+				job_id=job_id,
+				queue="long",
+				timeout=3600,
+			)
+		except Exception as enqueue_error:
+			# Không để lock treo 24 giờ nếu ghi job hoặc enqueue thất bại.
+			payload["status"] = "failed"
+			payload["message"] = str(enqueue_error)[:500]
+			try:
+				_write_sync_job(job_id, payload)
+			finally:
+				cache.delete_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			raise
 
-		frappe.enqueue(
-			"erp.api.erp_common_user.microsoft_auth._run_microsoft_group_sync_job",
-			job_id=job_id,
-			queue="long",
-			timeout=3600,
-		)
 		return success_response(data=payload, message="Đã xếp hàng đồng bộ Microsoft group")
 	except frappe.PermissionError:
 		raise

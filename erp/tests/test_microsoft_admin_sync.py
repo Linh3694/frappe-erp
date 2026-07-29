@@ -30,7 +30,9 @@ def _load_microsoft_auth_module():
 			setattr(sys.modules[parent], name.rsplit(".", 1)[-1], pkg)
 
 	if "frappe" not in sys.modules:
-		sys.modules["frappe"] = MagicMock()
+		frappe_stub = MagicMock()
+		frappe_stub.whitelist.side_effect = lambda *args, **kwargs: lambda fn: fn
+		sys.modules["frappe"] = frappe_stub
 	for stub in ("erp.utils", "erp.utils.api_response", "erp.api.utils"):
 		if stub not in sys.modules:
 			sys.modules[stub] = MagicMock()
@@ -169,6 +171,76 @@ class TestSyncJobCache(unittest.TestCase):
 		}
 		m._write_sync_job("job1", payload)
 		self.assertEqual(m._read_sync_job("job1")["status"], "queued")
+
+
+class TestStartMicrosoftGroupSync(unittest.TestCase):
+	@patch("erp.api.erp_common_user.microsoft_auth.success_response")
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	def test_second_start_returns_active_job_without_enqueue(self, mock_frappe, mock_success):
+		from erp.api.erp_common_user import microsoft_auth as m
+
+		existing = {
+			"job_id": "active-job",
+			"status": "running",
+			"processed": 3,
+		}
+		cache = MagicMock()
+		cache.make_key.return_value = b"site|ms_admin_sync_job:active"
+		cache.set.return_value = False
+		cache.get_value.side_effect = lambda key: (
+			"active-job"
+			if key == m.MS_ADMIN_SYNC_ACTIVE_KEY
+			else existing
+		)
+		mock_frappe.cache.return_value = cache
+		mock_frappe.session.user = "it@wellspring.edu.vn"
+		mock_frappe.get_roles.return_value = ["SIS IT"]
+		mock_frappe.PermissionError = PermissionError
+		mock_success.side_effect = lambda data=None, message=None, **kwargs: {
+			"data": data,
+			"message": message,
+		}
+
+		result = m.admin_start_microsoft_group_sync()
+
+		self.assertEqual(result["data"], existing)
+		cache.set.assert_called_once()
+		self.assertTrue(cache.set.call_args.kwargs["nx"])
+		self.assertEqual(
+			cache.set.call_args.kwargs["ex"],
+			m.MS_ADMIN_SYNC_JOB_TTL,
+		)
+		mock_frappe.enqueue.assert_not_called()
+
+	@patch("erp.api.erp_common_user.microsoft_auth.error_response")
+	@patch("erp.api.erp_common_user.microsoft_auth.frappe")
+	def test_enqueue_exception_clears_active_lock_and_marks_job_failed(
+		self,
+		mock_frappe,
+		mock_error,
+	):
+		from erp.api.erp_common_user import microsoft_auth as m
+
+		cache = MagicMock()
+		cache.make_key.return_value = b"site|ms_admin_sync_job:active"
+		cache.set.return_value = True
+		mock_frappe.cache.return_value = cache
+		mock_frappe.session.user = "it@wellspring.edu.vn"
+		mock_frappe.get_roles.return_value = ["SIS IT"]
+		mock_frappe.PermissionError = PermissionError
+		mock_frappe.enqueue.side_effect = RuntimeError("Redis queue unavailable")
+		mock_error.side_effect = lambda message, **kwargs: {
+			"message": message,
+			**kwargs,
+		}
+
+		result = m.admin_start_microsoft_group_sync()
+
+		self.assertIn("Redis queue unavailable", result["message"])
+		cache.delete_value.assert_called_once_with(m.MS_ADMIN_SYNC_ACTIVE_KEY)
+		failed_payload = cache.set_value.call_args_list[-1].args[1]
+		self.assertEqual(failed_payload["status"], "failed")
+		self.assertIn("Redis queue unavailable", failed_payload["message"])
 
 
 if __name__ == "__main__":
