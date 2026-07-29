@@ -38,6 +38,12 @@ class TestFilesRegex(unittest.TestCase):
     def test_ten_file_duoc_chua_dau_cach(self):
         self.assertEqual(self._match('"/files/Lop 1A1.jpg"'), ["/files/Lop 1A1.jpg"])
 
+    def test_van_ban_truoc_co_dau_cach_khong_bi_nuot(self):
+        # Rang buoc (a): origin khong chua dau cach — van ban dung truoc /files/
+        # khong bi keo vao match (tung lam vo anh tren production).
+        text = "anh hoc sinh /files/WS123.jpg"
+        self.assertEqual(self._match(text), ["/files/WS123.jpg"])
+
     def test_bat_duoc_duong_dan_co_thu_muc_con(self):
         self.assertEqual(
             self._match('"/files/News_Articles/content/x.png"'),

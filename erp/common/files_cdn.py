@@ -66,6 +66,10 @@ def get_domains():
             domain = module.get_domain()
             if domain and domain.get("keys"):
                 domains.append(domain)
+        except (ModuleNotFoundError, ImportError):
+            # Module chua ton tai (vd sis_content_cdn dang giai doan) la binh thuong —
+            # khong log de Error Log khong phinh theo moi response JSON co /files/.
+            continue
         except Exception as e:  # noqa: BLE001
             frappe.log_error(f"Nap domain {path} loi: {e}", "Files CDN")
     return domains
