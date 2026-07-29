@@ -6,6 +6,12 @@
         ../env/bin/python /opt/cdn/bin/diff-sis-content.py --group news
 
 Phai ra 0 o ca hai cot lech truoc khi bat nhom do trong CDN_SIS_CONTENT_GROUPS.
+
+Ma thoat:
+  0 — khong thieu tren CDN va khong thieu tren dia (ca hai cot sach)
+  1 — thieu tren CDN, thieu tren dia, hoac khong doc duoc cau hinh CDN
+
+Thieu tren dia cung phai fail: dia la duong lui khi tat CDN.
 """
 
 import argparse
@@ -13,6 +19,11 @@ import os
 import sys
 
 SITE = os.environ.get("SITE", "prod.sis.wellspring.edu.vn")
+
+
+def exit_code(thieu_cdn, thieu_dia):
+    """0 khi ca hai cot sach; 1 khi thieu CDN hoac thieu dia (tap/khong rong)."""
+    return 1 if thieu_cdn or thieu_dia else 0
 
 
 def main():
@@ -72,7 +83,7 @@ def main():
     print(f"  THIEU tren dia: {len(thieu_dia)}")
     for k in sorted(thieu_dia)[:5]:
         print(f"      {k}")
-    return 1 if thieu_cdn else 0
+    return exit_code(thieu_cdn, thieu_dia)
 
 
 if __name__ == "__main__":

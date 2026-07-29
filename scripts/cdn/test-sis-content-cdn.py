@@ -8,6 +8,12 @@
 Khong goi qua HTTP ma goi thang ham ky roi tai URL: nhu vay kiem duoc dung phan
 CDN, khong bi nhieu boi dang nhap va quyen. Rieng phan `after_request` da co test
 don vi o erp/tests/test_files_cdn.py.
+
+Ma thoat:
+  0 — tat ca mau PASS (tai duoc + chu ky sai bi tu choi 403)
+  1 — co mau FAIL, khong ky duoc URL, hoac khong doc duoc cau hinh CDN
+
+Khi CDN chua cau hinh, thoat gon (ma 1) — khong cat chuoi tren gia tri rong/None.
 """
 
 import argparse
@@ -42,6 +48,11 @@ def main():
     from erp.common import cdn_sign, sis_content_store
     from erp.common.sis_content_cdn import PREFIX, key_from_url, migrated_keys
 
+    conf = cdn_sign.load_conf()
+    if not conf:
+        print("khong doc duoc /etc/cdn/cdn.env", file=sys.stderr)
+        return 1
+
     urls = sorted(sis_content_store.collect_urls([args.group]))
     keys = migrated_keys([args.group])
 
@@ -53,6 +64,10 @@ def main():
             fail += 1
             continue
         signed = cdn_sign.sign_path(f"/{PREFIX}/{key}")
+        if not signed:
+            fail += 1
+            print(f"FAIL  khong ky duoc URL: {key}")
+            continue
         code, size = http_code(signed)
         if code == 200 and size > 0:
             ok += 1
@@ -61,16 +76,21 @@ def main():
             fail += 1
             print(f"FAIL  {code}  {key}")
 
-    # Chu ky sai phai bi tu choi
+    # Chu ky sai phai bi tu choi — chi cat khi da co URL hop le
     if urls:
         key = key_from_url(urls[0][len("/files/"):])
-        bad = cdn_sign.sign_path(f"/{PREFIX}/{key}")[:-1] + "X"
-        code, _ = http_code(bad)
-        print(f"{'PASS' if code == 403 else 'FAIL'}  chu ky sai -> {code} (mong doi 403)")
-        if code != 403:
+        signed = cdn_sign.sign_path(f"/{PREFIX}/{key}")
+        if not signed:
             fail += 1
+            print("FAIL  khong ky duoc URL de thu chu ky sai")
         else:
-            ok += 1
+            bad = signed[:-1] + "X"
+            code, _ = http_code(bad)
+            print(f"{'PASS' if code == 403 else 'FAIL'}  chu ky sai -> {code} (mong doi 403)")
+            if code != 403:
+                fail += 1
+            else:
+                ok += 1
 
     print(f"\nket qua: {ok} dat / {fail} khong dat")
     return 1 if fail else 0

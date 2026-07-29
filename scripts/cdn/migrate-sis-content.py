@@ -4,17 +4,18 @@
 Chay trong bench context de dung chung `collect_urls()` voi hook ky — script tu
 viet lai truy van chinh la cach sinh ra lech giua cac ben:
 
-    cd /srv/app/frappe-bench
-    sudo -u frappe bench --site prod.sis.wellspring.edu.vn execute \
-        erp.scripts_cdn.migrate_sis_content.main --kwargs "{'group':'news'}"
-
-Hoac chay truc tiep (script tu init frappe):
-
     cd /srv/app/frappe-bench/sites
     sudo -u frappe SITE=prod.sis.wellspring.edu.vn \
         ../env/bin/python /opt/cdn/bin/migrate-sis-content.py --group news --dry-run
 
 Chay lai duoc: mac dinh bo qua object da co dung kich thuoc, nen dung luon de doi soat.
+
+Ma thoat:
+  0 — day xong, khong loi day va khong thieu file tren dia
+  1 — co loi day, URL la, thieu file tren dia, hoac khong doc duoc cau hinh CDN
+
+Thieu tren dia van duoc in roi bo qua (khong dung), nhung van tinh la that bai:
+file dia la duong lui khi tat CDN; so sot van bao thanh cong se de bat nhom som.
 """
 
 import argparse
@@ -22,6 +23,11 @@ import os
 import sys
 
 SITE = os.environ.get("SITE", "prod.sis.wellspring.edu.vn")
+
+
+def exit_code(err, missing):
+    """0 khi khong loi day va khong thieu dia; 1 neu err hoac missing > 0."""
+    return 1 if err or missing else 0
 
 
 def init_frappe():
@@ -117,7 +123,7 @@ def main():
     if before:
         print(f"  truoc nen : {before/1048576:.1f} MB")
         print(f"  sau nen   : {after/1048576:.1f} MB  (giam {100*(1-after/before):.0f}%)")
-    return 1 if err else 0
+    return exit_code(err, missing)
 
 
 if __name__ == "__main__":
