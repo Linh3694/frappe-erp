@@ -729,13 +729,18 @@ doc_events = {
 	},
 	"SIS Photo": {
 		"after_insert": [
-			"erp.observability.audit.log_create"
+			"erp.observability.audit.log_create",
+			# Anh moi phai len CDN TRUOC khi timer niem no khoi public/files,
+			# neu khong se vo anh. Xem erp/common/student_photo_store.py
+			"erp.common.student_photo_store.on_photo_insert"
 		],
 		"on_update": [
-			"erp.observability.audit.log_update"
+			"erp.observability.audit.log_update",
+			"erp.common.student_photo_store.on_photo_update"
 		],
 		"on_trash": [
-			"erp.observability.audit.log_delete"
+			"erp.observability.audit.log_delete",
+			"erp.common.student_photo_store.on_photo_trash"
 		]
 	},
 	"SIS School Year": {

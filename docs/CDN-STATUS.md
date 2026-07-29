@@ -333,8 +333,8 @@ Tệ hơn: response `200` với mã có thật và `404` với mã không có bi
 | Migrate **3.281 file / 2,1 GB** được `tabSIS Photo` tham chiếu | ✅ |
 | Ký tại `after_request` — `erp/common/student_photo_cdn.py` | ✅ |
 | Niêm **6.257 file** khỏi `public/files` | ✅ |
-| Hook `File.after_insert` cho ảnh mới | ❌ chưa |
-| Timer niêm định kỳ | ❌ chưa |
+| Hook `SIS Photo` cho ảnh mới | ✅ |
+| Timer niêm định kỳ | ✅ `cdn-student-photo-seal.timer`, 5 phút |
 
 Kiểm chứng từ máy ngoài, không đăng nhập — đúng ba URL từng dùng để chứng minh lỗ hổng:
 
@@ -350,7 +350,21 @@ File cũ niêm tại `/srv/backup/student-photos-sealed-20260729-144737` (nằm 
 seal-student-photos.py --rollback /srv/backup/student-photos-sealed-20260729-144737
 ```
 
-⚠️ **Chưa có hook và timer cho ảnh MỚI.** Ảnh upload sau thời điểm này vẫn nằm trong `public/files` và vẫn lộ cho tới khi hai việc đó xong.
+### Ảnh mới — thứ tự bắt buộc
+
+```
+1. ảnh lên CDN              erp/common/student_photo_store.py, chạy ngay ở SIS Photo.after_insert
+2. xoá cache tên đã migrate  để hook ký nhận ra ảnh mới ở request kế tiếp
+3. niêm khỏi public/files    cdn-student-photo-seal.timer, sau ít nhất 10 phút
+```
+
+Đảo bước 1 và 3 là vỡ ảnh. Hai lớp bảo vệ: script niêm **từ chối** file chưa có trên CDN, và còn đợi file đủ "già" (`--min-age-min`, mặc định 10 phút) để chắc chắn cache đã được dựng lại ở mọi worker.
+
+Gắn vào `SIS Photo` chứ không vào `File`: trường `SIS Photo.photo` mới là thứ quyết định — một `File` có thể được tạo trước rồi mới gắn, và có thể bị đổi.
+
+Kiểm chứng vòng đời đầy đủ trên prod (6/6): tạo `SIS Photo` → hook đẩy lên CDN **ngay** → cache tự làm mới → hook ký → nginx trả `200` → xoá doc thì object biến mất khỏi CDN.
+
+⚠️ Xoá ảnh có độ trễ tối đa **1 giờ**: object mất khỏi MinIO ngay nhưng nginx còn phục vụ bản cache cho hết `proxy_cache_valid 200 1h`.
 
 ### Vì sao ký ở `after_request` chứ không tại từng điểm đọc
 

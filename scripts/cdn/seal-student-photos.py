@@ -37,6 +37,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.parse
 from datetime import datetime
 
@@ -90,6 +91,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="chi niem N file dau (me canary)")
     ap.add_argument("--orphans-only", action="store_true", help="chi niem file mo coi")
+    ap.add_argument("--min-age-min", type=int, default=10,
+                    help="chi niem file cu hon N phut — de hook day CDN va xoa cache kip chay")
     ap.add_argument("--rollback", metavar="ARCHIVE_DIR")
     args = ap.parse_args()
 
@@ -128,17 +131,24 @@ def main():
             config=Config(s3={"addressing_style": "path"}, retries={"max_attempts": 3}),
         )
 
+    # Tao thu muc luu tru LUOI — timer chay 5 phut/lan va da so lan khong co gi
+    # de niem; tao san se de lai hang tram thu muc rong.
     archive = os.path.join("/srv/backup",
                            "student-photos-sealed-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    if not args.dry_run:
-        os.makedirs(archive, exist_ok=True)
-        print(f"niem vao: {archive}\n")
+    archive_ready = False
 
-    sealed = skipped = absent = 0
+    sealed = skipped = absent = too_new = 0
     for name in targets:
         disk = os.path.join(PUBLIC_FILES, name)
         if not os.path.exists(disk):
             absent += 1
+            continue
+
+        # Doi file du "gia" truoc khi niem. Anh vua upload can thoi gian de hook
+        # `SIS Photo.after_insert` day len CDN va xoa cache ten da migrate o moi
+        # worker; niem qua som se lam anh vo trong vai phut dau.
+        if args.min_age_min and (time.time() - os.path.getmtime(disk)) < args.min_age_min * 60:
+            too_new += 1
             continue
 
         is_orphan = name in orphans
@@ -162,6 +172,10 @@ def main():
             sealed += 1
             continue
 
+        if not archive_ready:
+            os.makedirs(archive, exist_ok=True)
+            print(f"niem vao: {archive}\n")
+            archive_ready = True
         shutil.move(disk, os.path.join(archive, name))
         sealed += 1
 
@@ -169,6 +183,7 @@ def main():
     print(f"  da niem     : {sealed}")
     print(f"  bo qua      : {skipped} (chua co tren CDN hoac lech kich thuoc)")
     print(f"  khong tren dia: {absent}")
+    print(f"  con qua moi : {too_new} (< {args.min_age_min} phut)")
     if not args.dry_run and sealed:
         print(f"\n  rollback: seal-student-photos.py --rollback {archive}")
     return 0
