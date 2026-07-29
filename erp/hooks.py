@@ -1276,10 +1276,10 @@ before_request = [
 after_request = [
 	"erp.observability.middleware.log_api_request_end",
 	"erp.utils.module_tracker.track_request_module_usage",
-	# Ky URL anh hoc sinh tai ranh gioi response. 33 diem doc `tabSIS Photo.photo`
-	# nen ky tung cho se sot, ma sot mot cho = anh vo sau khi niem file goc.
-	# Xem erp/common/student_photo_cdn.py
-	"erp.common.student_photo_cdn.sign_response"
+	# Ky URL file tai ranh gioi response, MOT luot duyet body cho moi nhom anh:
+	# anh hoc sinh (33 diem doc) va noi dung SIS (~30 endpoint). Ky tung cho se
+	# sot. Xem erp/common/files_cdn.py
+	"erp.common.files_cdn.sign_response"
 ]
 
 # Job Events

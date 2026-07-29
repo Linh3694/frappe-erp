@@ -88,6 +88,20 @@ def _expiry(conf):
     return math.ceil(time.time() / window) * window + lifetime
 
 
+def expiry_for(window_key, lifetime_key):
+    """Moc het han cho mot nhom co cua so ky rieng.
+
+    Hoc bong dung 1h/2h vi link ro ri mang ten va lop hoc sinh. Anh thu vien /
+    thuc don / tin tuc thi khong nhay cam, nen cua so dai hon (6h/24h) de chuoi
+    URL on dinh va trinh duyet con cache lai duoc — quan trong voi danh sach
+    2.198 bia sach.
+    """
+    conf = load_conf() or {}
+    window = int(conf.get(window_key, DEFAULT_WINDOW_SEC))
+    lifetime = int(conf.get(lifetime_key, DEFAULT_LIFETIME_SEC))
+    return math.ceil(time.time() / window) * window + lifetime
+
+
 def _signature(expires, raw_path, secret):
     """md5(<exp><uri thô><dấu cách><secret>) → base64url, bỏ dấu `=` đệm."""
     digest = hashlib.md5(f"{expires}{raw_path} {secret}".encode("utf-8")).digest()
