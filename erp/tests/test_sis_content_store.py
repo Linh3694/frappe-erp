@@ -21,8 +21,20 @@ class TestExtractHtmlUrls(unittest.TestCase):
             {"/files/a.jpg", "/files/b.webp"},
         )
 
+    def test_duong_dan_co_dau_cach(self):
+        html = '<img src="/files/News_Articles/Lop 1A1.jpg">'
+        self.assertEqual(
+            sis_content_store.extract_html_urls(html),
+            {"/files/News_Articles/Lop 1A1.jpg"},
+        )
+
+    def test_nhay_don(self):
+        html = "<img src='/files/a.png'>"
+        self.assertEqual(sis_content_store.extract_html_urls(html), {"/files/a.png"})
+
     def test_bo_qua_url_ngoai(self):
-        html = '<img src="https://example.com/x.jpg">'
+        # URL mien ngoai CO chua /files/ — truoc day regex quet tu do se nhiem allowlist
+        html = '<img src="https://example.com/files/x.jpg">'
         self.assertEqual(sis_content_store.extract_html_urls(html), set())
 
     def test_html_rong(self):

@@ -29,8 +29,13 @@ from erp.common.sis_content_cdn import GROUPS, PREFIX, clear_cache
 MAX_DIM = {"news": 1600, "menu": 1024, "library": 1024}
 QUALITY = 82
 
+# Chi rut gia tri thuoc tinh src (bat dau bang /files/), KHONG quet chuoi /files/
+# tu do trong HTML. Quet tu do se: (1) cat ngang ten file co dau cach vi \s nam
+# trong lop phu dinh; (2) nhiem URL mien ngoai kieu https://example.com/files/...
+# vao allowlist ky. Ranh gioi dau nhay cua src giu nguyen dau cach trong path.
 _HTML_IMG_RE = re.compile(
-    r'/files/[^"\'\\\s>)]+\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?)', re.IGNORECASE
+    r"""src\s*=\s*(["'])(/files/(?:(?!\1).)+\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))\1""",
+    re.IGNORECASE,
 )
 
 
@@ -38,7 +43,8 @@ def extract_html_urls(html):
     """URL anh nhung trong HTML soan thao (tin tuc)."""
     if not html or not isinstance(html, str):
         return set()
-    return set(_HTML_IMG_RE.findall(html))
+    # group(2) = path; group(1) chi la dau nhay bao nhiem
+    return {m.group(2) for m in _HTML_IMG_RE.finditer(html)}
 
 
 def collect_urls(groups=None):
