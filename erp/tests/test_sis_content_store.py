@@ -84,6 +84,38 @@ class TestExtractHtmlUrls(unittest.TestCase):
             {"/files/a.jpg", "/files/b.png"},
         )
 
+    def test_markdown_mo_ta_chua_ngoac_vuong_dong(self):
+        # FE dung ten file lam mo ta; ten co `]` khong duoc lam mat anh
+        self.assertEqual(
+            sis_content_store.extract_html_urls("![photo].jpg](/files/x.jpg)"),
+            {"/files/x.jpg"},
+        )
+        self.assertEqual(
+            sis_content_store.extract_html_urls("![a[b].png](/files/y.jpg)"),
+            {"/files/y.jpg"},
+        )
+
+    def test_markdown_mo_ta_ngoac_long_nhau(self):
+        self.assertEqual(
+            sis_content_store.extract_html_urls("![foo [bar]](/files/nested.jpg)"),
+            {"/files/nested.jpg"},
+        )
+
+    def test_markdown_tieu_de_nhay_don(self):
+        md = "![x](/files/d.jpg 'tieu de')"
+        self.assertEqual(sis_content_store.extract_html_urls(md), {"/files/d.jpg"})
+
+    def test_markdown_khoang_trang_quanh_duong_dan(self):
+        md = "![x]( /files/a.jpg )"
+        self.assertEqual(sis_content_store.extract_html_urls(md), {"/files/a.jpg"})
+
+    def test_markdown_hai_anh_lien_nhau_mot_dong(self):
+        md = "![a](/files/a.jpg)![b](/files/b.png)"
+        self.assertEqual(
+            sis_content_store.extract_html_urls(md),
+            {"/files/a.jpg", "/files/b.png"},
+        )
+
 
 class TestShrink(unittest.TestCase):
     def _jpeg(self, w, h):

@@ -34,13 +34,17 @@ QUALITY = 82
 # file co dau cach vi \s nam trong lop phu dinh; (2) nhiem URL mien ngoai kieu
 # https://example.com/files/... vao allowlist ky. Path phai BAT DAU bang /files/.
 # Ranh gioi dau nhay / ngoac tron giu nguyen dau cach trong path; tieu de
-# markdown tuy chon ("...") sau path khong dua vao ket qua.
+# markdown tuy chon ("..." hoac '...') sau path khong dua vao ket qua.
 _HTML_IMG_RE = re.compile(
     r"""src\s*=\s*(["'])(/files/(?:(?!\1).)+\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))\1""",
     re.IGNORECASE,
 )
+# Neo vao ]( /files/... ) thay vi khop mo ta bang [^\]]*. FE chen anh bang
+# ![${file.name}](url) (AddNewsArticle.tsx) — ten co `]` thanh
+# ![photo].jpg](/files/x.jpg); [^\]]* dung o ] dau roi mat ca anh. [^\n]*?
+# nhe den ](.../files/...) hop le tren CUNG MOT DONG (khong vat qua newline).
 _MD_IMG_RE = re.compile(
-    r"""!\[[^\]]*\]\((/files/(?:(?!\)).)+\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))(?:\s+"[^"]*")?\)""",
+    r"""!\[[^\n]*?\]\(\s*(/files/(?:(?![)\n]).)+\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))\s*(?:(?:"[^"]*"|'[^']*'))?\s*\)""",
     re.IGNORECASE,
 )
 
