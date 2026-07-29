@@ -9,6 +9,7 @@ import frappe
 from frappe import _
 
 from erp.utils.search import search_names
+from erp.common import cdn_sign
 from frappe.utils import nowdate, getdate, now
 import json
 from erp.utils.api_response import (
@@ -898,6 +899,7 @@ def get_applications():
         
         for app in applications:
             app["status_display"] = status_display_map.get(app.status, app.status)
+            app["video_url"] = cdn_sign.sign_scholarship_url(app.get("video_url"))
             # Gom các điểm chi tiết vào scoring object
             app["scoring"] = {
                 "ctvn_score": app.pop("ctvn_score", None),
@@ -977,6 +979,7 @@ def get_application_detail(application_id=None):
                         AND status = 'Active'
                     ORDER BY 
                         CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                        (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                         upload_date DESC,
                         creation DESC
                     LIMIT 1
@@ -1000,7 +1003,7 @@ def get_application_detail(application_id=None):
                 "role": ach.role,
                 "result": ach.result,
                 "date_received": str(ach.date_received) if ach.date_received else None,
-                "attachment": ach.attachment
+                "attachment": cdn_sign.sign_scholarship_list(ach.attachment)
             })
         
         # Danh sách bài dự thi (child table)
@@ -1009,7 +1012,7 @@ def get_application_detail(application_id=None):
         for e in contest_rows:
             contest_entries.append({
                 "name": e.name,
-                "file_url": e.file_url,
+                "file_url": cdn_sign.sign_scholarship_url(e.file_url),
                 "file_name": e.file_name,
                 "file_type": getattr(e, "file_type", None),
                 "description": getattr(e, "description", None),
@@ -1111,8 +1114,8 @@ def get_application_detail(application_id=None):
                 # Báo cáo học tập
                 "academic_report_type": app.academic_report_type,
                 "academic_report_link": app.academic_report_link,
-                "academic_report_upload": app.academic_report_upload,
-                "video_url": app.video_url,
+                "academic_report_upload": cdn_sign.sign_scholarship_list(app.academic_report_upload),
+                "video_url": cdn_sign.sign_scholarship_url(app.video_url),
                 "contest_entries": contest_entries,
                 "main_teacher_name": app.main_teacher_name,
                 "second_teacher_name": app.second_teacher_name,
@@ -1188,7 +1191,7 @@ def add_contest_entry(application_id=None, file_url=None, file_name=None, descri
         new_row = app.contest_entries[-1]
         entry = {
             "name": new_row.name,
-            "file_url": new_row.file_url,
+            "file_url": cdn_sign.sign_scholarship_url(new_row.file_url),
             "file_name": new_row.file_name,
             "file_type": getattr(new_row, "file_type", None),
             "description": getattr(new_row, "description", None),
@@ -1256,7 +1259,7 @@ def delete_contest_entry(application_id=None, entry_name=None):
         for e in getattr(app, "contest_entries", None) or []:
             contest_entries.append({
                 "name": e.name,
-                "file_url": e.file_url,
+                "file_url": cdn_sign.sign_scholarship_url(e.file_url),
                 "file_name": e.file_name,
                 "file_type": getattr(e, "file_type", None),
                 "description": getattr(e, "description", None),

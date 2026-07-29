@@ -243,6 +243,7 @@ def _batch_resolve_student_photos(student_ids, school_year_id=None):
             AND status = 'Active'
         ORDER BY
             CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+            (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
             upload_date DESC,
             creation DESC
         """,

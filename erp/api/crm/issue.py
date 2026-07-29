@@ -788,6 +788,7 @@ def _student_photo_map(student_ids, current_school_year=None):
           AND status = 'Active'
         ORDER BY
             CASE WHEN school_year_id = %(year)s THEN 0 ELSE 1 END,
+            (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
             upload_date DESC,
             creation DESC
         """,

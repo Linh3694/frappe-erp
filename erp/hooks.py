@@ -584,13 +584,15 @@ doc_events = {
 	# Logging hooks for audit trail
 	"File": {
 		"after_insert": [
-			"erp.observability.audit.log_file_upload"
+			"erp.observability.audit.log_file_upload",
+			"erp.common.scholarship_store.on_file_insert"
 		],
 		"on_update": [
 			"erp.observability.audit.log_file_update"
 		],
 		"on_trash": [
-			"erp.observability.audit.log_file_delete"
+			"erp.observability.audit.log_file_delete",
+			"erp.common.scholarship_store.on_file_trash"
 		]
 	},
 	"Student": {
@@ -727,13 +729,18 @@ doc_events = {
 	},
 	"SIS Photo": {
 		"after_insert": [
-			"erp.observability.audit.log_create"
+			"erp.observability.audit.log_create",
+			# Anh moi phai len CDN TRUOC khi timer niem no khoi public/files,
+			# neu khong se vo anh. Xem erp/common/student_photo_store.py
+			"erp.common.student_photo_store.on_photo_insert"
 		],
 		"on_update": [
-			"erp.observability.audit.log_update"
+			"erp.observability.audit.log_update",
+			"erp.common.student_photo_store.on_photo_update"
 		],
 		"on_trash": [
-			"erp.observability.audit.log_delete"
+			"erp.observability.audit.log_delete",
+			"erp.common.student_photo_store.on_photo_trash"
 		]
 	},
 	"SIS School Year": {
@@ -1268,7 +1275,11 @@ before_request = [
 
 after_request = [
 	"erp.observability.middleware.log_api_request_end",
-	"erp.utils.module_tracker.track_request_module_usage"
+	"erp.utils.module_tracker.track_request_module_usage",
+	# Ky URL anh hoc sinh tai ranh gioi response. 33 diem doc `tabSIS Photo.photo`
+	# nen ky tung cho se sot, ma sot mot cho = anh vo sau khi niem file goc.
+	# Xem erp/common/student_photo_cdn.py
+	"erp.common.student_photo_cdn.sign_response"
 ]
 
 # Job Events

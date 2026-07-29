@@ -146,6 +146,7 @@ def get_homeroom_score_records(class_id=None, date_from=None, date_to=None, sear
                     SELECT student_id, photo FROM `tabSIS Photo`
                     WHERE student_id IN %(student_ids)s AND type = 'student' AND status = 'Active'
                     ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                             (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                              upload_date DESC, creation DESC
                     """,
                     {"student_ids": tuple(student_ids), "sy": current_sy or ""},
@@ -460,6 +461,7 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
                         SELECT student_id, photo FROM `tabSIS Photo`
                         WHERE student_id IN %(student_ids)s AND type = 'student' AND status = 'Active'
                         ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                                 (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                                  upload_date DESC, creation DESC
                         """,
                         {"student_ids": tuple(student_ids), "sy": current_sy},
@@ -470,7 +472,8 @@ def get_homeroom_score_stats(class_id=None, year=None, month=None):
                         """
                         SELECT student_id, photo FROM `tabSIS Photo`
                         WHERE student_id IN %(student_ids)s AND type = 'student' AND status = 'Active'
-                        ORDER BY upload_date DESC, creation DESC
+                        ORDER BY (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
+                                 upload_date DESC, creation DESC
                         """,
                         {"student_ids": tuple(student_ids)},
                         as_dict=True,

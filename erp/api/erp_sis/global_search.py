@@ -153,7 +153,8 @@ def global_search(search_term: str = None):
                         WHERE student_id IN %(student_ids)s
                             AND type = 'student'
                             AND status = 'Active'
-                        ORDER BY creation DESC
+                        ORDER BY (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
+                                 creation DESC
                     """, {"student_ids": students_without_photo}, as_dict=True)
                     
                     for photo in photos_fallback:

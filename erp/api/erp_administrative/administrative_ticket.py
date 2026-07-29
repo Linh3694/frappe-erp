@@ -673,6 +673,7 @@ def _ticket_to_dict(doc, include_feedback=True):
                   AND status = 'Active'
                 ORDER BY student_id,
                     CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                    (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                     upload_date DESC,
                     creation DESC
                 """,
@@ -2285,6 +2286,7 @@ def get_students_by_room(room_id=None, school_year_id=None, campus_id=None):
                   AND status = 'Active'
                 ORDER BY student_id,
                     CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                    (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                     upload_date DESC,
                     creation DESC
                 """,

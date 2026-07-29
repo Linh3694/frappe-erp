@@ -186,6 +186,7 @@ def get_all_students(include_all_campuses=0, only_eligible_for_class=0):
                             AND status = 'Active'
                         ORDER BY 
                             CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+                            (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                             upload_date DESC,
                             creation DESC
                     """, {"student_ids": student_ids_for_photos, "current_year": current_school_year}, as_dict=True)
@@ -402,6 +403,7 @@ def get_student_data():
                     AND status = 'Active'
                 ORDER BY 
                     CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                    (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                     upload_date DESC,
                     creation DESC
                 LIMIT 1
@@ -665,6 +667,7 @@ def batch_get_students():
                         AND status = 'Active'
                     ORDER BY 
                         CASE WHEN school_year_id = %(current_year)s THEN 0 ELSE 1 END,
+                        (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                         upload_date DESC,
                         creation DESC
                 """, {"student_ids": student_ids_for_photos, "current_year": current_school_year}, as_dict=True)
@@ -1263,6 +1266,7 @@ def search_students(search_term=None):
                     SELECT student_id, photo FROM `tabSIS Photo`
                     WHERE student_id IN %(ids)s AND type = 'student' AND status = 'Active'
                     ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                             (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                              upload_date DESC, creation DESC
                     """,
                     {"ids": tuple(student_ids), "sy": current_sy or ""},
@@ -1396,6 +1400,7 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
                         FROM `tabSIS Photo`
                         WHERE student_id IN %(ids)s AND type = 'student' AND status = 'Active'
                         ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                                 (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                                  upload_date DESC, creation DESC
                     """, {"ids": student_ids, "sy": school_year_id}, as_dict=True)
                     photo_map = {}
@@ -1749,40 +1754,16 @@ def get_student_profile():
                 school_year_id = current_school_year
         
         # Lấy ảnh học sinh - ưu tiên ảnh theo năm học hiện tại
+        #
+        # Trước đây làm hai bước với `order_by="creation desc"` ở bước fallback.
+        # Sai: `creation` không đồng biến với năm học — ảnh 2024-2025 được nhập
+        # bổ sung tháng 12/2025, tức sau ảnh 2025-2026, nên fallback chọn đúng
+        # ảnh cũ nhất. Xem erp/common/student_photo.py.
         student_photo = None
         try:
-            # Bước 1: Lấy ảnh theo năm học (nếu có school_year_id)
-            if school_year_id:
-                photos = frappe.get_all(
-                    "SIS Photo",
-                    filters={
-                        "student_id": student.name,
-                        "type": "student",
-                        "status": "Active",
-                        "school_year_id": school_year_id
-                    },
-                    fields=["photo"],
-                    order_by="creation desc",
-                    limit=1
-                )
-                if photos and photos[0].get("photo"):
-                    student_photo = photos[0]["photo"]
-            
-            # Bước 2: Fallback - lấy ảnh mới nhất nếu không có ảnh năm học
-            if not student_photo:
-                photos = frappe.get_all(
-                    "SIS Photo",
-                    filters={
-                        "student_id": student.name,
-                        "type": "student",
-                        "status": "Active"
-                    },
-                    fields=["photo"],
-                    order_by="creation desc",
-                    limit=1
-                )
-                if photos and photos[0].get("photo"):
-                    student_photo = photos[0]["photo"]
+            from erp.common.student_photo import get_photo_url
+
+            student_photo = get_photo_url(student.name, school_year_id)
         except Exception as photo_err:
             frappe.logger().warning(f"Error fetching photo for student {student.name}: {str(photo_err)}")
 

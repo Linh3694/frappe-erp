@@ -11,6 +11,7 @@ from frappe.utils import nowdate, getdate, now
 import json
 from erp.utils.email_service import send_email_via_service as _send_email_via_service
 from erp.common.notification_emit import emit_staff_notify
+from erp.common import cdn_sign
 from erp.utils.api_response import (
     validation_error_response, 
     list_response, 
@@ -448,6 +449,7 @@ def _get_guardian_students(guardian_id, school_year_id=None):
                     AND status = 'Active'
                 ORDER BY 
                     CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                    (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                     upload_date DESC,
                     creation DESC
                 LIMIT 1
@@ -819,9 +821,9 @@ def get_application_detail(application_id=None):
         if app.academic_report_upload:
             parts = app.academic_report_upload.split('||')
             if len(parts) >= 1 and parts[0]:
-                semester1_files = [url.strip() for url in parts[0].split('|') if url.strip()]
+                semester1_files = [cdn_sign.sign_scholarship_url(url.strip()) for url in parts[0].split('|') if url.strip()]
             if len(parts) >= 2 and parts[1]:
-                semester2_files = [url.strip() for url in parts[1].split('|') if url.strip()]
+                semester2_files = [cdn_sign.sign_scholarship_url(url.strip()) for url in parts[1].split('|') if url.strip()]
         
         # Lấy thành tích với files
         achievements = []
@@ -829,7 +831,7 @@ def get_application_detail(application_id=None):
             # Parse nhiều file URLs nếu có (phân cách bằng |)
             files = []
             if ach.attachment:
-                files = [url.strip() for url in ach.attachment.split(' | ') if url.strip()]
+                files = [cdn_sign.sign_scholarship_url(url.strip()) for url in ach.attachment.split(' | ') if url.strip()]
             
             achievements.append({
                 "achievement_type": ach.achievement_type,
@@ -847,7 +849,7 @@ def get_application_detail(application_id=None):
                 "guardian_phone": app.guardian_contact_phone,
                 "guardian_email": app.guardian_contact_email,
                 "second_teacher_id": app.second_teacher_id,
-                "video_url": app.video_url,
+                "video_url": cdn_sign.sign_scholarship_url(app.video_url),
                 "semester1_files": semester1_files,
                 "semester2_files": semester2_files,
                 "achievements": achievements

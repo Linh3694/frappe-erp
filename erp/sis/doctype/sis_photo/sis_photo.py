@@ -600,33 +600,20 @@ def upload_single_photo():
             actual_email = user[0].email
             photo_title = f"Avatar of {user[0].full_name} ({actual_email})"
 
-            # Use same avatar saving logic as avatar_management.py
+            # Ghi qua avatar_store — nơi duy nhất xử lý ảnh, lưu đĩa, đẩy CDN
+            # và cập nhật User (qua doc.save() nên doc_events luôn chạy).
             try:
-                # Create filename like avatar_management.py: user_{email}_{uuid}.{ext}
+                from erp.common import avatar_store
+
                 file_extension = file_doc.file_name.rsplit('.', 1)[1].lower() if '.' in file_doc.file_name else 'jpg'
-                file_id = str(uuid.uuid4())
-                avatar_filename = f"user_{actual_email}_{file_id}.{file_extension}"
-
-                # Create Avatar directory if it doesn't exist
-                avatar_dir = frappe.get_site_path("public", "files", "Avatar")
-                if not os.path.exists(avatar_dir):
-                    os.makedirs(avatar_dir)
-
-                processed_content = process_image(final_content, file_extension)
-
-                # Save to Avatar directory
-                avatar_path = os.path.join(avatar_dir, avatar_filename)
-                with open(avatar_path, 'wb') as f:
-                    f.write(processed_content)
-
-                # Create avatar URL 
-                avatar_url = f"/files/Avatar/{avatar_filename}"
-
-                # Update User.user_image directly
-                user_doc = frappe.get_doc("User", user_id)
-                user_doc.user_image = avatar_url
-                user_doc.flags.ignore_permissions = True
-                user_doc.save()
+                # user_id là tên doc User, actual_email dùng đặt tên file —
+                # giữ đúng phân biệt của code cũ, hai giá trị có thể khác nhau.
+                avatar_url = avatar_store.save_avatar(
+                    final_content,
+                    user_id,
+                    ext=file_extension,
+                    identifier=actual_email,
+                )
 
                 # Publish redis event for realtime microservices
                 try:

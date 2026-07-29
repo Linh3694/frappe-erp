@@ -75,6 +75,7 @@ def _get_student_display_info(sid):
                 """SELECT photo FROM `tabSIS Photo`
                 WHERE student_id = %s AND type = 'student' AND status = 'Active'
                 ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
+                         (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                          upload_date DESC, creation DESC LIMIT 1""",
                 (sid, current_sy),
                 as_dict=True,
@@ -83,7 +84,8 @@ def _get_student_display_info(sid):
             photo_row = frappe.db.sql(
                 """SELECT photo FROM `tabSIS Photo`
                 WHERE student_id = %s AND type = 'student' AND status = 'Active'
-                ORDER BY upload_date DESC, creation DESC LIMIT 1""",
+                ORDER BY (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
+                         upload_date DESC, creation DESC LIMIT 1""",
                 (sid,),
                 as_dict=True,
             )

@@ -166,3 +166,6 @@ common_site_config.json
 *.pem
 *.key
 *.crt
+
+# SDD scratch (task briefs/reports)
+.superpowers/

@@ -11,9 +11,26 @@ from datetime import datetime
 from datetime import timedelta
 import secrets
 import base64
+import pickle
 import urllib.parse
+import uuid
 from erp.utils.api_response import success_response, error_response
 from erp.api.utils import format_vietnamese_name
+
+ADMIN_SYNC_ROLES = ("System Manager", "SIS IT")
+MS_ADMIN_SYNC_ACTIVE_KEY = "ms_admin_sync_job:active"
+MS_ADMIN_SYNC_JOB_TTL = 86400
+MS_ADMIN_RENAME_JOB_TIMEOUT = 900
+
+
+def _require_it_admin() -> None:
+	"""Chỉ SIS IT / System Manager được gọi admin sync từ FE."""
+	roles = frappe.get_roles(frappe.session.user)
+	if not any(r in roles for r in ADMIN_SYNC_ROLES):
+		frappe.throw(
+			_("Chỉ System Manager hoặc SIS IT được đồng bộ Microsoft"),
+			frappe.PermissionError,
+		)
 
 
 def _extract_origin(url: str | None) -> str | None:
@@ -526,7 +543,7 @@ def get_microsoft_app_token():
         "grant_type": "client_credentials"
     }
     
-    response = requests.post(token_url, data=data)
+    response = requests.post(token_url, data=data, timeout=15)
     
     if response.status_code != 200:
         raise Exception(f"App token request failed: {response.text}")
@@ -707,6 +724,22 @@ def find_or_create_frappe_user(ms_user, user_data):
                 return local_user
             except frappe.DoesNotExistError:
                 pass
+        
+        # 1b. Tìm theo microsoft_id (tránh tạo trùng khi email local ≠ UPN MS)
+        ms_id = user_data.get("id") or getattr(ms_user, "microsoft_id", None)
+        if ms_id:
+            existing_by_ms = frappe.db.get_value("User", {"microsoft_id": ms_id})
+            if existing_by_ms:
+                local_user = frappe.get_doc("User", existing_by_ms)
+                update_frappe_user(local_user, ms_user, user_data)
+                try:
+                    if hasattr(ms_user, "mapped_user_id"):
+                        ms_user.mapped_user_id = local_user.name
+                        ms_user.flags.ignore_permissions = True
+                        ms_user.save()
+                except Exception:
+                    pass
+                return local_user
         
         # 2. Tìm theo email
         email = user_data.get("mail") or user_data.get("userPrincipalName")
@@ -1393,6 +1426,489 @@ def sync_one_microsoft_user(identifier: str):
     except Exception as e:
         frappe.log_error("Microsoft Manual Sync", f"sync_one_microsoft_user error: {str(e)}")
         frappe.throw(_(f"Error: {str(e)}"))
+
+
+MS_USER_SELECT_FIELDS = (
+	"id,displayName,givenName,surname,userPrincipalName,mail,"
+	"jobTitle,department,officeLocation,businessPhones,mobilePhone,"
+	"employeeId,employeeType,accountEnabled,preferredLanguage,usageLocation,companyName"
+)
+
+
+def _is_graph_user_not_found(resp) -> bool:
+	"""Chỉ 404 hoặc Request_ResourceNotFound mới được fallback $filter."""
+	if resp.status_code == 404:
+		return True
+	try:
+		code = ((resp.json() or {}).get("error") or {}).get("code") or ""
+		return code == "Request_ResourceNotFound"
+	except Exception:
+		return False
+
+
+def _fetch_microsoft_user_payload(identifier: str, headers: dict) -> dict:
+	"""Lấy 1 user Graph theo objectId/UPN/email; fallback $filter khi /users/{id} 404."""
+	import urllib.parse
+
+	ident = (identifier or "").strip()
+	if not ident:
+		frappe.throw(_("Missing identifier"))
+
+	url = f"https://graph.microsoft.com/v1.0/users/{urllib.parse.quote(ident)}?$select={MS_USER_SELECT_FIELDS}"
+	resp = requests.get(url, headers=headers, timeout=20)
+	if resp.status_code == 200:
+		return resp.json()
+
+	if not _is_graph_user_not_found(resp):
+		frappe.throw(_(f"Graph fetch failed: {resp.text}"))
+
+	# Fallback filter mail / UPN (case typo email local)
+	safe = ident.replace("'", "''")
+	filt = urllib.parse.quote(f"mail eq '{safe}' or userPrincipalName eq '{safe}'")
+	filter_url = (
+		f"https://graph.microsoft.com/v1.0/users?$select={MS_USER_SELECT_FIELDS}&$filter={filt}"
+	)
+	resp2 = requests.get(filter_url, headers=headers, timeout=20)
+	if resp2.status_code == 200:
+		values = (resp2.json() or {}).get("value") or []
+		if values:
+			return values[0]
+
+	frappe.throw(_("Không tìm thấy trên Microsoft: {0}").format(ident))
+
+
+@frappe.whitelist(methods=["POST"])
+def admin_sync_one_microsoft_user(identifier: str | None = None):
+	"""IT sync 1 user từ Graph (role-gated)."""
+	try:
+		_require_it_admin()
+		identifier = identifier or frappe.form_dict.get("identifier")
+		if not identifier:
+			return error_response("Thiếu identifier (email/UPN/objectId)")
+
+		token = get_microsoft_app_token()
+		headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+		user_data = _fetch_microsoft_user_payload(identifier, headers)
+
+		ms_id = user_data.get("id")
+		existed_local = bool(
+			ms_id and frappe.db.get_value("User", {"microsoft_id": ms_id})
+		) or bool(
+			frappe.db.exists(
+				"User",
+				user_data.get("mail") or user_data.get("userPrincipalName") or "",
+			)
+		)
+
+		ms_user = create_or_update_microsoft_user(user_data)
+		local_user = find_or_create_frappe_user(ms_user, user_data)
+		if not local_user:
+			return error_response("Lưu ERP Microsoft User được nhưng không tạo/map được User local")
+
+		update_frappe_user(local_user, ms_user, user_data)
+		action = "updated" if existed_local else "created"
+
+		# Email trên Microsoft có thể đã được IT sửa lại; User.name dưới Frappe là email
+		# nên phải rename bản ghi mới hết "stuck". Chỉ báo lệch, không tự rename.
+		ms_email = (user_data.get("mail") or user_data.get("userPrincipalName") or "").strip()
+		local_email = (local_user.name or "").strip()
+		email_mismatch = bool(ms_email) and ms_email.lower() != local_email.lower()
+		rename_conflict = email_mismatch and bool(frappe.db.exists("User", ms_email))
+
+		if email_mismatch:
+			message = (
+				"Đã cập nhật profile, nhưng email local ({0}) khác Microsoft ({1})."
+			).format(local_email, ms_email)
+			if rename_conflict:
+				message += " Email Microsoft đã tồn tại như một User khác — cần IT xử lý thủ công."
+		else:
+			message = "Đồng bộ Microsoft thành công"
+
+		return success_response(
+			data={
+				"action": action,
+				"email": local_email,
+				"microsoft_email": ms_email or None,
+				"microsoft_id": ms_id,
+				"department": user_data.get("department"),
+				"job_title": user_data.get("jobTitle"),
+				"employee_code": user_data.get("employeeId"),
+				"email_mismatch": email_mismatch,
+				"rename_conflict": rename_conflict,
+			},
+			message=message,
+		)
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Sync One", str(e))
+		return error_response(str(e))
+
+
+@frappe.whitelist(methods=["POST"])
+def admin_rename_user_email(current_email: str | None = None, new_email: str | None = None):
+	"""Đổi email (rename User) theo email đúng trên Microsoft — IT xác nhận từ FE.
+
+	An toàn: chỉ cho rename khi `new_email` đúng là mail/UPN của cùng `microsoft_id`,
+	và chặn khi `new_email` đã tồn tại như một User khác (không merge tự động).
+	"""
+	try:
+		_require_it_admin()
+		current_email = (current_email or frappe.form_dict.get("current_email") or "").strip()
+		new_email = (new_email or frappe.form_dict.get("new_email") or "").strip()
+		if not current_email or not new_email:
+			return error_response("Thiếu current_email hoặc new_email")
+		if current_email.lower() == new_email.lower():
+			return error_response("Email mới trùng email hiện tại")
+
+		if not frappe.db.exists("User", current_email):
+			return error_response(f"Không tìm thấy User: {current_email}")
+		if frappe.db.exists("User", new_email):
+			return error_response(
+				f"Email {new_email} đã tồn tại như một User khác. Cần IT hợp nhất thủ công "
+				"trước khi đổi email (hệ thống không tự merge)."
+			)
+
+		local_user = frappe.get_doc("User", current_email)
+		local_ms_id = getattr(local_user, "microsoft_id", None)
+		if not local_ms_id:
+			return error_response(
+				"User này chưa có microsoft_id — hãy đồng bộ Microsoft trước khi đổi email"
+			)
+
+		# Xác thực email mới thực sự thuộc cùng identity trên Microsoft
+		token = get_microsoft_app_token()
+		headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+		ms_payload = _fetch_microsoft_user_payload(new_email, headers)
+		if (ms_payload.get("id") or "") != local_ms_id:
+			return error_response(
+				"Email mới thuộc một tài khoản Microsoft khác — không đổi để tránh sai dữ liệu"
+			)
+
+		# rename_doc phải cập nhật link field trên hàng chục doctype + clear cache nên
+		# thường vượt timeout của request → chạy nền, FE poll theo job_id.
+		job_id = frappe.generate_hash(length=12)
+		job = {
+			"job_id": job_id,
+			"status": "queued",
+			"old_email": current_email,
+			"email": new_email,
+			"microsoft_id": local_ms_id,
+			"message": "Đang xếp hàng đổi email…",
+			"started_by": frappe.session.user,
+		}
+		_write_rename_job(job_id, job)
+		try:
+			frappe.enqueue(
+				"erp.api.erp_common_user.microsoft_auth._run_user_email_rename_job",
+				queue="long",
+				timeout=MS_ADMIN_RENAME_JOB_TIMEOUT,
+				job_id_param=job_id,
+				current_email=current_email,
+				new_email=new_email,
+			)
+		except Exception as e:
+			job["status"] = "failed"
+			job["message"] = f"Không thể xếp hàng job đổi email: {e}"
+			_write_rename_job(job_id, job)
+			return error_response(job["message"])
+
+		return success_response(
+			data=job,
+			message=f"Đang đổi email: {current_email} → {new_email}",
+		)
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Rename Email", str(e))
+		return error_response(str(e))
+
+
+def _rename_job_cache_key(job_id: str) -> str:
+	return f"ms_admin_rename_job:{job_id}"
+
+
+def _write_rename_job(job_id: str, payload: dict) -> None:
+	frappe.cache().set_value(
+		_rename_job_cache_key(job_id),
+		payload,
+		expires_in_sec=MS_ADMIN_SYNC_JOB_TTL,
+	)
+
+
+def _read_rename_job(job_id: str) -> dict | None:
+	return frappe.cache().get_value(_rename_job_cache_key(job_id))
+
+
+def _run_user_email_rename_job(job_id_param: str, current_email: str, new_email: str) -> None:
+	"""Worker: rename User + đồng bộ mapping, cập nhật tiến độ vào cache."""
+	job = _read_rename_job(job_id_param) or {
+		"job_id": job_id_param,
+		"old_email": current_email,
+		"email": new_email,
+	}
+	job["status"] = "running"
+	job["message"] = "Đang cập nhật các liên kết tới user…"
+	_write_rename_job(job_id_param, job)
+
+	try:
+		# frappe.rename_doc (top-level) không nhận ignore_permissions → gọi hàm gốc.
+		from frappe.model.rename_doc import rename_doc as _rename_doc
+
+		_rename_doc(
+			doctype="User",
+			old=current_email,
+			new=new_email,
+			ignore_permissions=True,
+			show_alert=False,
+		)
+		if frappe.db.get_value("User", new_email, "email") != new_email:
+			frappe.db.set_value("User", new_email, "email", new_email)
+
+		# Cập nhật mapping trên ERP Microsoft User để lần sync sau khớp ngay
+		ms_id = job.get("microsoft_id") or frappe.db.get_value("User", new_email, "microsoft_id")
+		ms_user_name = (
+			frappe.db.get_value("ERP Microsoft User", {"microsoft_id": ms_id}) if ms_id else None
+		)
+		if ms_user_name:
+			frappe.db.set_value("ERP Microsoft User", ms_user_name, "mapped_user_id", new_email)
+
+		frappe.db.commit()
+		job["status"] = "success"
+		job["message"] = f"Đã đổi email: {current_email} → {new_email}"
+		_write_rename_job(job_id_param, job)
+		frappe.logger("microsoft_sync").info(
+			f"renamed User {current_email} -> {new_email} by {job.get('started_by')}"
+		)
+	except Exception as e:
+		frappe.db.rollback()
+		job["status"] = "failed"
+		job["message"] = f"Đổi email thất bại: {e}"
+		_write_rename_job(job_id_param, job)
+		frappe.log_error("Microsoft Admin Rename Email Job", str(e))
+
+
+@frappe.whitelist(methods=["GET"])
+def admin_get_user_rename_job(job_id: str | None = None):
+	"""FE poll tiến độ job đổi email."""
+	try:
+		_require_it_admin()
+		job_id = job_id or frappe.form_dict.get("job_id")
+		if not job_id:
+			return error_response("Thiếu job_id")
+
+		job = _read_rename_job(job_id)
+		if not job:
+			return error_response("Không tìm thấy job (có thể đã hết hạn)")
+		return success_response(data=job, message=job.get("message") or "")
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Rename Job Status", str(e))
+		return error_response(str(e))
+
+
+def _job_cache_key(job_id: str) -> str:
+	return f"ms_admin_sync_job:{job_id}"
+
+
+def _write_sync_job(job_id: str, payload: dict) -> None:
+	frappe.cache().set_value(
+		_job_cache_key(job_id),
+		payload,
+		expires_in_sec=MS_ADMIN_SYNC_JOB_TTL,
+	)
+
+
+def _read_sync_job(job_id: str) -> dict | None:
+	return frappe.cache().get_value(_job_cache_key(job_id))
+
+
+def _acquire_sync_job_lock(job_id: str) -> bool:
+	"""Giữ lock active bằng Redis SET NX kèm TTL trong một lệnh atomic."""
+	cache = frappe.cache()
+	return bool(
+		cache.set(
+			name=cache.make_key(MS_ADMIN_SYNC_ACTIVE_KEY),
+			value=pickle.dumps(job_id),
+			nx=True,
+			ex=MS_ADMIN_SYNC_JOB_TTL,
+		)
+	)
+
+
+def _graph_get_with_retry(url: str, headers: dict, retries: int = 3):
+	"""GET Graph với retry ngắn cho 429/5xx."""
+	import time
+
+	last = None
+	for attempt in range(retries):
+		last = requests.get(url, headers=headers)
+		if last.status_code in (429, 500, 502, 503, 504):
+			time.sleep(1.5 * (attempt + 1))
+			continue
+		return last
+	return last
+
+
+def _run_microsoft_group_sync_job(job_id: str) -> None:
+	"""Worker: sync members các group trong microsoft_group_ids, cập nhật tiến độ cache."""
+	job = _read_sync_job(job_id) or {
+		"job_id": job_id,
+		"status": "running",
+		"processed": 0,
+		"created": 0,
+		"updated": 0,
+		"errors": 0,
+		"message": "",
+		"started_by": "",
+	}
+	job["status"] = "running"
+	_write_sync_job(job_id, job)
+
+	try:
+		groups = _get_allowed_group_ids()
+		if not groups:
+			job["status"] = "failed"
+			job["message"] = "Chưa cấu hình microsoft_group_ids"
+			_write_sync_job(job_id, job)
+			frappe.cache().delete_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			return
+
+		token = get_microsoft_app_token()
+		headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+		seen: set[str] = set()
+		page_size = 100
+
+		for gid in groups:
+			url = (
+				f"https://graph.microsoft.com/v1.0/groups/{gid}/members"
+				f"?$select={MS_USER_SELECT_FIELDS}&$top={page_size}"
+			)
+			while url:
+				resp = _graph_get_with_retry(url, headers)
+				if resp.status_code != 200:
+					raise Exception(f"Graph members {gid}: {resp.status_code} {resp.text[:300]}")
+				data = resp.json() or {}
+				for member in data.get("value") or []:
+					try:
+						if not (member.get("userPrincipalName") or member.get("mail")):
+							continue
+						uid = member.get("id")
+						if not uid or uid in seen:
+							continue
+						seen.add(uid)
+
+						ms_id = member.get("id")
+						existed = bool(ms_id and frappe.db.get_value("User", {"microsoft_id": ms_id}))
+						if not existed:
+							email = member.get("mail") or member.get("userPrincipalName")
+							existed = bool(email and frappe.db.exists("User", email))
+
+						ms_user = create_or_update_microsoft_user(member)
+						local_user = find_or_create_frappe_user(ms_user, member)
+						if local_user:
+							update_frappe_user(local_user, ms_user, member)
+							if existed:
+								job["updated"] += 1
+							else:
+								job["created"] += 1
+						job["processed"] += 1
+						if job["processed"] % 10 == 0:
+							_write_sync_job(job_id, job)
+							frappe.db.commit()
+					except Exception:
+						job["errors"] += 1
+
+				url = data.get("@odata.nextLink")
+
+		job["status"] = "success"
+		job["message"] = (
+			f"Xong: processed={job['processed']}, created={job['created']}, "
+			f"updated={job['updated']}, errors={job['errors']}"
+		)
+		_write_sync_job(job_id, job)
+		frappe.db.commit()
+	except Exception as e:
+		job["status"] = "failed"
+		job["message"] = str(e)[:500]
+		_write_sync_job(job_id, job)
+		frappe.log_error("Microsoft Admin Group Sync", str(e))
+	finally:
+		frappe.cache().delete_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+
+
+@frappe.whitelist(methods=["POST"])
+def admin_start_microsoft_group_sync() -> dict:
+	"""Enqueue sync members microsoft_group_ids (1 job active)."""
+	try:
+		_require_it_admin()
+		cache = frappe.cache()
+		job_id = str(uuid.uuid4())
+		if not _acquire_sync_job_lock(job_id):
+			active_id = cache.get_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			existing = _read_sync_job(active_id) if active_id else None
+			return success_response(
+				data=existing or {"job_id": active_id, "status": "queued"},
+				message="Đã có job đồng bộ đang chạy",
+			)
+
+		payload = {
+			"job_id": job_id,
+			"status": "queued",
+			"processed": 0,
+			"created": 0,
+			"updated": 0,
+			"errors": 0,
+			"message": "",
+			"started_by": frappe.session.user,
+		}
+		try:
+			_write_sync_job(job_id, payload)
+			frappe.enqueue(
+				"erp.api.erp_common_user.microsoft_auth._run_microsoft_group_sync_job",
+				job_id=job_id,
+				queue="long",
+				timeout=3600,
+			)
+		except Exception as enqueue_error:
+			# Không để lock treo 24 giờ nếu ghi job hoặc enqueue thất bại.
+			payload["status"] = "failed"
+			payload["message"] = str(enqueue_error)[:500]
+			try:
+				_write_sync_job(job_id, payload)
+			finally:
+				cache.delete_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			raise
+
+		return success_response(data=payload, message="Đã xếp hàng đồng bộ Microsoft group")
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Start Sync", str(e))
+		return error_response(str(e))
+
+
+@frappe.whitelist()
+def admin_get_microsoft_sync_job(job_id: str | None = None) -> dict:
+	"""Poll trạng thái job sync group."""
+	try:
+		_require_it_admin()
+		job_id = job_id or frappe.form_dict.get("job_id")
+		if not job_id:
+			active = frappe.cache().get_value(MS_ADMIN_SYNC_ACTIVE_KEY)
+			if not active:
+				return success_response(data=None, message="Không có job đang chạy")
+			job_id = active
+		job = _read_sync_job(job_id)
+		if not job:
+			return error_response("Không tìm thấy job", code="NOT_FOUND")
+		return success_response(data=job)
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		return error_response(str(e))
+
 
 @frappe.whitelist()
 def create_users_subscription():

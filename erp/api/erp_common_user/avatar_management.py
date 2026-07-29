@@ -87,34 +87,28 @@ def process_and_save_avatar(avatar_file, avatar_type, identifier):
         
         # Read file content
         file_content = avatar_file.read()
-        
+
         # Validate file size (max 5MB)
         max_size = 5 * 1024 * 1024  # 5MB
         if len(file_content) > max_size:
             frappe.throw(_("File size too large. Maximum allowed: 5MB"))
-        
-        # Process image (resize if needed)
-        processed_content = process_image(file_content, file_extension)
-        
-        # Create filename
-        file_id = str(uuid.uuid4())
-        filename = f"{avatar_type}_{identifier}_{file_id}.{file_extension}"
-        
-        # Create Avatar directory if it doesn't exist
-        upload_dir = frappe.get_site_path("public", "files", "Avatar")
-        if not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-        
-        # Save file
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, 'wb') as f:
-            f.write(processed_content)
-        
-        # Create file URL
-        avatar_url = f"/files/Avatar/{filename}"
-        
+
+        # Ghi qua avatar_store (xử lý ảnh + lưu đĩa + đẩy CDN).
+        # `update_user=False` vì người gọi tự quyết định cập nhật User hay
+        # không — avatar nhóm chat không gắn với User nào.
+        from erp.common import avatar_store
+
+        avatar_url = avatar_store.save_avatar(
+            file_content,
+            identifier if avatar_type == "user" else None,
+            ext=file_extension,
+            update_user=False,
+            kind=avatar_type,
+            identifier=identifier,
+        )
+
         return avatar_url
-        
+
     except Exception as e:
         frappe.log_error(f"Process and save avatar error: {str(e)}", "Avatar Management")
         raise e
@@ -194,30 +188,10 @@ def save_user_avatar_bytes(user_email: str, content_bytes: bytes, content_type: 
         # Chọn phần mở rộng hợp lệ
         ext = _guess_extension_from_content_type(content_type)
 
-        # Xử lý ảnh (resize/chuẩn hóa)
-        processed_content = process_image(content_bytes, ext)
+        # Ghi qua avatar_store (xử lý ảnh + lưu đĩa + đẩy CDN + cập nhật User)
+        from erp.common import avatar_store
 
-        # Tạo tên file
-        file_id = str(uuid.uuid4())
-        safe_email = user_email.replace("/", "_")
-        filename = f"user_{safe_email}_{file_id}.{ext}"
-
-        # Tạo thư mục Avatar nếu chưa có
-        upload_dir = frappe.get_site_path("public", "files", "Avatar")
-        if not os.path.exists(upload_dir):
-            os.makedirs(upload_dir)
-
-        # Ghi file
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, 'wb') as f:
-            f.write(processed_content)
-
-        avatar_url = f"/files/Avatar/{filename}"
-
-        # Cập nhật vào profile/user
-        update_user_avatar(user_email, avatar_url)
-
-        return avatar_url
+        return avatar_store.save_avatar(content_bytes, user_email, ext=ext)
     except Exception as e:
         frappe.log_error(f"Save user avatar bytes error: {str(e)}", "Avatar Management")
         raise e
@@ -263,12 +237,12 @@ def delete_avatar():
         # Get current avatar from User only
         current_avatar = frappe.db.get_value("User", frappe.session.user, "user_image")
         
-        # Delete file if exists
-        if current_avatar and current_avatar.startswith("/files/Avatar/"):
-            file_path = frappe.get_site_path("public", current_avatar.lstrip("/"))
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        
+        # Xoá cả bản trên đĩa lẫn object trên CDN — nếu chỉ xoá đĩa thì ảnh cũ
+        # vẫn phát được qua CDN sau khi user đã xoá avatar.
+        from erp.common import avatar_store
+
+        avatar_store.delete_avatar(current_avatar)
+
         # Update User only (no ERP User Profile)
         user_doc = frappe.get_doc("User", frappe.session.user)
         user_doc.user_image = ""

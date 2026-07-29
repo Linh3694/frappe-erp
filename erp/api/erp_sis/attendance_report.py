@@ -1301,6 +1301,7 @@ def get_student_attendance_by_month(student_id=None, year=None, month=None, camp
             SELECT photo FROM `tabSIS Photo`
             WHERE student_id = %(student_id)s AND type = 'student' AND status = 'Active'
             ORDER BY CASE WHEN school_year_id = %(sy)s THEN 0 ELSE 1 END,
+                     (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
                      upload_date DESC, creation DESC
             LIMIT 1
         """, {"student_id": student_id, "sy": school_year or ""}, as_dict=True)
