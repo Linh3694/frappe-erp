@@ -65,17 +65,28 @@ def _contact_emails_by_guardian(guardian_names):
     return emails
 
 
-def build_guardians_by_student_ids(student_ids):
+def build_guardians_by_student_ids(student_ids, access_only=False):
     """
     Nội bộ server: cùng cấu trúc với get_guardians_by_students.data.guardians.
     Dùng cho Parent Portal / social-service (tránh whitelist + permission Resource).
+
+    access_only=True: chỉ lấy quan hệ có cờ `access` (UI hiển thị "Xem thông tin") = 1.
+    PH không được tích cờ thì không xem được hồ sơ HS (xem parent_portal/student_profile.py)
+    nên cũng không được vào nhóm chat lớp. Lọc theo TỪNG QUAN HỆ chứ không theo PH: PH có
+    2 con mà chỉ 1 con được cấp quyền thì `students` chỉ còn con đó — subtitle nhóm chat
+    ("Phụ huynh của …") không lộ tên HS mà PH không có quyền xem.
+
+    Mặc định False: các consumer khác (màn hình Gia đình bên SIS, danh bạ PH) vẫn cần thấy
+    đủ mọi quan hệ, đừng bật cờ này ở đó.
     """
     student_ids = [student_id for student_id in (student_ids or []) if student_id]
     if not student_ids:
         return []
 
+    access_filter = "AND fr.access = 1" if access_only else ""
+
     rows = frappe.db.sql(
-        """
+        f"""
         SELECT
             fr.parent AS family_code,
             fr.student AS student_id,
@@ -96,6 +107,7 @@ def build_guardians_by_student_ids(student_ids):
         INNER JOIN `tabCRM Guardian` g ON g.name = fr.guardian
         LEFT JOIN `tabCRM Student` s ON s.name = fr.student
         WHERE fr.student IN %(student_ids)s
+          {access_filter}
         ORDER BY fr.display_order ASC, fr.key_person DESC, g.guardian_name ASC
         """,
         {"student_ids": tuple(student_ids)},

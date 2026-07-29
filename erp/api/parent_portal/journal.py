@@ -248,7 +248,10 @@ def get_class_chat_scope(class_id=None, school_year_id=None):
                 "family_code": row.get("family_code"),
             })
 
-        guardians = build_guardians_by_student_ids(student_ids)
+        # access_only: cùng roster nhóm chat lớp với chat_scope._build_class_chat_scope nên
+        # phải cùng bộ lọc cờ "Xem thông tin". Read-path này UNION membership, lỏng hơn là
+        # add lại đúng những PH mà luồng sync vừa revoke.
+        guardians = build_guardians_by_student_ids(student_ids, access_only=True)
 
         teachers = []
         for tid in [cls.get("homeroom_teacher"), cls.get("vice_homeroom_teacher")]:

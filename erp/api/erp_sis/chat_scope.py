@@ -123,7 +123,12 @@ def _build_class_chat_scope(cls, class_id, school_year_id):
             }
         )
 
-    guardians = build_guardians_by_student_ids(student_ids)
+    # access_only: PH chưa tích cờ "Xem thông tin" (CRM Family Relationship.access) không
+    # có quyền xem hồ sơ HS → cũng không được vào nhóm chat lớp. Scope này là AUTHORITATIVE
+    # cho luồng sync nên lọc ở đây vừa chặn add mới, vừa revoke PH đã lỡ vào nhóm.
+    # Phải giữ đồng bộ với parent_portal.journal.get_class_chat_scope (read-path UNION
+    # membership — bên đó lỏng hơn thì PH vừa revoke sẽ được add lại).
+    guardians = build_guardians_by_student_ids(student_ids, access_only=True)
 
     teachers = []
     for tid in [cls.get("homeroom_teacher"), cls.get("vice_homeroom_teacher")]:

@@ -353,55 +353,59 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     
     frappe.logger().info(f"📊 _build_entries: {len(pattern_rows)} pattern rows, {len(override_rows)} override rows")
     
-    # ⚡ NEW (2025-12-20): Filter pattern rows by valid_from/valid_to for the week
-    # Pattern rows có valid_from/valid_to chỉ áp dụng trong date range cụ thể
-    # Cần kiểm tra xem pattern có valid cho tuần được query không
-    week_end = _add_days(week_start, 6)
-    
-    def is_pattern_valid_for_week(row, ws, we):
-        """
-        Kiểm tra pattern row có valid cho tuần ws → we không.
-        
-        Logic:
-        - Pattern có valid_from/valid_to → chỉ valid nếu overlap với tuần
-        - Pattern không có valid_from/valid_to → valid cho tất cả (legacy)
-        """
-        valid_from = row.get("valid_from")
-        valid_to = row.get("valid_to")
-        
-        # Legacy pattern (không có date range) → always valid
+    # ⚡ FIX: Lọc pattern row theo ĐÚNG NGÀY nó được render, không phải theo cả tuần.
+    # Trước đây chỉ kiểm tra range có overlap với tuần hay không, nên TKB import từ giữa
+    # tuần (vd valid_from = thứ 4) vẫn hiện ở thứ 2 và thứ 3 của chính tuần đó.
+    #
+    # Phải lọc TRƯỚC bước dedup bên dưới: nếu dedup trước, row cũ (còn hiệu lực đầu tuần)
+    # bị row mới ghi đè theo valid_from rồi mới bị loại vì chưa tới hạn → ô đầu tuần trống
+    # thay vì hiển thị TKB cũ.
+    def _to_date(value):
+        """Chuẩn hoá Date/Datetime/chuỗi ISO về datetime.date. None nếu rỗng/không parse được."""
+        from datetime import date as _date_cls
+
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, _date_cls):
+            return value
+        try:
+            return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            return None
+
+    def get_pattern_render_date(row):
+        """Ngày mà pattern row này sẽ hiển thị trong tuần đang xem."""
+        idx = _day_of_week_to_index(row.get("day_of_week"))
+        if idx < 0:
+            return None
+        return _add_days(week_start, idx).date()
+
+    def is_pattern_valid_on(row, target_date):
+        """Pattern row có hiệu lực đúng vào target_date không (NULL = không giới hạn)."""
+        valid_from = _to_date(row.get("valid_from"))
+        valid_to = _to_date(row.get("valid_to"))
+
+        # Legacy pattern (không có date range) → luôn hiển thị
         if not valid_from and not valid_to:
             return True
-        
-        # Parse dates
-        from datetime import datetime
-        
-        if valid_from:
-            if isinstance(valid_from, str):
-                valid_from = datetime.strptime(valid_from, "%Y-%m-%d").date()
-            elif hasattr(valid_from, 'date'):
-                valid_from = valid_from.date()
-        
-        if valid_to:
-            if isinstance(valid_to, str):
-                valid_to = datetime.strptime(valid_to, "%Y-%m-%d").date()
-            elif hasattr(valid_to, 'date'):
-                valid_to = valid_to.date()
-        
-        ws_date = ws.date() if hasattr(ws, 'date') else ws
-        we_date = we.date() if hasattr(we, 'date') else we
-        
-        # Check overlap: pattern range phải overlap với tuần
-        # Overlap nếu: valid_from <= we AND valid_to >= ws
-        if valid_from and valid_from > we_date:
+
+        # day_of_week hỏng → giữ nguyên, vòng build bên dưới sẽ bỏ
+        if target_date is None:
+            return True
+
+        if valid_from and target_date < valid_from:
             return False
-        if valid_to and valid_to < ws_date:
+        if valid_to and target_date > valid_to:
             return False
-        
+
         return True
-    
-    # Lọc pattern rows theo week range
-    filtered_pattern_rows = [r for r in pattern_rows if is_pattern_valid_for_week(r, week_start, week_end)]
+
+    # Lọc pattern rows theo ngày hiển thị thực tế của từng row
+    filtered_pattern_rows = [
+        r for r in pattern_rows if is_pattern_valid_on(r, get_pattern_render_date(r))
+    ]
     frappe.logger().info(f"📊 _build_entries: After date filter: {len(filtered_pattern_rows)}/{len(pattern_rows)} pattern rows valid for week {week_start.strftime('%Y-%m-%d')}")
     
     # Ghi nhận các rows bị loại để debug
