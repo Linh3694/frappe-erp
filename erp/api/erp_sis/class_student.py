@@ -565,6 +565,25 @@ def assign_student(class_id=None, student_id=None, school_year_id=None, class_ty
                             frappe.delete_doc("SIS Class Student", dup["name"])
                         except Exception:
                             pass
+
+                    # Sync membership nhóm chat cho CẢ lớp cũ và lớp mới. Nhánh này chuyển lớp
+                    # bằng frappe.db.set_value nên doc_events của SIS Class Student KHÔNG bắn
+                    # (cùng lý do update_class trong sis_class.py phải gọi hook trực tiếp).
+                    # Thiếu đoạn này thì PH kẹt ở nhóm lớp cũ + vắng nhóm lớp mới cho tới cron
+                    # 6:30 sáng hôm sau. Đặt TRƯỚC commit để job (enqueue_after_commit=True)
+                    # được đẩy ngay tại commit bên dưới, không phụ thuộc commit cuối request.
+                    try:
+                        from erp.api.erp_sis.chat_membership_hooks import enqueue_chat_membership_sync
+
+                        enqueue_chat_membership_sync(old_class_id, school_year_id)
+                        enqueue_chat_membership_sync(class_id, school_year_id)
+                    except Exception as chat_sync_err:
+                        # Không được chặn luồng chuyển lớp vì lỗi sync chat.
+                        frappe.logger().warning(
+                            f"[Chat Membership Hook] assign_student move enqueue failed "
+                            f"{old_class_id}->{class_id}: {str(chat_sync_err)}"
+                        )
+
                     frappe.db.commit()
                     updated = frappe.get_doc("SIS Class Student", target_name)
                     

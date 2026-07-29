@@ -283,31 +283,43 @@ class TimetableImportValidator:
 		return len(self.errors) == 0
 	
 	def _validate_class_references(self, class_titles: List[str], campus_id: str):
-		"""Validate class titles exist"""
+		"""
+		Validate class titles exist.
+
+		⚠️ Bộ lọc ở đây PHẢI khớp TimetableImportExecutor._get_class_id (có school_year_id).
+		Nếu validator tra lỏng hơn executor, lớp lệch năm học sẽ qua được validate rồi biến
+		mất lúc chạy → import báo "thành công" với 0 lớp mà không có dòng lỗi nào.
+		"""
+		school_year_id = self.metadata.get("school_year_id")
+
 		for title in class_titles:
 			# Try to find class by short_title or title
-			class_id = frappe.db.get_value(
-				"SIS Class",
-				{
-					"campus_id": campus_id,
-					"short_title": title
-				},
-				"name"
-			)
-			
+			filters = {"campus_id": campus_id, "short_title": title}
+			if school_year_id:
+				filters["school_year_id"] = school_year_id
+			class_id = frappe.db.get_value("SIS Class", filters, "name")
+
 			if not class_id:
 				# Try by title
-				class_id = frappe.db.get_value(
-					"SIS Class",
-					{
-						"campus_id": campus_id,
-						"title": title
-					},
-					"name"
-				)
-			
+				filters_by_title = {"campus_id": campus_id, "title": title}
+				if school_year_id:
+					filters_by_title["school_year_id"] = school_year_id
+				class_id = frappe.db.get_value("SIS Class", filters_by_title, "name")
+
 			if class_id:
 				self.cache["classes"][title] = class_id
+			elif school_year_id and frappe.db.exists(
+				"SIS Class", {"campus_id": campus_id, "short_title": title}
+			):
+				# Lớp có tồn tại nhưng thuộc năm học khác → nói rõ để người dùng chọn lại năm.
+				# ⚠️ Cố tình KHÔNG dùng tiền tố "Class not found: '...'" — frontend
+				# (TimetableImportModal.translateError) bắt pattern đó và thay bằng câu dịch
+				# sẵn, sẽ nuốt mất phần gợi ý năm học. Câu tiếng Việt này rơi vào nhánh
+				# default nên hiển thị nguyên văn.
+				self.errors.append(
+					f"Lớp '{title}' không thuộc năm học đã chọn ({school_year_id}). "
+					f"Lớp này tồn tại ở năm học khác — kiểm tra lại Năm học ở Bước 1."
+				)
 			else:
 				self.errors.append(f"Class not found: '{title}'")
 	

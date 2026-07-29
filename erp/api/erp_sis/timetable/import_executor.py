@@ -82,7 +82,10 @@ class TimetableImportExecutor:
 		
 		# Track processed instances for materialized view sync
 		self.processed_instances = {}  # {instance_id: {class_id, start_date, end_date}}
-		
+
+		# Tên cột lớp trong Excel nhưng không tra ra SIS Class (theo campus + năm học)
+		self.unresolved_classes = []
+
 		# Logs
 		self.logs = []
 	
@@ -191,6 +194,10 @@ class TimetableImportExecutor:
 				"success": False,
 				"message": f"Import failed: {str(e)}",
 				"error": str(e),
+				# ⚠️ Bắt buộc có key `errors`: execute_import_synchronous() và frontend
+				# (TimetableImportModal.extractImportLists) đều đọc danh sách lỗi ở đây.
+				# Thiếu key này thì lỗi thật bị nuốt, UI chỉ còn message tổng.
+				"errors": [str(e)],
 				"stats": self.stats,
 				"logs": error_logs,
 				"detailed_logs": self.logs + [
@@ -240,7 +247,16 @@ class TimetableImportExecutor:
 			class_id = self._get_class_id(title, campus_id)
 			if class_id:
 				self.cache["classes"][title] = class_id
-		
+			else:
+				# Không im lặng bỏ qua: cột lớp không tra ra được phải nổi lên log/lỗi,
+				# nếu không import sẽ "thành công" với 0 lớp mà người dùng không hiểu vì sao.
+				self.unresolved_classes.append(str(title))
+
+		if self.unresolved_classes:
+			self.logs.append(
+				f"⚠️ Không tìm thấy lớp trong hệ thống: {', '.join(self.unresolved_classes)}"
+			)
+
 		# Cache subjects (different logic based on format)
 		if self.format == "row_based":
 			# OLD FORMAT: Get unique values from "Môn học" column
@@ -418,11 +434,20 @@ class TimetableImportExecutor:
 	
 	def _process_column_based_format(self):
 		"""Process NEW FORMAT (column-based): classes as columns"""
-		class_columns = list(self.cache["classes"].keys())
+		# Duyệt theo cột lớp trong Excel (không phải theo cache) để lớp tra không ra
+		# vẫn chạy vào nhánh "Skipped class" bên dưới thay vì biến mất không dấu vết.
+		class_columns = list(self.df.columns)[2:]
 		total_classes = len(class_columns)
-		
+
+		if not self.cache["classes"]:
+			raise Exception(
+				f"Không tra được lớp nào từ {total_classes} cột lớp trong file "
+				f"({', '.join(str(c) for c in class_columns) or 'không có cột lớp'}). "
+				f"Kiểm tra tên lớp có khớp SIS Class của campus + năm học đã chọn không."
+			)
+
 		frappe.logger().info(f"📚 Processing {total_classes} classes (column-based)...")
-		
+
 		for idx, class_title in enumerate(class_columns, 1):
 			class_id = self.cache["classes"].get(class_title)
 			
@@ -561,7 +586,8 @@ class TimetableImportExecutor:
 		1. Tìm instance hiện có cho class
 		2. Nếu có instance:
 		   - Range mới nằm trong range instance → Tạo pattern rows với valid_from/valid_to
-		   - Không thay đổi range của instance
+		   - Range mới vượt ra ngoài → Nới instance ra cho chứa được (cả 2 đầu), riêng
+		     đầu start chỉ nới khi ngày bắt đầu mới >= hôm nay (chặn backdate)
 		3. Nếu chưa có → Tạo instance mới
 		
 		Pattern rows với date range:
@@ -609,13 +635,47 @@ class TimetableImportExecutor:
 			is_within_range = (new_start >= existing_start and new_end <= existing_end)
 			
 			if new_start < existing_start:
-				# ❌ BACKDATE - STRICTLY FORBIDDEN
-				raise Exception(
-					f"❌ Không được phép backdate thời khóa biểu!\n\n"
-					f"Lớp: {class_id}\n"
-					f"Instance hiện tại: {existing_start.strftime('%d/%m/%Y')} → {existing_end.strftime('%d/%m/%Y')}\n"
-					f"Range mới: {new_start.strftime('%d/%m/%Y')} → {new_end.strftime('%d/%m/%Y')}\n\n"
-					f"Chọn ngày bắt đầu >= {existing_start.strftime('%d/%m/%Y')}."
+				# Mốc của "backdate" là HÔM NAY, không phải ngày mở màn instance.
+				# Trước đây so thẳng new_start với existing_start nên mọi range sớm hơn
+				# instance đều bị chặn — kể cả range nằm hoàn toàn ở tương lai (instance
+				# khai giảng 03/08, import cho 29/07 → 31/07 vẫn báo backdate).
+				# Range quá khứ NẰM TRONG instance vẫn được phép như cũ (nhánh
+				# is_within_range bên dưới): sửa TKB đã dạy là nghiệp vụ hợp lệ.
+				today = frappe.utils.getdate()
+				if new_start < today:
+					# ❌ BACKDATE - STRICTLY FORBIDDEN
+					raise Exception(
+						f"❌ Không được phép backdate thời khóa biểu!\n\n"
+						f"Lớp: {class_id}\n"
+						f"Instance hiện tại: {existing_start.strftime('%d/%m/%Y')} → {existing_end.strftime('%d/%m/%Y')}\n"
+						f"Range mới: {new_start.strftime('%d/%m/%Y')} → {new_end.strftime('%d/%m/%Y')}\n\n"
+						f"Chọn ngày bắt đầu >= {today.strftime('%d/%m/%Y')}."
+					)
+
+				# Chốt phạm vi pattern row legacy (valid_from/valid_to = NULL) theo range
+				# instance CŨ trước khi nới. _delete_overlapping_pattern_rows hiểu ngầm row
+				# legacy là "chạy suốt range instance", nới start lùi mà không chốt thì
+				# chúng lặng lẽ phủ luôn khoảng ngày vừa import. Phải set CẢ HAI cột: query
+				# `dated_rows` chỉ nhận row có đủ valid_from và valid_to.
+				frappe.db.sql("""
+					UPDATE `tabSIS Timetable Instance Row`
+					SET valid_from = %s, valid_to = %s
+					WHERE parent = %s
+					  AND date IS NULL
+					  AND valid_from IS NULL
+					  AND valid_to IS NULL
+				""", (str(existing_start), str(existing_end), existing.name))
+
+				# Nới instance lùi lại — đối xứng với nhánh mở rộng end_date bên dưới.
+				# Không nới thì pattern rows mới nằm ngoài container instance và query TKB
+				# sẽ không bao giờ trả về.
+				frappe.db.set_value(
+					"SIS Timetable Instance",
+					existing.name,
+					{"start_date": new_start_date}
+				)
+				self.logs.append(
+					f"  📅 Lớp {class_id}: Mở rộng instance lùi về {new_start.strftime('%d/%m/%Y')}"
 				)
 			
 			if new_end > existing_end:
@@ -2553,7 +2613,44 @@ def execute_import_synchronous(file_path: str, metadata: Dict, progress_callback
 		instances_created = exec_stats.get('instances_created', 0)
 		instances_updated = exec_stats.get('instances_updated', 0)
 		rows = exec_stats.get('rows_created', 0)
-		
+
+		# ⚠️ Nhánh executor lỗi: PHẢI giữ nguyên message + errors thật của executor.
+		# Trước đây nhánh này rơi xuống chung với nhánh thành công, nên message bị dựng
+		# lại từ stats rỗng thành "✅ Import thành công! Không có lớp nào được xử lý với
+		# 0 tiết học" rồi trả kèm success=False — frontend thấy errors rỗng nên hiển thị
+		# đúng câu đó vào ô "Lỗi cần sửa", che mất exception thật.
+		if not execution_result.get('success'):
+			exec_errors = execution_result.get('errors') or []
+			if not exec_errors and execution_result.get('error'):
+				exec_errors = [execution_result['error']]
+
+			error_message = execution_result.get('message') or 'Import failed'
+			frappe.logger().error(f"❌ Execution failed: {error_message}")
+
+			if progress_callback:
+				progress_callback({
+					"phase": "error",
+					"current": 0,
+					"total": 100,
+					"percentage": 0,
+					"message": f"❌ {error_message}",
+					"current_class": ""
+				})
+
+			return {
+				"success": False,
+				"message": error_message,
+				"timetable_id": exec_stats.get('timetable_id'),
+				"instances_created": instances_created,
+				"instances_updated": instances_updated,
+				"total_instances_processed": instances_created + instances_updated,
+				"rows_created": rows,
+				"stats": exec_stats,
+				"errors": exec_errors,
+				"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
+				"logs": execution_result.get('logs', []),
+			}
+
 		# Build smart message based on what actually happened
 		total_instances = instances_created + instances_updated
 		if instances_created > 0 and instances_updated > 0:
