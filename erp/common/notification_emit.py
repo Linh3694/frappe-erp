@@ -99,6 +99,106 @@ def emit_notify_bulk(
     }
 
 
+def push_delivered_by_notification_service() -> bool:
+    """`MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY` — ai là người đẩy push tới thiết bị.
+
+    Bật: envelope `notify.send` vừa tạo bản ghi hộp thư vừa đẩy push → KHÔNG cần mirror.
+    Tắt: Frappe tự gọi Expo, envelope không được publish → phải mirror để hộp thư có bản ghi.
+    """
+    return bool(frappe.utils.cint(frappe.conf.get("MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY") or 0))
+
+
+def _inbox_mirror_enabled() -> bool:
+    """Kill-switch `NOTIFICATION_INBOX_MIRROR` (mặc định BẬT) — tắt gấp không cần deploy."""
+    value = frappe.conf.get("NOTIFICATION_INBOX_MIRROR")
+    return True if value is None else bool(frappe.utils.cint(value))
+
+
+def emit_inbox_mirror(
+    emails: List[str],
+    title: str,
+    body: str,
+    event_type: str,
+    data: Optional[Dict[str, Any]] = None,
+    *,
+    reference_doctype: Optional[str] = None,
+    reference_name: Optional[str] = None,
+    channel: Optional[str] = None,
+) -> int:
+    """Ghi hộp thư notification-service NHƯNG không đẩy push (`deliver=False`).
+
+    Dùng cho luồng Frappe đã tự gửi push (vd Trao đổi gọi Expo trực tiếp). Từ Phase 3, app
+    đọc màn Thông báo từ notification-service chứ không đọc ERP Notification nữa — thiếu
+    envelope này thì thông báo KHÔNG BAO GIỜ lên danh sách dù push vẫn về máy.
+
+    Hợp đồng với notification-service: `deliver=False` ⇒ chỉ persist inbox, không gửi lại push.
+    Nếu service bỏ qua cờ đó người nhận sẽ bị push 2 lần — tắt gấp bằng site_config
+    `NOTIFICATION_INBOX_MIRROR: 0`.
+
+    Trả về số envelope publish thành công. Không raise — lỗi gửi KHÔNG được làm hỏng nghiệp vụ.
+    """
+    if not _inbox_mirror_enabled():
+        return 0
+
+    ch = channel or _notification_channel()
+    seen = set()
+    ok = 0
+    for raw in emails or []:
+        em = str(raw or "").strip().lower()
+        if not em or "@" not in em or em in seen:
+            continue
+        seen.add(em)
+        envelope: Dict[str, Any] = {
+            "service": "erp",
+            "event": event_type,
+            "type": event_type,
+            "kind": "notify.send",
+            "deliver": False,
+            "deliverFromStream": False,
+            "recipients": [em],
+            "title": str(title or "").strip(),
+            "body": str(body or "").strip(),
+            "channel": "push",
+            "channels": ["push"],
+            "data": {**(data or {}), "type": event_type},
+        }
+        if reference_doctype:
+            envelope["reference_doctype"] = reference_doctype
+        if reference_name:
+            envelope["reference_name"] = reference_name
+        try:
+            if publish(ch, envelope):
+                ok += 1
+        except Exception:
+            frappe.logger().error(
+                f"notification_emit.emit_inbox_mirror failed for {em}", exc_info=True
+            )
+    return ok
+
+
+def emit_inbox_mirror_bulk(
+    targets: List[Dict[str, Any]],
+    title: str,
+    body: str,
+    notification_type: str = "general",
+    *,
+    channel: Optional[str] = None,
+) -> int:
+    """targets: [{"email": str, "data": {...}}, ...] như `emit_notify_bulk`.
+
+    Mỗi người nhận một envelope để `data` deep link không lẫn nhau.
+    """
+    ok = 0
+    for t in targets or []:
+        em = (t or {}).get("email")
+        d = (t or {}).get("data") or {}
+        if not em:
+            continue
+        ntype = str((d.get("type") if isinstance(d, dict) else None) or notification_type)
+        ok += emit_inbox_mirror([em], title, body, ntype, data=d, channel=channel)
+    return ok
+
+
 def emit_standard_parent_notification(
     emails: List[str],
     title: str,

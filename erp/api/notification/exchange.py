@@ -2,6 +2,12 @@
 """
 Wave 3: Push + ERP Notification cho chat Trao đổi (social-service → Frappe).
 Nhận webhook từ social-service, enqueue RQ short, debounce Expo theo (conversation, recipient).
+
+Ba đích đến, đừng bỏ sót cái nào khi thêm loại sự kiện mới:
+  1. ERP Notification (MariaDB) — parent-portal WEB đọc.
+  2. Realtime socket Frappe — badge + toast khi app đang mở.
+  3. Hộp thư notification-service (Postgres) — parent-portal-mobile và workspace-mobile đọc
+     màn Thông báo từ đây kể từ Phase 3. Xem `_mirror_to_notification_service`.
 """
 
 import json
@@ -14,6 +20,10 @@ from erp.api.parent_portal.realtime_notification import (
 	emit_unread_count_update,
 )
 from erp.common.doctype.erp_notification.erp_notification import create_notification, get_unread_count
+from erp.common.notification_emit import (
+	emit_inbox_mirror_bulk,
+	push_delivered_by_notification_service,
+)
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notifications_bulk
 
 
@@ -42,6 +52,22 @@ def _set_expo_debounce(conversation_id, recipient_email):
 		)
 	except Exception as e:
 		frappe.logger().warning(f"💬 [Exchange] Debounce set failed: {e}")
+
+
+def _mirror_to_notification_service(targets, title, body, notif_type, log_tag):
+	"""Ghi hộp thư notification-service cho những người push KHÔNG đi qua service đó.
+
+	Từ Phase 3 app đọc màn Thông báo ở notification-service, không đọc ERP Notification nữa.
+	Debounce chỉ được phép chặn PUSH — mọi tin nhắn vẫn phải có bản ghi trong hộp thư,
+	nếu không danh sách thông báo sẽ trống dù push vẫn về máy.
+	"""
+	if not targets:
+		return
+	try:
+		ok = emit_inbox_mirror_bulk(targets, title, body, notification_type=notif_type)
+		frappe.logger().info(f"📥 [Exchange] {log_tag} inbox mirror: {ok}/{len(targets)}")
+	except Exception as me:
+		frappe.logger().error(f"❌ [Exchange] {log_tag} inbox mirror failed: {me}")
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -157,7 +183,10 @@ def _handle_new_chat_message(event_data):
 		base["studentId"] = student_id
 		base["student_id"] = student_id
 
+	# Cờ bật ⇒ envelope của send_mobile_notifications_bulk đã tạo sẵn bản ghi hộp thư.
+	push_via_service = push_delivered_by_notification_service()
 	expo_targets = []
+	mirror_targets = []
 
 	for recipient_email in recipient_emails:
 		merged = {**base}
@@ -196,9 +225,14 @@ def _handle_new_chat_message(event_data):
 		except Exception as re:
 			frappe.logger().error(f"❌ [Exchange] Realtime failed {recipient_email}: {re}")
 
+		pushed_by_service = False
 		if conversation_id and not _should_skip_expo_push(conversation_id, recipient_email):
 			expo_targets.append({"email": recipient_email, "data": dict(merged)})
 			_set_expo_debounce(conversation_id, recipient_email)
+			pushed_by_service = push_via_service
+
+		if not pushed_by_service:
+			mirror_targets.append({"email": recipient_email, "data": dict(merged)})
 
 	if expo_targets:
 		try:
@@ -208,6 +242,8 @@ def _handle_new_chat_message(event_data):
 			)
 		except Exception as be:
 			frappe.logger().error(f"❌ [Exchange] Bulk Expo failed: {be}")
+
+	_mirror_to_notification_service(mirror_targets, title_push, body_push, "chat_message", "new_message")
 
 
 def _handle_chat_poll_lifecycle(event_data, kind):
@@ -247,7 +283,9 @@ def _handle_chat_poll_lifecycle(event_data, kind):
 	base["type"] = notif_type
 	base["messageKind"] = "poll"
 
+	push_via_service = push_delivered_by_notification_service()
 	expo_targets = []
+	mirror_targets = []
 
 	for recipient_email in recipient_emails:
 		merged = {**base}
@@ -287,6 +325,8 @@ def _handle_chat_poll_lifecycle(event_data, kind):
 			frappe.logger().error(f"❌ [Exchange] poll_{kind} realtime {recipient_email}: {re}")
 
 		expo_targets.append({"email": recipient_email, "data": dict(merged)})
+		if not push_via_service:
+			mirror_targets.append({"email": recipient_email, "data": dict(merged)})
 
 	if expo_targets:
 		try:
@@ -296,6 +336,8 @@ def _handle_chat_poll_lifecycle(event_data, kind):
 			)
 		except Exception as be:
 			frappe.logger().error(f"❌ [Exchange] poll_{kind} bulk Expo failed: {be}")
+
+	_mirror_to_notification_service(mirror_targets, title_push, body_push, notif_type, f"poll_{kind}")
 
 
 def _handle_chat_message_reaction(event_data):
@@ -311,6 +353,8 @@ def _handle_chat_message_reaction(event_data):
 
 	base = _base_chat_data(event_data)
 	base["type"] = "chat_message_reaction"
+
+	mirror_targets = []
 
 	for recipient_email in recipient_emails:
 		try:
@@ -339,8 +383,14 @@ def _handle_chat_message_reaction(event_data):
 			)
 			unread = get_unread_count(recipient_email)
 			emit_unread_count_update(recipient_email, unread)
+			# Thả cảm xúc không gửi push — hộp thư luôn cần envelope mirror.
+			mirror_targets.append({"email": recipient_email, "data": dict(base)})
 		except Exception as e:
 			frappe.logger().error(f"❌ [Exchange] reaction notify {recipient_email}: {e}")
+
+	_mirror_to_notification_service(
+		mirror_targets, "Trao đổi", body, "chat_message_reaction", "reaction"
+	)
 
 
 def _handle_chat_message_recalled(event_data):

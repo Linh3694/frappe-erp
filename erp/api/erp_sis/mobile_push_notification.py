@@ -8,7 +8,11 @@ import json
 import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
-from erp.common.notification_emit import emit_notify, emit_notify_bulk
+from erp.common.notification_emit import (
+    emit_notify,
+    emit_notify_bulk,
+    push_delivered_by_notification_service,
+)
 
 # Bundle đăng ký push — tiêu đề Wislife/journal theo app (yêu cầu UX)
 BUNDLE_PARENT_PORTAL = "com.hailinh.n23.parentportalmobile"
@@ -34,8 +38,9 @@ def _mobile_notify_via_redis_stream_only():
     """site_config: MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY=1 — gửi qua notification-service (Streams).
 
     Cùng cờ áp dụng cho ticket hành chính (Frappe): xem _hc_via_notification_service trong administrative_ticket.
+    Nguồn duy nhất của cờ nằm ở erp/common/notification_emit.py để luồng mirror hộp thư đọc chung.
     """
-    return bool(frappe.utils.cint(frappe.conf.get("MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY") or 0))
+    return push_delivered_by_notification_service()
 
 
 # ===== Sync sang notification-service (Phase 3) =====
