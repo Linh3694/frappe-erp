@@ -18,7 +18,8 @@
 | **Hồ sơ học bổng (Frappe → CDN, signed URL)** | ✅ **Chạy production — lỗ hổng §7 đã vá** |
 | Ký URL phía Python trong Frappe | ✅ Chạy production (`erp/common/cdn_sign.py`) |
 | Video remux `+faststart` + poster | ❌ Chưa làm |
-| Ảnh SIS, thư viện, thực đơn, tin tức | ❌ Chưa làm |
+| **Ảnh chân dung học sinh** | ⚠️ **Chưa vá — đang lộ, xem §7b** |
+| Thư viện, thực đơn, tin tức | ❌ Chưa làm |
 | Phase 3 (upload thẳng lên CDN) | ❌ Chưa làm |
 | Phase 4 (dọn dẹp) | ❌ Chưa làm — user quyết **giữ fallback tới ~giữa 2027** |
 
@@ -88,6 +89,13 @@ Ngưỡng: disk ≥75%/85%, MinIO health, cert ≤14/7 ngày, cache hit <70%, t�
 Chống lặp: cùng mức nghiêm trọng thì 6 giờ mới nhắc lại; WARN→CRIT gửi ngay; hết cảnh báo thì gửi thư `[OK] … đã phục hồi`.
 
 > Script phân tích log dùng `gawk` (hàm `asort`) — **không chạy với mawk**.
+
+**Phân tích log tách riêng từng bucket** (từ 2026-07-29). Trước đây gộp chung nên hai vấn đề:
+
+* Sự cố ký ở một bucket bị pha loãng trong traffic của bucket khác — học bổng traffic thấp, social traffic cao, nên 403 của học bổng không bao giờ chạm ngưỡng 20% nếu tính gộp. Mỗi bucket lại có một đường ký riêng (`sign.js` cho social, `cdn_sign.py` cho học bổng) nên phải canh riêng.
+* Nhiễu từ bot quét Internet (`/robots.txt`, `/.ssh/id_ed25519`, `/backup.tar.gz`) bị tính vào mẫu, làm loãng tỉ lệ từ chối thật.
+
+**p95 loại trừ video và `legacy/`.** Video chạy `proxy_cache off` và stream theo `Range` nên latency cao là bản chất. File `legacy/` là ảnh cũ chưa qua pipeline nén — trung bình **1,78 MB**, có file 2,7 MB, so với 41 KB của ảnh mới; với kích thước đó thì ngưỡng 200ms bị chặn bởi băng thông chứ không phải bởi CDN. Để vào sẽ sinh cảnh báo vĩnh viễn và làm mọi người quen bỏ qua alert.
 
 ---
 
@@ -287,6 +295,41 @@ seal-scholarship.py --rollback /srv/backup/scholarship-sealed-20260729-130655
 
 ---
 
+## 7b. ⚠️ CHƯA VÁ — Ảnh chân dung học sinh, URL suy ra được từ mã học sinh
+
+**Phát hiện 2026-07-29 khi rà mục 10.2. Nghiêm trọng hơn lỗ hổng học bổng (§7) vì có thể liệt kê hàng loạt.**
+
+`tabSIS Photo` có **3.148 ảnh chân dung học sinh** + 158 ảnh lớp. Trường `photo` trỏ tới `/files/WS<mã học sinh>.jpg`, và `location /files/` vẫn phục vụ công khai không kiểm quyền.
+
+Kiểm chứng từ máy ngoài, không đăng nhập, không cookie:
+
+```
+GET /files/WS11420471.jpg  →  200  image/jpeg  970.450 bytes
+GET /files/WS11910099.jpg  →  200  image/jpeg  316.544 bytes
+GET /files/WS12407002.jpg  →  200  image/jpeg  244.609 bytes
+GET /files/WS11420472.jpg  →  404   (mã không tồn tại)
+```
+
+### Vì sao nặng hơn §7
+
+| | Học bổng (§7, đã vá) | Ảnh học sinh (chưa vá) |
+|---|---|---|
+| Cần biết gì để lấy | Tên đầy đủ + lớp của học sinh | Chỉ cần mã học sinh |
+| Liệt kê hàng loạt | Không thực tế | **Được** |
+| Nội dung | Giấy khen, báo cáo học tập | **Ảnh chân dung trẻ em** |
+
+Trong **6.211 file tên `WS*`** công khai, **3.326 file (54%)** có dạng `WS<8 số>.jpg` thuần — suy ra trực tiếp từ mã học sinh, không có phần ngẫu nhiên nào. 46% còn lại có hậu tố hash nên khó đoán hơn.
+
+Không gian tìm kiếm **rất nhỏ**: chỉ **20 tiền tố 3 chữ số** xuất hiện (`112`–`125` là chính), mã dài 8 số ⇒ khoảng 1,4 triệu tổ hợp. Quét hết trong vài giờ ở tốc độ vừa phải.
+
+Tệ hơn: response `200` với mã có thật và `404` với mã không có biến endpoint này thành **oracle xác nhận mã học sinh nào tồn tại**, kể cả khi không lấy được ảnh.
+
+### Hướng vá
+
+Dùng lại nguyên khuôn mẫu §7 đã chạy được — `cdn_sign` + `*_store` + timer niêm — chỉ đổi bucket và điểm ký. Khác biệt cần lưu ý: điểm ký của ảnh học sinh nhiều hơn 5 chỗ của học bổng, cần rà `tabSIS Photo.photo` được trả ra ở những API nào.
+
+---
+
 ## 8. Bản đồ media theo chức năng
 
 Nguồn: bảng `tabFile` + đo đĩa thực tế trên VM Frappe.
@@ -334,15 +377,16 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 
 ### Cần quyết định
 1. **Mở rộng disk VM3** — 200 GB không đủ một năm học. Hiện dùng 3,4 GB.
-2. **~7.500 file công khai còn lại chưa rà** (§8 mục 3–6, 8) — ảnh học sinh, thư viện, thực đơn, tin tức và ~6.600 file chưa gắn doctype. Cùng bản chất lỗ hổng §7 nhưng chưa ai kiểm tra mức nhạy cảm. Nên rà trước khi migrate.
+2. **⚠️ GẤP — Vá lỗ hổng ảnh học sinh (§7b).** Đã rà xong 2026-07-29: 3.326 ảnh chân dung có URL suy ra được từ mã học sinh, liệt kê hàng loạt được. Thư viện/thực đơn/tin tức rà cùng lượt: tên file không chứa thông tin cá nhân, độ nhạy cảm thấp, có thể xếp sau.
 
 ### Đã lên kế hoạch, chưa làm
 3. **Video remux `+faststart` + poster** — cần cài `ffmpeg` trên VM microservices (đã xác nhận **chưa có**).
 4. **Migrate theo chức năng** — còn lại: ảnh học sinh → thư viện/thực đơn/tin tức → nhóm chưa phân loại (phải phân loại trước, không migrate mù). Học bổng đã xong, dùng làm khuôn mẫu: `cdn_sign` + `*_store` + timer niêm.
 5. **Hook `after_request` toàn cục cho `user_image`** — chỉ cần nếu muốn cắt storage ở Frappe. `user_image` xuất hiện **227 lần** nên không ký từng chỗ được. Học bổng không cần vì chỉ có 5 điểm ký.
 6. **Phase 3** — upload thẳng lên CDN qua presigned PUT. Cần sửa client web + mobile. Làm xong sẽ khử luôn khoảng hở 5 phút của học bổng.
-7. **Dọn 22.817 dòng `tabFile` thừa** và 552 bản avatar trùng — không gấp, gộp vào đợt dọn cuối.
-8. **Thêm ngưỡng cảnh báo cho bucket học bổng** — `cdn-checks.sh` hiện chỉ soi `/social-*` trong log nginx, chưa đếm `/scholarship/`.
+7. **Nén ảnh legacy của chat** — 36 file đang phục vụ với dung lượng trung bình **1,78 MB** (lớn nhất 2,7 MB), trong khi ảnh qua pipeline mới chỉ 41 KB. Phụ huynh dùng 4G tải các ảnh này rất chậm: p95 đo được 0,268s so với 0,082s trung bình. `CDN-Design.md` §9 đã chủ ý hoãn việc này ở lần migrate đầu; giờ hệ thống đã ổn định thì làm được. Sinh key mới + cập nhật DB, cần `--dry-run` đầy đủ.
+8. **Dọn 22.817 dòng `tabFile` thừa** và 552 bản avatar trùng — không gấp, gộp vào đợt dọn cuối.
+9. ~~Thêm ngưỡng cảnh báo cho bucket học bổng~~ — ✅ xong 2026-07-29. `cdn-checks.sh` nay phân tích **theo từng bucket** (`social-posts`, `social-chat`, `social-avatars`, `scholarship`), khoá alert dạng `signdeny-<bucket>` nên mỗi bucket dedup và báo phục hồi độc lập.
 
 ### Việc nhỏ
 9. ~~`apps/erp` chưa commit~~ — ✅ đã commit và push 2026-07-29 (`e8deb030` avatar, `57878df2` học bổng). Prod vẫn ở dạng file rời chưa pull; khi pull hãy theo §11, đã đối chiếu md5 và 9/9 file khớp.
@@ -353,32 +397,85 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 
 ---
 
-## 11. Quy trình xử lý conflict khi pull trên prod
+## 11. Quy trình deploy
 
-Code đã được đẩy thẳng lên prod bằng `tar/ssh` nên khi push từ local rồi pull trên prod sẽ báo conflict. **Không dùng `git reset --hard` mù.**
+**Luôn deploy qua git. Không copy file thẳng lên máy chủ.**
+
+Trước 2026-07-29 code từng được đẩy bằng `tar`/`ssh` cho nhanh. Cách đó gây ba hậu quả đã xảy ra thật:
+
+* Prod có file khác repo mà `git status` ở local không hề biết.
+* Khi push rồi pull trên prod thì conflict, phải xử lý thủ công từng file.
+* Ba file avatar bị revert lúc ai đó `git checkout` trên prod, **lỗi vẫn chạy production thêm nhiều giờ** trong khi tài liệu ghi là "đã sửa".
+
+### Các bước
 
 ```bash
-# 1. So sánh trước — chỉ discard khi nội dung GIỐNG HỆT
-for f in <danh sách file>; do
-  A=$(md5sum $f | cut -d' ' -f1)
-  B=$(git show origin/main:$f | md5sum | cut -d' ' -f1)
-  [ "$A" = "$B" ] && echo "GIONG $f" || echo "KHAC  $f"
-done
+# ── Ở LOCAL ──────────────────────────────────────────────
+git add -A
+git commit -m "..."
+git push
 
-# 2. Xoá rác AppleDouble (tar từ macOS sinh ra)
-rm -f ./**/._*
+# ── TRÊN PROD ────────────────────────────────────────────
+ssh cdn                       # rồi ssh frappe  /  ssh micro
 
-# 3. Discard các file đã xác nhận giống
-git checkout -- <file>
-rm <file untracked>
+cd /srv/app/frappe-bench/apps/erp        # hoặc /srv/app/social-service
+git status                    # PHẢI sạch. Nếu bẩn, xem "Khi working tree bẩn"
+git pull
 
-# 4. Pull
+# Chỉ với app Frappe, và chỉ khi có đổi doctype/patch:
+cd /srv/app/frappe-bench
+sudo -u frappe bench --site prod.sis.wellspring.edu.vn migrate
+
+# Chỉ khi sửa hooks.py — hook nằm trong redis cache, không xoá thì
+# handler mới IM LẶNG không chạy, không báo lỗi gì:
+sudo -u frappe bench --site prod.sis.wellspring.edu.vn clear-cache
+
+# Khởi động lại
+supervisorctl restart frappe-bench-web: frappe-bench-workers:   # Frappe
+pm2 reload social-service                                        # social-service
+
+# ── KIỂM CHỨNG ───────────────────────────────────────────
+git log --oneline -1          # đúng commit vừa push?
+curl -s -o /dev/null -w "%{http_code}\n" https://prod.sis.wellspring.edu.vn/api/method/ping
+supervisorctl status | grep -E "web|workers"
+```
+
+Được phép chủ động restart, không cần hỏi trước. Nhưng luôn kiểm tra sức khoẻ trước và sau, và báo lại kết quả.
+
+⚠️ **`pm2 reload social-service` TUYỆT ĐỐI không kèm `--update-env`** — xem §4, PM2 đang giữ `PORT=5040` còn ecosystem file ghi 5010.
+
+### Script vận hành (`/opt/cdn/bin/`)
+
+Không nằm trong đường `git pull` vì đích đến ngoài repo. Copy thủ công **rồi đối chiếu md5** — xem [`scripts/cdn/README.md`](../scripts/cdn/README.md).
+
+### Khi working tree trên prod bẩn
+
+Chỉ nên xảy ra với di sản của cách deploy cũ. **Không dùng `git reset --hard` mù** — có thể xoá mất thay đổi của người khác.
+
+```bash
+git status                                  # xem ĐẦY ĐỦ trước
+
+# So sánh từng file với bản trên remote — chỉ discard khi GIỐNG HỆT
+A=$(md5sum "$f" | cut -d' ' -f1)
+B=$(git show origin/main:"$f" | md5sum | cut -d' ' -f1)
+[ "$A" = "$B" ] && git checkout -- "$f"
+
+rm -f ./**/._*                              # rác AppleDouble từ tar trên macOS
 git pull
 ```
 
-**Luôn kiểm tra `git status` đầy đủ trước** — có thể có thay đổi của người khác không liên quan (đã gặp: `scripts/sync-all-users.js` chỉ đổi quyền `100644→100755`, xử lý bằng `git config core.fileMode false` chứ không discard).
+Đã gặp: `scripts/sync-all-users.js` chỉ đổi quyền `100644→100755`, **không phải** thay đổi nội dung — xử lý bằng `git config core.fileMode false` chứ không discard. File log/backup thì thêm vào `.git/info/exclude` (mức máy-local) thay vì sửa `.gitignore` đang được track.
 
-Tránh AppleDouble ngay từ đầu: `COPYFILE_DISABLE=1 tar czf - ...`
+### Kiểm tra sau deploy
+
+`git status` sạch **không** có nghĩa là đã deploy đúng. Với thay đổi quan trọng, đối chiếu md5 giữa local và prod:
+
+```bash
+md5 -q <file>                                          # macOS
+ssh -n cdn 'ssh -n frappe "md5sum /srv/app/.../<file>"' # prod
+```
+
+> `ssh` đọc stdin nên sẽ **nuốt input của vòng lặp** `while read`. Luôn dùng `ssh -n` trong vòng lặp, nếu không chỉ file đầu tiên được kiểm và phần còn lại bị bỏ qua trong im lặng.
 
 ---
 
