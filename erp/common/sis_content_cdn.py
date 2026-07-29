@@ -59,6 +59,20 @@ def _cache_key(group):
     return f"{CACHE_KEY_PREFIX}:{group}"
 
 
+def key_from_collected_url(url):
+    """Tu URL do `collect_urls()` tra ve -> khoa. None neu khong hop le.
+
+    Phong ve bat buoc: `collect_urls` thuoc module khac (viet o task sau). Neu no
+    lo tra ve URL tuyet doi hoac thieu dau `/` dau, cat cung `url[len("/files/"):]`
+    se sinh khoa rac (vd `/host/files/...` hoac `enu_Categories/...`). Khoa rac
+    khong khop nen khong ky — nhung allowlist sai am tham, loai loi kho truy nhat.
+    Chi chap nhan dung dang bat dau bang `/files/`.
+    """
+    if not url or not url.startswith("/files/"):
+        return None
+    return key_from_url(url[len("/files/"):])
+
+
 def _keys_of_group(group):
     """Tap khoa cua MOT nhom, cache 5 phut.
 
@@ -75,7 +89,7 @@ def _keys_of_group(group):
 
     keys = set()
     for url in sis_content_store.collect_urls([group]):
-        k = key_from_url(url[len("/files/"):])
+        k = key_from_collected_url(url)
         if k:
             keys.add(k)
     frappe.cache().set_value(ckey, keys, expires_in_sec=CACHE_TTL)
