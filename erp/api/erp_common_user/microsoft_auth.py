@@ -1506,22 +1506,109 @@ def admin_sync_one_microsoft_user(identifier: str | None = None):
 
 		update_frappe_user(local_user, ms_user, user_data)
 		action = "updated" if existed_local else "created"
+
+		# Email trên Microsoft có thể đã được IT sửa lại; User.name dưới Frappe là email
+		# nên phải rename bản ghi mới hết "stuck". Chỉ báo lệch, không tự rename.
+		ms_email = (user_data.get("mail") or user_data.get("userPrincipalName") or "").strip()
+		local_email = (local_user.name or "").strip()
+		email_mismatch = bool(ms_email) and ms_email.lower() != local_email.lower()
+		rename_conflict = email_mismatch and bool(frappe.db.exists("User", ms_email))
+
+		if email_mismatch:
+			message = (
+				"Đã cập nhật profile, nhưng email local ({0}) khác Microsoft ({1})."
+			).format(local_email, ms_email)
+			if rename_conflict:
+				message += " Email Microsoft đã tồn tại như một User khác — cần IT xử lý thủ công."
+		else:
+			message = "Đồng bộ Microsoft thành công"
+
 		return success_response(
 			data={
 				"action": action,
-				"email": local_user.name,
-				"microsoft_email": user_data.get("mail") or user_data.get("userPrincipalName"),
+				"email": local_email,
+				"microsoft_email": ms_email or None,
 				"microsoft_id": ms_id,
 				"department": user_data.get("department"),
 				"job_title": user_data.get("jobTitle"),
 				"employee_code": user_data.get("employeeId"),
+				"email_mismatch": email_mismatch,
+				"rename_conflict": rename_conflict,
 			},
-			message="Đồng bộ Microsoft thành công",
+			message=message,
 		)
 	except frappe.PermissionError:
 		raise
 	except Exception as e:
 		frappe.log_error("Microsoft Admin Sync One", str(e))
+		return error_response(str(e))
+
+
+@frappe.whitelist(methods=["POST"])
+def admin_rename_user_email(current_email: str | None = None, new_email: str | None = None):
+	"""Đổi email (rename User) theo email đúng trên Microsoft — IT xác nhận từ FE.
+
+	An toàn: chỉ cho rename khi `new_email` đúng là mail/UPN của cùng `microsoft_id`,
+	và chặn khi `new_email` đã tồn tại như một User khác (không merge tự động).
+	"""
+	try:
+		_require_it_admin()
+		current_email = (current_email or frappe.form_dict.get("current_email") or "").strip()
+		new_email = (new_email or frappe.form_dict.get("new_email") or "").strip()
+		if not current_email or not new_email:
+			return error_response("Thiếu current_email hoặc new_email")
+		if current_email.lower() == new_email.lower():
+			return error_response("Email mới trùng email hiện tại")
+
+		if not frappe.db.exists("User", current_email):
+			return error_response(f"Không tìm thấy User: {current_email}")
+		if frappe.db.exists("User", new_email):
+			return error_response(
+				f"Email {new_email} đã tồn tại như một User khác. Cần IT hợp nhất thủ công "
+				"trước khi đổi email (hệ thống không tự merge)."
+			)
+
+		local_user = frappe.get_doc("User", current_email)
+		local_ms_id = getattr(local_user, "microsoft_id", None)
+		if not local_ms_id:
+			return error_response(
+				"User này chưa có microsoft_id — hãy đồng bộ Microsoft trước khi đổi email"
+			)
+
+		# Xác thực email mới thực sự thuộc cùng identity trên Microsoft
+		token = get_microsoft_app_token()
+		headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+		ms_payload = _fetch_microsoft_user_payload(new_email, headers)
+		if (ms_payload.get("id") or "") != local_ms_id:
+			return error_response(
+				"Email mới thuộc một tài khoản Microsoft khác — không đổi để tránh sai dữ liệu"
+			)
+
+		frappe.rename_doc("User", current_email, new_email, ignore_permissions=True)
+		renamed = frappe.get_doc("User", new_email)
+		if renamed.email != new_email:
+			renamed.email = new_email
+			renamed.flags.ignore_permissions = True
+			renamed.save()
+
+		# Cập nhật mapping trên ERP Microsoft User để lần sync sau khớp ngay
+		ms_user_name = frappe.db.get_value("ERP Microsoft User", {"microsoft_id": local_ms_id})
+		if ms_user_name:
+			frappe.db.set_value("ERP Microsoft User", ms_user_name, "mapped_user_id", new_email)
+
+		frappe.db.commit()
+		frappe.logger("microsoft_sync").info(
+			f"renamed User {current_email} -> {new_email} by {frappe.session.user}"
+		)
+
+		return success_response(
+			data={"old_email": current_email, "email": new_email, "microsoft_id": local_ms_id},
+			message=f"Đã đổi email: {current_email} → {new_email}",
+		)
+	except frappe.PermissionError:
+		raise
+	except Exception as e:
+		frappe.log_error("Microsoft Admin Rename Email", str(e))
 		return error_response(str(e))
 
 
