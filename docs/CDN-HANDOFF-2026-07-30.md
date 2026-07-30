@@ -359,7 +359,7 @@ pm2 reload social-service                        # không --update-env
 | Migrate nội dung SIS lên CDN | Cần file thật trên đĩa + MinIO | ✅ script (từ phiên trước) |
 | `cdn-verify-legacy.js` | Cần Mongo + MinIO | ✅ script + test logic |
 | `cdn-rewrite-legacy-urls.js` | Cần Mongo. **Cố ý hoãn tới ~giữa 2027** | ✅ script + test logic |
-| Tạo bucket `cdn-staging` + IAM + lifecycle | Cần MinIO trên VM3 | ✅ lệnh ở Bước 4.1 |
+| ~~Tạo bucket `cdn-staging` + IAM + lifecycle~~ | — | ✅ **đã làm xong trên prod 29/07**, kiểm lại 30/07 |
 | Đo ảnh 12 MP thật từ điện thoại | Cần thiết bị thật | ⏳ checklist ở `CDN-Design.md` §10 Phase 1.7 |
 **Một điều tôi không kiểm chứng được:** không có SSH nên mọi số "đo trên prod" trong `CDN-STATUS.md` §6 là **trích dẫn từ phiên trước**, không phải xác nhận của phiên này. Chúng cụ thể và nhất quán nên tôi tin, nhưng chị nên biết ranh giới đó.
 

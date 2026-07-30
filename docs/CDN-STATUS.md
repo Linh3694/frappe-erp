@@ -1040,7 +1040,43 @@ Chặng đắt nhất biến mất: client 4G không còn giữ kết nối tớ
 
 `CDN_DIRECT_UPLOAD=false` mặc định. Client **tự hỏi** `/api/social/media/capability` và tự quay về multipart khi tắt hoặc khi tải thẳng lỗi — nên deploy client trước, bật cờ sau, và tắt cờ là mọi máy về đường cũ ngay mà không cần phát hành lại app.
 
-⚠️ Cần thêm bucket `cdn-staging` + lifecycle 1 ngày trên VM3 trước khi bật. Bucket này **không** có location trên nginx (không đọc được từ Internet).
+### Tiền đề hạ tầng — ✅ đã xong hết (kiểm 2026-07-30 13:40)
+
+Bản trước ghi "cần tạo bucket `cdn-staging` + IAM trước khi bật". **Đã có sẵn cả ba**, tạo từ 29/07 nhưng chưa ai ghi lại:
+
+| Tiền đề | Trạng thái |
+|---|---|
+| Bucket `cdn-staging` | ✅ tạo 2026-07-29 09:20 |
+| IAM `social-service` có `cdn-staging` + `cdn-staging/*` | ✅ (cập nhật 30/07 04:39) |
+| Lifecycle expire 1 ngày | ✅ rule `d9km6q25i1vibcmid8hg`, Enabled |
+| Không có location trên nginx | ✅ — không đọc được từ Internet |
+
+Nghĩa là **thứ chặn Phase 3 không còn là hạ tầng**, mà là chưa có nhu cầu và chưa phát hành client. Xem ngưỡng quyết định ngay dưới.
+
+### Khi nào nên bật — ngưỡng, không phải cảm tính
+
+Đo 2026-07-30: toàn bộ media social chỉ **125 object / 129 MiB** (62 posts + 63 chat), avatar 1.345 object / 8,6 MiB. VM microservices là **2 vCPU / 3,9 GB**. Ở mức tải này, upload qua multipart **không hề là nút cổ chai** — bật Phase 3 lúc này là thêm mặt phẳng lỗi để giải quyết vấn đề chưa tồn tại.
+
+⚠️ Số trên đo **giữa kỳ nghỉ hè**, không đại diện. Đo lại trong năm học rồi mới kết luận.
+
+Bật khi **bất kỳ** điều nào sau đây đúng, đo trong năm học:
+
+1. **Video thành thường xuyên.** Đây là lý do gốc của Phase 3 (P1). Một video 50–100 MB giữ kết nối tới Node hàng chục giây; trên 2 vCPU chỉ vài cái đồng thời là nghẽn cả API text.
+2. **p95 thời gian upload từ client 4G vượt ~20–30 giây**, hoặc bắt đầu có timeout/lỗi upload trong log.
+3. **Lượng media vượt ~200–300 file/ngày hoặc ~1–2 GB/ngày** đi qua `social-service`.
+4. **`pm2` bắt đầu restart vì bộ nhớ**, hoặc event-loop lag tăng lúc cao điểm.
+
+> **Điều kiện tiên quyết chưa làm được:** ba ngưỡng đầu **hiện không đo được** — không có metric nào ghi kích thước và thời lượng upload. Không thể chờ chạm một ngưỡng mà mình không đo. Việc cần làm trước Phase 3 là **thêm đo đạc**, không phải bật cờ.
+
+### Phase 3 KHÔNG giải quyết cái gì
+
+Bước promote **vẫn đọc byte về** để chạy sharp/ffmpeg (§16 trên). Nếu cái đau là **CPU xử lý ảnh**, Phase 3 không cứu — nó chỉ bỏ chặng client giữ kết nối. Muốn bỏ hẳn byte khỏi Node thì cần worker riêng, ngoài phạm vi.
+
+### Thứ tự bắt buộc khi bật
+
+Client **phải ra trước**: web và mobile tự hỏi `/api/social/media/capability` rồi tự quay về multipart khi cờ tắt hoặc khi PUT lỗi. Deploy client → chờ người dùng cập nhật app → mới bật cờ. Tắt cờ là mọi máy về đường cũ ngay, không cần phát hành lại app.
+
+Vì phụ thuộc chu kỳ phát hành app, nên xếp lịch **trước khi vào năm học**, đừng bật giữa cao điểm.
 
 ---
 
