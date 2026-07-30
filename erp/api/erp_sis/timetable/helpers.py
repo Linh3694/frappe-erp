@@ -13,6 +13,33 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 
 
+def normalize_period_name(value) -> str:
+    """
+    Chuẩn hoá tên tiết để so khớp giữa Excel và SIS Timetable Column.
+
+    Bỏ khoảng trắng, bỏ tiền tố 'tiết'/'period', hạ chữ thường:
+    'Tiết 1 + 2' / 'Tiết 1+2' / '1+2' → '1+2'; float 1.0 của pandas → '1'.
+
+    Dùng chung cho import_validator và import_executor để hai bên không bao giờ
+    lệch chuẩn so khớp (validate pass nhưng executor miss, hoặc ngược lại).
+    """
+    if value is None:
+        return ""
+    raw = str(value).strip().lower()
+    if not raw:
+        return ""
+    # Excel đọc số thành float: 1.0 → '1'
+    try:
+        raw = str(int(float(raw)))
+    except (TypeError, ValueError):
+        pass
+    for prefix in ("tiết", "tiet", "period"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):]
+            break
+    return "".join(raw.split())
+
+
 def format_time_for_html(time_value):
     """
     Format time for HTML time input (HH:MM format)
@@ -200,15 +227,18 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
                 campus_id = class_info.get("campus_id")
                 # Get education_stage from grade
                 if class_info.get("education_grade"):
+                    # Field trên SIS Education Grade là education_stage_id. Trước đây hỏi
+                    # 'education_stage' → OperationalError bị except nuốt → nhánh lấy
+                    # non-study theo schedule active không bao giờ chạy.
                     grade_info = frappe.db.get_value(
                         "SIS Education Grade",
                         class_info["education_grade"],
-                        ["education_stage"],
+                        ["education_stage_id"],
                         as_dict=True
                     )
                     frappe.logger().info(f"📊 _build_entries: grade_info = {grade_info}")
                     if grade_info:
-                        education_stage_id = grade_info.get("education_stage")
+                        education_stage_id = grade_info.get("education_stage_id")
                         
             frappe.logger().info(f"📊 _build_entries: education_stage_id={education_stage_id}, campus_id={campus_id}")
         except Exception as e:

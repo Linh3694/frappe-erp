@@ -427,20 +427,24 @@ class TimetableImportValidator:
 	
 	def _validate_period_references(self, period_names: List[str], education_stage_id: str):
 		"""
-		Validate period names exist.
-		
-		Supports both:
-		1. NEW: Schedule-based periods (schedule_id set, matching date range)
-		2. LEGACY: Periods without schedule_id
+		Chặn file sai mẫu: tên tiết trong Excel phải thuộc ĐÚNG khung giờ (SIS Schedule)
+		đang áp dụng cho ngày bắt đầu import.
+
+		Trước đây có 4 nấc fallback, nấc 3 nhận cột của BẤT KỲ schedule nào cùng cấp học
+		và nấc 4 nhận bất kỳ cột trùng tên trong toàn hệ thống. Hệ quả: file dùng mẫu của
+		khung giờ đã nghỉ hưu ('Tiết 1 + 2') vẫn validate PASS rồi ghi vào cột của schedule
+		cũ; lưới chỉ hiển thị cột của schedule active nên tiết nhảy sai ô hoặc biến mất.
+		So khớp giờ dùng tên đã chuẩn hoá nên 'Tiết 1 + 2' ≡ 'Tiết 1+2' ≡ '1+2'.
 		"""
-		# Lấy campus_id và date range từ metadata để tìm schedule phù hợp
+		from .helpers import normalize_period_name
+
 		campus_id = self.metadata.get("campus_id")
 		start_date = self.metadata.get("start_date")
-		
-		# Tìm schedule active cho date range này (nếu có)
+
+		# Khung giờ áp dụng cho ngày bắt đầu của lần import này
 		active_schedule_id = None
 		if start_date and campus_id:
-			active_schedule = frappe.db.get_value(
+			active_schedule_id = frappe.db.get_value(
 				"SIS Schedule",
 				{
 					"education_stage_id": education_stage_id,
@@ -451,59 +455,61 @@ class TimetableImportValidator:
 				},
 				"name"
 			)
-			if active_schedule:
-				active_schedule_id = active_schedule
-				frappe.logger().info(f"📅 Found active schedule for import: {active_schedule_id}")
-		
-		for name in period_names:
-			period_id = None
-			
-			# 1. Ưu tiên tìm trong schedule active (nếu có)
 			if active_schedule_id:
-				period_id = frappe.db.get_value(
-					"SIS Timetable Column",
-					{
-						"schedule_id": active_schedule_id,
-						"period_name": name
-					},
-					"name"
-				)
-			
-			# 2. Fallback: Tìm theo education_stage_id (legacy periods)
-			if not period_id:
-				period_id = frappe.db.get_value(
-					"SIS Timetable Column",
-					{
-						"education_stage_id": education_stage_id,
-						"period_name": name,
-						"schedule_id": ["is", "not set"]  # Legacy periods only
-					},
-					"name"
-				)
-			
-			# 3. Final fallback: Tìm theo education_stage_id (bất kể schedule)
-			if not period_id:
-				period_id = frappe.db.get_value(
-					"SIS Timetable Column",
-					{
-						"education_stage_id": education_stage_id,
-						"period_name": name
-					},
-					"name"
-				)
-			
-			# 4. Last resort: Tìm chỉ theo period_name
-			if not period_id:
-				period_id = frappe.db.get_value(
-					"SIS Timetable Column",
-					{"period_name": name},
-					"name"
-				)
-			
-			if period_id:
-				self.cache["periods"][name] = period_id
+				frappe.logger().info(f"📅 Found active schedule for import: {active_schedule_id}")
+
+		if active_schedule_id:
+			columns = frappe.get_all(
+				"SIS Timetable Column",
+				fields=["name", "period_name", "period_type"],
+				filters={"schedule_id": active_schedule_id},
+			)
+			source_label = "khung giờ đang áp dụng"
+		else:
+			# Chưa cấu hình schedule → chấp nhận cột legacy của đúng cấp học + campus
+			columns = frappe.get_all(
+				"SIS Timetable Column",
+				fields=["name", "period_name", "period_type"],
+				filters={
+					"education_stage_id": education_stage_id,
+					"campus_id": campus_id,
+					"schedule_id": ["is", "not set"],
+				},
+			)
+			source_label = "danh sách tiết của cấp học"
+
+		by_key = {}
+		for col in columns:
+			key = normalize_period_name(col.get("period_name"))
+			if not key:
+				continue
+			# Tiết học ưu tiên hơn giờ nghỉ khi trùng tên sau chuẩn hoá
+			if by_key.get(key, {}).get("period_type") == "study":
+				continue
+			by_key[key] = col
+
+		missing = []
+		for name in period_names:
+			col = by_key.get(normalize_period_name(name))
+			if col:
+				self.cache["periods"][name] = col["name"]
 			else:
-				self.errors.append(f"Period not found: '{name}'")
+				missing.append(str(name))
+
+		if missing:
+			expected = ", ".join(
+				sorted(
+					c.get("period_name") or ""
+					for c in columns
+					if c.get("period_type") == "study" and c.get("period_name")
+				)
+			) or "(chưa cấu hình tiết nào)"
+			self.errors.append(
+				f"File dùng sai mẫu tiết cho khoảng thời gian đã chọn. "
+				f"Không khớp {source_label}: {', '.join(missing)}. "
+				f"Các tiết hợp lệ: {expected}. "
+				f"Tải lại file mẫu theo khung giờ đang áp dụng rồi import lại."
+			)
 	
 	def _validate_business_rules(self) -> bool:
 		"""Validate business logic rules"""

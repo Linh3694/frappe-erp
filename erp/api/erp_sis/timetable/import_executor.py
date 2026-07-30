@@ -313,20 +313,24 @@ class TimetableImportExecutor:
 			if subject_id:
 				self.cache["subjects"][title] = subject_id
 		
-		# Cache periods — lưu nhiều key alias (1.0 / "1" / "Tiết 1") để lookup không miss
+		# Cache periods theo tên gốc + tên chuẩn hoá (mọi biến thể quy về một key)
 		unique_periods = self.df["Tiết"].dropna().unique()
+		unresolved_periods = []
 		for name in unique_periods:
 			period_id = self._get_period_id(name, education_stage_id)
 			if period_id:
 				self.cache["periods"][name] = period_id
-				as_str = str(name).strip()
-				self.cache["periods"][as_str] = period_id
-				try:
-					as_int = str(int(float(name)))
-					self.cache["periods"][as_int] = period_id
-					self.cache["periods"][f"Tiết {as_int}"] = period_id
-				except (TypeError, ValueError):
-					pass
+				self.cache["periods"][self._normalize_period_name(name)] = period_id
+			else:
+				unresolved_periods.append(str(name))
+
+		if unresolved_periods:
+			# Tiết không khớp khung giờ đang áp dụng ⇒ toàn bộ dòng đó sẽ bị bỏ.
+			# Phải nổi lên log, đừng để import "thành công" mà thiếu tiết.
+			self.logs.append(
+				f"⚠️ Không tìm thấy tiết trong khung giờ đang áp dụng: "
+				f"{', '.join(unresolved_periods)}"
+			)
 		
 		# Cache teacher assignments
 		self._cache_teacher_assignments(campus_id)
@@ -644,26 +648,14 @@ class TimetableImportExecutor:
 		self.logs.append(f"  ✓ Created {rows_created} pattern rows for {class_title}")
 
 	def _resolve_period_id(self, period_name) -> Optional[str]:
-		"""Resolve period từ cache; chuẩn hóa float Excel (1.0 → '1' / 'Tiết 1')."""
+		"""Resolve period từ cache; mọi biến thể tên đều quy về key chuẩn hoá."""
 		if period_name is None or (isinstance(period_name, float) and pd.isna(period_name)):
 			return None
 		period_id = self.cache["periods"].get(period_name)
 		if period_id:
 			return period_id
-		# Thử key dạng chuỗi trim
-		as_str = str(period_name).strip()
-		period_id = self.cache["periods"].get(as_str)
-		if period_id:
-			return period_id
-		# Pandas đọc số thành float
-		try:
-			as_int = str(int(float(period_name)))
-			return (
-				self.cache["periods"].get(as_int)
-				or self.cache["periods"].get(f"Tiết {as_int}")
-			)
-		except (TypeError, ValueError):
-			return None
+		# Một key chuẩn hoá duy nhất thay cho chuỗi alias: '1.0' / 'Tiết 1 + 2' / '1+2'
+		return self._get_period_id(period_name, self.metadata.get("education_stage_id"))
 
 	def _count_creatable_pattern_rows(self, class_df: pd.DataFrame) -> tuple:
 		"""
@@ -1828,37 +1820,108 @@ class TimetableImportExecutor:
 		
 		return subject_id
 	
+	@staticmethod
+	def _normalize_period_name(value) -> str:
+		"""Chuẩn hoá tên tiết — dùng chung với import_validator (xem helpers.py)."""
+		from .helpers import normalize_period_name
+
+		return normalize_period_name(value)
+
+	def _get_period_columns(self, education_stage_id: str) -> dict:
+		"""
+		Nạp cột tiết ĐÚNG SCHEDULE đang áp dụng cho range import, trả map
+		{tên đã chuẩn hoá: column_id}.
+
+		Vì sao không tra thẳng theo period_name: mỗi lần đổi khung giờ, trường tạo
+		SIS Schedule mới với bộ cột mới, nhưng bộ cột CŨ vẫn nằm nguyên trong DB và
+		thường trùng/gần trùng tên. Tra theo tên là bốc trúng cột của schedule đã nghỉ
+		hưu — TKB vẫn ghi thành công nhưng lưới (chỉ hiển thị cột schedule active)
+		không match được theo id, phải đoán theo period_priority và nhảy sai ô.
+
+		Thứ tự ưu tiên: schedule active phủ ngày bắt đầu import → cột legacy
+		(schedule_id trống) → mọi schedule khác của cùng stage+campus.
+		"""
+		if self.cache.get("period_columns") is not None:
+			return self.cache["period_columns"]
+
+		campus_id = self.metadata.get("campus_id")
+		start_date = self.metadata.get("start_date")
+
+		def _as_map(columns, source):
+			mapping = {}
+			for col in columns:
+				key = self._normalize_period_name(col.get("period_name"))
+				if not key:
+					continue
+				# Tiết học được ưu tiên hơn giờ nghỉ khi trùng tên chuẩn hoá
+				existing = mapping.get(key)
+				if existing and existing.get("period_type") == "study":
+					continue
+				mapping[key] = col
+			if mapping:
+				self.logs.append(f"  🕐 Dùng {len(mapping)} cột tiết từ {source}")
+				frappe.logger().info(f"🕐 Period columns from {source}: {sorted(mapping.keys())}")
+			return mapping
+
+		fields = ["name", "period_name", "period_priority", "period_type", "schedule_id"]
+		resolved = {}
+
+		# 1) Schedule active phủ ngày bắt đầu áp dụng của lần import này
+		if education_stage_id and campus_id and start_date:
+			active_schedule = frappe.db.get_value(
+				"SIS Schedule",
+				{
+					"education_stage_id": education_stage_id,
+					"campus_id": campus_id,
+					"is_active": 1,
+					"start_date": ["<=", start_date],
+					"end_date": [">=", start_date],
+				},
+				"name",
+			)
+			if active_schedule:
+				resolved = _as_map(
+					frappe.get_all("SIS Timetable Column", fields=fields,
+								   filters={"schedule_id": active_schedule}),
+					f"schedule active {active_schedule}",
+				)
+
+		# 2) Cột legacy (chưa gắn schedule)
+		if not resolved and education_stage_id and campus_id:
+			resolved = _as_map(
+				frappe.get_all("SIS Timetable Column", fields=fields, filters={
+					"education_stage_id": education_stage_id,
+					"campus_id": campus_id,
+					"schedule_id": ["is", "not set"],
+				}),
+				"cột legacy (không schedule)",
+			)
+
+		# 3) Mọi schedule của stage+campus — cuối cùng mới chấp nhận, có cảnh báo
+		if not resolved and education_stage_id and campus_id:
+			resolved = _as_map(
+				frappe.get_all("SIS Timetable Column", fields=fields, filters={
+					"education_stage_id": education_stage_id,
+					"campus_id": campus_id,
+				}, order_by="creation desc"),
+				"mọi schedule của cấp học (không tìm thấy schedule active)",
+			)
+			if resolved:
+				self.logs.append(
+					"  ⚠️ Không có SIS Schedule nào active phủ ngày bắt đầu — "
+					"đang dùng cột tiết cũ, kiểm tra lại khung giờ của cấp học."
+				)
+
+		self.cache["period_columns"] = resolved
+		return resolved
+
 	def _get_period_id(self, name: str, education_stage_id: str) -> Optional[str]:
-		"""Get period ID from name — hỗ trợ float Excel và alias 'Tiết N'."""
-		candidates = [name]
-		as_str = str(name).strip() if name is not None else ""
-		if as_str and as_str not in candidates:
-			candidates.append(as_str)
-		try:
-			as_int = str(int(float(name)))
-			candidates.extend([as_int, f"Tiết {as_int}"])
-		except (TypeError, ValueError):
-			pass
-
-		for candidate in candidates:
-			period_id = frappe.db.get_value(
-				"SIS Timetable Column",
-				{"education_stage_id": education_stage_id, "period_name": candidate},
-				"name"
-			)
-			if period_id:
-				return period_id
-
-		for candidate in candidates:
-			period_id = frappe.db.get_value(
-				"SIS Timetable Column",
-				{"period_name": candidate},
-				"name"
-			)
-			if period_id:
-				return period_id
-
-		return None
+		"""Tra cột tiết theo tên đã chuẩn hoá, GIỚI HẠN trong schedule đang áp dụng."""
+		key = self._normalize_period_name(name)
+		if not key:
+			return None
+		col = self._get_period_columns(education_stage_id).get(key)
+		return col.get("name") if col else None
 	
 	def _get_teachers_for_class_subject(
 		self,
