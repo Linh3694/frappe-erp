@@ -126,15 +126,29 @@ TEST CHẠY Ở LOCAL
 CỐ Ý CHƯA LÀM (đừng tự khởi động)
   - §17 Phase 4 rewrite DB — hoãn tới ~giữa 2027, còn /uploads trong DB thì tắt
     CDN_ENABLED là rollback một phút.
-  - §16 bat Phase 3 (CDN_DIRECT_UPLOAD). Ha tang DA XONG HET (bucket cdn-staging,
-    IAM, lifecycle 1 ngay — kiem 30/07). Thu chan bay gio la CHUA CO NHU CAU:
-    toan bo media social moi co 125 object / 129 MiB. Viec can lam TRUOC khong
-    phai bat co ma la THEM DO DAC (kich thuoc + thoi luong upload) — xem nguong
-    quyet dinh o §16.
+  - §16 bat Phase 3 (CDN_DIRECT_UPLOAD). Ha tang gio DA XONG THAT: bucket
+    cdn-staging + IAM + lifecycle, VA `location /cdn-staging/` tren nginx (thieu
+    location nay thi MOI PUT tra 404 va client AM THAM ve multipart — vá chiều
+    30/07, do bang scripts/test-cdn-phase3-live.js, 12/12). Thu chan bay gio la
+    CHUA CO NHU CAU: toan bo media social moi co 125 object / 129 MiB. Viec can
+    lam TRUOC khong phai bat co ma la THEM DO DAC (kich thuoc + thoi luong
+    upload) — xem nguong quyet dinh o §16.
+    Con lai: thu tren THIET BI THAT bang CDN_DIRECT_UPLOAD_USERS (dang de id gia
+    `phase3-probe-user` trong config.env, thay bang id thuc khi thu).
   - §10.5 hook after_request cho user_image (227 chỗ) — quyết định kiến trúc.
   - Transcode video 720p; mọi thứ liên quan faceID.
   - Mở rộng disk VM3 — ĐÃ BỎ HẲN 2026-07-30 theo quyết định chủ dự án. Không
     phải việc treo, đừng đề xuất lại.
+
+VIEC MOI PHAT HIEN, CHUA XU LY
+  🟡 84 luot HTTP 410 tren bucket student-photos trong ngay 30/07 (so 4.804 luot
+     200), va DANG TANG DAN theo gio: 16 (14h) -> 28 (15h) -> 35 (16h).
+     410 = secure_link HET HAN, KHONG phai lech secret (lech secret ra 403).
+     Gia thuyet: phien lam viec mo lau hon vong doi chu ky (1h) roi moi tai anh
+     — lazy-load hoac danh sach render mot lan; anh vo cho nguoi dung.
+     Canh bao cdn-checks.sh gop 403+410 va quy cho "lech CDN_LINK_SECRET/NTP",
+     nen doc canh bao nay de bi hieu sai — nen tach hai ma ra.
+     Chua ai bao loi, nen chua ro muc do anh huong thuc te.
 
 Hãy bắt đầu bằng việc đọc §7b và §18 của CDN-STATUS.md, rồi trình bày kế hoạch vá
 62 ảnh kỷ luật trước khi sửa gì.
