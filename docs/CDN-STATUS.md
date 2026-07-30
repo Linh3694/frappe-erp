@@ -1072,9 +1072,40 @@ Bật khi **bất kỳ** điều nào sau đây đúng, đo trong năm học:
 
 Bước promote **vẫn đọc byte về** để chạy sharp/ffmpeg (§16 trên). Nếu cái đau là **CPU xử lý ảnh**, Phase 3 không cứu — nó chỉ bỏ chặng client giữ kết nối. Muốn bỏ hẳn byte khỏi Node thì cần worker riêng, ngoài phạm vi.
 
+### Rà soát client mobile 2026-07-30 — hai lỗi đã vá trước khi phát hành app
+
+`parent-portal-mobile` **không** có đường PUT trực tiếp (không gọi `/api/social` chỗ nào) — chỉ `workspace-mobile` có. Soát bản đó tìm ra hai lỗi thuộc loại **không hotfix được sau khi app lên store**, đã sửa trong `738fa3c`:
+
+**1. Nạp trọn tệp vào bộ nhớ.** `fetch(uri).blob()` đọc cả tệp vào heap JS trước khi PUT. Trần là 100 MB nên một video dài trên Android tầm trung là đủ làm app chết vì hết bộ nhớ — mà video chính là thứ Phase 3 sinh ra để giải quyết. Đổi sang `FileSystem.uploadAsync` + `BINARY_CONTENT`: đọc từ đĩa, byte không qua heap.
+
+> ⚠️ Phải import từ **`expo-file-system/legacy`**. Trong SDK 54, `uploadAsync` ở entry mới đã deprecated và **throw lúc chạy**.
+> ⚠️ `uploadAsync` **không throw khi HTTP lỗi**, chỉ trả `{ status }`. Quên kiểm là coi mọi lần PUT thất bại như thành công.
+
+**2. Nguy cơ lệch Content-Type — và vì sao nó im lặng.** Server ký URL theo kiểu MIME client khai; client phải gửi lại **đúng** chuỗi đó. `fetch` với body là Blob có thể tự đặt lại theo `blob.type`, lệch một ký tự là MinIO trả 403 `SignatureDoesNotMatch`. Vì có đường quay về multipart, lỗi này **không ai thấy**: người dùng đăng bài bình thường, chỉ là đường trực tiếp không bao giờ chạy. `uploadAsync` gửi đúng header ta truyền vào.
+
+**3. Phủ sóng hẹp.** Đường trực tiếp trước đây chỉ có trong `createPost`. `createClassPost` — Wislife theo lớp, luồng GVCN dùng nhiều nhất — vẫn multipart, nên bật cờ lên gần như không đổi gì trong thực tế. Đã gom vào `thuTaiThangLenCdn()` để hai luồng không thể lệch nhau. **Đính kèm chat vẫn chưa nối** — biết và chấp nhận.
+
+`tsc` trước và sau khi sửa đều **893 lỗi** — không thêm lỗi nào (893 là nền sẵn có của repo).
+
+### Cách thử an toàn trên máy thật — danh sách trắng theo user
+
+Hai lỗi trên chỉ hiện ra **trên thiết bị thật**, không phát hiện được bằng đọc code hay test đơn vị. Nhưng `CDN_DIRECT_UPLOAD` là cờ **toàn cục** — bật để thử là bật cho cả trường.
+
+Vì vậy thêm `CDN_DIRECT_UPLOAD_USERS` (social-service `9af34e4`, deploy prod 2026-07-30 16:43):
+
+| Cấu hình | Hiệu lực |
+|---|---|
+| `CDN_DIRECT_UPLOAD=true` | mọi người — danh sách trắng vô nghĩa |
+| cờ tắt + `CDN_DIRECT_UPLOAD_USERS=<id>` | **chỉ** những user đó đi đường trực tiếp |
+| `CDN_ENABLED=false` | đóng hết — danh sách trắng **không** vượt qua được kill switch |
+
+`capability`, `presign` và `promote` dùng **cùng một hàm** `directUploadChoUser()`. Nếu ba chỗ tự suy riêng thì sẽ có ngày `capability` bảo "được" mà `presign` trả 409, client rơi về multipart im lặng và không ai hiểu tại sao. Test `84/84` (thêm 4 cho danh sách trắng).
+
+Quy trình thử: thêm Mongo user id của một tài khoản vào `CDN_DIRECT_UPLOAD_USERS` trong `config.env` → `pm2 reload social-service` (**không** `--update-env`; `dotenv` đọc `config.env` lúc tiến trình khởi động nên reload thường là đủ) → đăng bài kèm ảnh **và một video dài** từ máy thật → kiểm object xuất hiện trong bucket đích và `cdn-staging` sạch → chỉ khi đó mới bật cờ toàn cục.
+
 ### Thứ tự bắt buộc khi bật
 
-Client **phải ra trước**: web và mobile tự hỏi `/api/social/media/capability` rồi tự quay về multipart khi cờ tắt hoặc khi PUT lỗi. Deploy client → chờ người dùng cập nhật app → mới bật cờ. Tắt cờ là mọi máy về đường cũ ngay, không cần phát hành lại app.
+Client **phải ra trước**: web và mobile tự hỏi `/api/social/media/capability` rồi tự quay về multipart khi cờ tắt hoặc khi PUT lỗi. Deploy client → chờ người dùng cập nhật app → thử bằng **danh sách trắng** trên máy thật → mới bật cờ toàn cục. Tắt cờ là mọi máy về đường cũ ngay, không cần phát hành lại app.
 
 Vì phụ thuộc chu kỳ phát hành app, nên xếp lịch **trước khi vào năm học**, đừng bật giữa cao điểm.
 
