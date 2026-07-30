@@ -151,7 +151,7 @@ def _teacher_snapshot_for_chat(teacher_id, subjects=None):
         user = frappe.db.get_value(
             "User",
             user_id,
-            ["name", "email", "full_name", "user_image", "mobile_no", "phone"],
+            ["name", "email", "full_name", "user_image", "mobile_no"],
             as_dict=True,
         )
     return {
@@ -162,7 +162,10 @@ def _teacher_snapshot_for_chat(teacher_id, subjects=None):
         "userId": user_id or "",
         "userName": (user or {}).get("name") or user_id or "",
         # SĐT GV — panel thành viên chat hiển thị dưới tên (cùng dạng với PH).
-        "phone_number": (user or {}).get("mobile_no") or (user or {}).get("phone") or "",
+        # CHỈ `mobile_no` (di động cá nhân). KHÔNG fallback `User.phone`: field đó do sync
+        # Microsoft ghi từ `businessPhones` (xem microsoft_auth.py) nên GV không khai di động
+        # trong AD sẽ hiện số tổng đài trường thay vì số của chính mình.
+        "phone_number": (user or {}).get("mobile_no") or "",
         "subjects": subjects or [],
     }
 
