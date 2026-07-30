@@ -131,8 +131,11 @@ def _build_class_chat_scope(cls, class_id, school_year_id):
     guardians = build_guardians_by_student_ids(student_ids, access_only=True)
 
     teachers = []
-    for tid in [cls.get("homeroom_teacher"), cls.get("vice_homeroom_teacher")]:
-        snap = _teacher_snapshot_for_chat(tid)
+    for tid, hr_role in [
+        (cls.get("homeroom_teacher"), "homeroom"),
+        (cls.get("vice_homeroom_teacher"), "vice_homeroom"),
+    ]:
+        snap = _teacher_snapshot_for_chat(tid, homeroom_role=hr_role)
         if snap:
             teachers.append(snap)
 

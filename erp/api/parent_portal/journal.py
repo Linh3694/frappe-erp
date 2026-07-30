@@ -124,8 +124,15 @@ def _parse_class_chat_scope_payload():
     return d
 
 
-def _teacher_snapshot_for_chat(teacher_id, subjects=None):
-    """Ảnh chụp GVCN/Phó GVCN/GV bộ môn cho payload chat (không qua Resource API)."""
+def _teacher_snapshot_for_chat(teacher_id, subjects=None, homeroom_role=None):
+    """Ảnh chụp GVCN/Phó GVCN/GV bộ môn cho payload chat (không qua Resource API).
+
+    `homeroom_role` = 'homeroom' | 'vice_homeroom' (rỗng với GVBM). Bắt buộc phải TRUYỀN
+    TƯỜNG MINH: trước đây vai trò chỉ nằm ở thứ tự [homeroom, vice] của mảng `teachers`,
+    nên mọi client đều không phân biệt được CN với phó và cùng hiển thị nhãn "GVCN".
+    Thứ tự mảng không đáng tin (nhánh fallback Resource-API của social-service dựng
+    danh sách bằng Promise.all + push) ⇒ phải là field riêng.
+    """
     if not teacher_id:
         return None
     t = frappe.db.get_value(
@@ -143,6 +150,7 @@ def _teacher_snapshot_for_chat(teacher_id, subjects=None):
             "userId": "",
             "userName": "",
             "phone_number": "",
+            "homeroom_role": homeroom_role or "",
             "subjects": subjects or [],
         }
     user_id = t.get("user_id")
@@ -166,6 +174,7 @@ def _teacher_snapshot_for_chat(teacher_id, subjects=None):
         # Microsoft ghi từ `businessPhones` (xem microsoft_auth.py) nên GV không khai di động
         # trong AD sẽ hiện số tổng đài trường thay vì số của chính mình.
         "phone_number": (user or {}).get("mobile_no") or "",
+        "homeroom_role": homeroom_role or "",
         "subjects": subjects or [],
     }
 
@@ -257,8 +266,11 @@ def get_class_chat_scope(class_id=None, school_year_id=None):
         guardians = build_guardians_by_student_ids(student_ids, access_only=True)
 
         teachers = []
-        for tid in [cls.get("homeroom_teacher"), cls.get("vice_homeroom_teacher")]:
-            snap = _teacher_snapshot_for_chat(tid)
+        for tid, hr_role in [
+            (cls.get("homeroom_teacher"), "homeroom"),
+            (cls.get("vice_homeroom_teacher"), "vice_homeroom"),
+        ]:
+            snap = _teacher_snapshot_for_chat(tid, homeroom_role=hr_role)
             if snap:
                 teachers.append(snap)
 
