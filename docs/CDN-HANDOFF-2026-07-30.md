@@ -157,7 +157,7 @@ docs/CDN-HANDOFF-2026-07-30.md            (mới — file này)
 
 > `Script phan loai file cong khai chua gan doctype + cap nhat CDN-STATUS`
 
-⚠️ Repo này **đang ahead 18 commit chưa push** từ phiên trước. C8 là commit thứ 19.
+✅ **C8 đã commit và push xong 2026-07-30 08:37** — `origin/main` = `HEAD` = `a0f18a99`, working tree sạch. Ghi chú cũ ("ahead 18 commit chưa push") đã hết hiệu lực. C1–C7 ở ba repo còn lại thì **chưa commit**.
 
 ---
 
@@ -165,13 +165,12 @@ docs/CDN-HANDOFF-2026-07-30.md            (mới — file này)
 
 ## Bước 0 — Đẩy code lên remote (5 phút) ⚠️ LÀM TRƯỚC TIÊN
 
-18 commit của `apps/erp` đang **chỉ nằm trên máy chị**. Mất máy là mất hết.
+> **Cập nhật 2026-07-30:** phần `apps/erp` (C8) **đã xong** — đã push, `origin/main` = `a0f18a99`.
+> Ba repo còn lại **vẫn chưa commit**, code chỉ nằm trên máy chị. Mất máy là mất hết.
 
 ```bash
-cd frappe-backend/apps/erp
-git log origin/main..HEAD --oneline | wc -l    # kỳ vọng 18
-git add -A && git commit -m "..."              # C8
-git push
+cd frappe-backend/apps/erp                     # ✅ ĐÃ XONG, bỏ qua
+git log origin/main..HEAD --oneline | wc -l    # nay ra 0
 
 cd ../../social-service && git push            # sau khi commit C1..C5
 cd ../../frappe-sis-frontend && git push       # C6
@@ -180,9 +179,16 @@ cd ../workspace-mobile && git push             # C7
 
 ---
 
-## Bước 1 — 🔴 Deploy bản vá bảo mật (15 phút)
+## Bước 1 — ✅ ĐÃ XONG: Deploy bản vá bảo mật
 
-Lỗ hổng `/uploads` đang còn hở. Làm trước mọi thứ khác.
+> **2026-07-30 08:47:28 — lỗ hổng `/uploads` đã đóng trên production.** Nghiệm thu đủ 8 mục ở `CDN-STATUS.md` §15: `200 → 403`, token rác 403, traversal 403, `[cdn] sharp OK — libvips 8.15.3`, 55 request media thật toàn 200/206.
+>
+> Hai chỗ khác thực tế so với checklist dưới đây:
+> * **C1–C5 đã được commit gộp** thành một commit `dd8626f` (không tách năm commit như §A đề xuất). Guard vẫn gắn đủ cả hai mount.
+> * **Không chạy `npm ci`.** Prod chỉ thiếu `@aws-sdk/s3-request-presigner`; đã cài riêng bằng `--no-save` để không xoá `node_modules` và không làm bẩn `package-lock.json`. `sharp` đã có sẵn bản Linux, không cần `npm rebuild`.
+> * Nguyên nhân thật khiến lỗ hổng còn hở: code đã ở trên prod từ trước, nhưng **tiến trình chạy từ 22:51 hôm 29/07** nên chưa nạp guard. Kiểm `pm2 describe … | grep uptime`, đừng chỉ kiểm `git log`.
+
+Giữ lại phần dưới làm khuôn cho lần deploy social-service sau.
 
 ```bash
 ssh cdn
@@ -369,11 +375,14 @@ cd frappe-backend/social-service && npm run test:cdn && npm run check
 # 80 test + syntax 57 file
 
 cd frappe-backend/apps/erp
-python3 -m unittest erp.tests.test_files_cdn erp.tests.test_sis_content_cdn \
-                    erp.tests.test_sis_content_store erp.tests.test_classify_unowned
-# 67 test
+python3 -m unittest erp.tests.test_classify_unowned
+# 15 test — chạy được bằng python3 hệ thống
+
+# 52 test còn lại PHẢI dùng interpreter của bench (import frappe):
+#   frappe-bench/env/bin/python -m unittest erp.tests.test_files_cdn \
+#     erp.tests.test_sis_content_cdn erp.tests.test_sis_content_store
 ```
 
-Không cần MinIO / Mongo / Redis / prod.
+Bộ Node không cần MinIO / Mongo / Redis / prod. Bộ Python thì **3/4 module cần bench env** — ghi chú "không cần prod" trước đây chỉ đúng với `test_classify_unowned`. Xem `CDN-STATUS.md` §19.
 
 > ⚠️ Nếu `npm run test:cdn` báo bỏ qua nhóm ảnh vì sharp không nạp được: đó là `node_modules` đang giữ binary macOS. Trên máy chị thì bình thường; **trên VM Linux thì phải `npm rebuild sharp`**, nếu không EXIF/GPS sẽ không bị loại.

@@ -16,7 +16,7 @@ LOG=/var/log/nginx/cdn.access.log
 WINDOW_MIN=${WINDOW_MIN:-15}
 
 # Prefix duoc coi la media that. Them bucket moi thi them vao day.
-BUCKETS="social-posts social-chat social-avatars scholarship"
+BUCKETS="social-posts social-chat social-avatars scholarship student-photos sis-content"
 
 # Nguong toi thieu de mot ti le co y nghia thong ke — tranh bao dong gia luc vang
 MIN_SAMPLE_DENY=30
@@ -105,7 +105,7 @@ while read -r BK TOT HIT CACHEABLE C403 C410 C5XX P95 NP95; do
     PCT=$(( DENY * 100 / TOT ))
     if [ "$PCT" -ge 20 ]; then
       case "$BK" in
-        scholarship) NGUON="erp/common/cdn_sign.py" ;;
+        scholarship|student-photos|sis-content) NGUON="erp/common/cdn_sign.py" ;;
         *)           NGUON="social-service/services/cdn/sign.js" ;;
       esac
       emit CRIT "signdeny-${BK}" "Bucket ${BK}: 403/410 chiem ${PCT}% (${C403} x 403, ${C410} x 410) tren ${TOT} request trong ${WINDOW_MIN} phut. Nghi lech CDN_LINK_SECRET giua ${NGUON} va nginx VM3, hoac lech dong ho NTP."
@@ -115,13 +115,50 @@ while read -r BK TOT HIT CACHEABLE C403 C410 C5XX P95 NP95; do
   # Cache hit
   if [ "$CACHEABLE" -ge "$MIN_SAMPLE_CACHE" ]; then
     RATE=$(( HIT * 100 / CACHEABLE ))
-    [ "$RATE" -lt 70 ] && emit WARN "cachehit-${BK}" "Bucket ${BK}: cache hit rate ${RATE}% tren ${CACHEABLE} request cache duoc (nguong 70%). Co the do lech cua so ky hoac cache vua bi xoa."
+    # Nguong theo bucket. 70% hop voi bucket co tap lam viec NONG va NHO (feed,
+    # avatar: it anh, nhieu nguoi xem cung luc). student-photos va sis-content la
+    # danh muc DUOI DAI: do duoc 432 request tren 369 URI rieng biet, chi 58 URI
+    # duoc goi lai — tran hit rate vi vay chi khoang 15%, khong the dat 70% du
+    # CDN hoan toan binh thuong. Giu 70% o day = WARN vinh vien.
+    # (proxy_cache_key la "$uri", KHONG gom query, nen vong quay chu ky khong
+    #  phai nguyen nhan — dung de thong bao goi y sai huong nhu truoc.)
+    # student-photos: do duoc 432 request / 369 URI rieng biet => TRAN hit rate
+    # chi ~15%, thuc do 10%. Nguong 5% van bat duoc su co that (cache bi xoa
+    # sach => 0%) ma khong bao dong khi moi thu binh thuong.
+    # sis-content: dang 68% vi traffic kiem thu lap lai, ve lau dai se xuong theo
+    # kieu duoi dai; 25% la muc con y nghia.
+    case "$BK" in
+      student-photos) CACHE_MIN=5  ;;
+      sis-content)    CACHE_MIN=25 ;;
+      *)              CACHE_MIN=70 ;;
+    esac
+    [ "$RATE" -lt "$CACHE_MIN" ] && emit WARN "cachehit-${BK}" "Bucket ${BK}: cache hit rate ${RATE}% tren ${CACHEABLE} request cache duoc (nguong ${CACHE_MIN}%). Kiem tra cache vua bi xoa, hoac tap truy cap doi sang duoi dai hon binh thuong."
   fi
 
   # p95 latency — mau da loai video va legacy (xem chu thich trong gawk)
   if [ "${NP95:-0}" -ge "$MIN_SAMPLE_DENY" ]; then
-    SLOW=$(gawk -v p="$P95" 'BEGIN { print (p > 0.2) ? 1 : 0 }')
-    [ "$SLOW" = "1" ] && emit WARN "latency-${BK}" "Bucket ${BK}: p95 latency ${P95}s (nguong 0.2s) tren ${NP95} request anh da qua pipeline."
+    # BO QUA p95 voi hai bucket anh LON — cung ly do da loai video va legacy/.
+    #
+    # Cot latency trong log la $request_time (xem /etc/nginx/conf.d/cdn-log.conf),
+    # tinh CA thoi gian day du lieu ve MAY KHACH. Do that 2026-07-30:
+    #   student-photos  p50=0.473  p95=6.044  max=7.587   (~640 KB/anh)
+    #   sis-content     p50=0.002  p95=0.826  max=5.751   (~190 KB, news 1,4 MB)
+    #   social-chat     p50=0.020  p95=0.195              (41 KB — vua khop 0.2s)
+    # 640 KB / 6 s = ~107 KB/s: day la bang thong 4G cua dien thoai, KHONG phai
+    # hieu nang CDN. Moi nguong dat cho hai bucket nay chi do bang thong client,
+    # nen se sinh WARN vinh vien va lam moi nguoi quen bo qua alert.
+    #
+    # Muon do dung hieu nang CDN cho nhung bucket nay thi phai ghi them
+    # $upstream_response_time vao log_format roi canh bao theo cot do — viec nay
+    # doi cot log nen phai sua song song ca gawk o tren, chua lam.
+    case "$BK" in
+      student-photos|sis-content) LIMIT="" ;;
+      *)                          LIMIT=0.2 ;;
+    esac
+    if [ -n "$LIMIT" ]; then
+      SLOW=$(gawk -v p="$P95" -v l="$LIMIT" 'BEGIN { print (p > l) ? 1 : 0 }')
+      [ "$SLOW" = "1" ] && emit WARN "latency-${BK}" "Bucket ${BK}: p95 latency ${P95}s (nguong ${LIMIT}s) tren ${NP95} request anh da qua pipeline."
+    fi
   fi
 
   # Loi upstream tu MinIO
