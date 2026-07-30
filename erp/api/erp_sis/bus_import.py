@@ -6,10 +6,11 @@ Chạy đồng bộ và trả kết quả ngay: dữ liệu danh mục chỉ ở
 không cần job nền như erp/api/bulk_import.py.
 """
 
+from io import BytesIO
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import frappe
-from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
+from openpyxl import load_workbook
 
 from erp.utils.api_response import error_response, success_response, validation_error_response
 from erp.utils.campus_utils import get_current_campus_from_context
@@ -40,9 +41,24 @@ def _resolve_campus() -> str:
     return get_current_campus_from_context() or "campus-1"
 
 
-def _read_rows(file_content: bytes) -> Tuple[List[str], List[Tuple[int, Dict[str, Any]]]]:
-    """Đọc file .xlsx → (tiêu đề, các cặp số dòng Excel và dữ liệu dòng)."""
-    data = read_xlsx_file_from_attached_file(fcontent=file_content)
+def _read_rows(
+    file_content: bytes, spec: ImportSpec
+) -> Tuple[List[str], List[Tuple[int, Dict[str, Any]]]]:
+    """Đọc sheet phù hợp trong file .xlsx → tiêu đề và dữ liệu kèm số dòng Excel."""
+    workbook = load_workbook(BytesIO(file_content), data_only=True)
+    worksheets = workbook.worksheets
+    if not worksheets:
+        return [], []
+
+    selected_sheet = worksheets[0]
+    for worksheet in worksheets:
+        first_row = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), ())
+        candidate_headers = [str(cell).strip() if cell is not None else "" for cell in first_row]
+        if not missing_headers(spec, candidate_headers):
+            selected_sheet = worksheet
+            break
+
+    data = [list(row) for row in selected_sheet.iter_rows(values_only=True)]
     if not data:
         return [], []
     headers = [str(h).strip() if h is not None else "" for h in data[0]]
@@ -88,7 +104,6 @@ def _existing_doc_name(spec: ImportSpec, values: Dict[str, str], campus_id: str)
 def _run_import(
     spec: ImportSpec,
     rows: List[Tuple[int, Dict[str, Any]]],
-    headers: List[str],
     campus_id: str,
     row_handler: Optional[Callable[[Dict[str, str], int, str], Tuple[Optional[Dict[str, Any]], Optional[str], bool]]] = None,
 ) -> Dict[str, Any]:
@@ -133,14 +148,14 @@ def _run_import(
             success_count += 1
         except Exception as ex:  # noqa: BLE001 — gom mọi lỗi tạo doc về mức dòng
             frappe.db.rollback(save_point=save_point)
-            frappe.log_error(
-                title=f"Lỗi import Excel {spec.doctype}, dòng {row_num}",
-                message=frappe.get_traceback(),
-            )
             duplicate_message = friendly_unique_error(str(ex), spec, row_num)
             if duplicate_message:
                 skipped.append({"row": row_num, "error": duplicate_message})
             else:
+                frappe.log_error(
+                    title=f"Lỗi import Excel {spec.doctype}, dòng {row_num}",
+                    message=frappe.get_traceback(),
+                )
                 errors.append(
                     {
                         "row": row_num,
@@ -160,6 +175,8 @@ def _run_import(
         "skipped_count": len(skipped),
         "errors_preview": errors[:MAX_PREVIEW_ROWS],
         "skipped_preview": skipped[:MAX_PREVIEW_ROWS],
+        "errors_truncated": len(errors) > MAX_PREVIEW_ROWS,
+        "skipped_truncated": len(skipped) > MAX_PREVIEW_ROWS,
     }
 
 
@@ -184,7 +201,7 @@ def _import_by_key(spec_key: str, row_handler=None):
         return validation_error_response("File rỗng", {"file": ["empty"]})
 
     try:
-        headers, rows = _read_rows(uploaded.stream.read())
+        headers, rows = _read_rows(uploaded.stream.read(), spec)
     except DuplicateHeaderError as ex:
         return validation_error_response(
             f"File có cột bị lặp: {', '.join(ex.headers)}",
@@ -210,7 +227,7 @@ def _import_by_key(spec_key: str, row_handler=None):
         )
 
     try:
-        result = _run_import(spec, rows, headers, _resolve_campus(), row_handler=row_handler)
+        result = _run_import(spec, rows, _resolve_campus(), row_handler=row_handler)
     except Exception:  # noqa: BLE001
         frappe.db.rollback()
         frappe.log_error(
