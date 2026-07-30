@@ -5,6 +5,7 @@ CRM Lead API - CRUD Ho So Tuyen Sinh
 import re
 import frappe
 from frappe import _
+from frappe.utils import cint
 from erp.utils.search import build_search_condition, matches_search, search_names
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
@@ -1805,6 +1806,10 @@ def _guardian_to_member_dict(
         "relationship_type": relationship_type or "",
         "is_primary_contact": bool(is_primary_contact),
         "display_order": int(display_order) if display_order is not None else 0,
+        # None = chua co CRM Family (che do A/fallback) -> FE disable toggle quyen,
+        # phan biet voi False = co family va bi tat quyen.
+        "access": None,
+        "can_pickup": None,
         "phones": phones,
         "emails": emails_list,
     }
@@ -1884,10 +1889,16 @@ def build_lead_family_payload(doc):
         fam = frappe.db.get_value("CRM Family", fam_name, "family_code", as_dict=True)
         if fam:
             family_code = fam.get("family_code")
+        rel_fields = ["student", "guardian", "relationship_type", "key_person", "access", "display_order"]
+        # can_pickup la cot moi — chi SELECT khi da bench migrate, khong thi query throw.
+        from erp.utils.family_relationship import _has_can_pickup
+        has_pickup_col = _has_can_pickup()
+        if has_pickup_col:
+            rel_fields.append("can_pickup")
         rels = frappe.get_all(
             "CRM Family Relationship",
             filters={"parent": fam_name},
-            fields=["student", "guardian", "relationship_type", "key_person", "access", "display_order"],
+            fields=rel_fields,
         )
         # Dedupe theo guardian: 1 guardian co the co N row (moi HS 1 row trong family).
         linked_sid = getattr(doc, "linked_student", None)
@@ -1927,6 +1938,10 @@ def build_lead_family_payload(doc):
                 "relationship_type": r.get("relationship_type", ""),
                 "is_primary_contact": bool(r.get("key_person")),
                 "display_order": int(r.get("display_order") or 0),
+                # Cờ theo CẶP (student, guardian) — dòng đại diện đã ưu tiên đúng
+                # linked_student trong _dedupe_family_rel_by_guardian.
+                "access": bool(r.get("access")),
+                "can_pickup": bool(r.get("can_pickup", 1)) if has_pickup_col else True,
                 "phones": phones,
                 "emails": emails_m,
             })
@@ -1998,6 +2013,8 @@ def build_lead_family_payload(doc):
                 "relationship_type": doc.relationship or "",
                 "is_primary_contact": True,
                 "display_order": 0,
+                "access": None,
+                "can_pickup": None,
                 "phones": phones,
                 "emails": emails_flat,
             })
@@ -2385,6 +2402,95 @@ def update_lead_guardian():
 
     frappe.db.commit()
     return single_item_response({"guardian": guardian_name}, "Cap nhat phu huynh thanh cong")
+
+
+@frappe.whitelist(methods=["POST"])
+def set_lead_guardian_flags():
+    """
+    Bat/tat quyen cua MOT phu huynh voi DUNG hoc sinh cua lead nay:
+      - access:     quyen XEM thong tin (ho so, hoc ba, tai chinh... tren portal)
+      - can_pickup: quyen DON con o cong truong (nguon sinh FaceID Pickup Authorization)
+
+    Body: {name, guardian, access?, can_pickup?} — bo qua cờ không gửi.
+
+    Khac cac duong ghi 2b dang khoa: access/can_pickup KHONG co ban sao nao phia Lead
+    (CRM Lead Guardian khong co 2 cot nay), nen day la ghi MOT-NGUON vao dong chuan —
+    khong co van de dual-write, va vi the duoc phep dung _resolve_family_for_lead thay
+    vi gate bang linked_family tho.
+
+    Grain: cap (student, guardian) — chi dong cua linked_student bi doi, quyen cua
+    phu huynh voi chau khac trong gia dinh giu nguyen.
+    """
+    check_crm_permission()
+    data = get_request_data()
+    name = data.get("name") or data.get("lead_name")
+    guardian_name = data.get("guardian_name") or data.get("guardian")
+    if not name:
+        return validation_error_response("Thieu tham so name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Lead", name):
+        return not_found_response(f"Khong tim thay ho so {name}")
+    if not guardian_name or not frappe.db.exists("CRM Guardian", guardian_name):
+        return validation_error_response("Thieu guardian", {"guardian": ["Bat buoc"]})
+
+    doc = frappe.get_doc("CRM Lead", name)
+    if not _guardian_linked_to_lead(doc, guardian_name):
+        return validation_error_response(
+            "Guardian khong thuoc lead nay", {"guardian": ["Khong lien ket"]}
+        )
+    if not getattr(doc, "linked_student", None):
+        return validation_error_response(
+            "Ho so chua lien ket hoc sinh — quyen xem/don gan theo tung hoc sinh nen "
+            "chi bat/tat duoc sau khi nhap hoc",
+            {"linked_student": ["Bat buoc"]},
+        )
+    fam_name = _resolve_family_for_lead(doc)
+    if not fam_name:
+        return validation_error_response(
+            "Hoc sinh chua thuoc gia dinh nao", {"linked_family": ["Chua co"]}
+        )
+
+    updates = {}
+    if "access" in data and data.get("access") is not None:
+        updates["access"] = 1 if cint(data.get("access")) else 0
+    if "can_pickup" in data and data.get("can_pickup") is not None:
+        from erp.utils.family_relationship import _has_can_pickup
+        if _has_can_pickup():
+            updates["can_pickup"] = 1 if cint(data.get("can_pickup")) else 0
+        else:
+            return validation_error_response(
+                "Cot can_pickup chua ton tai — server chua chay bench migrate",
+                {"can_pickup": ["Chua migrate"]},
+            )
+    if not updates:
+        return validation_error_response(
+            "Khong co cờ nao de cap nhat", {"access": ["Gui access hoac can_pickup"]}
+        )
+
+    set_clause = ", ".join(f"{col}=%({col})s" for col in updates)
+    params = dict(updates, parent=fam_name, student=doc.linked_student, guardian=guardian_name)
+    frappe.db.sql(
+        """
+        UPDATE `tabCRM Family Relationship`
+        SET {set_clause}
+        WHERE parent=%(parent)s AND student=%(student)s AND guardian=%(guardian)s
+        """.format(set_clause=set_clause),
+        params,
+    )
+    # 2 ban mirror dung lai tu dong chuan
+    rebuild_student_relationship_mirror(doc.linked_student)
+    rebuild_guardian_relationship_mirror(guardian_name)
+    frappe.db.commit()
+
+    row = frappe.db.get_value(
+        "CRM Family Relationship",
+        {"parent": fam_name, "student": doc.linked_student, "guardian": guardian_name},
+        ["access"] + (["can_pickup"] if "can_pickup" in updates else []),
+        as_dict=True,
+    ) or {}
+    return single_item_response(
+        {"guardian": guardian_name, "student": doc.linked_student, **row},
+        "Da cap nhat quyen",
+    )
 
 
 @frappe.whitelist(methods=["POST"])

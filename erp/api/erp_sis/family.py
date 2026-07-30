@@ -923,6 +923,30 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
         # transaction ở cuối request (sync_database, frappe/app.py) — validate SAU câu
         # DELETE bên dưới sẽ để lại gia đình rỗng mà API vẫn báo thất bại.
         # ------------------------------------------------------------------
+        # MÀN GIA ĐÌNH CHỈ QUẢN THÀNH VIÊN (nhóm) — thuộc tính của CẶP (student,
+        # guardian): relationship_type / key_person / access / can_pickup được sửa ở
+        # màn của TỪNG CHÁU (lead FamilySection, set_lead_guardian_flags...).
+        # Vì vậy khi lưu lại family: cặp ĐÃ CÓ dòng chuẩn thì KẾ THỪA nguyên giá trị cũ
+        # (không được ghi đè quyết định đã đặt per-cháu); cặp MỚI dùng default
+        # (relationship_type "other" — chỉnh sau ở màn cháu, key_person 0, access 1,
+        # can_pickup 1). Client vẫn ĐƯỢC gửi tường minh để override (API compat).
+        has_pickup_col = bool(frappe.db.has_column("CRM Family Relationship", "can_pickup"))
+        old_pair_cols = "student, guardian, relationship_type, key_person, access" + (
+            ", can_pickup" if has_pickup_col else ""
+        )
+        old_pairs = {
+            (r["student"], r["guardian"]): r
+            for r in frappe.db.sql(
+                f"""
+                SELECT {old_pair_cols}
+                FROM `tabCRM Family Relationship`
+                WHERE parent = %s AND parentfield = 'relationships'
+                """,
+                (family_id,),
+                as_dict=True,
+            )
+        }
+
         normalized_relationships = []
         for idx, rel in enumerate(relationships):
             if not isinstance(rel, dict):
@@ -933,18 +957,13 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
 
             student_id = str(rel.get("student") or "").strip()
             guardian_id = str(rel.get("guardian") or "").strip()
-            relationship_type = normalize_relationship(rel.get("relationship_type"))
 
-            # student / guardian / relationship_type đều `reqd: 1` trên child doctype
-            # CRM Family Relationship. `ignore_validate` KHÔNG tắt _validate_mandatory,
-            # nên thiếu là `save()` ném MandatoryError sau khi dữ liệu cũ đã bị xoá.
+            # student / guardian `reqd: 1` trên child doctype. `ignore_validate` KHÔNG
+            # tắt _validate_mandatory, nên thiếu là `save()` ném MandatoryError sau khi
+            # dữ liệu cũ đã bị xoá.
             missing = [
                 field
-                for field, value in (
-                    ("student", student_id),
-                    ("guardian", guardian_id),
-                    ("relationship_type", relationship_type),
-                )
+                for field, value in (("student", student_id), ("guardian", guardian_id))
                 if not value
             ]
             if missing:
@@ -953,27 +972,42 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                     errors={field: ["Required"] for field in missing}
                 )
 
-            normalized_relationships.append({
+            old = old_pairs.get((student_id, guardian_id)) or {}
+
+            # relationship_type reqd=1: payload → giá trị cũ của cặp → "other"
+            relationship_type = (
+                normalize_relationship(rel.get("relationship_type"))
+                or old.get("relationship_type")
+                or "other"
+            )
+
+            def _flag(field, default):
+                # Client gửi tường minh (kể cả 0/false) → tôn trọng; không gửi/null →
+                # kế thừa cặp cũ; cặp mới → default. Ép bool trước int vì int(None) ném.
+                if rel.get(field) is not None:
+                    return int(bool(rel.get(field)))
+                if field in old and old.get(field) is not None:
+                    return int(bool(old.get(field)))
+                return default
+
+            row = {
                 "student": student_id,
                 "guardian": guardian_id,
                 "relationship_type": relationship_type,
-                # Client gửi null thì int(None) ném TypeError — ép qua bool trước.
-                "key_person": int(bool(rel.get("key_person"))),
-                "access": int(True if rel.get("access") is None else bool(rel.get("access"))),
-                # PHẢI ghi tường minh: Document.append() KHÔNG áp default của doctype
-                # (base_document.py::_init_child), rồi get_valid_dict ép Check thiếu key
-                # thành 0 — nên bỏ trống là cả nhà mất quyền đón và sync_family_pickup
-                # sẽ THU HỒI uỷ quyền vì tưởng nhà trường chủ ý bỏ tick.
-                "can_pickup": int(True if rel.get("can_pickup") is None else bool(rel.get("can_pickup"))),
-            })
+                "key_person": _flag("key_person", 0),
+                "access": _flag("access", 1),
+            }
+            # PHẢI ghi tường minh: Document.append() KHÔNG áp default của doctype
+            # (base_document.py::_init_child), rồi get_valid_dict ép Check thiếu key
+            # thành 0 — nên bỏ trống là cả nhà mất quyền đón và sync_family_pickup
+            # sẽ THU HỒI uỷ quyền vì tưởng nhà trường chủ ý bỏ tick.
+            if has_pickup_col:
+                row["can_pickup"] = _flag("can_pickup", 1)
+            normalized_relationships.append(row)
 
-        # Validate key person: must have at least 1
-        key_person_count = sum(1 for rel in normalized_relationships if rel["key_person"])
-        if key_person_count == 0:
-            return validation_error_response(
-                message="Phải chọn ít nhất 1 người liên lạc chính",
-                errors={"key_person": ["Required"]}
-            )
+        # KHÔNG validate "phải có ≥1 người liên lạc chính" ở mức family nữa:
+        # key_person là thuộc tính per-cháu, đặt ở màn lead (set_primary_contact).
+        # Cháu mới thêm vào family sẽ chưa có key_person cho tới khi đặt ở màn cháu.
 
         # HS không được thuộc gia đình khác — kiểm tra TRƯỚC khi xoá quan hệ cũ.
         for student_id in students:
@@ -1567,11 +1601,13 @@ def create_family():
             family_doc.append("relationships", {
                 "student": rel.get("student"),
                 "guardian": rel.get("guardian"),
-                "relationship_type": normalize_relationship(rel.get("relationship_type")),
-                "key_person": int(rel.get("key_person", False)),
-                "access": int(rel.get("access", True)),
+                # Màn Gia đình chỉ quản thành viên — quan hệ chỉnh ở màn từng cháu,
+                # nên thiếu thì default "other" (relationship_type reqd=1).
+                "relationship_type": normalize_relationship(rel.get("relationship_type")) or "other",
+                "key_person": int(rel.get("key_person") or 0),
+                "access": int(True if rel.get("access") is None else bool(rel.get("access"))),
                 # Xem ghi chú ở update_family_members: append KHÔNG áp default doctype.
-                "can_pickup": int(rel.get("can_pickup", True)),
+                "can_pickup": int(True if rel.get("can_pickup") is None else bool(rel.get("can_pickup"))),
             })
         
         # Save the family with relationships
