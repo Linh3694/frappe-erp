@@ -193,6 +193,18 @@ class TestNameOf(unittest.TestCase):
     def test_tu_choi_thoat_thu_muc(self):
         self.assertIsNone(discipline_store._name_of("/files/../../etc/passwd"))
 
+    def test_tu_choi_thu_muc_con(self):
+        # Signer tu choi path co `/`, nen store cung phai tu choi — neu khong,
+        # store day len khoa `discipline/SUON19.jpg` ma khong ai ky duoc.
+        self.assertIsNone(discipline_store._name_of("/files/Menu_Categories/SUON19.jpg"))
+
+    def test_khoa_khop_signer(self):
+        url = f"/files/{VN_NAME}"
+        self.assertEqual(
+            discipline_store._name_of(url),
+            discipline_cdn.key_from_url(url[len("/files/"):]),
+        )
+
     def test_tu_choi_gia_tri_khong_phai_chuoi(self):
         self.assertIsNone(discipline_store._name_of(None))
         self.assertIsNone(discipline_store._name_of(123))

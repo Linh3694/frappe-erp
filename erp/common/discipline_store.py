@@ -30,12 +30,11 @@ cung khong ton hai gi.
 
 import mimetypes
 import os
-import urllib.parse
 
 import frappe
 
 from erp.common import cdn_sign
-from erp.common.discipline_cdn import PREFIX, clear_cache
+from erp.common.discipline_cdn import PREFIX, clear_cache, key_from_url
 
 
 def _bucket(conf):
@@ -57,15 +56,22 @@ def _client(conf):
 
 
 def _name_of(image_url):
-    """`/files/<ten>` -> `<ten>`. None neu khong hop le."""
+    """`/files/<ten>` -> `<ten>`. None neu khong hop le.
+
+    Dung DUNG `discipline_cdn.key_from_url` chu khong tu suy lai, vi hai ben phai
+    ra cung mot khoa. Neu store day len khoa ma signer khong bao gio sinh ra
+    (hoac nguoc lai) thi anh nam tren CDN nhung khong ai ky duoc — hong am tham.
+
+    Cu the: `os.path.basename()` roi moi kiem `".." in name` la KHONG chan duoc
+    gi ca — basename da nuot mat phan `../..` truoc khi kiem. Voi
+    `/files/../../etc/passwd` no tra ve `passwd`. Vo hai o day (basename trung
+    hoa duong dan) nhung sai nguyen tac, va signer thi tu choi han path co `/`.
+    """
     if not image_url or not isinstance(image_url, str):
         return None
     if not image_url.startswith("/files/"):
         return None
-    name = os.path.basename(urllib.parse.unquote(image_url))
-    if not name or ".." in name:
-        return None
-    return name
+    return key_from_url(image_url[len("/files/"):])
 
 
 def push_to_cdn(image_url):
