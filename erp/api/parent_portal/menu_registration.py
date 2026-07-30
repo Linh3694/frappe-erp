@@ -839,26 +839,10 @@ def save_registration():
         class_info = _get_student_current_class(student_id)
         class_id = class_info.get("class_id") if class_info else None
         
-        # Lấy family_id - query từ CRM Family có chứa relationship này
-        family_id = None
-        try:
-            # Tìm CRM Family Relationship record
-            rel_record = frappe.db.get_value(
-                "CRM Family Relationship",
-                {"guardian": parent_id, "student": student_id},
-                ["name", "parent"],
-                as_dict=True
-            )
-            if rel_record and rel_record.parent:
-                # Kiểm tra xem parent có phải là CRM Family không
-                if frappe.db.exists("CRM Family", rel_record.parent):
-                    family_id = rel_record.parent
-                    logs.append(f"Family ID: {family_id}")
-                else:
-                    logs.append(f"Parent {rel_record.parent} không phải CRM Family, bỏ qua")
-        except Exception as e:
-            logs.append(f"Không thể lấy family_id: {str(e)}")
-        
+        # family_id đang BỎ DẦN (quyết định 2026-07-30): đăng ký mới không ghi nữa —
+        # suất ăn thuộc về HỌC SINH (student_id), không gom theo hộ. Field + dữ liệu cũ
+        # giữ nguyên để đối soát; xóa CRM Family sẽ tự gỡ tham chiếu cũ.
+
         # Tìm đăng ký hiện có hoặc tạo mới
         existing = frappe.db.get_value(
             "SIS Menu Registration",
@@ -876,8 +860,6 @@ def save_registration():
             reg_doc = frappe.new_doc("SIS Menu Registration")
             reg_doc.period = period_id
             reg_doc.student_id = student_id
-            if family_id:
-                reg_doc.family_id = family_id
             if class_id:
                 reg_doc.class_id = class_id
             reg_doc.registered_by = frappe.session.user

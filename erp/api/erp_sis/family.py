@@ -213,6 +213,10 @@ def build_guardians_by_student_ids(student_ids, access_only=False):
 
     access_filter = "AND fr.access = 1" if access_only else ""
 
+    # CHỈ đọc dòng CHUẨN (dưới CRM Family còn sống). Trước đây query không lọc
+    # parentfield nên đọc lẫn 2 bản mirror (dưới CRM Student/CRM Guardian) có thể cũ:
+    # PH đã bị tắt `access` ở bản chuẩn vẫn lọt vào nhóm chat lớp qua mirror sót, và
+    # cột family_code nhận cả docname của guardian/student (parent của dòng mirror).
     rows = frappe.db.sql(
         f"""
         SELECT
@@ -232,9 +236,11 @@ def build_guardians_by_student_ids(student_ids, access_only=False):
             g.guardian_image,
             g.phone_number
         FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Family` f ON f.name = fr.parent AND f.docstatus < 2
         INNER JOIN `tabCRM Guardian` g ON g.name = fr.guardian
         LEFT JOIN `tabCRM Student` s ON s.name = fr.student
         WHERE fr.student IN %(student_ids)s
+          AND fr.parentfield = 'relationships'
           {access_filter}
         ORDER BY fr.display_order ASC, fr.key_person DESC, g.guardian_name ASC
         """,
@@ -1897,11 +1903,71 @@ def delete_family():
                 message="Family not found",
                 code="FAMILY_NOT_FOUND"
             )
-        
+
+        # SIS Menu Registration.family_id đang BỎ DẦN (suất ăn thuộc học sinh, đăng ký
+        # mới không ghi field này nữa) — gỡ tham chiếu cũ thay vì chặn xóa. Bản ghi
+        # đăng ký giữ nguyên, vẫn tra được theo student_id.
+        frappe.db.sql(
+            "UPDATE `tabSIS Menu Registration` SET family_id = NULL WHERE family_id = %s",
+            (family_id,),
+        )
+
+        # Chốt danh sách người bị ảnh hưởng TRƯỚC khi xóa (dòng chuẩn chết cùng parent).
+        affected = frappe.db.sql(
+            """
+            SELECT student, guardian FROM `tabCRM Family Relationship`
+            WHERE parent = %s AND parentfield = 'relationships'
+            """,
+            (family_id,),
+            as_dict=True,
+        )
+        affected_students = {r["student"] for r in affected if r.get("student")}
+        affected_guardians = {r["guardian"] for r in affected if r.get("guardian")}
+
+        # CRM Lead.linked_family là field đang khai tử (đường đọc đã resolve qua
+        # linked_student) — gỡ tham chiếu để không vướng LinkExistsError.
+        frappe.db.sql(
+            "UPDATE `tabCRM Lead` SET linked_family = NULL WHERE linked_family = %s",
+            (family_id,),
+        )
+
         # Delete the document
         frappe.delete_doc("CRM Family", family_id)
+
+        # Dọn hậu quả trên người liên quan:
+        # - family_code phẳng: student hết family -> NULL; guardian có thể còn family
+        #   khác -> trỏ sang family còn lại, không còn thì NULL.
+        # - 2 bản mirror dựng lại từ dòng chuẩn (family vừa xóa tự biến mất khỏi mirror);
+        #   không dọn thì guardian "ma" vẫn nhận thông báo/menu qua mirror cũ.
+        fam_code = getattr(family_doc, "family_code", None) or family_id
+        for sid in affected_students:
+            if frappe.db.exists("CRM Student", sid):
+                if frappe.db.get_value("CRM Student", sid, "family_code") in (family_id, fam_code):
+                    frappe.db.set_value("CRM Student", sid, "family_code", None, update_modified=False)
+                rebuild_student_relationship_mirror(sid)
+        for gid in affected_guardians:
+            if frappe.db.exists("CRM Guardian", gid):
+                remaining = canonical_relationship_rows(guardian=gid)
+                new_code = None
+                if remaining:
+                    fam_left = remaining[0].get("family")
+                    new_code = frappe.db.get_value("CRM Family", fam_left, "family_code") or fam_left
+                frappe.db.set_value("CRM Guardian", gid, "family_code", new_code, update_modified=False)
+                rebuild_guardian_relationship_mirror(gid)
+
+        # Gỡ PH khỏi nhóm chat lớp: doc-event on_family_change không chạy cho delete,
+        # sync tay như update_family_members.
+        if affected_students:
+            try:
+                from erp.api.erp_sis.chat_membership_hooks import (
+                    enqueue_chat_membership_sync_for_students,
+                )
+                enqueue_chat_membership_sync_for_students(affected_students)
+            except Exception:
+                frappe.log_error("delete_family: loi enqueue chat sync", frappe.get_traceback())
+
         frappe.db.commit()
-        
+
         return success_response(
             message="Family relationship deleted successfully"
         )

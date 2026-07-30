@@ -2479,6 +2479,16 @@ def set_lead_guardian_flags():
     # 2 ban mirror dung lai tu dong chuan
     rebuild_student_relationship_mirror(doc.linked_student)
     rebuild_guardian_relationship_mirror(guardian_name)
+    # `access` quyet dinh PH co duoc o trong nhom chat lop khong (chat_scope loc
+    # access=1) — doi co xong phai sync lai membership ngay, khong doi hook.
+    if "access" in updates:
+        try:
+            from erp.api.erp_sis.chat_membership_hooks import (
+                enqueue_chat_membership_sync_for_students,
+            )
+            enqueue_chat_membership_sync_for_students({doc.linked_student})
+        except Exception:
+            frappe.log_error("set_lead_guardian_flags: loi enqueue chat sync", frappe.get_traceback())
     frappe.db.commit()
 
     row = frappe.db.get_value(
