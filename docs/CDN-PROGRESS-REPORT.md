@@ -6,6 +6,15 @@
 >
 > **Giới hạn của báo cáo này:** tôi không có quyền SSH vào VM3/frappe/micro. Mọi thứ đánh dấu "đo trên prod" là **trích từ `CDN-STATUS.md`**, tôi không tự kiểm chứng lại được. Phần tôi tự chạy được đánh dấu rõ ở §2.
 
+> ### ⚠️ Đã lỗi một phần — đọc trước khi hành động theo báo cáo này
+>
+> Đây là **báo cáo chốt thời điểm sáng 2026-07-30**, viết **trước** khi `apps/erp` được push. Hai chỗ đã hết hiệu lực:
+>
+> * **"Push 18 commit của `apps/erp`"** (§0 mục 1, §184, §220 mục 1.1, §261, §276) — ✅ **đã xong 08:37 ngày 30/07**, `origin/main` = `HEAD` = `a0f18a99`, tree sạch. Không còn là việc gấp số 1.
+> * **"CDN thư viện/thực đơn/tin tức: CHƯA push"** (§46) — nay **đã push**; còn lại đúng phần migrate + bật nhóm trên prod.
+>
+> Việc gấp nhất hiện nay là **commit + deploy bản vá `/uploads`** (`CDN-STATUS.md` §15) — vẫn chưa commit, lỗ hổng vẫn hở. Trạng thái mới nhất: `CDN-STATUS.md` §0 và §10.
+
 ---
 
 ## 0. Kết luận ngắn

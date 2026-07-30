@@ -22,13 +22,28 @@ Ba mức độ, **đừng nhầm lẫn**: `code xong` ≠ `đã deploy` ≠ `đ�
 | Video remux `+faststart` + poster | ✅ Chạy production (2026-07-29) |
 | **Ảnh chân dung học sinh** | ✅ **Chạy production — lỗ hổng §7b đã vá** |
 | Thư viện, thực đơn, tin tức — nén tại chỗ | ✅ Chạy production (−52%) |
-| Thư viện, thực đơn, tin tức — **lên CDN** | 🟡 **Code xong + test xanh, ĐÃ push, CHƯA migrate, CHƯA bật** (§14) |
-| **Chặn `/uploads` ẩn danh (social-service)** | 🔴 **Code xong + test xanh, CHƯA commit, CHƯA deploy — lỗ hổng CÒN HỞ trên prod** (§15) |
-| **Phase 3 (upload thẳng lên CDN)** | 🟡 **Code xong + test xanh (BE + web + mobile), CHƯA commit, CHƯA deploy, cờ mặc định TẮT** (§16) |
+| Thư viện, thực đơn, tin tức — **lên CDN** | ✅ **Chạy production 2026-07-30 — cả ba nhóm đã migrate và đã bật, 63/63 phép thử đạt** (§14) |
+| **Chặn `/uploads` ẩn danh (social-service)** | ✅ **Chạy production 2026-07-30 08:47 — lỗ hổng §15 đã vá, 200 → 403** |
+| **Phase 3 (upload thẳng lên CDN)** | 🟡 Code xong + test xanh (BE + web + mobile), BE **đã deploy** cùng đợt vá `/uploads`, cờ `CDN_DIRECT_UPLOAD` vẫn **TẮT**; C7 mobile chưa commit (§16) |
 | Phase 4 (dọn dẹp) | 🟡 Script để sẵn + test xanh; **cố ý chưa chạy** — giữ fallback tới ~giữa 2027 (§17) |
-| Phân loại ~6.600 file công khai chưa rõ | 🟡 Script để sẵn; **chưa chạy** (cần prod DB) (§18) |
+| Phân loại ~6.600 file công khai chưa rõ | 🔴 **Đã chạy 2026-07-30 — tìm ra 141 file nhạy cảm CÒN phục vụ công khai, chưa vá** (§18) |
 
-**Việc gấp nhất hiện nay:** đẩy 18 commit của `apps/erp` lên remote (đang chỉ nằm trên một máy) và deploy bản vá `/uploads`.
+**Việc gấp nhất hiện nay:** 🔴 **vá 141 file đang phục vụ công khai** mà `classify-unowned-files.py` vừa tìm ra (§18) — gồm file nhập liệu chứa PII gia đình với tên đoán được, 55 ảnh lớp tên bằng mã lớp, và 62 ảnh hồ sơ kỷ luật ở nhóm kế bên.
+
+> **Cập nhật 2026-07-30 (phiên deploy):**
+> * Nội dung SIS đã migrate và bật cả ba nhóm (§14).
+> * Phát hiện **`cdn-checks.sh` chưa hề giám sát `student-photos`** dù bucket đó chạy production từ 29/07 — đã sửa, xem §3.
+> * **§18 đã chạy lần đầu, thoát mã 1.** Lỗ hổng mới cùng họ §7/§7b. Chi tiết và ba mức độ ở §18.
+
+> **Đã kiểm chứng 2026-07-30 (phiên rà tiến độ + deploy):**
+> * `apps/erp` **đã push** — `origin/main` = `HEAD` = `a0f18a99` (08:37). Việc "đẩy 18 commit" ở §0/§10 cũ **đã hoàn thành**.
+> * `social-service` **đã push** — `dd8626f` (08:37), C1–C5 gộp thành một commit `update` chứ không tách năm commit như `CDN-HANDOFF-2026-07-30.md` §A đề xuất. Nội dung đủ: guard đã gắn vào **cả hai** mount ở `app.js:133-134`.
+> * `frappe-sis-frontend` **đã push** — C6 nằm trong `da53437c`, `0/0` so với `origin/main`.
+> * `workspace-mobile` **chưa commit** — `src/services/cdnDirectUpload.ts` còn untracked, `postService.ts` còn modified. Đây là repo **duy nhất** còn code chỉ nằm trên một máy.
+> * **Bản vá `/uploads` đã deploy** — chi tiết và nghiệm thu ở §15.
+> * Test: `npm run test:cdn` **80/80 pass** (37+8+22+13). Python **chỉ chạy được 15/67** ngoài bench env — xem §19.
+>
+> ⚠️ **Cảnh báo về ổ CORSAIR.** Lần rà đầu tiên trong phiên này đọc ra trạng thái git **cũ** của cả ba repo (báo `social-service`/`frontend` chưa commit, `apps/erp` ahead 19). `git diff` cũng im lặng sau khi sửa file. Nguyên nhân là ổ ngoài trả `stat` cũ. Trước khi kết luận "chưa commit/chưa push" trên ổ này, chạy `git update-index --really-refresh` rồi `git ls-remote origin` hoặc `git fetch` — đừng tin `git status` lần đọc đầu.
 
 ---
 
@@ -78,7 +93,9 @@ Doc gốc viết trước khi dựng máy, ba thông số đã đổi. **Dùng g
 /etc/nginx/conf.d/cdn-cache.conf, cdn-log.conf
 ```
 
-**Bucket:** `cdn-social-posts`, `cdn-social-chat`, `cdn-social-avatars`, `cdn-scholarship`, `cdn-staging`
+**Bucket:** `cdn-social-posts`, `cdn-social-chat`, `cdn-social-avatars`, `cdn-scholarship`, `cdn-student-photos`, `cdn-sis-content`, `cdn-staging`
+
+Mỗi bucket có một file policy `allow-nginx-cdn-<ten>.json` trong `/opt/cdn/policies/` (chỉ `127.0.0.1` được `GetObject`), và tên bucket phải nằm trong policy IAM `social-service`.
 
 ### Hai bẫy đã gặp — đừng lặp lại
 
@@ -96,6 +113,26 @@ Ngưỡng: disk ≥75%/85%, MinIO health, cert ≤14/7 ngày, cache hit <70%, t�
 Chống lặp: cùng mức nghiêm trọng thì 6 giờ mới nhắc lại; WARN→CRIT gửi ngay; hết cảnh báo thì gửi thư `[OK] … đã phục hồi`.
 
 > Script phân tích log dùng `gawk` (hàm `asort`) — **không chạy với mawk**.
+
+> ⚠️ **Bucket mới thì PHẢI thêm vào `BUCKETS` của `cdn-checks.sh`.** Phát hiện 2026-07-30: biến này vẫn là `"social-posts social-chat social-avatars scholarship"`, tức là **`student-photos` đã chạy production từ 29/07 mà chưa bao giờ có cảnh báo 403/410**, và `sis-content` cũng vậy. Một sự cố lệch chữ ký ở hai bucket đó sẽ **không ai biết**. Đã thêm cả hai, và mở rộng nhánh `NGUON` để báo đúng là đường ký Python (`erp/common/cdn_sign.py`).
+>
+> Đi kèm hai chỉnh ngưỡng, **cả hai đều dựa trên số đo, không phải phỏng đoán** — thêm hai bucket vào là sinh ngay `latency-*` và `cachehit-*`, đúng loại cảnh báo vĩnh viễn mà đoạn dưới nói phải tránh:
+>
+> **1. p95: loại `student-photos` và `sis-content` khỏi phép kiểm** — cùng cách đã làm với video và `legacy/`. Cột latency trong log là `$request_time`, **tính cả thời gian đẩy dữ liệu về máy khách**. Đo thật 2026-07-30:
+>
+> | Bucket | p50 | p95 | max | cỡ ảnh |
+> |---|---|---|---|---|
+> | `student-photos` | 0,473 s | **6,044 s** | 7,587 s | ~640 KB |
+> | `sis-content` | 0,002 s | 0,826 s | 5,751 s | ~190 KB (news tới 1,4 MB) |
+> | `social-chat` | 0,020 s | 0,195 s | 0,858 s | 41 KB — vừa khớp ngưỡng 0,2 s |
+>
+> 640 KB / 6 s ≈ 107 KB/s: đó là băng thông 4G của điện thoại, **không phải hiệu năng CDN**. Mọi ngưỡng đặt cho hai bucket này chỉ đo băng thông client. Muốn đo đúng hiệu năng CDN thì phải ghi thêm `$upstream_response_time` vào `log_format` rồi cảnh báo theo cột đó — **việc này đổi số cột log nên phải sửa song song cả gawk phân tích, chưa làm.**
+>
+> **2. Cache hit: ngưỡng theo bucket** (`student-photos` 5%, `sis-content` 25%, còn lại giữ 70%). Ngưỡng 70% hợp với bucket có tập làm việc **nóng và nhỏ** (feed, avatar). `student-photos` là danh mục **đuôi dài**: đo được 432 request trên **369 URI riêng biệt**, chỉ 58 URI được gọi lại ⇒ trần hit rate chỉ ~15%, thực đo 10%. Giữ 70% ở đây là WARN vĩnh viễn. Ngưỡng 5% vẫn bắt được sự cố thật (cache bị xoá sạch ⇒ 0%).
+>
+> Thông báo cũ còn gợi ý sai hướng ("có thể do lệch cửa sổ ký") — `proxy_cache_key` là `"$uri"`, **không gồm query string**, nên vòng quay chữ ký không thể ảnh hưởng cache hit. Đã sửa lời thông báo.
+>
+> ⚠️ **Những gì KHÔNG nới:** `signdeny` (403/410 ≥ 20%, dấu hiệu lệch secret) và `upstream` (5xx từ MinIO) vẫn áp dụng cho **cả 6 bucket**; disk, MinIO health, TLS cert, NTP giữ nguyên. Hai chỉ số vừa nới đều là chỉ số **chất lượng dịch vụ**, không phải chỉ số phát hiện sự cố.
 
 **Phân tích log tách riêng từng bucket** (từ 2026-07-29). Trước đây gộp chung nên hai vấn đề:
 
@@ -434,9 +471,9 @@ Nguồn: bảng `tabFile` + đo đĩa thực tế trên VM Frappe.
 | 1 | **Avatar** | thư mục `Avatar/` | 1.345 | 38 MB | ✅ đã lên CDN |
 | 2 | **Hồ sơ học bổng** | `Home/Scholarship` | 1.564 | **1,8 GB** | ✅ đã lên CDN, đã niêm |
 | 3 | Ảnh học sinh | `SIS Photo` | 3.315 | 0,57 GB | công khai |
-| 4 | Bìa sách thư viện | `SIS Library Title` | 2.832 | 0,93 GB | công khai |
-| 5 | Ảnh thực đơn | `SIS Menu Category` | 1.721 | 0,69 GB | công khai |
-| 6 | Tin tức | `SIS News Article` | 72 | 0,11 GB | công khai |
+| 4 | Bìa sách thư viện | `SIS Library Title` | 2.832 | 0,93 GB | ✅ đã lên CDN (2.222 URL đang dùng), **chưa niêm** |
+| 5 | Ảnh thực đơn | `SIS Menu Category` | 1.721 | 0,69 GB | ✅ đã lên CDN (565 URL đang dùng), **chưa niêm** |
+| 6 | Tin tức | `SIS News Article` | 72 | 0,11 GB | ✅ đã lên CDN (34 URL đang dùng), **chưa niêm** |
 | 7 | Đơn nghỉ phép HS | `SIS Student Leave Request` | 43 | 0,04 GB | private 43/43 |
 | 8 | Chưa gắn doctype | — | ~6.600 | ~3,2 GB | công khai |
 
@@ -471,8 +508,10 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 ## 10. Việc còn lại
 
 ### ⚠️ Gấp — rủi ro mất mát / còn hở
-1. **Đẩy 18 commit của `apps/erp` lên remote.** `origin/main` đang ở `10cab575` (29/07 17:07) — **trước toàn bộ** công việc CDN nội dung SIS. Code chỉ tồn tại trên một máy. Đây cũng đúng là điều §11 cấm.
-2. **Deploy bản vá `/uploads` của social-service** — lỗ hổng phục vụ ẩn danh còn hở trên prod dù code và test đã sẵn sàng (§15).
+1. ~~**Đẩy 18 commit của `apps/erp` lên remote.**~~ — ✅ **xong 2026-07-30 08:37**. `origin/main` = `HEAD` = `a0f18a99`, working tree sạch. (Ghi chú cũ nói `origin/main` ở `10cab575` là trạng thái **trước** lần push đó.)
+2. ~~**Commit + deploy bản vá `/uploads`**~~ — ✅ **xong 2026-07-30 08:47**. Commit `dd8626f` (đã push), deploy + nghiệm thu 8/8 ở §15. `200 → 403`, media thật không vỡ.
+3. **Commit C7 (mobile Phase 3).** `workspace-mobile`: `src/services/cdnDirectUpload.ts` untracked + `postService.ts` modified, repo `0` commit chưa push ⇒ code chỉ nằm trên một máy — đúng rủi ro mà mục 1 vừa gỡ cho `apps/erp`. C6 (`frappe-sis-frontend`) **đã push** trong `da53437c`.
+4. **Chạy `classify-unowned-files.py` trên prod** (§18) — ~6.600 file công khai chưa gắn doctype, ~3,2 GB. Script chỉ đọc. Nhóm duy nhất còn lại chưa ai rà, và hai lỗ hổng đã tìm ra đều từng nằm trong nhóm "tưởng là bình thường". Thoát mã 1 ⇒ còn file nhạy cảm chưa bảo vệ.
 
 ### Cần quyết định
 3. **Mở rộng disk VM3** — 200 GB, dự phóng cần ~257 GB/năm học. Hiện dùng 3,4 GB. `CDN-NEXT-SESSION.md` ghi việc này "đã chủ động bỏ qua" — cần xác nhận lại là quyết định hay sót.
@@ -482,7 +521,9 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 
 ### Đã lên kế hoạch, chưa làm
 3. ~~**Video remux `+faststart` + poster**~~ — ✅ xong 2026-07-29 (`69f4623`). ffmpeg 6.1.1 trên VM microservices. Poster lưu dưới dạng variant `_poster.webp` **cùng hash với video**, nên client suy ra đường dẫn từ URL video, không cần thêm field DB. Không nhánh nào `throw`: remux lỗi ⇒ dùng bản gốc, poster lỗi ⇒ feed hơi trống chứ video vẫn phát. Kiểm chứng lại bất cứ lúc nào bằng `scripts/test-video-cdn.js` trong repo social-service — script tự dọn object thử. **Chưa làm Phase 2** (transcode 720p): chỉ đáng làm nếu video chat vượt ~0,5 GB/ngày.
-4. **Migrate theo chức năng** — thư viện/thực đơn/tin tức: **code đã xong** (§14), còn lại là chạy migrate trên prod rồi bật nhóm. Nhóm chưa phân loại phải phân loại trước, không migrate mù (§18). Học bổng và ảnh học sinh đã xong, dùng làm khuôn mẫu: `cdn_sign` + `*_store` + timer niêm.
+4. ~~**Migrate theo chức năng** — thư viện/thực đơn/tin tức~~ — ✅ **xong 2026-07-30**, cả ba nhóm đã migrate và đã bật, 63/63 phép thử đạt (§14). Nhóm chưa phân loại vẫn phải phân loại trước, không migrate mù (§18).
+
+   Việc còn có thể làm thêm cho ba nhóm này: **niêm khỏi `public/files`** để thực sự giảm dung lượng đĩa SIS. Hiện chưa niêm nên `/files/...` vẫn phục vụ song song — đây là lựa chọn có ý thức (xem cuối §14), nhưng nghĩa là đã giảm tải chứ **chưa** giảm được ~1,7 GB đĩa.
 
    Thư viện/thực đơn/tin tức **đã nén tại chỗ xong 2026-07-29**: 1.471 file, **1.023 MB → 487 MB (−52%)**, giữ nguyên tên và định dạng nên `tabFile.file_url` không đổi và không URL nào chết. Bản gốc ở `/srv/backup/sis-content-orig-20260729-155235/` (1,1 GB), rollback bằng `compress-sis-content.py --rollback <thư mục>`. **Nén ≠ migrate:** nén chỉ giảm dung lượng đĩa, không đưa file nào lên CDN. Ba nhóm không nhạy cảm nên không cần niêm, không cần signed URL — đây là tối ưu hiệu năng, không phải vá lỗ hổng.
 5. **Hook `after_request` toàn cục cho `user_image`** — chỉ cần nếu muốn cắt storage ở Frappe. `user_image` xuất hiện **227 lần** nên không ký từng chỗ được. Học bổng không cần vì chỉ có 5 điểm ký. **Chưa làm — cần quyết định trước.**
@@ -698,9 +739,68 @@ ssh cdn 'ssh micro "cd /srv/app/social-service && node scripts/test-video-cdn.js
 
 ---
 
-## 14. Nội dung SIS (thư viện / thực đơn / tin tức) — code xong, chưa migrate
+## 14. Nội dung SIS (thư viện / thực đơn / tin tức) — ✅ đã migrate và đã bật (2026-07-30)
 
-**Trạng thái chính xác:** code hoàn chỉnh và test xanh trên máy local. **Chưa push, chưa migrate dữ liệu, chưa bật nhóm nào.**
+**Cả ba nhóm đang chạy production.** `CDN_SIS_CONTENT_GROUPS=news,menu,library`.
+
+### Kết quả migrate
+
+| Nhóm | URL app dùng | Trên đĩa | Trên CDN | Thiếu | Trước nén | Sau nén | Phép thử |
+|---|---|---|---|---|---|---|---|
+| `news` | 34 | 34 | 34 | 0 / 0 | 43,1 MB | 17,7 MB (−59%) | 21/21 |
+| `menu` | 565 | 565 | 565 | 0 / 0 | 353,5 MB | 111,2 MB (−69%) | 21/21 |
+| `library` | 2.222 | 2.222 | 2.222 | 0 / 0 | 427,0 MB | 413,5 MB (−3%) | 21/21 |
+
+Tổng: **2.821 object / 542 MiB** trên bucket `cdn-sis-content`, khớp đúng **2.821 khoá** trong allowlist của `migrated_keys()`. Đĩa `/data` VM3: 6,0 GB / 200 GB (3%).
+
+`library` chỉ giảm 3% vì nhóm này **đã được nén tại chỗ hôm 29/07** (−52%) — gần như không còn gì để nén thêm. Con số của `news` và `menu` cao hơn vì đợt nén 29/07 làm theo basename nên bỏ sót thư mục con.
+
+### Thứ tự đã làm
+
+1. Tiền đề trên VM3 (**§14 bản cũ thiếu hẳn bước này**) — xem mục dưới.
+2. `clear-cache` + restart web/workers: prod đã có code từ trước nhưng tiến trình chạy 12,5 giờ nên **hook chưa được nạp** — đúng cái bẫy đã gặp ở §15.
+3. Copy 3 script vào `/opt/cdn/bin`, đối chiếu md5 (3/3 khớp cả với repo local).
+4. Mỗi nhóm: `--dry-run` → chạy thật → `diff` phải ra 0 ở cả hai cột → mới thêm tên nhóm vào `CDN_SIS_CONTENT_GROUPS` → `clear-cache` + restart → `test-sis-content-cdn.py`.
+5. Sau khi bật nhóm mới, chạy lại phép thử của **các nhóm cũ** — bật thêm nhóm không làm vỡ nhóm đã bật.
+
+### ⚠️ Tiền đề trên VM3 mà §14 bản cũ không ghi
+
+Giống hệt chỗ Phase 3 thiếu bucket `cdn-staging`: bản cũ nhảy thẳng vào `migrate` mà không có bước tạo hạ tầng. Đã làm:
+
+```
+bucket   cdn-sis-content                              (mc mb + anonymous set none)
+policy   /opt/cdn/policies/allow-nginx-cdn-sis-content.json   chi 127.0.0.1 duoc GetObject
+IAM      them cdn-sis-content vao policy `social-service` (14 resource)
+nginx    location /sis-content/  -> proxy_pass .../cdn-sis-content/sis-content/
+env      /etc/cdn/cdn.env: CDN_BUCKET_SIS_CONTENT, CDN_SIGN_WINDOW/LIFETIME_SIS_CONTENT_SEC
+```
+
+`location /sis-content/` **bắt buộc là prefix location, không regex** — cùng lý do §7: khoá ở đây là **đường dẫn tương đối đầy đủ** (`Menu_Categories/SUON19.jpg`), có thư mục con và tên file chứa dấu cách.
+
+Cache đặt `proxy_cache_valid 200 24h` chứ không 30d như `social-posts`: khoá của nhóm này **không chứa hash nội dung**, nên một ảnh thực đơn có thể bị thay bằng ảnh mới **dưới đúng tên file cũ**. 24h chặn trần thời gian phục vụ bản cũ và khớp `CDN_SIGN_LIFETIME_SIS_CONTENT_SEC=86400`.
+
+Cửa sổ ký **6h/24h** (`21600`/`86400`) thay vì 1h/2h của học bổng: nhóm này không nhạy cảm, cửa sổ dài thì chuỗi URL ổn định lâu hơn nên trình duyệt còn cache được.
+
+### Nghiệm thu chữ ký, đo từ máy ngoài
+
+| Ca | Kết quả |
+|---|---|
+| URL ký đúng | **200** |
+| Đổi ký tự **giữa** chữ ký | 403 |
+| Đổi ký tự **đầu** chữ ký | 403 |
+| Đổi `e=` (expiry) | 403 |
+| Không chữ ký | 403 |
+| Giữ chữ ký, đổi đường dẫn | 403 |
+| Liệt kê bucket (`/sis-content/`) | 403 |
+
+### Hai điều cần biết về trạng thái sau migrate
+
+* **File cũ vẫn nằm trong `public/files` và vẫn phục vụ được qua `/files/...`.** Không niêm — có chủ ý, xem mục dưới. Nên đây thuần là giảm tải, **chưa** giảm dung lượng đĩa SIS.
+* Có **2 object tên chứa dấu cách** (`sis-content/1 (1)0e4137.jpg`, `…18f0a7.jpg`) không được `cover_image`/`content_en`/`content_vn` của bất kỳ `SIS News Article` nào tham chiếu — chúng vào allowlist qua đường khác (`tabFile`). Vô hại: không URL nào trỏ tới nên không bao giờ được phục vụ, và tổng allowlist vẫn khớp tổng object.
+
+### Trạng thái cũ (giữ lại để đối chiếu)
+
+Trước 2026-07-30: code hoàn chỉnh và test xanh trên máy local, **chưa migrate dữ liệu, chưa bật nhóm nào.**
 
 Rất dễ nhầm hai việc khác nhau:
 
@@ -732,9 +832,9 @@ Khác §7 và §7b: ba nhóm này **không** niêm khỏi `public/files`, không
 
 ---
 
-## 15. Chặn `/uploads` ẩn danh — code xong, CHƯA deploy 🔴
+## 15. Chặn `/uploads` ẩn danh — ✅ đã vá (2026-07-30)
 
-**Lỗ hổng đang còn hở trên production.**
+**Đã đóng trên production lúc 08:47:28 ngày 2026-07-30.** Phần dưới giữ lại mô tả lỗ hổng gốc; nghiệm thu ở cuối mục.
 
 `express.static` của social-service phục vụ toàn bộ `uploads/` không kiểm tra gì — bất kỳ ai có URL đều tải được **ảnh chat GV↔phụ huynh về học sinh**. Tên file chỉ là `chat-<timestamp>-<random>.jpg`.
 
@@ -742,11 +842,40 @@ Khác §7 và §7b: ba nhóm này **không** niêm khỏi `public/files`, không
 |---|---|
 | Bản vá | `middleware/legacyUploadsGuard.js` |
 | Kiểm chứng | 8/8 test HTTP thật — xác nhận không lộ nội dung, kể cả qua path traversal đã mã hoá URL |
-| Trạng thái | Code xong, **chưa commit, chưa deploy** |
+| Trạng thái | ✅ **Chạy production** — commit `dd8626f`, deploy 2026-07-30 08:47:28 |
 
 Guard bắt buộc token khi `CDN_ENABLED=true`; khi tắt CDN thì cho qua thẳng để đường rollback (§9) nguyên vẹn. Chấp nhận token qua `?token=` vì thẻ `<img>` không gắn được header `Authorization` — quy ước này service đã dùng sẵn cho socket.
 
 Guard đếm lượt truy cập (`legacyUploadsGuard.stats`): gỡ hẳn mount khi `allowed` ngừng tăng.
+
+### Deploy — đã làm gì
+
+Code đã có sẵn trên prod từ lần `git pull` trước đó (`dd8626f`, tree sạch), nhưng **tiến trình đã chạy 9 giờ** — khởi động lúc 22:51 ngày 29/07, **trước** commit — nên guard chưa được nạp. Lỗ hổng vẫn hở dù code đã ở trên máy.
+
+> **Bài học, cùng họ với bài học md5 ở §5:** `git log` trên prod đúng commit **không** có nghĩa là code đang chạy. Phải đối chiếu **thời điểm khởi động tiến trình** với thời điểm commit. `pm2 describe <app> | grep uptime` là phép kiểm rẻ nhất.
+
+Một chi tiết nữa: prod thiếu `@aws-sdk/s3-request-presigner` (Phase 3 mới thêm vào `package.json`). Nó được `require` **lười** trong `s3.js:93`, nên thiếu **không** làm chết lúc khởi động — chỉ vỡ khi gọi presign, mà cờ `CDN_DIRECT_UPLOAD` đang tắt nên chưa ai gọi. Đã cài bằng:
+
+```bash
+npm install @aws-sdk/s3-request-presigner@^3.1097.0 --no-save --no-audit --no-fund
+```
+
+Dùng `--no-save` thay vì `npm ci` vì hai lý do: `npm ci` xoá sạch `node_modules` rồi cài lại (nếu registry lỗi giữa đường thì service không khởi động lại được), và `--no-save` giữ `package-lock.json` trên prod **không đổi** nên working tree vẫn sạch cho lần `git pull` sau. `npm install` báo "changed 4 packages" nên đã kiểm lại `sharp` ngay sau đó — vẫn nạp được, libvips 8.15.3.
+
+### Nghiệm thu trên production
+
+| Phép thử | Kết quả |
+|---|---|
+| `[cdn] sharp OK — libvips <ver>` trong log lúc khởi động | ✅ `libvips 8.15.3` @ 08:47:28 (`logs/out.log`, **không** phải `/root/.pm2/logs/`) |
+| Ảnh chat cũ, không token, đo từ máy ngoài | **200 → 403** (trước vá: `image/png`, 1.888.834 byte) |
+| Token rác | **403** |
+| Path traversal đã mã hoá URL (`..%2f..%2fconfig.env`) | **403** |
+| Mount `/uploads` trực tiếp qua nginx | **404** — nginx chỉ phát `/api/social/uploads`, guard vẫn phủ cả hai |
+| Thân response khi bị từ chối | `{"success":false,"code":"LEGACY_UPLOADS_FORBIDDEN",…}` — không lộ byte ảnh |
+| Media thật của người dùng, 12 phút sau reload | **55 request, 45×200 + 10×206, 0×403, 0×410** |
+| `/health` + `pm2` | `ok`, `online`, `unstable restarts 0` |
+
+Không có `LEGACY_UPLOADS_FORBIDDEN` nào từ người dùng thật — guard không ghi log từ chối, nên bằng chứng "không ai vỡ ảnh" lấy từ log nginx của CDN (dòng cuối bảng) chứ không lấy từ log ứng dụng.
 
 ---
 
@@ -799,7 +928,65 @@ Bốn điều kiện trước khi chạy: CDN ổn định nhiều tháng, `cdn-
 
 ---
 
-## 18. Phân loại ~6.600 file công khai chưa gắn doctype
+## 18. Phân loại ~6.600 file công khai chưa gắn doctype — ✅ đã chạy (2026-07-30)
+
+**Đã chạy lần đầu 2026-07-30. Thoát mã 1: tìm ra 141 file đang phục vụ công khai với dấu hiệu nhạy cảm.** §18 đã dự đoán đúng — đây là "rủi ro chưa biết", không phải rủi ro thấp.
+
+### Kết quả
+
+`tabFile`: 8.157 dòng → **6.979 `file_url` riêng biệt**, 4.198,9 MB. Quét được 9.030 URL đang được tham chiếu trong các field.
+
+| Nhóm | Số file | Dung lượng |
+|---|---|---|
+| **`NHAY_CAM_CHUA_BAO_VE`** | **141** | **100,6 MB** |
+| `dang_dung_chua_ro_nhay_cam` | 126 | 70,4 MB |
+| `tai_lieu_mo_coi` | 62 | 8,8 MB |
+| `anh_mo_coi` | 405 | 247,7 MB |
+| `da_niem_khong_con_tren_dia` | 6.245 | 3.771,5 MB |
+
+Tổng **còn phục vụ công khai: 734 file** (141+126+62+405). 6.245 file còn lại đã bị niêm ở §7/§7b — nginx trả 404.
+
+### 141 file nhạy cảm còn hở — tách theo dấu hiệu
+
+| Dấu hiệu | Số file | MB | Có doctype tham chiếu |
+|---|---|---|---|
+| Nhập liệu hàng loạt (PII) | 85 | 1,4 | 44 |
+| Ảnh lớp, tên = mã lớp | 55 | 98,9 | **0** |
+| Mã học sinh | 1 | 0,3 | **0** |
+
+Kiểm chứng từ máy ngoài, không đăng nhập (chỉ lấy mã trạng thái, **không tải nội dung**):
+
+```
+GET /files/import-families.xlsx   -> 200   100.461 byte
+GET /files/import-students.xlsx   -> 200     9.044 byte
+GET /files/5A5.jpg                -> 200 2.088.157 byte
+GET /files/9AB4.jpg               -> 200 2.122.946 byte
+GET /files/WS11710352.JPG         -> 200   309.044 byte
+```
+
+**Ba nhóm, ba mức độ khác nhau:**
+
+1. **85 file nhập liệu hàng loạt** — `import-families.xlsx`, `import-students.xlsx`, `import-classes*.xlsx`. Tên **đoán được ngay** và nội dung là PII hàng loạt của học sinh và gia đình. Nặng nhất trong ba nhóm dù chỉ 1,4 MB. 44 file được `SIS Bulk Import Job.file_url` tham chiếu (link tải trong UI quản trị), 41 file không ai dùng.
+2. **55 ảnh lớp đặt tên bằng mã lớp** (`3A2.jpg`, `5A5.jpg`, `9AB4.jpg`, ~2 MB/ảnh) — **không doctype nào tham chiếu**. Cùng loại lỗ hổng §7b nhưng **quy ước đặt tên khác** nên đợt niêm 29/07 không thấy: §7b chỉ lấy tên từ `tabSIS Photo` (dạng `Lớp 4A5….jpg`). Không gian tên chỉ vài chục lớp ⇒ đoán hết trong vài giây.
+3. **1 ảnh chân dung** `WS11710352.JPG` — **`.JPG` chữ HOA**. Trên CDN có `student-photos/WS11710352.jpg` chữ thường, tức DB trỏ bản chữ thường và bản đó đã niêm; bản chữ hoa là **bản sao mồ côi** nên trượt khỏi danh sách niêm. Bản chữ thường trả 404, bản chữ hoa trả 200.
+
+> **Bài học:** đợt niêm lấy danh sách từ **DB**, nên mọi file trên đĩa mà DB không biết đến đều trượt — dù nội dung y hệt. Rà theo đĩa và rà theo DB cho hai kết quả khác nhau; §7b chỉ làm cái thứ hai.
+
+### Hai khuyết điểm của chính script, đã sửa
+
+**1. Không kiểm file còn trên đĩa ⇒ 97% dương tính giả.** Lần chạy đầu báo **4.604** file nhạy cảm chưa bảo vệ và thoát mã 1. Thực tế chỉ **1** file trong số đó còn trên đĩa; 4.603 file kia đã bị niêm ở §7/§7b. Nguyên nhân: các đợt niêm **chỉ chuyển file** khỏi `public/files`, **không xoá dòng `tabFile`** (có ý, để rollback được) — nên script đọc DB thấy chúng vẫn "công khai". Đã thêm `con_tren_dia()` và nhóm riêng `da_niem_khong_con_tren_dia`; mã thoát nay chỉ tính file **còn trên đĩa**.
+
+**2. Bộ mẫu chỉ có tiếng Anh và tiếng Việt không dấu ⇒ bỏ sót đúng ba thứ đang lộ.** Ảnh lớp tên `5A5.jpg`, file `import-families.xlsx`, và báo cáo học tập tên tiếng Việt có dấu (`Báo cáo cuối học kì 1.pdf`) đều **không khớp mẫu nào**. Đã thêm mẫu mã lớp, mẫu `import-*`, và ba mẫu tiếng Việt có dấu. Sau khi sửa: 141 file lộ diện thay vì bị xếp vào `anh_mo_coi`/`tai_lieu_mo_coi`.
+
+> Nếu chỉ đọc con số của lần chạy đầu (4.604 file, 1.964 MB) thì vừa **báo động quá mức** về quy mô, vừa **bỏ sót** đúng ba nhóm cần xử lý. Hai lỗi ngược chiều nhau, và cùng đến từ việc suy trạng thái từ DB thay vì kiểm thực tế.
+
+### Còn phải quyết
+
+- **55 ảnh lớp + 1 ảnh chân dung**: không ai tham chiếu ⇒ **niêm được ngay, không cần code**, không ảnh hưởng ứng dụng.
+- **85 file nhập liệu**: 44 file có link trong UI quản trị. Ba hướng: đặt `is_private=1`, xoá hẳn (đây là file nhập liệu đã dùng xong), hoặc đưa lên CDN có ký. Cần quyết định.
+- **126 file `dang_dung_chua_ro`** còn trên đĩa, trong đó **62 file là `SIS Discipline Record Image.image`** — ảnh kèm hồ sơ kỷ luật học sinh, đang phục vụ công khai. Mẫu tên không bắt được vì tên là `IMG_1868.png`. Nhóm này cần rà thủ công như §18 đã cảnh báo, và nghiêng về việc cần khuôn §7b (`cdn_sign` + `*_store` + timer niêm).
+
+### Mô tả gốc
 
 `scripts/cdn/classify-unowned-files.py` — **chỉ đọc và báo cáo**, không sửa DB/đĩa/CDN.
 
@@ -819,7 +1006,39 @@ Thoát mã 1 nếu có file nhạy cảm chưa được bảo vệ.
 |---|---|---|
 | `cd social-service && npm run test:cdn` | **80** | Ký + cửa sổ, resolver legacy, `signMediaDeep`, pipeline ảnh (EXIF/orientation), guard `/uploads`, Phase 3, Phase 4 |
 | `npm run check` (social-service) | 57 file | `node --check` |
-| `python3 -m unittest erp.tests.test_files_cdn erp.tests.test_sis_content_cdn erp.tests.test_sis_content_store erp.tests.test_classify_unowned` | **67** | Regex `FILES_RE`, tranh URL học sinh/SIS, khoá đầy đủ, phân loại file |
+| `python3 -m unittest erp.tests.test_files_cdn erp.tests.test_sis_content_cdn erp.tests.test_sis_content_store erp.tests.test_classify_unowned` | **67** ⚠️ | Regex `FILES_RE`, tranh URL học sinh/SIS, khoá đầy đủ, phân loại file |
+
+⚠️ **Ba trong bốn module Python KHÔNG chạy được bằng `python3` hệ thống.** Kiểm chứng 2026-07-30 tại `apps/erp`:
+
+```
+test_files_cdn         ImportError: No module named 'frappe'
+test_sis_content_cdn   ImportError: No module named 'frappe'
+test_sis_content_store ImportError: No module named 'frappe'
+test_classify_unowned  15/15 OK
+```
+
+Chạy được đủ 67 test thì phải dùng interpreter của bench (`frappe-bench/env/bin/python`), tức là trên VM Frappe hoặc một bench local — **không** phải "không cần prod" như câu ghi chú cuối §19 và trong `CDN-HANDOFF-2026-07-30.md`. Riêng `test_classify_unowned` (15 test) thì đúng là chạy ở đâu cũng được vì script phân loại không import `frappe` ở tầng module.
+
+Bộ Node thì đúng như ghi: chạy lại 2026-07-30 được **80/80 pass** — 37 (`test-cdn-phase1`) + 8 (`test-cdn-wiring`) + 22 (`test-cdn-phase3`) + 13 (`test-cdn-phase4`).
 
 **Kiểm chứng chéo ba bộ ký** (2026-07-30): Python `cdn_sign.py`, Node `sign.js` và `openssl` (thuật toán nginx) cho ra **chữ ký giống hệt nhau** trên 5 ca, gồm hai ca từng làm vỡ production là tên file **có dấu cách** và **tiếng Việt có dấu**.
+
+### ⚠️ Đừng giả mạo chữ ký bằng cách đổi ký tự CUỐI
+
+Phát hiện 2026-07-30 khi `test-sis-content-cdn.py --group library` báo `chu ky sai -> 200 (mong doi 403)`. **Không phải lỗ hổng** — là lỗi của phép thử.
+
+`secure_link` của nginx là MD5 **128 bit** mã base64url thành **22 ký tự** = 132 bit. Bốn bit dư nằm ở ký tự cuối, nên **chỉ 2 bit đầu của ký tự cuối là có nghĩa**: mọi ký tự cuối cùng nhóm 2-bit-đầu đều giải ra **đúng một digest**. Đã kiểm chứng trên prod:
+
+```
+sig goc : RN1j-Y_h70-xtpjzigvwjQ   -> 44dd63f98fe1ef4fb1b698f38a0bf08d
+doi -> X: RN1j-Y_h70-xtpjzigvwjX   -> 44dd63f98fe1ef4fb1b698f38a0bf08d   GIONG NHAU
+```
+
+`Q` = `010000`, `X` = `010111` — hai bit đầu `01` giống nhau, bốn bit sau là bit thừa. Vì vậy `signed[:-1] + "X"` **không đổi chữ ký** với 16/64 ký tự cuối khả dĩ (~25%), và phép thử báo FAIL oan. `news`/`menu` lọt lưới chỉ vì rơi vào 75% còn lại — nghĩa là mỗi lần chạy là một lần tung xúc xắc.
+
+Đã sửa `test-sis-content-cdn.py`: đổi ký tự **đầu** của chữ ký, nơi cả 6 bit đều có nghĩa. Sau khi sửa: news 21/21, menu 21/21, library 21/21.
+
+Việc kiểm chữ ký ở production **hoàn toàn đúng** — 6/6 ca giả mạo thật (đổi ký tự đầu/giữa, đổi expiry, bỏ chữ ký, đổi đường dẫn, liệt kê bucket) đều trả 403. Xem bảng nghiệm thu §14.
+
+> **Bài học:** phép thử âm tính (negative test) phải chứng minh được là nó **thật sự** đổi thứ đang kiểm. Ở đây phép thử chỉ đổi biểu diễn, không đổi giá trị — và thất bại theo hướng "báo động giả", tức là còn may. Cùng một sai sót ở hướng ngược lại sẽ là phép thử luôn PASS và che mất lỗ hổng thật.
 

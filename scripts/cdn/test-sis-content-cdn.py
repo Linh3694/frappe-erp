@@ -84,7 +84,15 @@ def main():
             fail += 1
             print("FAIL  khong ky duoc URL de thu chu ky sai")
         else:
-            bad = signed[:-1] + "X"
+            # KHONG doi ky tu CUOI cua chu ky. secure_link md5 la 128 bit ma
+            # base64 thanh 22 ky tu = 132 bit, nen 4 bit cuoi la BIT THUA: moi
+            # ky tu cuoi co gia tri 16..31 (Q..f) deu giai ra CUNG mot digest.
+            # `signed[:-1] + "X"` vi vay khong doi chu ky trong 16/64 truong hop
+            # (~25%), va phep thu bao FAIL oan. Da xay ra that voi nhom library
+            # 2026-07-30: chu ky ket thuc bang "Q", doi thanh "X" van ra 200.
+            # Doi ky tu DAU cua chu ky thi ca 6 bit deu co nghia nen luon doi digest.
+            head, _sep, sig = signed.partition("s=")
+            bad = head + "s=" + ("A" if sig[0] != "A" else "B") + sig[1:]
             code, _ = http_code(bad)
             print(f"{'PASS' if code == 403 else 'FAIL'}  chu ky sai -> {code} (mong doi 403)")
             if code != 403:

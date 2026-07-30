@@ -41,6 +41,11 @@ import sys
 
 SITE = os.environ.get("SITE", "prod.sis.wellspring.edu.vn")
 
+# Thu muc nginx thuc su phuc vu. File khong con o day thi da 404, khong con la lo hong.
+PUBLIC_FILES = os.environ.get(
+    "PUBLIC_FILES", f"/srv/app/frappe-bench/sites/{SITE}/public/files"
+)
+
 # Thu muc da duoc bao ve boi cac dot truoc — khong tinh vao "chua bao ve".
 DA_BAO_VE_PREFIX = (
     "Avatar/",
@@ -48,6 +53,14 @@ DA_BAO_VE_PREFIX = (
 )
 
 # Mau ten goi y noi dung nhay cam. Chi dung TEN, khong mo file.
+#
+# ⚠️ Lan chay dau tien (2026-07-30) cho thay bo mau ban dau BO SOT ba loai that su
+# dang bi lo, vi mau chi viet bang tieng Anh va tieng Viet KHONG DAU:
+#   * anh lop ten theo MA LOP thuan (`5A5.jpg`, `9AB4.jpg`) — khong gio dau hieu
+#     nao trong bo mau cu, ma day la khong gian ten NHO va doan duoc het.
+#   * file nhap lieu hang loat (`import-families.xlsx`) — ten doan duoc, ben trong
+#     la PII ca gia dinh.
+#   * bao cao hoc tap dat ten tieng Viet CO DAU (`Bao cao cuoi hoc ki 1.pdf`).
 MAU_NHAY_CAM = [
     (re.compile(r"^WS\d{6,}", re.I), "ma hoc sinh"),
     (re.compile(r"(cccd|cmnd|passport|ho[_\s-]?chieu|can[_\s-]?cuoc)", re.I), "giay to tuy than"),
@@ -56,6 +69,16 @@ MAU_NHAY_CAM = [
     (re.compile(r"(hop[_\s-]?dong|contract|luong|salary|payroll)", re.I), "hop dong / luong"),
     (re.compile(r"(khai[_\s-]?sinh|birth[_\s-]?cert|so[_\s-]?ho[_\s-]?khau)", re.I), "ho tich"),
     (re.compile(r"\b(ky[_\s-]?luat|discipline|incident)\b", re.I), "ky luat"),
+    # --- them 2026-07-30 sau lan chay dau tien ---
+    # Ten file CHI la ma lop: khong gian ten rat nho (~vai chuc lop) nen doan het
+    # trong vai giay. Cung dang lo hong nhu muc 7b, chi khac quy uoc dat ten.
+    (re.compile(r"^\d?[A-Z]{1,3}\d{1,2}\.(jpe?g|png|webp|heic)$", re.I), "anh lop (ten = ma lop)"),
+    # Nhap lieu hang loat: ten doan duoc, noi dung la PII hang loat.
+    (re.compile(r"^import[_\s-]?(students?|families|classes|subjects?|timetable)", re.I), "nhap lieu hang loat (PII)"),
+    # Tieng Viet CO DAU — bo mau cu chi khop ban khong dau nen truot het.
+    (re.compile(r"b[áàảãạăắằẳẵặâấầẩẫậ]o\s*c[áàảãạăắằẳẵặâấầẩẫậ]o", re.I), "bao cao (co dau)"),
+    (re.compile(r"h[oọóòỏõôốồổỗộơớờởỡợ]c\s*(k[ìíỳ]|b[ạa])", re.I), "hoc ky / hoc ba (co dau)"),
+    (re.compile(r"danh\s*d[ựu]", re.I), "danh hieu hoc sinh"),
 ]
 
 # Duoi file goi y anh chan dung / tai lieu quet.
@@ -78,6 +101,30 @@ def duoi(ten):
 
 def da_bao_ve(file_url):
     return any(p in file_url for p in DA_BAO_VE_PREFIX)
+
+
+def duong_dan_dia(file_url):
+    """`/files/<rel>` -> duong dan tuyet doi trong public/files."""
+    import urllib.parse
+
+    rel = urllib.parse.unquote(file_url[len("/files/"):])
+    return os.path.join(PUBLIC_FILES, rel)
+
+
+def con_tren_dia(file_url):
+    """File CON nam trong public/files hay khong.
+
+    BAT BUOC phai kiem, khong duoc suy tu `tabFile`. Cac dot niem cua muc 7 va 7b
+    CHI CHUYEN FILE khoi public/files, KHONG xoa dong trong `tabFile` (co y: giu
+    duong rollback). Neu chi doc DB thi 4.603 file DA NIEM van bi dem la "chua
+    bao ve" — chinh xac la chuyen da xay ra o lan chay dau tien 2026-07-30, va ma
+    thoat 1 khi do la BAO DONG GIA. File khong con tren dia thi nginx tra 404,
+    khong con la lo hong.
+    """
+    try:
+        return os.path.exists(duong_dan_dia(file_url))
+    except Exception:
+        return True  # khong chac thi coi nhu con — bao dong gia an hon bo sot
 
 
 def nhan_dang_nhay_cam(file_url):
@@ -184,7 +231,11 @@ def main():
         ly_do = nhan_dang_nhay_cam(url)
         nguoi_dung = sorted(dang_dung.get(url, ()))
 
-        if da_bao_ve(url):
+        if not con_tren_dia(url):
+            # Da bi niem o dot truoc. Dong `tabFile` con lai la co y (rollback),
+            # khong phai lo hong — nginx tra 404.
+            key = "da_niem_khong_con_tren_dia"
+        elif da_bao_ve(url):
             key = "da_bao_ve"
         elif ly_do:
             key = "NHAY_CAM_CHUA_BAO_VE"
@@ -206,6 +257,7 @@ def main():
         "anh_mo_coi",
         "khac_mo_coi",
         "da_bao_ve",
+        "da_niem_khong_con_tren_dia",
     ]
 
     print("=" * 78)
@@ -223,9 +275,15 @@ def main():
     print(f"{'TONG':<34} {sum(len(v) for v in nhom.values()):>9} {tong_size/1024/1024:>11.1f} MB")
     print("=" * 78)
 
+    print(
+        "\nCHU Y: chi cac nhom CON TREN DIA moi la lo hong. Nhom"
+        " 'da_niem_khong_con_tren_dia' la file da bi niem o dot truoc — nginx tra 404,"
+        " dong tabFile con lai la co y de rollback duoc."
+    )
+
     for key in thu_tu:
         items = nhom.get(key, [])
-        if not items or key == "da_bao_ve":
+        if not items or key in ("da_bao_ve", "da_niem_khong_con_tren_dia"):
             continue
         print(f"\n### {key} — {len(items)} file")
         for url, size, ly_do, nguoi_dung in sorted(items, key=lambda x: -x[1])[: args.limit_vi_du]:
@@ -243,17 +301,25 @@ def main():
 
         with open(args.csv, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
-            w.writerow(["nhom", "file_url", "size_bytes", "dau_hieu", "dung_boi"])
+            w.writerow(["nhom", "file_url", "size_bytes", "dau_hieu", "dung_boi", "con_tren_dia"])
             for key in thu_tu:
                 for url, size, ly_do, nguoi_dung in nhom.get(key, []):
-                    w.writerow([key, url, size, "|".join(ly_do), "|".join(nguoi_dung)])
+                    w.writerow([
+                        key, url, size, "|".join(ly_do), "|".join(nguoi_dung),
+                        "0" if key == "da_niem_khong_con_tren_dia" else "1",
+                    ])
         print(f"\nDa ghi CSV: {args.csv}")
 
+    # Chi dem file CON TREN DIA. Nhom da_niem_* khong tinh — xem chu thich
+    # con_tren_dia(): dem ca chung la ly do ma thoat 1 bao dong gia lan dau chay.
     nhay_cam = nhom.get("NHAY_CAM_CHUA_BAO_VE", [])
     if nhay_cam:
+        size = sum(i[1] for i in nhay_cam)
         print(
-            f"\n⚠️  {len(nhay_cam)} file co dau hieu nhay cam ma CHUA duoc bao ve.\n"
-            "   Xu ly theo khuon mau muc 7 / 7b: cdn_sign + *_store + timer niem."
+            f"\n⚠️  {len(nhay_cam)} file ({size/1048576:.1f} MB) co dau hieu nhay cam,"
+            " CON tren public/files va DANG phuc vu cong khai.\n"
+            "   Xu ly theo khuon mau muc 7 / 7b: cdn_sign + *_store + timer niem.\n"
+            "   File KHONG duoc doctype nao tham chieu thi niem duoc ngay, khong can code."
         )
         return 1
 
