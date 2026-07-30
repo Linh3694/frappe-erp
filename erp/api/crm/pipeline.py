@@ -14,7 +14,7 @@ from erp.api.crm.utils import (
     get_valid_statuses_for_step, generate_crm_code, STEP_STATUSES,
     QLEAD_TEST_STATUSES,
 )
-from erp.api.crm.lead import enrich_lead_dict_with_pic_info
+from erp.api.crm.lead import enrich_lead_dict_with_pic_info, _save_lead_side_effect
 from erp.api.crm.assignment import (
     assign_pic_sales_weight_balance,
     assign_pic_sales_care_weight_balance,
@@ -65,7 +65,7 @@ def _sync_lead_guardians_to_family_if_needed(doc):
             if frappe.db.exists("CRM Family", family_code):
                 doc.linked_family = family_code
                 doc.flags.ignore_validate = True
-                doc.save(ignore_permissions=True)
+                _save_lead_side_effect(doc)
     except Exception as e:
         frappe.log_error(f"Loi sync lead_guardians sang CRM Family: {str(e)}")
 
@@ -285,7 +285,7 @@ def change_status():
             doc.reject_reason = reject_reason
             doc.reject_detail = reject_detail
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -351,7 +351,7 @@ def change_sub_status():
             doc.reject_reason = reject_reason
             doc.reject_detail = reject_detail
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -402,7 +402,7 @@ def advance_step():
             return prep_err
         doc, old_step, old_status = prepared
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -472,7 +472,7 @@ def bulk_advance_step():
                     break
                 doc, old_step, old_status = prepared
                 try:
-                    doc.save(ignore_permissions=True)
+                    _save_lead_side_effect(doc)
                     break
                 except frappe.TimestampMismatchError:
                     if attempt == 1:
@@ -550,7 +550,7 @@ def enroll_lead():
         if pic_care:
             doc.pic_care = pic_care
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -611,7 +611,7 @@ def transfer_to_withdraw():
         if reason:
             doc.reject_reason = reason
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -950,7 +950,7 @@ def _enroll_one_lead(lead_name, allowed_statuses, context):
         if pic_care:
             doc.pic_care = pic_care
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -1183,7 +1183,7 @@ def reserve_enrollment():
         doc.step = "Enrolled"
         doc.status = "Cho xep lop"
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -1238,7 +1238,7 @@ def move_back_to_reenroll():
         doc.status = "Cho xep lop"
         doc.enrollment_date = nowdate()
         try:
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             break
         except frappe.TimestampMismatchError:
             if attempt == 1:
@@ -1336,7 +1336,7 @@ def end_of_year_transition():
                     doc.status = "Cho xep lop"
                     bump = "re_enroll"
                 try:
-                    doc.save(ignore_permissions=True)
+                    _save_lead_side_effect(doc)
                     results[bump] += 1
                     _log_step_change(
                         doc.name, old_step, doc.step, old_status, doc.status

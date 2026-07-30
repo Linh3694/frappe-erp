@@ -1686,6 +1686,32 @@ def get_lead_summary():
 
 # === Lead Family / Guardian APIs ===
 
+
+def _save_lead_side_effect(doc):
+    """
+    Save CRM Lead cho cac thao tac PHU — nhung luong KHONG sua `phone_numbers`
+    (them/bot/sua phu huynh, doi nguoi lien lac chinh, sap xep, sync flat field...).
+
+    `CRM Lead.phone_numbers` la child table `reqd: 1` nhung CRM Lead KHONG co field SDT
+    phang de bootstrap, nen ho so cu (migrate tu CRM Student) khong co dong nao se lam
+    `doc.save()` throw MandatoryError "Du lieu bi mat trong bang: Phone Numbers". Patch
+    backfill_crm_lead_phone_from_guardian da chay va van con 1731 ho so khong co nguon
+    SDT — tuc rang buoc reqd nay khong phan anh du lieu thuc te. Chan cac thao tac phu
+    vi thieu SDT co tu truoc la sai. Cung ly do voi ghi chu o
+    erp/api/crm/pipeline.py::_prepare_step_to_off.
+
+    `ignore_validate` KHONG du: _validate_mandatory chi bi tat boi `ignore_mandatory`
+    (frappe/model/document.py:939-940) — day la ly do cac save cu van throw du da set
+    ignore_validate.
+
+    KHONG dung ham nay o create_lead / update_lead: do la noi nguoi dung thuc su nhap
+    lieu va da co validate SDT bang code voi thong bao ro rang.
+    """
+    doc.flags.ignore_validate = True
+    doc.flags.ignore_mandatory = True
+    doc.save(ignore_permissions=True)
+
+
 def _resolve_family_for_lead(doc):
     """
     Ten document CRM Family cua lead — CHI DOC, khong ghi gi vao Family.
@@ -2163,7 +2189,7 @@ def add_lead_guardian():
         "is_primary_contact": 1 if is_first else 0,
     })
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
 
     # Sync flat fields neu la primary
     if is_first:
@@ -2190,7 +2216,7 @@ def add_lead_guardian():
             # Cap nhat phone_numbers neu chua co
             if not doc.phone_numbers or len(doc.phone_numbers) == 0:
                 doc.append("phone_numbers", {"phone_number": guardian_phone, "is_primary": 1})
-        doc.save(ignore_permissions=True)
+        _save_lead_side_effect(doc)
 
     # TODO(Pham vi 2b): co tinh KHONG dung _resolve_family_for_lead() o day.
     # Day la duong GHI vao CRM Family (3 noi: Family.relationships,
@@ -2355,7 +2381,7 @@ def update_lead_guardian():
                 lg.relationship_type = relationship_type
                 break
         doc.flags.ignore_validate = True
-        doc.save(ignore_permissions=True)
+        _save_lead_side_effect(doc)
         doc = frappe.get_doc("CRM Lead", name)
 
     # TODO(Pham vi 2b): duong GHI — giu doc.linked_family, xem ghi chu o add_lead_guardian.
@@ -2398,7 +2424,7 @@ def update_lead_guardian():
         doc.guardian_nationality = getattr(g_doc, "nationality", None) or ""
         doc.guardian_note = getattr(g_doc, "note", None) or ""
         doc.guardian_dob = getattr(g_doc, "dob", None)
-        doc.save(ignore_permissions=True)
+        _save_lead_side_effect(doc)
 
     frappe.db.commit()
     return single_item_response({"guardian": guardian_name}, "Cap nhat phu huynh thanh cong")
@@ -2528,7 +2554,7 @@ def remove_lead_guardian():
 
     doc.set("lead_guardians", new_lead_guardians)
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
 
     # "Bo lien ket" tren mot lead = bo lien ket PH voi DUNG chau cua lead do — cung nguyen
     # tac cap (student, guardian) nhu key_person/access. Truoc day DELETE theo
@@ -2565,7 +2591,7 @@ def remove_lead_guardian():
         doc.guardian_nationality = getattr(g_doc, "nationality", None) or ""
         doc.guardian_note = getattr(g_doc, "note", None) or ""
         doc.guardian_dob = getattr(g_doc, "dob", None)
-        doc.save(ignore_permissions=True)
+        _save_lead_side_effect(doc)
     elif was_primary and not new_lead_guardians:
         # Xoa het flat fields
         doc.guardian_name = ""
@@ -2579,7 +2605,7 @@ def remove_lead_guardian():
         doc.guardian_nationality = ""
         doc.guardian_note = ""
         doc.guardian_dob = None
-        doc.save(ignore_permissions=True)
+        _save_lead_side_effect(doc)
 
     frappe.db.commit()
     return success_response(message="Da xoa phu huynh khoi ho so")
@@ -2633,7 +2659,7 @@ def add_lead_sibling():
         })
 
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
     frappe.db.commit()
     return single_item_response({"siblings": [r.as_dict() for r in doc.lead_siblings]}, "Da them anh/chi/em")
 
@@ -2667,7 +2693,7 @@ def update_lead_sibling():
             if "school" in updates:
                 row.school = updates.get("school", "")
             doc.flags.ignore_validate = True
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             frappe.db.commit()
             return single_item_response(row.as_dict(), "Da cap nhat")
     return not_found_response(f"Khong tim thay dong anh/chi/em {row_name}")
@@ -2691,7 +2717,7 @@ def remove_lead_sibling():
     new_siblings = [r for r in (getattr(doc, "lead_siblings", None) or []) if r.get("name") != row_name]
     doc.set("lead_siblings", new_siblings)
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
     frappe.db.commit()
     return success_response(message="Da xoa anh/chi/em khoi ho so")
 
@@ -2718,7 +2744,7 @@ def add_lead_learning_history():
         "withdraw_month_year": history_data.get("withdraw_month_year", ""),
     })
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
     frappe.db.commit()
     return single_item_response(
         {"items": [r.as_dict() for r in doc.lead_learning_history]},
@@ -2753,7 +2779,7 @@ def update_lead_learning_history():
             if "withdraw_month_year" in updates:
                 row.withdraw_month_year = updates.get("withdraw_month_year", "")
             doc.flags.ignore_validate = True
-            doc.save(ignore_permissions=True)
+            _save_lead_side_effect(doc)
             frappe.db.commit()
             return single_item_response(row.as_dict(), "Da cap nhat")
     return not_found_response(f"Khong tim thay dong qua trinh hoc tap {row_name}")
@@ -2777,7 +2803,7 @@ def remove_lead_learning_history():
     new_items = [r for r in (getattr(doc, "lead_learning_history", None) or []) if r.get("name") != row_name]
     doc.set("lead_learning_history", new_items)
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
     frappe.db.commit()
     return success_response(message="Da xoa qua trinh hoc tap khoi ho so")
 
@@ -2804,7 +2830,7 @@ def set_primary_contact():
     for lg in (getattr(doc, "lead_guardians", None) or []):
         lg.is_primary_contact = 1 if lg.get("guardian") == guardian_name else 0
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
 
     # key_person la thuoc tinh cua CAP (student, guardian) — moi chau mot nguoi lien lac
     # chinh, KHONG phai mot nguoi cho ca gia dinh. Nen moi UPDATE deu scope theo
@@ -2854,7 +2880,7 @@ def set_primary_contact():
     doc.guardian_nationality = getattr(g_doc, "nationality", None) or ""
     doc.guardian_note = getattr(g_doc, "note", None) or ""
     doc.guardian_dob = getattr(g_doc, "dob", None)
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
 
     frappe.db.commit()
     return single_item_response({"guardian": guardian_name}, "Da dat nguoi lien lac chinh")
@@ -2924,7 +2950,7 @@ def reorder_lead_guardians():
             if lg.get("guardian") == gid:
                 lg.display_order = i
     doc.flags.ignore_validate = True
-    doc.save(ignore_permissions=True)
+    _save_lead_side_effect(doc)
     frappe.db.commit()
     return success_response(message="Da luu thu tu phu huynh")
 
