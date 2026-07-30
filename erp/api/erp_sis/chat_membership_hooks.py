@@ -38,7 +38,15 @@ _GUARDIAN_WATCHED_FIELDS = ("guardian_name", "phone_number", "email", "guardian_
 _STUDENT_WATCHED_FIELDS = ("student_name", "student_code")
 
 # Cột của child row cần so sánh để biết liên kết HS↔PH có đổi không.
-_RELATIONSHIP_KEYS = ("student", "guardian", "relationship_type", "key_person", "display_order")
+# `access` quyết định PH có trong nhóm chat lớp — đổi cờ phải enqueue sync.
+_RELATIONSHIP_KEYS = (
+	"student",
+	"guardian",
+	"relationship_type",
+	"key_person",
+	"access",
+	"display_order",
+)
 _GUARDIAN_EMAIL_KEYS = ("email_address", "is_primary")
 
 
