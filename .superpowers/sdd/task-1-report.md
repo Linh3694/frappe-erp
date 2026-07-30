@@ -194,3 +194,52 @@ Probe thêm vài chuỗi (quan sát hành vi thật trước khi viết test):
 ### Hành vi regex quan sát được ở test mới
 
 Với input `"anh hoc sinh /files/WS123.jpg"`, `FILES_RE` match đúng `['/files/WS123.jpg']` — không nuốt `"anh hoc sinh "` đứng trước. Khớp ràng buộc (a) / kỳ vọng của test; không cần chỉnh assertion theo hành vi lệch.
+
+---
+
+## Bổ sung — siết test khóa `\s` trong nhóm origin (2026-07-29)
+
+**Nhánh:** `main` (không tạo nhánh mới, không push)
+
+### Vấn đề
+
+`test_van_ban_truoc_co_dau_cach_khong_bi_nuot` dùng input `"anh hoc sinh /files/WS123.jpg"`. Với URL tương đối, match bắt đầu ngay tại `/files/` nên văn bản đứng trước không lọt vào nhóm origin — bỏ `\s` khỏi lớp ký tự origin thì kết quả vẫn `['/files/WS123.jpg']`. Test không khóa được ràng buộc.
+
+### Input đã chọn (cả hai dạng)
+
+1. `https://evil.example/path with space https://prod.sis.wellspring.edu.vn/files/WS123.jpg`
+2. `see https://a.example/foo bar/files/WS123.jpg`
+
+### Output thật — so sánh hai regex
+
+```
+=== SO SANH HAI REGEX ===
+INPUT: 'https://evil.example/path with space https://prod.sis.wellspring.edu.vn/files/WS123.jpg'
+  with \s   : ['https://prod.sis.wellspring.edu.vn/files/WS123.jpg']
+  without \s: ['https://evil.example/path with space https://prod.sis.wellspring.edu.vn/files/WS123.jpg']
+  distinguishes: True
+  expected (with \s): ['https://prod.sis.wellspring.edu.vn/files/WS123.jpg']
+  pass with \s: True
+  fail without \s: True
+
+INPUT: 'see https://a.example/foo bar/files/WS123.jpg'
+  with \s   : ['/files/WS123.jpg']
+  without \s: ['https://a.example/foo bar/files/WS123.jpg']
+  distinguishes: True
+  expected (with \s): ['/files/WS123.jpg']
+  pass with \s: True
+  fail without \s: True
+
+ALL_DISTINGUISH: True
+```
+
+Probe unittest: `test_with_s_pass` ok; `test_without_s_fails` ok (assertion fail đúng với bản bỏ `\s`).
+
+`python3 -m py_compile erp/tests/test_files_cdn.py` → `py_compile_exit=0`
+
+**Không sửa** `FILES_RE`.
+
+### Commit hash
+
+
+`b0a0f1530a4f9f97970a77564a7340b764e13217`
