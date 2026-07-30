@@ -363,6 +363,144 @@ def diagnose_api(
     return out
 
 
+def diagnose_periods(class_id: str, week_start: str) -> dict:
+    """
+    Bước 3: TKB hiện ra nhưng SAI TIẾT — đối chiếu cột tiết mà import đã ghi vào rows
+    với cột tiết mà lưới đang hiển thị (schedule active của tuần).
+
+    Import tra cột chỉ bằng (education_stage_id, period_name), không lọc schedule/campus và
+    không order_by → có thể bám vào cột của schedule khác. Hàm này chỉ ra đúng chỗ lệch.
+
+    Usage:
+        from erp.scripts.diagnose_class_week_empty import diagnose_periods
+        diagnose_periods("SIS-CLASS-6137846", "2026-08-03")
+    """
+    ws = _to_date(week_start)
+    we = ws + timedelta(days=6)
+    print("\n" + "=" * 78)
+    print(f"🔍 ĐỐI CHIẾU CỘT TIẾT — lớp {class_id}, tuần {ws} → {we}")
+    print("=" * 78)
+
+    cls = frappe.db.get_value(
+        "SIS Class", class_id, ["title", "campus_id", "education_grade"], as_dict=True
+    )
+    if not cls:
+        print(f"❌ Không tìm thấy lớp {class_id}")
+        return {}
+    stage_id = frappe.db.get_value("SIS Education Grade", cls.education_grade, "education_stage")
+    stage_name = frappe.db.get_value("SIS Education Stage", stage_id, "title_vn") if stage_id else None
+    print(f"\n[L] Lớp {cls.title} | campus={cls.campus_id} | stage={stage_id} ({stage_name})")
+
+    # --- Cột mà ROWS đang trỏ tới -----------------------------------------
+    instances = frappe.get_all(
+        "SIS Timetable Instance", fields=["name"],
+        filters={"class_id": class_id, "start_date": ["<=", we], "end_date": [">=", ws]},
+    )
+    if not instances:
+        print("❌ Không instance nào phủ tuần")
+        return {}
+    rows = frappe.get_all(
+        "SIS Timetable Instance Row",
+        fields=["name", "day_of_week", "timetable_column_id", "subject_id"],
+        filters={
+            "parent": ["in", [i.name for i in instances]],
+            "parenttype": "SIS Timetable Instance",
+            "parentfield": "weekly_pattern",
+        },
+    )
+    used_cols = sorted({r.timetable_column_id for r in rows if r.timetable_column_id})
+    print(f"\n[A] Rows: {len(rows)} — dùng {len(used_cols)} cột tiết khác nhau")
+    col_info = {}
+    for cid in used_cols:
+        c = frappe.db.get_value(
+            "SIS Timetable Column", cid,
+            ["period_name", "period_priority", "period_type", "education_stage_id",
+             "campus_id", "schedule_id"],
+            as_dict=True,
+        ) or {}
+        col_info[cid] = c
+        n = sum(1 for r in rows if r.timetable_column_id == cid)
+        print(
+            f"     {cid} | '{c.get('period_name')}' | prio={c.get('period_priority')} "
+            f"| stage={c.get('education_stage_id')} | schedule={c.get('schedule_id') or '(legacy)'} "
+            f"| {n} rows"
+        )
+
+    # --- Cột mà LƯỚI đang hiển thị (schedule active của tuần) --------------
+    active_schedule = None
+    if stage_id and cls.campus_id:
+        active_schedule = frappe.db.get_value(
+            "SIS Schedule",
+            {
+                "education_stage_id": stage_id, "campus_id": cls.campus_id, "is_active": 1,
+                "start_date": ["<=", ws], "end_date": [">=", ws],
+            },
+            "name",
+        )
+    print(f"\n[B] Schedule active cho tuần: {active_schedule or '(không có → lưới dùng cột legacy)'}")
+    if active_schedule:
+        grid_cols = frappe.get_all(
+            "SIS Timetable Column",
+            fields=["name", "period_name", "period_priority", "period_type"],
+            filters={"schedule_id": active_schedule},
+            order_by="period_priority asc",
+        )
+    else:
+        grid_cols = frappe.get_all(
+            "SIS Timetable Column",
+            fields=["name", "period_name", "period_priority", "period_type"],
+            filters={
+                "education_stage_id": stage_id, "campus_id": cls.campus_id,
+                "schedule_id": ["is", "not set"],
+            },
+            order_by="period_priority asc",
+        )
+    print(f"    Lưới có {len(grid_cols)} cột:")
+    for c in grid_cols:
+        mark = "  ⬅ rows dùng cột này" if c.name in col_info else ""
+        print(f"     {c.name} | '{c.period_name}' | prio={c.period_priority} | {c.period_type}{mark}")
+
+    # --- Chẩn đoán lệch ----------------------------------------------------
+    grid_ids = {c.name for c in grid_cols}
+    wrong = [cid for cid in used_cols if cid not in grid_ids]
+    print("\n" + "-" * 78)
+    if wrong:
+        print(f"❌ {len(wrong)}/{len(used_cols)} cột mà rows trỏ tới KHÔNG thuộc lưới đang hiển thị")
+        print("   → FE không match được theo id, phải đoán theo period_name/priority → lệch tiết")
+        grid_by_prio = {c.period_priority: c for c in grid_cols}
+        for cid in wrong:
+            c = col_info[cid]
+            landed = grid_by_prio.get(c.get("period_priority"))
+            print(
+                f"     '{c.get('period_name')}' (prio={c.get('period_priority')}, "
+                f"schedule={c.get('schedule_id') or 'legacy'}) → rơi vào ô "
+                f"'{landed.period_name if landed else 'KHÔNG Ô NÀO (mất tiết)'}'"
+            )
+    else:
+        print("✅ Mọi cột rows trỏ tới đều thuộc lưới → lệch tiết không phải do sai cột")
+
+    # --- Cột trùng tên giữa các schedule (nguồn gốc chọn nhầm) -------------
+    names = {c.get("period_name") for c in col_info.values() if c.get("period_name")}
+    if names:
+        print("\n[C] Cột trùng period_name trong cùng education stage (import chọn bừa 1 cái):")
+        for nm in sorted(names):
+            dup = frappe.get_all(
+                "SIS Timetable Column",
+                fields=["name", "period_priority", "schedule_id", "campus_id"],
+                filters={"education_stage_id": stage_id, "period_name": nm},
+            )
+            if len(dup) > 1:
+                print(f"     '{nm}': {len(dup)} cột")
+                for d in dup:
+                    print(
+                        f"        {d.name} | prio={d.period_priority} "
+                        f"| schedule={d.schedule_id or '(legacy)'} | campus={d.campus_id}"
+                    )
+    print("-" * 78)
+    return {"used_cols": col_info, "grid_cols": grid_cols, "wrong": wrong,
+            "active_schedule": active_schedule}
+
+
 def diagnose_many(class_titles: list, week_start: str, school_year_title: Optional[str] = None):
     """Chạy diagnose cho nhiều lớp, in bảng tổng hợp — phân biệt lỗi toàn cục vs lỗi 1 lớp."""
     summary = []
