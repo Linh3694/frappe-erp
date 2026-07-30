@@ -37,8 +37,11 @@ from erp.api.crm.utils import (
     validate_phone_number,
 )
 from erp.utils.family_relationship import (
+    canonical_relationship_rows,
     find_guardian_by_phone,
     guardian_phone_matches,
+    rebuild_guardian_relationship_mirror,
+    rebuild_student_relationship_mirror,
 )
 from erp.utils.relationship_types import normalize as normalize_relationship
 
@@ -1959,10 +1962,11 @@ def fix_guardian_phone_duplicates(dry_run=1, commit_every=50):
 #
 # Doi chieu bang MA HOC SINH (cot ID / WS...). Tim PH uu tien quan he CRM Family
 # (Me/Bo/NGH), fallback SDT. Ghi ten, SDT, email (+ nghe nghiep/dia chi neu co).
-# KHONG tao CRM Guardian moi, KHONG them quan he gia dinh moi.
+# KHONG tao CRM Family moi; co the tao CRM Guardian + link quan he neu create_missing=1.
 # ==================================================================================
 
-TIH_SHEET = "1. TỔNG HS ĐÓNG PHÍ_ENROLLED  S"
+TIH_SHEET = "1. TỔNG HS ĐÓNG PHÍ_ENROLLED ST"
+TIH_SHEET_PREFIX = "1. TỔNG HS ĐÓNG PHÍ_ENROLLED"
 TIH_HEADER_ROW = 3
 
 # tieu de (da gop khoang trang) -> khoa noi bo. Dat truoc cac nhan de sau vi
@@ -2006,6 +2010,21 @@ def _tih_resolve_cols(ws):
                 out[key] = seen[n]
                 break
     return out, seen
+
+
+def _tih_resolve_sheet(wb, sheet=None):
+    """Chon sheet TIH — uu tien tham so, roi mac dinh, roi tim theo prefix."""
+    if sheet and sheet in wb.sheetnames:
+        return sheet
+    if TIH_SHEET in wb.sheetnames:
+        return TIH_SHEET
+    for name in wb.sheetnames:
+        if name.strip().startswith(TIH_SHEET_PREFIX):
+            return name
+    frappe.throw(
+        f"Khong co sheet TIH (can '{TIH_SHEET}' hoac prefix {TIH_SHEET_PREFIX!r}). "
+        f"Co: {wb.sheetnames}"
+    )
 
 
 # Me / Bo / NGH — quan he mac dinh tren CRM Family Relationship
@@ -2169,7 +2188,144 @@ def _apply_guardian_contact_update(doc, person, overwrite, counters):
     return changed
 
 
-def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
+_TIH_TAG_ORDER = {"m": 1, "f": 2, "g": 3}
+
+
+def _tih_resolve_student_family(student_id):
+    """Tim CRM Family cua hoc sinh (neu co)."""
+    if not student_id:
+        return None
+    from erp.api.crm.migration import _resolve_linked_family_for_student
+    return _resolve_linked_family_for_student(frappe.get_doc("CRM Student", student_id))
+
+
+def _tih_has_student_guardian_link(student_id, guardian_name):
+    if not student_id or not guardian_name:
+        return False
+    return bool(canonical_relationship_rows(guardian=guardian_name, student=student_id))
+
+
+def _tih_link_guardian_to_student(family_name, student_id, guardian_name, rel_type, counters):
+    """Them dong quan he HS-PH tren CRM Family + rebuild mirror."""
+    if frappe.db.exists(
+        "CRM Family Relationship",
+        {
+            "parent": family_name,
+            "parenttype": "CRM Family",
+            "parentfield": "relationships",
+            "student": student_id,
+            "guardian": guardian_name,
+        },
+    ):
+        return False
+    prior = canonical_relationship_rows(guardian=guardian_name, student=student_id)
+    inherited_access = 1
+    inherited_can_pickup = 1
+    if prior:
+        inherited_access = 1 if any(r.get("access") for r in prior) else 0
+        inherited_can_pickup = 1 if any(r.get("can_pickup", 1) for r in prior) else 0
+    family_doc = frappe.get_doc("CRM Family", family_name)
+    family_doc.append("relationships", {
+        "student": student_id,
+        "guardian": guardian_name,
+        "relationship_type": rel_type or "other",
+        "key_person": 0,
+        "access": inherited_access,
+        "can_pickup": inherited_can_pickup,
+    })
+    family_doc.flags.ignore_validate = True
+    family_doc.save(ignore_permissions=True)
+    if family_doc.family_code:
+        frappe.db.set_value(
+            "CRM Guardian", guardian_name, "family_code", family_doc.family_code)
+    rebuild_student_relationship_mirror(student_id)
+    rebuild_guardian_relationship_mirror(guardian_name)
+    counters["family_links"] += 1
+    return True
+
+
+def _tih_ensure_family_link(student_id, guardian_name, rel_type, counters, dry_run=False):
+    """Dam bao cap HS-PH tren CRM Family (neu family da ton tai)."""
+    if not student_id or not guardian_name:
+        return None
+    if _tih_has_student_guardian_link(student_id, guardian_name):
+        return None
+    fam = _tih_resolve_student_family(student_id)
+    if not fam:
+        counters["family_missing"] += 1
+        return None
+    if dry_run:
+        counters["family_links"] += 1
+        return fam
+    _tih_link_guardian_to_student(fam, student_id, guardian_name, rel_type, counters)
+    return fam
+
+
+def _tih_link_lead_guardian(lead_name, guardian_name, rel_type, display_order, counters):
+    """Them dong lead_guardians neu HS con co CRM Lead."""
+    doc = frappe.get_doc("CRM Lead", lead_name)
+    linked = {g.guardian for g in (doc.lead_guardians or [])}
+    if guardian_name in linked:
+        return False
+    doc.append("lead_guardians", {
+        "guardian": guardian_name,
+        "relationship_type": rel_type or "other",
+        "is_primary_contact": 0,
+        "display_order": display_order,
+    })
+    doc.flags.ignore_mandatory = True
+    doc.save(ignore_permissions=True)
+    counters["lead_guardian_rows"] += 1
+    return True
+
+
+def _tih_ensure_guardian(student_id, person, overwrite, create_missing, counters, dry_run):
+    """
+    Tim PH (quan he -> SDT); neu khong co va create_missing=1 thi tao moi bang _guardian_doc_for.
+    Tra (gname|None, cach_khop, rel_row|None, vua_tao_bool).
+    """
+    gname, how, rel_row = _tih_find_guardian_for_student(
+        student_id, person["rel_codes"], person["phones"])
+    if gname:
+        return gname, how, rel_row, False
+
+    if not int(create_missing):
+        return None, "missing", None, False
+
+    name = person.get("name") or ""
+    phones = person.get("phones") or []
+    if not name or not phones:
+        return None, "missing_no_phone", None, False
+
+    rel_type = person.get("rel") or (person.get("rel_codes") or ["other"])[0]
+    email = (person.get("emails") or [""])[0]
+
+    if dry_run:
+        counters["guardians_created"] += 1
+        if _tih_resolve_student_family(student_id):
+            counters["family_links"] += 1
+        else:
+            counters["family_missing"] += 1
+        return "__dry_run_new__", "created", None, True
+
+    gname, how = _guardian_doc_for(
+        name, phones[0], "", email, person.get("job") or "", "", "", overwrite=overwrite)
+    if how == "created":
+        counters["guardians_created"] += 1
+    else:
+        counters["guardians_reused"] += 1
+
+    doc = frappe.get_doc("CRM Guardian", gname)
+    if _apply_guardian_contact_update(doc, person, overwrite, counters):
+        doc.flags.ignore_validate = True
+        doc.flags.ignore_mandatory = True
+        doc.save(ignore_permissions=True)
+
+    _tih_ensure_family_link(student_id, gname, rel_type, counters, dry_run=False)
+    return gname, how, None, True
+
+
+def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, create_missing=1, commit_every=100):
     """
     Cap nhat lien lac phu huynh (ten / SDT / email) tu file
     «DANH SÁCH HỌC SINH XẾP LỚP», doi chieu ma HS (cot ID / WS...).
@@ -2184,21 +2340,24 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
     Ghi CRM Guardian.guardian_name, .phone_number, .email + bang con phone_numbers/emails.
     Bo qua gia tri '0'. Mot o co the chua nhieu SDT/email.
 
-    KHONG tao CRM Guardian moi, KHONG them lead_guardians / quan he gia dinh moi.
+    create_missing  1 (mac dinh) = tao CRM Guardian moi neu co ten+SDT hop le,
+                    link CRM Family Relationship (neu HS da co family).
+                    0 = chi cap nhat PH da ton tai.
+    Can ten + it nhat 1 SDT hop le de tao PH moi.
     """
     import openpyxl
 
     dry_run, ow = int(dry_run), int(overwrite)
+    create_missing = int(create_missing)
     commit_every = int(commit_every) or 100
     path = _resolve_path(path)
     print(f"  File: {path}")
     print(f"  overwrite={ow} ({'file thang' if ow else 'CRM thang'})")
+    print(f"  create_missing={create_missing}")
     print("  Ghi: ten / SDT / email (+ nghe nghiep / dia chi neu co)")
 
     wb = openpyxl.load_workbook(path, data_only=True)
-    sname = sheet or TIH_SHEET
-    if sname not in wb.sheetnames:
-        frappe.throw(f"Khong co sheet {sname!r}. Co: {wb.sheetnames}")
+    sname = _tih_resolve_sheet(wb, sheet)
     ws = wb[sname]
     C, seen = _tih_resolve_cols(ws)
     print(f"  Sheet: {sname!r}")
@@ -2216,6 +2375,8 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
 
     res = {
         "rows": 0, "people": 0, "guardian_found": 0, "guardian_missing": [],
+        "guardians_created": 0, "guardians_reused": 0,
+        "family_links": 0, "family_missing": 0, "lead_guardian_rows": 0,
         "set_name": 0, "set_phone": 0, "set_email": 0, "set_job": 0, "set_addr": 0,
         "child_phone": 0, "child_email": 0, "set_relationship": 0,
         "lead_filled": 0, "no_code": [], "student_missing": [],
@@ -2278,17 +2439,23 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
         lead = frappe.db.get_value("CRM Lead", {"student_code": code}, "name")
 
         for g in people:
-            gname, how, rel_row = _tih_find_guardian_for_student(
-                student_id, g["rel_codes"], g["phones"])
+            gname, how, rel_row, created = _tih_ensure_guardian(
+                student_id, g, ow, create_missing, res, dry_run)
             if not gname:
+                reason = "can ten + SDT de tao" if how == "missing_no_phone" else "khong tim thay"
                 res["guardian_missing"].append({
                     "row": r, "student": sn, "tag": g["tag"], "name": g["name"],
-                    "phones": ", ".join(g["phones"][:2]),
+                    "phones": ", ".join(g["phones"][:2]), "reason": reason,
                 })
                 continue
             res["guardian_found"] += 1
+            rel_type = g.get("rel") or (g.get("rel_codes") or ["other"])[0]
+
             if dry_run:
-                _tih_preview_guardian_update(gname, g, ow, res)
+                if gname != "__dry_run_new__":
+                    _tih_preview_guardian_update(gname, g, ow, res)
+                    if not rel_row:
+                        _tih_ensure_family_link(student_id, gname, rel_type, res, dry_run=True)
                 if g["tag"] == "g" and rel_row and g.get("rel"):
                     cur_rel = rel_row.get("relationship_type") or ""
                     if ow or not cur_rel:
@@ -2299,12 +2466,23 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
             sp = f"tih_{r}_{g['tag']}"
             try:
                 frappe.db.savepoint(sp)
-                doc = frappe.get_doc("CRM Guardian", gname)
-                changed = _apply_guardian_contact_update(doc, g, ow, res)
-                if changed:
-                    doc.flags.ignore_validate = True
-                    doc.flags.ignore_mandatory = True
-                    doc.save(ignore_permissions=True)
+                if not created:
+                    doc = frappe.get_doc("CRM Guardian", gname)
+                    changed = _apply_guardian_contact_update(doc, g, ow, res)
+                    if changed:
+                        doc.flags.ignore_validate = True
+                        doc.flags.ignore_mandatory = True
+                        doc.save(ignore_permissions=True)
+                        n_done += 1
+                    # PH tim qua SDT nhung chua link HS -> bo sung quan he family
+                    if not rel_row:
+                        _tih_ensure_family_link(student_id, gname, rel_type, res, dry_run=False)
+
+                if lead and created:
+                    _tih_link_lead_guardian(
+                        lead, gname, rel_type, _TIH_TAG_ORDER.get(g["tag"], 9), res)
+
+                if created:
                     n_done += 1
 
                 # Cap nhat quan he NGH tren CRM Family neu cot AE khac DB
@@ -2366,8 +2544,13 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
     print("=" * 62)
     print(f"  Dong doc duoc            : {res['rows']}")
     print(f"  Phu huynh co du lieu     : {res['people']}")
-    print(f"  Tim thay CRM Guardian    : {res['guardian_found']}")
+    print(f"  Tim thay / xu ly PH      : {res['guardian_found']}")
     print(f"  KHONG tim thay PH        : {len(res['guardian_missing'])}")
+    print(f"  {'Se tao PH moi' if dry_run else 'Da tao PH moi':<24} : {res['guardians_created']}")
+    if not dry_run:
+        print(f"  PH da ton tai (reuse)    : {res['guardians_reused']}")
+    print(f"  {'Se link CRM Family' if dry_run else 'Da link CRM Family':<24} : {res['family_links']}")
+    print(f"  HS khong co CRM Family   : {res['family_missing']}")
     print(f"  HS khong co CRM Student  : {len(res['student_missing'])}")
     print(f"  {'Se ghi ten' if dry_run else 'Da ghi ten':<24} : {res['set_name']}")
     print(f"  {'Se ghi SDT chinh' if dry_run else 'Da ghi SDT chinh':<24} : {res['set_phone']}")
@@ -2378,6 +2561,8 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
         print(f"  Dong phone_numbers       : {res['child_phone']}")
         print(f"  Dong CRM Guardian Email  : {res['child_email']}")
     print(f"  Cap nhat quan he NGH     : {res['set_relationship']}")
+    if not dry_run:
+        print(f"  Dong lead_guardians      : {res['lead_guardian_rows']}")
     print(f"  Ho so CRM Lead duoc bu   : {res['lead_filled']}")
     if res["no_code"]:
         print(f"\n  Ma HS khong hop le ({len(res['no_code'])}):")
@@ -2390,7 +2575,7 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
     if res["guardian_missing"]:
         print(f"\n  Khong tim thay guardian ({len(res['guardian_missing'])}):")
         for x in res["guardian_missing"][:20]:
-            print(f"    r{x['row']:>4} [{x['tag']}] {x['name'][:22]:<24} {x['phones']:<14} (HS {x['student'][:18]})")
+            print(f"    r{x['row']:>4} [{x['tag']}] {x['name'][:22]:<24} {x['phones']:<14} ({x.get('reason', '')})")
         if len(res["guardian_missing"]) > 20:
             print(f"    … con {len(res['guardian_missing']) - 20}")
     if res["invalid_phones"]:
