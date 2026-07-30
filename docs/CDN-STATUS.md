@@ -26,9 +26,10 @@ Ba mức độ, **đừng nhầm lẫn**: `code xong` ≠ `đã deploy` ≠ `đ�
 | **Chặn `/uploads` ẩn danh (social-service)** | ✅ **Chạy production 2026-07-30 08:47 — lỗ hổng §15 đã vá, 200 → 403** |
 | **Phase 3 (upload thẳng lên CDN)** | 🟡 Code xong + test xanh (BE + web + mobile), BE **đã deploy** cùng đợt vá `/uploads`, cờ `CDN_DIRECT_UPLOAD` vẫn **TẮT**; C7 mobile chưa commit (§16) |
 | Phase 4 (dọn dẹp) | 🟡 Script để sẵn + test xanh; **cố ý chưa chạy** — giữ fallback tới ~giữa 2027 (§17) |
-| Phân loại ~6.600 file công khai chưa rõ | 🟡 **Đã chạy 2026-07-30, mã thoát nay là 0** — 141 file nhạy cảm đã vá (56 niêm + 121 URL sang private). **Còn 62 ảnh hồ sơ kỷ luật công khai** (§18) |
+| **Ảnh hồ sơ kỷ luật học sinh** | ✅ **Chạy production 2026-07-30 — lỗ hổng §7c đã vá, 68 ảnh, 142/142 phép thử đạt** |
+| Phân loại ~6.600 file công khai chưa rõ | ✅ **Mã thoát 0** — 141 + 68 + 28 file nhạy cảm đã vá. Ba nhóm chưa rà nội dung còn lại ở §18 |
 
-**Việc gấp nhất hiện nay:** 🔴 **62 ảnh hồ sơ kỷ luật học sinh** (`SIS Discipline Record Image.image`) vẫn phục vụ công khai — hướng vá đã chọn (khuôn §7b), cần thêm code. Xem §18.
+**Không còn lỗ hổng nào đã biết đang hở.** Hai chỗ đáng nhìn tiếp, đều **chưa ai xem nội dung**: 71 ảnh `SIS Library Event Day` đang công khai (chưa mục nào trong tài liệu nhắc tới), và nhóm `anh_mo_coi` có họ tên `WF56KT.jpg` / `WT17GE.jpg` chưa rõ là gì. Xem cuối §18.
 
 > **Cập nhật 2026-07-30 (phiên deploy):**
 > * Nội dung SIS đã migrate và bật cả ba nhóm (§14).
@@ -93,7 +94,7 @@ Doc gốc viết trước khi dựng máy, ba thông số đã đổi. **Dùng g
 /etc/nginx/conf.d/cdn-cache.conf, cdn-log.conf
 ```
 
-**Bucket:** `cdn-social-posts`, `cdn-social-chat`, `cdn-social-avatars`, `cdn-scholarship`, `cdn-student-photos`, `cdn-sis-content`, `cdn-staging`
+**Bucket:** `cdn-social-posts`, `cdn-social-chat`, `cdn-social-avatars`, `cdn-scholarship`, `cdn-student-photos`, `cdn-sis-content`, `cdn-discipline`, `cdn-staging`
 
 Mỗi bucket có một file policy `allow-nginx-cdn-<ten>.json` trong `/opt/cdn/policies/` (chỉ `127.0.0.1` được `GetObject`), và tên bucket phải nằm trong policy IAM `social-service`.
 
@@ -114,7 +115,7 @@ Chống lặp: cùng mức nghiêm trọng thì 6 giờ mới nhắc lại; WARN
 
 > Script phân tích log dùng `gawk` (hàm `asort`) — **không chạy với mawk**.
 
-> ⚠️ **Bucket mới thì PHẢI thêm vào `BUCKETS` của `cdn-checks.sh`.** Phát hiện 2026-07-30: biến này vẫn là `"social-posts social-chat social-avatars scholarship"`, tức là **`student-photos` đã chạy production từ 29/07 mà chưa bao giờ có cảnh báo 403/410**, và `sis-content` cũng vậy. Một sự cố lệch chữ ký ở hai bucket đó sẽ **không ai biết**. Đã thêm cả hai, và mở rộng nhánh `NGUON` để báo đúng là đường ký Python (`erp/common/cdn_sign.py`).
+> ⚠️ **Bucket mới thì PHẢI thêm vào `BUCKETS` của `cdn-checks.sh`.** Phát hiện 2026-07-30: biến này vẫn là `"social-posts social-chat social-avatars scholarship"`, tức là **`student-photos` đã chạy production từ 29/07 mà chưa bao giờ có cảnh báo 403/410**, và `sis-content` cũng vậy. Một sự cố lệch chữ ký ở hai bucket đó sẽ **không ai biết**. Đã thêm cả hai, và mở rộng nhánh `NGUON` để báo đúng là đường ký Python (`erp/common/cdn_sign.py`). Bucket `discipline` (§7c) được thêm vào `BUCKETS` **cùng lúc tạo bucket**, trước cả khi migrate — đúng thứ tự, không lặp lại khoảng mù này.
 >
 > Đi kèm hai chỉnh ngưỡng, **cả hai đều dựa trên số đo, không phải phỏng đoán** — thêm hai bucket vào là sinh ngay `latency-*` và `cachehit-*`, đúng loại cảnh báo vĩnh viễn mà đoạn dưới nói phải tránh:
 >
@@ -462,6 +463,103 @@ Rà lại bằng regex nhiều dòng: **12 chỗ ORM**, tất cả `order_by="cr
 
 ---
 
+## 7c. Ảnh hồ sơ kỷ luật học sinh — lỗ hổng đã vá (2026-07-30)
+
+**Phát hiện ở §18, vá xong và đang chạy production.** `SIS Discipline Record Image.image` trỏ tới `/files/...` và `location /files/` phục vụ công khai không kiểm quyền.
+
+### Vì sao nặng hơn cả §7b
+
+§18 mô tả nhóm này là "62 ảnh tên dạng `IMG_1868.png`". Đo lại trên prod thì **68 URL** (68 dòng child, **32 hồ sơ**, **61,2 MB**), và tên file chia hai họ:
+
+```
+04FF7FA9-EAE9-42B6-8375-2AA32145B15E.jpg   UUID, không đoán được
+070526_BB Minh Quân 10AB3.jpg              ngày + "BB" + TÊN học sinh + LỚP
+```
+
+Họ thứ hai lộ theo cách khác hẳn §7b: ở đó phải **tải được ảnh** mới biết là ai, còn ở đây **chính tên file** đã cho biết em nào bị lập biên bản, lớp nào, ngày nào — nhìn log truy cập hay lịch sử trình duyệt là đủ.
+
+Chênh lệch 62 so với 68 là do §18 chỉ đếm file **không gắn doctype**, đúng kiểu sai lệch đã gặp ở nhóm `import-*` (báo 85, thật 126).
+
+Kiểm chứng từ máy ngoài, không đăng nhập, trước khi vá:
+
+```
+GET /files/04FF7FA9-EAE9-42B6-8375-2AA32145B15E.jpg  →  200  1.348.549 byte
+GET /files/070526_BB Minh Quân 10AB3.jpg             →  200    222.681 byte
+GET /files/150426_BB Gia Hưng 11Ab2.jpg              →  200    188.783 byte
+```
+
+### Vì sao chọn khuôn §7b chứ không `is_private`
+
+Khác nhóm file nhập liệu (§18): đây **là media hiển thị trong ứng dụng**, cần giữ đường rollback bằng cách tắt CDN, và không muốn đổi `file_url` trong DB.
+
+### Tiến độ
+
+| Bước | Trạng thái |
+|---|---|
+| Bucket `cdn-discipline` + policy `127.0.0.1` + IAM (14 → 16 resource) | ✅ |
+| `location /discipline/` trên nginx VM3 (prefix, không regex) | ✅ |
+| `discipline` trong `BUCKETS` của `cdn-checks.sh` | ✅ **làm ngay từ đầu** |
+| Migrate 68 file / 61,2 MB | ✅ |
+| Ký tại `after_request` — `erp/common/discipline_cdn.py` | ✅ |
+| Hook `SIS Discipline Record` cho ảnh mới | ✅ |
+| Niêm 68 file khỏi `public/files` | ✅ |
+| Timer niêm định kỳ | ✅ `cdn-discipline-seal.timer`, 5 phút |
+
+Nghiệm thu **142/142**: 68 URL ký trả 200, 68 đường `/files/` cũ trả 404, 6 ca giả mạo trả 403 (đổi ký tự **đầu**/giữa chữ ký, bỏ chữ ký, đổi `e=`, giữ chữ ký đổi đường dẫn, liệt kê bucket). `diff-discipline-images.py --sealed`: 68 dùng / 68 trên CDN / 0 thiếu / 0 thừa. Test đơn vị trên bench: **98/98**.
+
+### ⚠️ Hook phải gắn vào doctype CHA
+
+`SIS Discipline Record Image` là **child table** (`istable: 1`). Dòng child được lưu qua `db_insert`/`db_update` của parent chứ **không** qua `save()`, nên `doc_events` đăng ký cho child doctype sẽ **im lặng không chạy** — cùng họ với bẫy quên `bench clear-cache`, nhưng khó thấy hơn vì không có gì để clear và không có thông báo nào.
+
+Nên hook gắn ở `SIS Discipline Record` (`after_insert` / `on_update` / `on_trash`) và duyệt `doc.proof_images`. `hooks.py` **đã có sẵn** entry `"SIS Discipline Record"` với `before_insert` — phải **append** vào đó, không tạo entry thứ hai (xem cảnh báo ngay trong `doc_events`).
+
+### Không niêm theo mẫu tên — khác hẳn §7b
+
+`seal-student-photos.py` có nhánh quét thêm file `WS%` mồ côi trên đĩa rồi niêm thẳng. Làm vậy ở đây là **hỏng**: trên đĩa có 79 file `IMG_*` thuộc `SIS Library Event Day` (71), `Feedback` (6) và `SIS Library Title` (1). Danh sách niêm lấy **duy nhất** từ `tabSIS Discipline Record Image`; file không được tham chiếu chỉ được liệt kê qua `--report-orphans` (chạy 2026-07-30: **0 file**).
+
+### Đo đụng tên trước khi viết code — cổng chặn, không phải thủ tục
+
+Tên `IMG_1868.png` không mang thông tin phân biệt, nên trước khi làm gì phải đối chiếu ba tập khoá. Kết quả: 68 khoá kỷ luật giao **rỗng** với 3.284 khoá `student-photos` và 2.822 khoá `sis-content`, và không có hai URL nào trùng basename. Nhờ vậy dùng được khuôn §7b nguyên vẹn. Domain `discipline` đăng ký **sau cùng** trong `_DOMAIN_SOURCES` nên chỉ thua chứ không bao giờ cướp khoá của nhóm khác — có test giữ ràng buộc này.
+
+### Bật/tắt
+
+`CDN_DISCIPLINE_ENABLED` trong `/etc/cdn/cdn.env`, **mặc định tắt**. Cho phép migrate xong, `diff` sạch rồi mới bật ký.
+
+⚠️ `cdn_sign.load_conf()` cache ở mức **tiến trình**, không phải redis — đổi giá trị này thì `bench clear-cache` **không đủ**, phải restart web + workers.
+
+Cửa sổ ký **1h/2h** (`CDN_SIGN_WINDOW_DISCIPLINE_SEC=3600`, `LIFETIME=7200`) theo hồ sơ học bổng chứ không phải 6h/24h của nội dung SIS, vì tên file chứa tên và lớp học sinh. `proxy_cache_valid 200 1h` khớp trần đó.
+
+### Đẩy CDN chạy cả khi cờ ký đang tắt — có chủ ý
+
+`CDN_DISCIPLINE_ENABLED` chỉ điều khiển việc **ký lúc trả về**. Việc đẩy lên CDN thì luôn chạy: nếu đợi bật mới đẩy, mọi ảnh tạo trong khoảng đó sẽ thiếu trên CDN và script niêm sẽ từ chối chúng — lỗ hổng tồn tại âm thầm.
+
+### Một lỗi test bắt được trước khi lên prod
+
+`_name_of()` gọi `os.path.basename()` **rồi mới** kiểm `".." in name` — basename đã nuốt mất `../..` trước khi kiểm nên phép kiểm đó không chặn được gì. Vô hại về mặt khai thác (basename trung hoà đường dẫn) nhưng khiến store và signer suy khoá theo **hai cách khác nhau**: signer từ chối hẳn path có `/`, còn store thì nhận. Đã sửa để store gọi đúng `key_from_url` của signer.
+
+> Cùng khuyết điểm này còn nằm trong `student_photo_store.py` và `avatar_store.py`. Không khai thác được, nhưng đụng tới thì sửa.
+
+### Rollback
+
+```bash
+seal-discipline-images.py --rollback /srv/backup/discipline-sealed-20260730-123906   # mẻ canary 20
+seal-discipline-images.py --rollback /srv/backup/discipline-sealed-20260730-123936   # 48 còn lại
+```
+
+Hoặc `CDN_DISCIPLINE_ENABLED=false` + restart web/workers — ảnh quay về `/files/...`, nhưng phải rollback niêm trước thì file mới còn trên đĩa.
+
+### Thành phần
+
+| Tầng | File |
+|---|---|
+| Ký URL | `erp/common/discipline_cdn.py` |
+| Đẩy/xoá CDN + hook | `erp/common/discipline_store.py` |
+| Hook `doc_events` | `hooks.py` — `SIS Discipline Record` |
+| Script | `scripts/cdn/{migrate,seal,diff,test}-discipline-images.py` |
+| Test | `erp/tests/test_discipline_cdn.py` (28 test) |
+
+---
+
 ## 8. Bản đồ media theo chức năng
 
 Nguồn: bảng `tabFile` + đo đĩa thực tế trên VM Frappe.
@@ -676,7 +774,14 @@ CDN_BUCKET_SCHOLARSHIP=cdn-scholarship
 CDN_SCHOLARSHIP_PREFIX=scholarship
 CDN_SIGN_WINDOW_SCHOLARSHIP_SEC=3600          # link rò rỉ chết sau tối đa 3 giờ
 CDN_SIGN_LIFETIME_SCHOLARSHIP_SEC=7200
+# Phần ảnh hồ sơ kỷ luật — thêm 2026-07-30 (§7c)
+CDN_DISCIPLINE_ENABLED=true                   # false ⇒ API trả lại /files/...
+CDN_BUCKET_DISCIPLINE=cdn-discipline
+CDN_SIGN_WINDOW_DISCIPLINE_SEC=3600           # 1h/2h như học bổng: tên file chứa
+CDN_SIGN_LIFETIME_DISCIPLINE_SEC=7200         # tên và lớp học sinh
 ```
+
+⚠️ `cdn_sign.load_conf()` cache ở mức **tiến trình**. Đổi bất kỳ giá trị nào trong file này thì `bench clear-cache` **không đủ** — phải `supervisorctl restart frappe-bench-web: frappe-bench-workers:`.
 
 ### Script trên VM Frappe — `/opt/cdn/bin/` (bản gốc trong repo tại `scripts/cdn/`)
 
@@ -689,6 +794,10 @@ CDN_SIGN_LIFETIME_SCHOLARSHIP_SEC=7200
 | `test-scholarship-lifecycle.py` | kiểm chứng vòng đời upload → niêm |
 | `diff-scholarship.py` | đối chiếu ba tập: CDN, `tabFile`, URL đang dùng |
 | `test-avatar-store.py` | kiểm chứng avatar: nén, gỡ EXIF, đẩy CDN, chạy `doc_events` |
+| `migrate-discipline-images.py` | đẩy ảnh kỷ luật lên CDN; chạy lại được |
+| `seal-discipline-images.py` | chuyển ảnh khỏi `public/files`; `--report-orphans`, `--rollback` |
+| `diff-discipline-images.py` | đối chiếu ba tập; `--sealed` đảo kỳ vọng sau khi niêm |
+| `test-discipline-cdn.py` | kiểm chứng đầu-cuối + 6 ca giả mạo chữ ký |
 
 Tất cả chạy từ `/srv/app/frappe-bench/sites` dưới user `frappe`, cần `SITE=prod.sis.wellspring.edu.vn`.
 
@@ -730,6 +839,18 @@ ssh cdn 'ssh frappe "cd /srv/app/frappe-bench/sites && sudo -u frappe env SITE=p
 # Học bổng — lỗ hổng phải đóng: mong đợi 404
 curl -s -o /dev/null -w '%{http_code}\n' \
   "https://prod.sis.wellspring.edu.vn/files/1_YLE%20Flyers_Ngo%20Chuc%20An_4A6.jpg"
+
+# Ky luat — kiem chung dau-cuoi (phai ra 142/142 sau khi da niem)
+ssh cdn "ssh frappe 'cd /srv/app/frappe-bench/sites && sudo -u frappe \
+  env SITE=prod.sis.wellspring.edu.vn ../env/bin/python \
+  /opt/cdn/bin/test-discipline-cdn.py --sealed --limit 68'"
+
+# Ky luat — doi soat ba tap (phai ra 0 THIEU tren CDN)
+ssh cdn "ssh frappe '… diff-discipline-images.py --sealed'"
+
+# Ky luat — timer niem + file khong ai tham chieu
+ssh cdn 'ssh frappe "systemctl list-timers cdn-discipline-seal.timer"'
+ssh cdn "ssh frappe '… seal-discipline-images.py --report-orphans'"
 
 # Video — pipeline faststart + poster (7/7, tự dọn object thử)
 ssh cdn 'ssh micro "cd /srv/app/social-service && node scripts/test-video-cdn.js"'
@@ -1005,11 +1126,45 @@ Nghiệm thu từ máy ngoài: 7/7 URL cũ → **404**; `/private/files/...` v�
 
 Còn **2 tham chiếu treo** (`/files/import-timetables.xlsx`, `/files/import-students4c87e2.xlsx`) trỏ tới file đã mất khỏi đĩa **từ trước**. Trả 404, vô hại — cùng loại với "ba tham chiếu hỏng có sẵn" ở §7b.
 
-### Còn lại — đã có quyết định, chưa làm
+### Đã vá — nhóm thứ ba (2026-07-30 chiều)
 
-**62 ảnh hồ sơ kỷ luật học sinh** (`SIS Discipline Record Image.image`, tên dạng `IMG_1868.png`) **vẫn đang phục vụ công khai**. Đã chọn hướng: làm theo khuôn §7b — bucket riêng + `cdn_sign` + `*_store` + timer niêm, ký ở điểm đọc. Cần thêm code nên chưa làm trong phiên này.
+**68 ảnh hồ sơ kỷ luật** — xong, xem §7c. Không phải 62: §18 chỉ đếm file không gắn doctype.
 
-Nhóm còn trên đĩa sau khi vá: `dang_dung_chua_ro` **115 file / 70,0 MB** (gồm 62 ảnh kỷ luật), `tai_lieu_mo_coi` **34 / 7,3 MB**, `anh_mo_coi` **405 / 247,7 MB**. Hai nhóm mồ côi chưa rà nội dung.
+### ⚠️ Chính mẫu "mã lớp" thêm sáng 30/07 lại quá hẹp — 28 ảnh lớp còn hở tới chiều
+
+Chạy lại `classify` sau khi vá §7c thì thấy trong `anh_mo_coi` có `12AB2.jpg`, `10AB3.jpg`, `6AD.jpg`… Đo từ máy ngoài: **200, ~2 MB mỗi ảnh**. Cùng loại lỗ hổng với 55 ảnh lớp đã niêm sáng cùng ngày.
+
+Nguyên nhân là mẫu vừa thêm sáng hôm đó:
+
+```
+cu  ^\d?[A-Z]{1,3}\d{1,2}$     mot chu so dau, BAT BUOC co so cuoi
+moi ^\d{1,2}[A-Z]{1,4}\d{0,2}$  (khong re.I — ma lop luon CHU HOA)
+```
+
+Mẫu cũ khớp `5A5`, `9AB4` nhưng trượt **toàn bộ khối 10–12** (`10AB3`, `12ADN1`) và **lớp không có số cuối** (`6AD`, `9MT`). Vì `seal-unowned-files.py` dùng lại đúng hàm quét của `classify` — thiết kế vốn để hai bên không lệch — nó **thừa hưởng nguyên điểm mù**.
+
+Đã nới mẫu và niêm **28 file / 52,2 MB** → `/srv/backup/unowned-sealed-20260730-125127`. Nghiệm thu từ máy ngoài: `12AB2`, `11AB4`, `10AB3`, `6AD`, `10ADN3`, `9MT`, `12AI` đều **200 → 404**.
+
+Bộ lọc tham chiếu làm đúng việc: trong 29 ứng viên nó **loại `8gqe.jpg`** vì đang được `SIS Library Book Introduction.content` dùng — file đó vẫn trả 200.
+
+Mẫu **cố ý không dùng `re.I`**: mã lớp luôn viết hoa, còn với `re.I` nó nuốt cả `8gqe.jpg`, `1a.jpg`, `12q.jpg` — toàn rác tên viết thường. Một dương tính giả cũng đủ làm script thoát mã 1 vĩnh viễn, mà một cổng chặn luôn báo động thì không còn là cổng.
+
+> **Bài học:** dùng một nguồn sự thật duy nhất giúp hai script không lệch nhau — nhưng khi chính nguồn đó sai thì cả hai cùng sai, và không có gì đối chiếu để phát hiện. Mẫu nhận dạng nên được kiểm bằng **dữ liệu thật** (liệt kê đĩa rồi mắt người xem), không chỉ bằng test đơn vị do chính người viết mẫu nghĩ ra.
+
+Sau đợt này `classify` thoát **mã 0**, `NHAY_CAM_CHUA_BAO_VE` = **0**.
+
+### Còn lại — chưa rà nội dung
+
+| Nhóm | Số file | Dung lượng |
+|---|---|---|
+| `dang_dung_chua_ro_nhay_cam` | 52 | 9,8 MB |
+| `tai_lieu_mo_coi` | 34 | 7,3 MB |
+| `anh_mo_coi` | 371 | 194,5 MB |
+
+Hai chỗ đáng nhìn tiếp, đều **chưa ai xem**:
+
+* **`SIS Library Event Day`** — 71 ảnh `IMG_*` đang phục vụ công khai, chưa mục nào trong tài liệu này nhắc tới. Ảnh sự kiện thư viện nhiều khả năng có mặt trẻ em. Phát hiện tình cờ khi rà `IMG_*` cho §7c.
+* **`anh_mo_coi` có họ tên `WF56KT.jpg`, `WT17GE.jpg`, `WT16PY.jpg`** (~1,5–2,5 MB) — cùng dáng "mã ngắn viết hoa" như mã lớp nhưng khác quy ước, chưa biết là gì. Đúng loại đã hai lần trượt lưới.
 
 ### Mô tả gốc
 
@@ -1031,7 +1186,16 @@ Thoát mã 1 nếu có file nhạy cảm chưa được bảo vệ.
 |---|---|---|
 | `cd social-service && npm run test:cdn` | **80** | Ký + cửa sổ, resolver legacy, `signMediaDeep`, pipeline ảnh (EXIF/orientation), guard `/uploads`, Phase 3, Phase 4 |
 | `npm run check` (social-service) | 57 file | `node --check` |
-| `python3 -m unittest erp.tests.test_files_cdn erp.tests.test_sis_content_cdn erp.tests.test_sis_content_store erp.tests.test_classify_unowned` | **67** ⚠️ | Regex `FILES_RE`, tranh URL học sinh/SIS, khoá đầy đủ, phân loại file |
+| `python3 -m unittest erp.tests.test_files_cdn erp.tests.test_sis_content_cdn erp.tests.test_sis_content_store erp.tests.test_classify_unowned erp.tests.test_discipline_cdn` | **98** ⚠️ | Regex `FILES_RE`, tranh URL học sinh/SIS/kỷ luật, khoá đầy đủ, phân loại file, cờ bật/tắt |
+
+Chạy đủ 98 test bằng interpreter của bench (kiểm chứng trên prod 2026-07-30):
+
+```
+cd /srv/app/frappe-bench/sites && sudo -u frappe env SITE=prod.sis.wellspring.edu.vn \
+  ../env/bin/python -m unittest erp.tests.test_discipline_cdn erp.tests.test_files_cdn \
+  erp.tests.test_sis_content_cdn erp.tests.test_sis_content_store erp.tests.test_classify_unowned
+# Ran 98 tests — OK
+```
 
 ⚠️ **Ba trong bốn module Python KHÔNG chạy được bằng `python3` hệ thống.** Kiểm chứng 2026-07-30 tại `apps/erp`:
 
