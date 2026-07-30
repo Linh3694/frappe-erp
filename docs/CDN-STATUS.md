@@ -29,7 +29,11 @@ Ba mức độ, **đừng nhầm lẫn**: `code xong` ≠ `đã deploy` ≠ `đ�
 | **Ảnh hồ sơ kỷ luật học sinh** | ✅ **Chạy production 2026-07-30 — lỗ hổng §7c đã vá, 68 ảnh, 142/142 phép thử đạt** |
 | Phân loại ~6.600 file công khai chưa rõ | ✅ **Mã thoát 0** — 141 + 68 + 28 file nhạy cảm đã vá. Ba nhóm chưa rà nội dung còn lại ở §18 |
 
-**Không còn lỗ hổng nào đã biết đang hở.** Hai chỗ đáng nhìn tiếp, đều **chưa ai xem nội dung**: 71 ảnh `SIS Library Event Day` đang công khai (chưa mục nào trong tài liệu nhắc tới), và nhóm `anh_mo_coi` có họ tên `WF56KT.jpg` / `WT17GE.jpg` chưa rõ là gì. Xem cuối §18.
+**Không còn lỗ hổng nào đã biết đang hở.** Chiều 30/07 vá thêm **352 file / 186,7 MB**: 318 ảnh chân dung **nhân viên** đặt tên bằng mã nhân viên (316 tra ra được email người thật), 27 ảnh lớp có tiền tố `Lớp …`, 5 ảnh NV có hậu tố hex, 2 biên bản kỷ luật mang tên học sinh. Xem §18.
+
+⚠️ **`classify-unowned-files.py` từ nay thoát mã 1 vì đúng một file** — `WF01IT.jpg`, cố ý giữ vì đang là avatar đang dùng. Không phải lỗ hổng mới; đừng vá lại.
+
+Chỗ đáng nhìn tiếp, **chưa ai xem nội dung**: 71 ảnh `SIS Library Event Day` đang công khai. Ảnh bìa sách thư viện được phép công khai (có FE riêng, §14) nhưng ảnh **sự kiện** có thể có mặt trẻ em — khác chuyện.
 
 > **Cập nhật 2026-07-30 (phiên deploy):**
 > * Nội dung SIS đã migrate và bật cả ba nhóm (§14).
@@ -1157,18 +1161,55 @@ Mẫu **cố ý không dùng `re.I`**: mã lớp luôn viết hoa, còn với `r
 
 Sau đợt này `classify` thoát **mã 0**, `NHAY_CAM_CHUA_BAO_VE` = **0**.
 
+### 🔴 Ảnh chân dung NHÂN VIÊN đặt tên bằng mã nhân viên — 318 file đã niêm (2026-07-30 13:21)
+
+Mục "chưa biết là gì" ở bản trước (`WF56KT.jpg`, `WT17GE.jpg`) hoá ra là **mã nhân viên**. Đo trên prod:
+
+| | |
+|---|---|
+| File trên đĩa khớp dạng mã NV | **319** / **158,5 MB** |
+| Khớp đúng một `employee_code` có thật trong `tabUser` | **316** — tra ra cả email |
+| Đo từ máy ngoài, không đăng nhập | **200** toàn bộ |
+
+Nặng hơn §7b về khả năng vét cạn: mã nhân viên là `W` + 1–2 chữ + 2–4 số + 2 chữ, thực tế chỉ ~500 người, trong khi `WS\d{6,}` của học sinh rộng hơn nhiều. Đoán tên file là ra ảnh chân dung kèm danh tính một người cụ thể.
+
+**Vì sao xử lý được ngay, không cần code:** đường upload avatar hiện hành ghi vào `/files/Avatar/user_<id>_<uuid>` (xem `erp/common/avatar_store.py`) chứ **không** đặt tên theo mã. 319 file này là ảnh cũ, **không màn hình nào hiển thị** — niêm được luôn.
+
+Đã niêm **318 file / 158,2 MB** → `/srv/backup/unowned-sealed-20260730-132121`. Nghiệm thu ngoài: `WF01HC`, `WF02KT`, `WF56KT`, `WT17GE`, `WT12IS`, `WF02IT.png` đều **200 → 404**.
+
+> ⚠️ **`WF01IT.jpg` cố ý KHÔNG niêm** — đang là `User.user_image` của `linh.nguyenhai@…` và được ba chỗ IT Support tham chiếu. Bộ lọc tham chiếu tự loại nó ra (`User.user_image` là `Attach Image` nên nằm trong phạm vi `thu_thap_url_dang_dung()`). **Hệ quả: `classify` sẽ thoát mã 1 vì đúng một file này, mãi mãi.** Đó **không** phải lỗ hổng mới. Muốn về mã 0 thì phải đẩy lại ảnh đó qua đường avatar chuẩn rồi niêm — chưa làm vì đụng ba bản sao denormalize.
+
+### ⚠️ Tên file tiếng Việt trên đĩa là NFD — ba mẫu "có dấu" chưa bao giờ khớp gì
+
+Sau khi niêm 318 file, đọc tay danh sách `anh_mo_coi` thì thấy `Lớp 6AB4.jpg`, `Lớp 5A5.jpg`… vẫn còn. Nhưng `grep "Lớp"` và cả `startswith("Lớp")` trong Python đều trả **0 kết quả**.
+
+Nguyên nhân: tên trên đĩa ở dạng **NFD** — `ớ` được lưu là `ơ` + dấu sắc rời, còn chuỗi mẫu trong code là **NFC**. Hai chuỗi hiện ra giống hệt nhau trên màn hình nhưng khác byte.
+
+Nghĩa là ba mẫu "có dấu" thêm sáng 30/07 (`bao cao`, `hoc ky`, `danh du`) **chưa bao giờ khớp được file nào** — chúng im lặng, không báo lỗi, và ta tưởng "không có file nào như vậy". `nhan_dang_nhay_cam()` nay chuẩn hoá NFC trước khi khớp.
+
+### Ba nhóm còn hở tìm ra nhờ đọc tay — 34 file đã niêm (2026-07-30 13:27)
+
+| Nhóm | Số file | Vì sao lọt |
+|---|---|---|
+| Ảnh lớp có tiền tố `Lớp 5A5.jpg` | 27 / 26,3 MB | Quy ước đặt tên **thứ tư** của cùng loại ảnh; cộng lỗi NFD ở trên |
+| Ảnh NV có hậu tố hex Frappe (`WT08EMa801b5.jpg`) và mã dạng `WFT61PR` | 5 | Mẫu vừa thêm chốt `$` ngay sau mã, và chỉ cho 1 chữ trước phần số |
+| Biên bản kỷ luật `130326_BB Khánh Chi 11ab3.jpg`, `Khôi Minh_BB.jpg` | 2 | Chính tên file chứa **tên học sinh + lớp**; cùng họ §7c nhưng mồ côi |
+
+Niêm → `/srv/backup/unowned-sealed-20260730-132752`. Nghiệm thu ngoài: cả sáu mẫu thử **404**, `WF01IT.jpg` và `/api/method/ping` vẫn **200**.
+
+Một test cũ khẳng định `Lớp 1A1.jpg` **không** nhạy cảm. Khẳng định đó sai và chính nó hợp thức hoá điểm mù — ảnh chụp cả lớp là dữ liệu trẻ em, không phải ảnh trang trí. Đã đổi.
+
+> **Bài học lặp lại lần thứ tư:** ảnh lớp đã có **bốn** quy ước đặt tên (`5A5`, `10AB3`, `Lớp 5A5`, và bản có hậu tố hex). Khớp theo tên file luôn là cuộc đua đuổi. Mỗi lần thêm mẫu nên coi là **bằng chứng rằng cách này có giới hạn**, không phải là đã xong.
+
 ### Còn lại — chưa rà nội dung
 
 | Nhóm | Số file | Dung lượng |
 |---|---|---|
-| `dang_dung_chua_ro_nhay_cam` | 52 | 9,8 MB |
+| `dang_dung_chua_ro_nhay_cam` | 52 | 9,5 MB |
 | `tai_lieu_mo_coi` | 34 | 7,3 MB |
-| `anh_mo_coi` | 371 | 194,5 MB |
+| `anh_mo_coi` | 19 | 7,7 MB |
 
-Hai chỗ đáng nhìn tiếp, đều **chưa ai xem**:
-
-* **`SIS Library Event Day`** — 71 ảnh `IMG_*` đang phục vụ công khai, chưa mục nào trong tài liệu này nhắc tới. Ảnh sự kiện thư viện nhiều khả năng có mặt trẻ em. Phát hiện tình cờ khi rà `IMG_*` cho §7c.
-* **`anh_mo_coi` có họ tên `WF56KT.jpg`, `WT17GE.jpg`, `WT16PY.jpg`** (~1,5–2,5 MB) — cùng dáng "mã ngắn viết hoa" như mã lớp nhưng khác quy ước, chưa biết là gì. Đúng loại đã hai lần trượt lưới.
+Còn **`SIS Library Event Day`** — 71 ảnh `IMG_*` phục vụ công khai, chưa ai xem. Ảnh sự kiện thư viện nhiều khả năng có mặt trẻ em. Lưu ý: **thư viện được phép công khai** (có FE riêng, xem §14) — nhưng điều đó nói về **bìa sách**, không tự động đúng với ảnh có mặt trẻ em. Cần người xem nội dung rồi mới quyết.
 
 ### Mô tả gốc
 
