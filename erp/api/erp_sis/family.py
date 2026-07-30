@@ -12,7 +12,16 @@ from erp.utils.api_response import (
 )
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.search import build_search_condition
-from erp.utils.relationship_types import normalize as normalize_relationship
+from erp.utils.relationship_types import (
+    RELATIONSHIP_CODES,
+    is_known_code as is_known_relationship_code,
+    normalize as normalize_relationship,
+)
+from erp.utils.family_relationship import (
+    canonical_relationship_rows,
+    rebuild_guardian_relationship_mirror,
+    rebuild_student_relationship_mirror,
+)
 
 
 def _find_existing_family_for_student(student_id: str, exclude_family: str | None = None):
@@ -31,6 +40,125 @@ def _find_existing_family_for_student(student_id: str, exclude_family: str | Non
 
     result = frappe.db.sql(query, params, as_dict=True)
     return result[0] if result else None
+
+
+def _canonical_rows_with_family(student=None, guardian=None):
+    """Dòng quan hệ CHUẨN kèm GIA ĐÌNH đang giữ dòng đó.
+
+    Cùng vị từ với `erp.utils.family_relationship.canonical_relationship_rows`
+    (parentfield='relationships' + family docstatus<2) nhưng trả thêm cột gia đình:
+    helper dùng chung chỉ phục vụ dựng mirror nên cố tình không trả `fr.parent`, còn API
+    màn Gia đình cần biết dòng thuộc gia đình nào để nhóm/định vị bản ghi cần sửa.
+    KHÔNG đọc `CRM Student.family_relationships` / `CRM Guardian.student_relationships`:
+    hai bảng đó là mirror, có thể cũ.
+
+    Phải truyền ít nhất một trong student/guardian — không thì trả [] để tránh quét cả bảng.
+    """
+    if not student and not guardian:
+        return []
+
+    conds = ["fr.parentfield = 'relationships'", "f.docstatus < 2"]
+    params = {}
+    if student:
+        conds.append("fr.student = %(student)s")
+        params["student"] = student
+    if guardian:
+        conds.append("fr.guardian = %(guardian)s")
+        params["guardian"] = guardian
+
+    return frappe.db.sql(
+        """
+        SELECT
+            f.name AS family_id,
+            f.family_code,
+            f.campus_id,
+            f.creation,
+            f.modified,
+            fr.student,
+            fr.guardian,
+            fr.relationship_type,
+            fr.key_person,
+            fr.access,
+            fr.display_order
+        FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Family` f ON fr.parent = f.name
+        WHERE {conds}
+        ORDER BY f.family_code ASC, fr.display_order ASC, fr.idx ASC
+        """.format(conds=" AND ".join(conds)),
+        params,
+        as_dict=True,
+    ) or []
+
+
+def _relationship_view(row):
+    """Một dòng quan hệ theo shape frontend đang dùng.
+
+    `key_person` / `access` trả BOOLEAN (không phải 0/1): schema validate ở frontend
+    (`FamilySchema.relationships[]`) khai `z.boolean()`, nhận số sẽ ném ZodError.
+    """
+    return {
+        "student": row.get("student"),
+        "guardian": row.get("guardian"),
+        "relationship_type": row.get("relationship_type"),
+        "key_person": bool(row.get("key_person")),
+        "access": bool(row.get("access")),
+    }
+
+
+def _iso_or_none(value):
+    """datetime -> ISO string cho JSON response; None/rỗng -> None."""
+    if not value:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _parse_bool_flag(value):
+    """Cờ 0/1 từ payload HTTP (form gửi chuỗi, JSON gửi bool/số).
+
+    Bản cũ dùng `int(value) if str(value).lower() in ['1','true','yes'] else 0` —
+    với value='true' thì `int('true')` ném ValueError, tức nhánh 'true' luôn lỗi.
+    """
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        # 1.0 / 1 đều là bật; str(1.0) == '1.0' nên không so chuỗi được.
+        return 1 if value else 0
+    return 1 if str(value).strip().lower() in ("1", "true", "yes", "y", "on") else 0
+
+
+def _param_from_request(*keys):
+    """Đọc tham số theo thứ tự form_dict -> query args -> JSON body (idiom sẵn có trong file)."""
+    form = frappe.local.form_dict or {}
+    for key in keys:
+        value = form.get(key)
+        if value not in (None, ""):
+            return value
+
+    try:
+        args = getattr(frappe.request, "args", None)
+        if args:
+            for key in keys:
+                value = args.get(key)
+                if value not in (None, ""):
+                    return value
+    except Exception:
+        pass
+
+    try:
+        if frappe.request and frappe.request.data:
+            body = frappe.request.data
+            if isinstance(body, bytes):
+                body = body.decode("utf-8")
+            json_body = json.loads(body or "{}")
+            if isinstance(json_body, dict):
+                for key in keys:
+                    value = json_body.get(key)
+                    if value not in (None, ""):
+                        return value
+    except Exception:
+        pass
+
+    return None
 
 
 def _contact_emails_by_guardian(guardian_names):
@@ -531,7 +659,11 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
                         "guardian": guardian_doc['name'],
                         "relationship_type": relationship_code,
                         "key_person": main_flag,
-                        "access": view_flag
+                        "access": view_flag,
+                        # Quyền ĐÓN độc lập với quyền XEM: file import chưa có cột riêng
+                        # nên mặc định cho đón. Phải ghi tường minh — append() không áp
+                        # default doctype (xem ghi chú ở update_family_members).
+                        "can_pickup": 1,
                     })
 
             if not guardians:
@@ -558,25 +690,21 @@ def process_family_import_rows(df: pd.DataFrame, campus_id: str) -> dict:
             family_doc.flags.ignore_validate = True
             family_doc.save(ignore_permissions=True)
 
+            # Mirror dựng từ dòng CHUẨN vừa save ở trên (helper tự gom mọi family của
+            # guardian) — tránh mirror thiếu cột và tránh xoá quan hệ ở family khác.
             for student_id in student_ids:
-                student_doc = frappe.get_doc("CRM Student", student_id)
-                student_doc.family_code = family_doc.family_code
-                student_doc.set("family_relationships", [])
-                for rel in relationships:
-                    if rel['student'] == student_id:
-                        student_doc.append("family_relationships", rel)
-                student_doc.flags.ignore_validate = True
-                student_doc.save(ignore_permissions=True)
+                frappe.db.set_value(
+                    "CRM Student", student_id, "family_code", family_doc.family_code,
+                    update_modified=False,
+                )
+                rebuild_student_relationship_mirror(student_id)
 
             for guardian_id in guardians:
-                guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
-                guardian_doc.family_code = family_doc.family_code
-                guardian_doc.set("student_relationships", [])
-                for rel in relationships:
-                    if rel['guardian'] == guardian_id:
-                        guardian_doc.append("student_relationships", rel)
-                guardian_doc.flags.ignore_validate = True
-                guardian_doc.save(ignore_permissions=True)
+                frappe.db.set_value(
+                    "CRM Guardian", guardian_id, "family_code", family_doc.family_code,
+                    update_modified=False,
+                )
+                rebuild_guardian_relationship_mirror(guardian_id)
 
             frappe.db.commit()
             success_count += 1
@@ -832,6 +960,11 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                 # Client gửi null thì int(None) ném TypeError — ép qua bool trước.
                 "key_person": int(bool(rel.get("key_person"))),
                 "access": int(True if rel.get("access") is None else bool(rel.get("access"))),
+                # PHẢI ghi tường minh: Document.append() KHÔNG áp default của doctype
+                # (base_document.py::_init_child), rồi get_valid_dict ép Check thiếu key
+                # thành 0 — nên bỏ trống là cả nhà mất quyền đón và sync_family_pickup
+                # sẽ THU HỒI uỷ quyền vì tưởng nhà trường chủ ý bỏ tick.
+                "can_pickup": int(True if rel.get("can_pickup") is None else bool(rel.get("can_pickup"))),
             })
 
         # Validate key person: must have at least 1
@@ -898,27 +1031,25 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
             # Update students and guardians docs similar to create_family
             family_code = getattr(family_doc, 'family_code', family_doc.name)
 
+            # Dựng lại mirror từ các dòng CHUẨN đã ghi ở trên, KHÔNG dựng từ
+            # normalized_relationships: bộ đó chỉ chứa quan hệ của family này, nên với
+            # guardian còn con ở family khác thì dựng kiểu cũ sẽ xoá mất các quan hệ đó
+            # khỏi mirror (gãy consumer chỉ đọc mirror, vd menu_registration.py).
             for student_id in students:
                 if frappe.db.exists("CRM Student", student_id):
-                    student_doc = frappe.get_doc("CRM Student", student_id)
-                    student_doc.family_code = family_code
-                    student_doc.set("family_relationships", [])
-                    for rel in normalized_relationships:
-                        if rel["student"] == student_id:
-                            student_doc.append("family_relationships", dict(rel))
-                    student_doc.flags.ignore_validate = True
-                    student_doc.save(ignore_permissions=True)
+                    frappe.db.set_value(
+                        "CRM Student", student_id, "family_code", family_code,
+                        update_modified=False,
+                    )
+                    rebuild_student_relationship_mirror(student_id)
 
             for guardian_id in guardians:
                 if frappe.db.exists("CRM Guardian", guardian_id):
-                    guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
-                    guardian_doc.family_code = family_code
-                    guardian_doc.set("student_relationships", [])
-                    for rel in normalized_relationships:
-                        if rel["guardian"] == guardian_id:
-                            guardian_doc.append("student_relationships", dict(rel))
-                    guardian_doc.flags.ignore_validate = True
-                    guardian_doc.save(ignore_permissions=True)
+                    frappe.db.set_value(
+                        "CRM Guardian", guardian_id, "family_code", family_code,
+                        update_modified=False,
+                    )
+                    rebuild_guardian_relationship_mirror(guardian_id)
 
             # CRITICAL FIX: Cleanup guardians đã bị remove khỏi family
             # Clear family_code và student_relationships của họ
@@ -930,12 +1061,18 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                 for removed_guardian_id in removed_guardians:
                     if frappe.db.exists("CRM Guardian", removed_guardian_id):
                         try:
-                            removed_guardian_doc = frappe.get_doc("CRM Guardian", removed_guardian_id)
-                            # Clear family_code và student_relationships
-                            removed_guardian_doc.family_code = None
-                            removed_guardian_doc.set("student_relationships", [])
-                            removed_guardian_doc.flags.ignore_validate = True
-                            removed_guardian_doc.save(ignore_permissions=True)
+                            # Guardian có thể còn con ở family KHÁC: chỉ dựng lại mirror
+                            # từ dòng chuẩn (helper tự gom mọi family), và chỉ xoá
+                            # family_code khi thật sự không còn dòng chuẩn nào.
+                            remaining = canonical_relationship_rows(
+                                guardian=removed_guardian_id
+                            )
+                            if not remaining:
+                                frappe.db.set_value(
+                                    "CRM Guardian", removed_guardian_id, "family_code",
+                                    None, update_modified=False,
+                                )
+                            rebuild_guardian_relationship_mirror(removed_guardian_id)
                             frappe.logger().info(f"✅ Cleaned up guardian {removed_guardian_id}")
                         except Exception as cleanup_error:
                             frappe.logger().error(f"❌ Error cleaning up guardian {removed_guardian_id}: {str(cleanup_error)}")
@@ -1147,121 +1284,124 @@ def get_all_families():
         )
 
 
-@frappe.whitelist(allow_guest=False)  
-def get_family_data():
-    """Get a specific family by ID"""
+@frappe.whitelist(allow_guest=False)
+def get_family_data(family_id=None, student_id=None, guardian_id=None):
+    """Tra cứu gia đình theo family_id, hoặc theo học sinh / người giám hộ.
+
+    ĐỔI SHAPE (frontend phải sửa theo — xem ghi chú cuối docstring). Bản cũ đọc
+    `CRM Family.student_id / guardian_id / relationship / key_person / access`.
+    Những field đó KHÔNG còn tồn tại: CRM Family giờ chỉ có campus_id / family_code /
+    relationships (child table), vì `relationship_type`, `key_person`, `access` là thuộc
+    tính của CẶP (student, guardian) — mỗi cháu một người liên lạc chính, quyền xem cấp
+    riêng từng cháu — chứ không phải thuộc tính của cả gia đình. Gọi bản cũ chắc chắn lỗi
+    (`frappe.get_all` với filter field không tồn tại).
+
+    Nguồn đọc là bảng con CHUẨN `CRM Family.relationships`, KHÔNG dùng mirror ở
+    `CRM Student.family_relationships` / `CRM Guardian.student_relationships`.
+
+    Shape trả về:
+      - family_id  -> single item: gia đình + TOÀN BỘ `relationships[]` của gia đình.
+      - student_id + guardian_id -> single item: gia đình chứa cặp đó, `relationships[]`
+        chỉ gồm cặp đó.
+      - student_id (hoặc guardian_id) -> list: mỗi phần tử một gia đình, `relationships[]`
+        chỉ gồm quan hệ của chính đối tượng được hỏi.
+    Không còn field phẳng student_id/guardian_id/relationship/key_person/access ở cấp
+    gia đình. Cần đủ students/guardians kèm tên hiển thị thì dùng `get_family_details`.
+    """
     try:
-        # Get parameters from form_dict
-        family_id = frappe.local.form_dict.get("family_id")
-        student_id = frappe.local.form_dict.get("student_id")
-        guardian_id = frappe.local.form_dict.get("guardian_id")
-        
-        frappe.logger().info(f"get_family_data called - family_id: {family_id}, student_id: {student_id}, guardian_id: {guardian_id}")
-        frappe.logger().info(f"form_dict: {frappe.local.form_dict}")
-        
+        family_id = family_id or _param_from_request("family_id", "id", "name")
+        student_id = student_id or _param_from_request("student_id", "student")
+        guardian_id = guardian_id or _param_from_request("guardian_id", "guardian")
+
+        frappe.logger().info(
+            f"get_family_data called - family_id: {family_id}, "
+            f"student_id: {student_id}, guardian_id: {guardian_id}"
+        )
+
         if not family_id and not student_id and not guardian_id:
             return error_response(
                 message="Family ID, Student ID, or Guardian ID is required",
                 code="MISSING_FAMILY_ID"
             )
-        
-        # Build filters based on what parameter we have
+
+        # --- Theo family_id: trả gia đình + toàn bộ quan hệ của nó ---------------
         if family_id:
-            family = frappe.get_doc("CRM Family", family_id)
-        elif student_id and guardian_id:
-            # Search by both student and guardian
-            families = frappe.get_all("CRM Family", 
-                filters={
-                    "student_id": student_id,
-                    "guardian_id": guardian_id
-                }, 
-                fields=["name"], 
-                limit=1)
-            
-            if not families:
+            fam_row = frappe.db.get_value(
+                "CRM Family",
+                family_id,
+                ["name", "family_code", "campus_id", "creation", "modified"],
+                as_dict=True,
+            )
+            if not fam_row:
                 return not_found_response(
                     message="Family not found",
                     code="FAMILY_NOT_FOUND"
                 )
-            
-            family = frappe.get_doc("CRM Family", families[0].name)
-        elif student_id:
-            # Search by student only
-            families = frappe.get_all("CRM Family", 
-                filters={"student_id": student_id}, 
-                fields=["name"])
-            
-            if not families:
-                return not_found_response(
-                    message="No families found for this student",
-                    code="FAMILY_NOT_FOUND"
-                )
-            
-            # Return multiple families for this student
-            family_data = []
-            for f in families:
-                doc = frappe.get_doc("CRM Family", f.name)
-                family_data.append({
-                    "name": doc.name,
-                    "student_id": doc.student_id,
-                    "guardian_id": doc.guardian_id,
-                    "relationship": doc.relationship,
-                    "key_person": doc.key_person,
-                    "access": doc.access
-                })
-            
-            return list_response(
-                data=family_data,
-                message="Families fetched successfully"
+
+            rels = frappe.get_all(
+                "CRM Family Relationship",
+                filters={"parent": family_id, "parentfield": "relationships"},
+                fields=[
+                    "student", "guardian", "relationship_type",
+                    "key_person", "access", "display_order",
+                ],
+                order_by="display_order asc, idx asc",
             )
-        elif guardian_id:
-            # Search by guardian only
-            families = frappe.get_all("CRM Family", 
-                filters={"guardian_id": guardian_id}, 
-                fields=["name"])
-            
-            if not families:
-                return not_found_response(
-                    message="No families found for this guardian",
-                    code="FAMILY_NOT_FOUND"
-                )
-            
-            # Return multiple families for this guardian
-            family_data = []
-            for f in families:
-                doc = frappe.get_doc("CRM Family", f.name)
-                family_data.append({
-                    "name": doc.name,
-                    "student_id": doc.student_id,
-                    "guardian_id": doc.guardian_id,
-                    "relationship": doc.relationship,
-                    "key_person": doc.key_person,
-                    "access": doc.access
-                })
-            
-            return list_response(
-                data=family_data,
-                message="Families fetched successfully"
+
+            return single_item_response(
+                data={
+                    "name": fam_row.get("name"),
+                    "family_code": fam_row.get("family_code"),
+                    "campus_id": fam_row.get("campus_id"),
+                    "creation": _iso_or_none(fam_row.get("creation")),
+                    "modified": _iso_or_none(fam_row.get("modified")),
+                    "relationships": [_relationship_view(r) for r in rels],
+                },
+                message="Family fetched successfully"
             )
-        
-        if not family:
-            return not_found_response(
-                message="Family not found",
-                code="FAMILY_NOT_FOUND"
+
+        # --- Theo học sinh / người giám hộ: nhóm dòng chuẩn theo gia đình --------
+        rows = _canonical_rows_with_family(student=student_id, guardian=guardian_id)
+        if not rows:
+            if student_id and guardian_id:
+                message = "Family not found"
+            elif student_id:
+                message = "No families found for this student"
+            else:
+                message = "No families found for this guardian"
+            return not_found_response(message=message, code="FAMILY_NOT_FOUND")
+
+        families_by_id = {}
+        for row in rows:
+            family = families_by_id.setdefault(
+                row.get("family_id"),
+                {
+                    "name": row.get("family_id"),
+                    "family_code": row.get("family_code"),
+                    "campus_id": row.get("campus_id"),
+                    "creation": _iso_or_none(row.get("creation")),
+                    "modified": _iso_or_none(row.get("modified")),
+                    "relationships": [],
+                },
             )
-        
-        return single_item_response(
-            data={
-                "name": family.name,
-                "family_code": getattr(family, "family_code", None),
-                "creation": family.creation.isoformat() if family.creation else None,
-                "modified": family.modified.isoformat() if family.modified else None
-            },
-            message="Family fetched successfully"
+            family["relationships"].append(_relationship_view(row))
+
+        family_data = list(families_by_id.values())
+
+        # Hỏi đúng một CẶP (student, guardian) thì bản cũ trả single item — giữ nguyên.
+        if student_id and guardian_id:
+            return single_item_response(
+                data=family_data[0],
+                message="Family fetched successfully"
+            )
+
+        return list_response(
+            data=family_data,
+            message="Families fetched successfully"
         )
-        
+
     except Exception as e:
-        frappe.log_error(f"Error fetching family data: {str(e)}")
+        frappe.log_error("get_family_data failed", frappe.get_traceback(with_context=True))
         return error_response(
             message="Error fetching family data",
             code="FETCH_FAMILY_DATA_ERROR"
@@ -1429,7 +1569,9 @@ def create_family():
                 "guardian": rel.get("guardian"),
                 "relationship_type": normalize_relationship(rel.get("relationship_type")),
                 "key_person": int(rel.get("key_person", False)),
-                "access": int(rel.get("access", True))
+                "access": int(rel.get("access", True)),
+                # Xem ghi chú ở update_family_members: append KHÔNG áp default doctype.
+                "can_pickup": int(rel.get("can_pickup", True)),
             })
         
         # Save the family with relationships
@@ -1442,22 +1584,13 @@ def create_family():
                 student_doc = frappe.get_doc("CRM Student", student_id)
                 frappe.logger().info(f"Student doc before update: family_code = {student_doc.family_code}")
                 student_doc.family_code = family_code
-                frappe.logger().info(f"Student doc after setting: family_code = {student_doc.family_code}")
-
-                # Reset and append family relationships for this student (use child table API)
-                student_doc.set("family_relationships", [])
-                for rel in relationships:
-                    if rel.get("student") == student_id:
-                        student_doc.append("family_relationships", {
-                            "student": student_id,
-                            "guardian": rel.get("guardian"),
-                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
-                            "key_person": int(rel.get("key_person", False)),
-                            "access": int(rel.get("access", False))
-                        })
-
                 student_doc.flags.ignore_validate = True
                 student_doc.save(ignore_permissions=True)
+
+                # Mirror dựng từ dòng CHUẨN đã ghi ở trên, không dựng lại từ `relationships`:
+                # bản cũ mặc định access=False cho mirror trong khi dòng chuẩn là True, nên
+                # mirror lệch access ngay lúc tạo; và thiếu can_pickup thì mirror về 0.
+                rebuild_student_relationship_mirror(student_id)
                 frappe.logger().info(f"Successfully updated student {student_id}")
             except Exception as e:
                 frappe.logger().error(f"Error updating student {student_id}: {str(e)}")
@@ -1470,22 +1603,12 @@ def create_family():
                 guardian_doc = frappe.get_doc("CRM Guardian", guardian_id)
                 frappe.logger().info(f"Guardian doc before update: family_code = {guardian_doc.family_code}")
                 guardian_doc.family_code = family_code
-                frappe.logger().info(f"Guardian doc after setting: family_code = {guardian_doc.family_code}")
-
-                # Reset and append student relationships for this guardian (use child table API)
-                guardian_doc.set("student_relationships", [])
-                for rel in relationships:
-                    if rel.get("guardian") == guardian_id:
-                        guardian_doc.append("student_relationships", {
-                            "student": rel.get("student"),
-                            "guardian": guardian_id,
-                            "relationship_type": normalize_relationship(rel.get("relationship_type")),
-                            "key_person": int(rel.get("key_person", False)),
-                            "access": int(rel.get("access", False))
-                        })
-
                 guardian_doc.flags.ignore_validate = True
                 guardian_doc.save(ignore_permissions=True)
+
+                # Mirror dựng từ dòng CHUẨN (helper tự gom mọi family của guardian) — xem
+                # ghi chú ở vòng lặp student phía trên.
+                rebuild_guardian_relationship_mirror(guardian_id)
                 frappe.logger().info(f"Successfully updated guardian {guardian_id}")
             except Exception as e:
                 frappe.logger().error(f"Error updating guardian {guardian_id}: {str(e)}")
@@ -1513,106 +1636,211 @@ def create_family():
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
-def update_family(family_id=None, relationship=None, key_person=None, access=None):
-    """Update an existing family relationship"""
-    try:
-        # Get parameters from multiple sources for flexibility
-        if not family_id:
-            family_id = frappe.local.form_dict.get("family_id")
-        if not relationship:
-            relationship = frappe.local.form_dict.get("relationship")
-        if key_person is None:
-            key_person = frappe.local.form_dict.get("key_person")
-        if access is None:
-            access = frappe.local.form_dict.get("access")
-        
-        # Fallback to JSON data if form_dict is empty
-        if not family_id and frappe.request.data:
-            try:
-                import json
-                json_data = json.loads(frappe.request.data.decode('utf-8'))
-                family_id = json_data.get("family_id")
-                relationship = json_data.get("relationship")
-                key_person = json_data.get("key_person")
-                access = json_data.get("access")
-            except Exception:
-                pass
-        
-        if not family_id:
-            return error_response(
-                message="Family ID is required",
-                code="MISSING_FAMILY_ID"
-            )
-        
-        # Get existing document
-        try:
-            family_doc = frappe.get_doc("CRM Family", family_id)
-        except frappe.DoesNotExistError:
-            return not_found_response(
-                message="Family not found",
-                code="FAMILY_NOT_FOUND"
-            )
-        
-        # Track if any changes were made
-        changes_made = False
-        
-        # Helper function to normalize values for comparison
-        def normalize_value(val):
-            """Convert None/null/empty to empty string for comparison"""
-            if val is None or val == "null" or val == "":
-                return ""
-            return str(val).strip()
-        
-        # Update fields if provided
-        if relationship and normalize_value(relationship) != normalize_value(family_doc.relationship):
-            # Validate relationship
-            valid_relationships = ["dad", "mom", "foster_parent", "grandparent", "uncle_aunt", "sibling", "other"]
-            if relationship not in valid_relationships:
-                return validation_error_response(
-                    message=f"Relationship must be one of: {', '.join(valid_relationships)}",
-                    errors={"relationship": ["Invalid relationship type"]}
-                )
-            family_doc.relationship = relationship
-            changes_made = True
-        
-        if key_person is not None:
-            new_key_person = int(key_person) if str(key_person).lower() in ['1', 'true', 'yes'] else 0
-            if new_key_person != family_doc.key_person:
-                family_doc.key_person = new_key_person
-                changes_made = True
+def update_family(
+    family_id=None,
+    student=None,
+    guardian=None,
+    relationship=None,
+    relationship_type=None,
+    key_person=None,
+    access=None,
+):
+    """Sửa MỘT quan hệ: loại quan hệ / người liên lạc chính / quyền xem của một CẶP.
 
+    ĐỔI THAM SỐ BẮT BUỘC (frontend phải sửa theo): nay phải truyền `student` + `guardian`.
+    Bản cũ ghi thẳng `CRM Family.relationship / key_person / access` — schema đó đã bỏ,
+    ba thuộc tính này là của CẶP (student, guardian): mỗi cháu một người liên lạc chính,
+    quyền xem cấp riêng từng cháu. `family_id` một mình KHÔNG định vị được dòng nào phải
+    sửa; ghi theo family_id chính là lớp bug clobber (sửa 1 cháu, hỏng cả nhà) đã bị cấm.
+    `family_id` giờ là TUỲ CHỌN, chỉ dùng để khử nhập nhằng nếu cặp đó có ở nhiều gia đình.
+
+    Thay toàn bộ thành viên/quan hệ của một gia đình -> dùng `update_family_members`.
+    """
+    try:
+        # Tham số nhận từ arg, form_dict, query args hoặc JSON body.
+        family_id = family_id or _param_from_request("family_id")
+        student = student or _param_from_request("student", "student_id")
+        guardian = guardian or _param_from_request("guardian", "guardian_id")
+        if relationship in (None, ""):
+            relationship = _param_from_request("relationship")
+        if relationship_type in (None, ""):
+            relationship_type = _param_from_request("relationship_type")
+        if key_person is None:
+            key_person = _param_from_request("key_person")
+        if access is None:
+            access = _param_from_request("access")
+
+        student = (str(student).strip() if student else "")
+        guardian = (str(guardian).strip() if guardian else "")
+
+        if not student or not guardian:
+            return validation_error_response(
+                message=(
+                    "Cần cả student và guardian: loại quan hệ, người liên lạc chính và "
+                    "quyền xem là thuộc tính của từng cặp học sinh - người giám hộ, "
+                    "không phải của cả gia đình"
+                ),
+                errors={
+                    "student": ["Required"] if not student else [],
+                    "guardian": ["Required"] if not guardian else [],
+                },
+                code="MISSING_RELATIONSHIP_GRAIN",
+            )
+
+        # Định vị dòng CHUẨN của cặp này (bảng con dưới CRM Family), không đọc mirror.
+        rows = _canonical_rows_with_family(student=student, guardian=guardian)
+        if family_id:
+            rows = [row for row in rows if row.get("family_id") == family_id]
+        if not rows:
+            return not_found_response(
+                message="Không tìm thấy quan hệ của cặp học sinh - người giám hộ này",
+                code="RELATIONSHIP_NOT_FOUND",
+            )
+
+        target_families = {row.get("family_id") for row in rows}
+        if len(target_families) > 1:
+            return validation_error_response(
+                message="Cặp này xuất hiện ở nhiều gia đình, cần truyền family_id",
+                errors={"family_id": ["Required"]},
+                code="AMBIGUOUS_FAMILY",
+            )
+        target_family = rows[0].get("family_id")
+
+        # Gom các thay đổi được yêu cầu.
+        changes = {}
+
+        raw_relationship = relationship if relationship not in (None, "") else relationship_type
+        if raw_relationship not in (None, "", "null"):
+            new_relationship = normalize_relationship(raw_relationship)
+            # normalize() trả nguyên giá trị gốc khi không nhận diện được -> phải chặn ở đây,
+            # nếu không sẽ ghi mã rác vào relationship_type.
+            if not is_known_relationship_code(new_relationship):
+                return validation_error_response(
+                    message=f"Loại quan hệ phải thuộc: {', '.join(RELATIONSHIP_CODES)}",
+                    errors={"relationship": ["Invalid relationship type"]},
+                )
+            changes["relationship_type"] = new_relationship
+
+        if key_person is not None:
+            changes["key_person"] = _parse_bool_flag(key_person)
         if access is not None:
-            new_access = int(access) if str(access).lower() in ['1', 'true', 'yes'] else 0
-            if new_access != family_doc.access:
-                family_doc.access = new_access
-                changes_made = True
-        
-        # Save the document with validation disabled
+            changes["access"] = _parse_bool_flag(access)
+
+        current = _relationship_view(rows[0])
+        if not changes:
+            return single_item_response(
+                data={
+                    "name": target_family,
+                    "family_code": rows[0].get("family_code"),
+                    "relationships": [current],
+                },
+                message="Không có thay đổi nào được yêu cầu",
+            )
+
+        # Bỏ cờ liên lạc chính thì cháu đó phải còn người liên lạc chính khác — cùng luật
+        # "phải chọn ít nhất 1 người liên lạc chính" của update_family_members, nhưng xét ở
+        # đúng grain HỌC SINH. Đọc lại dòng chuẩn của cháu qua helper dùng chung.
+        # Chỉ chặn khi THẬT SỰ đang bỏ cờ: gửi key_person=0 cho dòng vốn đã 0 là no-op,
+        # không được vì thế mà từ chối request (dữ liệu cũ có cháu chưa ai là liên lạc chính).
+        currently_key_person = any(bool(row.get("key_person")) for row in rows)
+        if changes.get("key_person") == 0 and currently_key_person:
+            other_key_persons = [
+                row
+                for row in canonical_relationship_rows(student=student)
+                if row.get("key_person") and row.get("guardian") != guardian
+            ]
+            if not other_key_persons:
+                return validation_error_response(
+                    message="Mỗi học sinh phải có ít nhất 1 người liên lạc chính",
+                    errors={"key_person": ["Required"]},
+                    code="KEY_PERSON_REQUIRED",
+                )
+
+        savepoint = "update_family_relationship"
+        frappe.db.savepoint(savepoint)
         try:
+            family_doc = frappe.get_doc("CRM Family", target_family)
+            # CHỈ đụng dòng của đúng cặp (student, guardian). Dữ liệu xấu có thể có nhiều
+            # dòng trùng cặp -> sửa hết, vẫn nằm trong grain của cặp đó.
+            matched = [
+                child
+                for child in family_doc.relationships
+                if child.student == student and child.guardian == guardian
+            ]
+            if not matched:
+                frappe.db.rollback(save_point=savepoint)
+                return not_found_response(
+                    message="Không tìm thấy quan hệ của cặp học sinh - người giám hộ này",
+                    code="RELATIONSHIP_NOT_FOUND",
+                )
+
+            for child in matched:
+                for field, value in changes.items():
+                    child.set(field, value)
+
             family_doc.flags.ignore_validate = True
             family_doc.save(ignore_permissions=True)
+
+            # Mirror ở CRM Student / CRM Guardian dựng lại TỪ DÒNG CHUẨN vừa ghi
+            # (helper tự gom mọi family của PH nên không xoá mất quan hệ ở family khác).
+            rebuild_student_relationship_mirror(student)
+            rebuild_guardian_relationship_mirror(guardian)
+        except Exception:
+            frappe.db.rollback(save_point=savepoint)
+            raise
+
+        # `access` quyết định PH có được vào nhóm chat lớp không (xem
+        # build_guardians_by_student_ids(access_only=True)) nhưng KHÔNG nằm trong
+        # _RELATIONSHIP_KEYS của chat_membership_hooks, nên doc-event on_family_change
+        # không nhận ra thay đổi chỉ-đổi-access -> phải tự bắn sync.
+        if "access" in changes:
+            try:
+                from erp.api.erp_sis.chat_membership_hooks import (
+                    enqueue_chat_membership_sync_for_students,
+                )
+
+                enqueue_chat_membership_sync_for_students({student})
+            except Exception as sync_error:
+                frappe.logger().warning(
+                    f"[Family] enqueue chat membership sync failed for {student}: {str(sync_error)}"
+                )
+
+        # after_commit callbacks (realtime, enqueue_after_commit) chạy SAU khi SQL đã
+        # COMMIT — lỗi ở đó nghĩa là dữ liệu ĐÃ lưu, không được báo thất bại.
+        try:
             frappe.db.commit()
-        except Exception as save_error:
-            return error_response(
-                message=f"Failed to save family",
-                code="SAVE_FAMILY_ERROR"
+        except Exception as commit_error:
+            frappe.logger().warning(
+                f"[Family] post-commit side effect failed for {target_family}: {str(commit_error)}"
             )
-        
-        # Reload to get the final saved data from database
-        family_doc.reload()
-        
+            frappe.log_error(
+                "update_family post-commit",
+                frappe.get_traceback(with_context=True),
+            )
+
+        updated = frappe.db.sql(
+            """
+            SELECT fr.student, fr.guardian, fr.relationship_type, fr.key_person, fr.access
+            FROM `tabCRM Family Relationship` fr
+            WHERE fr.parent = %(family)s AND fr.parentfield = 'relationships'
+              AND fr.student = %(student)s AND fr.guardian = %(guardian)s
+            """,
+            {"family": target_family, "student": student, "guardian": guardian},
+            as_dict=True,
+        ) or []
+
         return single_item_response(
             data={
-                "name": family_doc.name,
-                "student_id": family_doc.student_id,
-                "guardian_id": family_doc.guardian_id,
-                "relationship": family_doc.relationship,
-                "key_person": family_doc.key_person,
-                "access": family_doc.access
+                "name": target_family,
+                "family_code": rows[0].get("family_code"),
+                # Cùng shape với get_family_data: gia đình + quan hệ (ở đây là cặp vừa sửa).
+                "relationships": [
+                    _relationship_view(updated[0]) if updated else current
+                ],
             },
-            message="Family updated successfully"
+            message="Family relationship updated successfully"
         )
-        
+
     except Exception as e:
         frappe.log_error("update_family failed", frappe.get_traceback(with_context=True))
         return error_response(

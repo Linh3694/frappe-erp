@@ -36,6 +36,10 @@ from erp.api.crm.utils import (
     resolve_status_input,
     validate_phone_number,
 )
+from erp.utils.family_relationship import (
+    find_guardian_by_phone,
+    guardian_phone_matches,
+)
 from erp.utils.relationship_types import normalize as normalize_relationship
 
 STEP = "QLead"
@@ -314,7 +318,10 @@ def _get_or_create_guardian(row, dry_run):
     if not name or not phone:
         return None, None
 
-    existing = frappe.db.get_value("CRM Guardian", {"phone_number": phone}, "name")
+    # Tra CA field phang LAN bang con `CRM Guardian Phone`: phu huynh da khai so thu
+    # hai o lan nhap truoc thi khop bang con, neu chi tra field phang se tao Guardian
+    # THU HAI cho cung mot nguoi (xem erp/utils/family_relationship.py).
+    existing = find_guardian_by_phone(phone)
     if existing:
         return existing, "reused"
     if dry_run:
@@ -328,7 +335,10 @@ def _get_or_create_guardian(row, dry_run):
         "doctype": "CRM Guardian",
         "guardian_id": gid,
         "guardian_name": name,
-        "phone_number": e164,
+        # `phone` da la +84... (_phone goi normalize_phone_number). Cho nay tung viet
+        # `e164` — bien khong ton tai trong scope nay, NameError lam ca dong bi rollback
+        # o savepoint cua run() moi khi PH2 la nguoi moi.
+        "phone_number": phone,
         "email": (_emails(row.get("g2_email")) or [""])[0],
         "id_number": _txt(row.get("g2_id_number")),
         "occupation": _txt(row.get("g2_occupation")),
@@ -342,9 +352,15 @@ def _get_or_create_guardian(row, dry_run):
     doc.flags.ignore_mandatory = True
     doc.insert(ignore_permissions=True)
 
+    # Bang con `phone_numbers` la cai giao dien CRM doc, va tu nay ca dedup cung tra
+    # (find_guardian_by_phone). Truoc day chi so THU HAI duoc them, so chinh khong co
+    # dong nao -> giao dien hien "Chua co du lieu" va so phu bi coi la khong chinh.
+    # _add_child_contact tu bo trung va tu dat dung mot primary.
+    changed = _add_child_contact(doc, "phone_numbers", "phone_number", phone)
     extra = _phone(row.get("g2_phone_2"))
     if extra and extra != phone:
-        doc.append("phone_numbers", {"phone_number": extra, "is_primary": 0})
+        changed = _add_child_contact(doc, "phone_numbers", "phone_number", extra) or changed
+    if changed:
         doc.save(ignore_permissions=True)
     return doc.name, "created"
 
@@ -1210,12 +1226,17 @@ def _guardian_doc_for(name, phone, cccd, email, job, pos, work, overwrite=0):
     # neu tra cuu/ghi bang 0... thi KHONG BAO GIO tim thay ban ghi cu -> lan nao cung
     # tao guardian moi va email/CCCD tren ban ghi that khong duoc cap nhat.
     e164 = normalize_phone_number(phone) or phone
-    existing = frappe.db.get_value("CRM Guardian", {"phone_number": e164}, "name")
-    legacy = None
-    if not existing:
-        # ban ghi do chinh script nay tao sai dinh dang o lan chay truoc
-        legacy = frappe.db.get_value("CRM Guardian", {"phone_number": phone}, "name")
-        existing = legacy
+    # Tra theo thu tu: field phang dang +84... -> field phang dang cu '0...' (ban ghi
+    # do chinh script nay tao sai dinh dang o lan chay truoc) -> bang con
+    # `CRM Guardian Phone` (so thu hai cua chinh nguoi do). Thieu buoc bang con thi
+    # phu huynh khai them so se bi tao thanh Guardian thu hai.
+    matches = guardian_phone_matches(phone)
+    existing = matches[0]["guardian"] if matches else None
+    # Chi chuan hoa lai field phang khi khop o CHINH field do va no dang dinh dang cu.
+    # Khop qua bang con nghia la e164 chi la so PHU cua nguoi ta -> ghi vao
+    # `phone_number` se xoa mat so chinh.
+    legacy = bool(existing) and matches[0]["source"] == "flat" \
+        and matches[0]["phone"] != e164
     if existing:
         g = frappe.get_doc("CRM Guardian", existing)
         changed = False
@@ -1241,7 +1262,11 @@ def _guardian_doc_for(name, phone, cccd, email, job, pos, work, overwrite=0):
         gid = f"{_slug(name)}-{frappe.generate_hash(length=6)}"
     doc = frappe.get_doc({
         "doctype": "CRM Guardian", "guardian_id": gid, "guardian_name": name,
-        "phone_number": phone, "email": email or "", "id_number": cccd or "",
+        # GHI e164, khong ghi chuoi '0...' cua Excel: ta save voi ignore_validate nen
+        # erp_sis.guardian.validate_vietnamese_phone_number KHONG chay de tu chuan hoa.
+        # Ghi dang cu la tu sinh ra dung lop ban ghi ma fix_guardian_phone_duplicates
+        # phai di gop lai, va lech voi dong `phone_numbers` ngay ben duoi.
+        "phone_number": e164, "email": email or "", "id_number": cccd or "",
         "occupation": job or "", "position": pos or "", "workplace": work or "",
     })
     _add_child_contact(doc, "emails", "email_address", email)
@@ -1818,6 +1843,12 @@ def fix_guardian_phone_duplicates(dry_run=1, commit_every=50):
 
     for i, o in enumerate(olds, start=1):
         e164 = normalize_phone_number(o["phone_number"])
+        # CO Y khong dung find_guardian_by_phone o day, du no la ham dedup dung chung:
+        #   - phai so sanh HAI DINH DANG voi nhau, ham kia coi '0...' va '+84...' la
+        #     mot nen se tu khop chinh no,
+        #   - ham kia con tra bang con `CRM Guardian Phone`; o day keeper bi GOP VA
+        #     XOA VINH VIEN, ma khop bang con chi chung to so nay la so PHU cua nguoi
+        #     khac -> gop hai nguoi khac nhau. Chi field phang moi la danh tinh.
         keeper = frappe.db.get_value(
             "CRM Guardian", {"phone_number": e164, "name": ["!=", o["name"]]}, "name")
 
@@ -1979,15 +2010,12 @@ def _tih_resolve_cols(ws):
 
 
 def _tih_find_guardian(phone):
-    """Tim CRM Guardian theo SDT. Nhan ca hai dinh dang dang ton tai trong DB."""
-    e164 = normalize_phone_number(phone)
-    for p in (e164, _txt(phone)):
-        if not p:
-            continue
-        g = frappe.db.get_value("CRM Guardian", {"phone_number": p}, "name")
-        if g:
-            return g
-    return None
+    """
+    Tim CRM Guardian theo SDT: nhan ca hai dinh dang dang ton tai trong DB ('+84...'
+    va '0...'), va tra CA bang con `CRM Guardian Phone` — phu huynh co so thu hai
+    truoc day bi coi la "khong tim thay" roi bi bo qua ca dong.
+    """
+    return find_guardian_by_phone(phone)
 
 
 def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):

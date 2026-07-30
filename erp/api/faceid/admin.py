@@ -514,49 +514,258 @@ def delete_pickup_auth(name):
     return _ok()
 
 
+def _relationship_has_can_pickup() -> bool:
+    """
+    `can_pickup` là field MỚI của CRM Family Relationship — chỉ tồn tại sau `bench migrate`.
+    Chưa migrate thì giữ hành vi cũ (mọi quan hệ đều được đón) thay vì làm chết endpoint.
+    """
+    try:
+        return bool(frappe.db.has_column("CRM Family Relationship", "can_pickup"))
+    except Exception:
+        return False
+
+
+def _canonical_family_pickup_rows(campus_id=None):
+    """
+    Quan hệ gia đình CHUẨN đã map sang FaceID Person, kèm cờ `can_pickup`.
+
+    BẢN CHUẨN = dòng dưới `CRM Family.relationships` (parentfield = 'relationships') của
+    family còn sống (docstatus < 2). Hai bản mirror — `CRM Student.family_relationships`
+    và `CRM Guardian.student_relationships` — CÓ THỂ CŨ. Bản cũ của hàm này quét cả ba
+    bản nên guardian đã bị gỡ khỏi gia đình VẪN được cấp uỷ quyền đón ở cổng: đây là
+    an ninh vật lý, không chỉ là lỗi dữ liệu.
+
+    Predicate giống hệt `canonical_relationship_rows()` trong
+    erp/utils/family_relationship.py. Không gọi lại được helper đó vì nó bắt buộc scope
+    theo một guardian/student (để khỏi quét cả bảng), còn đây là sweep toàn hệ thống;
+    hai cột `guardian`/`student` của child table chưa có index nên chạy N query rời sẽ
+    thành N lần full scan — một câu JOIN là đúng cho lô lớn.
+
+    KHÔNG giới hạn số dòng: bản cũ hardcode `limit=10000` nên vượt ngưỡng là cắt IM LẶNG,
+    một phần gia đình không bao giờ được cấp uỷ quyền mà không ai biết.
+    """
+    # NULL chỉ xảy ra với dòng ghi trước khi có field; theo default của doctype = 1.
+    can_pickup_expr = (
+        "IFNULL(fr.can_pickup, 1)" if _relationship_has_can_pickup() else "1"
+    )
+    conds = [
+        "fr.parentfield = 'relationships'",
+        "f.docstatus < 2",
+        "IFNULL(fr.guardian, '') != ''",
+        "IFNULL(fr.student, '') != ''",
+    ]
+    params = {}
+    if campus_id:
+        # Campus của HỌC SINH quyết định cổng đón. Giữ lại dòng chưa map FaceID Person
+        # để còn đếm/log được (không cấp uỷ quyền cho chúng).
+        conds.append("(sp.name IS NULL OR sp.campus_id = %(campus_id)s)")
+        params["campus_id"] = campus_id
+    return frappe.db.sql(
+        """
+        SELECT
+            fr.guardian AS crm_guardian,
+            fr.student AS crm_student,
+            {can_pickup} AS can_pickup,
+            gp.name AS guardian_person,
+            sp.name AS student_person
+        FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Family` f ON fr.parent = f.name
+        LEFT JOIN `tabFaceID Person` gp
+            ON gp.crm_guardian = fr.guardian AND gp.person_type = 'guardian'
+        LEFT JOIN `tabFaceID Person` sp
+            ON sp.crm_student = fr.student AND sp.person_type = 'student'
+        WHERE {conds}
+        """.format(can_pickup=can_pickup_expr, conds=" AND ".join(conds)),
+        params,
+        as_dict=True,
+    )
+
+
+def _revoke_pickup_doc(name):
+    """
+    Thu hồi một uỷ quyền. `on_update` của doctype tự enqueue job `revoke_pickup`
+    (create_device_sync_job dedup theo ref_name nên không sợ trùng job).
+    Dùng doc.save() chứ không db.set_value để giữ version trail — bản ghi này là
+    chứng từ an ninh, phải biết ai thu hồi lúc nào.
+    """
+    doc = frappe.get_doc("FaceID Pickup Authorization", name)
+    doc.revoked = 1
+    doc.save(ignore_permissions=True)
+
+
 @frappe.whitelist()
-def sync_family_pickup(campus_id=None):
-    """Tạo ủy quyền đón từ CRM Family Relationship (ủy quyền đứng)."""
+def sync_family_pickup(campus_id=None, revoke_missing=0):
+    """
+    Cấp / thu hồi uỷ quyền đón ĐỨNG theo quan hệ gia đình.
+
+    Nguồn: BẢN CHUẨN của CRM Family Relationship + cờ `can_pickup` — quyền VẬN HÀNH
+    (đón ở cổng), độc lập với `access` là quyền XEM thông tin. Người đưa đón được thuê
+    có can_pickup = 1 / access = 0; bố mẹ bị hạn chế thông tin thì ngược lại.
+
+    CẤP: cặp (guardian, student) có ít nhất một dòng chuẩn can_pickup = 1 và chưa có
+    bản ghi uỷ quyền nào -> tạo mới.
+
+    THU HỒI (luôn chạy): cặp CÒN quan hệ chuẩn nhưng KHÔNG dòng nào cho đón — tức có
+    người bỏ tick can_pickup. Đây là ý chí rõ ràng của nhà trường nên thu hồi ngay.
+
+    THU HỒI cặp KHÔNG CÒN quan hệ chuẩn nào: chỉ khi truyền revoke_missing = 1. Mặc định
+    TẮT vì `FaceID Pickup Authorization` không ghi nguồn tạo: uỷ quyền do văn phòng thêm
+    tay (người đón đột xuất, người ngoài gia đình) cũng "không có quan hệ chuẩn" và sẽ bị
+    thu hồi oan. Khi tắt, hàm vẫn TRẢ VỀ danh sách ứng viên để vận hành rà tay.
+
+    KHÔNG tự bỏ thu hồi (un-revoke): bản ghi đã revoked có thể do người thật thu hồi vì
+    lý do an ninh mà can_pickup chưa kịp cập nhật -> fail closed; mở lại bằng
+    reapply_pickup_auth.
+    """
     today = date.today()
     school_year = frappe.db.get_value("SIS School Year", {"is_enable": 1}, ["start_date", "end_date"], as_dict=True)
     valid_from = school_year.start_date if school_year else today
     valid_to = school_year.end_date if school_year else today
-    rels = frappe.get_all(
-        "CRM Family Relationship",
-        fields=["student", "guardian"],
-        limit=10000,
-    )
+    revoke_missing = cint(revoke_missing)
+    logger = frappe.logger("faceid")
+
+    rows = _canonical_family_pickup_rows(campus_id)
+    missing_person = 0
+    allowed_pairs = set()
+    known_pairs = set()
+    for r in rows:
+        if not r.get("guardian_person") or not r.get("student_person"):
+            # Chưa đồng bộ FaceID Person cho guardian/student -> chưa cấp được.
+            missing_person += 1
+            continue
+        pair = (r["guardian_person"], r["student_person"])
+        known_pairs.add(pair)
+        if cint(r.get("can_pickup")) == 1:
+            # Gộp theo cặp với quy ước OR — một dòng cho đón là được đón — giống
+            # accessible_relationship_rows() ở erp/utils/family_access.py. Nhánh cấp và
+            # nhánh thu hồi PHẢI dùng cùng vị từ, lệch nhau là mỗi lần chạy lại
+            # tạo–thu hồi qua lại (flapping).
+            allowed_pairs.add(pair)
+
+    if not rows:
+        # Không đọc được dòng chuẩn nào -> coi là lỗi đọc/dữ liệu, KHÔNG thu hồi hàng loạt.
+        logger.warning(
+            f"[sync_family_pickup] campus={campus_id}: 0 dòng quan hệ chuẩn — bỏ qua, không cấp/thu hồi"
+        )
+        return _ok(
+            {"created": 0, "scanned_relationships": 0},
+            message="Không tìm thấy quan hệ gia đình chuẩn nào — không cấp/thu hồi gì",
+        )
+
+    existing_by_pair = {}
+    for a in frappe.get_all(
+        "FaceID Pickup Authorization",
+        fields=["name", "guardian", "student", "revoked"],
+        limit_page_length=0,
+    ):
+        existing_by_pair.setdefault((a.guardian, a.student), []).append(a)
+
+    # Lọc campus cho nhánh thu hồi: chỉ chạm uỷ quyền của học sinh thuộc campus đang xét.
+    campus_students = None
+    if campus_id:
+        campus_students = set(
+            frappe.get_all(
+                "FaceID Person",
+                filters={"person_type": "student", "campus_id": campus_id},
+                pluck="name",
+                limit_page_length=0,
+            )
+        )
+
     created = 0
-    for rel in rels:
-        g_person = frappe.db.get_value(
-            "FaceID Person",
-            {"crm_guardian": rel.guardian, "person_type": "guardian"},
-            "name",
-        )
-        s_person = frappe.db.get_value(
-            "FaceID Person",
-            {"crm_student": rel.student, "person_type": "student"},
-            "name",
-        )
-        if not g_person or not s_person:
+    skipped_existing = 0
+    errors = []
+    for g_person, s_person in sorted(allowed_pairs):
+        if (g_person, s_person) in existing_by_pair:
+            skipped_existing += 1
             continue
-        key = {"guardian": g_person, "student": s_person}
-        if frappe.db.exists("FaceID Pickup Authorization", key):
+        try:
+            frappe.get_doc(
+                {
+                    "doctype": "FaceID Pickup Authorization",
+                    "guardian": g_person,
+                    "student": s_person,
+                    "valid_from": valid_from,
+                    "valid_to": valid_to,
+                    "method": "face",
+                    "revoked": 0,
+                }
+            ).insert(ignore_permissions=True)
+            created += 1
+        except Exception:
+            # Một cặp lỗi không được làm chết cả lô.
+            errors.append(f"create {g_person}->{s_person}")
+            frappe.log_error(
+                title=f"FaceID sync_family_pickup create {g_person}->{s_person}",
+                message=frappe.get_traceback(),
+            )
+
+    revoked_no_permission = 0
+    revoked_no_relationship = 0
+    revoke_candidates = []
+    for (g_person, s_person), auths in existing_by_pair.items():
+        if campus_students is not None and s_person not in campus_students:
             continue
-        doc = frappe.get_doc(
-            {
-                "doctype": "FaceID Pickup Authorization",
-                "guardian": g_person,
-                "student": s_person,
-                "valid_from": valid_from,
-                "valid_to": valid_to,
-                "method": "face",
-                "revoked": 0,
-            }
+        if (g_person, s_person) in allowed_pairs:
+            continue
+        live = [a for a in auths if not cint(a.revoked)]
+        if not live:
+            continue
+        # Còn quan hệ chuẩn mà không được đón = có người bỏ tick can_pickup (ý chí rõ ràng).
+        explicit_deny = (g_person, s_person) in known_pairs
+        if not explicit_deny and not revoke_missing:
+            revoke_candidates.extend(
+                {"authorization": a.name, "guardian": g_person, "student": s_person}
+                for a in live
+            )
+            continue
+        for a in live:
+            try:
+                _revoke_pickup_doc(a.name)
+                if explicit_deny:
+                    revoked_no_permission += 1
+                else:
+                    revoked_no_relationship += 1
+            except Exception:
+                errors.append(f"revoke {a.name}")
+                frappe.log_error(
+                    title=f"FaceID sync_family_pickup revoke {a.name}",
+                    message=frappe.get_traceback(),
+                )
+
+    if created or revoked_no_permission or revoked_no_relationship:
+        # Lớp 2: đẩy snapshot toàn bộ uỷ quyền còn hiệu lực xuống controller local, để
+        # cache ở cổng vẫn hội tụ nếu một job lẻ nào thất bại.
+        create_device_sync_job(
+            "reconcile_pickup", "FaceID Pickup Authorization", "__bulk__", priority=10
         )
-        doc.insert(ignore_permissions=True)
-        created += 1
-    return _ok({"created": created})
+
+    data = {
+        "created": created,
+        "skipped_existing": skipped_existing,
+        "revoked_no_permission": revoked_no_permission,
+        "revoked_no_relationship": revoked_no_relationship,
+        "revoke_candidate_count": len(revoke_candidates),
+        "revoke_candidates": revoke_candidates[:50],
+        "missing_faceid_person": missing_person,
+        "scanned_relationships": len(rows),
+        "allowed_pairs": len(allowed_pairs),
+        "can_pickup_column": _relationship_has_can_pickup(),
+        "errors": errors[:50],
+    }
+    logger.info(
+        f"[sync_family_pickup] campus={campus_id} revoke_missing={revoke_missing} "
+        f"scanned={len(rows)} pairs={len(known_pairs)} allowed={len(allowed_pairs)} "
+        f"created={created} existing={skipped_existing} "
+        f"revoked_no_permission={revoked_no_permission} "
+        f"revoked_no_relationship={revoked_no_relationship} "
+        f"candidates={len(revoke_candidates)} missing_person={missing_person} "
+        f"can_pickup_column={data['can_pickup_column']} errors={len(errors)}"
+    )
+    message = f"Đã cấp {created} uỷ quyền, thu hồi {revoked_no_permission + revoked_no_relationship}"
+    if revoke_candidates:
+        message += f", {len(revoke_candidates)} uỷ quyền không còn quan hệ gia đình cần rà tay"
+    return _ok(data, message=message)
 
 
 # ---- Gate Events ----

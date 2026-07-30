@@ -14,7 +14,16 @@
 from erp.utils.search import strip_accents
 
 
-# Mã chính — 12 mã, dùng cho dropdown ở frontend.
+# Mã chính — 13 mã, dùng cho dropdown ở frontend.
+#
+# "caretaker" = người được gia đình thuê/nhờ ĐƯA ĐÓN cháu (tài xế riêng, người giúp
+# việc, bảo mẫu). Trước đây nhóm này rơi hết vào "other" nên không lọc ra được.
+# Chọn "caretaker" thay vì "driver" vì cùng một vai trò vận hành nhưng thực tế có cả
+# tài xế lẫn người giúp việc/bảo mẫu — một mã bao cả hai, khỏi phải thêm mã thứ hai
+# rồi lại phải hợp nhất (xem LEGACY_CODES để thấy hậu quả của việc gộp/tách sai).
+# LƯU Ý: đây là mã QUAN HỆ, không phải quyền. Việc "được đón hay không" nằm ở cờ
+# CRM Family Relationship.can_pickup — caretaker mặc định không có quyền xem thông
+# tin (access = 0) nhưng phải có can_pickup = 1 mới qua được cổng.
 RELATIONSHIP_CODES = (
 	"father",
 	"mother",
@@ -26,6 +35,7 @@ RELATIONSHIP_CODES = (
 	"sister",
 	"guardian",
 	"foster_parent",
+	"caretaker",
 	"relative",
 	"other",
 )
@@ -52,6 +62,7 @@ LABELS_VI = {
 	"sister": "Chị/Em gái",
 	"guardian": "Người giám hộ",
 	"foster_parent": "Bố/Mẹ nuôi",
+	"caretaker": "Người đưa đón",
 	"relative": "Người thân",
 	"other": "Khác",
 	# legacy
@@ -71,6 +82,7 @@ LABELS_EN = {
 	"sister": "Sister",
 	"guardian": "Guardian",
 	"foster_parent": "Foster parent",
+	"caretaker": "Caretaker / driver",
 	"relative": "Relative",
 	"other": "Other",
 	# legacy
@@ -158,6 +170,22 @@ _ALIASES = {
 	"bo nuoi": "foster_parent",
 	"me nuoi": "foster_parent",
 	"bo/me nuoi": "foster_parent",
+	# caretaker — người được thuê/nhờ đưa đón. Gộp tài xế và người giúp việc/bảo mẫu
+	# vào một mã (xem ghi chú ở RELATIONSHIP_CODES).
+	"caretaker": "caretaker",
+	"caregiver": "caretaker",
+	"driver": "caretaker",
+	"nanny": "caretaker",
+	"dua don": "caretaker",
+	"nguoi dua don": "caretaker",
+	"tai xe": "caretaker",
+	"tai xe rieng": "caretaker",
+	"bac tai": "caretaker",
+	"giup viec": "caretaker",
+	"nguoi giup viec": "caretaker",
+	"co giup viec": "caretaker",
+	"bao mau": "caretaker",
+	"vu em": "caretaker",
 	# relative
 	"relative": "relative",
 	"nguoi than": "relative",
@@ -215,5 +243,5 @@ def get_label(code, lang: str = "vi") -> str:
 
 
 def get_options(lang: str = "vi") -> list:
-	"""Danh sách option cho dropdown — chỉ 12 mã chính, không kèm legacy."""
+	"""Danh sách option cho dropdown — chỉ 13 mã chính, không kèm legacy."""
 	return [{"value": code, "label": get_label(code, lang)} for code in RELATIONSHIP_CODES]

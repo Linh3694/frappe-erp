@@ -20,6 +20,11 @@ from erp.api.crm.utils import (
 )
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.relationship_types import normalize as normalize_relationship
+from erp.utils.family_relationship import (
+    canonical_relationship_rows,
+    rebuild_guardian_relationship_mirror,
+    rebuild_student_relationship_mirror,
+)
 
 
 def _recalculate_admission_profile_completion(doc):
@@ -1680,16 +1685,42 @@ def get_lead_summary():
 
 # === Lead Family / Guardian APIs ===
 
+def _resolve_family_for_lead(doc):
+    """
+    Ten document CRM Family cua lead — CHI DOC, khong ghi gi vao Family.
+
+    Uu tien doc.linked_family (lead cu, do migration gan). Lead nhap hoc qua
+    run_create_enrollment_records KHONG duoc gan field nay (enrollment.py khong set
+    linked_family), nen fallback resolve qua linked_student -> CRM Student -> CRM Family.
+
+    Tang fallback cuoi cua _resolve_linked_family_for_student (tim family qua guardian
+    dung chung) chi chay khi HS khong co dong quan he nao duoi parent CRM Family; neu
+    guardian thuoc nhieu family thi co the tra ve family cua anh/chi/em. Giu nguyen hanh
+    vi nhu migration.py de hai duong resolve khong lech nhau.
+
+    Tra ve None neu lead chua co linked_student hoac student chua thuoc family nao.
+    """
+    if getattr(doc, "linked_family", None):
+        return doc.linked_family
+    sid = getattr(doc, "linked_student", None)
+    if not sid or not frappe.db.exists("CRM Student", sid):
+        return None
+    from erp.api.crm.migration import _resolve_linked_family_for_student
+
+    return _resolve_linked_family_for_student(frappe.get_doc("CRM Student", sid))
+
+
 def _guardian_linked_to_lead(doc, guardian_name):
     """Kiem tra CRM Guardian co lien ket voi lead (lead_guardians hoac CRM Family Relationship)."""
     # doc: CRM Lead document
     for lg in getattr(doc, "lead_guardians", None) or []:
         if (getattr(lg, "guardian", None) or lg.get("guardian")) == guardian_name:
             return True
-    if getattr(doc, "linked_family", None):
+    fam_name = _resolve_family_for_lead(doc)
+    if fam_name:
         cnt = frappe.db.count(
             "CRM Family Relationship",
-            {"parent": doc.linked_family, "guardian": guardian_name},
+            {"parent": fam_name, "guardian": guardian_name},
         )
         if cnt:
             return True
@@ -1804,6 +1835,12 @@ def _ordered_guardian_names_for_lead(doc):
     """
     Danh sach ten CRM Guardian theo thu tu hien thi (giong get_lead_family).
     Tra ve None neu che do thong tin phang (1 guardian phang), khong sap xep duoc.
+
+    CO Y dung doc.linked_family tho, KHONG dung _resolve_family_for_lead():
+    ham nay chi de validate input cua reorder_lead_guardians (lead.py) va ban portal
+    tuong ung, va hai cho do CHON DUONG GHI bang chinh doc.linked_family. Neu validator
+    tra thu tu family-wide ma duong ghi lai la child table lead_guardians thi hai ben
+    lech nhau -> ghi display_order sai/thieu. Khi mo Pham vi 2b phai doi CA HAI cung luc.
     """
     if getattr(doc, "linked_family", None):
         rels = frappe.get_all(
@@ -1841,14 +1878,15 @@ def build_lead_family_payload(doc):
     members = []
     family_code = None
 
-    # Che do B: co linked_family
-    if getattr(doc, "linked_family", None):
-        fam = frappe.db.get_value("CRM Family", doc.linked_family, "family_code", as_dict=True)
+    # Che do B: co CRM Family (linked_family, hoac resolve qua linked_student)
+    fam_name = _resolve_family_for_lead(doc)
+    if fam_name:
+        fam = frappe.db.get_value("CRM Family", fam_name, "family_code", as_dict=True)
         if fam:
             family_code = fam.get("family_code")
         rels = frappe.get_all(
             "CRM Family Relationship",
-            filters={"parent": doc.linked_family},
+            filters={"parent": fam_name},
             fields=["student", "guardian", "relationship_type", "key_person", "access", "display_order"],
         )
         # Dedupe theo guardian: 1 guardian co the co N row (moi HS 1 row trong family).
@@ -1967,7 +2005,10 @@ def build_lead_family_payload(doc):
     return {
         "members": members,
         "family_code": family_code,
-        "linked_family": getattr(doc, "linked_family", None),
+        # Family that `members`/`family_code` thuc su duoc doc tu — co the resolve qua
+        # linked_student khi field linked_family con rong. Tra ve gia tri da resolve de
+        # payload nhat quan: khong con truong hop family_code co ma linked_family null.
+        "linked_family": fam_name,
     }
 
 
@@ -2087,16 +2128,16 @@ def add_lead_guardian():
     # Nguoi lien lac chinh: toi da 1. is_first = chua co bat ky phu huynh nao trong pham vi lead nay
     # (ke ca khi lead_guardians rong nhung da co CRM Family Relationship + linked_student).
     has_any_guardian = len(lead_guardians) > 0
-    if not has_any_guardian and getattr(doc, "linked_family", None) and getattr(
-        doc, "linked_student", None
-    ):
-        has_any_guardian = (
-            frappe.db.count(
-                "CRM Family Relationship",
-                filters={"parent": doc.linked_family, "student": doc.linked_student},
+    if not has_any_guardian and getattr(doc, "linked_student", None):
+        fam_name = _resolve_family_for_lead(doc)
+        if fam_name:
+            has_any_guardian = (
+                frappe.db.count(
+                    "CRM Family Relationship",
+                    filters={"parent": fam_name, "student": doc.linked_student},
+                )
+                > 0
             )
-            > 0
-        )
     is_first = not has_any_guardian
     # Them vao lead_guardians
     doc.append("lead_guardians", {
@@ -2134,45 +2175,45 @@ def add_lead_guardian():
                 doc.append("phone_numbers", {"phone_number": guardian_phone, "is_primary": 1})
         doc.save(ignore_permissions=True)
 
+    # TODO(Pham vi 2b): co tinh KHONG dung _resolve_family_for_lead() o day.
+    # Day la duong GHI vao CRM Family (3 noi: Family.relationships,
+    # Student.family_relationships, Guardian.student_relationships). Doi resolver vao se
+    # bat dual-write len du lieu da lech tu lau -> Lead ghi de Family (chieu sai).
     # Neu co linked_family + linked_student -> them CRM Family Relationship
     if getattr(doc, "linked_family", None) and doc.linked_student:
         # CRM Family Relationship.relationship_type la reqd=1 -> phai co gia tri.
         # Dialog "Them thanh vien" hien chua thu quan he, nen fallback "other".
         family_relationship_type = relationship_type or "other"
-        family_doc = frappe.get_doc("CRM Family", doc.linked_family)
-        family_doc.append("relationships", {
+        # access: mac dinh 1, nhung KE THUA neu cap (student, guardian) da co dong chuan —
+        # nha truong co the da co y bo quyen xem cua nguoi nay voi chau nay, them lai tu
+        # Admission khong duoc phep cap lai quyen do.
+        prior = canonical_relationship_rows(
+            guardian=guardian_name_doc, student=doc.linked_student
+        )
+        inherited_access = 1
+        inherited_can_pickup = 1
+        if prior:
+            inherited_access = 1 if any(r.get("access") for r in prior) else 0
+            inherited_can_pickup = 1 if any(r.get("can_pickup", 1) for r in prior) else 0
+        # can_pickup phai ghi tuong minh: append() KHONG ap default cua doctype
+        # (base_document.py::_init_child) nen thieu key la ve 0 -> mat quyen don.
+        new_row = {
             "student": doc.linked_student,
             "guardian": guardian_name_doc,
             "relationship_type": family_relationship_type,
             "key_person": 1 if is_first else 0,
-            "access": 1,
-        })
+            "access": inherited_access,
+            "can_pickup": inherited_can_pickup,
+        }
+        family_doc = frappe.get_doc("CRM Family", doc.linked_family)
+        family_doc.append("relationships", new_row)
         family_doc.flags.ignore_validate = True
         family_doc.save(ignore_permissions=True)
         # Cap nhat CRM Guardian family_code
         frappe.db.set_value("CRM Guardian", guardian_name_doc, "family_code", family_doc.family_code)
-        # Cap nhat CRM Student family_relationships
-        student_doc = frappe.get_doc("CRM Student", doc.linked_student)
-        student_doc.append("family_relationships", {
-            "student": doc.linked_student,
-            "guardian": guardian_name_doc,
-            "relationship_type": family_relationship_type,
-            "key_person": 1 if is_first else 0,
-            "access": 1,
-        })
-        student_doc.flags.ignore_validate = True
-        student_doc.save(ignore_permissions=True)
-        # Cap nhat CRM Guardian student_relationships
-        guardian_doc = frappe.get_doc("CRM Guardian", guardian_name_doc)
-        guardian_doc.append("student_relationships", {
-            "student": doc.linked_student,
-            "guardian": guardian_name_doc,
-            "relationship_type": family_relationship_type,
-            "key_person": 1 if is_first else 0,
-            "access": 1,
-        })
-        guardian_doc.flags.ignore_validate = True
-        guardian_doc.save(ignore_permissions=True)
+        # 2 ban mirror dung lai tu dong chuan vua ghi (khong tu append tay).
+        rebuild_student_relationship_mirror(doc.linked_student)
+        rebuild_guardian_relationship_mirror(guardian_name_doc)
 
     frappe.db.commit()
     return single_item_response({"guardian": guardian_name_doc}, "Them phu huynh thanh cong")
@@ -2300,6 +2341,7 @@ def update_lead_guardian():
         doc.save(ignore_permissions=True)
         doc = frappe.get_doc("CRM Lead", name)
 
+    # TODO(Pham vi 2b): duong GHI — giu doc.linked_family, xem ghi chu o add_lead_guardian.
     # Cap nhat relationship_type trong CRM Family Relationship neu co linked_family
     if relationship_type is not None and getattr(doc, "linked_family", None):
         rels = frappe.get_all(
@@ -2320,10 +2362,12 @@ def update_lead_guardian():
         if lg.get("guardian") == guardian_name and lg.get("is_primary_contact"):
             is_primary = True
             break
-    if not is_primary and getattr(doc, "linked_family", None):
-        rels = frappe.get_all("CRM Family Relationship", filters={"parent": doc.linked_family, "guardian": guardian_name}, fields=["key_person"])
-        if rels and rels[0].get("key_person"):
-            is_primary = True
+    if not is_primary:
+        fam_name = _resolve_family_for_lead(doc)
+        if fam_name:
+            rels = frappe.get_all("CRM Family Relationship", filters={"parent": fam_name, "guardian": guardian_name}, fields=["key_person"])
+            if rels and rels[0].get("key_person"):
+                is_primary = True
 
     if is_primary:
         g_doc = frappe.get_doc("CRM Guardian", guardian_name)
@@ -2370,30 +2414,25 @@ def remove_lead_guardian():
     doc.flags.ignore_validate = True
     doc.save(ignore_permissions=True)
 
-    # Neu co linked_family -> xoa CRM Family Relationship
-    if getattr(doc, "linked_family", None):
+    # "Bo lien ket" tren mot lead = bo lien ket PH voi DUNG chau cua lead do — cung nguyen
+    # tac cap (student, guardian) nhu key_person/access. Truoc day DELETE theo
+    # parent+guardian nen go PH o chau A lam mat luon quan he voi chau B: PH mat quyen
+    # portal / nhom chat lop / uy quyen don nghi cua chau B.
+    # TODO(Pham vi 2b): van gate bang doc.linked_family tho (chua dung
+    # _resolve_family_for_lead). Blocker xoa trang mirror da duoc go, cho quyet dinh 2b.
+    if getattr(doc, "linked_family", None) and doc.linked_student:
         frappe.db.sql(
-            "DELETE FROM `tabCRM Family Relationship` WHERE parent=%s AND guardian=%s",
-            (doc.linked_family, guardian_name)
+            "DELETE FROM `tabCRM Family Relationship` "
+            "WHERE parent=%s AND guardian=%s AND student=%s",
+            (doc.linked_family, guardian_name, doc.linked_student),
         )
-        # Kiem tra guardian con o family nao khac khong
-        other_fam = frappe.db.sql(
-            "SELECT 1 FROM `tabCRM Family Relationship` WHERE guardian=%s LIMIT 1",
-            (guardian_name,)
-        )
-        if not other_fam:
+        # Chi xet dong CHUAN: dong mirror con sot lai khong duoc tinh la "guardian van
+        # thuoc mot family nao do", neu khong family_code se khong bao gio duoc don.
+        if not canonical_relationship_rows(guardian=guardian_name):
             frappe.db.set_value("CRM Guardian", guardian_name, "family_code", None)
-        # Cap nhat student_relationships tren CRM Student
-        if doc.linked_student:
-            student_doc = frappe.get_doc("CRM Student", doc.linked_student)
-            student_doc.set("family_relationships", [r for r in (student_doc.family_relationships or []) if r.guardian != guardian_name])
-            student_doc.flags.ignore_validate = True
-            student_doc.save(ignore_permissions=True)
-        # Cap nhat guardian student_relationships
-        guardian_doc = frappe.get_doc("CRM Guardian", guardian_name)
-        guardian_doc.set("student_relationships", [])
-        guardian_doc.flags.ignore_validate = True
-        guardian_doc.save(ignore_permissions=True)
+        # Dung lai mirror thay vi set trang — guardian co the con chau khac o family khac.
+        rebuild_student_relationship_mirror(doc.linked_student)
+        rebuild_guardian_relationship_mirror(guardian_name)
 
     # Sync flat fields neu da xoa primary -> lay tu guardian tiep theo
     if was_primary and new_lead_guardians:
@@ -2651,37 +2690,31 @@ def set_primary_contact():
     doc.flags.ignore_validate = True
     doc.save(ignore_permissions=True)
 
-    # Neu co linked_family -> cap nhat key_person trong CRM Family Relationship
-    if getattr(doc, "linked_family", None):
+    # key_person la thuoc tinh cua CAP (student, guardian) — moi chau mot nguoi lien lac
+    # chinh, KHONG phai mot nguoi cho ca gia dinh. Nen moi UPDATE deu scope theo
+    # linked_student. Khong co linked_student thi khong biet dang doi cho chau nao ->
+    # bo qua, tuyet doi khong dung vao Family.
+    # TODO(Pham vi 2b): van gate bang doc.linked_family tho (chua dung
+    # _resolve_family_for_lead). Blocker clobber da duoc go, cho quyet dinh mo 2b tong the.
+    if getattr(doc, "linked_family", None) and doc.linked_student:
         frappe.db.sql(
-            "UPDATE `tabCRM Family Relationship` SET key_person=0 WHERE parent=%s",
-            (doc.linked_family,)
+            "UPDATE `tabCRM Family Relationship` SET key_person=0 "
+            "WHERE parent=%s AND student=%s",
+            (doc.linked_family, doc.linked_student),
         )
         frappe.db.sql(
-            "UPDATE `tabCRM Family Relationship` SET key_person=1 WHERE parent=%s AND guardian=%s",
-            (doc.linked_family, guardian_name)
+            "UPDATE `tabCRM Family Relationship` SET key_person=1 "
+            "WHERE parent=%s AND student=%s AND guardian=%s",
+            (doc.linked_family, doc.linked_student, guardian_name),
         )
-        # Cap nhat student_relationships va guardian student_relationships
-        for rel in frappe.get_all("CRM Family Relationship", filters={"parent": doc.linked_family}, fields=["name", "student", "guardian", "relationship_type", "key_person", "access"]):
-            if rel["guardian"] == guardian_name:
-                rel["key_person"] = 1
-            else:
-                rel["key_person"] = 0
-        # Reload va save student + guardian
-        if doc.linked_student:
-            student_doc = frappe.get_doc("CRM Student", doc.linked_student)
-            student_doc.set("family_relationships", [])
-            for rel in frappe.get_all("CRM Family Relationship", filters={"parent": doc.linked_family, "student": doc.linked_student}, fields=["student", "guardian", "relationship_type", "key_person", "access"]):
-                student_doc.append("family_relationships", rel)
-            student_doc.flags.ignore_validate = True
-            student_doc.save(ignore_permissions=True)
-        for gid in {r["guardian"] for r in frappe.get_all("CRM Family Relationship", filters={"parent": doc.linked_family}, fields=["guardian"]) if r.get("guardian")}:
-            guardian_doc = frappe.get_doc("CRM Guardian", gid)
-            guardian_doc.set("student_relationships", [])
-            for rel in frappe.get_all("CRM Family Relationship", filters={"parent": doc.linked_family, "guardian": gid}, fields=["student", "guardian", "relationship_type", "key_person", "access"]):
-                guardian_doc.append("student_relationships", rel)
-            guardian_doc.flags.ignore_validate = True
-            guardian_doc.save(ignore_permissions=True)
+        # Dung lai 2 ban mirror tu dong chuan (helper tu gom moi family cua guardian).
+        rebuild_student_relationship_mirror(doc.linked_student)
+        for gid in {
+            r["guardian"]
+            for r in canonical_relationship_rows(student=doc.linked_student)
+            if r.get("guardian")
+        }:
+            rebuild_guardian_relationship_mirror(gid)
 
     # Sync flat fields
     g_doc = frappe.get_doc("CRM Guardian", guardian_name)
@@ -2693,8 +2726,9 @@ def set_primary_contact():
         if lg.get("guardian") == guardian_name:
             doc.relationship = lg.get("relationship_type", "")
             break
-    if getattr(doc, "linked_family", None):
-        rel = frappe.db.get_value("CRM Family Relationship", {"parent": doc.linked_family, "guardian": guardian_name}, "relationship_type")
+    fam_name = _resolve_family_for_lead(doc)
+    if fam_name:
+        rel = frappe.db.get_value("CRM Family Relationship", {"parent": fam_name, "guardian": guardian_name}, "relationship_type")
         if rel:
             doc.relationship = rel
     doc.guardian_occupation = getattr(g_doc, "occupation", None) or ""
@@ -2744,6 +2778,9 @@ def reorder_lead_guardians():
             "Nguoi lien lac chinh phai o vi tri dau tien", {"order": ["Primary phai dung dau"]}
         )
 
+    # TODO(Pham vi 2b): duong GHI display_order. Phai doi CUNG LUC voi
+    # _ordered_guardian_names_for_lead() o tren — `expected` va duong ghi bat buoc dung
+    # cung mot nguon, neu khong se ghi display_order sai/thieu.
     if getattr(doc, "linked_family", None):
         stud = getattr(doc, "linked_student", None)
         if not stud:
