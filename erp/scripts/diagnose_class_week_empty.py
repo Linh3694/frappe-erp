@@ -260,6 +260,109 @@ def diagnose(
     return result
 
 
+def diagnose_api(
+    class_id: str,
+    week_start: str,
+    as_user: Optional[str] = None,
+    week_end: Optional[str] = None,
+) -> dict:
+    """
+    Bước 2: gọi THẲNG endpoint get_class_week như request thật.
+
+    diagnose() chạy dưới quyền Administrator nên KHÔNG áp permission query.
+    Hàm này chạy lại dưới đúng user đang dùng UI để lộ chênh lệch phân quyền/campus.
+
+    Usage:
+        from erp.scripts.diagnose_class_week_empty import diagnose_api
+        diagnose_api("SIS-CLASS-6137846", "2026-08-03", as_user="admin@wellspring.edu.vn")
+    """
+    from erp.api.erp_sis.timetable.weeks import get_class_week
+    from erp.sis.utils.permission_query import (
+        sis_timetable_instance_query,
+        sis_timetable_instance_row_query,
+    )
+    from erp.utils.campus_utils import get_current_campus_from_context
+
+    ws = _to_date(week_start)
+    we_str = week_end or str(ws + timedelta(days=6))
+    original_user = frappe.session.user
+    out = {"user": as_user or original_user, "success": None, "count": None}
+
+    print("\n" + "=" * 78)
+    print(f"🔍 GỌI THẲNG get_class_week — lớp {class_id}, tuần {week_start} → {we_str}")
+    print("=" * 78)
+
+    try:
+        if as_user:
+            frappe.set_user(as_user)
+        user = frappe.session.user
+        print(f"\n[U] User: {user}")
+
+        # Permission query áp lên frappe.get_all trong get_class_week
+        try:
+            cond_inst = sis_timetable_instance_query(user)
+            cond_row = sis_timetable_instance_row_query(user)
+            print(f"[P] Permission query SIS Timetable Instance    : {cond_inst or '(rỗng — không lọc)'}")
+            print(f"[P] Permission query SIS Timetable Instance Row: {cond_row or '(rỗng — không lọc)'}")
+            if cond_inst == "1=0" or cond_row == "1=0":
+                print("     ❌ '1=0' ⇒ user KHÔNG có campus nào → mọi query trả rỗng")
+        except Exception as e:
+            print(f"[P] Không đọc được permission query: {e}")
+
+        try:
+            print(f"[C] Campus context của user: {get_current_campus_from_context()}")
+        except Exception as e:
+            print(f"[C] Không đọc được campus context: {e}")
+
+        # Cache: get_class_week trả sớm nếu cache còn giá trị
+        try:
+            campus_id = get_current_campus_from_context()
+            cache_key = f"class_week:{class_id}:{week_start}:{we_str}:{campus_id or 'none'}"
+            cached = frappe.cache().get_value(cache_key)
+            print(f"[K] Cache key: {cache_key}")
+            print(f"[K] Cache hiện có: {('có, ' + str(len(cached)) + ' entries') if cached else 'trống'}")
+        except Exception as e:
+            print(f"[K] Không đọc được cache: {e}")
+
+        # Gọi thật — form_dict được set trước nên hàm không chạm frappe.request
+        frappe.local.form_dict = frappe._dict({
+            "class_id": class_id,
+            "week_start": week_start,
+            "week_end": we_str,
+        })
+        res = get_class_week()
+
+        success = res.get("success") if isinstance(res, dict) else None
+        data = (res.get("data") if isinstance(res, dict) else None) or []
+        out["success"] = success
+        out["count"] = len(data)
+
+        print(f"\n[R] success = {success}")
+        print(f"[R] message = {res.get('message') if isinstance(res, dict) else res}")
+        print(f"[R] số entries = {len(data)}")
+        if data[:3]:
+            print("[R] 3 entries đầu:")
+            for e in data[:3]:
+                print(
+                    f"     {e.get('date')} | {e.get('day_of_week')} | {e.get('period_name')} "
+                    f"| col={e.get('timetable_column_id')} | subj={e.get('subject_title') or e.get('subject_id')}"
+                )
+
+        print("\n" + "-" * 78)
+        if not data:
+            print("❌ API trả rỗng dưới user này trong khi dữ liệu DB đầy đủ")
+            print("   → so sánh [P]/[C]: lỗi phân quyền campus hoặc campus context sai")
+        else:
+            print(f"✅ API trả {len(data)} entries → backend OK, lỗi nằm ở frontend")
+            print("   Kiểm tra Network tab: request get_class_week gửi class_id/week_start nào")
+        print("-" * 78)
+    finally:
+        if as_user:
+            frappe.set_user(original_user)
+
+    return out
+
+
 def diagnose_many(class_titles: list, week_start: str, school_year_title: Optional[str] = None):
     """Chạy diagnose cho nhiều lớp, in bảng tổng hợp — phân biệt lỗi toàn cục vs lỗi 1 lớp."""
     summary = []
