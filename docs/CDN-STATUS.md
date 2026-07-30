@@ -22,9 +22,9 @@ Ba mức độ, **đừng nhầm lẫn**: `code xong` ≠ `đã deploy` ≠ `đ�
 | Video remux `+faststart` + poster | ✅ Chạy production (2026-07-29) |
 | **Ảnh chân dung học sinh** | ✅ **Chạy production — lỗ hổng §7b đã vá** |
 | Thư viện, thực đơn, tin tức — nén tại chỗ | ✅ Chạy production (−52%) |
-| Thư viện, thực đơn, tin tức — **lên CDN** | 🟡 **Code xong + test xanh, CHƯA push, CHƯA migrate, CHƯA bật** (§14) |
-| **Chặn `/uploads` ẩn danh (social-service)** | 🔴 **Code xong + test xanh, CHƯA deploy — lỗ hổng CÒN HỞ trên prod** (§15) |
-| **Phase 3 (upload thẳng lên CDN)** | 🟡 **Code xong + test xanh (BE + web + mobile), CHƯA deploy, cờ mặc định TẮT** (§16) |
+| Thư viện, thực đơn, tin tức — **lên CDN** | 🟡 **Code xong + test xanh, ĐÃ push, CHƯA migrate, CHƯA bật** (§14) |
+| **Chặn `/uploads` ẩn danh (social-service)** | 🔴 **Code xong + test xanh, CHƯA commit, CHƯA deploy — lỗ hổng CÒN HỞ trên prod** (§15) |
+| **Phase 3 (upload thẳng lên CDN)** | 🟡 **Code xong + test xanh (BE + web + mobile), CHƯA commit, CHƯA deploy, cờ mặc định TẮT** (§16) |
 | Phase 4 (dọn dẹp) | 🟡 Script để sẵn + test xanh; **cố ý chưa chạy** — giữ fallback tới ~giữa 2027 (§17) |
 | Phân loại ~6.600 file công khai chưa rõ | 🟡 Script để sẵn; **chưa chạy** (cần prod DB) (§18) |
 
