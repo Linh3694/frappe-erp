@@ -1955,12 +1955,11 @@ def fix_guardian_phone_duplicates(dry_run=1, commit_every=50):
 
 
 # ==================================================================================
-# Doc file «DANH SÁCH HỌC SINH XẾP LỚP» (TSxTiH) — bo sung lien lac phu huynh.
+# Doc file «DANH SÁCH HỌC SINH XẾP LỚP» (TSxTiH) — cap nhat lien lac phu huynh.
 #
-# Khac hai ham tren: doi chieu bang MA HOC SINH (cot ID) thay vi ten, nen khong
-# dinh rui ro trung ten. File gom ca HSM (hoc sinh moi, co CRM Lead) lan HSHH
-# (hoc sinh hien huu, chi co CRM Student) — voi HSHH ta chi lam giau ban ghi
-# CRM Guardian dang co, KHONG tao quan he gia dinh moi.
+# Doi chieu bang MA HOC SINH (cot ID / WS...). Tim PH uu tien quan he CRM Family
+# (Me/Bo/NGH), fallback SDT. Ghi ten, SDT, email (+ nghe nghiep/dia chi neu co).
+# KHONG tao CRM Guardian moi, KHONG them quan he gia dinh moi.
 # ==================================================================================
 
 TIH_SHEET = "1. TỔNG HS ĐÓNG PHÍ_ENROLLED  S"
@@ -2009,35 +2008,183 @@ def _tih_resolve_cols(ws):
     return out, seen
 
 
-def _tih_find_guardian(phone):
+# Me / Bo / NGH — quan he mac dinh tren CRM Family Relationship
+_TIH_ROLES = (
+    ("m", "m_name", "m_phone", "m_email", "m_job", ("mother",)),
+    ("f", "f_name", "f_phone", "f_email", "f_job", ("father",)),
+    ("g", "g_name", "g_phone", None, None, None),
+)
+
+
+def _is_skip(v):
+    """Bo qua o trong hoac ghi '0' (placeholder Excel)."""
+    if v is None:
+        return True
+    if isinstance(v, (int, float)) and v == 0:
+        return True
+    s = _txt(v)
+    return not s or s == "0"
+
+
+def _phones(v):
     """
-    Tim CRM Guardian theo SDT: nhan ca hai dinh dang dang ton tai trong DB ('+84...'
-    va '0...'), va tra CA bang con `CRM Guardian Phone` — phu huynh co so thu hai
-    truoc day bi coi la "khong tim thay" roi bi bo qua ca dong.
+    Tu o SDT -> (list +84... hop le, list chuoi loi).
+    Mot o co the chua nhieu SDT (phay, xuong dong, ...).
     """
-    return find_guardian_by_phone(phone)
+    if _is_skip(v):
+        return [], []
+    if isinstance(v, float) and v.is_integer():
+        raw = str(int(v))
+    else:
+        raw = _txt(v)
+    valid, invalid, seen = [], [], set()
+    chunks = re.split(r"[\s,;/|]+", raw)
+    candidates = []
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk or chunk == "0":
+            continue
+        if validate_phone_number(chunk):
+            candidates.append(chunk)
+            continue
+        for m in re.findall(r"\d{8,11}", chunk):
+            candidates.append(m)
+    for cand in candidates:
+        if not validate_phone_number(cand):
+            if cand not in invalid:
+                invalid.append(cand)
+            continue
+        norm = normalize_phone_number(cand)
+        if norm and norm not in seen:
+            seen.add(norm)
+            valid.append(norm)
+    return valid, invalid
+
+
+def _tih_find_guardian_for_student(student_id, rel_codes, phones):
+    """
+    Tim CRM Guardian theo quan he tren CRM Family Relationship, fallback SDT.
+    Tra (docname|None, cach_khop, rel_row|None).
+    """
+    rel_codes = [c for c in (rel_codes or []) if c]
+    rows = []
+    if student_id and rel_codes:
+        rows = frappe.get_all(
+            "CRM Family Relationship",
+            filters={"student": student_id, "relationship_type": ["in", rel_codes]},
+            fields=["name", "guardian", "relationship_type"],
+            limit_page_length=0,
+        ) or []
+    if len(rows) == 1:
+        return rows[0]["guardian"], "relationship", rows[0]
+    if len(rows) > 1:
+        if phones:
+            for row in rows:
+                for ph in phones:
+                    matches = guardian_phone_matches(ph)
+                    if any(m["guardian"] == row["guardian"] for m in matches):
+                        return row["guardian"], "relationship_phone", row
+        return rows[0]["guardian"], "relationship_first", rows[0]
+    for ph in phones or []:
+        gname = find_guardian_by_phone(ph)
+        if gname:
+            return gname, "phone_fallback", None
+    return None, "missing", None
+
+
+def _tih_would_update_field(cur, new, overwrite):
+    """Co ghi field vo huong khong (overwrite hoac dang trong)."""
+    new = _txt(new)
+    if not new:
+        return False
+    return overwrite or not _txt(cur)
+
+
+def _tih_preview_guardian_update(gname, person, overwrite, counters):
+    """Dem thay doi khi dry_run."""
+    cur = frappe.db.get_value(
+        "CRM Guardian", gname,
+        ["guardian_name", "phone_number", "email", "occupation", "address"],
+        as_dict=True,
+    ) or {}
+    if _tih_would_update_field(cur.get("guardian_name"), person["name"], overwrite):
+        counters["set_name"] += 1
+    phones = person.get("phones") or []
+    if phones and _tih_would_update_field(cur.get("phone_number"), phones[0], overwrite):
+        counters["set_phone"] += 1
+    if person.get("emails") and _tih_would_update_field(cur.get("email"), person["emails"][0], overwrite):
+        counters["set_email"] += 1
+    if person.get("job") and _tih_would_update_field(cur.get("occupation"), person["job"], overwrite):
+        counters["set_job"] += 1
+    if person.get("addr") and _tih_would_update_field(cur.get("address"), person["addr"], overwrite):
+        counters["set_addr"] += 1
+
+
+def _apply_guardian_contact_update(doc, person, overwrite, counters):
+    """Cap nhat ten / SDT / email (+ child tables) len CRM Guardian."""
+    changed = False
+    name = person.get("name") or ""
+    phones = person.get("phones") or []
+    emails = person.get("emails") or []
+
+    if name and _tih_would_update_field(doc.guardian_name, name, overwrite) \
+            and _txt(doc.guardian_name) != name:
+        doc.guardian_name = name
+        counters["set_name"] += 1
+        changed = True
+
+    if phones:
+        primary = phones[0]
+        if _tih_would_update_field(doc.phone_number, primary, overwrite) \
+                and _txt(doc.phone_number) != primary:
+            doc.phone_number = primary
+            counters["set_phone"] += 1
+            changed = True
+        for ph in phones:
+            if _add_child_contact(doc, "phone_numbers", "phone_number", ph):
+                counters["child_phone"] += 1
+                changed = True
+
+    if emails:
+        primary = emails[0]
+        if _tih_would_update_field(doc.email, primary, overwrite) \
+                and _txt(doc.email) != primary:
+            doc.email = primary
+            counters["set_email"] += 1
+            changed = True
+        for em in emails:
+            if _add_child_contact(doc, "emails", "email_address", em):
+                counters["child_email"] += 1
+                changed = True
+
+    for val, fld, counter in (
+        (person.get("job"), "occupation", "set_job"),
+        (person.get("addr"), "address", "set_addr"),
+    ):
+        if val and _tih_would_update_field(doc.get(fld), val, overwrite) \
+                and _txt(doc.get(fld)) != val:
+            doc.set(fld, val)
+            counters[counter] += 1
+            changed = True
+    return changed
 
 
 def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
     """
-    Bo sung EMAIL / NGHE NGHIEP / DIA CHI cho phu huynh, tu file
-    «DANH SÁCH HỌC SINH XẾP LỚP».
+    Cap nhat lien lac phu huynh (ten / SDT / email) tu file
+    «DANH SÁCH HỌC SINH XẾP LỚP», doi chieu ma HS (cot ID / WS...).
 
         bench --site <site> execute erp.api.crm.import_qlead_excel.backfill_tih \
-            --kwargs "{'path': '/private/files/....xlsx'}"
+            --kwargs "{'path': '/private/files/....xlsx', 'dry_run': 1}"
 
-    sheet      ten sheet, mac dinh «1. TỔNG HS ĐÓNG PHÍ_ENROLLED  S».
+    sheet      ten sheet (mac dinh «1. TỔNG HS ĐÓNG PHÍ_ENROLLED  S»).
     overwrite  0 = chi dien o dang trong | 1 = file thang.
 
-    Pham vi HEP — chi ghi 3 thong tin, tren dung phu huynh doi chieu duoc bang SDT:
-      CRM Guardian.email / .occupation / .address
-      + mot dong `CRM Guardian Email` (giao dien CRM doc bang con nay)
-      + neu hoc sinh co CRM Lead: guardian_email / guardian_occupation /
-        guardian_address tren ho so, chi khi dang trong.
+    Tim PH: uu tien quan he tren CRM Family (Me/Bo/NGH), fallback SDT.
+    Ghi CRM Guardian.guardian_name, .phone_number, .email + bang con phone_numbers/emails.
+    Bo qua gia tri '0'. Mot o co the chua nhieu SDT/email.
 
-    KHONG lam: tao CRM Guardian moi, them dong lead_guardians, them phone_numbers,
-    doi ten/quan he, sua gioi tinh/ngay sinh/truong. Phu huynh khong tim thay theo
-    SDT thi bo qua va liet ke trong bao cao.
+    KHONG tao CRM Guardian moi, KHONG them lead_guardians / quan he gia dinh moi.
     """
     import openpyxl
 
@@ -2046,7 +2193,7 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
     path = _resolve_path(path)
     print(f"  File: {path}")
     print(f"  overwrite={ow} ({'file thang' if ow else 'CRM thang'})")
-    print("  Chi ghi: email / nghe nghiep / dia chi")
+    print("  Ghi: ten / SDT / email (+ nghe nghiep / dia chi neu co)")
 
     wb = openpyxl.load_workbook(path, data_only=True)
     sname = sheet or TIH_SHEET
@@ -2055,7 +2202,7 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
     ws = wb[sname]
     C, seen = _tih_resolve_cols(ws)
     print(f"  Sheet: {sname!r}")
-    missing = [k for k in ("id", "student", "m_name", "m_phone") if k not in C]
+    missing = [k for k in ("id", "student") if k not in C]
     if missing:
         frappe.throw(f"Sheet thieu cot: {missing}. Tieu de tim thay: {list(seen)[:25]}")
 
@@ -2063,9 +2210,17 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
         j = C.get(key)
         return _txt(ws.cell(r, j).value) if j else ""
 
-    res = {"rows": 0, "people": 0, "guardian_found": 0, "guardian_missing": [],
-           "set_email": 0, "set_job": 0, "set_addr": 0, "child_email": 0,
-           "lead_filled": 0, "no_code": [], "errors": []}
+    def cell_raw(r, key):
+        j = C.get(key)
+        return ws.cell(r, j).value if j else None
+
+    res = {
+        "rows": 0, "people": 0, "guardian_found": 0, "guardian_missing": [],
+        "set_name": 0, "set_phone": 0, "set_email": 0, "set_job": 0, "set_addr": 0,
+        "child_phone": 0, "child_email": 0, "set_relationship": 0,
+        "lead_filled": 0, "no_code": [], "student_missing": [],
+        "invalid_phones": [], "errors": [],
+    }
     n_done = 0
 
     for r in range(TIH_HEADER_ROW + 1, ws.max_row + 1):
@@ -2078,27 +2233,44 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
             res["no_code"].append({"row": r, "student": sn, "code": code})
             continue
 
+        student_id = frappe.db.get_value("CRM Student", {"student_code": code}, "name")
+        if not student_id:
+            res["student_missing"].append({"row": r, "student": sn, "code": code})
+
         addr = " - ".join([x for x in (cell(r, "addr"), cell(r, "district"),
-                                       cell(r, "province")) if x])
+                                       cell(r, "province")) if x and not _is_skip(x)])
         both = _emails(cell(r, "both_email"))
         people = []
-        for tag, kn, kp, ke, kj in (
-            ("m", "m_name", "m_phone", "m_email", "m_job"),
-            ("f", "f_name", "f_phone", "f_email", "f_job"),
-            ("g", "g_name", "g_phone", None, None),
-        ):
-            nm, ph = cell(r, kn), cell(r, kp)
-            if not nm or not ph or not validate_phone_number(ph):
+        for tag, kn, kp, ke, kj, default_rels in _TIH_ROLES:
+            nm_raw = cell_raw(r, kn)
+            nm = "" if _is_skip(nm_raw) else _txt(nm_raw)
+            phones, bad_phones = _phones(cell_raw(r, kp)) if kp else ([], [])
+            for bad in bad_phones:
+                res["invalid_phones"].append(
+                    {"row": r, "student": sn, "tag": tag, "phone": bad})
+            mails = []
+            if ke and not _is_skip(cell_raw(r, ke)):
+                mails = _emails(cell(r, ke))
+            if not mails and both and tag in ("m", "f"):
+                mails = list(both)
+            job_raw = cell_raw(r, kj) if kj else None
+            job = "" if _is_skip(job_raw) else _txt(job_raw)
+
+            if tag == "g":
+                rel_raw = cell(r, "g_rel")
+                rel = normalize_relationship(rel_raw) if not _is_skip(rel_raw) else "guardian"
+                rel_codes = [rel] if rel else ["guardian"]
+            else:
+                rel_codes = list(default_rels)
+                rel = rel_codes[0] if rel_codes else ""
+
+            if not nm and not phones and not mails and not job:
                 continue
-            mails = _emails(cell(r, ke)) if ke else []
-            if not mails and both:
-                mails = both          # cot gop «Email Bố & Mẹ» cua sheet 3
-            email = mails[0] if mails else ""
-            job = cell(r, kj) if kj else ""
-            if not (email or job or addr):
-                continue              # khong co gi de ghi
-            people.append({"tag": tag, "name": nm, "phone": ph,
-                           "email": email, "job": job, "addr": addr})
+            people.append({
+                "tag": tag, "name": nm, "phones": phones, "emails": mails,
+                "job": job, "addr": addr, "rel_codes": rel_codes,
+                "rel": rel,
+            })
         if not people:
             continue
         res["people"] += len(people)
@@ -2106,44 +2278,43 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
         lead = frappe.db.get_value("CRM Lead", {"student_code": code}, "name")
 
         for g in people:
-            gname = _tih_find_guardian(g["phone"])
+            gname, how, rel_row = _tih_find_guardian_for_student(
+                student_id, g["rel_codes"], g["phones"])
             if not gname:
-                res["guardian_missing"].append(
-                    {"row": r, "student": sn, "name": g["name"], "phone": g["phone"]})
+                res["guardian_missing"].append({
+                    "row": r, "student": sn, "tag": g["tag"], "name": g["name"],
+                    "phones": ", ".join(g["phones"][:2]),
+                })
                 continue
             res["guardian_found"] += 1
             if dry_run:
-                cur = frappe.db.get_value(
-                    "CRM Guardian", gname, ["email", "occupation", "address"], as_dict=True) or {}
-                if g["email"] and (ow or not _txt(cur.get("email"))):
-                    res["set_email"] += 1
-                if g["job"] and (ow or not _txt(cur.get("occupation"))):
-                    res["set_job"] += 1
-                if g["addr"] and (ow or not _txt(cur.get("address"))):
-                    res["set_addr"] += 1
+                _tih_preview_guardian_update(gname, g, ow, res)
+                if g["tag"] == "g" and rel_row and g.get("rel"):
+                    cur_rel = rel_row.get("relationship_type") or ""
+                    if ow or not cur_rel:
+                        if cur_rel != g["rel"]:
+                            res["set_relationship"] += 1
                 continue
 
             sp = f"tih_{r}_{g['tag']}"
             try:
                 frappe.db.savepoint(sp)
                 doc = frappe.get_doc("CRM Guardian", gname)
-                changed = False
-                for val, fld, counter in ((g["email"], "email", "set_email"),
-                                          (g["job"], "occupation", "set_job"),
-                                          (g["addr"], "address", "set_addr")):
-                    if val and (ow or not _txt(doc.get(fld))) and _txt(doc.get(fld)) != val:
-                        doc.set(fld, val)
-                        res[counter] += 1
-                        changed = True
-                # giao dien CRM doc bang con, khong doc field vo huong
-                if _add_child_contact(doc, "emails", "email_address", g["email"]):
-                    res["child_email"] += 1
-                    changed = True
+                changed = _apply_guardian_contact_update(doc, g, ow, res)
                 if changed:
                     doc.flags.ignore_validate = True
                     doc.flags.ignore_mandatory = True
                     doc.save(ignore_permissions=True)
                     n_done += 1
+
+                # Cap nhat quan he NGH tren CRM Family neu cot AE khac DB
+                if g["tag"] == "g" and rel_row and g.get("rel"):
+                    cur_rel = rel_row.get("relationship_type") or ""
+                    if (ow or not cur_rel) and cur_rel != g["rel"]:
+                        frappe.db.set_value(
+                            "CRM Family Relationship", rel_row["name"],
+                            "relationship_type", g["rel"], update_modified=True)
+                        res["set_relationship"] += 1
             except Exception as e:
                 try:
                     frappe.db.rollback(save_point=sp)
@@ -2153,11 +2324,14 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
                 frappe.log_error(message=frappe.get_traceback() or str(e),
                                  title=f"backfill_tih guardian dong {r}")
 
-        # ho so CRM Lead: chi bu 3 field tuong ung, uu tien Me
+        # CRM Lead: bu guardian_* phang, uu tien Me
         if lead:
             pick = next((g for g in people if g["tag"] == "m"), people[0])
-            pairs = ((pick["email"], "guardian_email"), (pick["job"], "guardian_occupation"),
-                     (pick["addr"], "guardian_address"))
+            pairs = (
+                ((pick["emails"][0] if pick.get("emails") else ""), "guardian_email"),
+                (pick.get("job") or "", "guardian_occupation"),
+                (pick.get("addr") or "", "guardian_address"),
+            )
             if dry_run:
                 cur = frappe.db.get_value(
                     "CRM Lead", lead,
@@ -2193,23 +2367,36 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, commit_every=100):
     print(f"  Dong doc duoc            : {res['rows']}")
     print(f"  Phu huynh co du lieu     : {res['people']}")
     print(f"  Tim thay CRM Guardian    : {res['guardian_found']}")
-    print(f"  KHONG tim thay theo SDT  : {len(res['guardian_missing'])}")
+    print(f"  KHONG tim thay PH        : {len(res['guardian_missing'])}")
+    print(f"  HS khong co CRM Student  : {len(res['student_missing'])}")
+    print(f"  {'Se ghi ten' if dry_run else 'Da ghi ten':<24} : {res['set_name']}")
+    print(f"  {'Se ghi SDT chinh' if dry_run else 'Da ghi SDT chinh':<24} : {res['set_phone']}")
     print(f"  {'Se ghi email' if dry_run else 'Da ghi email':<24} : {res['set_email']}")
     print(f"  {'Se ghi nghe nghiep' if dry_run else 'Da ghi nghe nghiep':<24} : {res['set_job']}")
     print(f"  {'Se ghi dia chi' if dry_run else 'Da ghi dia chi':<24} : {res['set_addr']}")
     if not dry_run:
+        print(f"  Dong phone_numbers       : {res['child_phone']}")
         print(f"  Dong CRM Guardian Email  : {res['child_email']}")
+    print(f"  Cap nhat quan he NGH     : {res['set_relationship']}")
     print(f"  Ho so CRM Lead duoc bu   : {res['lead_filled']}")
     if res["no_code"]:
         print(f"\n  Ma HS khong hop le ({len(res['no_code'])}):")
         for x in res["no_code"][:10]:
             print(f"    r{x['row']:>4} {x['code'][:14]:<16} {x['student'][:34]}")
+    if res["student_missing"]:
+        print(f"\n  Khong co CRM Student ({len(res['student_missing'])}):")
+        for x in res["student_missing"][:10]:
+            print(f"    r{x['row']:>4} {x['code']:<12} {x['student'][:34]}")
     if res["guardian_missing"]:
-        print(f"\n  Khong tim thay guardian theo SDT ({len(res['guardian_missing'])}):")
+        print(f"\n  Khong tim thay guardian ({len(res['guardian_missing'])}):")
         for x in res["guardian_missing"][:20]:
-            print(f"    r{x['row']:>4} {x['name'][:24]:<26} {x['phone']:<13} (HS {x['student'][:22]})")
+            print(f"    r{x['row']:>4} [{x['tag']}] {x['name'][:22]:<24} {x['phones']:<14} (HS {x['student'][:18]})")
         if len(res["guardian_missing"]) > 20:
             print(f"    … con {len(res['guardian_missing']) - 20}")
+    if res["invalid_phones"]:
+        print(f"\n  SDT sai dinh dang ({len(res['invalid_phones'])}):")
+        for x in res["invalid_phones"][:15]:
+            print(f"    r{x['row']:>4} [{x['tag']}] {x['phone']}")
     if res["errors"]:
         print(f"\n  Loi ({len(res['errors'])}):")
         for e in res["errors"][:20]:
