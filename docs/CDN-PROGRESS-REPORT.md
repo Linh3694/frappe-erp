@@ -27,8 +27,6 @@ Ba việc cần xử lý ngay, theo thứ tự:
 |---|------|-----------|
 | 1 | **Push 18 commit của `apps/erp`** | Toàn bộ CDN nội dung SIS đang **chỉ nằm trên máy Linh**. Mất máy = mất hết. Vi phạm chính quy tắc deploy §11 của dự án. |
 | 2 | **Commit + deploy 8 file của `social-service`** | Trong đó có bản vá lỗ hổng `/uploads` phục vụ ẩn danh — **đang còn hở trên prod**. |
-| 3 | **Mở rộng disk VM3** | 200 GB, dự phóng cần ~257 GB/năm học. |
-
 ---
 
 ## 1. Tiến độ theo phase so với kế hoạch gốc
@@ -172,15 +170,9 @@ Số liệu prod cho ảnh chat thật (1,89 MB → 41,5 KB) thì **ủng hộ**
 | Traffic avatar | 142 request/15 phút, **200 toàn bộ**, 0 lỗi 403/410 |
 | Video `moov` atom | byte 48.289 → **36** (trước `mdat`) ⇒ phát ngay |
 
-### Disk — điểm cần chú ý
+### Disk
 
-| | |
-|---|---|
-| Cấp | **200 GB** |
-| Đang dùng | 3,4 GB |
-| Dự phóng `CDN-Design.md` §4.1 | **~257 GB/năm học** sau tối ưu |
-
-**200 GB không đủ một năm học.** Hiện chưa nguy cấp (3,4 GB) nhưng cần mở rộng trước khi dữ liệu tích đủ. `CDN-NEXT-SESSION.md` ghi việc này **"đã chủ động bỏ qua"** — cần xác nhận lại đó là quyết định hay là sót.
+Cấp **200 GB**, đang dùng 3,4 GB. **Mở rộng disk đã bị bỏ hẳn** theo quyết định của chủ dự án 2026-07-30 — không còn là việc treo, đừng nêu lại. Cảnh báo `disk ≥75%/85%` trong `cdn-checks.sh` là lớp phòng thủ nếu dung lượng thật sự sát ngưỡng.
 
 ---
 
@@ -192,7 +184,6 @@ Số liệu prod cho ảnh chat thật (1,89 MB → 41,5 KB) thì **ủng hộ**
 |---|---|---|
 | **18 commit `apps/erp` chưa push** | **Cao** | Toàn bộ CDN nội dung SIS chỉ tồn tại trên một máy. Không có bản sao ở remote. |
 | **Bản vá `/uploads` chưa deploy** | **Cao** | Lỗ hổng còn hở trên prod dù code đã sẵn sàng |
-| Disk 200 GB | Trung bình | Đủ ~9 tháng ở tốc độ hiện tại |
 | VM3 là điểm lỗi đơn (SPOF) | Trung bình | VM3 chết = toàn bộ ảnh/video không hiển thị. Chấp nhận có ý thức. |
 | `CDN_LINK_SECRET` từng hiện trong terminal | Thấp | Không rời máy Linh. Xoay secret nếu muốn chặt chẽ. |
 
@@ -243,7 +234,6 @@ Tài liệu ghi ngày 2026-07-29, code đã đi tiếp sau đó. Ba chỗ mâu t
 
 | # | Việc |
 |---|------|
-| 3.1 | **Mở rộng disk VM3** 200 GB → ≥500 GB. Xác nhận lại quyết định "chủ động bỏ qua" |
 | 3.2 | Bật CDN nội dung SIS (`CDN_SIS_CONTENT_GROUPS`) — bật dần từng nhóm, mặc định đang rỗng |
 
 ### Ưu tiên 4 — cải thiện, không gấp

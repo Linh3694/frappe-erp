@@ -22,7 +22,7 @@
 Việc **không** làm, và lý do:
 
 * **Hook `after_request` cho `user_image`** (227 chỗ) — `CDN-STATUS.md` §10.5 ghi rõ "chỉ cần nếu muốn cắt storage ở Frappe". Đây là quyết định kiến trúc, không phải việc thi hành. Để chị quyết.
-* **Chạy migrate nội dung SIS, mở disk VM3, xoay `CDN_LINK_SECRET`** — đều bắt buộc chạm prod. Xem mục "Chờ prod" cuối file.
+* **Chạy migrate nội dung SIS, xoay `CDN_LINK_SECRET`** — đều bắt buộc chạm prod. Xem mục "Chờ prod" cuối file.
 * **Transcode video 720p** — `CDN-STATUS.md` ghi chỉ đáng làm nếu video chat vượt ~0,5 GB/ngày. Chưa có số đó.
 
 ---
@@ -345,7 +345,6 @@ pm2 reload social-service                        # không --update-env
 
 ## Bước 5 — Còn lại, không gấp
 
-* Mở rộng disk VM3 (200 GB → ≥500 GB) — hiện dùng 3,4 GB, dự phóng ~257 GB/năm học
 * Xoay `CDN_LINK_SECRET` — đổi **đồng thời ba nơi**: `/opt/cdn/.env`, nginx snippet trên VM3, `config.env` của social-service
 * Dọn 22.817 dòng `tabFile` thừa + 552 bản avatar trùng
 * 4 file HEIC legacy chưa nén — cần `pillow-heif` trong bench env
@@ -362,8 +361,6 @@ pm2 reload social-service                        # không --update-env
 | `cdn-rewrite-legacy-urls.js` | Cần Mongo. **Cố ý hoãn tới ~giữa 2027** | ✅ script + test logic |
 | Tạo bucket `cdn-staging` + IAM + lifecycle | Cần MinIO trên VM3 | ✅ lệnh ở Bước 4.1 |
 | Đo ảnh 12 MP thật từ điện thoại | Cần thiết bị thật | ⏳ checklist ở `CDN-Design.md` §10 Phase 1.7 |
-| Mở rộng disk VM3 | Hạ tầng | — |
-
 **Một điều tôi không kiểm chứng được:** không có SSH nên mọi số "đo trên prod" trong `CDN-STATUS.md` §6 là **trích dẫn từ phiên trước**, không phải xác nhận của phiên này. Chúng cụ thể và nhất quán nên tôi tin, nhưng chị nên biết ranh giới đó.
 
 ---

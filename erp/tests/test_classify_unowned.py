@@ -9,6 +9,7 @@ file can bao ve — dung kieu loi ma hai lo hong truoc da mac phai.
 
 import importlib.util
 import os
+import unicodedata
 import unittest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +46,51 @@ class TestNhanDangNhayCam(unittest.TestCase):
             self.assertNotIn("anh lop (ten = ma lop)",
                              classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
 
+    def test_anh_nhan_vien_theo_ma_nhan_vien(self):
+        # Do tren prod 2026-07-30: 319 file, 316 khop mot employee_code co that.
+        for ten in ["WF01HC.jpg", "WF56KT.jpg", "WT17GE.jpg", "WT87PR.png",
+                    "WT136PR.jpg", "WF02IT.JPG"]:
+            self.assertIn("anh nhan vien (ten = ma nhan vien)",
+                          classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_ten_khac_khong_bi_nhan_nham_la_anh_nhan_vien(self):
+        # Ma nhan vien la CHU HOA; chu thuong toan la rac. Va `WS<so>` phai roi
+        # vao nhan "ma hoc sinh" chu khong phai nhan nay.
+        for ten in ["wf01hc.jpg", "WS11710352.JPG", "W01HC.jpg", "WFHC.jpg",
+                    "WF1HC.jpg", "banner.jpg", "WF01HC.pdf"]:
+            self.assertNotIn("anh nhan vien (ten = ma nhan vien)",
+                             classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_anh_nhan_vien_co_hau_to_hex(self):
+        # Frappe them hau to hex khi trung ten. Bo qua la sot 5 file tren prod.
+        for ten in ["WT08EMa801b5.jpg", "WF03IT453d82.jpg", "WF02IT6a3ea2.png",
+                    "WFT61PR.jpg"]:
+            self.assertIn("anh nhan vien (ten = ma nhan vien)",
+                          classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_anh_lop_co_tien_to_lop(self):
+        for ten in ["Lớp 5A5.jpg", "Lớp 6AB4.jpg", "Lớp 3A5e06ddd.jpg", "lớp 1A2.png"]:
+            self.assertIn("anh lop (tien to 'Lop')",
+                          classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_ten_NFD_van_khop(self):
+        # Ten tren dia o dang NFD (`ơ` + dau sac roi). Khong chuan hoa thi mau
+        # "co dau" im lang khong khop gi — 27 anh lop lot luoi vi dung ly do nay.
+        nfd = unicodedata.normalize("NFD", "Lớp 5A5.jpg")
+        self.assertNotEqual(nfd, "Lớp 5A5.jpg", "chuoi thu phai that su la NFD")
+        self.assertIn("anh lop (tien to 'Lop')",
+                      classify.nhan_dang_nhay_cam(f"/files/{nfd}"))
+
+    def test_bien_ban_ky_luat(self):
+        for ten in ["130326_BB Khánh Chi 11ab3.jpg", "Khôi Minh_BB.jpg"]:
+            self.assertIn("bien ban ky luat (BB)",
+                          classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_BB_khong_bat_tran_lan(self):
+        for ten in ["ABBA.jpg", "BBQ.png", "bb.jpg", "clubbing.jpg"]:
+            self.assertNotIn("bien ban ky luat (BB)",
+                             classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
     def test_ma_ngan_khong_bi_nhan_nham(self):
         # WS + 3 so la ma lop/phong, khong phai ma hoc sinh 8 so
         self.assertEqual(classify.nhan_dang_nhay_cam("/files/WS123.jpg"), [])
@@ -62,7 +108,10 @@ class TestNhanDangNhayCam(unittest.TestCase):
         self.assertTrue(classify.nhan_dang_nhay_cam("/files/khai_sinh_ABC.jpg"))
 
     def test_anh_thuong_khong_bao_dong_gia(self):
-        for ten in ["banner-tet.png", "logo.svg", "Lớp 1A1.jpg", "menu-thu-hai.jpg", "book-cover.jpg"]:
+        # `Lớp 1A1.jpg` TUNG nam trong danh sach nay — khang dinh sai, va chinh no
+        # hop thuc hoa diem mu de 27 anh lop tra 200 den 2026-07-30. Anh chup ca
+        # lop la du lieu tre em, khong phai anh trang tri.
+        for ten in ["banner-tet.png", "logo.svg", "menu-thu-hai.jpg", "book-cover.jpg"]:
             self.assertEqual(classify.nhan_dang_nhay_cam(f"/files/{ten}"), [], ten)
 
     def test_nhieu_dau_hieu_cung_luc(self):
