@@ -97,10 +97,11 @@ def diagnose(
     print("=" * 78)
 
     # --- B1: SIS Class ----------------------------------------------------
+    # SIS School Year không có cột `title` — tên năm học nằm ở title_vn/title_en
     classes = frappe.db.sql(
         """
         SELECT c.name, c.title, c.short_title, c.campus_id, c.school_year_id,
-               y.title AS year_title
+               COALESCE(y.title_vn, y.title_en) AS year_title
         FROM `tabSIS Class` c
         LEFT JOIN `tabSIS School Year` y ON y.name = c.school_year_id
         WHERE c.short_title = %(t)s OR c.title = %(t)s
@@ -117,7 +118,16 @@ def diagnose(
         result["stopped_at"] = "no_class"
         return result
 
-    matched = [c for c in classes if c.year_title == school_year_title] if school_year_title else []
+    # Khớp lỏng: title_vn có thể là "Năm học 2026-2027"; cũng chấp nhận truyền thẳng docname
+    matched = []
+    if school_year_title:
+        needle = school_year_title.strip().lower()
+        matched = [
+            c for c in classes
+            if needle in (c.year_title or "").lower() or needle == (c.school_year_id or "").lower()
+        ]
+        if not matched:
+            print(f"     ⚠️  Không lớp nào khớp năm học '{school_year_title}' — xét tất cả bản ghi")
     target = matched or classes
     class_id = target[0].name
     result["class_id"] = class_id
