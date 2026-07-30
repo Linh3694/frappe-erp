@@ -24,6 +24,25 @@ class TestNhanDangNhayCam(unittest.TestCase):
         self.assertIn("ma hoc sinh", classify.nhan_dang_nhay_cam("/files/WS11420471.jpg"))
         self.assertIn("ma hoc sinh", classify.nhan_dang_nhay_cam("/files/ws12407002_v2.jpg"))
 
+    def test_anh_lop_mot_chu_so_dau(self):
+        for ten in ["5A5.jpg", "9AB4.jpg", "1A1.jpg"]:
+            self.assertIn("anh lop (ten = ma lop)",
+                          classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_anh_lop_khoi_10_12_va_lop_khong_co_so_cuoi(self):
+        # Mau ban dau `^\d?[A-Z]{1,3}\d{1,2}$` truot het nhung ten nay, nen 28 anh
+        # lop ~2 MB van tra 200 sau dot niem 2026-07-30. Xem CDN-STATUS.md §18.
+        for ten in ["10AB3.jpg", "12ADN1.jpg", "11AI.jpg", "6AD.jpg", "9MT.jpg"]:
+            self.assertIn("anh lop (ten = ma lop)",
+                          classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_ten_thuong_khong_bi_nhan_nham_la_anh_lop(self):
+        # Noi mau thi phai chac no khong nuot ten binh thuong.
+        for ten in ["logo.png", "banner2026.jpg", "IMG_1868.png", "avatar.webp",
+                    "ABCDE12.jpg", "123.jpg"]:
+            self.assertNotIn("anh lop (ten = ma lop)",
+                             classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
     def test_ma_ngan_khong_bi_nhan_nham(self):
         # WS + 3 so la ma lop/phong, khong phai ma hoc sinh 8 so
         self.assertEqual(classify.nhan_dang_nhay_cam("/files/WS123.jpg"), [])
