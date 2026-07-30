@@ -126,7 +126,11 @@ TEST CHẠY Ở LOCAL
 CỐ Ý CHƯA LÀM (đừng tự khởi động)
   - §17 Phase 4 rewrite DB — hoãn tới ~giữa 2027, còn /uploads trong DB thì tắt
     CDN_ENABLED là rollback một phút.
-  - §16 bật Phase 3 (CDN_DIRECT_UPLOAD) — cần tạo bucket cdn-staging + IAM trước.
+  - §16 bat Phase 3 (CDN_DIRECT_UPLOAD). Ha tang DA XONG HET (bucket cdn-staging,
+    IAM, lifecycle 1 ngay — kiem 30/07). Thu chan bay gio la CHUA CO NHU CAU:
+    toan bo media social moi co 125 object / 129 MiB. Viec can lam TRUOC khong
+    phai bat co ma la THEM DO DAC (kich thuoc + thoi luong upload) — xem nguong
+    quyet dinh o §16.
   - §10.5 hook after_request cho user_image (227 chỗ) — quyết định kiến trúc.
   - Transcode video 720p; mọi thứ liên quan faceID.
   - Mở rộng disk VM3 — ĐÃ BỎ HẲN 2026-07-30 theo quyết định chủ dự án. Không
