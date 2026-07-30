@@ -38,8 +38,10 @@ class TestNhanDangNhayCam(unittest.TestCase):
 
     def test_ten_thuong_khong_bi_nhan_nham_la_anh_lop(self):
         # Noi mau thi phai chac no khong nuot ten binh thuong.
+        # `8gqe.jpg` la anh minh hoa cua SIS Library Book Introduction — tung bi
+        # nhan nham la ma lop vi mau dung re.I. Ma lop luon la CHU HOA.
         for ten in ["logo.png", "banner2026.jpg", "IMG_1868.png", "avatar.webp",
-                    "ABCDE12.jpg", "123.jpg"]:
+                    "ABCDE12.jpg", "123.jpg", "8gqe.jpg", "1a.jpg", "12q.jpg"]:
             self.assertNotIn("anh lop (ten = ma lop)",
                              classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
 

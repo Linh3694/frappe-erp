@@ -80,7 +80,13 @@ MAU_NHAY_CAM = [
     # `seal-unowned-files.py` dung lai dung ham quet nay nen thua huong nguyen
     # diem mu — dung mot nguon su that thi sua mot cho la xong, nhung sai mot cho
     # cung sai ca hai.
-    (re.compile(r"^\d{1,2}[A-Z]{1,4}\d{0,2}\.(jpe?g|png|webp|heic)$", re.I), "anh lop (ten = ma lop)"),
+    #
+    # Ma lop la CHU HOA — mau nay co y KHONG dung re.I. Voi re.I no nuot ca
+    # `8gqe.jpg` (anh minh hoa cua SIS Library Book Introduction) va `1a.jpg`,
+    # `12q.jpg`... toan rac ten viet thuong. Mot duong tinh gia cung du lam script
+    # thoat ma 1 vinh vien, va mot cong chan luon bao dong thi khong con la cong.
+    (re.compile(r"^\d{1,2}[A-Z]{1,4}\d{0,2}\.(?:jpe?g|png|webp|heic|JPE?G|PNG|WEBP|HEIC)$"),
+     "anh lop (ten = ma lop)"),
     # Nhap lieu hang loat: ten doan duoc, noi dung la PII hang loat.
     (re.compile(r"^import[_\s-]?(students?|families|classes|subjects?|timetable)", re.I), "nhap lieu hang loat (PII)"),
     # Tieng Viet CO DAU — bo mau cu chi khop ban khong dau nen truot het.
