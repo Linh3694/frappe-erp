@@ -45,6 +45,21 @@ class TestNhanDangNhayCam(unittest.TestCase):
             self.assertNotIn("anh lop (ten = ma lop)",
                              classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
 
+    def test_anh_nhan_vien_theo_ma_nhan_vien(self):
+        # Do tren prod 2026-07-30: 319 file, 316 khop mot employee_code co that.
+        for ten in ["WF01HC.jpg", "WF56KT.jpg", "WT17GE.jpg", "WT87PR.png",
+                    "WT136PR.jpg", "WF02IT.JPG"]:
+            self.assertIn("anh nhan vien (ten = ma nhan vien)",
+                          classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
+    def test_ten_khac_khong_bi_nhan_nham_la_anh_nhan_vien(self):
+        # Ma nhan vien la CHU HOA; chu thuong toan la rac. Va `WS<so>` phai roi
+        # vao nhan "ma hoc sinh" chu khong phai nhan nay.
+        for ten in ["wf01hc.jpg", "WS11710352.JPG", "W01HC.jpg", "WFHC.jpg",
+                    "WF1HC.jpg", "banner.jpg", "WF01HC.pdf"]:
+            self.assertNotIn("anh nhan vien (ten = ma nhan vien)",
+                             classify.nhan_dang_nhay_cam(f"/files/{ten}"), ten)
+
     def test_ma_ngan_khong_bi_nhan_nham(self):
         # WS + 3 so la ma lop/phong, khong phai ma hoc sinh 8 so
         self.assertEqual(classify.nhan_dang_nhay_cam("/files/WS123.jpg"), [])

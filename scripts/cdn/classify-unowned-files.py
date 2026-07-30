@@ -87,6 +87,28 @@ MAU_NHAY_CAM = [
     # thoat ma 1 vinh vien, va mot cong chan luon bao dong thi khong con la cong.
     (re.compile(r"^\d{1,2}[A-Z]{1,4}\d{0,2}\.(?:jpe?g|png|webp|heic|JPE?G|PNG|WEBP|HEIC)$"),
      "anh lop (ten = ma lop)"),
+    # Anh chan dung NHAN VIEN dat ten bang MA NHAN VIEN (`WF01HC.jpg`, `WT17GE.jpg`).
+    # Do 2026-07-30: 319 file / 158,5 MB tren dia, 316 khop DUNG mot `employee_code`
+    # co that trong `tabUser` — tra ra ca email. Doan `/files/WF01HC.jpg` la co anh
+    # chan dung cua mot nguoi cu the.
+    #
+    # Nguy hon ma hoc sinh: khong gian ten hep hon HAN (`W` + 1 chu + 2-4 so + 2 chu,
+    # ~vai trieu to hop va thuc te chi ~500 nguoi) nen quet vet can duoc, trong khi
+    # `WS\d{6,}` rong hon nhieu.
+    #
+    # Vi sao lot luoi den tan bay gio: bo mau chi co ma HOC SINH va ma LOP. Day la
+    # lan thu ba mot quy uoc dat ten noi bo tro thanh lo hong — moi lan deu la mot
+    # quy uoc khong ai coi la "du lieu".
+    #
+    # CHU HOA, co y khong dung re.I: chu thuong toan la rac (`wf01.jpg`). Duoi file
+    # thi cho ca hai kieu — da tung co `WS11710352.JPG` chu hoa lot luoi vi le do.
+    #
+    # ⚠️ Anh dang duoc dung lam avatar KHONG bi niem: `seal-unowned-files.py` bo qua
+    # moi URL co tham chieu, va `User.user_image` la `Attach Image` nen nam trong
+    # pham vi quet cua `thu_thap_url_dang_dung()`. Da do: dung mot file nhu vay
+    # (`WF01IT.jpg`). Neu doi ham quet ma bo `Attach Image` ra thi se niem nham no.
+    (re.compile(r"^W[A-Z]\d{2,4}[A-Z]{2}\.(?:jpe?g|png|webp|heic|JPE?G|PNG|WEBP|HEIC)$"),
+     "anh nhan vien (ten = ma nhan vien)"),
     # Nhap lieu hang loat: ten doan duoc, noi dung la PII hang loat.
     (re.compile(r"^import[_\s-]?(students?|families|classes|subjects?|timetable)", re.I), "nhap lieu hang loat (PII)"),
     # Tieng Viet CO DAU — bo mau cu chi khop ban khong dau nen truot het.

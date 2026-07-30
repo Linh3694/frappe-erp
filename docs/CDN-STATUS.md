@@ -74,7 +74,7 @@ Doc gốc viết trước khi dựng máy, ba thông số đã đổi. **Dùng g
 
 `cdn.wellspring.edu.vn` **đã bị chiếm**: trỏ về CMC Cloud CDN (`*.cmccdn.net` → 123.30.148.13/15), origin là một site Frappe. Không lấy lại được.
 
-⚠️ **Disk 200 GB không đủ một năm học.** §4.1 dự phóng ~257 GB/năm sau tối ưu. Cần mở rộng volume trước khi dữ liệu tích đủ.
+> **Mở rộng disk: KHÔNG làm, quyết định đã chốt 2026-07-30.** Dự phóng ~257 GB/năm ở `CDN-Design.md` §4.1 từng được dùng để đề xuất nâng lên ≥500 GB. Chủ dự án đã bỏ hẳn việc này. Đừng nêu lại trong danh sách việc cần làm; nếu disk thật sự sát ngưỡng thì cảnh báo `disk ≥75%/85%` của `cdn-checks.sh` sẽ báo.
 
 ---
 
@@ -612,7 +612,7 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 4. **Chạy `classify-unowned-files.py` trên prod** (§18) — ~6.600 file công khai chưa gắn doctype, ~3,2 GB. Script chỉ đọc. Nhóm duy nhất còn lại chưa ai rà, và hai lỗ hổng đã tìm ra đều từng nằm trong nhóm "tưởng là bình thường". Thoát mã 1 ⇒ còn file nhạy cảm chưa bảo vệ.
 
 ### Cần quyết định
-3. **Mở rộng disk VM3** — 200 GB, dự phóng cần ~257 GB/năm học. Hiện dùng 3,4 GB. `CDN-NEXT-SESSION.md` ghi việc này "đã chủ động bỏ qua" — cần xác nhận lại là quyết định hay sót.
+3. ~~**Mở rộng disk VM3**~~ — **đã bỏ hẳn 2026-07-30 theo quyết định của chủ dự án.** Không phải việc còn treo. Xem §2.
 4. **Phân loại ~6.600 file công khai chưa gắn doctype** (~3,2 GB, mục 8 dòng 8). Nhóm lớn nhất chưa ai nhìn vào. Script đã có (§18), chạy cần prod DB.
 
 > ~~"⚠️ GẤP — Vá lỗ hổng ảnh học sinh (§7b)"~~ — **đã vá xong 2026-07-29**, mục này trước đây mâu thuẫn với chính §7b và với bảng §0. Đã sửa 2026-07-30.
@@ -621,7 +621,7 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 3. ~~**Video remux `+faststart` + poster**~~ — ✅ xong 2026-07-29 (`69f4623`). ffmpeg 6.1.1 trên VM microservices. Poster lưu dưới dạng variant `_poster.webp` **cùng hash với video**, nên client suy ra đường dẫn từ URL video, không cần thêm field DB. Không nhánh nào `throw`: remux lỗi ⇒ dùng bản gốc, poster lỗi ⇒ feed hơi trống chứ video vẫn phát. Kiểm chứng lại bất cứ lúc nào bằng `scripts/test-video-cdn.js` trong repo social-service — script tự dọn object thử. **Chưa làm Phase 2** (transcode 720p): chỉ đáng làm nếu video chat vượt ~0,5 GB/ngày.
 4. ~~**Migrate theo chức năng** — thư viện/thực đơn/tin tức~~ — ✅ **xong 2026-07-30**, cả ba nhóm đã migrate và đã bật, 63/63 phép thử đạt (§14). Nhóm chưa phân loại vẫn phải phân loại trước, không migrate mù (§18).
 
-   Việc còn có thể làm thêm cho ba nhóm này: **niêm khỏi `public/files`** để thực sự giảm dung lượng đĩa SIS. Hiện chưa niêm nên `/files/...` vẫn phục vụ song song — đây là lựa chọn có ý thức (xem cuối §14), nhưng nghĩa là đã giảm tải chứ **chưa** giảm được ~1,7 GB đĩa.
+   ⚠️ Ghi chú cũ ở đây đề xuất **niêm ba nhóm này** để giảm đĩa. **Không làm với `library`:** có FE công khai không đăng nhập đang phục vụ ảnh bìa sách (repo `Codebase/Wellspring DX/library`) — niêm là hỏng trang đó. Xem cuối §14. Với `news`/`menu` thì niêm về lý thuyết được, nhưng lợi ích chỉ là dung lượng đĩa, còn rủi ro là vỡ ảnh — chưa đáng.
 
    Thư viện/thực đơn/tin tức **đã nén tại chỗ xong 2026-07-29**: 1.471 file, **1.023 MB → 487 MB (−52%)**, giữ nguyên tên và định dạng nên `tabFile.file_url` không đổi và không URL nào chết. Bản gốc ở `/srv/backup/sis-content-orig-20260729-155235/` (1,1 GB), rollback bằng `compress-sis-content.py --rollback <thư mục>`. **Nén ≠ migrate:** nén chỉ giảm dung lượng đĩa, không đưa file nào lên CDN. Ba nhóm không nhạy cảm nên không cần niêm, không cần signed URL — đây là tối ưu hiệu năng, không phải vá lỗ hổng.
 5. **Hook `after_request` toàn cục cho `user_image`** — chỉ cần nếu muốn cắt storage ở Frappe. `user_image` xuất hiện **227 lần** nên không ký từng chỗ được. Học bổng không cần vì chỉ có 5 điểm ký. **Chưa làm — cần quyết định trước.**
@@ -947,9 +947,13 @@ Rất dễ nhầm hai việc khác nhau:
 
 `migrated_keys()` chỉ ký URL nằm trong allowlist dựng từ dữ liệu thật. Bật nhóm trước khi migrate xong ⇒ URL không được ký và trả về `/files/...` như cũ. An toàn theo hướng đúng.
 
-### Không có bước niêm — có chủ ý
+### Không có bước niêm — có chủ ý, và với thư viện là BẮT BUỘC
 
-Khác §7 và §7b: ba nhóm này **không** niêm khỏi `public/files`, không cần signed URL bảo vệ. Tên file không chứa thông tin cá nhân. Đây là **tối ưu hiệu năng** (giảm tải máy chủ SIS), không phải vá lỗ hổng — nên xếp sau hai việc bảo mật.
+Khác §7 / §7b / §7c: ba nhóm này **không** niêm khỏi `public/files`. Tên file không chứa thông tin cá nhân, và đây là **tối ưu hiệu năng** (giảm tải máy chủ SIS), không phải vá lỗ hổng.
+
+⚠️ **Riêng nhóm `library`: ảnh phải giữ công khai.** Có một frontend công khai riêng phục vụ thư viện — repo `Codebase/Wellspring DX/library` (Vite + React), người dùng **không đăng nhập**. Niêm ảnh bìa sách ở đây là làm hỏng trang đó. Xác nhận của chủ dự án 2026-07-30.
+
+Nói cách khác, với `library` thì việc lên CDN **chỉ nhằm giảm tải backend**, không nhằm che giấu gì — và đó là toàn bộ mục tiêu. Đừng "hoàn thiện" nhóm này bằng cách niêm nó như hai nhóm bảo mật.
 
 ---
 

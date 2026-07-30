@@ -129,7 +129,8 @@ CỐ Ý CHƯA LÀM (đừng tự khởi động)
   - §16 bật Phase 3 (CDN_DIRECT_UPLOAD) — cần tạo bucket cdn-staging + IAM trước.
   - §10.5 hook after_request cho user_image (227 chỗ) — quyết định kiến trúc.
   - Transcode video 720p; mọi thứ liên quan faceID.
-  - Mở rộng disk VM3 (200 GB, đang dùng 6 GB, dự phóng ~257 GB/năm) — cần xác nhận.
+  - Mở rộng disk VM3 — ĐÃ BỎ HẲN 2026-07-30 theo quyết định chủ dự án. Không
+    phải việc treo, đừng đề xuất lại.
 
 Hãy bắt đầu bằng việc đọc §7b và §18 của CDN-STATUS.md, rồi trình bày kế hoạch vá
 62 ảnh kỷ luật trước khi sửa gì.
