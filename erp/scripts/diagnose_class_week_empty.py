@@ -387,7 +387,8 @@ def diagnose_periods(class_id: str, week_start: str) -> dict:
     if not cls:
         print(f"❌ Không tìm thấy lớp {class_id}")
         return {}
-    stage_id = frappe.db.get_value("SIS Education Grade", cls.education_grade, "education_stage")
+    # Field đúng là education_stage_id (helpers.py đang hỏi nhầm 'education_stage')
+    stage_id = frappe.db.get_value("SIS Education Grade", cls.education_grade, "education_stage_id")
     stage_name = frappe.db.get_value("SIS Education Stage", stage_id, "title_vn") if stage_id else None
     print(f"\n[L] Lớp {cls.title} | campus={cls.campus_id} | stage={stage_id} ({stage_name})")
 
