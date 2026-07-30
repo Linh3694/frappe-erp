@@ -436,7 +436,7 @@ class TimetableImportValidator:
 		cũ; lưới chỉ hiển thị cột của schedule active nên tiết nhảy sai ô hoặc biến mất.
 		So khớp giờ dùng tên đã chuẩn hoá nên 'Tiết 1 + 2' ≡ 'Tiết 1+2' ≡ '1+2'.
 		"""
-		from .helpers import normalize_period_name
+		from .helpers import period_match_key
 
 		campus_id = self.metadata.get("campus_id")
 		start_date = self.metadata.get("start_date")
@@ -480,17 +480,17 @@ class TimetableImportValidator:
 
 		by_key = {}
 		for col in columns:
-			key = normalize_period_name(col.get("period_name"))
+			key = period_match_key(col.get("period_name"))
 			if not key:
 				continue
-			# Tiết học ưu tiên hơn giờ nghỉ khi trùng tên sau chuẩn hoá
+			# Tiết học ưu tiên hơn giờ nghỉ khi hai cột trùng tên
 			if by_key.get(key, {}).get("period_type") == "study":
 				continue
 			by_key[key] = col
 
 		missing = []
 		for name in period_names:
-			col = by_key.get(normalize_period_name(name))
+			col = by_key.get(period_match_key(name))
 			if col:
 				self.cache["periods"][name] = col["name"]
 			else:

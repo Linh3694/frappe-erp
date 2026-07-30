@@ -13,31 +13,26 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 
 
-def normalize_period_name(value) -> str:
+def period_match_key(value) -> str:
     """
-    Chuẩn hoá tên tiết để so khớp giữa Excel và SIS Timetable Column.
+    Khoá so khớp tên tiết giữa Excel và SIS Timetable Column: NGUYÊN VĂN, chỉ bỏ
+    khoảng trắng thừa hai đầu.
 
-    Bỏ khoảng trắng, bỏ tiền tố 'tiết'/'period', hạ chữ thường:
-    'Tiết 1 + 2' / 'Tiết 1+2' / '1+2' → '1+2'; float 1.0 của pandas → '1'.
+    Cố tình KHÔNG đoán biến thể ('Tiết 1 + 2' ≠ 'Tiết 1+2', 'tiet 1' ≠ 'Tiết 1',
+    1.0 ≠ 'Tiết 1'). Số biến thể là vô hạn, mỗi lần nới thêm một kiểu là mở thêm một
+    đường âm thầm bám vào cột của khung giờ khác rồi lệch tiết. Tên không khớp thì
+    validator báo lỗi kèm danh sách tiết hợp lệ để người dùng sửa file — sai thì báo
+    sai, không tự đoán.
 
-    Dùng chung cho import_validator và import_executor để hai bên không bao giờ
-    lệch chuẩn so khớp (validate pass nhưng executor miss, hoặc ngược lại).
+    Chỉ trim hai đầu vì chênh lệch khoảng trắng ở đầu/cuối mắt thường không thấy,
+    báo lỗi "'Tiết 1' không khớp 'Tiết 1'" sẽ không ai hiểu.
+
+    Dùng chung cho import_validator và import_executor để hai bên không bao giờ lệch
+    chuẩn so khớp (validate pass nhưng executor miss, hoặc ngược lại).
     """
     if value is None:
         return ""
-    raw = str(value).strip().lower()
-    if not raw:
-        return ""
-    # Excel đọc số thành float: 1.0 → '1'
-    try:
-        raw = str(int(float(raw)))
-    except (TypeError, ValueError):
-        pass
-    for prefix in ("tiết", "tiet", "period"):
-        if raw.startswith(prefix):
-            raw = raw[len(prefix):]
-            break
-    return "".join(raw.split())
+    return str(value).strip()
 
 
 def format_time_for_html(time_value):

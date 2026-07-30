@@ -320,7 +320,7 @@ class TimetableImportExecutor:
 			period_id = self._get_period_id(name, education_stage_id)
 			if period_id:
 				self.cache["periods"][name] = period_id
-				self.cache["periods"][self._normalize_period_name(name)] = period_id
+				self.cache["periods"][self._period_key(name)] = period_id
 			else:
 				unresolved_periods.append(str(name))
 
@@ -1821,11 +1821,11 @@ class TimetableImportExecutor:
 		return subject_id
 	
 	@staticmethod
-	def _normalize_period_name(value) -> str:
-		"""Chuẩn hoá tên tiết — dùng chung với import_validator (xem helpers.py)."""
-		from .helpers import normalize_period_name
+	def _period_key(value) -> str:
+		"""Khoá so khớp tên tiết — nguyên văn, dùng chung với import_validator (helpers.py)."""
+		from .helpers import period_match_key
 
-		return normalize_period_name(value)
+		return period_match_key(value)
 
 	def _get_period_columns(self, education_stage_id: str) -> dict:
 		"""
@@ -1850,10 +1850,10 @@ class TimetableImportExecutor:
 		def _as_map(columns, source):
 			mapping = {}
 			for col in columns:
-				key = self._normalize_period_name(col.get("period_name"))
+				key = self._period_key(col.get("period_name"))
 				if not key:
 					continue
-				# Tiết học được ưu tiên hơn giờ nghỉ khi trùng tên chuẩn hoá
+				# Tiết học được ưu tiên hơn giờ nghỉ khi hai cột trùng tên
 				existing = mapping.get(key)
 				if existing and existing.get("period_type") == "study":
 					continue
@@ -1897,27 +1897,15 @@ class TimetableImportExecutor:
 				"cột legacy (không schedule)",
 			)
 
-		# 3) Mọi schedule của stage+campus — cuối cùng mới chấp nhận, có cảnh báo
-		if not resolved and education_stage_id and campus_id:
-			resolved = _as_map(
-				frappe.get_all("SIS Timetable Column", fields=fields, filters={
-					"education_stage_id": education_stage_id,
-					"campus_id": campus_id,
-				}, order_by="creation desc"),
-				"mọi schedule của cấp học (không tìm thấy schedule active)",
-			)
-			if resolved:
-				self.logs.append(
-					"  ⚠️ Không có SIS Schedule nào active phủ ngày bắt đầu — "
-					"đang dùng cột tiết cũ, kiểm tra lại khung giờ của cấp học."
-				)
-
+		# Cố tình KHÔNG có nấc "lấy cột của schedule bất kỳ": đúng hai nguồn trên, y hệt
+		# import_validator. Hai bên phải cùng một tập cột, nếu không sẽ tái diễn cảnh
+		# validate pass rồi executor bám vào khung giờ đã nghỉ hưu.
 		self.cache["period_columns"] = resolved
 		return resolved
 
 	def _get_period_id(self, name: str, education_stage_id: str) -> Optional[str]:
 		"""Tra cột tiết theo tên đã chuẩn hoá, GIỚI HẠN trong schedule đang áp dụng."""
-		key = self._normalize_period_name(name)
+		key = self._period_key(name)
 		if not key:
 			return None
 		col = self._get_period_columns(education_stage_id).get(key)
