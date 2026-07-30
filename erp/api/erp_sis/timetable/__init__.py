@@ -39,6 +39,11 @@ from .import_excel import (
     save_uploaded_file
 )
 
+# File mẫu import sinh theo khung giờ đang áp dụng
+from .import_template import (
+    download_import_template
+)
+
 # Excel import execution (NEW - validator + executor pattern)
 from .import_executor import (
     process_with_new_executor,
@@ -95,6 +100,7 @@ __all__ = [
     "import_timetable",
     "get_import_job_status",
     "save_uploaded_file",
+    "download_import_template",
     
     # Import execution (NEW)
     "process_with_new_executor",

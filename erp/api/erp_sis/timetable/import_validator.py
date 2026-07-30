@@ -434,7 +434,8 @@ class TimetableImportValidator:
 		và nấc 4 nhận bất kỳ cột trùng tên trong toàn hệ thống. Hệ quả: file dùng mẫu của
 		khung giờ đã nghỉ hưu ('Tiết 1 + 2') vẫn validate PASS rồi ghi vào cột của schedule
 		cũ; lưới chỉ hiển thị cột của schedule active nên tiết nhảy sai ô hoặc biến mất.
-		So khớp giờ dùng tên đã chuẩn hoá nên 'Tiết 1 + 2' ≡ 'Tiết 1+2' ≡ '1+2'.
+		So khớp NGUYÊN VĂN (chỉ trim hai đầu): 'Tiết 1 + 2' KHÔNG khớp 'Tiết 1+2'.
+		Không đoán biến thể — sai mẫu thì báo lỗi kèm danh sách tiết hợp lệ.
 		"""
 		from .helpers import period_match_key
 
