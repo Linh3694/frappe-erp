@@ -1020,18 +1020,6 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                     errors={"student": [existing_fam['family_code']]}
                 )
 
-        # Log key person count for debugging
-        frappe.logger().info(f"Key person count for family: {key_person_count}")
-        frappe.logger().info(f"Total relationships: {len(normalized_relationships)}")
-
-        # Note: Allow multiple key persons for flexibility in family structures
-        # Previously enforced "Only one key person allowed" but removed for business flexibility
-        # if key_person_count > 1:
-        #     return validation_error_response(
-        #         message="Chỉ được chọn 1 người liên lạc chính",
-        #         errors={"key_person": ["Only one key person allowed"]}
-        #     )
-        
         # CRITICAL: Get old guardians BEFORE deleting relationships
         # để có thể cleanup những guardians bị remove khỏi family
         old_guardians = set()
@@ -1576,26 +1564,10 @@ def create_family():
                     code="GUARDIAN_NOT_FOUND"
                 )
         
-        # Validate key person: must have at least 1
-        key_person_count = sum(1 for rel in relationships if rel.get("key_person"))
-        if key_person_count == 0:
-            return validation_error_response(
-                message="Phải chọn ít nhất 1 người liên lạc chính",
-                errors={"key_person": ["Required"]}
-            )
+        # KHÔNG validate "phải có ≥1 người liên lạc chính" ở mức family: key_person là
+        # thuộc tính per-cháu, đặt ở màn lead của từng cháu (màn Gia đình chỉ quản
+        # thành viên nên payload có thể không gửi key_person nào).
 
-        # Log key person count for debugging
-        frappe.logger().info(f"Key person count for family: {key_person_count}")
-        frappe.logger().info(f"Total relationships: {len(relationships)}")
-
-        # Note: Allow multiple key persons for flexibility in family structures
-        # Previously enforced "Only one key person allowed" but removed for business flexibility
-        # if key_person_count > 1:
-        #     return validation_error_response(
-        #         message="Chỉ được chọn 1 người liên lạc chính",
-        #         errors={"key_person": ["Only one key person allowed"]}
-        #     )
-        
         # Add relationships to the existing family_doc
         for rel in relationships:
             family_doc.append("relationships", {
