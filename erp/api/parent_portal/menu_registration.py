@@ -8,7 +8,7 @@ API endpoints cho phụ huynh đăng ký suất ăn Á/Âu qua Parent Portal.
 import frappe
 from frappe import _
 
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 from frappe.utils import nowdate, getdate, now, get_first_day, get_last_day
 import json
 from datetime import datetime, timedelta
@@ -1488,6 +1488,7 @@ def get_period_registrations(
             total = frappe.db.sql(count_sql, count_params, as_dict=True)[0].cnt or 0
 
             offset = (int(page) - 1) * int(page_size)
+            page_clause = "" if search else "LIMIT %s OFFSET %s"
             list_sql = f"""
                 SELECT
                     COALESCE(r.name, '') AS name,
@@ -1516,12 +1517,18 @@ def get_period_registrations(
                 LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
                 WHERE 1=1 {search_clause}
                 ORDER BY s.student_name ASC
-                LIMIT %s OFFSET %s
+                {page_clause}
             """
             list_params = (
-                eligible_params + fully_params + (period_id,) + search_params + (int(page_size), offset)
+                eligible_params + fully_params + (period_id,) + search_params
+                + ((int(page_size), offset) if not search else ())
             )
             registrations = frappe.db.sql(list_sql, list_params, as_dict=True)
+            if search:
+                # Khớp nhất lên đầu rồi mới cắt trang (chuẩn: erp/utils/search.py)
+                registrations = sort_by_relevance(
+                    registrations, ["student_name", "student_code", "class_name"], search
+                )[offset:offset + int(page_size)]
 
             for reg in registrations:
                 reg_name = (reg.get("name") or "").strip()
@@ -1669,6 +1676,7 @@ def get_period_registrations(
             order_clause = "ORDER BY s.student_name ASC"
             order_params = ()
 
+        page_clause = "" if search else "LIMIT %s OFFSET %s"
         list_sql = f"""
                 SELECT
                     COALESCE(r.name, '') AS name,
@@ -1696,12 +1704,18 @@ def get_period_registrations(
                 LEFT JOIN `tabSIS Education Stage` es ON eg.education_stage_id = es.name
                 WHERE 1=1 {search_clause}
                 {order_clause}
-                LIMIT %s OFFSET %s
+                {page_clause}
             """
         list_params = (
-            eligible_params + (period_id,) + search_params + order_params + (int(page_size), offset)
+            eligible_params + (period_id,) + search_params + order_params
+            + ((int(page_size), offset) if not search else ())
         )
         registrations = frappe.db.sql(list_sql, list_params, as_dict=True)
+        if search:
+            # Khớp nhất lên đầu rồi mới cắt trang (chuẩn: erp/utils/search.py)
+            registrations = sort_by_relevance(
+                registrations, ["student_name", "student_code", "class_name"], search
+            )[offset:offset + int(page_size)]
 
         for reg in registrations:
             reg_name = (reg.get("name") or "").strip()

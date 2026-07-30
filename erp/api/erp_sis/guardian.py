@@ -4,7 +4,7 @@ from frappe.utils import nowdate, get_datetime
 import json
 import re
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 from erp.utils.country import to_country_or_blank
 from erp.utils.api_response import (
     success_response, error_response, list_response,
@@ -1257,14 +1257,18 @@ def search_guardians(search_term=None, page=1, limit=20):
         
         conditions = " AND ".join(where_clauses) if where_clauses else "1=1"
         frappe.logger().info(f"FINAL WHERE: {conditions} | params: {params}")
-        
+
         # Calculate offset
         offset = (page - 1) * limit
-        
-        # Get guardians with search (parameterized)
+
+        # CÓ search: lấy toàn bộ kết quả khớp rồi xếp hạng mới cắt trang, để trang 1 là phụ
+        # huynh khớp nhất chứ không phải theo alphabet (chuẩn: erp/utils/search.py).
+        # KHÔNG search: giữ phân trang ở SQL — đừng quét cả bảng.
+        has_search = bool(search_term and str(search_term).strip())
+        page_clause = "" if has_search else "LIMIT %s OFFSET %s"
         sql_query = (
             """
-            SELECT 
+            SELECT
                 name,
                 guardian_id,
                 guardian_name,
@@ -1275,32 +1279,31 @@ def search_guardians(search_term=None, page=1, limit=20):
             FROM `tabCRM Guardian`
             WHERE {where}
             ORDER BY guardian_name ASC
-            LIMIT %s OFFSET %s
+            {page_clause}
             """
-        ).format(where=conditions)
+        ).format(where=conditions, page_clause=page_clause)
 
-        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params + [limit, offset]}")
+        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params}")
 
-        guardians = frappe.db.sql(sql_query, params + [limit, offset], as_dict=True)
+        if has_search:
+            matched = frappe.db.sql(sql_query, params, as_dict=True)
+            matched = sort_by_relevance(
+                matched, ["guardian_name", "guardian_id", "phone_number", "email"], search_term
+            )
+            guardians = matched[offset:offset + limit]
+            total_count = len(matched)
+        else:
+            guardians = frappe.db.sql(sql_query, params + [limit, offset], as_dict=True)
+            total_count = frappe.db.sql(
+                f"SELECT COUNT(*) as count FROM `tabCRM Guardian` WHERE {conditions}",
+                params, as_dict=True,
+            )[0]["count"]
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(guardians)} guardians")
 
         # Khớp tên/dấu/đầu-từ đã xử lý ở SQL (build_search_condition) — bỏ hậu-lọc Python
-        
-        # Get total count (parameterized)
-        count_query = (
-            """
-            SELECT COUNT(*) as count
-            FROM `tabCRM Guardian`
-            WHERE {where}
-            """
-        ).format(where=conditions)
-        
-        frappe.logger().info(f"EXECUTING COUNT QUERY: {count_query} | params={params}")
-        
-        total_count = frappe.db.sql(count_query, params, as_dict=True)[0]['count']
-        
-        frappe.logger().info(f"COUNT QUERY RETURNED: {total_count}")
+
+        frappe.logger().info(f"COUNT: {total_count}")
         
         total_pages = (total_count + limit - 1) // limit
         

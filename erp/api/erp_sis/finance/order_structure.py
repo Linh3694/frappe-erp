@@ -6,7 +6,7 @@ Quản lý đơn hàng với cấu trúc milestones và fee_lines (version 2).
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 import json
 
 from erp.utils.api_response import (
@@ -670,6 +670,7 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
         
         # Pagination
         offset = (page - 1) * page_size
+        page_clause = "" if search else "LIMIT %(page_size)s OFFSET %(offset)s"
         total_pages = (total + page_size - 1) // page_size
         
         # Get students - thêm các fields mới cho milestone payment và tuition_paid_elsewhere
@@ -689,8 +690,11 @@ def get_order_students_v2(order_id=None, search=None, data_status=None, payment_
             FROM `tabSIS Finance Order Student` os
             WHERE {where_sql}
             ORDER BY os.student_name ASC
-            LIMIT %(page_size)s OFFSET %(offset)s
+            {page_clause}
         """, {**params, "page_size": page_size, "offset": offset}, as_dict=True)
+        if search:
+            # Khop nhat len dau roi moi cat trang (chuan: erp/utils/search.py)
+            students = sort_by_relevance(students, ["student_name", "student_code"], search)[offset:offset + page_size]
         
         # Parse milestone_amounts_json cho từng student
         for student in students:

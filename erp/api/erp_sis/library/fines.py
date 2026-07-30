@@ -8,7 +8,7 @@ from erp.utils.api_response import (
 )
 
 from ._constants import FINE_DTYPE, COPY_DTYPE, TRANSACTION_DTYPE
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
 from ._common import _require_library_role, _get_json_payload, _parse_date
 
 def _create_fine_if_needed(
@@ -98,7 +98,6 @@ def list_fines():
     transaction_id = params.get("transaction_id") or ""
     page = int(params.get("page") or 1)
     page_size = min(int(params.get("page_size") or 20), 100)
-    offset = (page - 1) * page_size
 
     filters = {}
     if status:
@@ -110,18 +109,20 @@ def list_fines():
         filters["transaction_id"] = transaction_id
 
     try:
-        total = frappe.db.count(FINE_DTYPE, filters=filters)
-        rows = frappe.get_all(
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+        rows, total = paginated_search(
             FINE_DTYPE,
-            filters=filters,
             fields=[
                 "name", "transaction_id", "book_copy_id", "borrower_id",
                 "fine_type", "total_amount", "paid_amount", "payment_date",
                 "status", "waive_reason", "creation", "modified",
             ],
+            search=borrower_id,
+            search_fields=["borrower_id"],
+            filters=filters,
+            page=page,
+            per_page=page_size,
             order_by="creation desc",
-            limit=page_size,
-            start=offset,
         )
         for row in rows:
             row["id"] = row.pop("name")

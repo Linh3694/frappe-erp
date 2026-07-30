@@ -4,7 +4,7 @@ from frappe import _
 from frappe.utils import nowdate, get_datetime
 import json
 from erp.utils.campus_utils import get_current_campus_from_context, get_campus_id_from_user_roles
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
     single_item_response, validation_error_response,
@@ -1195,6 +1195,8 @@ def search_students(search_term=None):
         frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params}")
 
         students = frappe.db.sql(sql_query, params, as_dict=True)
+        # Khop nhat len dau (chuan chung, xem erp/utils/search.py)
+        students = sort_by_relevance(students, ["student_name", "student_code"], final_search_term)
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(students)} students")
         if students:
@@ -1381,7 +1383,9 @@ def search_students_by_school_year(search_term=None, school_year_id=None):
         frappe.logger().info(f"EXECUTING SQL: {sql_query} | params={params}")
         
         students = frappe.db.sql(sql_query, params, as_dict=True)
-        
+        # Khop nhat len dau (chuan chung, xem erp/utils/search.py)
+        students = sort_by_relevance(students, ["student_name", "student_code"], search_term)
+
         # Giữ current_class_title / current_class_id flat field + thêm nested object cho backward compat
         for student in students:
             if student.get('current_class_title'):

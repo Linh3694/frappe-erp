@@ -9,7 +9,10 @@ from erp.utils.api_response import (
 
 from ._constants import BOOK_INTRO_DTYPE, TITLE_DTYPE
 from ._common import _require_library_role, _get_json_payload
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
+
+# Bài chỉ khớp qua tên sách liên quan -> điểm sàn thấp, xếp sau khớp thẳng tiêu đề
+RELATED_TITLE_SCORE = 200
 
 @frappe.whitelist(allow_guest=False)
 def list_book_introductions():
@@ -30,70 +33,53 @@ def list_book_introductions():
         
         # Build filters
         filters = {}
-        
-        # Build query
+        or_filters = None
+        # Điểm sàn cho bài lọt vào nhờ TÊN SÁCH liên quan (cột không nằm trong bảng này)
+        # -> luôn xếp sau bài khớp thẳng tiêu đề. Xem chuẩn ở erp/utils/search.py.
+        extra_scores = {}
+
         if search:
             # Tìm kiếm trong title hoặc title_id
             intro_names = search_names(BOOK_INTRO_DTYPE, ["title"], search)
             or_filters = [["name", "in", intro_names or ["__no_match__"]]]
-            
+
             # Lấy danh sách title_id match với search
             title_ids = search_names(TITLE_DTYPE, ["title"], search)
 
             if title_ids:
                 or_filters.append(["title_id", "in", title_ids])
-            
-            items = frappe.get_all(
-                BOOK_INTRO_DTYPE,
-                filters=filters,
-                or_filters=or_filters,
-                fields=[
-                    "name as id",
-                    "title_id",
-                    "title",
-                    "description",
-                    "content",
-                    "is_featured",
-                    "status",
-                    "created_by",
-                    "updated_by",
-                    "creation",
-                    "modified"
-                ],
-                order_by="modified desc",
-                limit_start=(page - 1) * page_size,
-                limit_page_length=page_size,
-            )
-            
-            # Get total count with or_filters
-            total = len(frappe.get_all(
-                BOOK_INTRO_DTYPE,
-                filters=filters,
-                or_filters=or_filters,
-            ))
-        else:
-            items = frappe.get_all(
-                BOOK_INTRO_DTYPE,
-                filters=filters,
-                fields=[
-                    "name as id",
-                    "title_id",
-                    "title",
-                    "description",
-                    "content",
-                    "is_featured",
-                    "status",
-                    "created_by",
-                    "updated_by",
-                    "creation",
-                    "modified"
-                ],
-                order_by="modified desc",
-                limit_start=(page - 1) * page_size,
-                limit_page_length=page_size,
-            )
-            total = frappe.db.count(BOOK_INTRO_DTYPE, filters)
-        
+                extra_scores = {
+                    n: RELATED_TITLE_SCORE
+                    for n in frappe.get_all(
+                        BOOK_INTRO_DTYPE, filters=[["title_id", "in", title_ids]], pluck="name"
+                    )
+                }
+
+        items, total = paginated_search(
+            BOOK_INTRO_DTYPE,
+            fields=[
+                "name as id",
+                "title_id",
+                "title",
+                "description",
+                "content",
+                "is_featured",
+                "status",
+                "created_by",
+                "updated_by",
+                "creation",
+                "modified"
+            ],
+            search=search,
+            search_fields=["title"],
+            filters=filters,
+            or_filters=or_filters,
+            page=page,
+            per_page=page_size,
+            order_by="modified desc",
+            extra_scores=extra_scores,
+        )
+
         # Lấy thông tin title name cho mỗi item
         for item in items:
             if item.get("title_id"):

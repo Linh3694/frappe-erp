@@ -6,7 +6,10 @@ import re
 import frappe
 from frappe import _
 from frappe.utils import cint
-from erp.utils.search import build_search_condition, matches_search, search_names, strip_accents
+from erp.utils.search import (
+    build_search_condition, matches_search, order_rows_by_names, search_names,
+    sort_by_relevance, strip_accents,
+)
 from erp.utils.api_response import (
     success_response, error_response, paginated_response,
     single_item_response, list_response, validation_error_response, not_found_response
@@ -543,6 +546,20 @@ def _lead_names_by_enum_labels(search):
     )
 
 
+# Cot dung cham diem khi search (xep theo do uu tien hien thi) — xem erp/utils/search.py
+_LEAD_SEARCH_FIELDS = ["student_name", "crm_code", "student_code", "name", "guardian_name"]
+
+# Ho so co the lot vao chi vi khop cot phu (SDT, lop, PIC, ngay sinh, nhan trang thai).
+# Day la diem SAN cho nhung truong hop do — luon thap hon khop tron ten/ma de ten
+# khop dung len truoc.
+_SEARCH_SCORE_PHONE = 620
+_SEARCH_SCORE_NAME_FLOOR = 300
+_SEARCH_SCORE_DOB = 240
+_SEARCH_SCORE_CLASS = 200
+_SEARCH_SCORE_USER = 160
+_SEARCH_SCORE_ENUM = 80
+
+
 def _day_bounds(value):
     """'YYYY-MM-DD' -> ('YYYY-MM-DD 00:00:00', 'YYYY-MM-DD 23:59:59'); None neu khong hop le."""
     day = str(value or "").strip()[:10]
@@ -962,9 +979,12 @@ def get_leads():
     # per_page=0: lấy tất cả (unlimited) - dùng cho dialog thêm học sinh event/course
     if per_page <= 0:
         per_page = 0
-    sort_by = frappe.request.args.get("sort_by", "modified")
+    sort_by_arg = frappe.request.args.get("sort_by")
+    sort_by = sort_by_arg or "modified"
     sort_order = frappe.request.args.get("sort_order", "desc")
-    
+    # Dang search va nguoi dung chua chon sap xep theo cot -> xep theo do khop
+    rank_by_relevance = bool(search) and not sort_by_arg
+
     # Filter co ban (so khop chinh xac)
     filters = []
     if step:
@@ -995,19 +1015,27 @@ def get_leads():
         filters += marcom_profile_owner_filters()
 
     or_filters = []
+    # name -> diem nguon khop, dung khi xep hang (xem _lead_names_by_relevance)
+    match_sources = {}
+
+    def _mark_match(names, source_score):
+        for n in names or []:
+            if n and match_sources.get(n, 0) < source_score:
+                match_sources[n] = source_score
+
     if search:
         # Search phu MOI cot dang hien thi tren bang. Cot nao khong so khop truc tiep
         # tren `tabCRM Lead` (SDT, Lop, PIC/Nguoi nhap, enum hien thi bang nhan tieng
         # Viet) thi tra ra `name` rieng roi gop lai — cuoi cung ve 1 dieu kien name-in.
-        match_names = set()
         # Ten/ma: token + bo dau + dau tu qua helper chung (raw SQL tren tabCRM Lead)
         search_frag, search_params = build_search_condition(
             ["student_name", "guardian_name", "name", "student_code", "crm_code"],
             search,
         )
         if search_frag:
-            match_names.update(
-                frappe.db.sql_list(f"SELECT name FROM `tabCRM Lead` WHERE {search_frag}", search_params)
+            _mark_match(
+                frappe.db.sql_list(f"SELECT name FROM `tabCRM Lead` WHERE {search_frag}", search_params),
+                _SEARCH_SCORE_NAME_FLOOR,
             )
         # Tim theo SDT: luu o bang con CRM Lead Phone (dinh dang +84xxxxxxxxx).
         # Doi 0xxx -> +84xxx de khop gia tri da luu, roi gop vao ket qua.
@@ -1020,57 +1048,87 @@ def get_leads():
                 filters=[["phone_number", "like", f"%{phone_search}%"]],
                 pluck="parent",
             )
-            match_names.update(p for p in phone_parents if p)
+            _mark_match(phone_parents, _SEARCH_SCORE_PHONE)
         # Cot Lop (nam active / nam truoc): join SIS Class Student — vd go "5A2"
-        match_names.update(n for n in _lead_names_by_class_search(search, campus_id) if n)
+        _mark_match(_lead_names_by_class_search(search, campus_id), _SEARCH_SCORE_CLASS)
         # Cot PIC Sales / PIC Care / Nguoi nhap: hien thi ho ten, luu user id -> tra User
         user_ids = _user_ids_by_name_search(search)
         if user_ids:
-            match_names.update(
-                n for n in _lead_names_by_user_columns(user_ids, ["pic_sales", "pic_care", "owner"]) if n
+            _mark_match(
+                _lead_names_by_user_columns(user_ids, ["pic_sales", "pic_care", "owner"]),
+                _SEARCH_SCORE_USER,
             )
         # Cot Ngay sinh: so tren dinh dang hien thi dd/MM/yyyy (cho phep go mot phan)
-        match_names.update(n for n in _lead_names_by_dob_text(search) if n)
+        _mark_match(_lead_names_by_dob_text(search), _SEARCH_SCORE_DOB)
         # Cot Trang thai / Buoc / Gioi tinh / Khao sat dau vao: go NHAN tieng Viet
-        match_names.update(n for n in _lead_names_by_enum_labels(search) if n)
+        _mark_match(_lead_names_by_enum_labels(search), _SEARCH_SCORE_ENUM)
         # Luon dua ve 1 dieu kien name-in; rong -> sentinel de tra ve khong co ket qua
-        or_filters = [["name", "in", list(match_names) if match_names else ["__no_match__"]]]
+        or_filters = [["name", "in", list(match_sources) if match_sources else ["__no_match__"]]]
+
+    lead_fields = [
+        "name", "step", "status", "crm_code", "student_name", "guardian_name",
+        "student_code", "target_grade", "campus_id", "pic_sales", "pic_care",
+        "data_source", "modified", "creation", "duplicate_fields", "owner",
+        # Cot Ngay sinh / Gioi tinh (danh sach Hoc sinh chinh thuc)
+        "student_dob", "student_gender",
+        # Join lop theo nam hoc: linked_student -> SIS Class Student
+        "linked_student",
+        # QLead: tab Hoc sinh tien nang — bang can test_status / deal_status
+        "test_status", "deal_status",
+        # Marcom: ly do tu choi khi trang thai Lost / Tu choi
+        "reject_reason", "reject_detail",
+    ]
 
     # Dem tong (ton trong ca filter co ban, filter nang cao va search)
+    ranked_names = None
     if or_filters:
-        total = len(frappe.get_all(
+        matched_rows = frappe.get_all(
             "CRM Lead", filters=filters, or_filters=or_filters,
-            fields=["name"], limit_page_length=0,
-        ))
+            fields=list(dict.fromkeys(["name", *_LEAD_SEARCH_FIELDS])),
+            order_by=f"{sort_by} {sort_order}",
+            limit_page_length=0,
+        )
+        total = len(matched_rows)
+        if rank_by_relevance:
+            ranked_names = [
+                r["name"]
+                for r in sort_by_relevance(
+                    matched_rows, _LEAD_SEARCH_FIELDS, search, extra_scores=match_sources
+                )
+            ]
     else:
         total = frappe.db.count("CRM Lead", filters=filters)
-    
+
     offset = 0 if per_page == 0 else (page - 1) * per_page
     page_length = 0 if per_page == 0 else per_page  # 0 = unlimited trong Frappe get_all
 
     # Lay danh sach
-    leads = frappe.get_all(
-        "CRM Lead",
-        filters=filters,
-        or_filters=or_filters or None,
-        fields=[
-            "name", "step", "status", "crm_code", "student_name", "guardian_name",
-            "student_code", "target_grade", "campus_id", "pic_sales", "pic_care",
-            "data_source", "modified", "creation", "duplicate_fields", "owner",
-            # Cot Ngay sinh / Gioi tinh (danh sach Hoc sinh chinh thuc)
-            "student_dob", "student_gender",
-            # Join lop theo nam hoc: linked_student -> SIS Class Student
-            "linked_student",
-            # QLead: tab Hoc sinh tien nang — bang can test_status / deal_status
-            "test_status", "deal_status",
-            # Marcom: ly do tu choi khi trang thai Lost / Tu choi
-            "reject_reason", "reject_detail",
-        ],
-        order_by=f"{sort_by} {sort_order}",
-        start=offset,
-        page_length=page_length
-    )
-    
+    if ranked_names is not None:
+        # Da co thu tu theo do khop -> cat trang tren list name roi lay dung trang do,
+        # sau do sap lai theo thu tu da xep (get_all khong giu thu tu cua IN).
+        page_names = ranked_names if per_page == 0 else ranked_names[offset:offset + per_page]
+        leads = (
+            frappe.get_all(
+                "CRM Lead",
+                filters=[["name", "in", page_names]],
+                fields=lead_fields,
+                limit_page_length=0,
+            )
+            if page_names
+            else []
+        )
+        leads = order_rows_by_names(leads, page_names)
+    else:
+        leads = frappe.get_all(
+            "CRM Lead",
+            filters=filters,
+            or_filters=or_filters or None,
+            fields=lead_fields,
+            order_by=f"{sort_by} {sort_order}",
+            start=offset,
+            page_length=page_length
+        )
+
     # Lay phone number chinh cho moi lead
     for lead in leads:
         enrich_lead_dict_with_pic_info(lead)

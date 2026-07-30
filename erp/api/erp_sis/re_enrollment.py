@@ -8,7 +8,7 @@ API endpoints cho admin quản lý cấu hình và đơn tái ghi danh.
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 from frappe.utils import nowdate, getdate, now
 import json
 import os
@@ -1141,7 +1141,9 @@ def get_submissions():
         # Get submissions with pagination
         # Nếu có finance_year_id, join với Finance Student để lấy payment_status
         offset = (page - 1) * page_size
-        
+        # Có search -> lấy hết rồi xếp hạng theo độ khớp mới cắt trang (chuẩn: erp/utils/search.py)
+        page_clause = "" if search else f"LIMIT {page_size} OFFSET {offset}"
+
         if finance_year_id:
             values["finance_year_id"] = finance_year_id
             query = f"""
@@ -1180,7 +1182,7 @@ def get_submissions():
                 ) fs ON fs.student_id = re.student_id
                 WHERE {where_clause}
                 ORDER BY re.submitted_at DESC
-                LIMIT {page_size} OFFSET {offset}
+                {page_clause}
             """
         else:
             query = f"""
@@ -1208,10 +1210,14 @@ def get_submissions():
                     ON g.name = COALESCE(re.guardian_id, fr.guardian)
                 WHERE {where_clause}
                 ORDER BY re.submitted_at DESC
-                LIMIT {page_size} OFFSET {offset}
+                {page_clause}
             """
         
         submissions = frappe.db.sql(query, values, as_dict=True)
+        if search:
+            submissions = sort_by_relevance(
+                submissions, ["student_name", "student_code", "guardian_name"], search
+            )[offset:offset + page_size]
         
         # Thêm display values và answers
         for sub in submissions:

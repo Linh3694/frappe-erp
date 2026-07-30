@@ -3,7 +3,7 @@ from typing import List, Dict, Any
 
 import frappe
 from frappe.utils import now
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -14,6 +14,9 @@ from erp.utils.api_response import (
 
 from ._constants import TITLE_DTYPE, COPY_DTYPE, ACTIVITY_DTYPE
 from ._common import _require_library_role, _get_json_payload, _import_excel_to_rows
+
+# Cột dùng tìm + chấm điểm cho danh sách đầu sách
+SEARCH_FIELDS = ["title", "library_code", "authors"]
 
 
 def _push_cover_to_cdn(file_url: str) -> None:
@@ -86,23 +89,21 @@ def list_titles():
         
         filters = {}
         or_filters = None
-        
+
         # Thêm search nếu có
         if search and search.strip():
             _names = search_names(
                 TITLE_DTYPE,
-                ["title", "library_code", "authors"],
+                SEARCH_FIELDS,
                 search,
             )
             or_filters = [["name", "in", _names or ["__no_match__"]]]
             debug_info["or_filters"] = or_filters
-        
-        # Lấy data với pagination
-        limit_start = (page - 1) * page_size
-        
-        query_params = {
-            "filters": filters,
-            "fields": [
+
+        # Lấy data đã xếp hạng theo độ khớp rồi mới cắt trang (chuẩn chung)
+        data, total = paginated_search(
+            TITLE_DTYPE,
+            fields=[
                 "name as id",
                 "title",
                 "library_code",
@@ -117,15 +118,14 @@ def list_titles():
                 "cover_image",
                 "description",
             ],
-            "order_by": "modified desc",
-            "limit_start": limit_start,
-            "limit_page_length": page_size,
-        }
-        
-        if or_filters:
-            query_params["or_filters"] = or_filters
-            
-        data = frappe.get_all(TITLE_DTYPE, **query_params)
+            search=search,
+            search_fields=SEARCH_FIELDS,
+            filters=filters,
+            or_filters=or_filters,
+            page=page,
+            per_page=page_size,
+            order_by="modified desc",
+        )
 
         # Bổ sung số lượt mượn và chuẩn hóa boolean từ Frappe (0/1)
         title_ids = [row["id"] for row in data]
@@ -135,15 +135,7 @@ def list_titles():
             row["is_featured_book"] = bool(row.get("is_featured_book"))
             row["is_audio_book"] = bool(row.get("is_audio_book"))
             row["borrow_count"] = borrow_counts.get(row["id"], 0)
-        
-        # Lấy tổng số - dùng frappe.get_all với pluck='name' để đếm
-        count_params = {"filters": filters, "pluck": "name"}
-        if or_filters:
-            count_params["or_filters"] = or_filters
-            
-        total_count = frappe.get_all(TITLE_DTYPE, **count_params)
-        total = len(total_count)
-        
+
         return list_response(
             data={"items": data, "total": total, "debug": debug_info},
             message="Fetched titles",

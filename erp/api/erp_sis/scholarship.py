@@ -8,7 +8,7 @@ API endpoints cho admin quản lý kỳ học bổng và đơn đăng ký.
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 from erp.common import cdn_sign
 from frappe.utils import nowdate, getdate, now
 import json
@@ -859,6 +859,8 @@ def get_applications():
         # - guardian_name: fallback từ CRM Guardian khi app.guardian_name rỗng (fetch_from có thể chưa chạy khi tạo đơn qua API)
         # - guardian_contact_*: fallback từ CRM Guardian khi application không có (đơn cũ hoặc lỗi lưu)
         offset = (page - 1) * page_size
+        # Co search -> lay het roi xep hang theo do khop moi cat trang (chuan: erp/utils/search.py)
+        page_clause = "" if search else f"LIMIT {page_size} OFFSET {offset}"
         query = f"""
             SELECT 
                 app.name, app.scholarship_period_id, app.student_id, app.student_name, 
@@ -881,10 +883,14 @@ def get_applications():
             LEFT JOIN `tabSIS Scholarship Scoring` sc ON sc.application_id = app.name
             WHERE {where_clause}
             ORDER BY app.submitted_at DESC
-            LIMIT {page_size} OFFSET {offset}
+            {page_clause}
         """
         
         applications = frappe.db.sql(query, values, as_dict=True)
+        if search:
+            applications = sort_by_relevance(
+                applications, ["student_name", "student_code"], search
+            )[offset:offset + page_size]
         
         # Thêm display values và scoring object
         status_display_map = {

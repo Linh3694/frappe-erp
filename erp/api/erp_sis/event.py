@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from typing import Optional
 from erp.utils.campus_utils import get_current_campus_from_context
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, paginated_search
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -1277,17 +1277,20 @@ def get_events():
             start_offset = max(0, (page - 1) * limit)
         except (TypeError, ValueError):
             start_offset = 0
-        events = frappe.get_all(
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+        events, _search_total = paginated_search(
             "SIS Event",
             fields=[
                 "name", "title", "description", "start_time", "end_time",
                 "timetable_column_id", "status", "homeroom_teacher_id",
                 "approved_at", "approved_by", "create_by", "create_at"
             ],
+            search=search,
+            search_fields=["title"],
             filters=filters,
-            start=start_offset,
-            page_length=limit,
-            order_by="create_at desc"
+            page=page,
+            per_page=limit,
+            order_by="create_at desc",
         )
 
         # Add date schedules information for each event

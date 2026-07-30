@@ -7,7 +7,10 @@ import frappe
 from frappe import _
 from frappe.utils import cint, now_datetime
 
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, rank_names
+
+# Cột của thiết bị dùng chấm điểm khi search (xếp theo độ ưu tiên hiển thị)
+DEVICE_SEARCH_FIELDS = ["name_display", "serial", "manufacturer"]
 
 from erp.utils.api_response import (
 	error_response,
@@ -294,6 +297,12 @@ def get_devices(
 			final_names = [n for n in base_names if n in final_set]
 		else:
 			final_names = base_names
+
+		# Khớp nhất lên đầu (chuẩn chung, xem erp/utils/search.py)
+		if search_term:
+			final_names = rank_names(
+				"ERP Inventory Device", final_names, DEVICE_SEARCH_FIELDS, search_term
+			)
 
 		total = len(final_names)
 		start = (page - 1) * limit

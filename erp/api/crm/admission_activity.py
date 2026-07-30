@@ -5,7 +5,10 @@ CRM Admission Activity API - CRUD Sự kiện và Khoá học tuyển sinh
 from collections import defaultdict
 
 import frappe
-from erp.utils.search import search_names
+from erp.utils.search import order_rows_by_names, rank_names, search_names
+
+# Cot cua CRM Lead dung tim + cham diem (xep theo do uu tien hien thi)
+_LEAD_SEARCH_FIELDS = ["student_name", "crm_code", "name"]
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -611,8 +614,9 @@ def get_event_students():
         filters["status"] = status_filter
 
     or_filters = None
+    ranked_lead_names = None
     if search and search.strip():
-        lead_names = search_names("CRM Lead", ["name", "crm_code", "student_name"], search.strip())
+        lead_names = search_names("CRM Lead", _LEAD_SEARCH_FIELDS, search.strip())
         if not lead_names:
             return list_response(
                 [],
@@ -623,6 +627,8 @@ def get_event_students():
                 },
             )
         or_filters = {"crm_lead_id": ["in", lead_names]}
+        # Xep hang lead theo do khop de dua ho so khop nhat len dau (chuan: erp/utils/search.py)
+        ranked_lead_names = rank_names("CRM Lead", lead_names, _LEAD_SEARCH_FIELDS, search.strip())
 
     items = frappe.get_all(
         "CRM Admission Event Student",
@@ -631,6 +637,9 @@ def get_event_students():
         fields=["name", "event_id", "crm_lead_id", "status", "modified", "modified_by"],
         order_by="modified desc",
     )
+
+    if ranked_lead_names:
+        items = order_rows_by_names(items, ranked_lead_names, "crm_lead_id")
 
     flags_by_student = defaultdict(dict)
     if items:
@@ -1440,12 +1449,15 @@ def get_course_students():
         filters["status"] = status_filter
 
     or_filters = None
+    ranked_lead_names = None
     if search and search.strip():
         # Tìm theo tên lead, crm_code, student_name
-        lead_names = search_names("CRM Lead", ["name", "crm_code", "student_name"], search.strip())
+        lead_names = search_names("CRM Lead", _LEAD_SEARCH_FIELDS, search.strip())
         if not lead_names:
             return list_response([], "Thành công", meta={"summary": _get_course_student_summary(course_id)})
         or_filters = {"crm_lead_id": ["in", lead_names]}
+        # Xep hang lead theo do khop de dua ho so khop nhat len dau (chuan: erp/utils/search.py)
+        ranked_lead_names = rank_names("CRM Lead", lead_names, _LEAD_SEARCH_FIELDS, search.strip())
 
     items = frappe.get_all(
         "CRM Admission Course Student",
@@ -1454,6 +1466,9 @@ def get_course_students():
         fields=["name", "course_id", "crm_lead_id", "status", "study_duration", "regular_class", "modified", "modified_by"],
         order_by="modified desc",
     )
+
+    if ranked_lead_names:
+        items = order_rows_by_names(items, ranked_lead_names, "crm_lead_id")
 
     _enrich_course_students_with_classes(items)
 

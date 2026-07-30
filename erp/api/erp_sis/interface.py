@@ -6,7 +6,7 @@ Handles interface image upload, management, and WebP conversion
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
 import os
 import uuid
 from PIL import Image, ImageOps
@@ -314,21 +314,20 @@ def get_interfaces():
 
         logs.append(f"Filters: {filters}")
 
-        # Get interfaces with pagination
-        interfaces = frappe.get_all(
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+        interfaces, total_count = paginated_search(
             "SIS Interface",
-            filters=filters,
             fields=[
                 "name", "title", "image_url", "is_active",
                 "created_by", "created_at", "updated_at"
             ],
+            search=search,
+            search_fields=["title"],
+            filters=filters,
+            page=page,
+            per_page=limit,
             order_by="creation desc",
-            start=(page - 1) * limit,
-            limit=limit
         )
-
-        # Get total count
-        total_count = frappe.db.count("SIS Interface", filters)
 
         logs.append(f"Found {len(interfaces)} interfaces (total: {total_count})")
 

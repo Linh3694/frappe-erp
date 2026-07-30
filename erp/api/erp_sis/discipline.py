@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 
 import frappe
 from erp.utils.api_response import success_response, error_response, paginated_response
-from erp.utils.search import build_search_condition, search_names
+from erp.utils.search import build_search_condition, order_rows_by_names, search_names
 from erp.sis.discipline_record_permissions import (
     discipline_session_matches_owner as _discipline_session_matches_owner,
     user_can_create_discipline_record as _can_create_discipline_record,
@@ -2050,14 +2050,16 @@ def _search_discipline_record_names(search_term, campus, owner_user):
         ["IFNULL(v.title, '')", "IFNULL(cl.title, '')", "r.name"], search_term
     )
     match = set()
+    direct_match = set()
     if direct_frag:
-        match |= set(frappe.db.sql_list(f"""
+        direct_match = set(frappe.db.sql_list(f"""
             SELECT DISTINCT r.name
             FROM `tabSIS Discipline Record` r
             LEFT JOIN `tabSIS Discipline Violation` v ON v.name = r.violation
             LEFT JOIN `tabSIS Discipline Classification` cl ON cl.name = r.classification
             WHERE {direct_frag}
         """, direct_params))
+        match |= direct_match
 
     # 2) Khớp theo học sinh (target_student hoặc bảng con entry)
     stu = search_names("CRM Student", ["student_name", "student_code"], search_term)
@@ -2083,10 +2085,14 @@ def _search_discipline_record_names(search_term, campus, owner_user):
     if owner_user:
         owner_sql = " AND r.owner = %(owner)s"
         params["owner"] = owner_user
-    return frappe.db.sql_list(f"""
+    visible = frappe.db.sql_list(f"""
         SELECT r.name FROM `tabSIS Discipline Record` r
         WHERE {campus_sql}{owner_sql} AND r.name IN %(names)s
+        ORDER BY r.modified DESC
     """, params)
+    # Khớp thẳng tiêu đề VP / mã bản ghi lên trước khớp gián tiếp qua tên học sinh
+    # (chuẩn "khớp nhất lên đầu", xem erp/utils/search.py)
+    return sorted(visible, key=lambda n: 0 if n in direct_match else 1)
 
 
 def _attach_discipline_child_table_fields(records: list) -> None:
@@ -2440,10 +2446,12 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
         if date_from and date_to:
             filters["date"] = ["between", [date_from, date_to]]
 
+        ranked_names = None
         if search:
             names = _search_discipline_record_names(
                 search, campus_for_search, owner_for_search
             )
+            ranked_names = names
             if not names:
                 if page is not None:
                     return paginated_response(
@@ -2485,7 +2493,25 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
             "order_by": "modified desc",
         }
 
-        if page is not None:
+        if ranked_names:
+            # `ranked_names` đã xếp khớp-nhất-lên-đầu; giữ nguyên thứ tự đó qua bộ lọc
+            # còn lại rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+            visible = set(
+                frappe.get_all(
+                    "SIS Discipline Record", filters=filters, pluck="name", limit_page_length=0
+                )
+            )
+            ordered = [n for n in ranked_names if n in visible]
+            total = len(ordered)
+            if page is not None:
+                page = max(1, page)
+                offset = (page - 1) * per_page
+                page_names = ordered[offset:offset + per_page]
+            else:
+                page_names = ordered
+            list_kwargs["filters"] = [["name", "in", page_names or ["__no_match__"]]]
+            records = order_rows_by_names(frappe.get_all(**list_kwargs), page_names)
+        elif page is not None:
             total = frappe.db.count("SIS Discipline Record", filters=filters)
             page = max(1, page)
             offset = (page - 1) * per_page

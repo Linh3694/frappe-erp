@@ -2,7 +2,7 @@ import frappe
 from frappe import _
 import json
 from erp.utils.campus_utils import get_current_campus_from_context
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -69,6 +69,8 @@ def search_classes(search_term: str = None):
         frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params}")
 
         classes = frappe.db.sql(sql_query, params, as_dict=True)
+        # Khop nhat len dau (chuan chung, xem erp/utils/search.py)
+        classes = sort_by_relevance(classes, ["title"], search_term)
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(classes)} classes")
         if classes:

@@ -6,7 +6,7 @@ from erp.utils.api_response import (
     success_response,
     error_response,
 )
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 
 
 @frappe.whitelist(allow_guest=False, methods=['GET', 'POST'])
@@ -105,6 +105,8 @@ def global_search(search_term: str = None):
             result["_debug"]["logs"].append(debug_msg)
             frappe.logger().info(f"[GLOBAL_SEARCH] {debug_msg}")
             students = frappe.db.sql(sql_query, params, as_dict=True)
+            # Khớp nhất lên đầu (chuẩn chung, xem erp/utils/search.py)
+            students = sort_by_relevance(students, ["student_name", "student_code"], search_clean)
             result["_debug"]["logs"].append(f"Found {len(students)} students from DB")
             
             # Lấy ảnh học sinh từ SIS Photo - ưu tiên ảnh theo năm học hiện tại
@@ -216,6 +218,8 @@ def global_search(search_term: str = None):
             result["_debug"]["logs"].append(debug_msg)
             frappe.logger().info(f"[GLOBAL_SEARCH] {debug_msg}")
             classes = frappe.db.sql(sql_query, params, as_dict=True)
+            # Khớp nhất lên đầu (chuẩn chung, xem erp/utils/search.py)
+            classes = sort_by_relevance(classes, ["title"], search_clean)
             result["_debug"]["logs"].append(f"Found {len(classes)} classes from DB")
             
             # Get school year names for each class

@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 import frappe
 
 from erp.utils.api_response import error_response, list_response, single_item_response
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 
 from .core.default_rules import DEFAULT_RULE_SPECS, DISABLED_DEFAULT_RULE_IDS, build_default_rule_set
 from .core.filter_keys import list_subject_filter_keys as _list_filter_keys
@@ -1013,9 +1013,12 @@ def _query_filter_options(
 			filters=filters,
 			fields=["name", "full_name", "teacher_code"],
 			or_filters=[["name", "in", search_names("SIS Teacher", ["full_name", "name"], search) or ["__no_match__"]]] if search else None,
-			limit_page_length=limit,
+			limit_page_length=0 if search else limit,
 			order_by="full_name asc",
 		)
+		# Khớp nhất lên đầu rồi mới cắt `limit` (chuẩn chung, xem erp/utils/search.py)
+		if search:
+			rows = sort_by_relevance(rows, ["full_name", "teacher_code", "name"], search)[:limit]
 		return [{"value": r.name, "label": r.full_name or r.name, "code": r.teacher_code} for r in rows]
 
 	if entity == "class":

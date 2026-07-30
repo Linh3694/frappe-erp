@@ -9,7 +9,7 @@ Handles feedback management, assignment, SLA tracking, and reporting
 import frappe
 from frappe import _
 from frappe.utils import now, get_datetime, add_to_date
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
 from erp.utils.relationship_types import get_label as get_relationship_label
 from datetime import datetime, timedelta
 import json
@@ -144,11 +144,9 @@ def admin_list():
             )
             search_filters = [["name", "in", _names or ["__no_match__"]]]
         
-        # Get feedback list
-        feedback_list = frappe.get_all(
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+        feedback_list, total_count = paginated_search(
             "Feedback",
-            filters=filters,
-            or_filters=search_filters if search_filters else None,
             fields=[
                 "name", "feedback_type", "title", "status", "priority",
                 "rating", "rating_comment", "department",
@@ -157,9 +155,13 @@ def admin_list():
                 "conversation_count", "resolution_rating",
                 "deadline", "sla_status", "first_response_date"
             ],
+            search=search_query,
+            search_fields=["title", "content", "guardian"],
+            filters=filters,
+            or_filters=search_filters or None,
+            page=page,
+            per_page=page_length,
             order_by="submitted_at desc",
-            limit=page_length,
-            limit_start=offset
         )
         
         # Get guardian names for all feedback
@@ -207,13 +209,11 @@ def admin_list():
                 else:
                     feedback["sla_status"] = "On time"
         
-        # Get total count
-        total = frappe.db.count("Feedback", filters=filters)
-        
+        # `total_count` từ paginated_search — tôn trọng cả filter lẫn search
         return success_response(
             data={
                 "data": feedback_list,
-                "total": total,
+                "total": total_count,
                 "page": page,
                 "page_length": page_length
             },

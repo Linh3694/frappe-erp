@@ -6,7 +6,7 @@ Quản lý chi tiết học sinh trong đơn hàng và trạng thái thanh toán
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 from frappe.utils import nowdate
 import json
 
@@ -82,6 +82,7 @@ def get_order_items(order_id=None, search=None, payment_status=None, page=1, pag
         
         # Tính pagination
         offset = (page - 1) * page_size
+        page_clause = "" if search else "LIMIT %(page_size)s OFFSET %(offset)s"
         total_pages = (total + page_size - 1) // page_size
         
         # Lấy danh sách items
@@ -95,8 +96,11 @@ def get_order_items(order_id=None, search=None, payment_status=None, page=1, pag
             FROM `tabSIS Finance Order Item` foi
             WHERE {where_sql}
             ORDER BY foi.student_name ASC
-            LIMIT %(page_size)s OFFSET %(offset)s
+            {page_clause}
         """, {**params, "page_size": page_size, "offset": offset}, as_dict=True)
+        if search:
+            # Khop nhat len dau roi moi cat trang (chuan: erp/utils/search.py)
+            items = sort_by_relevance(items, ["student_name", "student_code"], search)[offset:offset + page_size]
         
         # Format payment_status display
         status_display = {

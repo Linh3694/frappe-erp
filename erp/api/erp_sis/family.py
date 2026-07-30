@@ -11,7 +11,7 @@ from erp.utils.api_response import (
     not_found_response, forbidden_response, paginated_response
 )
 from erp.utils.campus_utils import get_current_campus_from_context
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 from erp.utils.relationship_types import (
     RELATIONSHIP_CODES,
     is_known_code as is_known_relationship_code,
@@ -2082,7 +2082,11 @@ def search_families(search_term=None, page=1, limit=20):
         
         # Calculate offset
         offset = (page - 1) * limit
-        
+        # CÓ search: lấy hết rồi xếp hạng mới cắt trang. KHÔNG search: phân trang ở SQL
+        # (đừng quét cả bảng) — xem erp/utils/search.py.
+        has_search = bool(search_term and str(search_term).strip())
+        page_clause = "" if has_search else "LIMIT %s OFFSET %s"
+
         # Get families with search (parameterized) - join with student and guardian names
         sql_query = (
             """
@@ -2102,33 +2106,37 @@ def search_families(search_term=None, page=1, limit=20):
             WHERE {where}
             GROUP BY f.name, f.family_code, f.creation, f.modified
             ORDER BY f.family_code ASC
-            LIMIT %s OFFSET %s
+            {page_clause}
             """
-        ).format(where=conditions)
+        ).format(where=conditions, page_clause=page_clause)
 
-        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params + [limit, offset]}")
+        frappe.logger().info(f"EXECUTING SQL QUERY: {sql_query} | params={params}")
 
-        families = frappe.db.sql(sql_query, params + [limit, offset], as_dict=True)
+        if has_search:
+            # Lấy hết rồi xếp hạng theo độ khớp mới cắt trang (chuẩn: erp/utils/search.py)
+            matched = frappe.db.sql(sql_query, params, as_dict=True)
+            matched = sort_by_relevance(
+                matched, ["family_code", "student_names", "guardian_names"], search_term
+            )
+            families = matched[offset:offset + limit]
+            total_count = len(matched)
+        else:
+            families = frappe.db.sql(sql_query, params + [limit, offset], as_dict=True)
+            total_count = frappe.db.sql(
+                """
+                SELECT COUNT(DISTINCT f.name) as count
+                FROM `tabCRM Family` f
+                LEFT JOIN `tabCRM Family Relationship` fr ON f.name = fr.parent
+                LEFT JOIN `tabCRM Student` s ON fr.student = s.name
+                LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
+                WHERE {where}
+                """.format(where=conditions),
+                params, as_dict=True,
+            )[0]["count"]
 
         frappe.logger().info(f"SQL QUERY RETURNED {len(families)} families")
-        
-        # Get total count (parameterized)
-        count_query = (
-            """
-            SELECT COUNT(DISTINCT f.name) as count
-            FROM `tabCRM Family` f
-            LEFT JOIN `tabCRM Family Relationship` fr ON f.name = fr.parent
-            LEFT JOIN `tabCRM Student` s ON fr.student = s.name
-            LEFT JOIN `tabCRM Guardian` g ON fr.guardian = g.name
-            WHERE {where}
-            """
-        ).format(where=conditions)
-        
-        frappe.logger().info(f"EXECUTING COUNT QUERY: {count_query} | params={params}")
-        
-        total_count = frappe.db.sql(count_query, params, as_dict=True)[0]['count']
-        
-        frappe.logger().info(f"COUNT QUERY RETURNED: {total_count}")
+
+        frappe.logger().info(f"COUNT: {total_count}")
         
         total_pages = (total_count + limit - 1) // limit
         

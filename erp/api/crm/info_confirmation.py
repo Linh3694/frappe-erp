@@ -21,7 +21,7 @@ import frappe
 from frappe.utils import escape_html, now_datetime
 
 from erp.api.crm.utils import check_crm_permission, get_request_data
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, paginated_search
 from erp.utils.email_service import send_email_via_service
 from erp.utils.api_response import (
     error_response,
@@ -595,28 +595,22 @@ def list_confirmation():
         "pic_sales",
         "pic_care",
     ]
-    rows = frappe.get_all(
+    # Khop nhat len dau roi moi cat trang (chuan chung, xem erp/utils/search.py)
+    rows, total = paginated_search(
         "CRM Lead",
+        fields=fields,
+        search=q,
+        search_fields=["student_name", "student_code"],
         filters=filters,
         or_filters=or_filters,
-        fields=fields,
-        limit_start=(page - 1) * per_page,
-        limit_page_length=per_page,
+        page=page,
+        per_page=per_page,
         order_by="modified desc",
     )
     # Giu key `pic` = nguoi DANG giu ho so (module nay chi chay o step=Enrolled nen la
     # pic_care), khong doi hop dong API voi FE.
     for row in rows:
         row["pic"] = row.get("pic_care") or row.get("pic_sales") or ""
-    total = len(
-        frappe.get_all(
-            "CRM Lead",
-            filters=filters,
-            or_filters=or_filters,
-            fields=["name"],
-            limit_page_length=0,
-        )
-    )
     return paginated_response(
         data=rows, current_page=page, total_count=total, per_page=per_page
     )

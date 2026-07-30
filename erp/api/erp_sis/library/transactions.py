@@ -3,7 +3,7 @@ from datetime import timedelta
 
 import frappe
 from frappe.utils import now, nowdate, getdate
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -387,7 +387,6 @@ def list_transactions():
     to_date = _p("to_date")
     page = int(_p("page") or 1)
     page_size = min(int(_p("page_size") or 20), 100)
-    offset = (page - 1) * page_size
 
     filters = {}
     if status == "borrowing":
@@ -419,19 +418,22 @@ def list_transactions():
         or_filters = {"name": ["in", _names or ["__no_match__"]]}
 
     try:
-        total = frappe.db.count(TRANSACTION_DTYPE, filters=filters)
-        rows = frappe.get_all(
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py).
+        # `total` đi qua đây nên tôn trọng cả or_filters của search — trước đây đếm thiếu.
+        rows, total = paginated_search(
             TRANSACTION_DTYPE,
-            filters=filters,
-            or_filters=or_filters if or_filters else None,
             fields=[
                 "name", "borrower_id", "borrower_name", "student_code", "employee_code",
                 "borrower_type", "class_or_dept", "borrow_date", "status", "note",
                 "creation", "modified",
             ],
+            search=search or borrower_id,
+            search_fields=["borrower_name", "borrower_id", "student_code", "employee_code", "name"],
+            filters=filters,
+            or_filters=or_filters or None,
+            page=page,
+            per_page=page_size,
             order_by="borrow_date desc, creation desc",
-            limit=page_size,
-            start=offset,
         )
 
         # Attach items count, due date, and overdue days per transaction

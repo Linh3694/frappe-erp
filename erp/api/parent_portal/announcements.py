@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 import json
 from erp.utils.campus_utils import get_current_campus_from_context
 from erp.utils.api_response import (
@@ -408,6 +408,12 @@ def get_announcements():
 
             processed_all_filtered.append(processed_announcement)
 
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+        processed_all_filtered = sort_by_relevance(
+            processed_all_filtered,
+            ["title_vn", "title_en", "content_vn", "content_en"],
+            search_query,
+        )
         total_filtered = len(processed_all_filtered)
         offset = (page - 1) * limit
         processed_announcements = processed_all_filtered[offset : offset + limit]

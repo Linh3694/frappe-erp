@@ -11,21 +11,30 @@ from erp.utils.api_response import (
 
 from ._constants import TITLE_DTYPE, COPY_DTYPE, ACTIVITY_DTYPE, STATUS_MAP
 from ._common import _require_library_role, _get_json_payload, _import_excel_to_rows, _log_library_activity
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 
 def _is_available_copy_status(status: str | None) -> bool:
     """Status trống/NULL coi như available — đồng bộ UI mượn sách."""
     return (status or "available").strip().lower() == "available"
 
 
-def _build_copy_search_or_filters(search: str) -> List[List[Any]]:
-    """Or-filters tìm bản sao — ưu tiên mã bản sao / mã quy ước."""
-    copy_names = search_names(
-        COPY_DTYPE,
-        ["generated_code", "special_code", "isbn", "book_title",
-         "document_identifier", "classification_sign", "storage_location"],
-        search,
-    )
+# Cột của bản sao dùng tìm + chấm điểm (xếp theo độ ưu tiên hiển thị)
+COPY_SEARCH_FIELDS = [
+    "generated_code", "special_code", "book_title", "isbn",
+    "document_identifier", "classification_sign", "storage_location",
+]
+
+# Bản sao chỉ khớp qua ĐẦU SÁCH liên kết (book_title trống) — điểm sàn, xếp sau khớp thẳng
+LINKED_TITLE_SCORE = 250
+
+
+def _build_copy_search_or_filters(search: str):
+    """Or-filters tìm bản sao — ưu tiên mã bản sao / mã quy ước.
+
+    Trả về ``(or_filters, {copy_name: điểm_sàn})``; điểm sàn dành cho bản sao lọt vào
+    nhờ đầu sách liên kết, dùng khi xếp hạng (xem erp/utils/search.py).
+    """
+    copy_names = search_names(COPY_DTYPE, COPY_SEARCH_FIELDS, search)
     or_filters: List[List[Any]] = [["name", "in", copy_names or ["__no_match__"]]]
 
     # Nhiều bản sao chỉ link title_id — book_title có thể trống
@@ -34,10 +43,15 @@ def _build_copy_search_or_filters(search: str) -> List[List[Any]]:
         ["title", "library_code", "authors"],
         search,
     )
+    linked_scores: Dict[str, int] = {}
     if title_ids:
         or_filters.append(["title_id", "in", title_ids])
+        linked_scores = {
+            n: LINKED_TITLE_SCORE
+            for n in frappe.get_all(COPY_DTYPE, filters=[["title_id", "in", title_ids]], pluck="name")
+        }
 
-    return or_filters
+    return or_filters, linked_scores
 
 
 @frappe.whitelist(allow_guest=False)
@@ -75,8 +89,9 @@ def list_book_copies():
             filters["title_id"] = title_id
             
         # Search by generated_code, isbn, book_title, linked title, ...
+        linked_scores: Dict[str, int] = {}
         if search and search.strip():
-            or_filters = _build_copy_search_or_filters(search)
+            or_filters, linked_scores = _build_copy_search_or_filters(search)
 
         # Autocomplete mượn sách: lấy dư rồi lọc available để không bị thiếu kết quả
         fetch_page_size = page_size
@@ -114,21 +129,35 @@ def list_book_copies():
                 "cataloging_agency",
                 "storage_location",
             ],
-            "limit_start": 0 if filter_available_in_python else (page - 1) * page_size,
-            "limit_page_length": fetch_page_size,
             "order_by": "modified desc",
         }
-        
+
         if or_filters:
             query_params["or_filters"] = or_filters
-            
-        copies = frappe.get_all(COPY_DTYPE, **query_params)
 
-        if filter_available_in_python:
-            copies = [c for c in copies if _is_available_copy_status(c.get("status"))]
-            offset = (page - 1) * page_size
+        offset = (page - 1) * page_size
+        if or_filters:
+            # Có search -> lấy hết kết quả khớp, xếp hạng theo độ khớp rồi mới cắt trang
+            # (chuẩn chung, xem erp/utils/search.py)
+            copies = frappe.get_all(COPY_DTYPE, **query_params, limit_page_length=0)
+            if filter_available_in_python:
+                copies = [c for c in copies if _is_available_copy_status(c.get("status"))]
+            copies = sort_by_relevance(
+                copies, COPY_SEARCH_FIELDS, search, extra_scores=linked_scores, id_field="id"
+            )
             copies = copies[offset : offset + page_size]
-        
+        else:
+            copies = frappe.get_all(
+                COPY_DTYPE,
+                **query_params,
+                limit_start=0 if filter_available_in_python else offset,
+                limit_page_length=fetch_page_size,
+            )
+            if filter_available_in_python:
+                copies = [c for c in copies if _is_available_copy_status(c.get("status"))]
+                copies = copies[offset : offset + page_size]
+
+
         # Enrich with title info
         for copy in copies:
             if copy.get("title_id"):

@@ -11,7 +11,7 @@ import json
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
 from frappe.utils import get_table_name
 
 from erp.utils.api_response import (
@@ -21,6 +21,9 @@ from erp.utils.api_response import (
 )
 
 DOCTYPE = "SIS AI Chat Feedback"
+
+# Cột dùng tìm + chấm điểm (xếp theo độ ưu tiên hiển thị)
+SEARCH_FIELDS = ["user_question", "ai_answer", "user_name", "user_email", "message_id"]
 
 AGENT_TYPES = ("WISers", "Receptionist", "Parent")
 FEEDBACK_TYPES = ("Like", "Dislike")
@@ -187,17 +190,12 @@ def admin_list():
         search = (data.get("search") or request_args.get("search") or "").strip()
         or_filters = None
         if search:
-            _names = search_names(
-                DOCTYPE,
-                ["user_question", "ai_answer", "user_email", "user_name", "message_id"],
-                search,
-            )
+            _names = search_names(DOCTYPE, SEARCH_FIELDS, search)
             or_filters = [["name", "in", _names or ["__no_match__"]]]
 
-        rows = frappe.get_all(
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+        rows, total = paginated_search(
             DOCTYPE,
-            filters=filters,
-            or_filters=or_filters,
             fields=[
                 "name",
                 "message_id",
@@ -211,22 +209,14 @@ def admin_list():
                 "user_name",
                 "creation",
             ],
+            search=search,
+            search_fields=SEARCH_FIELDS,
+            filters=filters,
+            or_filters=or_filters,
+            page=page,
+            per_page=page_length,
             order_by="creation desc",
-            limit=page_length,
-            limit_start=offset,
         )
-
-        if or_filters:
-            total = len(
-                frappe.get_all(
-                    DOCTYPE,
-                    filters=filters,
-                    or_filters=or_filters,
-                    pluck="name",
-                )
-            )
-        else:
-            total = frappe.db.count(DOCTYPE, filters=filters)
 
         return success_response(
             data={

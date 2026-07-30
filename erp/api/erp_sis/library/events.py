@@ -3,7 +3,7 @@ from typing import Dict, Any
 
 import frappe
 from frappe.utils import now
-from erp.utils.search import search_names
+from erp.utils.search import paginated_search, search_names
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -56,10 +56,10 @@ def list_events():
         if search:
             _names = search_names(EVENT_DTYPE, ["title"], search)
             filters["name"] = ["in", _names or ["__no_match__"]]
-        
-        events = frappe.get_all(
+
+        # Khớp nhất lên đầu rồi mới cắt trang (chuẩn chung, xem erp/utils/search.py)
+        events, total = paginated_search(
             EVENT_DTYPE,
-            filters=filters,
             fields=[
                 "name as id",
                 "title",
@@ -70,11 +70,14 @@ def list_events():
                 "owner",
                 "modified_by",
             ],
-            limit_start=(page - 1) * page_size,
-            limit=page_size,
+            search=search,
+            search_fields=["title"],
+            filters=filters,
+            page=page,
+            per_page=page_size,
             order_by="modified desc",
         )
-        
+
         # Enrich với days data
         for event in events:
             days = frappe.get_all(
@@ -101,8 +104,7 @@ def list_events():
                 else:
                     day["images"] = []
             event["days"] = days
-        
-        total = frappe.db.count(EVENT_DTYPE, filters=filters)
+
         return list_response(
             data={"items": events, "total": total},
             message="Fetched events",

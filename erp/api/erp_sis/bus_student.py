@@ -6,7 +6,7 @@ import frappe
 from frappe import _
 from erp.utils.api_response import success_response, error_response
 from erp.utils.campus_utils import get_current_campus_from_context
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 from erp.utils.compreFace_service import compreFace_service
 
 @frappe.whitelist()
@@ -822,6 +822,10 @@ def get_students_for_bus_selection(search_term=None, school_year_id=None):
 		query += " ORDER BY s.student_name ASC"
 
 		students = frappe.db.sql(query, params, as_dict=True)
+		# Khop nhat len dau (chuan chung, xem erp/utils/search.py)
+		students = sort_by_relevance(
+			students, ["full_name", "student_code", "class_name"], search_term, id_field="student_id"
+		)
 
 		# Enrich with photo URLs
 		if students:

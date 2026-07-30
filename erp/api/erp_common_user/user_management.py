@@ -9,7 +9,7 @@ from frappe import _
 from datetime import datetime
 import json
 
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, order_rows_by_names, sort_by_relevance
 
 
 @frappe.whitelist()
@@ -56,6 +56,7 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             where_conditions.append("u.department = %s")
             query_params.append(department)
 
+        rank_fields = []
         if search:
             # token + bỏ dấu + đầu từ (đồng bộ mọi field)
             search_fields = ["u.full_name", "u.email"]
@@ -66,6 +67,7 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
                     search_fields.append("u.employee_code")
             except Exception:
                 pass
+            rank_fields = [f.split(".", 1)[1] for f in search_fields]
             search_frag, search_params = build_search_condition(search_fields, search)
             if search_frag:
                 where_conditions.append(search_frag)
@@ -78,7 +80,23 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             query_params.append(role)
 
         where_clause = " AND ".join(where_conditions)
-        
+
+        # Có search -> xếp hạng theo độ khớp trên TOÀN BỘ kết quả rồi mới cắt trang,
+        # để trang 1 là người khớp nhất chứ không phải người sửa gần nhất.
+        page_where, page_params, page_limit, ranked_page = (
+            where_clause, list(query_params), f"LIMIT {limit} OFFSET {offset}", None
+        )
+        if search and rank_fields:
+            matched = frappe.db.sql(
+                f"SELECT u.name, {', '.join('u.' + f for f in rank_fields)} "
+                f"FROM `tabUser` u WHERE {where_clause} ORDER BY u.modified DESC",
+                query_params, as_dict=True,
+            )
+            ranked = [r["name"] for r in sort_by_relevance(matched, rank_fields, search)]
+            ranked_page = ranked[offset:offset + limit]
+            placeholders = ", ".join(["%s"] * len(ranked_page)) or "NULL"
+            page_where, page_params, page_limit = f"u.name IN ({placeholders})", list(ranked_page), ""
+
         # Debug logging
         frappe.logger().info(f"=== GET USERS DEBUG ===")
         frappe.logger().info(f"Active parameter: {active}")
@@ -106,15 +124,18 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
                 'local' as provider,
                 NULL as last_login,
                 NULL as last_active
-            FROM 
+            FROM
                 `tabUser` u
-            WHERE 
-                {where_clause}
-            ORDER BY 
+            WHERE
+                {page_where}
+            ORDER BY
                 u.modified DESC
-            LIMIT {limit} OFFSET {offset}
-        """, query_params, as_dict=True)
-        
+            {page_limit}
+        """, page_params, as_dict=True)
+
+        if ranked_page is not None:
+            users = order_rows_by_names(users, ranked_page)
+
         frappe.logger().info(f"Query returned {len(users)} users")
         
         # Add custom fields if they exist

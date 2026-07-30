@@ -14,7 +14,7 @@ from erp.utils.api_response import (
     not_found_response,
 )
 from erp.api.crm.utils import ALLOWED_ROLES, check_crm_permission, get_request_data
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, paginated_search
 
 # Phong ban = don vi So do to chuc (ERP Organization Unit). Thay the CRM Issue Department.
 ORG_UNIT_DOCTYPE = "ERP Organization Unit"
@@ -605,6 +605,35 @@ def _issue_names_mine(user):
     for field in ("pic", "created_by_user", "owner"):
         names.update(frappe.get_all("CRM Issue", filters={field: user}, pluck="name") or [])
     return names
+
+
+# Cot tra ve cho danh sach van de (dung chung get_issues / get_pending_issues)
+_ISSUE_LIST_FIELDS = [
+    "name",
+    "issue_code",
+    "title",
+    "issue_module",
+    "school_year_id",
+    "status",
+    "result",
+    "priority",
+    "issue_group",
+    "pic",
+    "created_by_user",
+    "owner",
+    "occurred_at",
+    "lead",
+    "student",
+    "modified",
+    "creation",
+    "approval_status",
+    "sla_deadline",
+    "sla_status",
+    "department",
+]
+
+# Diem san cho van de chi khop qua ten hoc sinh/phu huynh (cot ngoai bang CRM Issue)
+_ISSUE_PEOPLE_MATCH_SCORE = 250
 
 
 def _issue_names_matching_people(search):
@@ -1502,6 +1531,7 @@ def get_issues():
         filters["pic"] = pic
 
     name_constraint_sets = []
+    people_scores = {}
 
     if department:
         dept_names = _issue_names_matching_department(department)
@@ -1542,7 +1572,10 @@ def get_issues():
             matched_names.update(
                 frappe.db.sql_list(f"SELECT name FROM `tabCRM Issue` WHERE {search_frag}", search_params)
             )
-        matched_names.update(_issue_names_matching_people(search))
+        people_names = _issue_names_matching_people(search)
+        matched_names.update(people_names)
+        # Van de lot vao qua ten hoc sinh/phu huynh -> diem san, xep sau khop ma/tieu de
+        people_scores = {n: _ISSUE_PEOPLE_MATCH_SCORE for n in people_names}
         # Search rong/khong khop -> set rong -> intersection ben duoi tra ve khong co ket qua.
         name_constraint_sets.append(matched_names)
     if name_constraint_sets:
@@ -1555,38 +1588,17 @@ def get_issues():
             return out
         filters["name"] = ["in", names_list]
 
-    total = frappe.db.count("CRM Issue", filters=filters)
-    offset = (page - 1) * per_page
-
-    issues = frappe.get_all(
+    # Khop nhat len dau roi moi cat trang (chuan chung, xem erp/utils/search.py)
+    issues, total = paginated_search(
         "CRM Issue",
+        fields=_ISSUE_LIST_FIELDS,
+        search=search,
+        search_fields=["issue_code", "title"],
         filters=filters,
-        fields=[
-            "name",
-            "issue_code",
-            "title",
-            "issue_module",
-            "school_year_id",
-            "status",
-            "result",
-            "priority",
-            "issue_group",
-            "pic",
-            "created_by_user",
-            "owner",
-            "occurred_at",
-            "lead",
-            "student",
-            "modified",
-            "creation",
-            "approval_status",
-            "sla_deadline",
-            "sla_status",
-            "department",
-        ],
+        page=page,
+        per_page=per_page,
         order_by="creation desc",
-        start=offset,
-        page_length=per_page,
+        extra_scores=people_scores,
     )
 
     _enrich_user_info(issues)
@@ -1612,6 +1624,7 @@ def get_pending_issues():
     filters = {"approval_status": "Cho duyet"}
     scope_meta = "all"
     dept_flag = bool(_get_user_crm_issue_department_names(user))
+    people_scores = {}
     if search:
         # Tim tren toan bo hang cho: ma/tieu de + hoc sinh + phu huynh lien quan.
         search_frag, search_params = build_search_condition(["issue_code", "title"], search)
@@ -1620,7 +1633,10 @@ def get_pending_issues():
             if search_frag
             else []
         )
-        matched_names.update(_issue_names_matching_people(search))
+        people_names = _issue_names_matching_people(search)
+        matched_names.update(people_names)
+        # Van de lot vao qua ten hoc sinh/phu huynh -> diem san, xep sau khop ma/tieu de
+        people_scores = {n: _ISSUE_PEOPLE_MATCH_SCORE for n in people_names}
         matched_names = list(matched_names)
         if not matched_names:
             out = paginated_response([], page, 0, per_page)
@@ -1628,38 +1644,17 @@ def get_pending_issues():
             out["is_department_member"] = dept_flag
             return out
         filters["name"] = ["in", matched_names]
-    total = frappe.db.count("CRM Issue", filters=filters)
-    offset = (page - 1) * per_page
-
-    issues = frappe.get_all(
+    # Khop nhat len dau roi moi cat trang (chuan chung, xem erp/utils/search.py)
+    issues, total = paginated_search(
         "CRM Issue",
+        fields=_ISSUE_LIST_FIELDS,
+        search=search,
+        search_fields=["issue_code", "title"],
         filters=filters,
-        fields=[
-            "name",
-            "issue_code",
-            "title",
-            "issue_module",
-            "school_year_id",
-            "status",
-            "result",
-            "priority",
-            "issue_group",
-            "pic",
-            "created_by_user",
-            "owner",
-            "occurred_at",
-            "lead",
-            "student",
-            "modified",
-            "creation",
-            "approval_status",
-            "sla_deadline",
-            "sla_status",
-            "department",
-        ],
+        page=page,
+        per_page=per_page,
         order_by="creation asc",
-        start=offset,
-        page_length=per_page,
+        extra_scores=people_scores,
     )
     _enrich_user_info(issues)
     _enrich_issue_list_departments(issues)

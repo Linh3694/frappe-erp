@@ -6,7 +6,7 @@ Quản lý học sinh trong năm tài chính.
 import frappe
 from frappe import _
 
-from erp.utils.search import search_names
+from erp.utils.search import search_names, sort_by_relevance
 import json
 
 from erp.utils.api_response import (
@@ -77,6 +77,7 @@ def get_finance_students(finance_year_id=None, search=None, page=1, page_size=20
         
         # Tính pagination
         offset = (page - 1) * page_size
+        page_clause = "" if search else "LIMIT %(page_size)s OFFSET %(offset)s"
         total_pages = (total + page_size - 1) // page_size
         
         # Lấy danh sách học sinh với tổng hợp từ Order Student (tính động)
@@ -106,8 +107,11 @@ def get_finance_students(finance_year_id=None, search=None, page=1, page_size=20
             WHERE {where_sql_with_prefix}
             GROUP BY fs.name
             ORDER BY fs.student_name ASC
-            LIMIT %(page_size)s OFFSET %(offset)s
+            {page_clause}
         """, query_params, as_dict=True)
+        if search:
+            # Khop nhat len dau roi moi cat trang (chuan: erp/utils/search.py)
+            students = sort_by_relevance(students, ["student_name", "student_code"], search)[offset:offset + page_size]
         
         logs.append(f"Tìm thấy {total} học sinh, trả về {len(students)} học sinh")
         

@@ -9,7 +9,7 @@ Handles health reports from homeroom teachers and porridge registration
 import frappe
 from frappe import _
 from frappe.utils import today, now, get_datetime, escape_html
-from erp.utils.search import build_search_condition
+from erp.utils.search import build_search_condition, sort_by_relevance
 import json
 from erp.utils.email_service import send_email_via_service
 from erp.utils.api_response import (
@@ -662,11 +662,16 @@ def get_porridge_registration_list():
         count_query = f"SELECT COUNT(*) as cnt FROM ({query}) as sub"
         total = frappe.db.sql(count_query, params, as_dict=True)[0].cnt
         
-        # Phân trang
-        query += " LIMIT %s OFFSET %s"
-        params.extend([page_length, offset])
-        
+        # Có search -> lấy hết rồi xếp hạng theo độ khớp mới cắt trang (chuẩn: erp/utils/search.py)
+        if not search:
+            query += " LIMIT %s OFFSET %s"
+            params.extend([page_length, offset])
+
         reports = frappe.db.sql(query, params, as_dict=True)
+        if search:
+            reports = sort_by_relevance(
+                reports, ["student_name", "student_code", "class_name"], search
+            )[offset:offset + page_length]
         
         # Bổ sung created_at cho mỗi report
         for report in reports:
@@ -756,8 +761,12 @@ def get_porridge_list():
                 params.extend(_p)
         
         query += " ORDER BY hr.student_name ASC"
-        
+
         results = frappe.db.sql(query, params, as_dict=True)
+        # Khớp nhất lên đầu (chuẩn chung, xem erp/utils/search.py)
+        results = sort_by_relevance(
+            results, ["student_name", "student_code", "class_name"], search
+        )
         
         # Tính thống kê
         total = len(results)
