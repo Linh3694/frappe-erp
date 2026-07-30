@@ -7,11 +7,14 @@ thay vì gửi Expo trực tiếp (xem `mobile_push_notification.py`).
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import frappe
 
 from erp.common.redis_events import publish
+from erp.utils.bilingual_notification import coerce_title_body
+
+TitleBody = Union[str, Dict[str, str]]
 
 
 def _notification_channel(default: str = "frappe_notifications") -> str:
@@ -21,8 +24,8 @@ def _notification_channel(default: str = "frappe_notifications") -> str:
 def emit_notify(
     channel: str,
     recipients: List[str],
-    title: str,
-    body: str,
+    title: TitleBody,
+    body: TitleBody,
     data: Optional[Dict[str, Any]] = None,
     notification_type: str = "general",
 ) -> bool:
@@ -43,8 +46,8 @@ def emit_notify(
         "deliver": True,
         "deliverFromStream": True,
         "recipients": emails,
-        "title": str(title or "").strip(),
-        "body": str(body or "").strip(),
+        "title": coerce_title_body(title),
+        "body": coerce_title_body(body),
         "data": data if isinstance(data, dict) else {},
         "channel": "push",
     }
@@ -58,8 +61,8 @@ def emit_notify(
 def emit_notify_bulk(
     channel: str,
     targets: List[Dict[str, Any]],
-    title: str,
-    body: str,
+    title: TitleBody,
+    body: TitleBody,
     notification_type: str = "general",
 ) -> Dict[str, Any]:
     """
@@ -116,8 +119,8 @@ def _inbox_mirror_enabled() -> bool:
 
 def emit_inbox_mirror(
     emails: List[str],
-    title: str,
-    body: str,
+    title: TitleBody,
+    body: TitleBody,
     event_type: str,
     data: Optional[Dict[str, Any]] = None,
     *,
@@ -156,8 +159,8 @@ def emit_inbox_mirror(
             "deliver": False,
             "deliverFromStream": False,
             "recipients": [em],
-            "title": str(title or "").strip(),
-            "body": str(body or "").strip(),
+            "title": coerce_title_body(title),
+            "body": coerce_title_body(body),
             "channel": "push",
             "channels": ["push"],
             "data": {**(data or {}), "type": event_type},
@@ -178,8 +181,8 @@ def emit_inbox_mirror(
 
 def emit_inbox_mirror_bulk(
     targets: List[Dict[str, Any]],
-    title: str,
-    body: str,
+    title: TitleBody,
+    body: TitleBody,
     notification_type: str = "general",
     *,
     channel: Optional[str] = None,

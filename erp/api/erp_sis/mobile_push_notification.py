@@ -13,6 +13,7 @@ from erp.common.notification_emit import (
     emit_notify_bulk,
     push_delivered_by_notification_service,
 )
+from erp.utils.bilingual_notification import resolve_text
 
 # Bundle đăng ký push — tiêu đề Wislife/journal theo app (yêu cầu UX)
 BUNDLE_PARENT_PORTAL = "com.hailinh.n23.parentportalmobile"
@@ -764,6 +765,9 @@ def send_mobile_notification(user_email, title, body, data=None):
                 "message": "redis_stream" if ok else "redis_stream_failed",
             }
 
+        push_title = resolve_text(title)
+        push_body = resolve_text(body)
+
         # Get active device tokens for user
         tokens = frappe.get_all("Mobile Device Token",
             filters={
@@ -786,7 +790,7 @@ def send_mobile_notification(user_email, title, body, data=None):
             frappe.logger().info(f"   - Token: {t.device_token[:40]}... | Platform: {t.platform} | App Type: {t.get('app_type', 'unknown')}")
 
         # Build messages cho từng token (dùng helper _build_expo_message)
-        messages = [_build_expo_message(token_doc, title, body, data) for token_doc in tokens]
+        messages = [_build_expo_message(token_doc, push_title, push_body, data) for token_doc in tokens]
 
         # Phase C.2: Gửi BATCH thay vì loop từng message
         # Trước: N POST × 10s timeout = worst case 30-60s cho 1 user nhiều device
@@ -1008,11 +1012,11 @@ def _post_expo_batch(messages):
 def send_mobile_notifications_bulk(targets, title, body):
     """
     Gửi Expo push BATCH cho nhiều user (multiple parents) trong 1 POST.
-    
+
     Args:
         targets: List of dicts [{"email": str, "data": dict}]
-        title: Tiêu đề (string đã resolve, không phải dict bilingual)
-        body: Nội dung
+        title: Tiêu đề — chuỗi hoặc dict {vi, en}
+        body: Nội dung — chuỗi hoặc dict {vi, en}
     
     Returns:
         dict: {"success", "success_count", "failed_count", "total_messages", ...}
@@ -1057,12 +1061,15 @@ def send_mobile_notifications_bulk(targets, title, body):
         
         # Map email → data (mỗi user có data riêng với student_id riêng)
         email_to_data = {t.get("email"): t.get("data", {}) for t in targets}
-        
+
+        push_title = resolve_text(title)
+        push_body = resolve_text(body)
+
         # Build messages cho tất cả token
         messages = []
         for token in all_tokens:
             user_data = email_to_data.get(token.get("user"), {})
-            messages.append(_build_expo_message(token, title, body, user_data))
+            messages.append(_build_expo_message(token, push_title, push_body, user_data))
         
         frappe.logger().info(f"📱 [Bulk Expo] Sending BATCH: {len(messages)} messages cho {len(emails)} users")
         return _post_expo_batch(messages)

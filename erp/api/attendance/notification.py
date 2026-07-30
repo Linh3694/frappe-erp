@@ -13,6 +13,7 @@ from erp.api.parent_portal.realtime_notification import emit_notification_to_use
 from erp.api.parent_portal.push_notification import send_push_notification
 from erp.utils.relationship_types import get_label as get_relationship_label
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification
+from erp.utils.bilingual_notification import bi
 
 
 def publish_attendance_notification(
@@ -211,23 +212,28 @@ def send_student_attendance_notification(
 		is_check_in = determine_checkin_or_checkout(timestamp, check_in_time, check_out_time)
 
 		# Build notification theo format chuẩn của notification-service
-		title = "Điểm danh"
+		title = bi("Điểm danh", "Attendance")
 
 		# Parse location từ device name
 		# Device name format: "Gate 2 - Check in", "Gate 5 - Check out", "Gate 2 - Abnormal", etc.
 		if not device_name:
-			location = "cổng trường"
+			location_vi = "cổng trường"
+			location_en = "the school gate"
 		else:
 			# Extract gate name (Gate 2, Gate 5, etc.)
 			parts = device_name.split(' - ')
 			gate_name = parts[0].strip() if len(parts) >= 1 else device_name
 
-			# Map to Vietnamese names
-			location_map = {
+			location_map_vi = {
 				'Gate 2': 'Cổng 2',
 				'Gate 5': 'Cổng 5'
 			}
-			location = location_map.get(gate_name, gate_name)  # Default to original if not mapped
+			location_map_en = {
+				'Gate 2': 'Gate 2',
+				'Gate 5': 'Gate 5'
+			}
+			location_vi = location_map_vi.get(gate_name, gate_name)
+			location_en = location_map_en.get(gate_name, gate_name)
 
 		# Format time giống notification-service: HH:MM DD/MM/YYYY
 		event_time = timestamp
@@ -239,7 +245,10 @@ def send_student_attendance_notification(
 			event_time = frappe.utils.get_datetime(timestamp)
 			time_str = event_time.strftime('%H:%M %d/%m/%Y')
 
-		message = f"Học sinh {employee_name} đã đi qua {location} lúc {time_str}"
+		message = bi(
+			f"Học sinh {employee_name} đã đi qua {location_vi} lúc {time_str}",
+			f"Student {employee_name} passed {location_en} at {time_str}",
+		)
 
 		# Additional data (convert datetime to string for JSON serialization)
 		notification_data = {
@@ -313,7 +322,7 @@ def send_staff_attendance_notification(
 		is_check_in = determine_checkin_or_checkout(timestamp, check_in_time, check_out_time)
 		
 		# Build notification cho staff (giống notification-service)
-		title = "Chấm công"
+		title = bi("Chấm công", "Attendance")
 
 		# Format time giống notification-service
 		event_time = timestamp
@@ -323,8 +332,10 @@ def send_staff_attendance_notification(
 			event_time = frappe.utils.get_datetime(timestamp)
 			time_str = event_time.strftime('%H:%M %d/%m/%Y')
 
-		# Staff message format - unified for all attendance events
-		message = f"Nhận diện khuôn mặt thành công lúc {time_str}"
+		message = bi(
+			f"Nhận diện khuôn mặt thành công lúc {time_str}",
+			f"Face recognition successful at {time_str}",
+		)
 		
 		# Additional data
 		notification_data = {
@@ -350,8 +361,8 @@ def send_staff_attendance_notification(
 			from frappe import get_doc
 			notification_doc = get_doc({
 				"doctype": "ERP Notification",
-				"title": title,
-				"message": message,
+				"title": json.dumps(title) if isinstance(title, dict) else title,
+				"message": json.dumps(message) if isinstance(message, dict) else message,
 				"recipient_user": staff_email,
 				"recipients": json.dumps([staff_email]),  # Convert list to JSON string
 				"notification_type": "attendance",

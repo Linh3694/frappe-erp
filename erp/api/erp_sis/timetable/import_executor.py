@@ -19,12 +19,31 @@ import pandas as pd
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from ..utils.assignment_cache import get_subject_id_from_actual_cached
-from ..utils.cache_utils import clear_teacher_dashboard_cache
+from ..utils.cache_utils import clear_teacher_dashboard_cache, clear_class_cache
 
 
 def _clear_teacher_classes_cache():
 	"""Wrapper function for backward compatibility."""
 	clear_teacher_dashboard_cache()
+
+
+def _clear_caches_after_import(processed_instances: Dict):
+	"""Xóa cache TKB sau import — cả wildcard lẫn từng lớp đã xử lý.
+
+	Trước đây chỉ gọi scan_iter wildcard; nếu Redis wrapper không hỗ trợ thì
+	class_week:* cũ (thường là []) vẫn còn tới 5 phút → FE vẫn trống dù DB đã có 270 tiết.
+	"""
+	clear_teacher_dashboard_cache()
+	class_ids = {
+		(data or {}).get("class_id")
+		for data in (processed_instances or {}).values()
+		if (data or {}).get("class_id")
+	}
+	for class_id in class_ids:
+		try:
+			clear_class_cache(class_id)
+		except Exception as e:
+			frappe.logger().warning(f"⚠️ clear_class_cache({class_id}) failed: {e}")
 
 
 class TimetableImportExecutor:
@@ -175,8 +194,8 @@ class TimetableImportExecutor:
 			# Commit transaction
 			frappe.db.commit()
 			
-			# ⚡ CLEAR CACHE: Invalidate caches after timetable import
-			_clear_teacher_classes_cache()
+			# ⚡ CLEAR CACHE: bắt buộc xóa class_week/teacher_week sau khi ghi DB
+			_clear_caches_after_import(self.processed_instances)
 			
 			frappe.logger().info(
 				f"✅ Import complete: {self.stats['instances_created']}I created, "
@@ -1882,7 +1901,11 @@ class TimetableImportExecutor:
 		return unique_teachers
 	
 	def _normalize_day_of_week(self, day_str: str) -> str:
-		"""Normalize day of week to lowercase 3-letter code"""
+		"""Normalize day of week to lowercase 3-letter code.
+
+		Pandas hay đọc cột Thứ thành float (2.0) → str = '2.0' không khớp map cũ
+		và bị fallback hết về 'mon' (sai cả tuần).
+		"""
 		day_map = {
 			"2": "mon",
 			"3": "tue",
@@ -1891,16 +1914,39 @@ class TimetableImportExecutor:
 			"6": "fri",
 			"7": "sat",
 			"CN": "sun",
+			"cn": "sun",
 			"Thứ 2": "mon",
 			"Thứ 3": "tue",
 			"Thứ 4": "wed",
 			"Thứ 5": "thu",
 			"Thứ 6": "fri",
 			"Thứ 7": "sat",
-			"Chủ nhật": "sun"
+			"Chủ nhật": "sun",
+			"mon": "mon",
+			"tue": "tue",
+			"wed": "wed",
+			"thu": "thu",
+			"fri": "fri",
+			"sat": "sat",
+			"sun": "sun",
 		}
-		
-		return day_map.get(str(day_str).strip(), "mon")
+
+		if day_str is None or (isinstance(day_str, float) and pd.isna(day_str)):
+			return "mon"
+
+		raw = str(day_str).strip()
+		if raw in day_map:
+			return day_map[raw]
+
+		# Chuẩn hóa float/int Excel: 2.0 → "2"
+		try:
+			as_int = str(int(float(raw)))
+			if as_int in day_map:
+				return day_map[as_int]
+		except (TypeError, ValueError):
+			pass
+
+		return day_map.get(raw, "mon")
 	
 	def _get_user_friendly_logs(self) -> List[str]:
 		"""
@@ -1930,10 +1976,11 @@ class TimetableImportExecutor:
 				if log and not log.startswith("  "):  # Skip indented detail logs
 					friendly_logs.append(log)
 		
-		# Add summary at the end
-		if self.stats["instances_created"] > 0 or self.stats["rows_created"] > 0:
+		# Add summary at the end (tính cả lớp update, không chỉ tạo mới)
+		total_classes = self.stats["instances_created"] + self.stats["instances_updated"]
+		if total_classes > 0 or self.stats["rows_created"] > 0:
 			friendly_logs.append(
-				f"✅ Đã xử lý thành công {self.stats['instances_created']} lớp học với "
+				f"✅ Đã xử lý thành công {total_classes} lớp học với "
 				f"{self.stats['rows_created']} tiết học"
 			)
 		

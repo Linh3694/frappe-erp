@@ -424,18 +424,12 @@ def send_bulk_parent_notifications(
         if isinstance(title, dict):
             notification_title = title
         else:
-            notification_title = {
-                "vi": title,
-                "en": title
-            }
-        
+            notification_title = {"vi": title, "en": ""}
+
         if isinstance(body, dict):
             notification_body = body
         else:
-            notification_body = {
-                "vi": body,
-                "en": body
-            }
+            notification_body = {"vi": body, "en": ""}
         
         # Merge custom data parameter
         merged_data = {
@@ -638,8 +632,8 @@ def send_bulk_parent_notifications(
                     
                     bulk_expo_result = send_mobile_notifications_bulk(
                         targets=expo_targets,
-                        title=final_title_str,
-                        body=final_body_str,
+                        title=notification_title,
+                        body=notification_body,
                     )
                     frappe.logger().info(
                         f"📱 [Bulk Expo] sent={bulk_expo_result.get('success_count', 0)} "

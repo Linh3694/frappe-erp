@@ -25,10 +25,39 @@ from erp.common.notification_emit import (
 	push_delivered_by_notification_service,
 )
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notifications_bulk
+from erp.utils.bilingual_notification import bi
 
 
 # Debounce giữa các lần Expo push cho cùng hội thoại + người nhận (tránh spam khi chat liên tục)
+CHAT_TITLE = bi("Trao đổi", "Chat")
+POLL_TITLE = bi("Bình chọn", "Poll")
+RECALL_TITLE = bi("Tin nhắn đã thu hồi", "Message recalled")
+ATTACHMENT_PREVIEW = bi("[Tệp đính kèm]", "[Attachment]")
+NEW_MESSAGE_BODY = bi("Tin nhắn mới", "New message")
+SOMEONE = bi("Ai đó", "Someone")
+DEFAULT_SENDER = bi("Trao đổi", "Chat")
+
+# Debounce giữa các lần Expo push cho cùng hội thoại + người nhận (tránh spam khi chat liên tục)
 CHAT_EXPO_DEBOUNCE_SECONDS = 5
+
+
+def _preview_bilingual(preview_raw, has_attachment=False):
+	"""Chuẩn hoá preview tin nhắn — nội dung người gửi giữ nguyên, placeholder có bản EN."""
+	if preview_raw:
+		text = preview_raw[:200]
+		return bi(text, text)
+	if has_attachment:
+		return ATTACHMENT_PREVIEW
+	return NEW_MESSAGE_BODY
+
+
+def _reaction_body(sender_name):
+	name = (sender_name or "").strip() or SOMEONE["vi"]
+	name_en = (sender_name or "").strip() or SOMEONE["en"]
+	return bi(
+		_("%(name)s đã thả cảm xúc tin nhắn") % {"name": name},
+		f"{name_en} reacted to a message",
+	)
 
 
 def _debounce_cache_key(conversation_id, recipient_email):
@@ -170,12 +199,10 @@ def _handle_new_chat_message(event_data):
 		return
 
 	conversation_id = str(event_data.get("conversationId") or "")
-	sender_name = event_data.get("senderName") or _("Trao đổi")
+	sender_name = event_data.get("senderName") or DEFAULT_SENDER["vi"]
 	preview_raw = (event_data.get("messagePreview") or "").strip()
-	if not preview_raw and event_data.get("hasAttachment"):
-		preview_raw = _("[Tệp đính kèm]")
-	title_push = str(sender_name)[:80]
-	body_push = preview_raw[:200] if preview_raw else _("Tin nhắn mới")
+	title_push = bi(str(sender_name)[:80], str(sender_name)[:80])
+	body_push = _preview_bilingual(preview_raw, event_data.get("hasAttachment"))
 
 	base = _base_chat_data(event_data)
 	student_id = event_data.get("studentId") or event_data.get("student_id")
@@ -262,22 +289,28 @@ def _handle_chat_poll_lifecycle(event_data, kind):
 		return
 
 	question = (event_data.get("messagePreview") or "").strip()
-	title_push = _("Bình chọn")
+	title_push = POLL_TITLE
 	if kind == "reminder":
 		notif_type = "chat_poll_reminder"
-		body_push = (
-			_('Sắp hết hạn: "%(q)s" — bạn chưa bình chọn') % {"q": question}
-			if question
-			else _("Một bình chọn sắp hết hạn — bạn chưa bình chọn")
-		)
+		if question:
+			body_push = bi(
+				_('Sắp hết hạn: "%(q)s" — bạn chưa bình chọn') % {"q": question},
+				f'Closing soon: "{question}" — you have not voted yet',
+			)
+		else:
+			body_push = bi(
+				_("Một bình chọn sắp hết hạn — bạn chưa bình chọn"),
+				"A poll is closing soon — you have not voted yet",
+			)
 	else:
 		notif_type = "chat_poll_closed"
-		body_push = (
-			_('Đã kết thúc: "%(q)s"') % {"q": question}
-			if question
-			else _("Một bình chọn đã kết thúc")
-		)
-	body_push = body_push[:200]
+		if question:
+			body_push = bi(
+				_('Đã kết thúc: "%(q)s"') % {"q": question},
+				f'Closed: "{question}"',
+			)
+		else:
+			body_push = bi(_("Một bình chọn đã kết thúc"), "A poll has closed")
 
 	base = _base_chat_data(event_data)
 	base["type"] = notif_type
@@ -348,8 +381,8 @@ def _handle_chat_message_reaction(event_data):
 	if not recipient_emails:
 		return
 
-	sender_name = event_data.get("senderName") or _("Ai đó")
-	body = _("%(name)s đã thả cảm xúc tin nhắn") % {"name": sender_name}
+	sender_name = event_data.get("senderName")
+	body = _reaction_body(sender_name)
 
 	base = _base_chat_data(event_data)
 	base["type"] = "chat_message_reaction"
@@ -359,7 +392,7 @@ def _handle_chat_message_reaction(event_data):
 	for recipient_email in recipient_emails:
 		try:
 			create_notification(
-				title="Trao đổi",
+				title=CHAT_TITLE,
 				message=body,
 				recipient_user=recipient_email,
 				notification_type="system",
@@ -373,7 +406,7 @@ def _handle_chat_message_reaction(event_data):
 				{
 					"id": f"CHAT-REACT-{frappe.generate_hash(length=8)}",
 					"type": "chat_message_reaction",
-					"title": "Trao đổi",
+					"title": CHAT_TITLE,
 					"message": body,
 					"status": "unread",
 					"priority": "low",
@@ -389,7 +422,7 @@ def _handle_chat_message_reaction(event_data):
 			frappe.logger().error(f"❌ [Exchange] reaction notify {recipient_email}: {e}")
 
 	_mirror_to_notification_service(
-		mirror_targets, "Trao đổi", body, "chat_message_reaction", "reaction"
+		mirror_targets, CHAT_TITLE, body, "chat_message_reaction", "reaction"
 	)
 
 
@@ -411,8 +444,8 @@ def _handle_chat_message_recalled(event_data):
 				{
 					"id": f"CHAT-RECALL-{frappe.generate_hash(length=8)}",
 					"type": "chat_message_recalled",
-					"title": _("Tin nhắn đã thu hồi"),
-					"message": "",
+					"title": RECALL_TITLE,
+					"message": bi("", ""),
 					"status": "read",
 					"priority": "low",
 					"created_at": frappe.utils.now(),
