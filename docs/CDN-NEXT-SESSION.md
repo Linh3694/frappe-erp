@@ -1,124 +1,152 @@
 # Prompt tiếp tục CDN — phiên mới
 
-> **Cập nhật 2026-07-30.** Bản trước (29/07) đã lỗi: nó ghi "KHÔNG CÒN VIỆC ĐANG DỞ"
-> trong khi thực tế có ba khối code xong chưa deploy (§14 nội dung SIS, §15 vá
-> `/uploads`, §16 Phase 3) và một lỗ hổng còn hở trên production.
+> **Cập nhật 2026-07-30, sau phiên deploy.** Phiên đó đã: vá `/uploads`, migrate cả ba
+> nhóm nội dung SIS, chạy `classify-unowned-files.py` lần đầu và vá hai trong ba nhóm
+> lỗ hổng nó tìm ra. Việc còn lại là **62 ảnh hồ sơ kỷ luật học sinh**.
 
 Copy toàn bộ phần trong khung dưới đây vào phiên mới.
 
 ---
 
 ```
-Tiếp tục công việc CDN cho hệ thống Wellspring. Đọc theo thứ tự:
-  1. frappe-backend/apps/erp/docs/CDN-STATUS.md      — nguồn sự thật về trạng thái
-  2. frappe-backend/apps/erp/docs/CDN-HANDOFF-2026-07-30.md — nhóm commit đề xuất
-     (§A) và checklist thao tác từng bước (§B)
+Tiếp tục công việc CDN cho hệ thống Wellspring. Đọc trước, theo thứ tự:
+  1. frappe-backend/apps/erp/docs/CDN-STATUS.md   — nguồn sự thật về trạng thái
+     Đọc kỹ §7b (khuôn mẫu sẽ dùng lại), §18 (kết quả rà file công khai), §11 (deploy)
+  2. frappe-backend/apps/erp/docs/CDN-HANDOFF-2026-07-30.md — checklist thao tác
 
-BỐI CẢNH
+VIỆC CỦA PHIÊN NÀY
 
-Ba máy chủ, vào theo thứ tự: `ssh cdn` rồi từ đó `ssh micro` (microservices) hoặc
-`ssh frappe` (Frappe/SIS). Alias micro/frappe chỉ có trên VM3, không có trên máy cá nhân.
+🔴 Vá 62 ảnh hồ sơ kỷ luật học sinh đang phục vụ công khai.
 
-Đã chạy production: hạ tầng CDN trên VM3 (MinIO + nginx secure_link + TLS),
-cảnh báo email, media của social-service (bài đăng/chat/avatar), hồ sơ học bổng,
-ảnh chân dung học sinh, và video remux `+faststart` + poster. Hai lỗ hổng bảo mật
-nghiêm trọng đã vá: hồ sơ học bổng và ảnh học sinh đều từng phục vụ công khai
-không kiểm quyền.
+    SIS Discipline Record Image.image  ->  /files/IMG_1868.png  (và tương tự)
+
+Đo từ máy ngoài, không đăng nhập: HTTP 200, 3,3 MB. Tên dạng `IMG_<số>.png` nên
+không liệt kê hàng loạt được như §7b, nhưng nội dung là ảnh kèm hồ sơ kỷ luật của
+trẻ em nên mức nhạy cảm cao.
+
+Hướng đã quyết (chủ dự án chọn): làm theo ĐÚNG khuôn §7b, không phải is_private.
+  - bucket riêng + bucket policy chỉ 127.0.0.1 + thêm bucket vào IAM `social-service`
+  - `location /<prefix>/` trên nginx VM3 — PREFIX location, KHÔNG regex
+  - module ký (theo `erp/common/student_photo_cdn.py`)
+  - module đẩy (theo `erp/common/student_photo_store.py`) + hook doc_events
+  - script migrate + seal + test + diff trong `scripts/cdn/`
+  - timer niêm định kỳ
+  - THỨ TỰ BẮT BUỘC: lên CDN trước → xoá cache tên đã migrate → niêm sau (§7b).
+    Đảo là vỡ ảnh.
+
+Vì sao không dùng is_private như nhóm file nhập liệu: đây LÀ media hiện trong ứng
+dụng, cần giữ đường rollback bằng cách tắt CDN, và không muốn đổi `file_url` trong DB.
+
+TIỀN ĐỀ DỄ BỊ BỎ SÓT
+
+§14 và Phase 3 đều từng thiếu bước tạo hạ tầng trên VM3. Trước khi migrate phải có:
+bucket, file policy trong /opt/cdn/policies/, tên bucket trong IAM policy
+`social-service`, location trên nginx, biến trong /etc/cdn/cdn.env, VÀ tên bucket
+trong `BUCKETS` của /opt/cdn/bin/cdn-checks.sh (nếu thiếu thì bucket đó không có
+cảnh báo nào — đã xảy ra với student-photos suốt 29/07→30/07).
+
+TRẠNG THÁI HIỆN TẠI (đã kiểm chứng 2026-07-30)
+
+Đang chạy production:
+  - Hạ tầng CDN VM3 (MinIO + nginx secure_link + TLS), cảnh báo email
+  - social-service: ảnh/video bài đăng, đính kèm chat, avatar
+  - Hồ sơ học bổng (§7), ảnh chân dung học sinh (§7b) — hai lỗ hổng đã vá
+  - Video remux +faststart + poster
+  - Chặn /uploads ẩn danh (§15) — deploy 30/07 08:47, 200 -> 403
+  - Nội dung SIS lên CDN (§14) — cả ba nhóm news/menu/library đã bật,
+    2.821 object/542 MiB, 63/63 phép thử đạt
+  - 6 bucket: social-posts, social-chat, social-avatars, scholarship,
+    student-photos, sis-content (+ cdn-staging chưa dùng)
+
+Git (kiểm bằng ls-remote, KHÔNG tin git status lần đọc đầu — xem bẫy #5):
+  apps/erp            6fe5e812 = origin/main; CHƯA commit: docs/CDN-STATUS.md,
+                      scripts/cdn/privatize-import-files.py,
+                      scripts/cdn/privatize-name-collision.py
+  social-service      dd8626f = origin/main, đã deploy
+  frappe-sis-frontend đã push (C6)
+  workspace-mobile    đã commit (C7)
+  ⚠️ Repo erp TRÊN PROD theo remote tên `upstream` và có lúc ĐI TRƯỚC local.
+     Luôn kiểm `git log` trên prod trước khi kết luận thiếu code.
+
+Còn hở / chưa rà (§18, sau khi đã vá 141 file):
+  - 62 ảnh hồ sơ kỷ luật  <- việc của phiên này
+  - anh_mo_coi   405 file / 247,7 MB  — mồ côi, chưa rà nội dung
+  - tai_lieu_mo_coi 34 file / 7,3 MB  — mồ côi, chưa rà nội dung
+  `classify-unowned-files.py` hiện thoát mã 0; CSV mới nhất: frappe:/tmp/unowned3.csv
 
 QUY TẮC BẮT BUỘC
 
-1. Deploy LUÔN qua git: commit + push từ local → ssh vào prod → git pull → migrate/
-   clear-cache nếu cần → restart. KHÔNG copy file thẳng bằng tar/ssh. Chi tiết ở §11.
-2. `git status` sạch KHÔNG có nghĩa là đã deploy. Đối chiếu md5 local ↔ prod với
-   thay đổi quan trọng. Trong vòng lặp `while read` phải dùng `ssh -n`, nếu không
-   ssh nuốt stdin và chỉ file đầu được kiểm.
-3. Sửa `hooks.py` thì BẮT BUỘC `bench clear-cache`, không thì handler mới im lặng
+1. Deploy LUÔN qua git: commit + push từ local → ssh prod → git pull → migrate/
+   clear-cache nếu cần → restart. KHÔNG copy file thẳng bằng tar/ssh (§11).
+   Script trong /opt/cdn/bin nằm ngoài đường git pull: copy tay RỒI đối chiếu md5.
+2. Sửa hooks.py thì BẮT BUỘC `bench clear-cache`, không thì handler mới im lặng
    không chạy.
-4. `pm2 reload social-service` TUYỆT ĐỐI không kèm `--update-env`.
-5. Được phép chủ động restart service, không cần hỏi. Nhưng kiểm tra sức khoẻ
-   trước và sau, và báo lại kết quả.
-6. Không quét cổng/dải IP nội bộ — hỏi trực tiếp nếu cần IP.
-7. Trong Frappe, rà theo tên bảng SQL là chưa đủ: phải rà cả `frappe.get_all` /
-   `get_list` / `db.get_value` với TÊN DOCTYPE, bằng regex nhiều dòng. Đã một lần
-   bỏ sót 4 chỗ vì grep một dòng theo tên bảng.
-8. Đo độ trễ prod thì đo TỪ MÁY NGOÀI. `curl` hostname công khai từ bên trong VM
-   Frappe đi qua hairpin NAT: đo được 29 s và timeout, trong khi từ ngoài chỉ
-   31–66 ms. Đã một lần tưởng là sự cố production.
-9. `npm rebuild sharp` sau khi pull trên VM Linux. `node_modules` trong repo giữ
-   binary darwin-arm64; sharp không nạp được thì MỌI ảnh lưu nguyên bản và
-   EXIF/GPS KHÔNG bị loại, mà upload vẫn trả 200. Deploy phải thấy dòng
-   `[cdn] sharp OK — libvips <ver>` trong log.
+3. `pm2 reload social-service` TUYỆT ĐỐI không kèm `--update-env` (PORT 5040).
+4. Được phép chủ động restart, không cần hỏi — nhưng kiểm sức khoẻ trước/sau và báo lại.
+5. Không quét cổng/dải IP nội bộ — hỏi trực tiếp nếu cần IP.
+6. Trong Frappe, rà theo tên bảng SQL là chưa đủ: phải rà cả `frappe.get_all` /
+   `get_list` / `db.get_value` theo TÊN DOCTYPE, bằng regex nhiều dòng.
+7. Đo độ trễ prod thì đo TỪ MÁY NGOÀI, và tách tầng khi thấy chậm (xem bẫy #7).
+8. Ba máy chủ: `ssh cdn` rồi từ đó `ssh micro` hoặc `ssh frappe`. Alias micro/frappe
+   chỉ có trên VM3.
 
-TRẠNG THÁI GIT (kiểm chứng 2026-07-30)
+TÁM CÁI BẪY ĐÃ TRẢ GIÁ — ĐỪNG LẶP LẠI
 
-  apps/erp             ✅ đã push, origin/main = HEAD = a0f18a99, tree sạch
-  social-service       🔴 C1–C5 CHƯA COMMIT (guard, sharp selfTest, Phase 3 BE,
-                          Phase 4 script, CDN-Design) — 0 commit chưa push
-  frappe-sis-frontend  🔴 C6 CHƯA COMMIT (cdnDirectUpload.ts + 2 file sửa)
-  workspace-mobile     🔴 C7 CHƯA COMMIT (cdnDirectUpload.ts + postService.ts)
+1. `git log` trên prod đúng commit KHÔNG có nghĩa code đang chạy. Lỗ hổng /uploads
+   còn hở nhiều giờ vì tiến trình khởi động TRƯỚC commit. Kiểm
+   `pm2 describe <app> | grep uptime` và `supervisorctl status` so với giờ commit.
+2. Đừng giả mạo chữ ký bằng cách đổi ký tự CUỐI. secure_link md5 128 bit mã base64
+   thành 22 ký tự = 132 bit, 4 bit cuối là bit thừa ⇒ đổi ký tự cuối KHÔNG đổi chữ ký
+   trong ~25% trường hợp. Phép thử báo FAIL oan. Đổi ký tự ĐẦU.
+3. `ssh -n` chặn stdin: BẮT BUỘC dùng trong vòng lặp `while read`, nhưng PHẢI BỎ khi
+   truyền dữ liệu qua pipe (`base64 | ssh ...`) — nếu không file lên prod sẽ RỖNG.
+4. Log khởi động của social-service ở /srv/app/social-service/logs/out.log, KHÔNG ở
+   /root/.pm2/logs/.
+5. Ổ CORSAIR trả `stat` cũ: `git status` lần đọc đầu có thể báo sai (đã một lần kết
+   luận sai là "chưa commit"). Chạy `git update-index --really-refresh` rồi
+   `git ls-remote origin` / `git fetch` trước khi kết luận.
+6. `File.handle_is_private_changed()` của Frappe chuyển file theo BASENAME, throw
+   FileNotFoundError nếu nguồn mất và FileExistsError nếu đích đã có. Nhiều File doc
+   trỏ CÙNG một URL ⇒ chỉ `doc.save()` MỘT doc mỗi URL, còn lại `db.set_value`.
+7. Khi thấy prod chậm, tách tầng trước khi kết luận: gunicorn (curl 127.0.0.1:8000
+   KÈM `-H "Host: <site>"`, thiếu Host là ra 404 và đo sai đường) → nginx cục bộ
+   (curl -k https://127.0.0.1 kèm Host) → công khai. Ngày 30/07 chênh 8ms/12ms/3s,
+   tức nghẽn nằm NGOÀI VM Frappe và tự hết.
+8. Rà theo DB và rà theo đĩa cho KẾT QUẢ KHÁC NHAU. Đợt niêm §7b lấy danh sách từ DB
+   nên trượt: 55 ảnh lớp tên `5A5.jpg` không doctype nào tham chiếu, và
+   `WS11710352.JPG` đuôi CHỮ HOA (bản chữ thường đã niêm). Cả hai vẫn trả 200 tới 30/07.
 
-Ba repo sau: code chỉ tồn tại trên một máy. Đây đúng là rủi ro §11 cấm.
+TEST CHẠY Ở LOCAL
 
-VIỆC GẤP — theo thứ tự
-
-1. 🔴 Commit + deploy bản vá `/uploads` (§15). Lỗ hổng ĐANG CÒN HỞ trên prod:
-   `express.static` phục vụ toàn bộ `uploads/` không kiểm gì — ảnh chat GV↔phụ huynh
-   về học sinh ai có URL cũng tải được. Code + 8 test HTTP đã sẵn sàng.
-   Commit theo đúng thứ tự C1→C2→C3 (ba commit cùng sửa app.js/index.js/package.json).
-   Nghiệm thu: 4 mục ở Bước 1 của HANDOFF.
-2. 🔴 Commit C6/C7 để code client Phase 3 có bản sao ở remote.
-3. 🔴 Chạy `classify-unowned-files.py` trên prod (§18) — ~6.600 file công khai
-   chưa gắn doctype, ~3,2 GB, nhóm lớn nhất chưa ai nhìn vào. Script CHỈ ĐỌC.
-   Thoát mã 1 = có file nhạy cảm chưa bảo vệ.
-
-VIỆC ĐÃ SẴN SÀNG, CHỜ QUYẾT ĐỊNH / CHỜ PROD
-
-  - §14 Migrate nội dung SIS (thư viện/thực đơn/tin tức) lên CDN. Code đã push.
-    Còn lại: pull + clear-cache trên prod, copy 3 script, migrate TỪNG NHÓM
-    (dry-run → thật → diff phải ra 0), rồi mới thêm tên nhóm vào
-    CDN_SIS_CONTENT_GROUPS. Đây là tối ưu hiệu năng, KHÔNG phải vá lỗ hổng —
-    xếp sau hai việc bảo mật. Lưu ý: nén tại chỗ đã xong (−52%) nhưng
-    NÉN ≠ MIGRATE, `migrate-sis-content.py` chưa chạy lần nào.
-  - §16 Bật Phase 3: cần tạo bucket `cdn-staging` + IAM + lifecycle 1 ngày trên
-    VM3 trước. Deploy client trước, bật cờ CDN_DIRECT_UPLOAD sau; tắt cờ là mọi
-    máy về multipart ngay, không cần phát hành lại app.
-  - §10.5 Hook `after_request` toàn cục cho `user_image` (227 chỗ) — chỉ cần nếu
-    muốn cắt hẳn storage ở Frappe. QUYẾT ĐỊNH KIẾN TRÚC, cần hỏi trước.
-  - Mở rộng disk VM3: 200 GB, hiện dùng 3,4 GB, dự phóng ~257 GB/năm học.
-    Bản NEXT-SESSION cũ ghi "đã chủ động bỏ qua" — cần xác nhận lại.
-  - §10.13 Xoay CDN_LINK_SECRET — đổi đồng thời BA nơi: /opt/cdn/.env,
-    /etc/nginx/snippets/cdn-securelink.conf trên VM3, và config.env của
-    social-service. Lệch một ký tự là 403 toàn bộ media.
-  - §10.8 Dọn 22.817 dòng tabFile thừa và 552 bản avatar trùng.
-  - 4 file HEIC legacy chưa nén được, cần pillow-heif trong bench env.
+  cd frappe-backend/social-service && npm run test:cdn        # 80/80
+  cd frappe-backend/apps/erp && python3 -m unittest erp.tests.test_classify_unowned   # 15/15
+  52 test Python còn lại CẦN frappe-bench/env/bin/python (import frappe) — không chạy
+  được bằng python3 hệ thống.
 
 CỐ Ý CHƯA LÀM (đừng tự khởi động)
+  - §17 Phase 4 rewrite DB — hoãn tới ~giữa 2027, còn /uploads trong DB thì tắt
+    CDN_ENABLED là rollback một phút.
+  - §16 bật Phase 3 (CDN_DIRECT_UPLOAD) — cần tạo bucket cdn-staging + IAM trước.
+  - §10.5 hook after_request cho user_image (227 chỗ) — quyết định kiến trúc.
+  - Transcode video 720p; mọi thứ liên quan faceID.
+  - Mở rộng disk VM3 (200 GB, đang dùng 6 GB, dự phóng ~257 GB/năm) — cần xác nhận.
 
-  - §17 Phase 4 rewrite DB — hoãn tới ~giữa 2027. Chừng nào DB còn giữ
-    `/uploads/...` thì tắt CDN_ENABLED là rollback trong một phút.
-  - Transcode video 720p — chỉ đáng làm nếu video chat vượt ~0,5 GB/ngày.
-  - Mọi thứ liên quan faceID.
-
-TEST CHẠY LẠI ĐƯỢC Ở LOCAL
-
-  cd frappe-backend/social-service && npm run test:cdn   # 80/80, đã chạy 30/07
-  cd frappe-backend/apps/erp && python3 -m unittest erp.tests.test_classify_unowned  # 15/15
-  52 test Python còn lại cần frappe-bench/env/bin/python (import frappe).
-
-Không có việc nào đang chạy nền. Hãy hỏi tôi muốn ưu tiên gì trước khi bắt tay.
+Hãy bắt đầu bằng việc đọc §7b và §18 của CDN-STATUS.md, rồi trình bày kế hoạch vá
+62 ảnh kỷ luật trước khi sửa gì.
 ```
 
 ---
 
 ## Ghi chú cho người bàn giao
 
-Nếu phiên mới cần bối cảnh sâu hơn, những mục đáng đọc nhất trong `CDN-STATUS.md`:
+Những mục đáng đọc nhất trong `CDN-STATUS.md`:
 
-* **§7 và §7b** — hai lỗ hổng bảo mật đã vá, kèm cách vá và các bẫy gặp phải
-* **§11** — quy trình deploy, viết lại sau khi cách cũ gây ra ba sự cố thật
-* **§10** — danh sách việc còn lại, đã đánh dấu cái nào xong
-* **§14–§19** — bốn khối code xong chưa chạy, và ranh giới giữa "code xong",
-  "đã deploy" và "đã chạy trên dữ liệu thật"
+* **§7b** — khuôn mẫu sẽ dùng lại cho ảnh kỷ luật, kèm lý do ký ở `after_request`
+  thay vì tại từng điểm đọc, và hai đường trả **byte** mà hook không phủ được
+* **§18** — kết quả rà 6.979 file công khai, hai khuyết điểm của script và cách vá
+  hai trong ba nhóm
+* **§11** — quy trình deploy, viết lại sau khi cách cũ gây ba sự cố thật
+* **§3** — cảnh báo theo từng bucket, và vì sao ngưỡng p95/cache-hit phải theo bucket
 
-`CDN-PROGRESS-REPORT.md` là báo cáo chốt thời điểm sáng 30/07; phần "18 commit
-chưa push" trong đó đã hết hiệu lực sau khi push `a0f18a99`.
+`CDN-PROGRESS-REPORT.md` là bản chốt thời điểm sáng 30/07, đã lỗi một phần — có ghi
+chú cảnh báo ở đầu file.

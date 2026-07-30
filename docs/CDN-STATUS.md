@@ -26,9 +26,9 @@ Ba mức độ, **đừng nhầm lẫn**: `code xong` ≠ `đã deploy` ≠ `đ�
 | **Chặn `/uploads` ẩn danh (social-service)** | ✅ **Chạy production 2026-07-30 08:47 — lỗ hổng §15 đã vá, 200 → 403** |
 | **Phase 3 (upload thẳng lên CDN)** | 🟡 Code xong + test xanh (BE + web + mobile), BE **đã deploy** cùng đợt vá `/uploads`, cờ `CDN_DIRECT_UPLOAD` vẫn **TẮT**; C7 mobile chưa commit (§16) |
 | Phase 4 (dọn dẹp) | 🟡 Script để sẵn + test xanh; **cố ý chưa chạy** — giữ fallback tới ~giữa 2027 (§17) |
-| Phân loại ~6.600 file công khai chưa rõ | 🔴 **Đã chạy 2026-07-30 — tìm ra 141 file nhạy cảm CÒN phục vụ công khai, chưa vá** (§18) |
+| Phân loại ~6.600 file công khai chưa rõ | 🟡 **Đã chạy 2026-07-30, mã thoát nay là 0** — 141 file nhạy cảm đã vá (56 niêm + 121 URL sang private). **Còn 62 ảnh hồ sơ kỷ luật công khai** (§18) |
 
-**Việc gấp nhất hiện nay:** 🔴 **vá 141 file đang phục vụ công khai** mà `classify-unowned-files.py` vừa tìm ra (§18) — gồm file nhập liệu chứa PII gia đình với tên đoán được, 55 ảnh lớp tên bằng mã lớp, và 62 ảnh hồ sơ kỷ luật ở nhóm kế bên.
+**Việc gấp nhất hiện nay:** 🔴 **62 ảnh hồ sơ kỷ luật học sinh** (`SIS Discipline Record Image.image`) vẫn phục vụ công khai — hướng vá đã chọn (khuôn §7b), cần thêm code. Xem §18.
 
 > **Cập nhật 2026-07-30 (phiên deploy):**
 > * Nội dung SIS đã migrate và bật cả ba nhóm (§14).
@@ -980,11 +980,36 @@ GET /files/WS11710352.JPG         -> 200   309.044 byte
 
 > Nếu chỉ đọc con số của lần chạy đầu (4.604 file, 1.964 MB) thì vừa **báo động quá mức** về quy mô, vừa **bỏ sót** đúng ba nhóm cần xử lý. Hai lỗi ngược chiều nhau, và cùng đến từ việc suy trạng thái từ DB thay vì kiểm thực tế.
 
-### Còn phải quyết
+### Đã vá — hai trong ba nhóm (2026-07-30)
 
-- **55 ảnh lớp + 1 ảnh chân dung**: không ai tham chiếu ⇒ **niêm được ngay, không cần code**, không ảnh hưởng ứng dụng.
-- **85 file nhập liệu**: 44 file có link trong UI quản trị. Ba hướng: đặt `is_private=1`, xoá hẳn (đây là file nhập liệu đã dùng xong), hoặc đưa lên CDN có ký. Cần quyết định.
-- **126 file `dang_dung_chua_ro`** còn trên đĩa, trong đó **62 file là `SIS Discipline Record Image.image`** — ảnh kèm hồ sơ kỷ luật học sinh, đang phục vụ công khai. Mẫu tên không bắt được vì tên là `IMG_1868.png`. Nhóm này cần rà thủ công như §18 đã cảnh báo, và nghiêng về việc cần khuôn §7b (`cdn_sign` + `*_store` + timer niêm).
+Chạy lại `classify-unowned-files.py` sau khi vá: **mã thoát 0**, nhóm `NHAY_CAM_CHUA_BAO_VE` từ **141 → 0**.
+
+**1. 56 ảnh không ai tham chiếu — đã niêm.** `scripts/cdn/seal-unowned-files.py` (mới), 99,2 MB → `/srv/backup/unowned-sealed-20260730-104257`. Kiểm chứng từ máy ngoài: `5A5.jpg`, `9AB4.jpg`, `3A2.jpg`, `1A4.jpg`, `WS11710352.JPG` đều **200 → 404**.
+
+Script này **import trực tiếp hàm quét của `classify-unowned-files.py`** thay vì viết lại — bài học §7: hai script suy danh sách theo hai cách khác nhau thì một bên sẽ sót. Mặc định dry-run, có `--rollback`.
+
+**2. File nhập liệu — đã đặt `is_private=1`.** `scripts/cdn/privatize-import-files.py` (mới): **121 URL / 237 File doc**, và **203 field** đã trỏ sang URL mới. Đĩa `public/files` nay còn **0** file `import-*`.
+
+Số thật lớn hơn con số 85 mà §18 báo: **126 URL riêng biệt từ 245 File doc**. Hai lý do:
+* `classify` chỉ đếm file **không gắn doctype**, nên bỏ qua ~39 file `import-*` có `attached_to_doctype` — vẫn công khai y như nhau.
+* Một URL có tới **5 File doc** trỏ vào (bẫy trùng lặp `tabFile` ở §8).
+
+⚠️ **Hai bẫy khi đổi `is_private` bằng script:**
+
+* `File.handle_is_private_changed()` của Frappe chuyển file theo **basename** và **`throw FileNotFoundError`** nếu nguồn không còn. Nhiều File doc trỏ cùng một URL ⇒ doc đầu chuyển file xong, các doc sau **vỡ ngay**. Cách làm: gom theo `file_url`, mỗi URL chỉ `doc.save()` **một** doc, các doc còn lại cập nhật bằng `db.set_value` (không chuyển file lần hai).
+* Nó cũng **`throw FileExistsError`** nếu `private/files/<ten>` đã có. Gặp thật ở 3 file. Đã đối chiếu md5: **nội dung KHÁC nhau, chỉ trùng tên** — nên không được xoá bản nào. `scripts/cdn/privatize-name-collision.py` (mới) chuyển bản công khai sang private **dưới tên mới** (chèn 6 ký tự đầu md5 nội dung), rồi cập nhật `File` và field tham chiếu bằng `db.set_value` — **không** `doc.save()`, vì save sẽ kích hoạt lại `handle_is_private_changed` và nó đi tìm file ở chỗ cũ.
+
+Nghiệm thu từ máy ngoài: 7/7 URL cũ → **404**; `/private/files/...` với người lạ → **403** (không phải 200). `SIS Bulk Import Job`: **220 bản ghi** đã trỏ `/private/files/`.
+
+> Hướng `is_private` khác §7/§7b (giữ nguyên DB, ánh xạ ở tầng CDN) vì đây **không phải media hiện trong ứng dụng**, chỉ là link tải trong trang quản trị — nên không cần đường rollback bằng cách tắt CDN.
+
+Còn **2 tham chiếu treo** (`/files/import-timetables.xlsx`, `/files/import-students4c87e2.xlsx`) trỏ tới file đã mất khỏi đĩa **từ trước**. Trả 404, vô hại — cùng loại với "ba tham chiếu hỏng có sẵn" ở §7b.
+
+### Còn lại — đã có quyết định, chưa làm
+
+**62 ảnh hồ sơ kỷ luật học sinh** (`SIS Discipline Record Image.image`, tên dạng `IMG_1868.png`) **vẫn đang phục vụ công khai**. Đã chọn hướng: làm theo khuôn §7b — bucket riêng + `cdn_sign` + `*_store` + timer niêm, ký ở điểm đọc. Cần thêm code nên chưa làm trong phiên này.
+
+Nhóm còn trên đĩa sau khi vá: `dang_dung_chua_ro` **115 file / 70,0 MB** (gồm 62 ảnh kỷ luật), `tai_lieu_mo_coi` **34 / 7,3 MB**, `anh_mo_coi` **405 / 247,7 MB**. Hai nhóm mồ côi chưa rà nội dung.
 
 ### Mô tả gốc
 
