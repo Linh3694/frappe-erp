@@ -107,8 +107,24 @@ MAU_NHAY_CAM = [
     # moi URL co tham chieu, va `User.user_image` la `Attach Image` nen nam trong
     # pham vi quet cua `thu_thap_url_dang_dung()`. Da do: dung mot file nhu vay
     # (`WF01IT.jpg`). Neu doi ham quet ma bo `Attach Image` ra thi se niem nham no.
-    (re.compile(r"^W[A-Z]\d{2,4}[A-Z]{2}\.(?:jpe?g|png|webp|heic|JPE?G|PNG|WEBP|HEIC)$"),
+    # `[A-Z]{1,2}` truoc so: co ca `WF01HC` lan `WFT61PR`.
+    # `[0-9a-f]{0,8}` sau ma: Frappe them hau to hex khi trung ten
+    # (`WT08EMa801b5.jpg`, `WF03IT453d82.jpg`). Bo qua hau to nay la sot 5 file —
+    # da xay ra o lan chay dau, chi phat hien khi doc tay danh sach `anh_mo_coi`.
+    (re.compile(r"^W[A-Z]{1,2}\d{2,4}[A-Z]{2}[0-9a-f]{0,8}"
+                r"\.(?:jpe?g|png|webp|heic|JPE?G|PNG|WEBP|HEIC)$"),
      "anh nhan vien (ten = ma nhan vien)"),
+    # Anh lop dat ten CO tien to: `Lớp 5A5.jpg`, `Lớp 3A5e06ddd.jpg`. Cung noi dung
+    # voi 55+28 anh lop da niem, chi khac quy uoc — do duoc 27 file / 26,3 MB.
+    # Day la quy uoc dat ten thu TU cua cung mot loai anh; mau khop tren ten file
+    # luon la cuoc dua duoi, nen moi lan them mau hay coi la dau hieu rang cach
+    # nay co gioi han chu khong phai da xong.
+    (re.compile(r"^l[ơớ]p\s", re.I), "anh lop (tien to 'Lop')"),
+    # Bien ban ky luat dat ten kieu `130326_BB Khánh Chi 11ab3.jpg`,
+    # `Khôi Minh_BB.jpg` — CHINH TEN FILE chua ten hoc sinh va lop. Cung ho voi §7c.
+    # Chi khop `BB` khi di kem ngay hoac ngay truoc duoi file, khong bat `BB` tran
+    # lan (de tranh nuot `ABBA.jpg`, `BBQ.png`).
+    (re.compile(r"(?:^\d{6}_BB\s|_BB\.[a-z]+$)", re.I), "bien ban ky luat (BB)"),
     # Nhap lieu hang loat: ten doan duoc, noi dung la PII hang loat.
     (re.compile(r"^import[_\s-]?(students?|families|classes|subjects?|timetable)", re.I), "nhap lieu hang loat (PII)"),
     # Tieng Viet CO DAU — bo mau cu chi khop ban khong dau nen truot het.
@@ -164,8 +180,19 @@ def con_tren_dia(file_url):
 
 
 def nhan_dang_nhay_cam(file_url):
-    """Tra ve list ly do; rong = khong thay dau hieu gi tu TEN file."""
-    ten = file_url.rsplit("/", 1)[-1]
+    """Tra ve list ly do; rong = khong thay dau hieu gi tu TEN file.
+
+    ⚠️ CHUAN HOA NFC TRUOC KHI KHOP — bay da tra gia 2026-07-30.
+
+    Ten file tieng Viet tren dia nay o dang NFD: `Lớp` duoc luu la `L` + `ơ` +
+    dau sac ROI, tuc `"Lớp 5A5.jpg".startswith("Lớp")` tra ve False neu chuoi mau
+    viet dang NFC. Nghia la ba mau "co dau" them vao lan truoc (`bao cao`,
+    `hoc ky`, `danh du`) CHUA BAO GIO khop duoc gi — chung im lang khong bao loi,
+    va ta tuong la "khong co file nao nhu vay".
+    """
+    import unicodedata
+
+    ten = unicodedata.normalize("NFC", file_url.rsplit("/", 1)[-1])
     ly_do = []
     for mau, nhan in MAU_NHAY_CAM:
         if mau.search(ten):
