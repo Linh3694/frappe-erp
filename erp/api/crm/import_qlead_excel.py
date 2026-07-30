@@ -27,7 +27,7 @@ from datetime import date, datetime, timedelta
 from datetime import time as dtime
 
 import frappe
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 from erp.api.crm.utils import (
     STEP_STATUSES,
@@ -2205,6 +2205,37 @@ def _tih_has_student_guardian_link(student_id, guardian_name):
     return bool(canonical_relationship_rows(guardian=guardian_name, student=student_id))
 
 
+def _tih_relationship_template_from_family(family_name, guardian_name, exclude_student_id):
+    """
+    Mau quan he HS-PH tu anh chi em cung CRM Family (cung guardian).
+    Them HS vao family da co PH -> dong bo relationship_type / access / can_pickup.
+    """
+    if not family_name or not guardian_name:
+        return None
+    fields = ["relationship_type", "key_person", "access", "display_order"]
+    try:
+        if frappe.db.has_column("CRM Family Relationship", "can_pickup"):
+            fields.append("can_pickup")
+    except Exception:
+        pass
+    filters = {
+        "parent": family_name,
+        "parenttype": "CRM Family",
+        "parentfield": "relationships",
+        "guardian": guardian_name,
+    }
+    if exclude_student_id:
+        filters["student"] = ["!=", exclude_student_id]
+    rows = frappe.get_all(
+        "CRM Family Relationship",
+        filters=filters,
+        fields=fields,
+        order_by="modified desc",
+        limit_page_length=0,
+    ) or []
+    return rows[0] if rows else None
+
+
 def _tih_link_guardian_to_student(family_name, student_id, guardian_name, rel_type, counters):
     """Them dong quan he HS-PH tren CRM Family + rebuild mirror."""
     if frappe.db.exists(
@@ -2218,20 +2249,33 @@ def _tih_link_guardian_to_student(family_name, student_id, guardian_name, rel_ty
         },
     ):
         return False
-    prior = canonical_relationship_rows(guardian=guardian_name, student=student_id)
-    inherited_access = 1
-    inherited_can_pickup = 1
-    if prior:
-        inherited_access = 1 if any(r.get("access") for r in prior) else 0
-        inherited_can_pickup = 1 if any(r.get("can_pickup", 1) for r in prior) else 0
+
+    # Uu tien quan he cua anh chi em cung family + cung PH
+    tpl = _tih_relationship_template_from_family(family_name, guardian_name, student_id)
+    if tpl:
+        rel_type = tpl.get("relationship_type") or rel_type or "other"
+        key_person = cint(tpl.get("key_person"))
+        access = cint(tpl.get("access", 1))
+        can_pickup = cint(tpl.get("can_pickup", 1))
+    else:
+        prior = canonical_relationship_rows(guardian=guardian_name, student=student_id)
+        key_person = 0
+        access = 1
+        can_pickup = 1
+        if prior:
+            inherited_access = 1 if any(r.get("access") for r in prior) else 0
+            inherited_can_pickup = 1 if any(r.get("can_pickup", 1) for r in prior) else 0
+            access = inherited_access
+            can_pickup = inherited_can_pickup
+
     family_doc = frappe.get_doc("CRM Family", family_name)
     family_doc.append("relationships", {
         "student": student_id,
         "guardian": guardian_name,
         "relationship_type": rel_type or "other",
-        "key_person": 0,
-        "access": inherited_access,
-        "can_pickup": inherited_can_pickup,
+        "key_person": key_person,
+        "access": access,
+        "can_pickup": can_pickup,
     })
     family_doc.flags.ignore_validate = True
     family_doc.save(ignore_permissions=True)
@@ -2337,6 +2381,8 @@ def backfill_tih(path, sheet=None, dry_run=1, overwrite=0, create_missing=1, com
     overwrite  0 = chi dien o dang trong | 1 = file thang.
 
     Tim PH: uu tien quan he tren CRM Family (Me/Bo/NGH), fallback SDT.
+    Link family moi: neu anh chi em cung family da co PH do -> ke thua relationship_type,
+    access, can_pickup, key_person tu dong quan he sibling.
     Ghi CRM Guardian.guardian_name, .phone_number, .email + bang con phone_numbers/emails.
     Bo qua gia tri '0'. Mot o co the chua nhieu SDT/email.
 

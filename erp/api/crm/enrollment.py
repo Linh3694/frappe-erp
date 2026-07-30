@@ -409,14 +409,43 @@ def _create_family_shell():
 
 def _inherited_access(guardian_docname, student_name):
     """
-    `access` cho dong quan he MOI: mac dinh 1, nhung KE THUA neu guardian da co dong cho
-    CHINH chau nay (o family khac). Quyen xem la thuoc tinh cua CAP (student, guardian) —
-    da bi thu hoi o cho khac thi tao dong moi khong duoc am tham mo lai.
+    `access` tu dong cua CHINH cap (student, guardian) o family khac. Quyen xem la thuoc
+    tinh cua CAP — da bi thu hoi o cho khac thi tao dong moi khong duoc am tham mo lai.
+
+    Tra None khi cap nay chua co dong nao o dau ca -> caller di tiep xuong ke thua tu
+    anh/chi/em roi moi den default.
     """
     rows = canonical_relationship_rows(guardian=guardian_docname, student=student_name)
     if not rows:
-        return 1
+        return None
     return 1 if any(cint(r.get("access")) for r in rows) else 0
+
+
+def _inherited_from_siblings(family_doc, guardian_docname, exclude_student):
+    """
+    Gia tri ke thua khi THEM CHAU MOI vao gia dinh SAN CO: lay tu dong cua chinh guardian
+    do voi cac chau KHAC dang trong family (bo van la "bo", quyen xem/don giu nguyen nhu
+    voi anh/chi).
+
+    Chi ke thua khi cac chau hien co DONG NHAT. Lech nhau (vd bo xem duoc chau A nhung bi
+    tat voi chau B) thi bo qua field do -> roi ve default, vi do la quyet dinh cua nha
+    truong theo tung chau, doan sai la cap nham quyen xem/don.
+
+    key_person KHONG ke thua: moi chau mot nguoi lien lac chinh, dat o man cua chau.
+    """
+    rows = [
+        r
+        for r in (family_doc.get("relationships") or [])
+        if r.guardian == guardian_docname and r.student and r.student != exclude_student
+    ]
+    out = {}
+    for field in ("relationship_type", "access", "can_pickup"):
+        values = {getattr(r, field, None) for r in rows}
+        if len(values) == 1:
+            value = values.pop()
+            if value is not None and str(value).strip() != "":
+                out[field] = value
+    return out
 
 
 def _sync_guardians_into_family(family_name, student_name, guardian_entries):
@@ -448,18 +477,38 @@ def _sync_guardians_into_family(family_name, student_name, guardian_entries):
                 row.key_person = 1
                 changed = True
             continue
+        # Thu tu lay gia tri cho dong MOI:
+        #   1. du lieu tu lead (relationship_type / key_person)
+        #   2. dong cua CHINH cap (student, guardian) o family khac  -> _inherited_access
+        #   3. anh/chi/em dang trong family nay                      -> inherited
+        #   4. default
+        inherited = _inherited_from_siblings(family_doc, e["guardian"], student_name)
+        access_same_pair = _inherited_access(e["guardian"], student_name)
+        if access_same_pair is not None:
+            access_value = access_same_pair
+        elif inherited.get("access") is not None:
+            access_value = 1 if cint(inherited["access"]) else 0
+        else:
+            access_value = 1
         family_doc.append(
             "relationships",
             {
                 "student": student_name,
                 "guardian": e["guardian"],
-                "relationship_type": e.get("relationship_type") or "guardian",
+                "relationship_type": (
+                    e.get("relationship_type")
+                    or inherited.get("relationship_type")
+                    or "guardian"
+                ),
                 "key_person": 1 if cint(e.get("key_person")) else 0,
-                "access": _inherited_access(e["guardian"], student_name),
+                "access": access_value,
                 # can_pickup PHAI ghi tay du doctype khai default 1: Document.append ->
                 # _init_child KHONG ap default (chi frappe.new_doc moi ap), nen de trong
                 # la xuong DB thanh 0 -> bo/me khong duoc don con o cong truong.
-                "can_pickup": 1,
+                "can_pickup": (
+                    1 if inherited.get("can_pickup") is None
+                    else (1 if cint(inherited["can_pickup"]) else 0)
+                ),
             },
         )
         changed = True

@@ -932,26 +932,47 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
         # MÀN GIA ĐÌNH CHỈ QUẢN THÀNH VIÊN (nhóm) — thuộc tính của CẶP (student,
         # guardian): relationship_type / key_person / access / can_pickup được sửa ở
         # màn của TỪNG CHÁU (lead FamilySection, set_lead_guardian_flags...).
-        # Vì vậy khi lưu lại family: cặp ĐÃ CÓ dòng chuẩn thì KẾ THỪA nguyên giá trị cũ
-        # (không được ghi đè quyết định đã đặt per-cháu); cặp MỚI dùng default
-        # (relationship_type "other" — chỉnh sau ở màn cháu, key_person 0, access 1,
-        # can_pickup 1). Client vẫn ĐƯỢC gửi tường minh để override (API compat).
+        # Vì vậy khi lưu lại family, thứ tự lấy giá trị cho MỖI cặp:
+        #   1. client gửi tường minh  -> tôn trọng (kể cả 0/false)
+        #   2. cặp (student, guardian) đã có dòng chuẩn -> giữ nguyên (không ghi đè
+        #      quyết định đã đặt ở màn cháu)
+        #   3. THÊM CHÁU MỚI vào gia đình sẵn có -> KẾ THỪA từ guardian đó với các cháu
+        #      đang có trong gia đình (quan hệ / access / can_pickup)
+        #   4. hết cách -> default (other / key_person 0 / access 1 / can_pickup 1)
+        #
+        # key_person KHÔNG kế thừa ở bước 3: mỗi cháu một người liên lạc chính, đặt ở
+        # màn cháu — sao chép sang cháu mới là tự quyết thay nhà trường.
         has_pickup_col = bool(frappe.db.has_column("CRM Family Relationship", "can_pickup"))
         old_pair_cols = "student, guardian, relationship_type, key_person, access" + (
             ", can_pickup" if has_pickup_col else ""
         )
-        old_pairs = {
-            (r["student"], r["guardian"]): r
-            for r in frappe.db.sql(
-                f"""
-                SELECT {old_pair_cols}
-                FROM `tabCRM Family Relationship`
-                WHERE parent = %s AND parentfield = 'relationships'
-                """,
-                (family_id,),
-                as_dict=True,
-            )
-        }
+        old_rows = frappe.db.sql(
+            f"""
+            SELECT {old_pair_cols}
+            FROM `tabCRM Family Relationship`
+            WHERE parent = %s AND parentfield = 'relationships'
+            """,
+            (family_id,),
+            as_dict=True,
+        )
+        old_pairs = {(r["student"], r["guardian"]): r for r in old_rows}
+
+        # Giá trị kế thừa theo GUARDIAN (gộp từ mọi cháu sẵn có trong gia đình).
+        # Chỉ kế thừa khi các cháu hiện có ĐỒNG NHẤT: bố là "bố" với mọi cháu thì cháu
+        # mới cũng vậy. Nếu lệch nhau (vd bố xem được cháu A nhưng bị tắt với cháu B)
+        # thì KHÔNG đoán — trả None để rơi về default, vì đó là quyết định của nhà
+        # trường theo từng cháu, đoán sai là cấp nhầm quyền xem/đón.
+        _INHERIT_FIELDS = ("relationship_type", "access") + (
+            ("can_pickup",) if has_pickup_col else ()
+        )
+        inherit_by_guardian = {}
+        for gid in {r["guardian"] for r in old_rows if r.get("guardian")}:
+            rows_g = [r for r in old_rows if r.get("guardian") == gid]
+            merged = {}
+            for field in _INHERIT_FIELDS:
+                values = {r.get(field) for r in rows_g}
+                merged[field] = values.pop() if len(values) == 1 else None
+            inherit_by_guardian[gid] = merged
 
         normalized_relationships = []
         for idx, rel in enumerate(relationships):
@@ -979,21 +1000,25 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                 )
 
             old = old_pairs.get((student_id, guardian_id)) or {}
+            # Chỉ dùng khi cặp CHƯA có dòng (cháu mới vào gia đình sẵn có).
+            inherited = {} if old else (inherit_by_guardian.get(guardian_id) or {})
 
-            # relationship_type reqd=1: payload → giá trị cũ của cặp → "other"
+            # relationship_type reqd=1: payload → cặp cũ → kế thừa từ cháu khác → "other"
             relationship_type = (
                 normalize_relationship(rel.get("relationship_type"))
                 or old.get("relationship_type")
+                or inherited.get("relationship_type")
                 or "other"
             )
 
-            def _flag(field, default):
-                # Client gửi tường minh (kể cả 0/false) → tôn trọng; không gửi/null →
-                # kế thừa cặp cũ; cặp mới → default. Ép bool trước int vì int(None) ném.
-                if rel.get(field) is not None:
-                    return int(bool(rel.get(field)))
-                if field in old and old.get(field) is not None:
-                    return int(bool(old.get(field)))
+            def _flag(field, default, _old=old, _inherited=inherited, _rel=rel):
+                # Ép bool trước int vì int(None) ném TypeError.
+                if _rel.get(field) is not None:
+                    return int(bool(_rel.get(field)))
+                if _old.get(field) is not None:
+                    return int(bool(_old.get(field)))
+                if _inherited.get(field) is not None:
+                    return int(bool(_inherited.get(field)))
                 return default
 
             row = {
