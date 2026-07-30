@@ -547,7 +547,9 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
     for r in override_rows:
         row_date = r.get("date")
         if isinstance(row_date, str):
-            from datetime import datetime
+            # KHÔNG import datetime ở đây: import trong thân hàm biến `datetime` thành
+            # biến local của cả _build_entries_with_date_precedence, khiến closure
+            # _to_date() bên trên đọc phải local chưa gán → NameError và cả tuần trả rỗng.
             row_date = datetime.strptime(row_date, "%Y-%m-%d").date()
         
         # Convert datetime to date for comparison
@@ -626,8 +628,7 @@ def _build_entries_with_date_precedence(rows: list[dict], week_start: datetime) 
         
         # Add non-study entries for each date
         for date_str in all_dates:
-            # Parse date to get day of week
-            from datetime import datetime
+            # Parse date to get day of week (dùng `datetime` module-level — xem ghi chú trên)
             date_obj = datetime.strptime(date_str, "%Y-%m-%d")
             day_index = date_obj.weekday()  # 0=Monday, 6=Sunday
             day_names = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
