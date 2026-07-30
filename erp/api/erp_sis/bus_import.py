@@ -48,6 +48,7 @@ def _read_rows(
     workbook = load_workbook(BytesIO(file_content), data_only=True)
     worksheets = workbook.worksheets
     if not worksheets:
+        workbook.close()
         return [], []
 
     selected_sheet = worksheets[0]
@@ -59,6 +60,7 @@ def _read_rows(
             break
 
     data = [list(row) for row in selected_sheet.iter_rows(values_only=True)]
+    workbook.close()
     if not data:
         return [], []
     headers = [str(h).strip() if h is not None else "" for h in data[0]]
