@@ -16,7 +16,7 @@ LOG=/var/log/nginx/cdn.access.log
 WINDOW_MIN=${WINDOW_MIN:-15}
 
 # Prefix duoc coi la media that. Them bucket moi thi them vao day.
-BUCKETS="social-posts social-chat social-avatars scholarship student-photos sis-content"
+BUCKETS="social-posts social-chat social-avatars scholarship student-photos sis-content discipline"
 
 # Nguong toi thieu de mot ti le co y nghia thong ke — tranh bao dong gia luc vang
 MIN_SAMPLE_DENY=30

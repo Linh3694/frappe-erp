@@ -29,12 +29,32 @@ def _get_current_student_from_session():
         return None
 
 
+# TODO: tạm chặn dữ liệu bus cho parent portal (web + mobile) theo yêu cầu vận hành.
+# Bỏ cờ này (và block return sớm trong get_student_bus_trips) khi mở lại tính năng.
+BUS_TEMPORARILY_DISABLED = True
+
+
 @frappe.whitelist()
 def get_student_bus_trips():
     """Get morning and afternoon bus trips for current student"""
     logs = []
     try:
         logs.append("🚍 Starting get_student_bus_trips")
+
+        if BUS_TEMPORARILY_DISABLED:
+            # Trả payload rỗng đúng shape FE mong đợi để web/mobile hiện empty state,
+            # không trả trip nào vì FE gọi license_plate.split() trên từng trip.
+            logs.append("⛔ Bus data tạm bị chặn (BUS_TEMPORARILY_DISABLED)")
+            return success_response(
+                data={
+                    "date": date.today().isoformat(),
+                    "morning_trip": None,
+                    "afternoon_trip": None,
+                    "total_trips": 0,
+                },
+                message="Lấy thông tin chuyến xe thành công",
+                logs=logs
+            )
 
         student_id = _get_current_student_from_session()
         if not student_id:

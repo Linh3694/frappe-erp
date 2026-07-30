@@ -60,6 +60,11 @@ FILES_RE = re.compile(
 _DOMAIN_SOURCES = (
     "erp.common.student_photo_cdn",
     "erp.common.sis_content_cdn",
+    # Anh ky luat duyet SAU CUNG nen no chi thua chu khong bao gio cuop khoa cua
+    # hai nhom tren. Do tren prod 2026-07-30: 68 khoa ky luat giao RONG voi ca
+    # 3.284 khoa anh hoc sinh lan 2.822 khoa noi dung SIS, nen thu tu hien khong
+    # anh huong gi — nhung phai do lai neu them nhom moi.
+    "erp.common.discipline_cdn",
 )
 
 

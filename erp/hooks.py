@@ -1158,8 +1158,15 @@ doc_events = {
 	"PM Project Invitation": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
 	},
+	# Anh minh chung ky luat len CDN. Gan o doctype CHA chu khong o child table
+	# `SIS Discipline Record Image`: dong child duoc luu qua db_insert/db_update
+	# chu khong qua save(), nen doc_events cua child doctype se im lang khong chay.
+	# Xem erp/common/discipline_store.py va CDN-STATUS.md §7c.
 	"SIS Discipline Record": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
+		"after_insert": "erp.common.discipline_store.on_record_insert",
+		"on_update": "erp.common.discipline_store.on_record_update",
+		"on_trash": "erp.common.discipline_store.on_record_trash",
 	},
 	"SIS Discipline Classification": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
