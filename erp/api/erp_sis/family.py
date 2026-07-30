@@ -974,6 +974,37 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                 merged[field] = values.pop() if len(values) == 1 else None
             inherit_by_guardian[gid] = merged
 
+        # CHUYỂN HỌC SINH SANG GIA ĐÌNH KHÁC: cặp (student, guardian) có thể đã có dòng
+        # chuẩn ở gia đình CŨ. Bố vẫn là bố, quyền xem/đón và người liên lạc chính của
+        # chính cháu đó không có lý do gì reset chỉ vì đổi cách gom nhóm — nên đây là
+        # tín hiệu MẠNH NHẤT, xếp trên cả kế thừa từ anh/chị/em.
+        # Khác với kế thừa từ anh/chị/em: chỗ này CÓ kế thừa key_person, vì vẫn đúng
+        # cặp cháu–phụ huynh ấy chứ không phải suy sang cháu khác.
+        _MOVE_FIELDS = ("relationship_type", "key_person", "access") + (
+            ("can_pickup",) if has_pickup_col else ()
+        )
+        prior_pairs = {}
+        wanted_pairs = {
+            (str(r.get("student") or "").strip(), str(r.get("guardian") or "").strip())
+            for r in relationships
+            if isinstance(r, dict)
+        }
+        for sid, gid in wanted_pairs:
+            if not sid or not gid or (sid, gid) in old_pairs:
+                continue
+            rows_prev = [
+                r
+                for r in canonical_relationship_rows(guardian=gid, student=sid)
+                if r.get("family") != family_id
+            ]
+            if not rows_prev:
+                continue
+            merged = {}
+            for field in _MOVE_FIELDS:
+                values = {r.get(field) for r in rows_prev}
+                merged[field] = values.pop() if len(values) == 1 else None
+            prior_pairs[(sid, gid)] = merged
+
         normalized_relationships = []
         for idx, rel in enumerate(relationships):
             if not isinstance(rel, dict):
@@ -1000,23 +1031,29 @@ def update_family_members(family_id=None, students=None, guardians=None, relatio
                 )
 
             old = old_pairs.get((student_id, guardian_id)) or {}
-            # Chỉ dùng khi cặp CHƯA có dòng (cháu mới vào gia đình sẵn có).
+            # Hai nguồn kế thừa, chỉ dùng khi cặp CHƯA có dòng trong family này:
+            #   prior  = chính cặp đó ở gia đình CŨ (chuyển nhà) — mạnh hơn
+            #   sibling = guardian đó với các cháu khác trong family này
+            prior = {} if old else (prior_pairs.get((student_id, guardian_id)) or {})
             inherited = {} if old else (inherit_by_guardian.get(guardian_id) or {})
 
-            # relationship_type reqd=1: payload → cặp cũ → kế thừa từ cháu khác → "other"
+            # relationship_type reqd=1: payload → cặp cũ → gia đình cũ → cháu khác → "other"
             relationship_type = (
                 normalize_relationship(rel.get("relationship_type"))
                 or old.get("relationship_type")
+                or prior.get("relationship_type")
                 or inherited.get("relationship_type")
                 or "other"
             )
 
-            def _flag(field, default, _old=old, _inherited=inherited, _rel=rel):
+            def _flag(field, default, _old=old, _prior=prior, _inherited=inherited, _rel=rel):
                 # Ép bool trước int vì int(None) ném TypeError.
                 if _rel.get(field) is not None:
                     return int(bool(_rel.get(field)))
                 if _old.get(field) is not None:
                     return int(bool(_old.get(field)))
+                if _prior.get(field) is not None:
+                    return int(bool(_prior.get(field)))
                 if _inherited.get(field) is not None:
                     return int(bool(_inherited.get(field)))
                 return default

@@ -19,11 +19,13 @@ from typing import Any
 import frappe
 
 from erp.api.crm.lead import (
+    _ensure_lead_family_relationship,
     _ordered_guardian_names_for_lead,
     _recalculate_admission_profile_completion,
     _resolve_family_for_lead,
     build_lead_family_payload,
     enrich_lead_dict_with_sibling_lead_links,
+    merge_family_derived_siblings,
 )
 from erp.utils.family_relationship import (
     canonical_relationship_rows,
@@ -461,32 +463,35 @@ def _apply_guardian_updates(
             # Tránh fieldtype Email bị bỏ qua khi save
             frappe.db.set_value("CRM Guardian", gid, "email", email_from_request)
 
-        # TODO(Phạm vi 2b): cố ý KHÔNG dùng _resolve_family_for_lead() — đây là đường
-        # GHI vào CRM Family. Mở resolver sẽ bật dual-write lên dữ liệu đã lệch từ lâu,
-        # tức để Lead ghi đè Family (chiều sai). Xem ghi chú ở erp/api/crm/lead.py.
-        # Cập nhật relationship_type (cả child table lead_guardians và CRM
-        # Family Relationship nếu có linked_family)
+        # Đường GHI vào CRM Family — phải đi qua family ĐÃ RESOLVE, không dùng
+        # lead_doc.linked_family thô: field đó rỗng với mọi hồ sơ nhập học và cũ với học
+        # sinh đã chuyển gia đình, nên trước đây phụ huynh sửa quan hệ trên app thì API
+        # báo thành công mà màn hình (đọc dòng chuẩn) vẫn hiện giá trị cũ.
         if "relationship_type" in fields:
             relationship_type = fields.get("relationship_type")
             for lg in (getattr(lead_doc, "lead_guardians", None) or []):
                 if lg.get("guardian") == gid:
                     lg.relationship_type = relationship_type
-            if getattr(lead_doc, "linked_family", None):
-                rels = frappe.get_all(
-                    "CRM Family Relationship",
-                    filters={
-                        "parent": lead_doc.linked_family,
-                        "guardian": gid,
-                    },
-                    fields=["name"],
+            fam_name = _resolve_family_for_lead(lead_doc)
+            linked_sid = getattr(lead_doc, "linked_student", None)
+            if fam_name and linked_sid:
+                # BẮT BUỘC scope theo student: relationship_type là thuộc tính của CẶP.
+                # Lọc {parent, guardian} như trước sẽ để phụ huynh tự tay đổi quan hệ của
+                # chính mình với TẤT CẢ các con.
+                row_name = _ensure_lead_family_relationship(
+                    fam_name, linked_sid, gid, relationship_type=relationship_type or None
                 )
-                for r in rels:
+                if row_name:
                     frappe.db.set_value(
                         "CRM Family Relationship",
-                        r["name"],
+                        row_name,
                         "relationship_type",
                         relationship_type or "",
                     )
+                    # Tái ghi danh / đăng ký suất ăn đọc relationship_type từ MIRROR —
+                    # không dựng lại thì hai màn đó giữ giá trị cũ vô thời hạn.
+                    rebuild_student_relationship_mirror(linked_sid)
+                    rebuild_guardian_relationship_mirror(gid)
         audit_log.append(f"guardian:{gid}")
     return True, None
 
@@ -722,18 +727,34 @@ def _apply_set_primary_contact(
     # key_person là thuộc tính của CẶP (student, guardian) — mỗi cháu một người liên lạc
     # chính, KHÔNG phải một người cho cả gia đình. Nên mọi UPDATE đều scope theo
     # linked_student; thiếu linked_student thì không biết đang đổi cho cháu nào -> bỏ qua.
-    # TODO(Phạm vi 2b): vẫn gate bằng lead_doc.linked_family thô — chờ quyết định mở 2b.
-    if getattr(lead_doc, "linked_family", None) and lead_doc.linked_student:
+    fam_name_write = _resolve_family_for_lead(lead_doc)
+    if fam_name_write and lead_doc.linked_student:
+        # GUARD BẮT BUỘC trước câu SET key_person=0: thứ tự "xoá sạch rồi mới set" chỉ an
+        # toàn khi chắc chắn có dòng để bật lại. Guardian mới chỉ nằm ở lead_guardians sẽ
+        # khiến học sinh mất sạch người liên lạc chính — và giá trị cũ đã bị ghi đè nên
+        # không tự khôi phục được.
+        row_relationship = ""
+        for lg in (getattr(lead_doc, "lead_guardians", None) or []):
+            if lg.get("guardian") == guardian_name:
+                row_relationship = lg.get("relationship_type") or ""
+                break
+        row_name = _ensure_lead_family_relationship(
+            fam_name_write,
+            lead_doc.linked_student,
+            guardian_name,
+            relationship_type=row_relationship or None,
+        )
+        if not row_name:
+            return False, validation_error_response(
+                "Không tạo được quan hệ gia đình cho phụ huynh này",
+                {"guardian": ["Thiếu relationship"]},
+            )
         frappe.db.sql(
             "UPDATE `tabCRM Family Relationship` SET key_person=0 "
             "WHERE parent=%s AND student=%s",
-            (lead_doc.linked_family, lead_doc.linked_student),
+            (fam_name_write, lead_doc.linked_student),
         )
-        frappe.db.sql(
-            "UPDATE `tabCRM Family Relationship` SET key_person=1 "
-            "WHERE parent=%s AND student=%s AND guardian=%s",
-            (lead_doc.linked_family, lead_doc.linked_student, guardian_name),
-        )
+        frappe.db.set_value("CRM Family Relationship", row_name, "key_person", 1)
         # Dựng lại 2 bản mirror từ dòng chuẩn (helper tự gom mọi family của guardian).
         rebuild_student_relationship_mirror(lead_doc.linked_student)
         for gid in {
@@ -755,10 +776,17 @@ def _apply_set_primary_contact(
             break
     fam_name = _resolve_family_for_lead(lead_doc)
     if fam_name:
+        # Lọc thêm student: gia đình nhiều con thì dòng của cháu khác sẽ được gán vào
+        # field phẳng `CRM Lead.relationship` của hồ sơ này.
+        rel_filters = {
+            "parent": fam_name,
+            "parentfield": "relationships",
+            "guardian": guardian_name,
+        }
+        if getattr(lead_doc, "linked_student", None):
+            rel_filters["student"] = lead_doc.linked_student
         rel = frappe.db.get_value(
-            "CRM Family Relationship",
-            {"parent": fam_name, "guardian": guardian_name},
-            "relationship_type",
+            "CRM Family Relationship", rel_filters, "relationship_type"
         )
         if rel:
             lead_doc.relationship = rel
@@ -798,10 +826,11 @@ def _apply_reorder_guardians(
             {"order": ["Primary phải đứng đầu"]},
         )
 
-    # TODO(Phạm vi 2b): đường GHI display_order. Phải đổi CÙNG LÚC với
-    # _ordered_guardian_names_for_lead() — `expected` ở trên và đường ghi này buộc phải
-    # dùng cùng một nguồn, nếu không sẽ ghi display_order sai/thiếu.
-    if getattr(lead_doc, "linked_family", None):
+    # Đường GHI display_order. Dùng CHUNG nguồn với _ordered_guardian_names_for_lead()
+    # (đã chuyển sang _resolve_family_for_lead) — `expected` ở trên và đường ghi này buộc
+    # phải cùng nguồn, nếu không sẽ ghi display_order sai/thiếu.
+    fam_name_write = _resolve_family_for_lead(lead_doc)
+    if fam_name_write:
         stud = getattr(lead_doc, "linked_student", None)
         if not stud:
             return False, validation_error_response(
@@ -812,7 +841,8 @@ def _apply_reorder_guardians(
             row_name = frappe.db.get_value(
                 "CRM Family Relationship",
                 {
-                    "parent": lead_doc.linked_family,
+                    "parent": fam_name_write,
+                    "parentfield": "relationships",
                     "student": stud,
                     "guardian": gid,
                 },
@@ -905,6 +935,9 @@ def _build_refresh_payload(student_id: str) -> dict[str, Any]:
         )
 
     lead_for_siblings = doc.as_dict()
+    # Cặp với student_profile.py: cả hai đường đọc của portal phải cùng suy anh/chị/em từ
+    # CRM Family, nếu không danh sách sẽ nhấp nháy giữa màn xem và response sau commit.
+    merge_family_derived_siblings(doc, lead_for_siblings)
     enrich_lead_dict_with_sibling_lead_links(lead_for_siblings)
     siblings = lead_for_siblings.get("lead_siblings") or []
     for s in siblings:

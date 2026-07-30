@@ -127,6 +127,54 @@ def find_campus_id_by_title(campus_title):
         return None
 
 
+def resolve_campus_link_id(campus_id=None):
+    """
+    Chuẩn hoá campus_id trước khi ghi Link tới SIS Campus.
+    FE/role cũ có thể gửi campus-1 hoặc title — map sang docname (CAMPUS-00001).
+    """
+    def _map_single(value):
+        raw = (value or "").strip()
+        if not raw:
+            return None
+
+        if frappe.db.exists("SIS Campus", raw):
+            return raw
+
+        if raw.lower().startswith("campus-"):
+            try:
+                campus_index = int(raw.split("-", 1)[1])
+                mapped_campus = f"CAMPUS-{campus_index:05d}"
+                if frappe.db.exists("SIS Campus", mapped_campus):
+                    return mapped_campus
+            except (ValueError, IndexError):
+                pass
+
+        by_title = find_campus_id_by_title(raw)
+        if by_title:
+            return by_title
+
+        if raw.isdigit():
+            mapped_campus = f"CAMPUS-{raw.zfill(5)}"
+            if frappe.db.exists("SIS Campus", mapped_campus):
+                return mapped_campus
+
+        return None
+
+    for candidate in ((campus_id or "").strip(), get_current_campus_from_context()):
+        resolved = _map_single(candidate)
+        if resolved:
+            return resolved
+
+    try:
+        first_campus = frappe.db.get_value("SIS Campus", {}, "name", order_by="creation asc")
+        if first_campus:
+            return first_campus
+    except Exception as e:
+        frappe.logger().error(f"Error resolving fallback campus: {str(e)}")
+
+    frappe.throw(_("Không xác định được campus hợp lệ"), frappe.ValidationError)
+
+
 def get_all_campus_ids_from_user_roles(user_email=None):
     """
     Get all campus_ids that user has access to based on roles

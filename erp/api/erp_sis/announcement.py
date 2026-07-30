@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 import json
-from erp.utils.campus_utils import get_current_campus_from_context
+from erp.utils.campus_utils import get_current_campus_from_context, resolve_campus_link_id
 from erp.utils.api_response import (
     success_response,
     error_response,
@@ -262,10 +262,8 @@ def create_announcement():
 
         frappe.logger().info(f"Create announcement data: {list(data.keys())}")
 
-        # Get current user's campus information
-        campus_id = get_current_campus_from_context()
-        if not campus_id:
-            campus_id = "campus-1"
+        # Get current user's campus information — map campus-1 -> CAMPUS-00001 trước khi insert Link
+        campus_id = resolve_campus_link_id(get_current_campus_from_context())
 
         # Override campus_id to ensure user can't create for other campuses
         data['campus_id'] = campus_id
@@ -273,8 +271,8 @@ def create_announcement():
         # Validate required fields
         title_en = str(data.get("title_en", "")).strip()
         title_vn = str(data.get("title_vn", "")).strip()
-        content_en = str(data.get("content_en", "")).strip()
-        content_vn = str(data.get("content_vn", "")).strip()
+        content_en = frappe.utils.strip_html_tags(str(data.get("content_en", ""))).strip()
+        content_vn = frappe.utils.strip_html_tags(str(data.get("content_vn", ""))).strip()
         
         frappe.logger().info(f"Validation: title_en='{title_en}', title_vn='{title_vn}'")
 

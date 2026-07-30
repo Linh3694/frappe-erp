@@ -5,7 +5,11 @@ Chỉ phụ huynh có CRM Family Relationship với access=1 mới xem được.
 
 import frappe
 from erp.utils.api_response import success_response, error_response, validation_error_response
-from erp.api.crm.lead import build_lead_family_payload, enrich_lead_dict_with_sibling_lead_links
+from erp.api.crm.lead import (
+    build_lead_family_payload,
+    enrich_lead_dict_with_sibling_lead_links,
+    merge_family_derived_siblings,
+)
 
 
 # Các trường trên CRM Lead cần hiển thị tại Parent Portal (đồng bộ màn CRM StudentSection)
@@ -226,6 +230,9 @@ def get_student_profile():
         )
 
     lead_for_siblings = doc.as_dict()
+    # Suy anh/chị/em từ CRM Family (chỉ đọc, không ghi lead_siblings) — phải gọi ở CẢ hai
+    # đường đọc của portal, nếu không màn xem và response sau khi commit sẽ lệch nhau.
+    merge_family_derived_siblings(doc, lead_for_siblings)
     enrich_lead_dict_with_sibling_lead_links(lead_for_siblings)
     siblings = lead_for_siblings.get("lead_siblings") or []
     for s in siblings:
