@@ -30,9 +30,7 @@ truy van moi 5 phut, doi lai khop CHINH XAC thay vi doan theo mau ten file —
 quan trong vi anh lop (`Lớp 4A5....jpg`) khong theo mau `WS<ma>` nao ca.
 """
 
-import json
 import os
-import re
 import urllib.parse
 
 import frappe
@@ -42,27 +40,6 @@ from erp.common import cdn_sign
 CACHE_KEY = "erp:student_photo:migrated_names"
 CACHE_TTL = 300
 PREFIX = "student-photos"
-
-# Bat ca hai dang URL anh xuat hien trong response:
-#
-#     /files/WS123.jpg                                        (tuong doi)
-#     https://prod.sis.wellspring.edu.vn/files/WS123.jpg      (day du)
-#
-# Dang day du sinh ra tu `frappe.utils.get_url()` — vd `batch_get_students`,
-# `global_search`. Neu regex chi bat phan `/files/...` thi origin bi bo lai va
-# ket qua thanh `https://prod.sis...https://media...` — URL vo, anh khong hien.
-# Da dinh dung loi nay tren production 2026-07-29.
-#
-# Nhom 1 nuot ca origin (neu co) de bi thay het; nhom 2 la ten file.
-#
-# Ten file duoc phep chua DAU CACH (`Lớp 1A1.jpg`) nen khong loai \s o nhom 2 —
-# da tung sua nham va lam anh lop khong duoc ky. Nhung de tranh nuot qua xa khi
-# mot chuoi chua hai URL, nhom 2 dung lazy va phai ket thuc bang duoi anh.
-_FILES_RE = re.compile(
-    r'((?:https?://[^"\\\s]*?)?/files/)'
-    r'([^"\\]+?\.(?:jpe?g|png|webp|gif|heic|bmp|tiff?))',
-    re.IGNORECASE,
-)
 
 
 def _migrated_names():
@@ -137,48 +114,47 @@ def object_exists(name):
         return False
 
 
-def _sign_in_text(text, names):
-    """Thay moi `/files/<ten da migrate>` bang URL da ky."""
-    def repl(m):
-        raw = m.group(2)
-        name = os.path.basename(urllib.parse.unquote(raw))
-        if name not in names:
-            return m.group(0)
-        # Thay TOAN BO match (ke ca origin o nhom 1), khong chi phan ten file
-        signed = cdn_sign.sign_path(f"/{PREFIX}/{name}")
-        # Dang trong chuoi JSON nen phai escape lai dau `/` khong can, nhung `&`
-        # va ky tu unicode thi json.dumps da xu ly o buoc goi — o day ta thay
-        # truc tiep tren text nen chi can dam bao khong lam vo cu phap JSON.
-        return signed.replace("\\", "\\\\").replace('"', '\\"')
-    return _FILES_RE.sub(repl, text)
+def key_from_url(raw):
+    """Suy khoa tu phan sau `/files/`. Chi nhan path KHONG co thu muc con.
+
+    Anh hoc sinh von nam thang trong `files/` (khong o thu muc con). Neu chap
+    nhan path co `/` roi lay basename, URL SIS kieu `Menu_Categories/X.jpg`
+    trung ten anh hoc sinh se bi ky nham sang kho student-photos (nhom hoc sinh
+    dung truoc trong bo ky chung).
+
+    Gioi han: hai file o CUNG thu muc goc trung ten van tranh nhau theo thu tu
+    domain — siet nay khong xu ly duoc. Van can do trung ten tren du lieu that.
+    """
+    if not raw:
+        return None
+    key = urllib.parse.unquote(raw)
+    if not key or ".." in key:
+        return None
+    # Chi nhan path khong chua `/` — anh hoc sinh von o goc files/
+    if "/" in key:
+        return None
+    return key
+
+
+def get_domain():
+    """Domain cho bo ky chung — xem erp/common/files_cdn.py.
+
+    Suy khoa theo ten file o goc `files/`: ten `WS<ma hoc sinh>.jpg` von duy
+    nhat, va anh lop (`Lớp 4A5....jpg`) cung nam thang trong `files/`. Path co
+    thu muc con bi bo qua (xem `key_from_url`).
+    """
+    return {
+        "name": "student-photos",
+        "prefix": PREFIX,
+        "keys": _migrated_names(),
+        "key_from_url": key_from_url,
+        # None = dung cua so mac dinh nhu truoc, khong doi hanh vi
+        "expiry": None,
+    }
 
 
 def sign_response(**kwargs):
-    """Hook `after_request`. Nuot moi loi — khong duoc lam hong response."""
-    try:
-        if not cdn_sign.is_enabled():
-            return
-        response = kwargs.get("response")
-        if response is None:
-            return
-        ctype = (response.headers.get("Content-Type") or "").lower()
-        if "json" not in ctype:
-            return
+    """Giu lai de khong vo cau hinh cu; may moc da chuyen sang files_cdn."""
+    from erp.common import files_cdn
 
-        raw = response.get_data(as_text=True)
-        # Kiem tra re truoc: da so response khong he co `/files/`
-        if not raw or "/files/" not in raw:
-            return
-
-        names = _migrated_names()
-        if not names:
-            return
-
-        signed = _sign_in_text(raw, names)
-        if signed != raw:
-            # Xac nhan van la JSON hop le truoc khi ghi de. Neu regex lam hong
-            # cu phap thi tha khong ky con hon tra ve response vo.
-            json.loads(signed)
-            response.set_data(signed)
-    except Exception as e:  # noqa: BLE001
-        frappe.log_error(f"Ky anh hoc sinh that bai: {e}", "Student Photo CDN")
+    return files_cdn.sign_response(**kwargs)

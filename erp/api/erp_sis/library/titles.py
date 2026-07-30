@@ -15,6 +15,26 @@ from erp.utils.api_response import (
 from ._constants import TITLE_DTYPE, COPY_DTYPE, ACTIVITY_DTYPE
 from ._common import _require_library_role, _get_json_payload, _import_excel_to_rows
 
+
+def _push_cover_to_cdn(file_url: str) -> None:
+    """Đẩy bìa lên CDN sau `db.set_value` (set_value không chạy doc event).
+
+    Import trong thân hàm để tránh vòng lặp import với module CDN.
+    Nuốt lỗi: đẩy CDN hỏng không được làm gãy việc upload bìa.
+    Chỉ xoá cache allowlist khi đẩy thành công — cùng lý do với `on_doc_update`.
+    """
+    if not file_url:
+        return
+    try:
+        from erp.common.sis_content_store import push_url
+        from erp.common.sis_content_cdn import clear_cache
+
+        if push_url(file_url, "library"):
+            clear_cache()
+    except Exception as e:  # noqa: BLE001
+        frappe.log_error(f"Đẩy bìa thư viện lên CDN lỗi: {e}", "SIS Content Store")
+
+
 def _borrow_counts_by_title_ids(title_ids: List[str]) -> Dict[str, int]:
     """Đếm tổng lượt mượn theo đầu sách (gộp qua mã bản sao)."""
     if not title_ids:
@@ -210,6 +230,8 @@ def upload_title_cover():
         # Update title with cover_image URL
         frappe.db.set_value(TITLE_DTYPE, title_id, "cover_image", file_doc.file_url)
         frappe.db.commit()
+        # set_value không chạy doc event — đẩy CDN thủ công
+        _push_cover_to_cdn(file_doc.file_url)
         
         return success_response(
             data={"file_url": file_doc.file_url, "title_id": title_id},
@@ -288,6 +310,8 @@ def bulk_upload_covers():
             
             # Update title with cover_image URL
             frappe.db.set_value(TITLE_DTYPE, matched_title.name, "cover_image", file_doc.file_url)
+            # set_value không chạy doc event — đẩy CDN thủ công
+            _push_cover_to_cdn(file_doc.file_url)
             
             results.append({
                 "filename": filename,
