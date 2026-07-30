@@ -24,7 +24,7 @@ Ba mức độ, **đừng nhầm lẫn**: `code xong` ≠ `đã deploy` ≠ `đ�
 | Thư viện, thực đơn, tin tức — nén tại chỗ | ✅ Chạy production (−52%) |
 | Thư viện, thực đơn, tin tức — **lên CDN** | ✅ **Chạy production 2026-07-30 — cả ba nhóm đã migrate và đã bật, 63/63 phép thử đạt** (§14) |
 | **Chặn `/uploads` ẩn danh (social-service)** | ✅ **Chạy production 2026-07-30 08:47 — lỗ hổng §15 đã vá, 200 → 403** |
-| **Phase 3 (upload thẳng lên CDN)** | 🟡 Code xong + test xanh (BE + web + mobile), BE **đã deploy** cùng đợt vá `/uploads`, cờ `CDN_DIRECT_UPLOAD` vẫn **TẮT**; C7 mobile chưa commit (§16) |
+| **Phase 3 (upload thẳng lên CDN)** | 🟡 Đường đi **đã thông thật** — 12/12 phép thử PUT thật→promote→tải về trên prod 30/07 sau khi vá `location /cdn-staging/` còn thiếu trên nginx (thiếu nó thì mọi PUT 404 và client âm thầm về multipart). Cờ `CDN_DIRECT_UPLOAD` vẫn **TẮT** — chờ đo đạc, chưa có nhu cầu (§16) |
 | Phase 4 (dọn dẹp) | 🟡 Script để sẵn + test xanh; **cố ý chưa chạy** — giữ fallback tới ~giữa 2027 (§17) |
 | **Ảnh hồ sơ kỷ luật học sinh** | ✅ **Chạy production 2026-07-30 — lỗ hổng §7c đã vá, 68 ảnh, 142/142 phép thử đạt** |
 | Phân loại ~6.600 file công khai chưa rõ | ✅ **Mã thoát 0** — 141 + 68 + 28 file nhạy cảm đã vá. Ba nhóm chưa rà nội dung còn lại ở §18 |
@@ -1081,7 +1081,11 @@ Bước promote **vẫn đọc byte về** để chạy sharp/ffmpeg (§16 trên
 > ⚠️ Phải import từ **`expo-file-system/legacy`**. Trong SDK 54, `uploadAsync` ở entry mới đã deprecated và **throw lúc chạy**.
 > ⚠️ `uploadAsync` **không throw khi HTTP lỗi**, chỉ trả `{ status }`. Quên kiểm là coi mọi lần PUT thất bại như thành công.
 
-**2. Nguy cơ lệch Content-Type — và vì sao nó im lặng.** Server ký URL theo kiểu MIME client khai; client phải gửi lại **đúng** chuỗi đó. `fetch` với body là Blob có thể tự đặt lại theo `blob.type`, lệch một ký tự là MinIO trả 403 `SignatureDoesNotMatch`. Vì có đường quay về multipart, lỗi này **không ai thấy**: người dùng đăng bài bình thường, chỉ là đường trực tiếp không bao giờ chạy. `uploadAsync` gửi đúng header ta truyền vào.
+**2. ~~Nguy cơ lệch Content-Type~~ — ĐO RA LÀ KHÔNG CÓ.** Suy luận ban đầu: chữ ký phủ Content-Type nên lệch một ký tự là 403 `SignatureDoesNotMatch`. **Sai.** Đo trên prod (`test-cdn-phase3-live.js`, 30/07 17:0x): presigner của SDK v3 ký `X-Amz-SignedHeaders=host`, **không** có `content-type`; PUT với `image/png` trong khi ký `image/jpeg` vẫn trả **2xx**.
+
+Vẫn nên gửi đúng header, nhưng vì lý do khác: `promote()` lấy Content-Type **đã lưu** để chọn nhánh ảnh/video của pipeline, khai lệch thì sharp/ffmpeg ném lỗi ở bước promote. Phép thử đã ghi lại `SignedHeaders=host` như một **bất biến** — nếu SDK đổi hành vi, phép thử đỏ và nhắc rằng lúc đó client buộc phải gửi khớp từng ký tự.
+
+> Đổi sang `uploadAsync` vẫn đúng, nhưng công trạng chỉ là **chống hết bộ nhớ** (lỗi 1), không phải chống lệch chữ ký.
 
 **3. Phủ sóng hẹp.** Đường trực tiếp trước đây chỉ có trong `createPost`. `createClassPost` — Wislife theo lớp, luồng GVCN dùng nhiều nhất — vẫn multipart, nên bật cờ lên gần như không đổi gì trong thực tế. Đã gom vào `thuTaiThangLenCdn()` để hai luồng không thể lệch nhau. **Đính kèm chat vẫn chưa nối** — biết và chấp nhận.
 
@@ -1102,6 +1106,44 @@ Vì vậy thêm `CDN_DIRECT_UPLOAD_USERS` (social-service `9af34e4`, deploy prod
 `capability`, `presign` và `promote` dùng **cùng một hàm** `directUploadChoUser()`. Nếu ba chỗ tự suy riêng thì sẽ có ngày `capability` bảo "được" mà `presign` trả 409, client rơi về multipart im lặng và không ai hiểu tại sao. Test `84/84` (thêm 4 cho danh sách trắng).
 
 Quy trình thử: thêm Mongo user id của một tài khoản vào `CDN_DIRECT_UPLOAD_USERS` trong `config.env` → `pm2 reload social-service` (**không** `--update-env`; `dotenv` đọc `config.env` lúc tiến trình khởi động nên reload thường là đủ) → đăng bài kèm ảnh **và một video dài** từ máy thật → kiểm object xuất hiện trong bucket đích và `cdn-staging` sạch → chỉ khi đó mới bật cờ toàn cục.
+
+Đã chạy thử chính quy trình này trên prod 30/07 17:0x với id giả `phase3-probe-user` (không phải người thật): sau `pm2 reload`, cờ toàn cục vẫn tắt, `phase3-probe-user` → `true`, mọi id khác → `false`, `/health` 200. Còn nguyên trong `config.env`; ngày thử máy thật thì **thay** bằng id thật.
+
+### 🔴 Tiền đề bị bỏ sót — nginx không có đường ghi vào `cdn-staging` (vá 2026-07-30 17:0x)
+
+Đây là **lần thứ ba** cùng một loại lỗi: code xong, bucket xong, IAM xong, nhưng thiếu `location` trên nginx (trước đó là §14 và `student-photos` thiếu trong `cdn-checks.sh`).
+
+Presigned PUT **buộc** phải ký bằng host công khai — SigV4 phủ `Host`, ký bằng `172.16.20.31:9000` rồi cho client dùng qua `media.wellspring.edu.vn` là `SignatureDoesNotMatch` chắc chắn (`s3.js` đã ghi chú đúng chỗ này). Nên client luôn PUT vào `https://media.wellspring.edu.vn/cdn-staging/<khoá>`. Nhưng vhost `media` **không có `location` nào khớp** ⇒ rơi vào `location / { return 404; }`.
+
+Hệ quả: **mọi** PUT trực tiếp trả 404 và client **âm thầm** quay về multipart. Phase 3 chưa từng chạy được ở bất kỳ đâu — web hay mobile. Vì cờ đang tắt nên không ai bị ảnh hưởng; nếu bật cờ mà không vá, kết quả là "bật rồi mà chẳng thấy gì đổi".
+
+Dòng "`cdn-staging`: anonymous `none`, không phát ra ngoài" trong `CDN-Design.md` §7 từng bị đọc như một **quyết định bảo mật**, trong khi nó chặn luôn cả đường ghi mà chính Phase 3 cần. Bản thiết kế §10 chỉ liệt kê endpoint presign, worker promote và cập nhật client — **không** nhắc tới nginx.
+
+`location /cdn-staging/` đã thêm, khác các location đọc ở ba điểm:
+
+| Điểm | Lý do |
+|---|---|
+| **Không** `secure_link` | Xác thực là chữ ký SigV4 trong query, do chính MinIO kiểm. Thêm `secure_link` vào là chặn oan. |
+| `proxy_pass` **không có phần URI** | Chữ ký phủ cả URI; rewrite đường dẫn là `SignatureDoesNotMatch`. |
+| Chỉ `PUT` (+ `OPTIONS` preflight) | `GET`/`HEAD`/`DELETE` → 405, nên vùng đệm vẫn **không đọc được** từ Internet. |
+
+Thêm `proxy_request_buffering off` để video 100 MB không bị nginx ghi tạm ra đĩa VM3 trước khi chuyển tiếp, và `client_max_body_size 110m`.
+
+> ⚠️ **Không dùng `limit_except PUT { deny all; }`.** Nó chặn ở access phase, chạy **trước** khi nhánh `OPTIONS` kịp trả 204, nên preflight của web client bị 403 (đã mắc và đã sửa). Kiểm phương thức tường minh bằng `if ($request_method != PUT) { return 405; }` thì đúng thứ tự.
+
+### Bộ thử trên hạ tầng thật — `scripts/test-cdn-phase3-live.js` (social-service `4ecacb5`)
+
+Unit test (`test-cdn-phase3.js`, 13 phép) không thể bắt lỗi trên: nó không PUT thật. Bộ mới PUT thật qua nginx → promote thật → tải về thật, **12/12 đạt** sau khi vá.
+
+Nó bật `CDN_DIRECT_UPLOAD` trong bộ nhớ **của chính tiến trình nó**, nên tiến trình đang phục vụ người dùng không bị ảnh hưởng, không cần reload, và không phút nào cờ được bật cho người thật. Tự dọn mọi object nó tạo.
+
+```bash
+ssh cdn 'ssh micro "cd /srv/app/social-service && node scripts/test-cdn-phase3-live.js"'
+```
+
+Ngoài đường đi chính, nó chốt bốn bất biến: khoá staging mang tiền tố `userId`; không promote được khoá của người khác (`STAGING_KEY_FORBIDDEN`); vượt trần thì promote **xoá** object chứ không để chiếm chỗ; và vùng đệm chỉ ghi được, không đọc được từ ngoài.
+
+**Vẫn chưa kiểm được** (chỉ hiện trên thiết bị thật với bản app mới): bộ nhớ khi gửi video lớn, và header thực tế RN gửi đi.
 
 ### Thứ tự bắt buộc khi bật
 
