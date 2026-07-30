@@ -86,6 +86,9 @@ class TimetableImportExecutor:
 		# Tên cột lớp trong Excel nhưng không tra ra SIS Class (theo campus + năm học)
 		self.unresolved_classes = []
 
+		# Lớp bị bỏ qua vì Excel không resolve được môn/tiết nào (tránh xóa TKB cũ)
+		self.skipped_empty_classes = []
+
 		# Logs
 		self.logs = []
 	
@@ -132,6 +135,22 @@ class TimetableImportExecutor:
 			except Exception as e:
 				raise Exception(f"Failed to process classes: {str(e)}")
 			
+			# Không commit khi không tạo được tiết nào — tránh "thành công" nhưng lưới trống
+			# sau full-replacement / skip im lặng toàn bộ môn-tiết.
+			if self.stats["rows_created"] == 0:
+				detail = ""
+				if self.skipped_empty_classes:
+					detail = " Các lớp không tạo được tiết: " + "; ".join(
+						self.skipped_empty_classes[:10]
+					)
+					if len(self.skipped_empty_classes) > 10:
+						detail += f" (và {len(self.skipped_empty_classes) - 10} lớp khác)"
+				raise Exception(
+					"Import không tạo được tiết học nào. Thời khóa biểu cũ đã được giữ nguyên "
+					"(không xóa khi Excel không khớp môn/tiết)."
+					+ detail
+				)
+
 			# Step 3: Sync Student Subjects
 			try:
 				self._sync_student_subjects()
@@ -275,12 +294,20 @@ class TimetableImportExecutor:
 			if subject_id:
 				self.cache["subjects"][title] = subject_id
 		
-		# Cache periods
+		# Cache periods — lưu nhiều key alias (1.0 / "1" / "Tiết 1") để lookup không miss
 		unique_periods = self.df["Tiết"].dropna().unique()
 		for name in unique_periods:
 			period_id = self._get_period_id(name, education_stage_id)
 			if period_id:
 				self.cache["periods"][name] = period_id
+				as_str = str(name).strip()
+				self.cache["periods"][as_str] = period_id
+				try:
+					as_int = str(int(float(name)))
+					self.cache["periods"][as_int] = period_id
+					self.cache["periods"][f"Tiết {as_int}"] = period_id
+				except (TypeError, ValueError):
+					pass
 		
 		# Cache teacher assignments
 		self._cache_teacher_assignments(campus_id)
@@ -551,12 +578,26 @@ class TimetableImportExecutor:
 		
 		⚡ REFACTORED (2025-12-19): Sử dụng valid_from/valid_to cho pattern rows
 		
-		Logic mới:
-		1. Xóa pattern rows có overlapping date range
-		2. Tạo pattern rows mới với valid_from/valid_to
+		Logic:
+		1. Đếm tiết Excel resolve được (môn + tiết) TRƯỚC khi đụng instance/xóa
+		2. Nếu 0 tiết → bỏ qua lớp, giữ nguyên TKB cũ
+		3. Có tiết → tạo/lấy instance, xóa overlapping, ghi pattern mới
 		"""
 		self.logs.append(f"🏫 Processing class: {class_title} ({len(class_df)} rows)")
 		frappe.logger().info(f"🏫 Starting _process_class for {class_title} with {len(class_df)} rows")
+
+		# Chặn xóa sạch rồi ghi 0: chỉ đụng DB khi chắc chắn tạo được ít nhất 1 tiết
+		creatable_count, skip_samples = self._count_creatable_pattern_rows(class_df)
+		if creatable_count == 0:
+			sample_msg = "; ".join(skip_samples[:5]) if skip_samples else "không có dòng môn/tiết hợp lệ"
+			msg = (
+				f"Lớp '{class_title}': Excel không khớp môn/tiết nào trong hệ thống "
+				f"({sample_msg}). Đã giữ nguyên TKB cũ."
+			)
+			self.skipped_empty_classes.append(msg)
+			self.logs.append(f"⚠️  {msg}")
+			frappe.logger().warning(f"⚠️ Skip class {class_title}: 0 creatable rows — {sample_msg}")
+			return
 		
 		# Create or get instance
 		instance_id = self._create_or_get_instance(class_id)
@@ -572,9 +613,80 @@ class TimetableImportExecutor:
 		# Tạo pattern rows mới với valid_from/valid_to
 		rows_created = self._create_pattern_rows_with_date_range(instance_id, class_id, class_df)
 		frappe.logger().info(f"✅ Created {rows_created} pattern rows for {class_title}")
+
+		# Edge case: đếm trước > 0 nhưng insert thực tế = 0 → fail để rollback cả transaction
+		if rows_created == 0:
+			raise Exception(
+				f"Lớp '{class_title}': không tạo được tiết nào sau khi chuẩn bị xóa TKB cũ. "
+				f"Import bị hủy để tránh mất dữ liệu."
+			)
 		
 		self.stats["rows_created"] += rows_created
 		self.logs.append(f"  ✓ Created {rows_created} pattern rows for {class_title}")
+
+	def _resolve_period_id(self, period_name) -> Optional[str]:
+		"""Resolve period từ cache; chuẩn hóa float Excel (1.0 → '1' / 'Tiết 1')."""
+		if period_name is None or (isinstance(period_name, float) and pd.isna(period_name)):
+			return None
+		period_id = self.cache["periods"].get(period_name)
+		if period_id:
+			return period_id
+		# Thử key dạng chuỗi trim
+		as_str = str(period_name).strip()
+		period_id = self.cache["periods"].get(as_str)
+		if period_id:
+			return period_id
+		# Pandas đọc số thành float
+		try:
+			as_int = str(int(float(period_name)))
+			return (
+				self.cache["periods"].get(as_int)
+				or self.cache["periods"].get(f"Tiết {as_int}")
+			)
+		except (TypeError, ValueError):
+			return None
+
+	def _count_creatable_pattern_rows(self, class_df: pd.DataFrame) -> tuple:
+		"""
+		Đếm số dòng Excel sẽ tạo được pattern (subject + period resolve trong cache).
+		Không ghi DB. Trả (count, mẫu lý do skip) để log/UI.
+		"""
+		creatable = 0
+		skip_samples = []
+		seen_skip = set()
+
+		for _, row in class_df.iterrows():
+			subject_title = row.get("Môn học")
+			period_name = row.get("Tiết")
+
+			if pd.isna(subject_title) or str(subject_title).strip() == "":
+				key = "môn trống"
+				if key not in seen_skip and len(skip_samples) < 8:
+					skip_samples.append(key)
+					seen_skip.add(key)
+				continue
+			if pd.isna(period_name) or str(period_name).strip() == "":
+				key = "tiết trống"
+				if key not in seen_skip and len(skip_samples) < 8:
+					skip_samples.append(key)
+					seen_skip.add(key)
+				continue
+
+			subject_id = self.cache["subjects"].get(subject_title)
+			if subject_id is None and isinstance(subject_title, str):
+				subject_id = self.cache["subjects"].get(subject_title.strip())
+			period_id = self._resolve_period_id(period_name)
+
+			if not subject_id or not period_id:
+				key = f"môn='{subject_title}', tiết='{period_name}'"
+				if key not in seen_skip and len(skip_samples) < 8:
+					skip_samples.append(key)
+					seen_skip.add(key)
+				continue
+
+			creatable += 1
+
+		return creatable, skip_samples
 	
 	def _create_or_get_instance(self, class_id: str) -> str:
 		"""
@@ -1071,7 +1183,9 @@ class TimetableImportExecutor:
 			day_of_week = self._normalize_day_of_week(row["Thứ"])
 			
 			subject_id = self.cache["subjects"].get(subject_title)
-			period_id = self.cache["periods"].get(period_name)
+			if subject_id is None and isinstance(subject_title, str):
+				subject_id = self.cache["subjects"].get(subject_title.strip())
+			period_id = self._resolve_period_id(period_name)
 			
 			if not subject_id or not period_id:
 				self.logs.append(
@@ -1696,22 +1810,36 @@ class TimetableImportExecutor:
 		return subject_id
 	
 	def _get_period_id(self, name: str, education_stage_id: str) -> Optional[str]:
-		"""Get period ID from name"""
-		period_id = frappe.db.get_value(
-			"SIS Timetable Column",
-			{"education_stage_id": education_stage_id, "period_name": name},
-			"name"
-		)
-		
-		if not period_id:
-			# Try without education stage filter
+		"""Get period ID from name — hỗ trợ float Excel và alias 'Tiết N'."""
+		candidates = [name]
+		as_str = str(name).strip() if name is not None else ""
+		if as_str and as_str not in candidates:
+			candidates.append(as_str)
+		try:
+			as_int = str(int(float(name)))
+			candidates.extend([as_int, f"Tiết {as_int}"])
+		except (TypeError, ValueError):
+			pass
+
+		for candidate in candidates:
 			period_id = frappe.db.get_value(
 				"SIS Timetable Column",
-				{"period_name": name},
+				{"education_stage_id": education_stage_id, "period_name": candidate},
 				"name"
 			)
-		
-		return period_id
+			if period_id:
+				return period_id
+
+		for candidate in candidates:
+			period_id = frappe.db.get_value(
+				"SIS Timetable Column",
+				{"period_name": candidate},
+				"name"
+			)
+			if period_id:
+				return period_id
+
+		return None
 	
 	def _get_teachers_for_class_subject(
 		self,
@@ -2661,6 +2789,36 @@ def execute_import_synchronous(file_path: str, metadata: Dict, progress_callback
 			instance_msg = f"Đã cập nhật {instances_updated} lớp"
 		else:
 			instance_msg = "Không có lớp nào được xử lý"
+
+		# Đai an toàn: không bao giờ trả success khi 0 tiết (kể cả executor lỡ trả True)
+		if rows == 0:
+			error_message = (
+				f"❌ Import thất bại: {instance_msg} với 0 tiết học. "
+				f"Kiểm tra tên môn/tiết trong Excel khớp hệ thống."
+			)
+			frappe.logger().error(error_message)
+			if progress_callback:
+				progress_callback({
+					"phase": "error",
+					"current": 0,
+					"total": 100,
+					"percentage": 0,
+					"message": error_message,
+					"current_class": ""
+				})
+			return {
+				"success": False,
+				"message": error_message,
+				"timetable_id": exec_stats.get('timetable_id'),
+				"instances_created": instances_created,
+				"instances_updated": instances_updated,
+				"total_instances_processed": total_instances,
+				"rows_created": 0,
+				"stats": exec_stats,
+				"errors": [error_message],
+				"warnings": validation_result.get('warnings', []) + execution_result.get('warnings', []),
+				"logs": execution_result.get('logs', []),
+			}
 		
 		success_message = f"✅ Import thành công! {instance_msg} với {rows} tiết học"
 		
