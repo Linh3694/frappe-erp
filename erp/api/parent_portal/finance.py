@@ -14,7 +14,6 @@ from erp.utils.api_response import (
     success_response, 
     list_response
 )
-from erp.api.parent_portal.otp_auth import is_production_server
 
 # Tên cột: "Tên viết tắt" — gỡ lặp với chuỗi "Lớp: …" trên phụ huynh
 _LOP_PREFIX_RE = re.compile(r"^Lớp\s*[:：]?\s*")
@@ -553,23 +552,12 @@ def get_finance_years():
     Lấy danh sách năm tài chính của các học sinh thuộc phụ huynh.
     Dùng để hiển thị dropdown chọn năm học.
     
-    Trên môi trường production, trả về coming_soon để FE hiển thị thông báo.
-    
     Returns:
         Danh sách năm tài chính unique
     """
     logs = []
     
     try:
-        # Kiểm tra production - nếu production thì báo tính năng sắp ra mắt
-        if is_production_server():
-            return {
-                "success": False,
-                "coming_soon": True,
-                "message": "Tính năng sẽ sớm ra mắt trong thời gian tới",
-                "data": None
-            }
-        
         # Kiểm tra phụ huynh
         parent_id = _get_current_parent()
         if not parent_id:
@@ -618,8 +606,6 @@ def get_all_students_finance(finance_year_id=None):
     Lấy tổng hợp tài chính của tất cả học sinh của phụ huynh.
     Dùng để hiển thị overview trên dashboard.
     
-    Trên môi trường production, trả về coming_soon để FE hiển thị thông báo.
-    
     Args:
         finance_year_id: ID năm tài chính (optional). Nếu không truyền, lấy năm active.
     
@@ -629,15 +615,6 @@ def get_all_students_finance(finance_year_id=None):
     logs = []
     
     try:
-        # Kiểm tra production - nếu production thì báo tính năng sắp ra mắt
-        if is_production_server():
-            return {
-                "success": False,
-                "coming_soon": True,
-                "message": "Tính năng sẽ sớm ra mắt trong thời gian tới",
-                "data": None
-            }
-        
         # Lấy finance_year_id từ query params nếu không truyền vào
         if not finance_year_id:
             finance_year_id = frappe.request.args.get('finance_year_id')

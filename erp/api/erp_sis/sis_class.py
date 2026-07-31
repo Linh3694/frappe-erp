@@ -797,18 +797,21 @@ def update_class(class_id: str = None):
         
         # Prepare update data
         update_data = {}
+        clearable_link_fields = ["homeroom_teacher", "vice_homeroom_teacher", "room"]
         for key in ["title", "short_title", "campus_id", "school_year_id", "education_grade", "academic_program", "homeroom_teacher", "vice_homeroom_teacher", "room"]:
-            if data.get(key) is not None:
+            # Link fields có thể bị bỏ gán: chỉ cần key có mặt trong payload là xử lý,
+            # '' hoặc null đều nghĩa là "Không chọn". Các field khác giữ nguyên hành vi cũ
+            # (bỏ qua khi null) để tránh xoá nhầm dữ liệu bắt buộc.
+            if key in clearable_link_fields:
+                if key not in data:
+                    continue
                 value = data.get(key)
-                
-                # ⚡ FIX: Convert empty string to None for Link fields
-                # When user selects "Không chọn" in frontend, it sends empty string ''
-                # But Frappe Link fields need None to clear the value
-                if key in ["homeroom_teacher", "vice_homeroom_teacher", "room"] and value == '':
+                if value is None or (isinstance(value, str) and value.strip() == ''):
                     value = None
-                    frappe.logger().info(f"🔄 Converting empty string to None for {key}")
-                
+                    frappe.logger().info(f"🔄 Clearing link field {key}")
                 update_data[key] = value
+            elif data.get(key) is not None:
+                update_data[key] = data.get(key)
         
         # 🔍 DEBUG: Log homeroom teacher changes
         if "homeroom_teacher" in update_data or "vice_homeroom_teacher" in update_data:
