@@ -78,14 +78,16 @@ def _is_within_24_hours(submitted_at):
 	return time_diff.total_seconds() <= (24 * 60 * 60)
 
 
-def _check_overlapping_leave_requests(student_id, start_date, end_date):
+def _check_overlapping_leave_requests(student_id, start_date, end_date, exclude_request_id=None):
 	"""Check if there are overlapping leave requests for this student
-	
+
 	Args:
 		student_id: Student ID
 		start_date: Start date of new leave request (string: YYYY-MM-DD)
 		end_date: End date of new leave request (string: YYYY-MM-DD)
-	
+		exclude_request_id: Bỏ qua đơn này khi đối chiếu (dùng lúc sửa đơn — đơn
+			đang sửa luôn tự chồng lên chính nó)
+
 	Returns:
 		Dict with:
 		- overlapping_dates: List of individual dates that overlap
@@ -93,15 +95,19 @@ def _check_overlapping_leave_requests(student_id, start_date, end_date):
 		- has_overlap: Boolean flag
 	"""
 	from datetime import datetime, timedelta
-	
+
 	# Convert string dates to datetime objects
 	new_start = datetime.strptime(str(start_date), '%Y-%m-%d').date()
 	new_end = datetime.strptime(str(end_date), '%Y-%m-%d').date()
-	
+
 	# Find all existing leave requests for this student
+	filters = {"student_id": student_id}
+	if exclude_request_id:
+		filters["name"] = ["!=", exclude_request_id]
+
 	existing_requests = frappe.get_all(
 		"SIS Student Leave Request",
-		filters={"student_id": student_id},
+		filters=filters,
 		fields=["name", "start_date", "end_date", "reason"]
 	)
 	
@@ -354,6 +360,17 @@ def _validate_parent_student_access(parent_id, student_ids):
 	return True
 
 
+def _normalize_other_reason(reason, other_reason):
+	"""other_reason chỉ có nghĩa khi reason == 'other' — các trường hợp khác phải rỗng.
+
+	Tránh trường hợp đơn đổi từ 'Lý do khác' sang lý do khác mà text cũ vẫn còn
+	trong DB rồi hiển thị lẫn lộn ở danh sách.
+	"""
+	if reason != 'other':
+		return ''
+	return (other_reason or '').strip()
+
+
 def _get_student_display_name(student_id):
 	"""Lấy tên hiển thị của học sinh để báo lỗi theo từng HS."""
 	return frappe.db.get_value("CRM Student", student_id, "student_name") or student_id
@@ -518,7 +535,7 @@ def submit_leave_request():
 					"parent_id": parent_id,
 					"campus_id": student_campus,
 					"reason": data['reason'],
-					"other_reason": data.get('other_reason', ''),
+					"other_reason": _normalize_other_reason(data['reason'], data.get('other_reason')),
 					"start_date": data['start_date'],
 					"end_date": data['end_date'],
 					"description": data.get('description', ''),
@@ -736,12 +753,38 @@ def update_leave_request():
 		if not leave_request.can_edit():
 			return error_response("Đã quá thời hạn chỉnh sửa (24 giờ)")
 
+		# Ngày sau khi sửa — field nào không gửi lên thì giữ nguyên giá trị cũ
+		new_start_date = data.get('start_date') or str(leave_request.start_date)
+		new_end_date = data.get('end_date') or str(leave_request.end_date)
+
+		if new_start_date > new_end_date:
+			return error_response("Ngày kết thúc phải sau hoặc bằng ngày bắt đầu")
+
+		# Chặn trùng ngày với đơn khác của cùng học sinh (bỏ qua chính đơn đang sửa)
+		overlap_check = _check_overlapping_leave_requests(
+			leave_request.student_id,
+			new_start_date,
+			new_end_date,
+			exclude_request_id=leave_request.name,
+		)
+		if overlap_check['has_overlap']:
+			dates_str_vi = ", ".join(_format_overlap_dates(overlap_check['overlapping_dates']))
+			frappe.logger().warning(
+				f"⚠️ Update {leave_request.name} overlaps existing leave on dates: {dates_str_vi}"
+			)
+			return error_response(f"Ngày {dates_str_vi} đã có đơn xin nghỉ phép.")
+
 		# Update fields
 		updatable_fields = ['reason', 'other_reason', 'start_date', 'end_date', 'description']
 
 		for field in updatable_fields:
 			if field in data:
 				leave_request.set(field, data[field])
+
+		# other_reason phải khớp với reason cuối cùng (kể cả khi client không gửi lên)
+		leave_request.other_reason = _normalize_other_reason(
+			leave_request.reason, leave_request.other_reason
+		)
 
 		# Handle file attachments if any
 		if frappe.request.files:

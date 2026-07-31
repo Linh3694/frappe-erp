@@ -100,6 +100,49 @@ class SISStudentLeaveRequest(Document):
 		except Exception as e:
 			frappe.logger().error(f"❌ [Leave] Failed to delete attendance: {str(e)}")
 
+	def get_holiday_dates(self):
+		"""Ngày nghỉ lễ áp dụng toàn campus trong khoảng nghỉ (SIS Calendar type=holiday).
+
+		Chỉ tính các mục lịch áp dụng cho toàn campus (không gán education_stages).
+		Mục lịch giới hạn theo khối/cấp học được bỏ qua có chủ đích: thà tạo dư một
+		bản ghi "excused" còn hơn bỏ sót ngày học thật của học sinh.
+		"""
+		holidays = set()
+
+		if not self.campus_id:
+			return holidays
+
+		try:
+			entries = frappe.get_all(
+				"SIS Calendar",
+				filters={
+					"campus_id": self.campus_id,
+					"type": "holiday",
+					"start_date": ["<=", self.end_date],
+					"end_date": [">=", self.start_date],
+				},
+				fields=["name", "start_date", "end_date"],
+			)
+		except Exception as e:
+			frappe.logger().warning(f"⚠️ [Leave] Không đọc được SIS Calendar: {str(e)}")
+			return holidays
+
+		leave_start = datetime.strptime(str(self.start_date), '%Y-%m-%d')
+		leave_end = datetime.strptime(str(self.end_date), '%Y-%m-%d')
+
+		for entry in entries:
+			# Mục lịch gán cho khối/cấp cụ thể → không coi là nghỉ toàn campus
+			if frappe.db.exists("SIS Calendar Education Stage", {"parent": entry.name}):
+				continue
+
+			current = max(datetime.strptime(str(entry.start_date), '%Y-%m-%d'), leave_start)
+			entry_end = min(datetime.strptime(str(entry.end_date), '%Y-%m-%d'), leave_end)
+			while current <= entry_end:
+				holidays.add(current.strftime('%Y-%m-%d'))
+				current += timedelta(days=1)
+
+		return holidays
+
 	def sync_to_attendance(self):
 		"""Sync leave to homeroom attendance for each day in the leave period"""
 		if not self.start_date or not self.end_date or not self.student_id:
@@ -127,9 +170,19 @@ class SISStudentLeaveRequest(Document):
 		current_date = datetime.strptime(str(self.start_date), '%Y-%m-%d')
 		end_date = datetime.strptime(str(self.end_date), '%Y-%m-%d')
 
+		holiday_dates = self.get_holiday_dates()
+
 		synced_count = 0
+		skipped_count = 0
 		while current_date <= end_date:
 			date_str = current_date.strftime('%Y-%m-%d')
+
+			# Bỏ qua ngày không đi học: T7 (5), CN (6) và ngày nghỉ lễ
+			if current_date.weekday() >= 5 or date_str in holiday_dates:
+				frappe.logger().info(f"⏭️ [Leave] Bỏ qua ngày không đi học {date_str}")
+				skipped_count += 1
+				current_date += timedelta(days=1)
+				continue
 
 			try:
 				# Check if homeroom attendance already exists for this date
@@ -173,7 +226,10 @@ class SISStudentLeaveRequest(Document):
 
 			current_date += timedelta(days=1)
 
-		frappe.logger().info(f"✨ [Leave] Successfully synced {synced_count}/{self.total_days} days")
+		frappe.logger().info(
+			f"✨ [Leave] Successfully synced {synced_count}/{self.total_days} days "
+			f"({skipped_count} ngày cuối tuần/nghỉ lễ được bỏ qua)"
+		)
 
 	def delete_synced_attendance(self):
 		"""Delete all attendance records created by this leave"""
