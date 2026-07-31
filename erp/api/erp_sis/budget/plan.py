@@ -39,6 +39,7 @@ from .utils import (
     _user_managed_units,
     list_budget_departments,
     _can_edit_plan_dept,
+    _plan_editor_emails,
     _is_first_leader,
     _unit_name,
     _first_department_leader,
@@ -54,6 +55,7 @@ from .utils import (
     _actionable_steps_for_user,
     _plan_line_snapshot,
     _diff_line_snapshots,
+    _append_or_merge_edit_history,
     _state_label,
     _period_school_year_id,
     _previous_school_year_id,
@@ -68,6 +70,24 @@ from . import notification as notify
 # ---------------------------------------------------------------------------
 # Serialize
 # ---------------------------------------------------------------------------
+
+def _line_to_dict(l):
+    """Serialize 1 dòng ngân sách — dùng chung cho get_plan và payload realtime."""
+    attachments = _parse_line_attachments(l.attachment)
+    return {
+        "budget_code": l.budget_code,
+        "account_item": l.account_item,
+        "is_removed": 1 if l.get("is_removed") else 0,
+        "planned_amount": l.planned_amount,
+        "approved_amount": l.approved_amount,
+        "note": l.note,
+        "overrun_explanation": l.overrun_explanation,
+        "explanation": l.explanation,
+        "attachment": attachments[0] if attachments else None,
+        "attachments": attachments,
+        **{m: (l.get(m) or 0) for m in MONTH_FIELDS},
+    }
+
 
 def _plan_to_dict(doc, with_lines=True):
     data = {
@@ -127,25 +147,9 @@ def _plan_to_dict(doc, with_lines=True):
         hide_removed = doc.workflow_state in ("Approved", "Active", "Closed")
         data["lines"] = []
         for l in (doc.lines or []):
-            is_removed = 1 if l.get("is_removed") else 0
-            if is_removed and hide_removed:
+            if l.get("is_removed") and hide_removed:
                 continue
-            attachments = _parse_line_attachments(l.attachment)
-            data["lines"].append(
-                {
-                    "budget_code": l.budget_code,
-                    "account_item": l.account_item,
-                    "is_removed": is_removed,
-                    "planned_amount": l.planned_amount,
-                    "approved_amount": l.approved_amount,
-                    "note": l.note,
-                    "overrun_explanation": l.overrun_explanation,
-                    "explanation": l.explanation,
-                    "attachment": attachments[0] if attachments else None,
-                    "attachments": attachments,
-                    **{m: (l.get(m) or 0) for m in MONTH_FIELDS},
-                }
-            )
+            data["lines"].append(_line_to_dict(l))
     return data
 
 
@@ -446,6 +450,176 @@ def upsert_plan():
 
 
 # ---------------------------------------------------------------------------
+# Patch (autosave, nhiều người cùng nhập) - merge theo budget_code
+# ---------------------------------------------------------------------------
+
+# Trùng tên với FE: src/realtime/budgetRealtimeConstants.ts
+BUDGET_PLAN_RT_EVENT_PATCHED = "budget_plan_patched"
+
+# Field text của dòng cho phép patch (ngoài 12 tháng + is_removed + attachments)
+_PATCHABLE_TEXT_FIELDS = ("note", "overrun_explanation", "explanation")
+
+
+def _emit_plan_patched(doc, actor_email, changed_lines=None, removed_codes=None, applicable_codes=None):
+    """Đẩy thay đổi tới client đang mở cùng bản ngân sách (mirror administrative_ticket).
+
+    Không gửi cho chính người vừa sửa — họ đã có thay đổi ở local.
+    """
+    emails = [
+        e
+        for e in _plan_editor_emails(doc.department)
+        if (e or "").strip() and e != actor_email
+    ]
+    if not emails:
+        return
+    payload = {
+        "plan": doc.name,
+        "workflow_state": doc.workflow_state,
+        "lines": changed_lines or [],
+        "removed_codes": [c for c in (removed_codes or []) if c],
+        "applicable_codes": applicable_codes,
+        "total_planned": doc.total_planned,
+        "modified": str(doc.modified),
+        "actor": {
+            "email": actor_email,
+            "full_name": frappe.db.get_value("User", actor_email, "full_name") or actor_email,
+        },
+    }
+    for em in emails:
+        try:
+            frappe.publish_realtime(
+                BUDGET_PLAN_RT_EVENT_PATCHED, payload, user=em, after_commit=True
+            )
+        except Exception as ex:
+            frappe.log_error(
+                f"budget.plan: publish_realtime patched to {em}: {ex!s}",
+                "budget.emit_plan_patched",
+            )
+
+
+@frappe.whitelist(allow_guest=False)
+def patch_plan():
+    """Lưu TỪNG PHẦN bản nháp — merge theo budget_code thay vì thay cả bảng.
+
+    Khác upsert_plan (thay sạch doc.lines): patch chỉ đụng đúng dòng/field client gửi,
+    nên hai người cùng nhập không xoá số của nhau. Tạo mới vẫn dùng upsert_plan/start_plan.
+
+    Payload:
+      name          : bản ngân sách (bắt buộc)
+      lines         : [{budget_code, m7?…m6?, note?, overrun_explanation?, explanation?,
+                        is_removed?, attachments?}] — CHỈ dòng đổi, CHỈ field đổi
+      added_codes   : mã thêm vào kế hoạch (delta của applicable_snapshot)
+      removed_codes : mã bỏ hẳn khỏi kế hoạch (khác is_removed = gạch bỏ nhưng giữ data)
+
+    Chỉ apply field CÓ MẶT trong payload (vắng ≠ 0) — hai người sửa 2 field khác nhau
+    của cùng một dòng cũng không đè nhau.
+    """
+    data = _get_request_data()
+    name = data.get("name")
+    email = _session_email()
+    if not name or not frappe.db.exists(PLAN_DT, name):
+        return not_found_response(f"Không tìm thấy ngân sách: {name}")
+
+    try:
+        # Khoá hàng: patch là read-modify-write, hai request song song phải nối đuôi
+        doc = frappe.get_doc(PLAN_DT, name, for_update=True)
+        if not _can_edit_plan_dept(doc.department, email):
+            return forbidden_response("Bạn không có quyền sửa ngân sách của phòng này")
+        if doc.workflow_state not in ("Draft", "Returned"):
+            return error_response("Chỉ sửa được khi ở trạng thái Nháp hoặc Bị trả lại")
+
+        lines = _parse(data.get("lines")) or []
+        added_codes = [c for c in (_parse(data.get("added_codes")) or []) if c]
+        removed_codes = [c for c in (_parse(data.get("removed_codes")) or []) if c]
+        _validate_codes_for_department(lines, doc.department)
+
+        old_snapshot = _plan_line_snapshot(doc)
+        by_code = {l.budget_code: l for l in (doc.lines or []) if l.budget_code}
+        changed_codes = []
+
+        for payload_line in lines:
+            if not isinstance(payload_line, dict):
+                continue
+            code = payload_line.get("budget_code")
+            if not code:
+                continue
+            row = by_code.get(code)
+            if row is None:
+                row = doc.append("lines", {"budget_code": code})
+                by_code[code] = row
+            for m in MONTH_FIELDS:
+                if m in payload_line:
+                    row.set(m, payload_line.get(m) or 0)
+            for f in _PATCHABLE_TEXT_FIELDS:
+                if f in payload_line:
+                    row.set(f, payload_line.get(f))
+            if "is_removed" in payload_line:
+                row.is_removed = 1 if payload_line.get("is_removed") else 0
+            if "attachments" in payload_line or "attachment" in payload_line:
+                row.attachment = _serialize_line_attachments(
+                    _line_attachments_from_payload(payload_line)
+                )
+            if code not in changed_codes:
+                changed_codes.append(code)
+
+        # Bỏ hẳn mã khỏi kế hoạch (dòng chưa từng lưu) — làm sau cùng để thắng phần patch ở trên
+        if removed_codes:
+            keep = [l for l in (doc.lines or []) if l.budget_code not in removed_codes]
+            if len(keep) != len(doc.lines or []):
+                doc.set("lines", keep)
+                for i, l in enumerate(doc.lines or []):
+                    l.idx = i + 1  # set() giữ idx cũ -> phải đánh số lại cho liền mạch
+            changed_codes = [c for c in changed_codes if c not in removed_codes]
+
+        # Snapshot mã áp dụng: apply DELTA, không nhận cả list (nhận cả list là LWW trở lại)
+        try:
+            snapshot = json.loads(doc.applicable_snapshot or "[]")
+        except (ValueError, TypeError):
+            snapshot = []
+        applicable = [c for c in snapshot if c]
+        for c in added_codes:
+            if c not in applicable:
+                applicable.append(c)
+        if removed_codes:
+            applicable = [c for c in applicable if c not in removed_codes]
+        doc.applicable_snapshot = json.dumps(applicable)
+
+        state_before = doc.workflow_state
+        new_snapshot = _plan_line_snapshot(doc)
+        doc.save(ignore_permissions=True)
+        # 1 dòng lịch sử / phiên biên tập, không phải 1 dòng / lần autosave
+        _append_or_merge_edit_history(doc.name, state_before, email, old_snapshot, new_snapshot)
+
+        changed_lines = [_line_to_dict(by_code[c]) for c in changed_codes if c in by_code]
+        _emit_plan_patched(
+            doc,
+            email,
+            changed_lines=changed_lines,
+            removed_codes=removed_codes,
+            applicable_codes=applicable,
+        )
+        frappe.db.commit()
+        return single_item_response(
+            {
+                "name": doc.name,
+                "workflow_state": doc.workflow_state,
+                "modified": str(doc.modified),
+                "total_planned": doc.total_planned,
+                "applicable_codes": applicable,
+                "lines": changed_lines,
+            },
+            message="Đã lưu",
+        )
+    except frappe.ValidationError as e:
+        frappe.db.rollback()
+        return error_response(str(e))
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "Patch Budget Plan Error")
+        return error_response(f"Lỗi khi lưu ngân sách: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
 # Submit (Draft/Returned -> Pending step 1)
 # ---------------------------------------------------------------------------
 
@@ -483,6 +657,8 @@ def submit_plan():
             ),
             user=email,
         )
+        # Ai đang mở bản này để nhập -> chuyển read-only ngay, không để gõ tiếp rồi lỗi
+        _emit_plan_patched(doc, email)
         frappe.db.commit()
         try:
             head_email = email

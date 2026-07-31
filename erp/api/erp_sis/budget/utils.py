@@ -362,6 +362,40 @@ def _can_edit_plan_dept(department, email=None):
     )
 
 
+def _plan_editor_emails(department):
+    """Email của MỌI người được sửa ngân sách phòng — nghịch đảo của _can_edit_plan_dept.
+
+    Dùng để phát realtime tới các client đang mở cùng bản. Không gồm System Manager
+    (họ sửa được nhưng không phải người của phòng, không cần nhận realtime)."""
+    if not department:
+        return []
+    rows = frappe.db.sql(
+        """
+        SELECT l.user AS user FROM `tabERP Organization Unit Leader` l
+        WHERE l.parent = %(dept)s AND l.parenttype = 'ERP Organization Unit'
+        UNION
+        SELECT m.user AS user FROM `tabERP Organization Unit Member` m
+        WHERE m.parent = %(dept)s AND m.parenttype = 'ERP Organization Unit'
+        UNION
+        SELECT l.user AS user FROM `tabERP Organization Unit Leader` l
+        INNER JOIN `tabERP Organization Unit` u ON l.parent = u.name
+        WHERE u.parent_organization_unit = %(dept)s AND u.is_active = 1
+        UNION
+        SELECT m.user AS user FROM `tabERP Organization Unit Member` m
+        INNER JOIN `tabERP Organization Unit` u ON m.parent = u.name
+        WHERE u.parent_organization_unit = %(dept)s AND u.is_active = 1
+        """,
+        {"dept": department},
+        as_dict=True,
+    )
+    out = []
+    for r in rows:
+        user = (r.get("user") or "").strip()
+        if user and user not in out:
+            out.append(user)
+    return out
+
+
 def _is_first_leader(department, email=None):
     """User là lãnh đạo ĐỨNG ĐẦU (sort_order nhỏ nhất) của phòng — người duy nhất được nộp."""
     if not department:
@@ -425,6 +459,7 @@ def _append_history(plan_id, action, detail=None, user=None):
         }
     )
     row.insert(ignore_permissions=True)
+    return row.name
 
 
 # 12 tháng ngân sách theo năm tài chính: T7 năm nay -> T6 năm sau (thứ tự hiển thị)
@@ -559,6 +594,59 @@ def _diff_line_snapshots(old, new):
         if parts:
             changes.append(f"• {code}: " + "; ".join(parts))
     return "\n".join(changes)
+
+
+# ---------------------------------------------------------------------------
+# Lịch sử theo PHIÊN biên tập — autosave gọi patch liên tục, không được đẻ mỗi
+# lần lưu 1 dòng lịch sử. Mỗi phiên (user × bản × trạng thái) chỉ giữ 1 dòng,
+# detail luôn là diff so với lúc BẮT ĐẦU phiên (nên "T7: 100→200" rồi "200→300"
+# hiển thị gọn thành "T7: 100→300").
+# ---------------------------------------------------------------------------
+
+EDIT_SESSION_TTL_SEC = 30 * 60
+
+
+def _edit_session_key(plan_id, state, user):
+    # Có state trong key: Nháp -> Chờ duyệt -> Bị trả lại sẽ mở phiên mới, không gộp nhầm
+    return f"budget_edit_session:{plan_id}:{state or ''}:{user}"
+
+
+def _append_or_merge_edit_history(plan_id, state, user, old_snapshot, new_snapshot):
+    """Ghi (lần đầu) hoặc gộp (các lần sau) lịch sử của một phiên biên tập.
+
+    old_snapshot: ảnh chụp TRƯỚC patch hiện tại — chỉ dùng khi mở phiên mới.
+    """
+    key = _edit_session_key(plan_id, state, user)
+    session = None
+    try:
+        # expires=True: key có TTL nên đừng để frappe.local cache che mất
+        session = frappe.cache().get_value(key, expires=True)
+    except Exception:
+        session = None
+
+    row_name = (session or {}).get("history_row")
+    base_snapshot = (session or {}).get("base_snapshot")
+    # Row bị xoá ngoài luồng (vd xoá lịch sử) -> coi như phiên mới
+    if row_name and not frappe.db.exists(PLAN_HISTORY_DT, row_name):
+        row_name = None
+
+    if row_name and base_snapshot is not None:
+        detail = _diff_line_snapshots(base_snapshot, new_snapshot)
+        frappe.db.set_value(PLAN_HISTORY_DT, row_name, "detail", detail or None)
+        return row_name
+
+    base_snapshot = old_snapshot or {}
+    detail = _diff_line_snapshots(base_snapshot, new_snapshot)
+    row_name = _append_history(plan_id, "Cập nhật nháp", detail=detail or None, user=user)
+    try:
+        frappe.cache().set_value(
+            key,
+            {"history_row": row_name, "base_snapshot": base_snapshot},
+            expires_in_sec=EDIT_SESSION_TTL_SEC,
+        )
+    except Exception:
+        pass
+    return row_name
 
 
 def _can_approve_step(steps, current_step, email=None):
