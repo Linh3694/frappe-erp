@@ -445,6 +445,29 @@ def get_student_data():
         )
 
 
+def _resolve_active_school_year(campus_id=None, school_year_id=None):
+    """
+    Năm học dùng để tra lớp: school_year_id nếu truyền, ngược lại năm active của campus
+    (fallback năm active toàn hệ thống khi campus chưa có năm nào bật).
+    """
+    resolved = (school_year_id or "").strip() or None
+    if not resolved and campus_id:
+        resolved = frappe.db.get_value(
+            "SIS School Year",
+            {"is_enable": 1, "campus_id": campus_id},
+            "name",
+            order_by="start_date desc",
+        )
+    if not resolved:
+        resolved = frappe.db.get_value(
+            "SIS School Year",
+            {"is_enable": 1},
+            "name",
+            order_by="start_date desc",
+        )
+    return resolved
+
+
 def _get_homeroom_class_map_for_students(student_ids, campus_id=None, school_year_id=None):
     """
     Map student_id -> {class_id, class_title} chỉ lớp chủ nhiệm (homeroom):
@@ -456,21 +479,7 @@ def _get_homeroom_class_map_for_students(student_ids, campus_id=None, school_yea
         return {}
     mapping = {}
     try:
-        current_school_year = (school_year_id or "").strip() or None
-        if not current_school_year and campus_id:
-            current_school_year = frappe.db.get_value(
-                "SIS School Year",
-                {"is_enable": 1, "campus_id": campus_id},
-                "name",
-                order_by="start_date desc",
-            )
-        if not current_school_year:
-            current_school_year = frappe.db.get_value(
-                "SIS School Year",
-                {"is_enable": 1},
-                "name",
-                order_by="start_date desc",
-            )
+        current_school_year = _resolve_active_school_year(campus_id, school_year_id)
         if not current_school_year:
             return mapping
 
@@ -528,6 +537,110 @@ def _enrich_students_current_class_for_batch(students, campus_id=None, school_ye
                 s["current_class_title"] = None
     except Exception as e:
         frappe.logger().warning(f"_enrich_students_current_class_for_batch: {e}")
+
+
+@frappe.whitelist(allow_guest=False)
+def get_student_directory(school_year_id=None):
+    """
+    Danh bạ học sinh chỉ-để-xem cho toàn trường (màn Báo cáo > Danh sách học sinh).
+
+    Nguồn là SIS Class Student lọc theo năm học (mặc định năm active) — đi từ bảng xếp lớp
+    nên lấy được luôn Lớp / Khối / Cấp trong một query, khác get_all_students (đi từ CRM
+    Student rồi mới enrich lớp, và không có Khối/Cấp).
+
+    Chỉ lớp chủ nhiệm (class_type = 'regular' ở cả bản ghi xếp lớp lẫn lớp) để mỗi học sinh
+    chỉ ra đúng một dòng, không nhân bản vì lớp mixed/club.
+
+    Trả kèm danh mục stages/grades rút từ chính kết quả, để FE dựng dropdown lọc mà không
+    phải gọi thêm API — và dropdown chỉ hiện Cấp/Khối thực sự có học sinh.
+    """
+    try:
+        campus_id = get_current_campus_from_context()
+        resolved_year = _resolve_active_school_year(campus_id, school_year_id)
+        if not resolved_year:
+            return success_response(
+                data={"students": [], "stages": [], "grades": [], "school_year_id": None},
+                message="Chưa có năm học nào được kích hoạt"
+            )
+
+        params = {"year": resolved_year}
+        campus_condition = ""
+        if campus_id:
+            campus_condition = "AND cs.campus_id = %(campus)s"
+            params["campus"] = campus_id
+
+        rows = frappe.db.sql(
+            f"""
+            SELECT
+                s.name AS name,
+                s.student_name AS student_name,
+                s.student_code AS student_code,
+                s.dob AS dob,
+                s.gender AS gender,
+                c.name AS class_id,
+                c.title AS class_title,
+                g.name AS grade_id,
+                g.title_vn AS grade_title,
+                g.sort_order AS grade_sort,
+                st.name AS stage_id,
+                st.title_vn AS stage_title
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+            INNER JOIN `tabCRM Student` s ON s.name = cs.student_id
+            LEFT JOIN `tabSIS Education Grade` g ON g.name = c.education_grade
+            LEFT JOIN `tabSIS Education Stage` st ON st.name = g.education_stage_id
+            WHERE cs.school_year_id = %(year)s
+              AND c.school_year_id = %(year)s
+              AND c.class_type = 'regular'
+              AND IFNULL(NULLIF(TRIM(cs.class_type), ''), 'regular') = 'regular'
+              {campus_condition}
+            ORDER BY g.sort_order ASC, c.title ASC, s.student_name ASC
+            """,
+            params,
+            as_dict=True,
+        ) or []
+
+        # Một học sinh có thể còn bản ghi xếp lớp cũ trong cùng năm (chuyển lớp giữa năm);
+        # giữ dòng đầu tiên theo thứ tự ORDER BY để danh sách không lặp học sinh.
+        students = []
+        seen_students = set()
+        stages = {}
+        grades = {}
+        for r in rows:
+            sid = r.get("name")
+            if not sid or sid in seen_students:
+                continue
+            seen_students.add(sid)
+            students.append(r)
+
+            stage_id = r.get("stage_id")
+            if stage_id and stage_id not in stages:
+                stages[stage_id] = {"name": stage_id, "title": r.get("stage_title")}
+
+            grade_id = r.get("grade_id")
+            if grade_id and grade_id not in grades:
+                grades[grade_id] = {
+                    "name": grade_id,
+                    "title": r.get("grade_title"),
+                    "stage_id": stage_id,
+                    "sort_order": r.get("grade_sort"),
+                }
+
+        return success_response(
+            data={
+                "students": students,
+                "stages": list(stages.values()),
+                "grades": sorted(grades.values(), key=lambda x: (x.get("sort_order") or 0)),
+                "school_year_id": resolved_year,
+            },
+            message="Lấy danh sách học sinh thành công"
+        )
+    except Exception:
+        frappe.log_error(title="get_student_directory", message=frappe.get_traceback())
+        return error_response(
+            message="Lỗi hệ thống khi lấy danh sách học sinh",
+            code="SYSTEM_ERROR"
+        )
 
 
 @frappe.whitelist(allow_guest=False, methods=['POST'])
