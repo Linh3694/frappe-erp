@@ -1146,6 +1146,7 @@ def get_timetable_subjects_for_selection():
                 s.title_vn,
                 s.title_en,
                 s.campus_id,
+                COALESCE(s.education_stage_id, '') as education_stage_id,
                 COALESCE(es.title_vn, '') as education_stage_name
             FROM `tabSIS Timetable Subject` s
             LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
@@ -1177,6 +1178,7 @@ def get_timetable_subjects_for_selection():
                         s.title_vn,
                         s.title_en,
                         s.campus_id,
+                        COALESCE(s.education_stage_id, '') as education_stage_id,
                         COALESCE(es.title_vn, '') as education_stage_name
                     FROM `tabSIS Timetable Subject` s
                     LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
@@ -1225,6 +1227,7 @@ def get_actual_subjects_for_selection():
                 s.title_vn,
                 s.title_en,
                 s.campus_id,
+                COALESCE(s.education_stage_id, '') as education_stage_id,
                 COALESCE(es.title_vn, '') as education_stage_name
             FROM `tabSIS Actual Subject` s
             LEFT JOIN `tabSIS Education Stage` es ON s.education_stage_id = es.name
@@ -1253,7 +1256,7 @@ def get_actual_subjects_for_selection():
                 # Return all subjects for this campus
                 actual_subjects = frappe.get_all(
                     "SIS Actual Subject",
-                    fields=["name", "title_vn", "title_en", "campus_id"],
+                    fields=["name", "title_vn", "title_en", "campus_id", "education_stage_id"],
                     filters={"campus_id": campus_id},
                     order_by="title_vn asc"
                 )
