@@ -145,87 +145,49 @@ def _check_overlapping_leave_requests(student_id, start_date, end_date, exclude_
 	}
 
 
-def _get_homeroom_teachers_for_student(student_id):
+def _get_homeroom_teachers_for_student(student_id, campus_id=None, on_date=None):
 	"""Get homeroom teacher user_id(s) for a student
-	
+
+	Chỉ lấy GVCN/phó GVCN của LỚP CHÍNH QUY thuộc ĐÚNG năm học của đơn nghỉ phép.
+	Không lọc năm học thì `SIS Class Student` trả về cả lớp các năm trước (bản ghi được
+	giữ làm lịch sử) ⇒ GVCN cũ vẫn nhận thông báo; không lọc `class_type` thì GVCN của
+	lớp chạy/CLB cũng bị gửi nhầm. Chi tiết: erp.utils.student_class (SIS-176).
+
 	Args:
 		student_id: Student ID
-	
+		campus_id: campus của đơn, dùng để resolve đúng năm học
+		on_date: ngày bắt đầu nghỉ, ưu tiên resolve năm học theo ngày này
+
 	Returns:
-		List of dicts: [{"user_id": "teacher@email.com", "teacher_name": "...", "class_title": "..."}]
+		List of dicts: [{"user_id", "teacher_id", "teacher_name", "class_id", "class_title"}]
 	"""
 	try:
-		# Step 1: Get class(es) for this student from SIS Class Student
-		class_students = frappe.get_all(
-			"SIS Class Student",
-			filters={"student_id": student_id},
-			fields=["class_id"]
+		from erp.utils.student_class import get_homeroom_teacher_users
+
+		result = get_homeroom_teacher_users(
+			student_id,
+			campus_id=campus_id,
+			on_date=on_date,
 		)
-		
-		if not class_students:
-			frappe.logger().info(f"📚 No class found for student {student_id}")
+
+		if not result:
+			frappe.logger().info(
+				f"📚 Không có GVCN lớp chính quy cho học sinh {student_id} "
+				f"(campus={campus_id}, on_date={on_date})"
+			)
 			return []
-		
-		class_ids = [cs.class_id for cs in class_students]
-		
-		# Step 2: Get homeroom teachers from SIS Class
-		classes = frappe.get_all(
-			"SIS Class",
-			filters={"name": ["in", class_ids]},
-			fields=["name", "title", "homeroom_teacher", "vice_homeroom_teacher"]
-		)
-		
-		if not classes:
-			frappe.logger().info(f"📚 No SIS Class records found for class_ids {class_ids}")
-			return []
-		
-		# Step 3: Collect all homeroom teachers
-		teacher_ids = set()
-		class_info_map = {}
-		
-		for cls in classes:
-			if cls.homeroom_teacher:
-				teacher_ids.add(cls.homeroom_teacher)
-				class_info_map[cls.homeroom_teacher] = cls.title
-			if cls.vice_homeroom_teacher:
-				teacher_ids.add(cls.vice_homeroom_teacher)
-				if cls.vice_homeroom_teacher not in class_info_map:
-					class_info_map[cls.vice_homeroom_teacher] = cls.title
-		
-		if not teacher_ids:
-			frappe.logger().info(f"📚 No homeroom teachers found for classes {class_ids}")
-			return []
-		
-		# Step 4: Get user_id from SIS Teacher
-		teachers = frappe.get_all(
-			"SIS Teacher",
-			filters={"name": ["in", list(teacher_ids)]},
-			fields=["name", "user_id"]
-		)
-		
-		result = []
-		for teacher in teachers:
-			if teacher.user_id:
-				# Get teacher name from User
-				teacher_name = frappe.db.get_value("User", teacher.user_id, "full_name") or teacher.user_id
-				result.append({
-					"user_id": teacher.user_id,
-					"teacher_id": teacher.name,
-					"teacher_name": teacher_name,
-					"class_title": class_info_map.get(teacher.name, "")
-				})
-		
+
 		frappe.logger().info(f"✅ Found {len(result)} homeroom teachers for student {student_id}: {[t['user_id'] for t in result]}")
 		return result
-		
+
 	except Exception as e:
 		frappe.logger().error(f"❌ Error getting homeroom teachers for student {student_id}: {str(e)}")
 		return []
 
 
-def _send_leave_notification_to_teachers(student_id, student_name, parent_name, leave_request_id, reason, reason_display, start_date, end_date):
+def _send_leave_notification_to_teachers(student_id, student_name, parent_name, leave_request_id, reason, reason_display, start_date, end_date, campus_id=None):
 	"""Send push notification to homeroom teachers when parent creates leave request
-	
+
 	Args:
 		student_id: Student ID
 		student_name: Student name for display
@@ -235,17 +197,22 @@ def _send_leave_notification_to_teachers(student_id, student_name, parent_name, 
 		reason_display: Localized reason text
 		start_date: Leave start date (YYYY-MM-DD)
 		end_date: Leave end date (YYYY-MM-DD)
+		campus_id: Campus của đơn, dùng để resolve đúng năm học khi tìm GVCN
 	"""
 	try:
 		from erp.api.erp_sis.mobile_push_notification import send_mobile_notification_persisted
-		
+
 		# Get homeroom teachers for this student
-		teachers = _get_homeroom_teachers_for_student(student_id)
-		
+		teachers = _get_homeroom_teachers_for_student(
+			student_id,
+			campus_id=campus_id,
+			on_date=start_date,
+		)
+
 		if not teachers:
 			frappe.logger().info(f"📱 No homeroom teachers to notify for student {student_id}")
 			return
-		
+
 		# Format dates for display
 		try:
 			start_date_display = datetime.strptime(str(start_date), '%Y-%m-%d').strftime('%d/%m/%Y')
@@ -253,19 +220,10 @@ def _send_leave_notification_to_teachers(student_id, student_name, parent_name, 
 		except:
 			start_date_display = str(start_date)
 			end_date_display = str(end_date)
-		
-		# Lấy class_id của học sinh (lớp chủ nhiệm) để mobile app navigate đúng
-		class_id = None
-		if teachers:
-			# Lấy class_id từ SIS Class Student - lớp đầu tiên của học sinh
-			class_students = frappe.get_all(
-				"SIS Class Student",
-				filters={"student_id": student_id},
-				fields=["class_id"],
-				limit=1
-			)
-			if class_students:
-				class_id = class_students[0].class_id
+
+		# class_id lấy luôn từ lớp chính quy đã resolve ở trên (mobile app navigate đúng lớp
+		# hiện tại). Query riêng trước đây không lọc năm học nên có thể trỏ vào lớp cũ.
+		class_id = teachers[0].get("class_id")
 
 		# Prepare notification content
 		notification_title = "Đơn xin nghỉ phép mới"
@@ -552,7 +510,8 @@ def submit_leave_request():
 				created_requests.append({
 					"id": leave_request.name,
 					"student_id": student_id,
-					"student_name": leave_request.student_name
+					"student_name": leave_request.student_name,
+					"campus_id": student_campus
 				})
 		except Exception as e:
 			frappe.db.rollback()
@@ -590,7 +549,8 @@ def submit_leave_request():
 					reason=data['reason'],
 					reason_display=reason_display,
 					start_date=data['start_date'],
-					end_date=data['end_date']
+					end_date=data['end_date'],
+					campus_id=req.get("campus_id")
 				)
 			except Exception as noti_error:
 				# Don't fail the request if notification fails

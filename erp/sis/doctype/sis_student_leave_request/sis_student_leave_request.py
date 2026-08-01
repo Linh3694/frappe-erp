@@ -150,19 +150,28 @@ class SISStudentLeaveRequest(Document):
 
 		frappe.logger().info(f"📅 [Leave] Syncing {self.total_days} days for student {self.student_id}")
 
-		# Get student's class
-		class_student = frappe.get_value(
-			"SIS Class Student",
-			filters={"student_id": self.student_id},
-			fieldname=["name", "class_id"],
-			as_dict=True
+		# Lớp chính quy của ĐÚNG năm học phủ ngày nghỉ.
+		# Trước đây query chỉ lọc student_id và không có ORDER BY (frappe mặc định
+		# KEEP_DEFAULT_ORDERING) nên lớp chọn được là không xác định — có thể là lớp năm
+		# học cũ hoặc lớp chạy, khiến bản ghi "excused" rơi sai lớp (SIS-177).
+		from erp.utils.student_class import get_regular_class_row
+
+		class_row = get_regular_class_row(
+			self.student_id,
+			campus_id=self.campus_id,
+			on_date=self.start_date,
 		)
 
-		if not class_student:
-			frappe.logger().warning(f"⚠️ [Leave] Student {self.student_id} not in any class")
+		if not class_row:
+			# KHÔNG fallback sang lớp bất kỳ: thà thiếu bản ghi còn hơn ghi vào lớp sai,
+			# vì GVCN lớp sai sẽ thấy nhiễu còn lớp đúng vẫn không thấy học sinh nghỉ.
+			frappe.logger().warning(
+				f"⚠️ [Leave] Không tìm được lớp chính quy của học sinh {self.student_id} "
+				f"cho ngày {self.start_date} (campus={self.campus_id}) — bỏ qua sync điểm danh"
+			)
 			return
 
-		class_id = class_student.class_id
+		class_id = class_row.get("class_id")
 		student_name = self.student_name
 		student_code = self.student_code
 
