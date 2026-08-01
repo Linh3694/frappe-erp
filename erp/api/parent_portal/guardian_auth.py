@@ -86,19 +86,32 @@ def verify_guardian_jwt_token(token):
             guardian_name = payload.get("guardian")
             token_version = payload.get("token_version")
             
-            if guardian_name and token_version:
-                # Lấy current token_version từ database
-                current_version = frappe.db.get_value(
-                    "CRM Guardian", guardian_name, "jwt_token_version"
-                ) or 1
-                
-                # Nếu token_version không match, token đã bị revoke
-                if token_version != current_version:
+            if guardian_name:
+                # `_get_value` trả None cho CẢ HAI trường hợp: bản ghi không còn, và bản
+                # ghi còn nhưng field rỗng. Phải phân biệt — bản cũ gộp luôn bằng `or 1`
+                # nên guardian ĐÃ BỊ XOÁ vẫn cho ra current_version = 1, khớp với token
+                # mặc định version 1 và phiên tiếp tục sống. Tức xoá/gộp một bản ghi
+                # guardian KHÔNG thu hồi được phiên của người đó — vừa là trải nghiệm tệ
+                # (app báo "không tìm thấy thông tin phụ huynh" thay vì về màn đăng nhập),
+                # vừa là lỗ hổng: token của tài khoản đã xoá vẫn được chấp nhận.
+                if not frappe.db.exists("CRM Guardian", guardian_name):
                     frappe.logger().warning(
-                        f"Token version mismatch for {guardian_name}: "
-                        f"token={token_version}, current={current_version}"
+                        f"Guardian {guardian_name} khong con ton tai — tu choi token"
                     )
                     return None
+
+                if token_version:
+                    current_version = frappe.db.get_value(
+                        "CRM Guardian", guardian_name, "jwt_token_version"
+                    ) or 1
+
+                    # Nếu token_version không match, token đã bị revoke
+                    if token_version != current_version:
+                        frappe.logger().warning(
+                            f"Token version mismatch for {guardian_name}: "
+                            f"token={token_version}, current={current_version}"
+                        )
+                        return None
         
         return payload
         
