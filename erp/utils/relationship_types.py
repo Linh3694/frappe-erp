@@ -186,6 +186,11 @@ _ALIASES = {
 	"co giup viec": "caretaker",
 	"bao mau": "caretaker",
 	"vu em": "caretaker",
+	# "quan gia" gặp thật trong dữ liệu prod (FAM-4644106) và trước đây KHÔNG khớp alias
+	# nào, nên bị coi như người thân: access = 1, tức xem được học bạ / tài chính của
+	# cháu. Cùng vai trò thuê/nhờ như giúp việc -> caretaker (đón được, không xem được).
+	"quan gia": "caretaker",
+	"nguoi quan gia": "caretaker",
 	# relative
 	"relative": "relative",
 	"nguoi than": "relative",
@@ -222,9 +227,14 @@ def normalize(raw) -> str:
 	value = str(raw).strip()
 	if not value:
 		return ""
-	key = strip_accents(value).strip()
+	# casefold(): mọi khoá trong _ALIASES đều viết thường, nên không hạ chữ là "Quản gia"
+	# trượt alias trong khi "quản gia" thì khớp — cùng một vai trò mà một bên thành
+	# caretaker (access = 0), một bên thành quan hệ lạ được cấp access = 1.
+	key = strip_accents(value).strip().casefold()
 	# Gộp khoảng trắng thừa: "me  ruot" -> "me ruot"
 	key = " ".join(key.split())
+	# Trả về `value` GỐC khi không nhận ra: giữ nguyên chữ hoa/dấu của dữ liệu lạ để đội
+	# vận hành đọc đúng thứ người dùng đã gõ.
 	return _ALIASES.get(key, value)
 
 

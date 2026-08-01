@@ -85,12 +85,28 @@ from erp.utils.family_relationship import (
     rebuild_guardian_relationship_mirror,
     rebuild_student_relationship_mirror,
 )
+from erp.utils.relationship_types import normalize as normalize_relationship
 
 # Quan hệ được tính là BẰNG CHỨNG để gộp hai nhà. Xem quy tắc 2 ở docstring.
 MERGE_EVIDENCE_TYPES = frozenset({"father", "mother", "foster_parent"})
 
 # Quan hệ KHÔNG được cấp access dù nhà có gộp hay không. Xem quy tắc 3.
 NO_ACCESS_TYPES = frozenset({"caretaker"})
+
+
+def _rel_code(raw):
+    """Mã quan hệ đã chuẩn hoá, dùng cho MỌI so sánh luật trong file này.
+
+    BẮT BUỘC đi qua `relationship_types.normalize`: DB đang chứa cả chuỗi tiếng Việt tự
+    do ("quản gia", "Mẹ kế") lẫn mã chuẩn. So thẳng `.strip().lower()` như bản trước thì
+    "quản gia" không khớp NO_ACCESS_TYPES -> được cấp access = 1, tức người giúp việc
+    xem được học bạ / tài chính của cháu. Bản dry-run trên prod đã dính đúng ca này ở
+    FAM-4644106.
+
+    normalize() không nhận ra thì trả về nguyên chuỗi gốc (không ép về "other"), nên
+    quan hệ lạ vẫn KHÔNG được tính là bằng chứng gộp — vẫn giữ hướng thận trọng.
+    """
+    return (normalize_relationship(raw) or "").strip().lower()
 
 # Chặn nạp cả bảng vào RAM nếu dữ liệu phình bất thường (cùng ngưỡng family_diagnostics).
 MAX_SCAN_ROWS = 300000
@@ -310,7 +326,7 @@ def _analyse_group(families, ctx, max_families, max_guardians_per_phone, min_sha
             g = guardians.get(r["guardian"])
             if not g:
                 continue
-            if (r.get("relationship_type") or "").strip().lower() not in MERGE_EVIDENCE_TYPES:
+            if _rel_code(r.get("relationship_type")) not in MERGE_EVIDENCE_TYPES:
                 continue
             ident_families[_identity_of(g)].add(f)
     shared = {i: fs for i, fs in ident_families.items() if len(fs) > 1}
@@ -442,7 +458,7 @@ def _plan_rows(group, ctx, has_pickup):
                 # relationship_type là field BẮT BUỘC — không bịa quan hệ cho người lạ.
                 skipped_rows.append({"student": s, "guardian": g, "why": "khong suy duoc relationship_type"})
                 continue
-            rel_key = rel.strip().lower()
+            rel_key = _rel_code(rel)
             want_access = 0 if rel_key in NO_ACCESS_TYPES else 1
             want_pickup = 1
             # key_person: TUYỆT ĐỐI không do script quyết định. Dòng đã có giữ nguyên cờ
@@ -692,7 +708,7 @@ def run(
             g = guardians.get(r["guardian"])
             if not g:
                 continue
-            if (r.get("relationship_type") or "").strip().lower() not in MERGE_EVIDENCE_TYPES:
+            if _rel_code(r.get("relationship_type")) not in MERGE_EVIDENCE_TYPES:
                 continue
             ident_to_families[_identity_of(g)].add(fam_name)
     for ident, fams in ident_to_families.items():
@@ -750,6 +766,7 @@ def run(
             "guardian_names": group["guardian_names"],
             "shared_identities": group.get("shared_identities"),
             "key_identity": group.get("key_identity"),
+            "key_identities_all": group.get("key_identities_all"),
             "key_guardian": group.get("key_guardian"),
             "key_missing_in": group.get("key_missing_in"),
             "rows_after": len(planned),
@@ -846,10 +863,17 @@ def _print_report(result, dry_run):
         print(f"  [GOP] {' + '.join(m['sources'])}  ->  {m['target']} ({m['target_family_code']})")
         print(f"        Hoc sinh : {', '.join(m['student_names'])}")
         print(f"        Phu huynh: {'; '.join(m['guardian_names'])}")
+        # Ba trạng thái KHÁC HẲN nhau — bản trước gộp cả ba vào một câu "CHUA CO", khiến
+        # 15 cụm có sẵn người liên hệ chính đầy đủ bị đọc nhầm thành "cần đặt tay".
         if m["key_guardian"]:
             print(f"        Nguoi lien he chinh: {m['key_guardian']} ({m['key_identity']})")
+        elif m.get("key_identities_all"):
+            print(
+                "        Nguoi lien he chinh: MOI CHAU MOT NGUOI (%s) — dung nhu thiet ke, giu nguyen"
+                % ", ".join(m["key_identities_all"])
+            )
         else:
-            print("        Nguoi lien he chinh: CHUA CO o ca hai nha — giu nguyen, can dat tay")
+            print("        Nguoi lien he chinh: CHUA CO o nha nao — can dat tay")
         if m["rows_added"]:
             print(f"        Bo sung {len(m['rows_added'])} quan he thieu:")
             for a in m["rows_added"]:
