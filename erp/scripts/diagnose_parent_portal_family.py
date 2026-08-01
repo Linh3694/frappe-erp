@@ -16,11 +16,13 @@ Không hàm nào ở đây ghi dữ liệu.
 -----------------------------------------------------------------------------------------
 BA NGUYÊN NHÂN SCRIPT NÀY PHÂN BIỆT
 -----------------------------------------------------------------------------------------
-1. TRÙNG BẢN GHI GUARDIAN. Đăng nhập tra CHỈ field phẳng `CRM Guardian.phone_number` rồi
-   lấy `guardian_list[0]` (erp/api/parent_portal/otp_auth.py). `frappe.db.get_list` mặc
-   định sắp `modified desc`, nên khi một số điện thoại có hai bản ghi, PP bám vào bản
-   ĐƯỢC SỬA GẦN NHẤT — quan hệ nằm ở bản kia thì portal rỗng, và thứ tự đổi mỗi lần ai
-   đó sửa một trong hai bản (hôm nay đúng, mai sai).
+1. TRÙNG BẢN GHI GUARDIAN. Đăng nhập tra CHỈ field phẳng `CRM Guardian.phone_number`.
+   Bản trước lấy thẳng `guardian_list[0]` — tức bản `modified` mới nhất theo thứ tự mặc
+   định của `frappe.db.get_list` — nên quan hệ nằm ở bản kia thì portal rỗng, và thứ tự
+   đổi mỗi lần ai đó sửa một trong hai bản (hôm nay đúng, mai sai). Nay
+   `otp_auth.pick_guardian_record` ưu tiên bản CÓ dòng quan hệ chuẩn, hoà mới xét
+   `modified`. Script gọi thẳng hàm đó nên cột `<= PP BAM VAO` luôn phản ánh hành vi
+   thật, kể cả sau này luật chọn có đổi tiếp.
 
    Quan trọng: `modified desc` chỉ quyết định lúc ĐĂNG NHẬP. Sau đó phiên bị ghim theo
    `guardian_id` nhúng trong email `<guardian_id>@parent.wellspring.edu.vn`
@@ -59,18 +61,39 @@ MAX_CANDIDATES = 20
 
 
 def _login_candidates(normalized_phone):
-    """Đúng truy vấn mà đăng nhập dùng, kể cả thứ tự — để biết PP bám vào bản nào.
+    """Mọi bản ghi khớp SĐT ở field phẳng, xếp theo `modified desc` như đăng nhập.
 
-    Giữ nguyên biến thể thừa `+{normalized}` của bản gốc: nó không khớp gì (chuỗi đã có
-    dấu +) nhưng bỏ đi thì script không còn phản ánh đúng hành vi thật.
+    `normalize_phone_number` của erp.api.crm.utils trả '+84...', còn bản trong
+    otp_auth.py trả '84...' (không dấu cộng) — nên phải tra CẢ HAI biến thể mới phủ
+    đúng tập bản ghi mà đăng nhập nhìn thấy.
     """
+    bare = normalized_phone[1:] if normalized_phone.startswith("+") else normalized_phone
     return frappe.db.get_list(
         "CRM Guardian",
-        filters={"phone_number": ["in", [normalized_phone, f"+{normalized_phone}"]]},
+        filters={"phone_number": ["in", [bare, f"+{bare}"]]},
         fields=["name", "guardian_name", "phone_number", "modified"],
         order_by="modified desc",
         ignore_permissions=True,
     ) or []
+
+
+def _bound_guardian(candidates):
+    """Bản ghi mà đăng nhập THỰC SỰ chọn — gọi thẳng hàm production, không mô phỏng.
+
+    Trước đây script tự lấy phần tử đầu của danh sách `modified desc`. Từ khi
+    `otp_auth.pick_guardian_record` ưu tiên bản có dòng quan hệ chuẩn, mô phỏng kiểu đó
+    sẽ nói dối đúng vào lúc cần nhất: khi hai cách chọn ra hai kết quả khác nhau.
+    """
+    if not candidates:
+        return None
+    try:
+        from erp.api.parent_portal.otp_auth import pick_guardian_record
+
+        picked = pick_guardian_record(candidates)
+        return picked["name"] if picked else None
+    except ImportError:
+        # Server chưa deploy bước 3 -> hành vi cũ là lấy bản modified mới nhất.
+        return candidates[0]["name"]
 
 
 def _canonical_rows(guardian):
@@ -261,7 +284,7 @@ def run(phone=None, guardian=None):
         child_only = []
     else:
         login_rows = _login_candidates(normalized)
-        bound = login_rows[0]["name"] if login_rows else None
+        bound = _bound_guardian(login_rows)
         # Bản khớp qua bảng con: đăng nhập KHÔNG thấy chúng, nhưng quan hệ hay nằm ở đây.
         all_matches = guardian_phone_matches(normalized) or []
         flat_names = {r["name"] for r in login_rows}
