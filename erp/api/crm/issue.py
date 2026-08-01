@@ -409,7 +409,9 @@ def _finalize_issue_api_dict(doc):
         can_pic_role = bool(PIC_CHANGE_ROLES & roles)
         data["can_change_pic"] = bool(can_pic_role and ap == "Da duyet")
         data["can_change_department"] = bool(_can_edit_issue_departments(u) and ap == "Da duyet")
-        data["can_edit_related_users"] = bool(_can_edit_issue_related_users(u, doc) and st != "Dong")
+        # KHONG chan theo trang thai: them nguoi lien quan chi mo rong pham vi nhan thong bao,
+        # khong sua du lieu nghiep vu — van de da dong van can keo them nguoi vao xem.
+        data["can_edit_related_users"] = bool(_can_edit_issue_related_users(u, doc))
         data["can_add_process_log"] = bool(
             (_is_issue_pic(u, doc) or _can_write_issue_ops(u, doc)) and ap == "Da duyet" and st == "Dang xu ly"
         )
@@ -1129,14 +1131,16 @@ def _is_issue_related_user(user: str, issue_doc) -> bool:
 def _can_edit_issue_related_users(user: str, issue_doc) -> bool:
     """Nguoi trong nhom tu quan ly nhom (quyet dinh nghiep vu).
 
-    PIC va nhom Care luon sua duoc — loi thoat khi nhom rong (chua seed) hoac seed sai,
-    neu khong se khong con ai co quyen mo nhom ra.
+    Nguoi tao, PIC va nhom Care luon sua duoc — loi thoat khi nhom rong (chua seed) hoac
+    seed sai, neu khong se khong con ai co quyen mo nhom ra.
     """
     if not user or user == "Guest":
         return False
     if _is_issue_related_user(user, issue_doc):
         return True
     if _is_issue_pic(user, issue_doc):
+        return True
+    if user == (getattr(issue_doc, "created_by_user", None) or "").strip():
         return True
     return _can_edit_issue_departments(user)
 
