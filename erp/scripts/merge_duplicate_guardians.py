@@ -397,7 +397,7 @@ def _apply(keeper, losers, link_fields):
     return detail
 
 
-def run(dry_run=1, limit=0, skip_recent_login_days=0, exclude=None, verbose=1):
+def run(dry_run=1, limit=0, skip_recent_login_days=0, exclude=None, only=None, verbose=1):
     """
     Gộp bản ghi CRM Guardian trùng người.
 
@@ -407,6 +407,11 @@ def run(dry_run=1, limit=0, skip_recent_login_days=0, exclude=None, verbose=1):
                             — dùng khi muốn báo cho phụ huynh trước, vì gộp là đá phiên
                             của họ ra.
     exclude                 List/chuỗi phân cách phẩy các docname guardian cần loại.
+    only                    Ngược lại của `exclude`: CHỈ xử lý nhóm có chứa các docname
+                            này. Có vì dry_run không chạy `_apply`, tức phần ghi (trỏ lại
+                            link, hợp nhất cờ, xoá dòng trùng) KHÔNG được rà soát trước.
+                            Cách kiểm chứng an toàn là chạy thật đúng MỘT nhóm rủi ro
+                            cao, đo lại family_diagnostics, rồi mới mở ra toàn bộ.
     """
     dry_run = _int(dry_run)
     limit = _int(limit)
@@ -416,6 +421,10 @@ def run(dry_run=1, limit=0, skip_recent_login_days=0, exclude=None, verbose=1):
         excluded = {x.strip() for x in exclude.split(",") if x.strip()}
     else:
         excluded = {str(x).strip() for x in (exclude or []) if str(x).strip()}
+    if isinstance(only, str):
+        only_set = {x.strip() for x in only.split(",") if x.strip()}
+    else:
+        only_set = {str(x).strip() for x in (only or []) if str(x).strip()}
 
     cutoff = add_days(now_datetime(), -skip_recent_login_days) if skip_recent_login_days else None
 
@@ -455,6 +464,7 @@ def run(dry_run=1, limit=0, skip_recent_login_days=0, exclude=None, verbose=1):
             "limit": limit,
             "skip_recent_login_days": skip_recent_login_days,
             "exclude": sorted(excluded),
+            "only": sorted(only_set),
         },
         "scanned": {
             "guardians": len(guardians),
@@ -472,6 +482,8 @@ def run(dry_run=1, limit=0, skip_recent_login_days=0, exclude=None, verbose=1):
         if limit and processed >= limit:
             break
         names = [r["name"] for r in rows]
+        if only_set and not (only_set & set(names)):
+            continue
         hit = sorted(excluded & set(names))
         if hit:
             result["skipped"].append(
