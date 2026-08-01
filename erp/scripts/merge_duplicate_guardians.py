@@ -70,6 +70,19 @@ CHILD_EXTRA_KEY = {
     "CRM Family Relationship": "student",
 }
 
+# Cờ phải HỢP NHẤT (lấy max) trước khi xoá dòng trùng, TUYỆT ĐỐI không xoá mù.
+#
+# Hai bản ghi của cùng một người thường mỗi bản giữ cờ cho một cháu: bản A là người liên
+# hệ chính của cháu 1, bản B của cháu 2. Sau khi gộp nhà (bước 2) thì cả hai bản cùng nối
+# tới cả hai cháu, nên mỗi cặp (cháu, người) có hai dòng — một dòng cờ 1, một dòng cờ 0.
+# Xoá dòng của bản thừa mà không nhìn cờ là cháu đó MẤT người liên hệ chính, và chỉ số
+# [1] của family_diagnostics ("không cháu nào thiếu key_person") vỡ ngay sau khi ghi.
+# Ca thật: Lê Thị Mến (+84915347402) — hai bản ghi, mỗi bản là key_person của một cháu.
+CHILD_MERGE_FLAGS = {
+    "CRM Family Relationship": ("key_person", "access", "can_pickup"),
+    "CRM Lead Guardian": ("is_primary_contact",),
+}
+
 
 def _int(value):
     try:
@@ -190,45 +203,68 @@ def _repoint_regular(doctype, fieldname, loser, keeper):
 
 
 def _repoint_child(doctype, fieldname, loser, keeper):
-    """Trỏ lại dòng bảng con, XOÁ thay vì trỏ nếu bản giữ đã có dòng cho cùng cặp.
+    """Trỏ lại dòng bảng con; nếu bản giữ đã có dòng cho cùng cặp thì HỢP NHẤT CỜ rồi xoá.
 
-    Trả về (repointed, deleted) để báo cáo nói đúng việc đã làm.
+    Trả về (repointed, deleted, flags_merged).
     """
     extra = CHILD_EXTRA_KEY.get(doctype)
-    cols = ["name", "parent", "parentfield"] + ([extra] if extra else [])
+    flags = [
+        f
+        for f in CHILD_MERGE_FLAGS.get(doctype, ())
+        if frappe.db.has_column(doctype, f)
+    ]
+    cols = ["name", "parent", "parentfield"] + ([extra] if extra else []) + flags
+    col_sql = ", ".join("`" + c + "`" for c in cols)
+
     rows = frappe.db.sql(
-        f"SELECT {', '.join('`' + c + '`' for c in cols)} FROM `tab{doctype}` "
-        f"WHERE `{fieldname}` = %(loser)s",
+        f"SELECT {col_sql} FROM `tab{doctype}` WHERE `{fieldname}` = %(loser)s",
         {"loser": loser},
         as_dict=True,
     ) or []
     if not rows:
-        return 0, 0
+        return 0, 0, 0
 
-    existing = set()
     keep_rows = frappe.db.sql(
-        f"SELECT {', '.join('`' + c + '`' for c in cols)} FROM `tab{doctype}` "
-        f"WHERE `{fieldname}` = %(keeper)s",
+        f"SELECT {col_sql} FROM `tab{doctype}` WHERE `{fieldname}` = %(keeper)s",
         {"keeper": keeper},
         as_dict=True,
     ) or []
-    for r in keep_rows:
-        existing.add((r["parent"], r["parentfield"], r.get(extra) if extra else None))
+    existing = {
+        (r["parent"], r["parentfield"], r.get(extra) if extra else None): r
+        for r in keep_rows
+    }
 
-    repointed = deleted = 0
+    repointed = deleted = merged_flags = 0
     for r in rows:
         key = (r["parent"], r["parentfield"], r.get(extra) if extra else None)
-        if key in existing:
-            frappe.db.sql(f"DELETE FROM `tab{doctype}` WHERE name = %(n)s", {"n": r["name"]})
-            deleted += 1
-        else:
+        kept = existing.get(key)
+        if kept is None:
             frappe.db.sql(
                 f"UPDATE `tab{doctype}` SET `{fieldname}` = %(keeper)s WHERE name = %(n)s",
                 {"keeper": keeper, "n": r["name"]},
             )
-            existing.add(key)
+            r[fieldname] = keeper
+            existing[key] = r
             repointed += 1
-    return repointed, deleted
+            continue
+
+        # Trùng cặp: nâng cờ của dòng được giữ lên max(hai dòng) TRƯỚC khi xoá dòng kia.
+        updates = {}
+        for f in flags:
+            merged = max(_int(kept.get(f)), _int(r.get(f)))
+            if merged != _int(kept.get(f)):
+                updates[f] = merged
+                kept[f] = merged
+        if updates:
+            sets = ", ".join(f"`{f}` = %({f})s" for f in updates)
+            frappe.db.sql(
+                f"UPDATE `tab{doctype}` SET {sets} WHERE name = %(n)s",
+                {**updates, "n": kept["name"]},
+            )
+            merged_flags += 1
+        frappe.db.sql(f"DELETE FROM `tab{doctype}` WHERE name = %(n)s", {"n": r["name"]})
+        deleted += 1
+    return repointed, deleted, merged_flags
 
 
 def _merge_contact_rows(keeper, loser, child_dt, value_field):
@@ -300,17 +336,25 @@ def _apply(keeper, losers, link_fields):
     # Lấy TRƯỚC khi xoá: sau khi xoá thì không còn dòng nào để suy ra học sinh liên quan.
     students = _affected_students([keeper_name] + loser_names)
 
-    detail = {"repointed": [], "deleted_rows": [], "contacts_moved": 0, "users_disabled": []}
+    detail = {
+        "repointed": [],
+        "deleted_rows": [],
+        "flags_merged": [],
+        "contacts_moved": 0,
+        "users_disabled": [],
+    }
 
     for loser in losers:
         loser_name = loser["name"]
         for dt, fieldname, is_child in link_fields:
             if is_child:
-                rp, dl = _repoint_child(dt, fieldname, loser_name, keeper_name)
+                rp, dl, fm = _repoint_child(dt, fieldname, loser_name, keeper_name)
                 if rp:
                     detail["repointed"].append(f"{dt}.{fieldname}: {rp}")
                 if dl:
                     detail["deleted_rows"].append(f"{dt}.{fieldname}: {dl}")
+                if fm:
+                    detail["flags_merged"].append(f"{dt}.{fieldname}: {fm}")
             else:
                 _repoint_regular(dt, fieldname, loser_name, keeper_name)
 
@@ -518,6 +562,8 @@ def _print(result):
                 print(f"        Tro lai   : {'; '.join(applied['repointed'])}")
             if applied["deleted_rows"]:
                 print(f"        Xoa dong trung: {'; '.join(applied['deleted_rows'])}")
+            if applied["flags_merged"]:
+                print(f"        Hop nhat co (key_person/access/...): {'; '.join(applied['flags_merged'])}")
             if applied["contacts_moved"]:
                 print(f"        Mang sang {applied['contacts_moved']} so/email")
             if applied["users_disabled"]:
