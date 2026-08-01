@@ -174,8 +174,24 @@ def _diff_mirrors():
     return students, guardians
 
 
-def _contact_drift():
-    """Guardian có field phẳng lệch dòng is_primary của bảng con."""
+def _contact_drift(fill_empty=0):
+    """Guardian có field phẳng MỒ CÔI so với bảng con.
+
+    ĐỊNH NGHĨA HẸP, cố ý. "Lệch dòng is_primary" là tiêu chí SAI để tự động ghi:
+
+    - `CRM Guardian.phone_number` là thứ ĐĂNG NHẬP tra (otp_auth tra đúng field phẳng,
+      không đọc bảng con). Số phẳng khác dòng is_primary nhưng VẪN nằm trong bảng con
+      nghĩa là nó vẫn là một số thật của người ta và đăng nhập đang chạy tốt — ghi đè là
+      đá phụ huynh ra khỏi tài khoản. Bản dry-run đầu tiên định đổi số của Cao Hải Đăng,
+      Trần Ngọc Yến... đều là người vừa gộp xong và đang dùng portal.
+    - Field phẳng RỖNG mà bảng con có giá trị thì là chuyện khác: 1800+ email đang rỗng.
+      Điền hàng loạt có thể bật luồng gửi thư tới địa chỉ trước nay im lặng, nên phải
+      BẬT TƯỜNG MINH bằng `fill_empty`, không làm mặc định.
+
+    Chỉ ghi khi giá trị phẳng KHÔNG còn tồn tại trong bảng con — lúc đó nó chắc chắn là
+    rác (số/email đã bị xoá khỏi bảng con mà quên dọn field phẳng), và chính nó gây ra
+    lớp bug "chặn oan" ở dedup.
+    """
     phones = defaultdict(list)
     for r in frappe.db.sql(
         """
@@ -208,68 +224,83 @@ def _contact_drift():
     }
 
     out = []
+    skipped_still_valid = 0
+
+    def _collect(name, rows, field, flat_key, want, child_values):
+        nonlocal skipped_still_valid
+        cur = flat.get(name)
+        if cur is None or not want:
+            return
+        have = (cur.get(flat_key) or "").strip()
+        if want.casefold() == have.casefold():
+            return
+        if have and have.casefold() in child_values:
+            # Giá trị phẳng vẫn là một giá trị THẬT của người này -> không đụng.
+            skipped_still_valid += 1
+            return
+        if not have and not fill_empty:
+            return
+        out.append(
+            {
+                "guardian": name,
+                "field": field,
+                "from": have,
+                "to": want,
+                "kind": "dien vao cho rong" if not have else "thay gia tri mo coi",
+                # Không dòng nào đánh dấu is_primary -> luật runtime lấy dòng đầu.
+                # Báo ra để người phụ trách biết giá trị này là SUY, không phải khai.
+                "no_primary_marked": not any(_int(r["is_primary"]) for r in rows),
+            }
+        )
+
     for name, rows in phones.items():
-        cur = flat.get(name)
-        if cur is None:
-            continue
-        want = (_derive_primary_phone_from_rows(rows) or "").strip()
-        have = (cur.get("phone_number") or "").strip()
-        if want and want != have:
-            out.append(
-                {
-                    "guardian": name,
-                    "field": "phone_number",
-                    "from": have,
-                    "to": want,
-                    # Không dòng nào đánh dấu is_primary -> luật runtime lấy dòng đầu.
-                    # Báo ra để người phụ trách biết giá trị này là SUY, không phải khai.
-                    "no_primary_marked": not any(_int(r["is_primary"]) for r in rows),
-                }
-            )
+        vals = {(r["phone_number"] or "").strip().casefold() for r in rows}
+        _collect(
+            name, rows, "phone_number", "phone_number",
+            (_derive_primary_phone_from_rows(rows) or "").strip(), vals,
+        )
     for name, rows in emails.items():
-        cur = flat.get(name)
-        if cur is None:
-            continue
-        want = (_derive_primary_email_from_rows(rows) or "").strip()
-        have = (cur.get("email") or "").strip()
-        if want and want.casefold() != have.casefold():
-            out.append(
-                {
-                    "guardian": name,
-                    "field": "email",
-                    "from": have,
-                    "to": want,
-                    "no_primary_marked": not any(_int(r["is_primary"]) for r in rows),
-                }
-            )
-    return sorted(out, key=lambda d: (d["guardian"], d["field"]))
+        vals = {(r["email_address"] or "").strip().casefold() for r in rows}
+        _collect(
+            name, rows, "email", "email",
+            (_derive_primary_email_from_rows(rows) or "").strip(), vals,
+        )
+    return sorted(out, key=lambda d: (d["guardian"], d["field"])), skipped_still_valid
 
 
-def run(dry_run=1, do_mirrors=1, do_contacts=1, limit=0, verbose=1):
+def run(dry_run=1, do_mirrors=1, do_contacts=1, fill_empty=0, limit=0, verbose=1):
     """
-    Dựng lại mirror lệch + đồng bộ số/email phẳng.
+    Dựng lại mirror lệch + dọn field phẳng mồ côi.
 
     dry_run      1 = chỉ báo cáo (mặc định).
     do_mirrors   0 = bỏ qua phần mirror.
     do_contacts  0 = bỏ qua phần số/email phẳng.
+    fill_empty   1 = ĐIỀN cả những field phẳng đang RỖNG từ bảng con. Mặc định TẮT: có
+                 hơn 1800 guardian đang rỗng `email`, điền hàng loạt có thể bật luồng gửi
+                 thư tới địa chỉ trước nay im lặng. Bật khi đã xác nhận với nghiệp vụ.
     limit        Chỉ xử lý N bản ghi mỗi loại (0 = tất cả) — để thử trước.
     """
     dry_run = _int(dry_run)
     do_mirrors = _int(do_mirrors)
     do_contacts = _int(do_contacts)
+    fill_empty = _int(fill_empty)
     limit = _int(limit)
     verbose = _int(verbose)
 
     students, guardians = _diff_mirrors() if do_mirrors else ({}, {})
-    contacts = _contact_drift() if do_contacts else []
+    contacts, skipped_still_valid = (
+        _contact_drift(fill_empty) if do_contacts else ([], 0)
+    )
 
     result = {
         "params": {
             "dry_run": dry_run,
             "do_mirrors": do_mirrors,
             "do_contacts": do_contacts,
+            "fill_empty": fill_empty,
             "limit": limit,
         },
+        "contacts_skipped_still_valid": skipped_still_valid,
         "students": [{"name": k, **v} for k, v in sorted(students.items())],
         "guardians": [{"name": k, **v} for k, v in sorted(guardians.items())],
         "contacts": contacts,
@@ -351,10 +382,16 @@ def _print(result):
         print(f"    ... con {len(result['guardians']) - 40} ban ghi nua")
     print("")
 
-    print(f"[3] SO/EMAIL PHANG lech dong is_primary: {len(result['contacts'])}")
+    print(f"[3] SO/EMAIL PHANG can don: {len(result['contacts'])}")
+    print(
+        f"    (bo qua {result['contacts_skipped_still_valid']} truong hop gia tri phang "
+        "van nam trong bang con — dang dung tot, KHONG dung vao)"
+    )
+    if not result["params"]["fill_empty"]:
+        print("    (fill_empty=0: KHONG dien vao field phang dang rong. Bat khi da xac nhan.)")
     for c in result["contacts"][:40]:
         note = "  <- bang con KHONG co dong nao danh dau is_primary, lay dong dau" if c["no_primary_marked"] else ""
-        print(f"    {c['guardian']}.{c['field']}: '{c['from']}' -> '{c['to']}'{note}")
+        print(f"    [{c['kind']}] {c['guardian']}.{c['field']}: '{c['from']}' -> '{c['to']}'{note}")
     if len(result["contacts"]) > 40:
         print(f"    ... con {len(result['contacts']) - 40} ban ghi nua")
     print("")
