@@ -183,6 +183,63 @@ def normalize_phone_number(phone):
     return phone
 
 
+def pick_guardian_record(guardian_list):
+    """
+    Chọn bản ghi CRM Guardian mà phụ huynh nên được đăng nhập vào.
+
+    Một SĐT có thể gắn với NHIỀU bản ghi CRM Guardian: `phone_number` không có ràng
+    buộc unique, và các đường tạo hồ sơ trượt dedup vẫn đẻ bản mới mỗi lần nhập học
+    thêm một cháu. Bản cũ lấy thẳng `guardian_list[0]`, tức bản `modified` mới nhất
+    theo thứ tự mặc định của `frappe.db.get_list` — nghĩa là phụ huynh rơi vào bản nào
+    phụ thuộc lần cuối AI ĐÓ SỬA bản ghi, và đảo theo thời gian. Bản rỗng quan hệ
+    thắng thì portal trắng trơn ("chưa chọn học sinh"), hôm sau ai đó sửa bản kia thì
+    lại đúng — ca CRM-GUARDIAN-6208328 (+84943685268) là đúng lớp lỗi này.
+
+    Ở đây ưu tiên bản CÓ dòng quan hệ chuẩn (`CRM Family.relationships`, family còn
+    sống). Hoà nhau thì giữ nguyên thứ tự cũ, để không đổi hành vi ngoài chủ đích.
+
+    Lưu ý phạm vi: hàm này KHÔNG gộp bản ghi trùng — đó là việc riêng và nặng hơn
+    nhiều (13 doctype tham chiếu + tài khoản User riêng cho từng guardian_id). Nó chỉ
+    bảo đảm phiên đăng nhập bám vào bản có dữ liệu. Và vì phiên sau đó bị ghim theo
+    `guardian_id` nhúng trong email đăng nhập, phụ huynh đang kẹt ở bản rỗng vẫn phải
+    ĐĂNG XUẤT rồi đăng nhập lại mới hưởng được thay đổi này.
+    """
+    if not guardian_list:
+        return None
+    if len(guardian_list) == 1:
+        return guardian_list[0]
+
+    names = [g["name"] for g in guardian_list if g.get("name")]
+    if not names:
+        return guardian_list[0]
+
+    try:
+        rows = frappe.db.sql(
+            """
+            SELECT fr.guardian AS guardian, COUNT(*) AS rows_count
+            FROM `tabCRM Family Relationship` fr
+            INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+            WHERE fr.parentfield = 'relationships'
+              AND f.docstatus < 2
+              AND fr.guardian IN %(names)s
+            GROUP BY fr.guardian
+            """,
+            {"names": tuple(names)},
+            as_dict=True,
+        ) or []
+    except Exception:
+        # Tra không được thì giữ nguyên hành vi cũ. Tuyệt đối không để việc chọn bản
+        # ghi làm hỏng đăng nhập của người đang có dữ liệu bình thường.
+        frappe.log_error(
+            "pick_guardian_record: loi dem quan he chuan", frappe.get_traceback()
+        )
+        return guardian_list[0]
+
+    counts = {r["guardian"]: int(r["rows_count"] or 0) for r in rows}
+    # sorted() ổn định: các bản cùng số dòng giữ nguyên thứ tự `modified desc` ban đầu.
+    return sorted(guardian_list, key=lambda g: -counts.get(g.get("name"), 0))[0]
+
+
 def is_production_server():
     """
     Kiểm tra xem server hiện tại có phải là production không.
@@ -366,9 +423,14 @@ def request_otp(phone_number):
                 "logs": logs
             }
         
-        guardian = guardian_list[0]
+        guardian = pick_guardian_record(guardian_list)
+        if len(guardian_list) > 1:
+            logs.append(
+                f"⚠️ SDT {normalized_phone} co {len(guardian_list)} ban ghi guardian — "
+                f"chon ban co quan he chuan: {guardian['name']}"
+            )
         logs.append(f"✅ Found guardian: {guardian['guardian_name']} ({guardian['name']})")
-        
+
         # Generate OTP
         is_prod = is_production_server()
         static_demo_otp = get_static_demo_otp_for_phone(normalized_phone)
@@ -514,9 +576,16 @@ def verify_otp_and_login(phone_number, otp):
                 "logs": logs
             }
         
-        guardian = guardian_list[0]
+        # PHẢI dùng cùng một hàm chọn với request_otp/phone_login: nếu hai chỗ chọn khác
+        # bản ghi thì mã OTP gửi cho một người mà phiên lại mở cho bản ghi khác.
+        guardian = pick_guardian_record(guardian_list)
+        if len(guardian_list) > 1:
+            logs.append(
+                f"⚠️ SDT {normalized_phone} co {len(guardian_list)} ban ghi guardian — "
+                f"chon ban co quan he chuan: {guardian['name']}"
+            )
         logs.append(f"✅ Guardian found: {guardian['guardian_name']}")
-        
+
         # Get or create User for this guardian
         user_email = f"{guardian['guardian_id']}@parent.wellspring.edu.vn"
         
@@ -684,7 +753,12 @@ def phone_login(phone_number):
                 "logs": logs
             }
 
-        guardian = guardian_list[0]
+        guardian = pick_guardian_record(guardian_list)
+        if len(guardian_list) > 1:
+            logs.append(
+                f"⚠️ SDT {normalized_phone} co {len(guardian_list)} ban ghi guardian — "
+                f"chon ban co quan he chuan: {guardian['name']}"
+            )
         logs.append(f"✅ Found guardian: {guardian['guardian_name']}")
 
         # Tạo / lấy User cho guardian
@@ -949,12 +1023,29 @@ def get_guardian_comprehensive_data(guardian_name):
         logs.append(f"🔍 Finding all families where guardian {guardian_name} is a member...")
 
         # Get all relationships where this guardian is involved
-        all_guardian_relationships = frappe.get_all(
-            "CRM Family Relationship",
-            filters={"guardian": guardian_name},
-            fields=["parent", "name", "student", "guardian", "relationship_type", "key_person", "access"],
-            ignore_permissions=True
-        )
+        # parentfield = 'relationships' + family còn sống: `CRM Family Relationship` là
+        # child table được lưu ở BA nơi cho cùng một sự thật — bản chuẩn dưới CRM Family,
+        # cộng hai mirror dưới CRM Student (`family_relationships`) và CRM Guardian
+        # (`student_relationships`). Không lọc thì dòng mirror cũng lọt vào đây, và
+        # `parent` của chúng là docname Student/Guardian chứ không phải family, nên
+        # `get_doc("CRM Family", ...)` bên dưới ném lỗi rồi bị except nuốt vào `logs` —
+        # im lặng hoàn toàn với người dùng. Prod đang đếm 4 "gia đình" cho một guardian
+        # chỉ có 1 nhà thật. Nguy hơn: nếu docname mirror trùng tên một CRM Family khác
+        # thì nhà lạ bị trộn vào danh sách con của phụ huynh.
+        # Xem quy ước ở erp/utils/family_relationship.py.
+        all_guardian_relationships = frappe.db.sql(
+            """
+            SELECT fr.parent, fr.name, fr.student, fr.guardian,
+                   fr.relationship_type, fr.key_person, fr.access
+            FROM `tabCRM Family Relationship` fr
+            INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+            WHERE fr.parentfield = 'relationships'
+              AND f.docstatus < 2
+              AND fr.guardian = %(guardian)s
+            """,
+            {"guardian": guardian_name},
+            as_dict=True,
+        ) or []
 
         if not all_guardian_relationships:
             logs.append("⚠️ No relationships found for this guardian")
@@ -988,12 +1079,20 @@ def get_guardian_comprehensive_data(guardian_name):
                 logs.append(f"✅ Processing family: {family_doc.family_code}")
 
                 # Get ALL relationships for this family (includes all members, not just this guardian)
-                all_family_relationships = frappe.get_all(
-                    "CRM Family Relationship",
-                    filters={"parent": family_name},
-                    fields=["name", "student", "guardian", "relationship_type", "key_person", "access"],
-                    ignore_permissions=True
-                )
+                # Cũng phải lọc parentfield: `parent` ở đây là docname CRM Family, nhưng
+                # bộ lọc chỉ-theo-parent vẫn quét cả bảng và sẽ nhặt nhầm dòng mirror nếu
+                # một CRM Student/CRM Guardian tình cờ có cùng docname.
+                all_family_relationships = frappe.db.sql(
+                    """
+                    SELECT fr.name, fr.student, fr.guardian,
+                           fr.relationship_type, fr.key_person, fr.access
+                    FROM `tabCRM Family Relationship` fr
+                    WHERE fr.parentfield = 'relationships'
+                      AND fr.parent = %(family)s
+                    """,
+                    {"family": family_name},
+                    as_dict=True,
+                ) or []
 
                 family_data = {
                     "name": family_doc.name,
