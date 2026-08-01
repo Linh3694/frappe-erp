@@ -22,6 +22,14 @@ BA NGUYÊN NHÂN SCRIPT NÀY PHÂN BIỆT
    ĐƯỢC SỬA GẦN NHẤT — quan hệ nằm ở bản kia thì portal rỗng, và thứ tự đổi mỗi lần ai
    đó sửa một trong hai bản (hôm nay đúng, mai sai).
 
+   Quan trọng: `modified desc` chỉ quyết định lúc ĐĂNG NHẬP. Sau đó phiên bị ghim theo
+   `guardian_id` nhúng trong email `<guardian_id>@parent.wellspring.edu.vn`
+   (`get_current_guardian_comprehensive_data`), nên phụ huynh đã đăng nhập vào bản rỗng
+   sẽ ở lại đó VĨNH VIỄN cho tới khi đăng xuất — dù thứ tự `modified` sau đó đã đổi.
+   Vì vậy `last_login_at` mới là cột chỉ ra bản ghi mà phụ huynh ĐANG THỰC SỰ dùng, còn
+   `modified` chỉ nói lần đăng nhập TIẾP THEO sẽ rơi vào đâu. Hai cột lệch nhau = đang
+   có bug, kể cả khi bản đang bind hiện lên đủ học sinh.
+
 2. MẤT DÒNG CHUẨN, CHỈ CÒN MIRROR. Bản chuẩn là `CRM Family.relationships`; hai bản
    `CRM Student.family_relationships` và `CRM Guardian.student_relationships` chỉ là
    mirror (xem erp/utils/family_relationship.py). Query của portal KHÔNG lọc
@@ -207,6 +215,24 @@ def _diagnose(candidate_reports, bound):
             "Ban ghi nay khong co quan he o bat ky dau (chuan, mirror, lead).",
         )
 
+    # Phiên ghim theo guardian_id, không theo `modified`: bản có `last_login_at` mới nhất
+    # mới là bản phụ huynh đang thực sự ngồi trong đó. Bản đó khác bản đang bind nghĩa là
+    # portal của họ vẫn rỗng, dù báo cáo phía trên trông "đủ học sinh".
+    if len(candidate_reports) > 1:
+        logged_in = [c for c in candidate_reports if c["last_login_at"]]
+        if logged_in:
+            session_holder = max(logged_in, key=lambda c: c["last_login_at"])
+            if session_holder["guardian"] != bound and not session_holder["canonical_rows"]:
+                return (
+                    "NGUYEN_NHAN_1_TRUNG_BAN_GHI_PHIEN_O_BAN_RONG",
+                    "Ban ghi %s dang nhap gan day nhat (%s) nhung KHONG co dong quan he "
+                    "nao -> phu huynh dang ngoi trong ban rong. Ban dang bind (%s) chi la "
+                    "noi lan dang nhap TIEP THEO se roi vao, phien hien tai khong doi theo. "
+                    "Phai gop hai ban ghi guardian; dang xuat/dang nhap lai chi la vet tam "
+                    "va se lat nguoc khi ai do sua ban rong."
+                    % (session_holder["guardian"], session_holder["last_login_at"], bound),
+                )
+
     if bound_report and bound_report["portal"]["students"] == 0:
         return (
             "CO_DONG_CHUAN_NHUNG_PORTAL_RONG",
@@ -248,10 +274,15 @@ def run(phone=None, guardian=None):
 
     reports = []
     for name in candidates:
+        # `owner` + `creation` để truy ra ĐƯỜNG nào đã sinh ra bản trùng — mỗi endpoint
+        # tạo CRM Guardian có một guard khác nhau, biết ai tạo mới biết phải vá cửa nào.
         doc = frappe.db.get_value(
             "CRM Guardian",
             name,
-            ["guardian_name", "phone_number", "family_code", "modified", "last_login_at"],
+            [
+                "guardian_name", "phone_number", "family_code",
+                "modified", "last_login_at", "owner", "creation",
+            ],
             as_dict=True,
         ) or {}
         canonical = _canonical_rows(name)
@@ -264,6 +295,8 @@ def run(phone=None, guardian=None):
                 "family_code": doc.get("family_code"),
                 "modified": str(doc.get("modified") or ""),
                 "last_login_at": str(doc.get("last_login_at") or ""),
+                "owner": doc.get("owner"),
+                "creation": str(doc.get("creation") or ""),
                 "is_bound": name == bound,
                 "canonical_rows": canonical,
                 "broken_canonical_rows": _broken_canonical_rows(name),
@@ -300,9 +333,11 @@ def _print(result):
     for r in result["reports"]:
         mark = "<= PP BAM VAO" if r["is_bound"] else ""
         print(
-            "    %-28s %-24s %s  modified=%s %s"
-            % (r["guardian"], (r["guardian_name"] or "")[:24], r["phone_number"], r["modified"], mark)
+            "    %-28s %-24s %s  modified=%s  last_login=%s %s"
+            % (r["guardian"], (r["guardian_name"] or "")[:24], r["phone_number"],
+               r["modified"], r["last_login_at"] or "-", mark)
         )
+        print("        tao luc %s boi %s" % (r["creation"], r["owner"]))
     if result["child_table_only"]:
         print(
             "    Chi khop o bang con (dang nhap KHONG tra ra): %s"
