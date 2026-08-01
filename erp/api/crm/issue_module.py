@@ -38,7 +38,15 @@ def get_modules():
     modules = frappe.get_all(
         "CRM Issue Module",
         filters=filters or None,
-        fields=["name", "module_name", "sla_hours", "description", "is_active", "modified"],
+        fields=[
+            "name",
+            "module_name",
+            "module_name_en",
+            "sla_hours",
+            "description",
+            "is_active",
+            "modified",
+        ],
         order_by="module_name asc",
     )
     module_names = [m["name"] for m in modules]
@@ -86,6 +94,7 @@ def create_module():
     try:
         doc = frappe.new_doc("CRM Issue Module")
         doc.module_name = data["module_name"]
+        doc.module_name_en = (data.get("module_name_en") or "").strip()
         doc.sla_hours = float(data.get("sla_hours") or 0)
         doc.description = data.get("description") or ""
         doc.is_active = 1 if data.get("is_active", True) else 0
@@ -113,6 +122,8 @@ def update_module():
         doc = frappe.get_doc("CRM Issue Module", name)
         if "module_name" in data:
             doc.module_name = data["module_name"]
+        if "module_name_en" in data:
+            doc.module_name_en = (data.get("module_name_en") or "").strip()
         if "sla_hours" in data:
             doc.sla_hours = float(data["sla_hours"] or 0)
         if "description" in data:

@@ -247,7 +247,13 @@ def _create_issue_from_feedback(feedback_doc, guardian_name):
     doc.content = content_html
     doc.issue_module = module_name
     # Nhom van de = Gop y (feedback phu huynh luon thuoc nhom Gop y)
-    doc.issue_group = "Góp ý"
+    # Nhom van de cau hinh duoc — admin doi ten "Gop y" thi lay nhom dang bat dau tien.
+    try:
+        from erp.api.crm.issue_group import resolve_group_name
+
+        doc.issue_group = resolve_group_name("Góp ý")
+    except Exception:
+        doc.issue_group = "Góp ý"
     # Lien ket nguoc ve Feedback de mobile/staff reply phu huynh tu man CRM Issue
     doc.source_feedback = getattr(feedback_doc, "name", None) or ""
     doc.issue_code = _generate_issue_code()

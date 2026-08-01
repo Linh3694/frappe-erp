@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "module_name",
+  "module_name_en",
   "sla_hours",
   "description",
   "is_active",
@@ -20,6 +21,12 @@
    "in_list_view": 1,
    "label": "Module Name",
    "reqd": 1
+  },
+  {
+   "fieldname": "module_name_en",
+   "fieldtype": "Data",
+   "label": "Module Name (EN)",
+   "description": "Tên hiển thị khi giao diện ở tiếng Anh; bỏ trống thì dùng tên tiếng Việt"
   },
   {
    "description": "So gio can phan hoi (SLA)",

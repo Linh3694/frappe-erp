@@ -60,7 +60,21 @@ TS_CARE_UNIT_CODE = "TS-CARE"
 # Muc do hop le - them Khan cap (cao nhat)
 VALID_PRIORITIES = ("Khan cap", "Cao", "Trung binh", "Thap")
 # Nhom van de - team care dien truoc khi duyet
-VALID_ISSUE_GROUPS = ("Góp ý", "Sự vụ")
+# Nhom van de gio cau hinh duoc (doctype CRM Issue Group) — hai gia tri nay chi con la
+# seed mac dinh, dung `_valid_issue_groups()` de validate.
+DEFAULT_ISSUE_GROUPS = ("Góp ý", "Sự vụ")
+
+
+def _valid_issue_groups():
+    """Ten nhom van de dang bat. Loi doc cau hinh -> quay ve mac dinh, khong chan nguoi dung."""
+    try:
+        from erp.api.crm.issue_group import active_group_names
+
+        names = active_group_names()
+        return tuple(names) if names else DEFAULT_ISSUE_GROUPS
+    except Exception:
+        frappe.logger().error("issue: khong doc duoc CRM Issue Group", exc_info=True)
+        return DEFAULT_ISSUE_GROUPS
 
 # Role duoc ghi / xu ly van de (dong bo frontend canWriteIssue). SIS Sales = user thuong (ghi qua Team don vi).
 ISSUE_WRITE_ROLES = frozenset(
@@ -2387,7 +2401,7 @@ def create_issue():
                     "Phong ban lien quan la bat buoc",
                     {"departments": ["Bat buoc"]},
                 )
-            if issue_group not in VALID_ISSUE_GROUPS:
+            if issue_group not in _valid_issue_groups():
                 return validation_error_response(
                     "Nhom van de la bat buoc",
                     {"issue_group": ["Bat buoc"]},
@@ -2529,7 +2543,7 @@ def approve_issue():
 
     # Nhom van de (Gop y / Su vu): team care bat buoc dien truoc khi duyet
     issue_group = (data.get("issue_group") or getattr(doc, "issue_group", "") or "").strip()
-    if issue_group not in VALID_ISSUE_GROUPS:
+    if issue_group not in _valid_issue_groups():
         return validation_error_response(
             "Nhom van de la bat buoc khi duyet",
             {"issue_group": ["Bat buoc"]},
@@ -2741,7 +2755,7 @@ def update_issue():
             if not _can_edit_issue_departments(frappe.session.user):
                 return error_response("Chi nhom Care moi duoc thay doi nhom van de")
             ig = (data.get("issue_group") or "").strip()
-            if ig and ig not in VALID_ISSUE_GROUPS:
+            if ig and ig not in _valid_issue_groups():
                 return validation_error_response("Nhom van de khong hop le", {"issue_group": ["Khong hop le"]})
             doc.issue_group = ig
 
