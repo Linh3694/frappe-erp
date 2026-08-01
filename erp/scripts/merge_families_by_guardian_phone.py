@@ -39,9 +39,12 @@ BỐN QUY TẮC AN TOÀN — đọc trước khi chạy với dry_run = 0
    `can_pickup = 1` (đón được nhưng không xem được hồ sơ/điểm/học phí). Vì vậy "mặc
    định được xem thông tin" ở đây áp cho mọi quan hệ TRỪ caretaker.
 
-4. Người liên hệ chính khác nhau -> ĐỂ LẠI.
-   Nếu hai nhà đang đặt người liên hệ chính là hai NGƯỜI khác nhau thì script không
-   đoán hộ: bỏ qua cả nhóm, báo ra để người phụ trách quyết định.
+4. KHÔNG BAO GIỜ đụng vào `key_person`.
+   `key_person` là thuộc tính của CẶP (student, guardian) — mỗi cháu một người liên hệ
+   chính riêng. Hai nhà đặt hai người khác nhau KHÔNG phải xung đột: đó là bố đứng tên
+   cháu này, mẹ đứng tên cháu kia. Dòng đã có giữ nguyên cờ của chính nó, dòng bổ sung
+   mới luôn = 0. Gộp gia đình là thao tác DỮ LIỆU; "ai là người liên hệ chính của cháu
+   này" là quyết định NGHIỆP VỤ, không phải việc của script.
 
 -----------------------------------------------------------------------------------------
 HỒ SƠ LEAD
@@ -327,7 +330,15 @@ def _analyse_group(families, ctx, max_families, max_guardians_per_phone, min_sha
                 "reason": f"SDT {ident} gan voi {len(holders)} ban ghi guardian (> {max_guardians_per_phone}) — nghi so dung chung",
             }
 
-    # --- Gate: người liên hệ chính (quy tắc 4) -------------------------------
+    # --- Người liên hệ chính: CHỈ ĐỂ BÁO CÁO, không còn là điều kiện gộp -------
+    # `key_person` là thuộc tính của CẶP (student, guardian) — mỗi cháu một người liên
+    # hệ chính riêng (quy ước ở erp/utils/family_relationship.py). Nên hai nhà đặt hai
+    # người khác nhau KHÔNG phải xung đột: đó là bố đứng tên cháu này, mẹ đứng tên cháu
+    # kia. Bản trước coi đó là xung đột nên bỏ qua 19/33 cụm hợp lệ, và ở cụm nó không
+    # bỏ qua thì lại ép một người cho cả nhà — tức là script tự ý đổi người liên hệ
+    # chính của một cháu (đã bắt được ca đổi mẹ ruột sang mẹ kế ở FAM-4648927).
+    # Từ đây script KHÔNG bao giờ quyết định key_person: dòng cũ giữ nguyên cờ của
+    # chính nó, dòng bổ sung mới luôn = 0. Xem `_plan_rows`.
     key_by_family = {}
     for f in families:
         idents = set()
@@ -339,25 +350,18 @@ def _analyse_group(families, ctx, max_families, max_guardians_per_phone, min_sha
                 idents.add(_identity_of(g))
         key_by_family[f] = idents
 
-    multi = {f: sorted(i) for f, i in key_by_family.items() if len(i) > 1}
-    if multi:
-        return {**info, "ok": False, "reason": f"trong mot nha da co >1 nguoi lien he chinh: {multi}"}
-
-    non_empty = {f: next(iter(i)) for f, i in key_by_family.items() if i}
-    distinct = set(non_empty.values())
-    if len(distinct) > 1:
-        return {
-            **info,
-            "ok": False,
-            "reason": f"nguoi lien he chinh KHAC NHAU giua cac nha ({sorted(distinct)}) — de lai cho nguoi phu trach",
-        }
-
-    key_identity = next(iter(distinct)) if distinct else None
+    # sorted() chứ không next(iter(set)): thứ tự set không ổn định giữa các lần chạy,
+    # mà giá trị này đi vào báo cáo nên phải tất định.
+    distinct = sorted({i for idents in key_by_family.values() for i in idents})
+    key_identity = distinct[0] if len(distinct) == 1 else None
     info["key_identity"] = key_identity
+    info["key_identities_all"] = distinct
     info["key_missing_in"] = sorted(f for f in families if not key_by_family[f])
 
-    # Bản ghi guardian mang cờ key_person cho cả nhà: ưu tiên bản đang là key nhiều
-    # nhất, rồi bản đã kích hoạt portal, rồi docname nhỏ nhất (ổn định giữa các lần chạy).
+    # CHỈ ĐỂ IN BÁO CÁO — không dòng nào được ghi theo giá trị này nữa. Khi cả cụm chỉ
+    # có đúng một người liên hệ chính thì in ra cho người đọc dễ nhận diện nhà; nhiều
+    # người khác nhau (trường hợp bình thường: mỗi cháu một người) thì để trống.
+    # Thứ tự chọn: bản đang là key nhiều nhất, rồi bản đã kích hoạt portal, rồi docname.
     key_guardian = None
     if key_identity:
         candidates = [g for g in all_guardians if g in guardians and _identity_of(guardians[g]) == key_identity]
@@ -441,10 +445,12 @@ def _plan_rows(group, ctx, has_pickup):
             rel_key = rel.strip().lower()
             want_access = 0 if rel_key in NO_ACCESS_TYPES else 1
             want_pickup = 1
-            want_key = 1 if (group.get("key_guardian") and g == group["key_guardian"]) else 0
-            # Chưa xác định được người liên hệ chính -> giữ nguyên cờ cũ, không tự đặt.
-            if not group.get("key_guardian") and row is not None:
-                want_key = _int(row.get("key_person"))
+            # key_person: TUYỆT ĐỐI không do script quyết định. Dòng đã có giữ nguyên cờ
+            # của chính cặp đó; dòng bổ sung mới luôn 0. Gộp gia đình là thao tác DỮ LIỆU,
+            # còn "ai là người liên hệ chính của cháu này" là quyết định NGHIỆP VỤ.
+            # An toàn vì mỗi cháu hiện đã có đúng một key_person (family_diagnostics [1]:
+            # không cháu nào thiếu, không cháu nào có >1) — giữ nguyên là giữ đúng.
+            want_key = _int(row.get("key_person")) if row is not None else 0
 
             new_row = {
                 "student": s,
@@ -557,12 +563,17 @@ def _sync_leads(group, target, planned):
     Ở đây chỉ trỏ lại linked_family và BỔ SUNG lead_guardians còn thiếu.
     """
     touched = []
-    key_guardian = group.get("key_guardian")
     rel_by_guardian = {}
     order_by_guardian = {}
+    # `is_primary_contact` (grain lead) là bản sao của `key_person` (grain cặp) — xem
+    # erp/api/crm/enrollment.py::_lead_guardian_entries. Lead nào cũng gắn với ĐÚNG một
+    # học sinh, nên phải lấy cờ của cặp (học sinh của lead đó, guardian), không phải cờ
+    # của một người được chọn cho cả nhà: lấy sai là ghi đè người liên hệ chính của cháu.
+    key_by_pair = {}
     for row in planned:
         rel_by_guardian.setdefault(row["guardian"], row.get("relationship_type") or "")
         order_by_guardian.setdefault(row["guardian"], _int(row.get("display_order")))
+        key_by_pair[(row["student"], row["guardian"])] = _int(row.get("key_person"))
 
     for sid in sorted(group["students"]):
         leads = frappe.get_all(
@@ -583,7 +594,7 @@ def _sync_leads(group, target, planned):
                         {
                             "guardian": g,
                             "relationship_type": rel_by_guardian.get(g) or "",
-                            "is_primary_contact": 1 if (key_guardian and g == key_guardian) else 0,
+                            "is_primary_contact": key_by_pair.get((sid, g), 0),
                             "display_order": order_by_guardian.get(g, 0),
                         },
                     )
