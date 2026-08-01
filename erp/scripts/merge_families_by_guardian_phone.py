@@ -193,19 +193,41 @@ def _load_guardians():
     return out
 
 
+def _name_key(guardian_row):
+    """Tên đã bỏ dấu / hạ chữ / gộp khoảng trắng — dùng để nhận ra CÙNG MỘT NGƯỜI."""
+    from erp.utils.search import strip_accents
+
+    name = (guardian_row.get("guardian_name") or "").strip()
+    if not name:
+        return ""
+    # split() gộp luôn cả \n: dữ liệu prod có bản ghi tên hai dòng dính nhau.
+    return " ".join(strip_accents(name).casefold().split())
+
+
 def _identity_of(guardian_row):
     """
-    Khoá danh tính của một bản ghi guardian.
+    Khoá danh tính của một bản ghi guardian: SĐT **cộng với TÊN**.
 
-    Có SĐT phẳng hợp lệ -> dùng số đó (hai bản ghi cùng số = một người).
-    Không có -> dùng chính docname, để bản ghi đó chỉ "trùng với chính nó": trường hợp
-    MỘT bản ghi guardian đứng ở hai family vẫn nối được hai nhà, mà không kéo nhầm những
-    guardian khác cũng đang trống SĐT vào chung một cụm.
+    Chỉ dùng SĐT là SAI, và đã sai thật trên prod: +84966667997 do HAI người khác nhau
+    giữ — Dương Thị Thủy (mẹ của Lê Đắc Minh, Lê Ngọc Diệu Thảo) và Nguyễn Hồng Quyên
+    (mẹ của Lê Ngọc Minh Thư). Gộp theo khoá chỉ-SĐT thì hai nhà đó bị coi là "cùng mẹ"
+    và nhập làm một, kéo theo bà Quyên được gán quan hệ `mother` với hai cháu KHÔNG PHẢI
+    con bà, kèm access = 1. Cùng lập luận với quy tắc gộp bản ghi guardian trùng: phải
+    trùng CẢ số LẪN tên mới là một người.
+
+    Không có SĐT hợp lệ -> dùng docname, để bản ghi đó chỉ "trùng với chính nó": một bản
+    ghi guardian đứng ở hai family vẫn nối được hai nhà, mà không kéo nhầm những guardian
+    khác cũng đang trống SĐT vào chung một cụm.
     """
     e164 = guardian_row.get("e164") or ""
     if e164 and not _is_placeholder_phone(e164):
-        return e164
+        return f"{e164}|{_name_key(guardian_row)}"
     return "doc:" + guardian_row["name"]
+
+
+def _identity_phone(identity):
+    """Phần SĐT của khoá danh tính — để in báo cáo cho người đọc."""
+    return identity.split("|", 1)[0] if "|" in identity else identity
 
 
 def _load_canonical_rows():
@@ -343,8 +365,40 @@ def _analyse_group(families, ctx, max_families, max_guardians_per_phone, min_sha
             return {
                 **info,
                 "ok": False,
-                "reason": f"SDT {ident} gan voi {len(holders)} ban ghi guardian (> {max_guardians_per_phone}) — nghi so dung chung",
+                "reason": f"SDT {_identity_phone(ident)} gan voi {len(holders)} ban ghi guardian (> {max_guardians_per_phone}) — nghi so dung chung",
             }
+
+    # --- Gate: nghi GIA ĐÌNH CÓ CON RIÊNG -------------------------------------
+    # Hai người KHÁC NHAU cùng khai vai `mother` (hoặc cùng khai `father`) trong một cụm
+    # nghĩa là các cháu không cùng một cặp bố mẹ. Gộp kiểu đó là sai ở chỗ nguy hiểm
+    # nhất: `_plan_rows` dựng TÍCH mọi học sinh × mọi phụ huynh và sao chép luôn
+    # `relationship_type` của người đó, nên mẹ của cháu này bị gán làm `mother` của cháu
+    # kia — sai quan hệ, và kèm access = 1 là lộ học bạ/học phí sang gia đình khác.
+    #
+    # Ca thật trên prod: FAM-4648927 (Lê Đắc Minh, Lê Ngọc Diệu Thảo — mẹ Dương Thị Thủy)
+    # và FAM-6208003 (Lê Ngọc Minh Thư — mẹ Nguyễn Hồng Quyên, Dương Thị Thủy là MẸ KẾ).
+    # Chung bố, khác mẹ. Script định gán Nguyễn Hồng Quyên làm mẹ của hai cháu đầu.
+    #
+    # Không tự quyết: cụm kiểu này cần người phụ trách nhìn hoàn cảnh gia đình.
+    role_people = defaultdict(dict)
+    for f in families:
+        for r in rows_by_family[f]:
+            code = _rel_code(r.get("relationship_type"))
+            if code not in ("mother", "father"):
+                continue
+            g = guardians.get(r["guardian"])
+            if not g:
+                continue
+            # Khoá theo TÊN: cùng người có thể có nhiều bản ghi (nhiều SĐT) mà vẫn là một.
+            role_people[code].setdefault(_name_key(g) or r["guardian"], g.get("guardian_name") or r["guardian"])
+    conflict = {role: sorted(names.values()) for role, names in role_people.items() if len(names) > 1}
+    if conflict:
+        detail = "; ".join(f"{role}: {', '.join(names)}" for role, names in sorted(conflict.items()))
+        return {
+            **info,
+            "ok": False,
+            "reason": f"nghi gia dinh CO CON RIENG — nhieu nguoi cung vai ({detail}) — de nguoi phu trach quyet",
+        }
 
     # --- Người liên hệ chính: CHỈ ĐỂ BÁO CÁO, không còn là điều kiện gộp -------
     # `key_person` là thuộc tính của CẶP (student, guardian) — mỗi cháu một người liên
@@ -637,6 +691,7 @@ def run(
     max_guardians_per_phone=6,
     sync_leads=1,
     verbose=1,
+    exclude_families=None,
 ):
     """
     Rà và gộp các gia đình cùng bố mẹ nhưng khác học sinh.
@@ -648,6 +703,11 @@ def run(
     max_families            Cụm nhiều hơn ngần này thì bỏ qua (nghi SĐT dùng chung).
     max_guardians_per_phone Một SĐT gắn nhiều hơn ngần này bản ghi thì bỏ qua.
     sync_leads              1 = cập nhật CRM Lead (linked_family + bổ sung lead_guardians).
+    exclude_families        List/chuỗi phân cách dấu phẩy các CRM Family cần LOẠI khỏi
+                            đợt chạy. Chạm vào family nào trong danh sách thì CẢ CỤM bị
+                            loại — có gia đình chỉ người phụ trách mới quyết được (dữ
+                            liệu test, tên rác, quan hệ khai sai), và gộp nửa cụm còn
+                            nguy hiểm hơn không gộp. Cụm bị loại được BÁO RA, không im.
 
     Mỗi cụm được commit riêng, nên dừng giữa chừng (Ctrl-C, timeout) chỉ mất cụm đang
     làm dở; chạy lại là tiếp tục được vì các cụm đã gộp không còn là ứng viên nữa.
@@ -659,6 +719,11 @@ def run(
     max_guardians_per_phone = max(2, _int(max_guardians_per_phone) or 6)
     sync_leads = _int(sync_leads)
     verbose = _int(verbose)
+    # bench --kwargs truyền được cả list lẫn chuỗi "FAM-1,FAM-2" — nhận cả hai.
+    if isinstance(exclude_families, str):
+        excluded = {f.strip() for f in exclude_families.split(",") if f.strip()}
+    else:
+        excluded = {str(f).strip() for f in (exclude_families or []) if str(f).strip()}
 
     has_pickup = _has_can_pickup()
     guardians = _load_guardians()
@@ -732,6 +797,7 @@ def run(
             "max_families": max_families,
             "max_guardians_per_phone": max_guardians_per_phone,
             "sync_leads": sync_leads,
+            "exclude_families": sorted(excluded),
         },
         "scanned": {
             "families": len(rows_by_family),
@@ -750,6 +816,18 @@ def run(
     for fams in candidates:
         if limit and processed >= limit:
             break
+        hit = sorted(excluded & set(fams))
+        if hit:
+            # Báo ra như một cụm bị bỏ qua bình thường: người vận hành phải thấy mình đã
+            # loại cái gì, nếu không lần chạy sau sẽ tưởng dữ liệu đã sạch.
+            result["skipped"].append(
+                {
+                    "families": sorted(fams),
+                    "ok": False,
+                    "reason": f"bi loai thu cong qua exclude_families ({', '.join(hit)})",
+                }
+            )
+            continue
         group = _analyse_group(fams, ctx, max_families, max_guardians_per_phone, min_shared)
         if not group.get("ok"):
             result["skipped"].append(group)
@@ -813,7 +891,10 @@ def run(
 
     # --- Báo riêng: chỉ trùng ở BẢNG CON (số phụ) — xem tay, không tự gộp ------
     child_ident = _child_phone_identities()
-    flat_idents = {_identity_of(g) for g in guardians.values()}
+    # So với SĐT của bảng con thì chỉ được lấy PHẦN SỐ của khoá danh tính: khoá đã gồm
+    # cả tên nên so nguyên khoá sẽ không bao giờ khớp, và mọi cặp đều bị báo nhầm là
+    # "chỉ trùng ở bảng con".
+    flat_idents = {_identity_phone(_identity_of(g)) for g in guardians.values()}
     guardian_families = defaultdict(set)
     for fam_name, frows in rows_by_family.items():
         for r in frows:
@@ -865,12 +946,15 @@ def _print_report(result, dry_run):
         print(f"        Phu huynh: {'; '.join(m['guardian_names'])}")
         # Ba trạng thái KHÁC HẲN nhau — bản trước gộp cả ba vào một câu "CHUA CO", khiến
         # 15 cụm có sẵn người liên hệ chính đầy đủ bị đọc nhầm thành "cần đặt tay".
+        # Khoá danh tính nay là "SĐT|tên" — in ra chỉ lấy phần số cho người đọc.
         if m["key_guardian"]:
-            print(f"        Nguoi lien he chinh: {m['key_guardian']} ({m['key_identity']})")
+            print(
+                f"        Nguoi lien he chinh: {m['key_guardian']} ({_identity_phone(m['key_identity'] or '')})"
+            )
         elif m.get("key_identities_all"):
             print(
                 "        Nguoi lien he chinh: MOI CHAU MOT NGUOI (%s) — dung nhu thiet ke, giu nguyen"
-                % ", ".join(m["key_identities_all"])
+                % ", ".join(_identity_phone(i) for i in m["key_identities_all"])
             )
         else:
             print("        Nguoi lien he chinh: CHUA CO o nha nao — can dat tay")
@@ -899,13 +983,18 @@ def _print_report(result, dry_run):
         print("  --- BO QUA (can nguoi quyet dinh) ---")
         for k in result["skipped"]:
             print(f"  [BO QUA] {', '.join(k['families'])}: {k['reason']}")
-            print(f"           Hoc sinh: {', '.join(k['student_names'])}")
+            # .get(): cụm bị loại thủ công không đi qua _analyse_group nên không có
+            # student_names — truy cứng vào khoá đó thì báo cáo chết ngay giữa chừng.
+            if k.get("student_names"):
+                print(f"           Hoc sinh: {', '.join(k['student_names'])}")
         print("")
 
     if result["duplicate_guardian_records"]:
         print("  --- BAN GHI GUARDIAN TRUNG (viec RIENG, script nay khong xoa) ---")
         for d in result["duplicate_guardian_records"]:
-            print(f"  [TRUNG] {d['identity']}: {', '.join(d['guardians'])} — {', '.join(d['names'])}")
+            print(
+                f"  [TRUNG] {_identity_phone(d['identity'])}: {', '.join(d['guardians'])} — {', '.join(d['names'])}"
+            )
         print("")
 
     if result["child_phone_only"]:
