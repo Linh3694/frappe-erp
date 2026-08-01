@@ -44,6 +44,13 @@ from ..approval_helpers.helpers import (
     L2_PASSED_CLEAR_REJECTION_STATUSES,
 )
 
+# Thông báo hộp thư nhân viên (GV nộp + người duyệt) — tách khỏi push phụ huynh.
+from ..approval_helpers.staff_notify import (
+    notify_pending_approvers,
+    notify_reports_published,
+    notify_reports_rejected,
+)
+
 
 def _parse_reviewer_list(json_str):
     """
@@ -57,6 +64,50 @@ def _parse_reviewer_list(json_str):
         return result if isinstance(result, list) else []
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+# =============================================================================
+# THÔNG BÁO HỘP THƯ NHÂN VIÊN (gom nhóm cho batch)
+# =============================================================================
+
+def _notify_next_level_grouped(refs, campus_id, status, user):
+    """Batch nhiều lớp/template: gom theo (template, lớp) để mỗi nhóm chỉ 1 thông báo.
+
+    refs: list[{"template_id": ..., "class_id": ...}] của các báo cáo vừa xử lý xong.
+    """
+    groups = {}
+    for r in refs or []:
+        key = (r.get("template_id"), r.get("class_id"))
+        groups[key] = groups.get(key, 0) + 1
+
+    for (template_id, class_id), count in groups.items():
+        if not template_id:
+            continue
+        try:
+            template = frappe.get_doc("SIS Report Card Template", template_id)
+            notify_pending_approvers(
+                template,
+                campus_id,
+                status,
+                class_id=class_id,
+                count=count,
+                actor=user,
+            )
+        except Exception as ex:
+            frappe.logger().error(f"[Report Card] notify next level ({template_id}): {str(ex)}")
+
+
+def _notify_published_grouped(refs, user):
+    """Báo tác giả sau publish hàng loạt — gom theo lớp."""
+    groups = {}
+    for r in refs or []:
+        groups.setdefault(r.get("class_id"), []).append(r.get("name"))
+
+    for class_id, names in groups.items():
+        try:
+            notify_reports_published(names, actor=user, class_id=class_id)
+        except Exception as ex:
+            frappe.logger().error(f"[Report Card] notify published ({class_id}): {str(ex)}")
 
 
 # =============================================================================
@@ -340,7 +391,23 @@ def submit_class_reports():
                 })
         
         frappe.db.commit()
-        
+
+        # Báo cấp duyệt kế tiếp (target_status đã tính sẵn phần skip level ở trên).
+        if submitted_count:
+            try:
+                notify_pending_approvers(
+                    template,
+                    campus_id,
+                    target_status,
+                    class_id=class_id,
+                    count=submitted_count,
+                    section=section,
+                    actor=user,
+                    subject_ids=[subject_id] if subject_id else None,
+                )
+            except Exception as notif_error:
+                frappe.logger().error(f"[Report Card] batch submit staff notify failed: {str(notif_error)}")
+
         section_name_map = {
             "homeroom": "Nhận xét GVCN",
             "scores": "Bảng điểm",
@@ -842,6 +909,27 @@ def approve_class_reports():
                     except Exception as notif_error:
                         frappe.logger().error(f"Failed to send notification: {str(notif_error)}")
         
+        # Hộp thư nhân viên: publish → báo người đã nộp; các cấp còn lại → báo cấp duyệt kế tiếp.
+        if approved_count:
+            try:
+                if pending_level == "publish":
+                    notify_reports_published(
+                        [r.name for r in reports], actor=user, class_id=class_id
+                    )
+                elif template:
+                    notify_pending_approvers(
+                        template,
+                        campus_id,
+                        next_status,
+                        class_id=class_id,
+                        count=approved_count,
+                        section=section,
+                        actor=user,
+                        subject_ids=[subject_id] if subject_id else None,
+                    )
+            except Exception as notif_error:
+                frappe.logger().error(f"[Report Card] batch approve staff notify failed: {str(notif_error)}")
+
         message = f"Đã duyệt {approved_count}/{len(reports)} báo cáo ({section}) thành công"
         if pending_level == "review" and skipped_incomplete:
             message += f". {len(skipped_incomplete)} báo cáo chưa đủ điều kiện (chờ hoàn tất Level 2)"
@@ -1341,7 +1429,19 @@ def reject_class_reports():
             )
         
         frappe.db.commit()
-        
+
+        # Báo người đã nộp để họ biết phải sửa lại.
+        try:
+            notify_reports_rejected(
+                [r.name for r in reports],
+                reason=reason,
+                actor=user,
+                class_id=class_id,
+                section=section,
+            )
+        except Exception as notif_error:
+            frappe.logger().error(f"[Report Card] batch reject staff notify failed: {str(notif_error)}")
+
         return success_response(
             data={
                 "template_id": template_id,
@@ -1394,6 +1494,7 @@ def review_batch_reports():
         skipped_count = 0
         errors = []
         now = datetime.now()
+        reviewed_refs = []
         
         for report_id in report_ids:
             try:
@@ -1418,9 +1519,14 @@ def review_batch_reports():
                 report.reviewed_by = user
                 
                 add_approval_history(report, "batch_review", user, "approved", "Batch review from ApprovalList")
-                
+
                 report.save(ignore_permissions=True)
                 reviewed_count += 1
+                reviewed_refs.append({
+                    "name": report.name,
+                    "template_id": report.template_id,
+                    "class_id": report.class_id,
+                })
                 
             except frappe.DoesNotExistError:
                 errors.append({
@@ -1434,7 +1540,10 @@ def review_batch_reports():
                 })
         
         frappe.db.commit()
-        
+
+        # Báo cấp xuất bản (L4) — gom theo template/lớp vì batch có thể trải nhiều lớp.
+        _notify_next_level_grouped(reviewed_refs, campus_id, "reviewed", user)
+
         return success_response(
             data={
                 "reviewed_count": reviewed_count,
@@ -1482,6 +1591,7 @@ def publish_batch_reports():
         ASYNC_THRESHOLD = 20
         use_async_notification = len(report_ids) >= ASYNC_THRESHOLD
         published_report_names = []
+        published_refs = []
 
         for report_id in report_ids:
             try:
@@ -1517,6 +1627,7 @@ def publish_batch_reports():
                     except Exception as notif_error:
                         frappe.logger().error(f"Failed to send notification for {report_id}: {str(notif_error)}")
 
+                published_refs.append({"name": report.name, "class_id": report.class_id})
                 published_count += 1
                 
             except frappe.DoesNotExistError:
@@ -1548,6 +1659,9 @@ def publish_batch_reports():
             frappe.logger().info(
                 f"⚡ [Report Card Publish] Enqueued {len(published_report_names)} notifications (>= {ASYNC_THRESHOLD})"
             )
+
+        # Hộp thư nhân viên: báo lại người đã nộp (push phụ huynh ở nhánh trên).
+        _notify_published_grouped(published_refs, user)
 
         return success_response(
             data={
@@ -1972,7 +2086,18 @@ def reject_single_report():
         
         report.save(ignore_permissions=True)
         frappe.db.commit()
-        
+
+        try:
+            notify_reports_rejected(
+                [report.name],
+                reason=reason,
+                actor=user,
+                class_id=report.class_id,
+                section=section,
+            )
+        except Exception as notif_error:
+            frappe.logger().error(f"[Report Card] reject single staff notify failed: {str(notif_error)}")
+
         return success_response(
             data={
                 "report_id": report_id,

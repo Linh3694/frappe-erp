@@ -64,6 +64,13 @@ from .helpers import (
     get_teacher_for_user,
 )
 
+# Thông báo hộp thư nhân viên (GV nộp + người duyệt) — khác push phụ huynh ở helpers.
+from .staff_notify import (
+    notify_pending_approvers,
+    notify_reports_published,
+    notify_reports_rejected,
+)
+
 __all__ = [
     # Helpers
     "batch_operation_savepoint",
@@ -86,4 +93,7 @@ __all__ = [
     "send_report_card_notification",
     "get_section_name",
     "get_teacher_for_user",
+    "notify_pending_approvers",
+    "notify_reports_published",
+    "notify_reports_rejected",
 ]

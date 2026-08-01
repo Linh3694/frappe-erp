@@ -41,6 +41,12 @@ from ..approval_helpers.helpers import (
     check_user_is_level_4_approver,
 )
 
+# Thông báo hộp thư nhân viên (GV nộp + người duyệt) — tách khỏi push phụ huynh.
+from ..approval_helpers.staff_notify import (
+    notify_pending_approvers,
+    notify_reports_published,
+)
+
 
 # =============================================================================
 # LEGACY APPROVAL API
@@ -184,10 +190,24 @@ def submit_section():
         report.submitted_by = user
         
         add_approval_history(report, "submit", user, "submitted", f"Section: {section}")
-        
+
         report.save(ignore_permissions=True)
         frappe.db.commit()
-        
+
+        # Báo cấp duyệt kế tiếp — gửi sau commit để không báo nhầm khi rollback.
+        try:
+            template = frappe.get_doc("SIS Report Card Template", report.template_id)
+            notify_pending_approvers(
+                template,
+                campus_id,
+                "submitted",
+                class_id=report.class_id,
+                section=section,
+                actor=user,
+            )
+        except Exception as notif_error:
+            frappe.logger().error(f"Failed to notify approvers for report {report_id}: {str(notif_error)}")
+
         return success_response(
             data={
                 "report_id": report_id,
@@ -261,10 +281,21 @@ def approve_level_1():
         report.level_1_approved_by = user
         
         add_approval_history(report, "level_1", user, "approved", comment)
-        
+
         report.save(ignore_permissions=True)
         frappe.db.commit()
-        
+
+        try:
+            notify_pending_approvers(
+                template,
+                campus_id,
+                "level_1_approved",
+                class_id=report.class_id,
+                actor=user,
+            )
+        except Exception as notif_error:
+            frappe.logger().error(f"Failed to notify L2 approvers for report {report_id}: {str(notif_error)}")
+
         return success_response(
             data={
                 "report_id": report_id,
@@ -350,10 +381,21 @@ def approve_level_2():
         report.level_2_approved_by = user
         
         add_approval_history(report, "level_2", user, "approved", comment)
-        
+
         report.save(ignore_permissions=True)
         frappe.db.commit()
-        
+
+        try:
+            notify_pending_approvers(
+                template,
+                campus_id,
+                "level_2_approved",
+                class_id=report.class_id,
+                actor=user,
+            )
+        except Exception as notif_error:
+            frappe.logger().error(f"Failed to notify L3 reviewers for report {report_id}: {str(notif_error)}")
+
         return success_response(
             data={
                 "report_id": report_id,
@@ -432,10 +474,21 @@ def review_report():
         report.reviewed_by = user
         
         add_approval_history(report, "review", user, "approved", comment)
-        
+
         report.save(ignore_permissions=True)
         frappe.db.commit()
-        
+
+        try:
+            notify_pending_approvers(
+                template,
+                campus_id,
+                "reviewed",
+                class_id=report.class_id,
+                actor=user,
+            )
+        except Exception as notif_error:
+            frappe.logger().error(f"Failed to notify L4 approvers for report {report_id}: {str(notif_error)}")
+
         return success_response(
             data={
                 "report_id": report_id,
@@ -515,12 +568,18 @@ def final_publish():
         report.save(ignore_permissions=True)
         frappe.db.commit()
         
-        # Gửi notification
+        # Gửi notification (phụ huynh)
         try:
             send_report_card_notification(report)
         except Exception as notif_error:
             frappe.logger().error(f"Failed to send notification: {str(notif_error)}")
-        
+
+        # …và báo lại người đã nộp báo cáo.
+        try:
+            notify_reports_published([report.name], actor=user, class_id=report.class_id)
+        except Exception as notif_error:
+            frappe.logger().error(f"Failed to notify author for report {report_id}: {str(notif_error)}")
+
         return success_response(
             data={
                 "report_id": report_id,

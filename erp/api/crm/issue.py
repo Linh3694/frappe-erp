@@ -2,6 +2,8 @@
 CRM Issue API - Van de chung (tuyen sinh): module, SLA, duyet, PIC tu CRM Lead
 """
 
+import json
+
 import frappe
 from frappe.utils import now, add_to_date, get_datetime, getdate
 from frappe.utils.nestedset import get_ancestors_of, get_descendants_of
@@ -216,11 +218,14 @@ def _mark_first_response_if_eligible(doc):
 
 
 def _can_write_issue_ops(user: str, issue_doc) -> bool:
-    """User duoc chinh sua van de (sau check_crm_permission): role ISSUE_WRITE_ROLES hoac thanh vien mot phong ban lien quan."""
+    """User duoc chinh sua van de (sau check_crm_permission): role ISSUE_WRITE_ROLES,
+    thanh vien mot phong ban lien quan, hoac nam trong nhom nguoi lien quan cua van de."""
     if not user or user == "Guest":
         return False
     roles = set(frappe.get_roles(user))
     if ISSUE_WRITE_ROLES & roles:
+        return True
+    if _is_issue_related_user(user, issue_doc):
         return True
     for dn in _issue_department_docnames(issue_doc):
         if dn and user in _department_member_emails(dn):
@@ -365,6 +370,7 @@ def _finalize_issue_api_dict(doc):
     _enrich_issue_students_display(data)
     _enrich_issue_guardians_display(data)
     _enrich_process_logs_accent(data, doc)
+    data["related_users"] = _related_users_payload(doc)
     # Nhan nam hoc cho UI (khong bat client tra cuu them)
     sy = (data.get("school_year_id") or "").strip()
     if sy:
@@ -389,6 +395,7 @@ def _finalize_issue_api_dict(doc):
         can_pic_role = bool(PIC_CHANGE_ROLES & roles)
         data["can_change_pic"] = bool(can_pic_role and ap == "Da duyet")
         data["can_change_department"] = bool(_can_edit_issue_departments(u) and ap == "Da duyet")
+        data["can_edit_related_users"] = bool(_can_edit_issue_related_users(u, doc) and st != "Dong")
         data["can_add_process_log"] = bool(
             (_is_issue_pic(u, doc) or _can_write_issue_ops(u, doc)) and ap == "Da duyet" and st == "Dang xu ly"
         )
@@ -413,7 +420,8 @@ def _finalize_issue_api_dict(doc):
 
 def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_user=None):
     """
-    Push Expo + ERP Notification (trung tam thong bao mobile / notification_center).
+    Push Expo + ERP Notification (trung tam thong bao mobile / notification_center)
+    + mirror hop thu notification-service (trung tam thong bao web SIS).
     Dong bo payload voi workspace-mobile (issueId / issue_id, type crm_issue_*).
     """
     try:
@@ -430,12 +438,14 @@ def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_
     }
 
     seen = set()
+    targets = []
     for email in users or []:
         if not email or email in ("Guest",) or email == exclude_user:
             continue
         if email in seen:
             continue
         seen.add(email)
+        targets.append(email)
         try:
             send_mobile_notification_persisted(
                 user_email=email,
@@ -448,6 +458,171 @@ def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_
             )
         except Exception as ex:
             frappe.logger().error(f"CRM Issue push notify failed for {email}: {ex}")
+
+    _mirror_crm_issue_to_inbox(targets, title, body, payload, notif_type, issue_doc)
+
+
+def _issue_email_enabled():
+    """Gui email van de chung qua email-service hay khong.
+
+    Mac dinh BAT; tat bang site_config `crm_issue_email_enabled: false` (dong quy uoc voi
+    `administrative_ticket_email_enabled` cua ticket HC).
+    """
+    return frappe.get_site_config().get("crm_issue_email_enabled") is not False
+
+
+def _issue_web_url(doc):
+    base = (frappe.conf.get("sis_web_url") or "https://sis.wellspring.edu.vn").rstrip("/")
+    return f"{base}/admission/issues/view/{doc.name}"
+
+
+def _issue_build_email_payload(doc, event_type, recipient_email, extra=None):
+    """Payload JSON gui email-service /notify-crm-issue.
+
+    Cung khuon voi ticket HC (`_hc_build_email_service_payload`) de template dung chung
+    kieu trinh bay: eventType + cac field hien thi + link chi tiet.
+    """
+    extra = extra or {}
+    code = (getattr(doc, "issue_code", None) or doc.name or "").strip()
+    title = (getattr(doc, "title", None) or "").strip() or code
+    content = (getattr(doc, "content", None) or "") or ""
+    snippet = content if len(content) <= 400 else (content[:400] + "…")
+    created_at = ""
+    try:
+        if doc.creation:
+            from frappe.utils import format_datetime
+
+            created_at = format_datetime(doc.creation, "dd/MM/yyyy HH:mm")
+    except Exception:
+        created_at = str(doc.creation or "")
+
+    dept_labels = []
+    for dn in _issue_department_docnames(doc):
+        label = frappe.db.get_value(ORG_UNIT_DOCTYPE, dn, "unit_name_vn") or dn
+        if label:
+            dept_labels.append(str(label))
+
+    module_label = ""
+    if getattr(doc, "issue_module", None):
+        module_label = (
+            frappe.db.get_value("CRM Issue Module", doc.issue_module, "module_name")
+            or doc.issue_module
+        )
+
+    payload = {
+        "eventType": event_type,
+        "recipientEmail": (recipient_email or "").strip(),
+        "creatorEmail": (getattr(doc, "created_by_user", None) or "").strip(),
+        "issueUrl": _issue_web_url(doc),
+        "issueCode": code,
+        "title": title,
+        "moduleLabel": module_label,
+        "issueGroup": (getattr(doc, "issue_group", None) or "").strip(),
+        "departmentLabels": dept_labels,
+        "creatorName": _user_display_name((getattr(doc, "created_by_user", None) or "").strip()),
+        "picName": _user_display_name((getattr(doc, "pic", None) or "").strip()),
+        "descriptionSnippet": snippet,
+        "status": (getattr(doc, "status", None) or "").strip(),
+        "priority": (getattr(doc, "priority", None) or "").strip(),
+        "createdAt": created_at,
+        "issueDocName": doc.name,
+    }
+    payload.update(extra)
+    return payload
+
+
+def _issue_post_email(payload):
+    """POST email-service /notify-crm-issue. Chay trong background job (xem _issue_send_emails)."""
+    try:
+        import requests
+
+        base = (frappe.conf.get("email_service_url") or "http://localhost:5030").rstrip("/")
+        r = requests.post(
+            f"{base}/notify-crm-issue",
+            json=payload,
+            timeout=20,
+            headers={"Content-Type": "application/json"},
+        )
+        if r.status_code >= 400:
+            frappe.logger().error(
+                f"CRM Issue email HTTP {r.status_code}: {(r.text or '')[:500]}"
+            )
+    except Exception as ex:
+        frappe.logger().error(f"CRM Issue email request failed: {ex}")
+
+
+def send_crm_issue_emails(issue_name, event_type, emails, extra=None):
+    """Job nen: dung ten van de (khong phai doc) de an toan khi chay o worker khac."""
+    try:
+        doc = frappe.get_doc("CRM Issue", issue_name)
+    except Exception as ex:
+        frappe.logger().error(f"CRM Issue email job: khong load duoc {issue_name}: {ex}")
+        return
+    for em in emails or []:
+        payload = _issue_build_email_payload(doc, event_type, em, extra)
+        _issue_post_email(payload)
+
+
+def _issue_send_emails(doc, event_type, emails, extra=None, exclude_user=None):
+    """Xep hang email cho mot su kien van de. Loi gui KHONG duoc lam hong nghiep vu.
+
+    Chi cac moc chinh moi gui email (tao/duyet/tu choi/giao PIC/doi trang thai) — them log
+    xu ly chi bao in-app de khong bien moi log thanh mot email cho ca nhom lien quan.
+    """
+    if not _issue_email_enabled():
+        return
+    ex = (exclude_user or "").strip().lower()
+    targets = [e for e in _enabled_emails(emails) if e.lower() != ex]
+    if not targets:
+        return
+    try:
+        frappe.enqueue(
+            "erp.api.crm.issue.send_crm_issue_emails",
+            queue="short",
+            timeout=300,
+            enqueue_after_commit=True,
+            issue_name=doc.name,
+            event_type=event_type,
+            emails=targets,
+            extra=extra or {},
+        )
+    except Exception as ex_enq:
+        frappe.logger().error(f"CRM Issue email enqueue failed ({event_type}): {ex_enq}")
+
+
+def _mirror_crm_issue_to_inbox(emails, title, body, payload, notif_type, issue_doc):
+    """Ghi hop thu notification-service — web SIS doc tu do, KHONG doc ERP Notification (Phase 3).
+
+    Chi mirror khi Frappe tu gui push (co MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY tat): luc do
+    khong co envelope nao duoc publish nen trung tam thong bao web trong tron. Khi co bat,
+    `send_mobile_notification` da publish envelope deliver=true (vua tao inbox vua day push)
+    → mirror them se nhan doi ban ghi.
+
+    `channels=["inapp"]`: notification-service KHONG doc co `deliver` — de mac dinh
+    (`["push"]`) thi no push Expo lan hai chong len push Frappe vua gui.
+    """
+    if not emails:
+        return
+    try:
+        from erp.common.notification_emit import (
+            emit_inbox_mirror,
+            push_delivered_by_notification_service,
+        )
+
+        if push_delivered_by_notification_service():
+            return
+        emit_inbox_mirror(
+            emails,
+            title,
+            body,
+            notif_type,
+            data=payload,
+            reference_doctype="CRM Issue",
+            reference_name=issue_doc.name,
+            channels=["inapp"],
+        )
+    except Exception as ex:
+        frappe.logger().error(f"CRM Issue inbox mirror failed ({notif_type}): {ex}")
 
 
 def _approver_emails():
@@ -485,33 +660,60 @@ def _care_admin_emails():
     return list(set(enabled or []))
 
 
+def _enabled_emails(emails):
+    """Chi giu user con hoat dong (User.enabled=1) — giu thu tu goc, dedupe.
+
+    Bang leaders/members cua So do to chuc khong tu don khi nhan su nghi viec, khong loc
+    thi nguoi da nghi van sinh ban ghi hop thu + email.
+    """
+    ordered = []
+    seen = set()
+    for raw in emails or []:
+        em = (raw or "").strip() if isinstance(raw, str) else ""
+        if em and em not in seen:
+            seen.add(em)
+            ordered.append(em)
+    if not ordered:
+        return []
+    alive = set(
+        frappe.get_all("User", filters={"name": ["in", ordered], "enabled": 1}, pluck="name") or []
+    )
+    return [e for e in ordered if e in alive]
+
+
 def _unit_leader_emails(unit_name):
-    """Email leader (quan ly) cua mot don vi to chuc."""
+    """Email leader (quan ly) cua mot don vi to chuc — chi user con hoat dong."""
     if not unit_name:
         return []
-    return frappe.get_all(
-        "ERP Organization Unit Leader",
-        filters={"parent": unit_name, "parenttype": ORG_UNIT_DOCTYPE},
-        order_by="sort_order asc",
-        pluck="user",
+    return _enabled_emails(
+        frappe.get_all(
+            "ERP Organization Unit Leader",
+            filters={"parent": unit_name, "parenttype": ORG_UNIT_DOCTYPE},
+            order_by="sort_order asc",
+            pluck="user",
+        )
     )
 
 
 def _unit_member_emails_only(unit_name):
-    """Email member (khong gom leader) cua mot don vi to chuc."""
+    """Email member (khong gom leader) cua mot don vi to chuc — chi user con hoat dong."""
     if not unit_name:
         return []
-    return frappe.get_all(
-        "ERP Organization Unit Member",
-        filters={"parent": unit_name, "parenttype": ORG_UNIT_DOCTYPE},
-        pluck="user",
+    return _enabled_emails(
+        frappe.get_all(
+            "ERP Organization Unit Member",
+            filters={"parent": unit_name, "parenttype": ORG_UNIT_DOCTYPE},
+            pluck="user",
+        )
     )
 
 
 def _department_member_emails(department_name):
     """
-    'Thanh vien phong ban' theo phan cap So do to chuc — Team(U):
-    leaders(U) + members(U) + leaders(don vi con) + leaders(cap tren). Dedupe.
+    'Thanh vien nhom lien quan' = leaders(U) + members(U) cua DUNG don vi duoc chon.
+
+    Khong keo theo cap tren lan cap duoi: picker "Nhom lien quan" liet ke ca cay to chuc
+    nen viec dinh toi nhom con nao thi chon thang nhom con do. Chi user con hoat dong.
     """
     if not department_name or not frappe.db.exists(ORG_UNIT_DOCTYPE, department_name):
         return []
@@ -526,18 +728,7 @@ def _department_member_emails(department_name):
 
     _add(_unit_leader_emails(department_name))
     _add(_unit_member_emails_only(department_name))
-    for child in (get_descendants_of(ORG_UNIT_DOCTYPE, department_name) or []):
-        _add(_unit_leader_emails(child))
-    for parent in (get_ancestors_of(ORG_UNIT_DOCTYPE, department_name) or []):
-        _add(_unit_leader_emails(parent))
     return out
-
-
-def _department_manager_emails(department_name):
-    """'Quan ly phong ban' = leaders cua don vi (notify manager)."""
-    if not department_name or not frappe.db.exists(ORG_UNIT_DOCTYPE, department_name):
-        return []
-    return _unit_leader_emails(department_name)
 
 
 def _issue_department_docnames(issue_doc):
@@ -555,11 +746,25 @@ def _issue_department_docnames(issue_doc):
     return names
 
 
+def _issue_group_docnames(issue_doc):
+    """Docname don vi o field 'Nhom lien quan' — nhom con cua Phong ban lien quan."""
+    names = []
+    for row in getattr(issue_doc, "issue_related_groups", None) or []:
+        u = (getattr(row, "unit", None) or "").strip()
+        if u and u not in names:
+            names.append(u)
+    return names
+
+
 def _all_department_member_emails_for_issue(issue_doc):
-    """Union email thanh vien cua tat ca phong ban lien quan (dedupe)."""
+    """Union email thanh vien cua Phong ban lien quan + Nhom lien quan (dedupe).
+
+    Chon them nhom con KHONG thu hep phong ban cha: phong ban van la don vi chiu trach
+    nhiem nen thanh vien phong van nhan; nhom con chi keo them dung nguoi lam viec do.
+    """
     seen = set()
     out = []
-    for dn in _issue_department_docnames(issue_doc):
+    for dn in _issue_department_docnames(issue_doc) + _issue_group_docnames(issue_doc):
         for e in _department_member_emails(dn):
             if e and e not in seen:
                 seen.add(e)
@@ -567,16 +772,33 @@ def _all_department_member_emails_for_issue(issue_doc):
     return out
 
 
-def _all_department_manager_emails_for_issue(issue_doc):
-    """Union email manager cua tat ca phong ban lien quan."""
-    seen = set()
-    out = []
-    for dn in _issue_department_docnames(issue_doc):
-        for e in _department_manager_emails(dn):
-            if e and e not in seen:
-                seen.add(e)
-                out.append(e)
-    return out
+def _set_issue_related_groups(doc, unit_ids):
+    """Set bang con issue_related_groups. Validate ton tai trong ERP Organization Unit."""
+    ids = []
+    for x in unit_ids or []:
+        sid = (x or "").strip() if isinstance(x, str) else ""
+        if sid and frappe.db.exists(ORG_UNIT_DOCTYPE, sid) and sid not in ids:
+            ids.append(sid)
+    doc.issue_related_groups = []
+    for sid in ids:
+        doc.append("issue_related_groups", {"unit": sid})
+    return ids
+
+
+def _sync_issue_related_groups(doc, data):
+    """Doc field 'Nhom lien quan' (related_groups) tu payload — cung cho nhap voi departments."""
+    if "related_groups" not in data:
+        return False
+    groups = data.get("related_groups")
+    if isinstance(groups, str):
+        try:
+            groups = json.loads(groups)
+        except (json.JSONDecodeError, TypeError):
+            groups = [g.strip() for g in groups.split(",") if g.strip()]
+    if not isinstance(groups, list):
+        groups = []
+    _set_issue_related_groups(doc, groups)
+    return True
 
 
 def _issue_names_matching_department(dept_name):
@@ -593,7 +815,7 @@ def _issue_names_matching_department(dept_name):
 
 
 def _issue_names_mine(user):
-    """CRM Issue cua user: la PIC HOAC nguoi tao.
+    """CRM Issue cua user: la PIC, nguoi tao, HOAC nam trong nhom nguoi lien quan.
 
     Tra ve set ten (khong phai filter dict) vi day la dieu kien OR — frappe.db.count
     khong nhan or_filters nen phai quy ve name-in giong department/search.
@@ -604,6 +826,14 @@ def _issue_names_mine(user):
     names = set()
     for field in ("pic", "created_by_user", "owner"):
         names.update(frappe.get_all("CRM Issue", filters={field: user}, pluck="name") or [])
+    names.update(
+        frappe.get_all(
+            "CRM Issue Related User",
+            filters={"user": user, "parenttype": "CRM Issue"},
+            pluck="parent",
+        )
+        or []
+    )
     return names
 
 
@@ -764,14 +994,154 @@ def _sync_issue_departments(doc, data):
 
 
 def _module_member_emails(module_name: str):
-    """Email members cua Loai van de (chi de notify)."""
+    """Email members cua Loai van de (chi de notify) — chi user con hoat dong."""
     if not module_name:
         return []
-    return frappe.get_all(
-        "CRM Issue Module Member",
-        filters={"parent": module_name, "parenttype": "CRM Issue Module"},
-        pluck="user",
+    return _enabled_emails(
+        frappe.get_all(
+            "CRM Issue Module Member",
+            filters={"parent": module_name, "parenttype": "CRM Issue Module"},
+            pluck="user",
+        )
     )
+
+
+# =============================================================================
+# NHOM NGUOI LIEN QUAN CUA VAN DE (issue_related_users)
+# =============================================================================
+
+def _user_display_name(email: str) -> str:
+    if not email:
+        return ""
+    fn = frappe.db.get_value("User", email, "full_name") or ""
+    return _normalize_vn_name(fn) or fn or email
+
+
+def _issue_related_user_rows(doc):
+    return getattr(doc, "issue_related_users", None) or []
+
+
+def _issue_related_user_emails(doc):
+    """Email nhom nguoi lien quan — nguon nhan thong bao chinh cua van de."""
+    return _enabled_emails(
+        [(getattr(r, "user", None) or "").strip() for r in _issue_related_user_rows(doc)]
+    )
+
+
+def _default_related_user_emails(doc):
+    """Nguoi suy ra tu Phong ban lien quan + Nhom lien quan = leader + member cua cac don vi do."""
+    return _all_department_member_emails_for_issue(doc)
+
+
+def _manual_related_user_emails(doc):
+    """Chi nhung nguoi duoc chon tay o field 'Nguoi lien quan'."""
+    return [
+        (getattr(r, "user", None) or "").strip()
+        for r in _issue_related_user_rows(doc)
+        if (getattr(r, "source", None) or "auto") == "manual"
+        and (getattr(r, "user", None) or "").strip()
+    ]
+
+
+def _issue_notify_group_emails(doc):
+    """Nguoi nhan thong bao cua van de = nhom lien quan.
+
+    Van de tao TRUOC khi co bang issue_related_users chua duoc seed -> fallback ve nguoi
+    phong ban lien quan, neu khong nhung van de dang mo se im lang hoan toan.
+    """
+    emails = _issue_related_user_emails(doc)
+    return emails or _enabled_emails(_default_related_user_emails(doc))
+
+
+def _rebuild_issue_related_users(doc, manual_emails=None):
+    """Dung lai bang issue_related_users = nguoi cua Nhom lien quan (auto) + Nguoi lien quan (manual).
+
+    Nhanh `auto` LUON derive lai tu cac don vi dang chon — bo mot nhom khoi 'Nhom lien quan'
+    thi nguoi cua nhom do thoi nhan thong bao. Nhanh `manual` chi doi khi client gui
+    `manual_emails`; None = giu nguyen danh sach chon tay hien co.
+    """
+    if manual_emails is None:
+        manual = _manual_related_user_emails(doc)
+    else:
+        manual = []
+        for u in manual_emails or []:
+            em = (u or "").strip() if isinstance(u, str) else ""
+            if em and em not in manual and frappe.db.exists("User", em):
+                manual.append(em)
+
+    manual_set = set(manual)
+    rows = []
+    for em in manual:
+        rows.append({"user": em, "full_name": _user_display_name(em), "source": "manual"})
+    for em in _default_related_user_emails(doc):
+        if em and em not in manual_set:
+            rows.append({"user": em, "full_name": _user_display_name(em), "source": "auto"})
+
+    doc.issue_related_users = []
+    for row in rows:
+        doc.append("issue_related_users", row)
+    return [r["user"] for r in rows]
+
+
+def _sync_issue_related_users(doc):
+    """Derive lai nhanh auto sau khi Nhom lien quan doi; giu nguyen Nguoi lien quan."""
+    _rebuild_issue_related_users(doc)
+
+
+def _sync_related_users_from_payload(doc, data):
+    """Doc field 'Nguoi lien quan' (related_users) tu payload — cung cho duyet voi departments."""
+    if "related_users" not in data:
+        return False
+    users = data.get("related_users")
+    if isinstance(users, str):
+        try:
+            users = json.loads(users)
+        except (json.JSONDecodeError, TypeError):
+            users = [u.strip() for u in users.split(",") if u.strip()]
+    if not isinstance(users, list):
+        users = []
+    _rebuild_issue_related_users(doc, manual_emails=users)
+    return True
+
+
+def _is_issue_related_user(user: str, issue_doc) -> bool:
+    if not user or user == "Guest":
+        return False
+    return user in {
+        (getattr(r, "user", None) or "").strip() for r in _issue_related_user_rows(issue_doc)
+    }
+
+
+def _can_edit_issue_related_users(user: str, issue_doc) -> bool:
+    """Nguoi trong nhom tu quan ly nhom (quyet dinh nghiep vu).
+
+    PIC va nhom Care luon sua duoc — loi thoat khi nhom rong (chua seed) hoac seed sai,
+    neu khong se khong con ai co quyen mo nhom ra.
+    """
+    if not user or user == "Guest":
+        return False
+    if _is_issue_related_user(user, issue_doc):
+        return True
+    if _is_issue_pic(user, issue_doc):
+        return True
+    return _can_edit_issue_departments(user)
+
+
+def _related_users_payload(doc):
+    """[{user, full_name, source}] cho client."""
+    out = []
+    for r in _issue_related_user_rows(doc):
+        em = (getattr(r, "user", None) or "").strip()
+        if not em:
+            continue
+        out.append(
+            {
+                "user": em,
+                "full_name": (getattr(r, "full_name", None) or "").strip() or _user_display_name(em),
+                "source": (getattr(r, "source", None) or "auto"),
+            }
+        )
+    return out
 
 
 def _enrich_issue_list_departments(issues):
@@ -1684,6 +2054,148 @@ def get_issue():
     return single_item_response(data)
 
 
+@frappe.whitelist(methods=["GET"])
+def get_issue_related_users():
+    """Nhom nguoi lien quan cua van de + co quyen sua nhom hay khong."""
+    if not _can_access_crm_issue_list():
+        frappe.throw("Khong co quyen xem van de CRM", frappe.PermissionError)
+
+    name = frappe.request.args.get("name")
+    if not name:
+        return validation_error_response("Thieu name", {"name": ["Bat buoc"]})
+    if not frappe.db.exists("CRM Issue", name):
+        return not_found_response(f"Khong tim thay van de {name}")
+
+    doc = frappe.get_doc("CRM Issue", name)
+    return success_response(
+        {
+            "related_users": _related_users_payload(doc),
+            "can_edit_related_users": bool(
+                _can_edit_issue_related_users(frappe.session.user, doc)
+            ),
+        }
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+def preview_issue_participants():
+    """Xem truoc nguoi se nhan thong bao theo lua chon dang nhap tren form.
+
+    Dung CHINH `_department_member_emails` cua luong gui that — preview tu tinh lai o client
+    se lech thuc te ngay khi quy tac doi.
+    Body: {departments: [], related_groups: [], related_users: []}
+    """
+    if not _can_access_crm_issue_list():
+        frappe.throw("Khong co quyen xem van de CRM", frappe.PermissionError)
+
+    data = get_request_data()
+
+    def _as_list(value):
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (json.JSONDecodeError, TypeError):
+                value = [v.strip() for v in value.split(",") if v.strip()]
+        return [v for v in value if v] if isinstance(value, list) else []
+
+    departments = _as_list(data.get("departments"))
+    groups = _as_list(data.get("related_groups"))
+    manual = _as_list(data.get("related_users"))
+
+    unit_titles = {}
+    for dn in departments + groups:
+        unit_titles[dn] = frappe.db.get_value(ORG_UNIT_DOCTYPE, dn, "unit_name_vn") or dn
+
+    # Nguoi chon tay len truoc; trung thi giu nhan "them tay" cho ro nguon.
+    source_by_email = {}
+    ordered = []
+    for em in _enabled_emails(manual):
+        if em not in source_by_email:
+            source_by_email[em] = {"source": "manual", "source_label": ""}
+            ordered.append(em)
+    for dn in departments + groups:
+        kind = "department" if dn in departments else "group"
+        for em in _department_member_emails(dn):
+            if em not in source_by_email:
+                source_by_email[em] = {"source": kind, "source_label": unit_titles.get(dn, dn)}
+                ordered.append(em)
+
+    rows = (
+        frappe.get_all(
+            "User",
+            filters={"name": ["in", ordered]},
+            fields=["name", "full_name", "user_image"],
+        )
+        if ordered
+        else []
+    )
+    info = {r["name"]: r for r in rows}
+
+    participants = []
+    for em in ordered:
+        r = info.get(em) or {}
+        participants.append(
+            {
+                "user": em,
+                "full_name": _normalize_vn_name(r.get("full_name") or "") or em,
+                "user_image": r.get("user_image") or "",
+                **source_by_email[em],
+            }
+        )
+
+    return success_response({"participants": participants, "total": len(participants)})
+
+
+@frappe.whitelist(methods=["POST"])
+def set_issue_related_users():
+    """Ghi de field 'Nguoi lien quan' (danh sach chon tay).
+
+    Nguoi suy ra tu 'Nhom lien quan' (source=auto) khong sua o day — muon bo thi bo don vi
+    khoi Nhom lien quan. Quyen sua: nguoi DANG trong nhom, PIC, hoac nhom Care.
+    """
+    if not _can_access_crm_issue_list():
+        frappe.throw("Khong co quyen thao tac van de CRM", frappe.PermissionError)
+
+    data = get_request_data()
+    name = data.get("name")
+    if not name or not frappe.db.exists("CRM Issue", name):
+        return not_found_response("Khong tim thay van de")
+
+    users = data.get("users")
+    if users is None:
+        return validation_error_response("Thieu users", {"users": ["Bat buoc"]})
+    if isinstance(users, str):
+        try:
+            users = json.loads(users)
+        except (json.JSONDecodeError, TypeError):
+            users = [u.strip() for u in users.split(",") if u.strip()]
+    if not isinstance(users, list):
+        return validation_error_response("users phai la danh sach", {"users": ["Khong hop le"]})
+
+    doc = frappe.get_doc("CRM Issue", name)
+    if not _can_edit_issue_related_users(frappe.session.user, doc):
+        return error_response(
+            "Chi nguoi trong nhom lien quan, PIC hoac nhom Care moi sua duoc nhom nay",
+            code="PERMISSION_DENIED",
+        )
+
+    try:
+        _rebuild_issue_related_users(doc, manual_emails=users)
+        doc.save(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception as e:
+        frappe.db.rollback()
+        return error_response(f"Loi cap nhat nguoi lien quan: {str(e)}")
+
+    return success_response(
+        {
+            "related_users": _related_users_payload(doc),
+            "can_edit_related_users": True,
+        },
+        "Da cap nhat nhom nguoi lien quan",
+    )
+
+
 def _feedback_replies_and_guardian_for_crm(feedback_name):
     """
     Tra ve replies (co enrich ten) + guardian_info toi gian cho man CRM Issue.
@@ -1865,6 +2377,8 @@ def create_issue():
         if dept_values is None:
             dept_values = [data.get("department")] if data.get("department") else []
         dept_ids = _set_issue_departments(doc, dept_values)
+        # Nhom lien quan: nhom con cua phong ban vua chon (khong bat buoc).
+        _sync_issue_related_groups(doc, data)
         # Nhom van de (Gop y / Su vu): team care dien. Care tao truc tiep (tu duyet) -> bat buoc ngay.
         issue_group = (data.get("issue_group") or "").strip()
         if _can_create_directly():
@@ -1915,25 +2429,35 @@ def create_issue():
             doc.approval_status = "Cho duyet"
             doc.status = "Cho duyet"
 
+        # Nhom lien quan (don vi) + Nguoi lien quan (chon tay) — cung cho nhap, cung luat voi
+        # departments: luc TAO ai gui cung nhan, sua/duyet ve sau moi gioi han nhom Care.
+        # Tao qua hang cho thi ca hai con trong -> seed lai o buoc duyet.
+        if not _sync_related_users_from_payload(doc, data):
+            _sync_issue_related_users(doc)
+
         doc.insert(ignore_permissions=True)
         frappe.db.commit()
 
-        # Push: cho duyet -> bao nguoi duyet; tao truc tiep -> bao PIC + quan ly phong ban + members loai van de
+        # Push: cho duyet -> bao nguoi duyet; tao truc tiep -> bao PIC + nhom lien quan + members loai van de
         try:
             if doc.approval_status == "Cho duyet":
+                approvers = _approver_emails()
                 _notify_crm_issue_mobile(
-                    _approver_emails(),
+                    approvers,
                     "Vấn đề mới chờ duyệt",
                     f"{doc.issue_code}: {doc.title}",
                     doc,
                     "crm_issue_created",
                     exclude_user=frappe.session.user,
                 )
+                _issue_send_emails(
+                    doc, "new_issue_pending", approvers, exclude_user=frappe.session.user
+                )
             else:
                 recipients = []
                 if doc.pic:
                     recipients.append(doc.pic)
-                recipients.extend(_all_department_manager_emails_for_issue(doc))
+                recipients.extend(_issue_notify_group_emails(doc))
                 recipients.extend(_module_member_emails(doc.issue_module))
                 _notify_crm_issue_mobile(
                     recipients,
@@ -1943,6 +2467,13 @@ def create_issue():
                     "crm_issue_created",
                     exclude_user=frappe.session.user,
                 )
+                _issue_send_emails(
+                    doc, "new_issue", recipients, exclude_user=frappe.session.user
+                )
+            # Xac nhan cho nguoi tao (giong ticket_creation_confirmation cua ticket IT/HC).
+            # KHONG exclude nguoi thao tac: day chinh la email xac nhan gui cho chinh ho.
+            if doc.created_by_user:
+                _issue_send_emails(doc, "issue_creation_confirmation", [doc.created_by_user])
         except Exception as e:
             frappe.logger().error(f"CRM Issue notify create: {e}")
 
@@ -1989,6 +2520,7 @@ def approve_issue():
         if dept_values is None:
             dept_values = [data.get("department")] if data.get("department") else []
         _set_issue_departments(doc, dept_values)
+    _sync_issue_related_groups(doc, data)
     if not _issue_department_docnames(doc):
         return validation_error_response(
             "Phong ban lien quan la bat buoc khi duyet",
@@ -2029,6 +2561,9 @@ def approve_issue():
     doc.sla_started_at = now()
     doc.sla_deadline = _compute_sla_deadline(now(), float(doc.sla_hours or 0))
     _recompute_sla_state(doc)
+    # Nhom lien quan + Nguoi lien quan chot o buoc duyet.
+    if not _sync_related_users_from_payload(doc, data):
+        _sync_issue_related_users(doc)
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
@@ -2036,7 +2571,7 @@ def approve_issue():
         recipients = []
         if doc.pic:
             recipients.append(doc.pic)
-        recipients.extend(_all_department_manager_emails_for_issue(doc))
+        recipients.extend(_issue_notify_group_emails(doc))
         recipients.extend(_module_member_emails(doc.issue_module))
         _notify_crm_issue_mobile(
             recipients,
@@ -2046,6 +2581,9 @@ def approve_issue():
             "crm_issue_approved",
             exclude_user=frappe.session.user,
         )
+        _issue_send_emails(doc, "issue_approved", recipients, exclude_user=frappe.session.user)
+        if doc.created_by_user:
+            _issue_send_emails(doc, "issue_approved_creator", [doc.created_by_user])
     except Exception as e:
         frappe.logger().error(f"CRM Issue notify approve: {e}")
 
@@ -2101,6 +2639,13 @@ def reject_issue():
                 f"{doc.issue_code}: {doc.title}",
                 doc,
                 "crm_issue_rejected",
+                exclude_user=frappe.session.user,
+            )
+            _issue_send_emails(
+                doc,
+                "issue_rejected",
+                [doc.created_by_user],
+                extra={"reason": (reason or "").strip()},
                 exclude_user=frappe.session.user,
             )
     except Exception as e:
@@ -2176,6 +2721,21 @@ def update_issue():
                 dept_values = [data.get("department")] if data.get("department") else []
             _set_issue_departments(doc, dept_values)
 
+        # Nhom lien quan + Nguoi lien quan: cung quyen va cung cho nhap voi phong ban.
+        if "related_groups" in data:
+            if not _can_edit_issue_departments(frappe.session.user):
+                return error_response("Chi nhom Care moi duoc thay doi nhom lien quan")
+            _sync_issue_related_groups(doc, data)
+
+        if "related_users" in data:
+            if not _can_edit_issue_departments(frappe.session.user):
+                return error_response("Chi nhom Care moi duoc thay doi nguoi lien quan")
+
+        # Doi phong ban / nhom -> derive lai nhanh auto, giu nguyen nguoi chon tay.
+        if not _sync_related_users_from_payload(doc, data):
+            if "departments" in data or "department" in data or "related_groups" in data:
+                _sync_issue_related_users(doc)
+
         # Chi nhom Care moi duoc sua Nhom van de (Gop y / Su vu)
         if "issue_group" in data:
             if not _can_edit_issue_departments(frappe.session.user):
@@ -2220,6 +2780,13 @@ def update_issue():
                     f"{doc.issue_code}: {doc.title}",
                     doc,
                     "crm_issue_pic_changed",
+                    exclude_user=frappe.session.user,
+                )
+                _issue_send_emails(
+                    doc,
+                    "issue_assigned",
+                    [new_pic],
+                    extra={"actorName": _user_display_name(frappe.session.user)},
                     exclude_user=frappe.session.user,
                 )
         except Exception as e:
@@ -2322,32 +2889,50 @@ def change_issue_status():
         recipients = []
         title = "Cập nhật trạng thái vấn đề"
         body = f"{doc.issue_code}: {status}"
+        email_event = "issue_status_changed"
         if status == "Hoan thanh":
             recipients.extend(_care_admin_emails())
+            recipients.extend(_issue_notify_group_emails(doc))
             title = "Vấn đề đã hoàn thành"
             body = f"{doc.issue_code}: PIC đã hoàn thành, cần xác nhận"
+            email_event = "issue_completed"
         elif status == "Dong":
             if doc.pic:
                 recipients.append(doc.pic)
+            recipients.extend(_issue_notify_group_emails(doc))
             title = "Vấn đề đã đóng"
             body = f"{doc.issue_code}: Care Admin đã xác nhận đóng"
+            email_event = "issue_closed"
         elif old_status == "Hoan thanh" and status == "Dang xu ly":
             if doc.pic:
                 recipients.append(doc.pic)
             title = "Vấn đề cần tiếp tục xử lý"
             body = f"{doc.issue_code}: Care Admin yêu cầu tiếp tục xử lý"
+            email_event = "issue_reopened"
         else:
             if doc.pic:
                 recipients.append(doc.pic)
             if doc.created_by_user:
                 recipients.append(doc.created_by_user)
-            recipients.extend(_all_department_manager_emails_for_issue(doc))
+            recipients.extend(_issue_notify_group_emails(doc))
         _notify_crm_issue_mobile(
             recipients,
             title,
             body,
             doc,
             "crm_issue_status_changed",
+            exclude_user=frappe.session.user,
+        )
+        _issue_send_emails(
+            doc,
+            email_event,
+            recipients,
+            extra={
+                "oldStatus": old_status or "",
+                "newStatus": status or "",
+                "actorName": _user_display_name(frappe.session.user),
+                **({"rating": doc.result} if status == "Dong" and getattr(doc, "result", None) else {}),
+            },
             exclude_user=frappe.session.user,
         )
     except Exception as e:
@@ -2410,7 +2995,8 @@ def add_process_log():
                 recipients.append(doc.pic)
             if doc.created_by_user:
                 recipients.append(doc.created_by_user)
-            recipients.extend(_all_department_member_emails_for_issue(doc))
+            recipients.extend(_issue_notify_group_emails(doc))
+            # Chi in-app: moi log ma gui email cho ca nhom lien quan la qua nhieu thu.
             _notify_crm_issue_mobile(
                 recipients,
                 "Log xử lý vấn đề mới",

@@ -27,6 +27,8 @@
   "pic",
   "department",
   "issue_departments",
+  "issue_related_groups",
+  "issue_related_users",
   "priority",
   "issue_group",
   "approval_section",
@@ -176,6 +178,18 @@
    "fieldtype": "Table",
    "label": "Related Departments",
    "options": "CRM Issue Related Department"
+  },
+  {
+   "fieldname": "issue_related_groups",
+   "fieldtype": "Table",
+   "label": "Related Groups",
+   "options": "CRM Issue Related Group"
+  },
+  {
+   "fieldname": "issue_related_users",
+   "fieldtype": "Table",
+   "label": "Related Users",
+   "options": "CRM Issue Related User"
   },
   {
    "fieldname": "priority",

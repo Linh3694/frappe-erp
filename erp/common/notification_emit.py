@@ -127,6 +127,7 @@ def emit_inbox_mirror(
     reference_doctype: Optional[str] = None,
     reference_name: Optional[str] = None,
     channel: Optional[str] = None,
+    channels: Optional[List[str]] = None,
 ) -> int:
     """Ghi hộp thư notification-service NHƯNG không đẩy push (`deliver=False`).
 
@@ -134,9 +135,11 @@ def emit_inbox_mirror(
     đọc màn Thông báo từ notification-service chứ không đọc ERP Notification nữa — thiếu
     envelope này thì thông báo KHÔNG BAO GIỜ lên danh sách dù push vẫn về máy.
 
-    Hợp đồng với notification-service: `deliver=False` ⇒ chỉ persist inbox, không gửi lại push.
-    Nếu service bỏ qua cờ đó người nhận sẽ bị push 2 lần — tắt gấp bằng site_config
-    `NOTIFICATION_INBOX_MIRROR: 0`.
+    CẢNH BÁO đã kiểm chứng: `notifyPipeline.deliverForRecipient` KHÔNG đọc cờ `deliver` —
+    nó push theo `channels` (`resolveChannels`). Muốn mirror thật sự "chỉ ghi hộp thư"
+    thì truyền `channels=["inapp"]`; để mặc định (`["push"]`) người nhận sẽ bị push 2 lần
+    khi Frappe đã tự gọi Expo. Mặc định giữ nguyên hành vi cũ để không đổi luồng đang chạy;
+    tắt gấp toàn bộ mirror bằng site_config `NOTIFICATION_INBOX_MIRROR: 0`.
 
     Trả về số envelope publish thành công. Không raise — lỗi gửi KHÔNG được làm hỏng nghiệp vụ.
     """
@@ -144,6 +147,9 @@ def emit_inbox_mirror(
         return 0
 
     ch = channel or _notification_channel()
+    chans = [str(c).strip().lower() for c in (channels or ["push"]) if str(c or "").strip()]
+    if not chans:
+        chans = ["push"]
     seen = set()
     ok = 0
     for raw in emails or []:
@@ -161,8 +167,8 @@ def emit_inbox_mirror(
             "recipients": [em],
             "title": coerce_title_body(title),
             "body": coerce_title_body(body),
-            "channel": "push",
-            "channels": ["push"],
+            "channel": chans[0],
+            "channels": chans,
             "data": {**(data or {}), "type": event_type},
         }
         if reference_doctype:
@@ -186,10 +192,12 @@ def emit_inbox_mirror_bulk(
     notification_type: str = "general",
     *,
     channel: Optional[str] = None,
+    channels: Optional[List[str]] = None,
 ) -> int:
     """targets: [{"email": str, "data": {...}}, ...] như `emit_notify_bulk`.
 
     Mỗi người nhận một envelope để `data` deep link không lẫn nhau.
+    `channels` xem cảnh báo push trùng ở `emit_inbox_mirror`.
     """
     ok = 0
     for t in targets or []:
@@ -198,7 +206,9 @@ def emit_inbox_mirror_bulk(
         if not em:
             continue
         ntype = str((d.get("type") if isinstance(d, dict) else None) or notification_type)
-        ok += emit_inbox_mirror([em], title, body, ntype, data=d, channel=channel)
+        ok += emit_inbox_mirror(
+            [em], title, body, ntype, data=d, channel=channel, channels=channels
+        )
     return ok
 
 
