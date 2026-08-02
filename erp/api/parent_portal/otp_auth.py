@@ -119,9 +119,37 @@ SUPPORT_OTP_CACHE_PREFIX = "parent_portal_support_otp:"
 SUPPORT_OTP_DEFAULT_TTL_SEC = 15 * 60
 SUPPORT_OTP_MAX_TTL_SEC = 60 * 60
 
+# Quyền bỏ qua SMS là một key RIÊNG, dùng một lần và sống rất ngắn.
+# Tách khỏi grant vì hai thứ này phục vụ hai người khác nhau: bỏ qua SMS chỉ dành cho
+# đúng lượt bấm "Lấy mã" của người kiểm thử, còn mã hỗ trợ thì dùng được tới hết TTL.
+# Nếu gộp làm một, phụ huynh bấm "Lấy mã" trong lúc đó sẽ không nhận được SMS nào và
+# bị kẹt đăng nhập cho tới khi grant hết hạn.
+SUPPORT_OTP_SMS_SKIP_PREFIX = "parent_portal_support_sms_skip:"
+SUPPORT_OTP_SMS_SKIP_SEC = 3 * 60
+
 
 def _support_otp_cache_key(normalized_phone):
     return f"{SUPPORT_OTP_CACHE_PREFIX}{normalized_phone}"
+
+
+def _support_sms_skip_cache_key(normalized_phone):
+    return f"{SUPPORT_OTP_SMS_SKIP_PREFIX}{normalized_phone}"
+
+
+def consume_support_sms_skip(normalized_phone):
+    """
+    True nếu lượt gọi này được phép bỏ qua SMS. Dùng một lần rồi mất, nên lượt
+    "Lấy mã" tiếp theo — thường là của phụ huynh — quay lại gửi SMS bình thường.
+    """
+    if not normalized_phone:
+        return False
+
+    key = _support_sms_skip_cache_key(normalized_phone)
+    if not frappe.cache().get_value(key):
+        return False
+
+    frappe.cache().delete_value(key)
+    return True
 
 
 def get_support_otp_grant(normalized_phone):
@@ -146,8 +174,10 @@ def grant_support_otp(
     Cấp mã OTP hỗ trợ tạm thời cho 1 SĐT phụ huynh — KHÔNG gửi SMS.
 
     Chỉ gọi từ bench console (cố tình không whitelist ra HTTP). Sau khi cấp,
-    người kiểm thử nhập SĐT trên app như bình thường: bước "Lấy mã" sẽ không
-    bắn SMS, và mã dưới đây dùng được cho tới khi hết hạn.
+    người kiểm thử nhập SĐT trên app như bình thường và bấm "Lấy mã" TRONG VÒNG
+    3 phút — đúng lượt đó sẽ không bắn SMS. Từ lượt sau, phụ huynh bấm "Lấy mã"
+    vẫn nhận SMS và đăng nhập bình thường, còn mã hỗ trợ dưới đây vẫn dùng được
+    cho tới khi hết TTL.
 
     Args:
         phone_number: SĐT phụ huynh (0xxxxxxxxx / 84xxxxxxxxx / +84xxxxxxxxx)
@@ -156,7 +186,8 @@ def grant_support_otp(
         reason: Lý do cấp (ghi vào audit log khi grant được dùng).
 
     Returns:
-        dict: {phone_number, guardian, guardian_name, otp, expires_in_sec}
+        dict: {phone_number, guardian, guardian_name, otp, expires_in_sec,
+               sms_skip_window_sec}
     """
     normalized_phone = normalize_phone_number(phone_number)
     if not normalized_phone:
@@ -193,6 +224,13 @@ def grant_support_otp(
         expires_in_sec=ttl,
     )
 
+    sms_skip_window = min(SUPPORT_OTP_SMS_SKIP_SEC, ttl)
+    frappe.cache().set_value(
+        _support_sms_skip_cache_key(normalized_phone),
+        1,
+        expires_in_sec=sms_skip_window,
+    )
+
     return {
         "phone_number": normalized_phone,
         "guardian": guardian["name"],
@@ -200,6 +238,7 @@ def grant_support_otp(
         "duplicate_guardian_records": len(guardian_list),
         "otp": otp_code,
         "expires_in_sec": ttl,
+        "sms_skip_window_sec": sms_skip_window,
     }
 
 
@@ -211,6 +250,7 @@ def revoke_support_otp(phone_number):
 
     existed = get_support_otp_grant(normalized_phone) is not None
     frappe.cache().delete_value(_support_otp_cache_key(normalized_phone))
+    frappe.cache().delete_value(_support_sms_skip_cache_key(normalized_phone))
     return {"phone_number": normalized_phone, "revoked": existed}
 
 
@@ -546,9 +586,10 @@ def request_otp(phone_number):
             # SĐT demo: luôn dùng OTP cố định (cache/SMS đồng bộ với bước verify)
             otp_code = static_demo_otp
             logs.append(f"🔐 [DEMO] OTP cố định cho review/demo: {otp_code}")
-        elif support_grant:
-            # SĐT đang có grant hỗ trợ: dùng lại đúng mã đã cấp và KHÔNG gửi SMS,
-            # để kiểm thử trên bản build store mà không làm phiền phụ huynh.
+        elif support_grant and consume_support_sms_skip(normalized_phone):
+            # Đúng lượt "Lấy mã" của người kiểm thử ngay sau khi cấp grant: dùng lại
+            # mã đã cấp và không bắn SMS. Quyền này tiêu ngay tại đây, nên nếu phụ
+            # huynh bấm "Lấy mã" sau đó thì rơi xuống nhánh thường và vẫn nhận SMS.
             otp_code = support_grant["otp"]
             skip_sms = True
             logs.append("🔐 [SUPPORT] Dùng OTP hỗ trợ đang còn hiệu lực")
