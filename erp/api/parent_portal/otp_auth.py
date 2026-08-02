@@ -108,6 +108,112 @@ def is_static_demo_otp_accepted(normalized_phone, otp_input):
     return otp_input.strip() == expected
 
 
+# ---------------------------------------------------------------------------
+# OTP hỗ trợ (support bypass)
+#
+# Dùng để đăng nhập nick phụ huynh trên bản build store nhằm tái hiện lỗi mà
+# KHÔNG gửi SMS làm phiền phụ huynh. Grant chỉ cấp được từ bench console
+# (không có endpoint whitelist), tự hết hạn, và mọi lần dùng đều ghi audit.
+# ---------------------------------------------------------------------------
+SUPPORT_OTP_CACHE_PREFIX = "parent_portal_support_otp:"
+SUPPORT_OTP_DEFAULT_TTL_SEC = 15 * 60
+SUPPORT_OTP_MAX_TTL_SEC = 60 * 60
+
+
+def _support_otp_cache_key(normalized_phone):
+    return f"{SUPPORT_OTP_CACHE_PREFIX}{normalized_phone}"
+
+
+def get_support_otp_grant(normalized_phone):
+    """Grant OTP hỗ trợ còn hiệu lực cho SĐT, hoặc None."""
+    if not normalized_phone:
+        return None
+
+    grant = frappe.cache().get_value(_support_otp_cache_key(normalized_phone))
+    if not isinstance(grant, dict) or not grant.get("otp"):
+        return None
+
+    return grant
+
+
+def grant_support_otp(
+    phone_number,
+    otp=None,
+    ttl_sec=SUPPORT_OTP_DEFAULT_TTL_SEC,
+    reason=None,
+):
+    """
+    Cấp mã OTP hỗ trợ tạm thời cho 1 SĐT phụ huynh — KHÔNG gửi SMS.
+
+    Chỉ gọi từ bench console (cố tình không whitelist ra HTTP). Sau khi cấp,
+    người kiểm thử nhập SĐT trên app như bình thường: bước "Lấy mã" sẽ không
+    bắn SMS, và mã dưới đây dùng được cho tới khi hết hạn.
+
+    Args:
+        phone_number: SĐT phụ huynh (0xxxxxxxxx / 84xxxxxxxxx / +84xxxxxxxxx)
+        otp: Mã muốn dùng (đúng 6 chữ số). Bỏ trống thì hệ thống tự sinh.
+        ttl_sec: Thời gian hiệu lực, mặc định 15 phút, tối đa 1 giờ.
+        reason: Lý do cấp (ghi vào audit log khi grant được dùng).
+
+    Returns:
+        dict: {phone_number, guardian, guardian_name, otp, expires_in_sec}
+    """
+    normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone:
+        frappe.throw(_("Số điện thoại không hợp lệ"))
+
+    # Dùng đúng cách chọn bản ghi của luồng đăng nhập, để tên in ra ở console khớp
+    # với bản ghi mà phiên hỗ trợ sẽ thực sự rơi vào.
+    guardian_list = frappe.db.get_list(
+        "CRM Guardian",
+        filters={"phone_number": ["in", [normalized_phone, f"+{normalized_phone}"]]},
+        fields=["name", "guardian_name"],
+        ignore_permissions=True,
+    )
+    guardian = pick_guardian_record(guardian_list)
+    if not guardian:
+        frappe.throw(_("Không tìm thấy phụ huynh với số điện thoại này"))
+
+    otp_code = str(otp).strip() if otp else generate_otp(6)
+    if not (otp_code.isdigit() and len(otp_code) == 6):
+        # App chỉ có 6 ô nhập, mã khác 6 chữ số sẽ không gõ vào được.
+        frappe.throw(_("Mã OTP hỗ trợ phải gồm đúng 6 chữ số"))
+
+    ttl = min(max(int(ttl_sec or 0), 60), SUPPORT_OTP_MAX_TTL_SEC)
+
+    frappe.cache().set_value(
+        _support_otp_cache_key(normalized_phone),
+        {
+            "otp": otp_code,
+            "guardian": guardian["name"],
+            "granted_by": frappe.session.user,
+            "reason": reason,
+            "granted_at": datetime.now().isoformat(),
+        },
+        expires_in_sec=ttl,
+    )
+
+    return {
+        "phone_number": normalized_phone,
+        "guardian": guardian["name"],
+        "guardian_name": guardian["guardian_name"],
+        "duplicate_guardian_records": len(guardian_list),
+        "otp": otp_code,
+        "expires_in_sec": ttl,
+    }
+
+
+def revoke_support_otp(phone_number):
+    """Thu hồi ngay grant OTP hỗ trợ của 1 SĐT (không cần chờ hết hạn)."""
+    normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone:
+        frappe.throw(_("Số điện thoại không hợp lệ"))
+
+    existed = get_support_otp_grant(normalized_phone) is not None
+    frappe.cache().delete_value(_support_otp_cache_key(normalized_phone))
+    return {"phone_number": normalized_phone, "revoked": existed}
+
+
 def update_guardian_login_stats(guardian_name):
     """
     Cập nhật thống kê login của guardian.
@@ -434,10 +540,18 @@ def request_otp(phone_number):
         # Generate OTP
         is_prod = is_production_server()
         static_demo_otp = get_static_demo_otp_for_phone(normalized_phone)
+        support_grant = get_support_otp_grant(normalized_phone)
+        skip_sms = False
         if static_demo_otp:
             # SĐT demo: luôn dùng OTP cố định (cache/SMS đồng bộ với bước verify)
             otp_code = static_demo_otp
             logs.append(f"🔐 [DEMO] OTP cố định cho review/demo: {otp_code}")
+        elif support_grant:
+            # SĐT đang có grant hỗ trợ: dùng lại đúng mã đã cấp và KHÔNG gửi SMS,
+            # để kiểm thử trên bản build store mà không làm phiền phụ huynh.
+            otp_code = support_grant["otp"]
+            skip_sms = True
+            logs.append("🔐 [SUPPORT] Dùng OTP hỗ trợ đang còn hiệu lực")
         elif not is_prod:
             # Staging/Dev: dùng OTP mặc định theo ngày (DDMMYY) để dễ kiểm thử
             otp_code = get_staging_default_otp()
@@ -462,9 +576,19 @@ def request_otp(phone_number):
         
         # Dùng mẫu SMS có cụm "verification code" để iOS/Android nhận diện OTP ổn định hơn.
         sms_message = f"{otp_code} is your Parent Portal verification code. This code expires in 5 minutes."
-        
-        # Send SMS (truyền otp_code để log trong môi trường dev)
-        sms_result = send_sms_via_vivas(normalized_phone, sms_message, otp_code=otp_code)
+
+        if skip_sms:
+            # Người kiểm thử đã có mã từ lúc cấp grant — không bắn SMS tới phụ huynh.
+            logs.append("📵 [SUPPORT] Bỏ qua gửi SMS cho SĐT đang có OTP hỗ trợ")
+            sms_result = {
+                "success": True,
+                "message": "SMS skipped (support OTP)",
+                "logs": [],
+                "mock": True,
+            }
+        else:
+            # Send SMS (truyền otp_code để log trong môi trường dev)
+            sms_result = send_sms_via_vivas(normalized_phone, sms_message, otp_code=otp_code)
         logs.extend(sms_result.get("logs", []))
         
         # Return response
@@ -536,8 +660,19 @@ def verify_otp_and_login(phone_number, otp):
         static_otp_accepted = is_static_demo_otp_accepted(normalized_phone, otp)
         if static_otp_accepted:
             logs.append("✅ [DEMO] OTP cố định (whitelist SĐT) được chấp nhận")
-        
-        if not cached_data and not staging_otp_accepted and not static_otp_accepted:
+
+        # SĐT đang được cấp OTP hỗ trợ: chấp nhận kể cả khi cache 5 phút đã hết hạn
+        support_grant = get_support_otp_grant(normalized_phone)
+        support_otp_accepted = bool(support_grant) and otp.strip() == support_grant["otp"]
+        if support_otp_accepted:
+            logs.append("✅ [SUPPORT] OTP hỗ trợ (cấp tạm từ console) được chấp nhận")
+
+        if (
+            not cached_data
+            and not staging_otp_accepted
+            and not static_otp_accepted
+            and not support_otp_accepted
+        ):
             logs.append(f"❌ No OTP found in cache for: {normalized_phone}")
             return {
                 "success": False,
@@ -549,7 +684,7 @@ def verify_otp_and_login(phone_number, otp):
             logs.append(f"💾 Found cached OTP data")
         
         # Verify OTP
-        if not staging_otp_accepted and not static_otp_accepted:
+        if not staging_otp_accepted and not static_otp_accepted and not support_otp_accepted:
             if not cached_data or cached_data["otp"] != otp.strip():
                 logs.append(f"❌ OTP mismatch: expected {cached_data['otp'] if cached_data else 'N/A'}, got {otp}")
                 return {
@@ -647,28 +782,41 @@ def verify_otp_and_login(phone_number, otp):
             except Exception:
                 ip = 'unknown'
             
+            auth_details = {
+                'fullname': guardian['guardian_name'],
+                'guardian_id': guardian['guardian_id'],
+                'phone_number': normalized_phone,
+                'timestamp': frappe.utils.now()
+            }
+            if support_otp_accepted:
+                # Đăng nhập bằng cửa hỗ trợ: ghi rõ ai cấp và lý do để truy vết sau này.
+                auth_details['support_bypass'] = True
+                auth_details['support_granted_by'] = support_grant.get('granted_by')
+                auth_details['support_reason'] = support_grant.get('reason')
+
             log_authentication(
                 user=user_email,
-                action='otp_login',
+                action='otp_login_support' if support_otp_accepted else 'otp_login',
                 ip=ip,
                 status='success',
-                details={
-                    'fullname': guardian['guardian_name'],
-                    'guardian_id': guardian['guardian_id'],
-                    'phone_number': normalized_phone,
-                    'timestamp': frappe.utils.now()
-                }
+                details=auth_details
             )
             logs.append(f"✅ Logged OTP authentication for {user_email}")
         except Exception as e:
             logs.append(f"⚠️ Failed to log authentication: {str(e)}")
 
-        # Cập nhật login stats và tạo activity record
-        try:
-            update_guardian_login_stats(guardian["name"])
-            logs.append(f"✅ Updated guardian login stats")
-        except Exception as e:
-            logs.append(f"⚠️ Failed to update login stats: {str(e)}")
+        # Cập nhật login stats và tạo activity record.
+        # Phiên hỗ trợ KHÔNG tính vào thống kê: nếu tính, mỗi lần vào debug sẽ set
+        # first_login_at / portal_activated cho phụ huynh chưa từng đăng nhập và làm
+        # lệch báo cáo kích hoạt portal.
+        if support_otp_accepted:
+            logs.append("⏭️ [SUPPORT] Bỏ qua cập nhật login stats cho phiên hỗ trợ")
+        else:
+            try:
+                update_guardian_login_stats(guardian["name"])
+                logs.append(f"✅ Updated guardian login stats")
+            except Exception as e:
+                logs.append(f"⚠️ Failed to update login stats: {str(e)}")
 
         # Get comprehensive guardian data
         comprehensive_data = get_guardian_comprehensive_data(guardian["name"])
