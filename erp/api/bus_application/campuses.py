@@ -101,7 +101,6 @@ def get_bus_students():
             SELECT
                 bs.name, bs.full_name, bs.student_code, bs.class_id,
                 bs.route_id, bs.status, bs.campus_id, bs.school_year_id,
-                bs.compreface_registered,
                 c.title as class_name,
                 r.route_name
             FROM `tabSIS Bus Student` bs
