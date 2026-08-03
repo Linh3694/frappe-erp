@@ -95,7 +95,9 @@ def _drop_legacy_unique_index() -> None:
         if not idx:
             _log("Khong con index `vehicle_code` tren bang xe — bo qua")
             return
-        frappe.db.sql(f"ALTER TABLE `tab{_VEHICLE_DT}` DROP INDEX `vehicle_code`")
+        # Phai dung sql_ddl: DDL gay implicit commit, `frappe.db.sql` se chan
+        # neu transaction hien tai da co lenh ghi (buoc backfill o tren).
+        frappe.db.sql_ddl(f"ALTER TABLE `tab{_VEHICLE_DT}` DROP INDEX `vehicle_code`")
         _log("Da drop UNIQUE index `vehicle_code` tren bang xe")
     except Exception as e:
         _log(f"LOI khi drop index `vehicle_code`: {e}")
