@@ -231,6 +231,28 @@ def test_parse_raw_timestamps():
     except Exception as e:
         result.add_fail("Bỏ qua phần tử thiếu timestamp", e)
 
+    try:
+        raw = [
+            {"timestamp": "999999999999999999999"},
+            {"timestamp": "2026-08-03 07:00:00"},
+        ]
+        parsed = parse_raw_timestamps(raw)
+        assert parsed == [_dt(7, 0)], f"phải bỏ qua OverflowError, nhận {parsed}"
+        result.add_pass("Bỏ qua timestamp gây OverflowError")
+    except Exception as e:
+        result.add_fail("Bỏ qua timestamp gây OverflowError", e)
+
+    try:
+        raw = [
+            {"timestamp": "khong-phai-ngay"},
+            {"timestamp": "2026-08-03 07:00:00"},
+        ]
+        parsed = parse_raw_timestamps(raw)
+        assert parsed == [_dt(7, 0)], f"phải bỏ qua ParserError, nhận {parsed}"
+        result.add_pass("Bỏ qua timestamp gây ParserError")
+    except Exception as e:
+        result.add_fail("Bỏ qua timestamp gây ParserError", e)
+
     return result.summary()
 
 
