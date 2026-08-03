@@ -1,0 +1,232 @@
+"""
+Unit Test cho quy tắc giờ vào / giờ ra (checkout_rule)
+
+Chạy test (không cần site/DB — máy dev không dựng được site Frappe):
+    cd frappe-backend/sites && ../env/bin/python -m erp.api.attendance.test_checkout_rule
+
+Test truyền ngưỡng tường minh nên không phụ thuộc site_config; hai hàm đọc config
+được kiểm bằng frappe.init(site="") — chỉ đọc file config, không kết nối DB.
+
+Các case lấy từ dữ liệu production ngày 2026-08-03 (xem plan
+docs/superpowers/plans/2026-08-03-diem-danh-gio-vao-ra-ssot.md).
+"""
+
+import frappe
+from datetime import datetime, time
+
+from erp.api.attendance.test_unit import TestResult
+
+# Ngưỡng đã chốt, truyền tường minh vào hàm để test độc lập với cấu hình site.
+TEST_EARLIEST_TIME = time(12, 0)
+TEST_MIN_SESSION_MINUTES = 30
+
+
+def _dt(hour, minute, second=0):
+    """Rút gọn: một mốc giờ trong ngày 2026-08-03."""
+    return datetime(2026, 8, 3, hour, minute, second)
+
+
+def test_resolve_check_in_out():
+    """Kiểm tra quy tắc chọn giờ vào / giờ ra."""
+    print("\n" + "=" * 60)
+    print("🧪 CHECKOUT RULE: resolve_check_in_out")
+    print("=" * 60)
+
+    result = TestResult()
+
+    from erp.api.attendance.checkout_rule import resolve_check_in_out
+
+    cases = [
+        # (mô tả, input, expected_check_in, expected_check_out)
+        ("Không có lần quẹt nào", [], None, None),
+        ("Chỉ 1 lần quẹt buổi sáng", [_dt(6, 57, 20)], _dt(6, 57, 20), None),
+        (
+            "Ca Trần Ngọc Anh: quẹt Check Out rồi Check In khi vào",
+            [_dt(6, 57, 20), _dt(7, 9, 26)],
+            _dt(6, 57, 20),
+            None,
+        ),
+        (
+            "Ca Trương Bá Nam Phong: 2 lần quẹt cách 35 giây",
+            [_dt(6, 45, 26), _dt(6, 46, 1)],
+            _dt(6, 45, 26),
+            None,
+        ),
+        (
+            "Ngày bình thường: vào sáng, ra chiều",
+            [_dt(7, 0), _dt(15, 30)],
+            _dt(7, 0),
+            _dt(15, 30),
+        ),
+        (
+            "Sau mốc 12:00 nhưng chưa đủ 30 phút kể từ giờ vào",
+            [_dt(11, 50), _dt(12, 10)],
+            _dt(11, 50),
+            None,
+        ),
+        (
+            "Trước mốc 12:00 dù đã cách giờ vào rất lâu",
+            [_dt(6, 45), _dt(11, 59, 59)],
+            _dt(6, 45),
+            None,
+        ),
+        (
+            "Đúng biên: 12:00 và cách giờ vào đúng 30 phút",
+            [_dt(11, 30), _dt(12, 0)],
+            _dt(11, 30),
+            _dt(12, 0),
+        ),
+        (
+            "Nhiều lần quẹt chiều: lấy lần muộn nhất",
+            [_dt(7, 0), _dt(12, 28), _dt(15, 30)],
+            _dt(7, 0),
+            _dt(15, 30),
+        ),
+        (
+            "Input chưa sort: vẫn phải ra đúng",
+            [_dt(15, 30), _dt(7, 0)],
+            _dt(7, 0),
+            _dt(15, 30),
+        ),
+    ]
+
+    for description, times, expected_in, expected_out in cases:
+        try:
+            actual_in, actual_out = resolve_check_in_out(
+                times,
+                earliest_time=TEST_EARLIEST_TIME,
+                min_session_minutes=TEST_MIN_SESSION_MINUTES,
+            )
+            assert actual_in == expected_in, f"giờ vào: mong {expected_in}, nhận {actual_in}"
+            assert actual_out == expected_out, f"giờ ra: mong {expected_out}, nhận {actual_out}"
+            result.add_pass(description)
+        except Exception as e:
+            result.add_fail(description, e)
+
+    return result.summary()
+
+
+def test_config_defaults():
+    """Kiểm tra đọc cấu hình và giá trị mặc định."""
+    print("\n" + "=" * 60)
+    print("🧪 CHECKOUT RULE: cấu hình")
+    print("=" * 60)
+
+    result = TestResult()
+
+    from erp.api.attendance.checkout_rule import (
+        DEFAULT_CHECKOUT_EARLIEST_TIME,
+        DEFAULT_MIN_SESSION_MINUTES,
+        get_checkout_earliest_time,
+        get_min_session_minutes,
+    )
+
+    try:
+        assert DEFAULT_CHECKOUT_EARLIEST_TIME == "12:00"
+        assert DEFAULT_MIN_SESSION_MINUTES == 30
+        result.add_pass("Hằng số mặc định")
+    except Exception as e:
+        result.add_fail("Hằng số mặc định", e)
+
+    try:
+        value = get_checkout_earliest_time()
+        assert isinstance(value, time), f"phải là datetime.time, nhận {type(value)}"
+        result.add_pass("get_checkout_earliest_time trả datetime.time")
+    except Exception as e:
+        result.add_fail("get_checkout_earliest_time trả datetime.time", e)
+
+    try:
+        value = get_min_session_minutes()
+        assert isinstance(value, int), f"phải là int, nhận {type(value)}"
+        assert value >= 0, f"không được âm, nhận {value}"
+        result.add_pass("get_min_session_minutes trả int không âm")
+    except Exception as e:
+        result.add_fail("get_min_session_minutes trả int không âm", e)
+
+    return result.summary()
+
+
+def test_parse_raw_timestamps():
+    """Kiểm tra chuẩn hoá timestamp từ raw_data."""
+    print("\n" + "=" * 60)
+    print("🧪 CHECKOUT RULE: parse_raw_timestamps")
+    print("=" * 60)
+
+    result = TestResult()
+
+    from erp.api.attendance.checkout_rule import parse_raw_timestamps
+
+    try:
+        assert parse_raw_timestamps([]) == []
+        result.add_pass("raw_data rỗng")
+    except Exception as e:
+        result.add_fail("raw_data rỗng", e)
+
+    try:
+        # Đúng định dạng thiết bị đang gửi (có offset +07:00)
+        raw = [
+            {"timestamp": "2026-08-03T07:09:26+07:00", "device_name": "Gate 2 - Check In"},
+            {"timestamp": "2026-08-03T06:57:20+07:00", "device_name": "Gate 2 - Check Out"},
+        ]
+        parsed = parse_raw_timestamps(raw)
+        assert parsed == [_dt(6, 57, 20), _dt(7, 9, 26)], f"nhận {parsed}"
+        result.add_pass("Timestamp có offset +07:00, tự sort tăng dần")
+    except Exception as e:
+        result.add_fail("Timestamp có offset +07:00, tự sort tăng dần", e)
+
+    try:
+        # Định dạng cũ (naive, đã là giờ VN)
+        raw = [{"timestamp": "2026-08-03 07:00:00"}]
+        parsed = parse_raw_timestamps(raw)
+        assert parsed == [_dt(7, 0)], f"nhận {parsed}"
+        result.add_pass("Timestamp naive định dạng cũ")
+    except Exception as e:
+        result.add_fail("Timestamp naive định dạng cũ", e)
+
+    try:
+        raw = [{"device_name": "Gate 2 - Check In"}, {"timestamp": "2026-08-03 07:00:00"}]
+        parsed = parse_raw_timestamps(raw)
+        assert parsed == [_dt(7, 0)], f"phải bỏ qua phần tử thiếu timestamp, nhận {parsed}"
+        result.add_pass("Bỏ qua phần tử thiếu timestamp")
+    except Exception as e:
+        result.add_fail("Bỏ qua phần tử thiếu timestamp", e)
+
+    return result.summary()
+
+
+def run_tests():
+    """Chạy toàn bộ test của checkout_rule."""
+    all_results = {}
+    total_passed = 0
+    total_failed = 0
+
+    tests = [
+        ("Parse raw timestamps", test_parse_raw_timestamps),
+        ("Resolve check in/out", test_resolve_check_in_out),
+        ("Config defaults", test_config_defaults),
+    ]
+
+    for name, func in tests:
+        summary = func()
+        all_results[name] = summary
+        total_passed += summary["passed"]
+        total_failed += summary["failed"]
+
+    print("\n" + "=" * 60)
+    print(f"📊 CHECKOUT RULE: {total_passed} passed / {total_failed} failed")
+    print("=" * 60)
+
+    return {
+        "total": total_passed + total_failed,
+        "passed": total_passed,
+        "failed": total_failed,
+        "results": all_results,
+    }
+
+
+if __name__ == "__main__":
+    # frappe.init(site="") chỉ nạp common_site_config, không kết nối DB — đủ cho
+    # các hàm đọc config. Cần gọi trước khi test chạm frappe.conf.
+    frappe.init(site="")
+    summary = run_tests()
+    raise SystemExit(1 if summary["failed"] else 0)
