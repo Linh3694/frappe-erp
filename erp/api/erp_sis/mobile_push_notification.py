@@ -323,12 +323,10 @@ def register_device_token():
     try:
         user = frappe.session.user
         frappe.logger().info(f"Mobile push registration - Session user: {user}")
-        frappe.logger().info(f"Mobile push registration - Request headers: {dict(frappe.request.headers) if hasattr(frappe.request, 'headers') else 'No headers'}")
 
         if not user or user == "Guest":
             # Try to extract user from Authorization header for JWT tokens
             auth_header = frappe.request.headers.get('Authorization', '')
-            frappe.logger().info(f"Mobile push registration - Auth header: {auth_header[:50] if auth_header else 'None'}")
 
             # Also check if JWT token is passed in the payload for mobile apps
             if not auth_header or not auth_header.startswith('Bearer '):
@@ -340,24 +338,17 @@ def register_device_token():
 
             if auth_header.startswith('Bearer '):
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
-                try:
-                    import jwt
-                    # Try to decode JWT token to get user (skip signature verification for now)
-                    decoded = jwt.decode(token, options={"verify_signature": False})
-                    potential_user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
-                    frappe.logger().info(f"Mobile push registration - Extracted user from JWT: {potential_user}")
+                # BẮT BUỘC verify chữ ký — token không verify cho phép giả mạo user
+                # và cướp push notification của người khác (đã từng skip signature).
+                from erp.common.jwt_auth import resolve_verified_user_from_jwt
 
-                    # Validate that this user exists in Frappe
-                    if potential_user and frappe.db.exists("User", potential_user):
-                        user = potential_user
-                        frappe.logger().info(f"Mobile push registration - User validated: {user}")
-                        # Set session user for this request
-                        frappe.session.user = user
-                    else:
-                        frappe.logger().warning(f"Mobile push registration - User from JWT does not exist: {potential_user}")
-
-                except Exception as jwt_error:
-                    frappe.logger().warning(f"Mobile push registration - JWT decode failed: {str(jwt_error)}")
+                verified_user = resolve_verified_user_from_jwt(token)
+                if verified_user:
+                    user = verified_user
+                    frappe.session.user = user
+                    frappe.logger().info(f"Mobile push registration - User verified via JWT: {user}")
+                else:
+                    frappe.logger().warning("Mobile push registration - JWT verification failed")
 
             if not user or user == "Guest":
                 return error_response("Authentication required", code="NOT_AUTHENTICATED")
@@ -911,12 +902,55 @@ def _build_expo_message(token_doc, title, body, data):
 # Expo Push API giới hạn 100 messages/POST
 EXPO_BATCH_SIZE = 100
 EXPO_POST_TIMEOUT = 5  # giây — giảm từ 10s
+EXPO_POST_RETRIES = 1  # retry thêm 1 lần khi lỗi mạng / 429 / 5xx
+
+
+def _expo_request_headers():
+    """Header gọi Expo Push API — kèm EXPO_ACCESS_TOKEN nếu site_config có cấu hình.
+
+    Với dự án EAS bật Enhanced Security, thiếu access token → ticket vẫn "ok"
+    nhưng receipt fail và thiết bị thật không nhận push. notification-service (Node)
+    đã dùng token này; Frappe phải đồng bộ cùng cấu hình.
+    """
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    access_token = (frappe.conf.get("EXPO_ACCESS_TOKEN") or "").strip()
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    return headers
+
+
+def _deactivate_unregistered_tokens(tokens):
+    """Đánh dấu is_active=0 các Expo token Expo báo DeviceNotRegistered.
+
+    Không xóa hẳn để còn trace; cron cleanup sẽ dọn bản ghi inactive lâu ngày.
+    """
+    if not tokens:
+        return
+    try:
+        frappe.db.sql(
+            """
+            UPDATE `tabMobile Device Token`
+            SET is_active = 0, modified = %s
+            WHERE device_token IN %s AND is_active = 1
+            """,
+            (frappe.utils.now(), tuple(tokens)),
+        )
+        frappe.db.commit()
+        frappe.logger().info(
+            f"📱 [Expo] Deactivated {len(tokens)} DeviceNotRegistered token(s)"
+        )
+    except Exception as e:
+        frappe.logger().warning(f"📱 [Expo] Không deactivate được token hỏng: {str(e)}")
 
 
 def _post_expo_batch(messages):
     """
     POST danh sách messages tới Expo theo BATCH (max 100/POST).
     Expo trả per-message status → parse và đếm success/failed riêng.
+    Token bị Expo báo DeviceNotRegistered sẽ được deactivate trong DB.
     """
     if not messages:
         return {
@@ -928,24 +962,36 @@ def _post_expo_batch(messages):
             "failed_count": 0,
         }
     
+    import time
     import requests
     
     success_count = 0
     failed_count = 0
     results = []
+    unregistered_tokens = []
     
     for chunk_start in range(0, len(messages), EXPO_BATCH_SIZE):
         chunk = messages[chunk_start:chunk_start + EXPO_BATCH_SIZE]
         try:
-            response = requests.post(
-                "https://exp.host/--/api/v2/push/send",
-                json=chunk,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                },
-                timeout=EXPO_POST_TIMEOUT,
-            )
+            response = None
+            for attempt in range(EXPO_POST_RETRIES + 1):
+                try:
+                    response = requests.post(
+                        "https://exp.host/--/api/v2/push/send",
+                        json=chunk,
+                        headers=_expo_request_headers(),
+                        timeout=EXPO_POST_TIMEOUT,
+                    )
+                    # 429 / 5xx: thử lại 1 lần sau khoảng nghỉ ngắn
+                    if response.status_code in (429, 500, 502, 503, 504) and attempt < EXPO_POST_RETRIES:
+                        time.sleep(1)
+                        continue
+                    break
+                except requests.RequestException:
+                    if attempt < EXPO_POST_RETRIES:
+                        time.sleep(1)
+                        continue
+                    raise
             
             if response.status_code == 200:
                 resp_json = response.json()
@@ -968,6 +1014,11 @@ def _post_expo_batch(messages):
                             "status": "failed",
                             "error": ticket if isinstance(ticket, dict) else str(ticket),
                         })
+                        # DeviceNotRegistered: app đã gỡ / token hết hạn → deactivate
+                        if isinstance(ticket, dict):
+                            err_code = (ticket.get("details") or {}).get("error")
+                            if err_code == "DeviceNotRegistered" and target_token:
+                                unregistered_tokens.append(target_token)
                 
                 # Trường hợp số ticket < số messages → đánh dấu các message còn lại là failed
                 for idx in range(len(tickets), len(chunk)):
@@ -995,6 +1046,8 @@ def _post_expo_batch(messages):
                     "error": str(e),
                 })
     
+    _deactivate_unregistered_tokens(unregistered_tokens)
+
     msg_summary = f"Sent to {success_count}/{len(messages)} devices successfully"
     if failed_count > 0:
         msg_summary += f" ({failed_count} failed)"
@@ -1261,6 +1314,57 @@ def broadcast_workspace_app_update(
     result = _run_workspace_app_update_broadcast(title, body, data_json=data_json)
     ok = result.get("success")
     return success_response(result, "Đã gửi push" if ok else (result.get("message") or "Gửi push thất bại"))
+
+
+# ===== SCHEDULED JOB: dọn Mobile Device Token stale =====
+
+# Token không thấy hoạt động (last_seen) quá lâu → deactivate; bản ghi inactive
+# quá lâu → xóa hẳn. App re-register mỗi lần mở nên last_seen của máy còn dùng luôn mới.
+MOBILE_TOKEN_DEACTIVATE_AFTER_DAYS = 90
+MOBILE_TOKEN_DELETE_INACTIVE_AFTER_DAYS = 30
+
+
+def cleanup_stale_mobile_device_tokens():
+    """
+    Scheduled job (daily) dọn DocType Mobile Device Token:
+    1. Deactivate token active nhưng last_seen quá MOBILE_TOKEN_DEACTIVATE_AFTER_DAYS ngày.
+    2. Xóa hẳn token inactive không được cập nhật quá MOBILE_TOKEN_DELETE_INACTIVE_AFTER_DAYS ngày.
+
+    Song song với cleanup_stale_push_subscriptions (PWA) — hai DocType riêng biệt.
+    """
+    try:
+        now = frappe.utils.now_datetime()
+        deactivate_cutoff = frappe.utils.add_days(now, -MOBILE_TOKEN_DEACTIVATE_AFTER_DAYS)
+        delete_cutoff = frappe.utils.add_days(now, -MOBILE_TOKEN_DELETE_INACTIVE_AFTER_DAYS)
+
+        deactivated = frappe.db.sql(
+            """
+            UPDATE `tabMobile Device Token`
+            SET is_active = 0, modified = %s
+            WHERE is_active = 1
+              AND (last_seen IS NULL OR last_seen < %s)
+              AND creation < %s
+            """,
+            (frappe.utils.now(), deactivate_cutoff, deactivate_cutoff),
+        )
+
+        stale_inactive = frappe.get_all(
+            "Mobile Device Token",
+            filters={"is_active": 0, "modified": ["<", delete_cutoff]},
+            pluck="name",
+        )
+        for name in stale_inactive:
+            frappe.delete_doc("Mobile Device Token", name, ignore_permissions=True, force=True)
+
+        frappe.db.commit()
+        frappe.logger().info(
+            f"🧹 [Mobile Token Cleanup] Deactivated stale (> {MOBILE_TOKEN_DEACTIVATE_AFTER_DAYS}d), "
+            f"deleted {len(stale_inactive)} inactive (> {MOBILE_TOKEN_DELETE_INACTIVE_AFTER_DAYS}d)"
+        )
+        return {"success": True, "deleted": len(stale_inactive)}
+    except Exception as e:
+        frappe.log_error(f"Mobile token cleanup error: {str(e)}", "Mobile Token Cleanup")
+        return {"success": False, "error": str(e)}
 
 
 # ===== INTEGRATION WITH EXISTING ATTENDANCE SYSTEM =====

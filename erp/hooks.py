@@ -1453,7 +1453,9 @@ scheduler_events = {
     # Push Subscription cleanup - Xóa subscriptions không dùng trong 30 ngày
     "daily": [
         "erp.project_management.cron.expire_pending_invitations",
-        "erp.api.parent_portal.push_notification.cleanup_stale_push_subscriptions"
+        "erp.api.parent_portal.push_notification.cleanup_stale_push_subscriptions",
+        # Mobile Device Token (Expo) - deactivate token last_seen quá 90 ngày, xóa inactive quá 30 ngày
+        "erp.api.erp_sis.mobile_push_notification.cleanup_stale_mobile_device_tokens",
     ],
     # CRM Weekly - Khong co scheduler tu dong mac dinh, goi thu cong qua API
     # auto_enroll va end_of_year_transition duoc goi thu cong boi admin
