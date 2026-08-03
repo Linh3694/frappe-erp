@@ -6,8 +6,11 @@ CCCD la khoa nghiep vu; ma noi bo bo han khoi man hinh, form va nhap Excel.
 
 DIEM QUAN TRONG — app Monitor: tai khoan Frappe cua giam sat duoc dat ten theo
 `{monitor_code}@busmonitor.wellspring.edu.vn`, va moi API cua app tach nguoc email nay
-ra de tim giam sat. Doi dinh danh sang CCCD nen phai DOI TEN luon cac User da co,
-neu khong giam sat dang dung app se khong tra ra ban ghi nao sau khi deploy.
+ra de tim giam sat. Doi dinh danh sang CCCD nen phai co tai khoan theo CCCD, neu khong
+giam sat dang dung app se khong tra ra ban ghi nao sau khi deploy.
+
+Patch TAO TAI KHOAN MOI thay vi doi ten tai khoan cu — xem chu thich o
+`_migrate_monitor_users` de biet vi sao (`rename_doc` tren User mat 5-15 phut/tai khoan).
 
 Patch chay o [post_model_sync]: Frappe KHONG drop cot khi field bi xoa khoi JSON nen
 cot cu van doc duoc bang `frappe.db.sql` raw (`frappe.get_all` se bao loi vi fieldname
@@ -27,10 +30,23 @@ def _log(msg: str) -> None:
     frappe.logger().info(f"[drop_bus_staff_codes] {msg}")
 
 
-def _rename_monitor_users() -> None:
-    """Doi email tai khoan app Monitor tu ma giam sat sang CCCD."""
+def _copy_roles(old_email: str, new_user) -> None:
+    """Sao chep danh sach role tu tai khoan cu sang tai khoan moi."""
+    roles = frappe.get_all("Has Role", filters={"parent": old_email}, pluck="role")
+    for role in roles:
+        new_user.append("roles", {"role": role})
+
+
+def _migrate_monitor_users() -> None:
+    """Tao tai khoan app Monitor theo CCCD, vo hieu hoa tai khoan cu theo ma giam sat.
+
+    KHONG dung `frappe.rename_doc`: `User.after_rename` quet MOI bang trong DB roi
+    `UPDATE ... SET owner/modified_by`, ma hai cot nay khong co index — moi tai khoan
+    mat 5-15 phut tren prod (rieng `tabVersion` da 40-210 giay moi cau). Tao tai khoan
+    moi la O(1); lich su `owner`/`modified_by` van tro ve tai khoan cu, vo hai.
+    """
     if not frappe.db.has_column(_MONITOR_DT, "monitor_code"):
-        _log("Bang giam sat khong con cot monitor_code — bo qua buoc doi ten User")
+        _log("Bang giam sat khong con cot monitor_code — bo qua buoc chuyen tai khoan")
         return
 
     rows = frappe.db.sql(
@@ -43,28 +59,43 @@ def _rename_monitor_users() -> None:
         as_dict=True,
     )
 
-    renamed = 0
+    created = 0
     skipped = 0
     for row in rows:
         old_email = f"{row.code}{_MONITOR_EMAIL_DOMAIN}"
         new_email = f"{row.citizen_id}{_MONITOR_EMAIL_DOMAIN}"
         if old_email == new_email:
             continue
-        if not frappe.db.exists("User", old_email):
-            continue
         if frappe.db.exists("User", new_email):
             # Da co tai khoan theo CCCD (chay lai patch, hoac tao tay) — khong ghi de
-            _log(f"Bo qua {old_email}: {new_email} da ton tai")
-            skipped += 1
             continue
+        if not frappe.db.exists("User", old_email):
+            continue
+
         try:
-            frappe.rename_doc("User", old_email, new_email, force=True, show_alert=False)
-            renamed += 1
+            old_user = frappe.get_doc("User", old_email)
+            new_user = frappe.get_doc(
+                {
+                    "doctype": "User",
+                    "email": new_email,
+                    "first_name": old_user.first_name or old_user.full_name or new_email,
+                    "user_type": old_user.user_type or "Website User",
+                    "enabled": 1,
+                    "send_welcome_email": 0,
+                }
+            )
+            _copy_roles(old_email, new_user)
+            new_user.flags.no_welcome_mail = True
+            new_user.insert(ignore_permissions=True)
+
+            # Vo hieu hoa tai khoan cu — dung set_value de khong keo theo hook cua User
+            frappe.db.set_value("User", old_email, "enabled", 0, update_modified=False)
+            created += 1
         except Exception as e:  # noqa: BLE001 — mot tai khoan hong khong duoc chan ca migrate
-            _log(f"LOI khi doi ten {old_email} -> {new_email}: {e}")
+            _log(f"LOI khi tao {new_email} tu {old_email}: {e}")
             skipped += 1
 
-    _log(f"Tai khoan app Monitor: doi ten {renamed}, bo qua {skipped}")
+    _log(f"Tai khoan app Monitor: tao moi {created} theo CCCD, bo qua {skipped}")
 
 
 def _drop_unique_index(doctype: str, column: str) -> None:
@@ -91,7 +122,7 @@ def execute():
         _log(f"Bo qua — chua co bang {_MONITOR_DT} / {_DRIVER_DT}")
         return
 
-    _rename_monitor_users()
+    _migrate_monitor_users()
 
     _drop_unique_index(_MONITOR_DT, "monitor_code")
     _drop_unique_index(_DRIVER_DT, "driver_code")
