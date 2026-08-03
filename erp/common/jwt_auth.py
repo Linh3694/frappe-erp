@@ -93,6 +93,54 @@ def verify_jwt_token(token):
         return None
 
 
+def resolve_verified_user_from_jwt(token):
+    """
+    Verify chữ ký JWT (HS256, jwt_secret) và trả về email User hợp lệ.
+
+    Dùng cho các endpoint allow_guest nhận Bearer token thủ công (đăng ký push token
+    mobile/PWA). Khác verify_jwt_token ở chỗ: chấp nhận payload của cả staff
+    (`user`/`email`) lẫn guardian (`sub`/`email`), và với tài khoản Parent Portal
+    thì kiểm tra thêm token_version (force logout) qua verify_guardian_jwt_token.
+
+    Returns:
+        str: email User nếu token hợp lệ và User tồn tại, ngược lại None.
+    """
+    if not token:
+        return None
+    try:
+        secret = (
+            frappe.conf.get("jwt_secret")
+            or frappe.get_site_config().get("jwt_secret")
+            or "default_jwt_secret_change_in_production"
+        )
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return None
+    except Exception:
+        return None
+
+    user_email = (
+        payload.get("email")
+        or payload.get("sub")
+        or payload.get("user")
+        or payload.get("username")
+    )
+    if not user_email or not frappe.db.exists("User", user_email):
+        return None
+
+    # Tài khoản phụ huynh: tôn trọng cơ chế thu hồi phiên (jwt_token_version)
+    if "@parent.wellspring.edu.vn" in user_email:
+        try:
+            from erp.api.parent_portal.guardian_auth import verify_guardian_jwt_token
+
+            if not verify_guardian_jwt_token(token):
+                return None
+        except Exception:
+            return None
+
+    return user_email
+
+
 def update_user_activity(user_email):
     """Update user's last activity - no longer needed after removing ERP User Profile"""
     pass

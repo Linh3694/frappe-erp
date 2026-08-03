@@ -86,21 +86,17 @@ def save_push_subscription(subscription_json=None, device_name=None):
             
             if auth_header.startswith('Bearer '):
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
-                try:
-                    import jwt
-                    # Decode JWT token to get user (skip signature verification)
-                    decoded = jwt.decode(token, options={"verify_signature": False})
-                    potential_user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
-                    
-                    # Validate that this user exists in Frappe
-                    if potential_user and frappe.db.exists("User", potential_user):
-                        user = potential_user
-                        frappe.session.user = user
-                        frappe.logger().info(f"📱 [Push Subscription] Authenticated via JWT: {user}")
-                    else:
-                        frappe.logger().warning(f"📱 [Push Subscription] User from JWT not found: {potential_user}")
-                except Exception as jwt_error:
-                    frappe.logger().warning(f"📱 [Push Subscription] JWT decode failed: {str(jwt_error)}")
+                # BẮT BUỘC verify chữ ký JWT — trước đây skip verification nên có thể
+                # đăng ký subscription giả cho user khác và nhận push của họ.
+                from erp.common.jwt_auth import resolve_verified_user_from_jwt
+
+                verified_user = resolve_verified_user_from_jwt(token)
+                if verified_user:
+                    user = verified_user
+                    frappe.session.user = user
+                    frappe.logger().info(f"📱 [Push Subscription] Authenticated via JWT: {user}")
+                else:
+                    frappe.logger().warning("📱 [Push Subscription] JWT verification failed")
         
         if not user or user == "Guest":
             return {
@@ -234,16 +230,15 @@ def delete_push_subscription(endpoint=None, delete_all=False):
             
             if auth_header.startswith('Bearer '):
                 token = auth_header[7:]
-                try:
-                    import jwt
-                    decoded = jwt.decode(token, options={"verify_signature": False})
-                    potential_user = decoded.get('email') or decoded.get('sub') or decoded.get('username')
-                    
-                    if potential_user and frappe.db.exists("User", potential_user):
-                        user = potential_user
-                        frappe.session.user = user
-                except Exception as jwt_error:
-                    frappe.logger().warning(f"JWT decode failed: {str(jwt_error)}")
+                # Verify chữ ký JWT (không chấp nhận token không verify)
+                from erp.common.jwt_auth import resolve_verified_user_from_jwt
+
+                verified_user = resolve_verified_user_from_jwt(token)
+                if verified_user:
+                    user = verified_user
+                    frappe.session.user = user
+                else:
+                    frappe.logger().warning("📱 [Push Subscription] JWT verification failed")
         
         if not user or user == "Guest":
             return {

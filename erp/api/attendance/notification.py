@@ -193,9 +193,28 @@ def send_student_attendance_notification(
 	try:
 		frappe.logger().info(f"📧 [Student Attendance] STARTING notification for student {employee_code}")
 
+		# SSOT: employee_code từ thiết bị HiVision là student_code (mã chuỗi hiển thị).
+		# Khóa học sinh chuẩn là CRM Student.name — resolve 1 lần và dùng nhất quán
+		# trong payload để client (web SW + mobile router) chọn đúng học sinh.
+		crm_student_row = frappe.db.sql(
+			"""
+			SELECT name FROM `tabCRM Student`
+			WHERE UPPER(student_code) = UPPER(%(code)s)
+			LIMIT 1
+			""",
+			{"code": employee_code},
+		)
+		crm_student_name = crm_student_row[0][0] if crm_student_row else None
+		if not crm_student_name:
+			frappe.logger().warning(
+				f"📧 [Student Attendance] Không resolve được CRM Student cho code {employee_code} — fallback dùng code"
+			)
+
+		student_key = crm_student_name or employee_code
+
 		# DEBUG: Check if student exists and has guardians
 		from erp.utils.notification_handler import get_guardians_for_students
-		guardians = get_guardians_for_students([employee_code])
+		guardians = get_guardians_for_students([student_key])
 		frappe.logger().info(f"📧 [Student Attendance] Found {len(guardians)} guardians for student {employee_code}")
 
 		if not guardians:
@@ -254,10 +273,12 @@ def send_student_attendance_notification(
 		notification_data = {
 			"type": "student_attendance",
 			"notificationType": "attendance",
-			"student_id": employee_code,
+			# SSOT: student_id/studentId = CRM Student.name; mã hiển thị nằm ở student_code
+			"student_id": student_key,
 			"student_name": employee_name,
-			"studentId": employee_code,
+			"studentId": student_key,
 			"studentName": employee_name,
+			"student_code": employee_code,
 			"employeeCode": employee_code,
 			"employeeName": employee_name,
 			"timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
@@ -274,7 +295,7 @@ def send_student_attendance_notification(
 		result = send_bulk_parent_notifications(
 			recipient_type="attendance",
 			recipients_data={
-				"student_ids": [employee_code]
+				"student_ids": [student_key]
 			},
 			title=title,
 			body=message,
