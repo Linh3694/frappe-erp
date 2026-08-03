@@ -125,6 +125,77 @@ class TestParseRowOtherSpecs(unittest.TestCase):
         self.assertEqual(values["status"], "Active")
 
 
+class TestParseRowRoute(unittest.TestCase):
+    def _row(self, **override):
+        row = {
+            "Tên tuyến": "Ecopark 1",
+            "Mã xe": "12",
+            "Biển số": "29B-173.96",
+            "Mã tài xế": "TX001",
+            "Mã giám sát 1": "GS001",
+            "Mã giám sát 2": "",
+            "Trạng thái": "",
+        }
+        row.update(override)
+        return row
+
+    def test_dong_hop_le_giam_sat_2_de_trong(self):
+        spec = bic.BUS_IMPORT_SPECS["route"]
+        values, err = bic.parse_row(spec, self._row(), 2)
+        self.assertIsNone(err)
+        self.assertEqual(values["route_name"], "Ecopark 1")
+        self.assertEqual(values["vehicle_code"], "12")
+        self.assertEqual(values["monitor2_code"], "")
+        self.assertEqual(values["status"], "Active")
+
+    def test_thieu_bien_so(self):
+        spec = bic.BUS_IMPORT_SPECS["route"]
+        values, err = bic.parse_row(spec, self._row(**{"Biển số": ""}), 4)
+        self.assertIsNone(values)
+        self.assertIn("Biển số", err)
+
+
+class TestRouteStudentWeeklyConfig(unittest.TestCase):
+    """Cấu hình chung cả tuần: lượt suy từ cột địa điểm nào được điền."""
+
+    def test_dien_ca_hai_cot_thi_di_ca_hai_luot(self):
+        trips, err = bic.weekly_trip_types(
+            {"pickup_location": "12 Lê Lợi", "drop_off_location": "12 Lê Lợi"}, 2
+        )
+        self.assertIsNone(err)
+        self.assertEqual(trips, ("Đón", "Trả"))
+
+    def test_chi_dien_diem_don_thi_chi_co_luot_don(self):
+        trips, err = bic.weekly_trip_types(
+            {"pickup_location": "12 Lê Lợi", "drop_off_location": "  "}, 2
+        )
+        self.assertIsNone(err)
+        self.assertEqual(trips, ("Đón",))
+
+    def test_chi_dien_diem_tra_thi_chi_co_luot_tra(self):
+        trips, err = bic.weekly_trip_types({"drop_off_location": "12 Lê Lợi"}, 2)
+        self.assertIsNone(err)
+        self.assertEqual(trips, ("Trả",))
+
+    def test_de_trong_ca_hai_thi_bao_loi(self):
+        trips, err = bic.weekly_trip_types({}, 9)
+        self.assertIsNone(trips)
+        self.assertIn("Dòng 9", err)
+
+    def test_tuan_hoc_la_thu_2_den_thu_6(self):
+        self.assertEqual(bic.BUS_WEEKDAYS, ("Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6"))
+
+    def test_thu_tu_don_phai_la_so_duong(self):
+        self.assertEqual(bic.parse_pickup_order("3", 2), (3, None))
+        self.assertEqual(bic.parse_pickup_order(" 4 ", 2), (4, None))
+        order, err = bic.parse_pickup_order("abc", 5)
+        self.assertIsNone(order)
+        self.assertIn("Thứ tự đón", err)
+        order, err = bic.parse_pickup_order("0", 6)
+        self.assertIsNone(order)
+        self.assertIn("Dòng 6", err)
+
+
 class TestFriendlyUniqueError(unittest.TestCase):
     def test_nhan_ra_truong_bi_trung(self):
         spec = bic.BUS_IMPORT_SPECS["driver"]

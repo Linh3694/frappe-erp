@@ -17,11 +17,14 @@ from erp.utils.campus_utils import get_current_campus_from_context
 
 from .bus_import_columns import (
     BUS_IMPORT_SPECS,
+    BUS_WEEKDAYS,
     ImportSpec,
     friendly_unique_error,
     missing_headers,
     normalize_cell,
+    parse_pickup_order,
     parse_row,
+    weekly_trip_types,
 )
 
 # Số dòng lỗi / bỏ qua tối đa gửi về UI — tránh trả về danh sách quá dài
@@ -107,9 +110,14 @@ def _run_import(
     spec: ImportSpec,
     rows: List[Tuple[int, Dict[str, Any]]],
     campus_id: str,
-    row_handler: Optional[Callable[[Dict[str, str], int, str], Tuple[Optional[Dict[str, Any]], Optional[str], bool]]] = None,
+    row_handler: Optional[Callable[[Dict[str, str], int, str], Tuple[Any, Optional[str], bool]]] = None,
 ) -> Dict[str, Any]:
-    """Duyệt từng dòng: chuẩn hóa, bỏ qua dòng trùng, tạo bản ghi, gom kết quả."""
+    """
+    Duyệt từng dòng: chuẩn hóa, bỏ qua dòng trùng, tạo bản ghi, gom kết quả.
+
+    ``row_handler`` trả về một payload, hoặc danh sách payload khi một dòng Excel
+    tương ứng nhiều bản ghi. Số đếm thành công luôn tính theo DÒNG.
+    """
     errors: List[Dict[str, Any]] = []
     skipped: List[Dict[str, Any]] = []
     success_count = 0
@@ -142,11 +150,17 @@ def _run_import(
             payload = dict(values)
             payload["campus_id"] = campus_id
 
+        # row_handler có thể trả nhiều payload cho một dòng (vd. học sinh trong tuyến:
+        # một dòng Excel nở ra T2–T6 × lượt Đón/Trả). Cả nhóm nằm trong cùng savepoint
+        # nên một dòng hoặc vào trọn vẹn, hoặc không vào gì.
+        payloads = payload if isinstance(payload, list) else [payload]
+
         save_point = f"bus_import_row_{row_num}"
         frappe.db.savepoint(save_point=save_point)
         try:
-            doc = frappe.get_doc({"doctype": spec.doctype, **payload})
-            doc.insert()
+            for item in payloads:
+                doc = frappe.get_doc({"doctype": spec.doctype, **item})
+                doc.insert()
             success_count += 1
         except Exception as ex:  # noqa: BLE001 — gom mọi lỗi tạo doc về mức dòng
             frappe.db.rollback(save_point=save_point)
@@ -270,8 +284,10 @@ def _lookup_student_for_bus(student_code: str, campus_id: str) -> Optional[Dict[
     found = frappe.db.sql(
         """
         SELECT
+            s.name AS student_id,
             s.student_name AS full_name,
             s.student_code,
+            cs.name AS class_student_id,
             cs.class_id,
             cs.school_year_id
         FROM `tabCRM Student` s
@@ -330,3 +346,145 @@ def _student_row_handler(
 def import_bus_students():
     """Nhập danh sách học sinh đi xe buýt từ Excel (đối chiếu mã học sinh với CRM Student)."""
     return _import_by_key("student", row_handler=_student_row_handler)
+
+
+def _resolve_school_year(campus_id: str) -> Optional[str]:
+    """Năm học đang bật của campus; không có thì lấy năm học đang bật bất kỳ."""
+    for filters in ({"campus_id": campus_id, "is_enable": 1}, {"is_enable": 1}):
+        rows = frappe.get_all(
+            "SIS School Year", filters=filters, fields=["name"], order_by="creation desc", limit=1
+        )
+        if rows:
+            return rows[0].name
+    return None
+
+
+def _route_row_handler(
+    values: Dict[str, str], row_num: int, campus_id: str
+) -> Tuple[Any, Optional[str], bool]:
+    """Dựng payload SIS Bus Route: biển số → xe, mã tài xế/giám sát → nhân sự."""
+    route_name = values.get("route_name", "")
+    if frappe.db.exists("SIS Bus Route", {"route_name": route_name, "campus_id": campus_id}):
+        return None, f"Dòng {row_num}: tuyến '{route_name}' đã có trong hệ thống", True
+
+    license_plate = values.get("license_plate", "")
+    vehicle_id = frappe.db.get_value(
+        "SIS Bus Transportation", {"license_plate": license_plate, "campus_id": campus_id}, "name"
+    )
+    if not vehicle_id:
+        return None, f"Dòng {row_num}: không tìm thấy xe có biển số '{license_plate}'", False
+
+    driver_code = values.get("driver_code", "")
+    driver_id = frappe.db.get_value(
+        "SIS Bus Driver", {"driver_code": driver_code, "campus_id": campus_id}, "name"
+    )
+    if not driver_id:
+        return None, f"Dòng {row_num}: không tìm thấy tài xế có mã '{driver_code}'", False
+
+    monitor_ids: List[str] = []
+    for index, field in enumerate(("monitor1_code", "monitor2_code"), start=1):
+        code = values.get(field, "")
+        if not code:
+            monitor_ids.append("")
+            continue
+        monitor_id = frappe.db.get_value(
+            "SIS Bus Monitor", {"monitor_code": code, "campus_id": campus_id}, "name"
+        )
+        if not monitor_id:
+            return None, f"Dòng {row_num}: không tìm thấy giám sát {index} có mã '{code}'", False
+        monitor_ids.append(monitor_id)
+
+    school_year_id = _resolve_school_year(campus_id)
+    if not school_year_id:
+        return None, f"Dòng {row_num}: chưa có năm học nào đang hoạt động", False
+
+    payload: Dict[str, Any] = {
+        "route_name": route_name,
+        "vehicle_code": values.get("vehicle_code", ""),
+        "vehicle_id": vehicle_id,
+        "driver_id": driver_id,
+        "monitor1_id": monitor_ids[0],
+        "monitor2_id": monitor_ids[1] or None,
+        "status": values.get("status") or "Active",
+        "campus_id": campus_id,
+        "school_year_id": school_year_id,
+    }
+    return payload, None, False
+
+
+def _route_student_row_handler(
+    values: Dict[str, str], row_num: int, campus_id: str
+) -> Tuple[Any, Optional[str], bool]:
+    """
+    Một dòng Excel → các bản ghi SIS Bus Route Student cho cả tuần học.
+
+    Cấu hình chung cho cả tuần: nở ra T2–T6; lượt Đón/Trả suy từ việc cột
+    'Điểm đón' / 'Điểm trả' có được điền hay không.
+    """
+    route_name = values.get("route_name", "")
+    route_id = frappe.db.get_value(
+        "SIS Bus Route", {"route_name": route_name, "campus_id": campus_id}, "name"
+    )
+    if not route_id:
+        return None, f"Dòng {row_num}: không tìm thấy tuyến đường '{route_name}'", False
+
+    student_code = values.get("student_code", "")
+    student = _lookup_student_for_bus(student_code, campus_id)
+    if not student:
+        return (
+            None,
+            f"Dòng {row_num}: không tìm thấy học sinh có mã '{student_code}' đã được xếp lớp trong campus",
+            False,
+        )
+
+    if frappe.db.exists(
+        "SIS Bus Route Student", {"route_id": route_id, "student_id": student["student_id"]}
+    ):
+        return (
+            None,
+            f"Dòng {row_num}: học sinh {student_code} đã có trong tuyến '{route_name}'",
+            True,
+        )
+
+    trip_types, trip_error = weekly_trip_types(values, row_num)
+    if trip_error:
+        return None, trip_error, False
+
+    pickup_order, order_error = parse_pickup_order(values.get("pickup_order", ""), row_num)
+    if order_error:
+        return None, order_error, False
+
+    pickup_location = (values.get("pickup_location") or "").strip()
+    drop_off_location = (values.get("drop_off_location") or "").strip()
+
+    payloads: List[Dict[str, Any]] = []
+    for weekday in BUS_WEEKDAYS:
+        for trip_type in trip_types:
+            payloads.append(
+                {
+                    "route_id": route_id,
+                    "campus_id": campus_id,
+                    "student_id": student["student_id"],
+                    "class_student_id": student.get("class_student_id") or "",
+                    "weekday": weekday,
+                    "trip_type": trip_type,
+                    "pickup_order": pickup_order,
+                    # Lượt Đón đưa học sinh tới trường, lượt Trả xuất phát từ trường —
+                    # giống mặc định của form thêm tuyến trên giao diện.
+                    "pickup_location": pickup_location if trip_type == "Đón" else "Trường học",
+                    "drop_off_location": drop_off_location if trip_type == "Trả" else "Trường học",
+                }
+            )
+    return payloads, None, False
+
+
+@frappe.whitelist()
+def import_bus_routes():
+    """Nhập danh sách tuyến đường từ Excel (chưa gồm học sinh)."""
+    return _import_by_key("route", row_handler=_route_row_handler)
+
+
+@frappe.whitelist()
+def import_bus_route_students():
+    """Nhập học sinh vào tuyến từ Excel — cấu hình chung cho cả tuần (T2–T6)."""
+    return _import_by_key("route_student", row_handler=_route_student_row_handler)

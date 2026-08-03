@@ -150,6 +150,34 @@ BUS_IMPORT_SPECS: Dict[str, ImportSpec] = {
         ),
         dedupe_fields=("point_name",),
     ),
+    "route": ImportSpec(
+        key="route",
+        doctype="SIS Bus Route",
+        entity_label="tuyến đường",
+        columns=(
+            ColumnSpec("Tên tuyến", "route_name", required=True),
+            ColumnSpec("Mã xe", "vehicle_code", required=True),
+            ColumnSpec("Biển số", "license_plate", required=True),
+            ColumnSpec("Mã tài xế", "driver_code", required=True),
+            ColumnSpec("Mã giám sát 1", "monitor1_code", required=True),
+            ColumnSpec("Mã giám sát 2", "monitor2_code"),
+            ColumnSpec("Trạng thái", "status", normalizer="status", default="Active"),
+        ),
+        dedupe_fields=("route_name",),
+    ),
+    "route_student": ImportSpec(
+        key="route_student",
+        doctype="SIS Bus Route Student",
+        entity_label="học sinh trong tuyến",
+        columns=(
+            ColumnSpec("Tên tuyến", "route_name", required=True),
+            ColumnSpec("Mã học sinh", "student_code", required=True),
+            ColumnSpec("Thứ tự đón", "pickup_order", required=True),
+            ColumnSpec("Điểm đón", "pickup_location"),
+            ColumnSpec("Điểm trả", "drop_off_location"),
+        ),
+        dedupe_fields=("route_name", "student_code"),
+    ),
     "student": ImportSpec(
         key="student",
         doctype="SIS Bus Student",
@@ -162,6 +190,42 @@ BUS_IMPORT_SPECS: Dict[str, ImportSpec] = {
         dedupe_fields=("student_code",),
     ),
 }
+
+
+#: Nhập Excel chỉ hỗ trợ "cấu hình chung cho cả tuần" — các thứ trong tuần học.
+BUS_WEEKDAYS: Tuple[str, ...] = ("Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6")
+
+
+def weekly_trip_types(
+    values: Dict[str, str], row_num: int
+) -> Tuple[Optional[Tuple[str, ...]], Optional[str]]:
+    """
+    Suy lượt đi/về từ hai cột địa điểm: điền cột nào thì học sinh đi lượt đó.
+    Điền cả hai → cả Đón và Trả; để trống cả hai → lỗi vì không biết xếp lượt nào.
+    """
+    trip_types: List[str] = []
+    if (values.get("pickup_location") or "").strip():
+        trip_types.append("Đón")
+    if (values.get("drop_off_location") or "").strip():
+        trip_types.append("Trả")
+
+    if not trip_types:
+        return None, (
+            f"Dòng {row_num}: phải điền ít nhất một trong hai cột "
+            "'Điểm đón' hoặc 'Điểm trả' để biết học sinh đi lượt nào"
+        )
+    return tuple(trip_types), None
+
+
+def parse_pickup_order(raw: str, row_num: int) -> Tuple[Optional[int], Optional[str]]:
+    """Thứ tự đón phải là số nguyên dương."""
+    try:
+        order = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None, f"Dòng {row_num}: cột 'Thứ tự đón' phải là số ('{raw}')"
+    if order <= 0:
+        return None, f"Dòng {row_num}: cột 'Thứ tự đón' phải lớn hơn 0 ('{raw}')"
+    return order, None
 
 
 def missing_headers(spec: ImportSpec, headers: List[str]) -> List[str]:
