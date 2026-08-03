@@ -55,6 +55,7 @@
     "**/eslint.config.mjs",
     "**/eslint.config.cjs",
     "**/.pre-commit-config.yaml",
+    "**/CONTRIBUTING-WHITELABEL.md",
     "**/.env.example",
     "**/CHANGELOG.md",
     "**/white-label-plans/**",

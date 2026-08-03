@@ -373,40 +373,36 @@ def process_employee_events(key, events, logger, existing_name=None):
 		logger.info(f"✅ {employee_name or employee_code} - {len(events)} events merged - check_in: {format_vn_time(attendance_doc.check_in_time)}, check_out: {format_vn_time(attendance_doc.check_out_time)}")
 		
 		# Determine if should send notification
-		should_notify = False
 		latest_timestamp = sorted_events[-1].get("parsed_timestamp")
 		
-		# Check nếu có bất kỳ event nào là Invalid Time Period (subEventType = 7) thì skip notification
+		# Trước đây bỏ notification khi có event subEventType = 7 (Invalid Time Period).
+		# Bản ghi điểm danh đã được lưu nên vẫn phải thông báo — giữ khớp với hikvision.py.
 		INVALID_TIME_PERIOD_SUB_EVENT = 7
 		has_invalid_time_period = any(
-			evt.get("sub_event_type") == INVALID_TIME_PERIOD_SUB_EVENT 
+			evt.get("sub_event_type") == INVALID_TIME_PERIOD_SUB_EVENT
 			for evt in events
 		)
-		
+
 		if has_invalid_time_period:
-			logger.info(f"⏭️ [SKIP NOTIFICATION] Invalid Time Period event detected for {employee_code}")
-		else:
-			# Luôn enqueue notification; worker quyết định skip push nếu event stale
-			should_notify = True
-		
-		notification_data = None
-		if should_notify:
-			notification_data = {
-				"employee_code": employee_code,
-				"employee_name": employee_name,
-				"timestamp": latest_timestamp.isoformat(),
-				"device_id": device_id,
-				"device_name": device_name,
-				"check_in_time": attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-				"check_out_time": attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-				"total_check_ins": attendance_doc.total_check_ins,
-				"date": str(attendance_doc.date)
-			}
+			logger.info(f"invalid time period subEvent=7 for {employee_code} - van gui notification")
+
+		# Luôn enqueue notification; worker quyết định skip push nếu event stale
+		notification_data = {
+			"employee_code": employee_code,
+			"employee_name": employee_name,
+			"timestamp": latest_timestamp.isoformat(),
+			"device_id": device_id,
+			"device_name": device_name,
+			"check_in_time": attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+			"check_out_time": attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+			"total_check_ins": attendance_doc.total_check_ins,
+			"date": str(attendance_doc.date)
+		}
 		
 		return {
 			"success": True,
 			"is_new": is_new,
-			"should_notify": should_notify,
+			"should_notify": True,
 			"notification_data": notification_data
 		}
 		
