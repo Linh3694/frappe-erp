@@ -475,7 +475,6 @@ def accept_feedback():
 		if invalid_badges:
 			return validation_error_response(_("Badge không hợp lệ: {0}").format(", ".join(invalid_badges)))
 
-		old_status = doc.status
 		doc.feedback_rating = rating
 		doc.feedback_comment = comment
 		doc.feedback_badges = json.dumps(badges, separators=(",", ":")) if badges else None
@@ -485,9 +484,9 @@ def accept_feedback():
 		_append_history(doc.name, _("Chấp nhận kết quả — {0} sao").format(rating))
 		frappe.db.commit()
 		try:
-			actor = _session_email()
-			_notify_it_feedback(doc, actor_email=actor)
-			_notify_it_status_changed(doc, old_status, "Closed", actor_email=actor)
+			# _notify_it_feedback đã bao gồm việc ticket chuyển sang Closed — không gọi
+			# thêm _notify_it_status_changed, tránh hai thông báo cho cùng một hành động.
+			_notify_it_feedback(doc, actor_email=_session_email())
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "it_support.accept_feedback.notify")
 		return success_response(

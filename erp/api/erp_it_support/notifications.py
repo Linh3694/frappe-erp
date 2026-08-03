@@ -44,13 +44,20 @@ def _get_support_team_emails() -> list:
 
 
 def _collect_status_recipients(doc, sender_email: str = "", *, include_creator: bool = False) -> list:
-	"""Recipients chuẩn cho fan-out status: assignee + IT support team, loại sender."""
+	"""Recipients cho fan-out status: assignee, hoặc cả đội IT khi ticket chưa có người xử lý.
+
+	Trước đây luôn gửi cho toàn đội (parity legacy). Với đội vài chục người thì mỗi lần
+	đổi trạng thái một ticket bất kỳ là một push cho tất cả — thông báo mất nghĩa vì
+	luôn luôn đến mà không ai phải làm gì. Đội chỉ cần biết khi ticket còn vô chủ, tức
+	là lúc thật sự cần ai đó nhặt.
+	"""
 	recipients = set()
 	ae = _get_assignee_email(doc)
 	if ae:
 		recipients.add(ae)
-	for em in _get_support_team_emails():
-		recipients.add(em)
+	else:
+		for em in _get_support_team_emails():
+			recipients.add(em)
 	if include_creator:
 		ce = _normalize_email(doc.creator_email)
 		if ce:
@@ -280,9 +287,8 @@ def _notify_it_status_changed(
 			notification_type="it_support_ticket_status",
 		)
 
-	# Status final → fan-out có email cho assignee + support team
-	final_states = ("Done", "Closed", "Cancelled")
-	include_email_for_team = new_status in final_states
+	# Trạng thái kết thúc → kèm email để lưu vết; các bước trung gian chỉ push.
+	include_email = new_status in ("Done", "Closed", "Cancelled")
 
 	for em in _collect_status_recipients(doc, sender_email=actor):
 		if em == creator:
@@ -293,7 +299,7 @@ def _notify_it_status_changed(
 			team_body,
 			pdata,
 			notification_type="it_support_ticket_status",
-			include_email=include_email_for_team,
+			include_email=include_email,
 		)
 
 
@@ -370,57 +376,51 @@ def _is_staff_sender(email: str) -> bool:
 
 
 def _notify_it_feedback(doc, actor_email: str = ""):
-	"""Đánh giá mới — notify assignee (chính), creator (xác nhận) + IT support team theo dõi.
+	"""Người tạo chấp nhận kết quả — một thông báo duy nhất mang cả đánh giá và việc đóng ticket.
 
-	Bật email cho assignee + creator để lưu hồ sơ; team chỉ push (tránh spam mailbox).
+	Chấp nhận kết quả vừa là đánh giá vừa là chuyển sang `Closed`. Trước đây `accept_feedback`
+	gọi thêm `_notify_it_status_changed`, nên mỗi người nhận hai dòng nói cùng một chuyện —
+	nay gộp về đây, và `accept_feedback` không gọi status nữa.
+
+	Đội IT không nhận: điểm đánh giá là số liệu để xem trên dashboard, không phải việc cần làm.
 	"""
 	code = doc.ticket_code or doc.name
+	title = _shorten((doc.title or "").strip() or code)
 	rating = doc.feedback_rating or 0
-	body = _("Ticket {0} được đánh giá {1}/5 sao").format(f"#{code}", rating)
-	payload = _it_ticket_payload(doc, "ticket_feedback", {"rating": rating})
+	payload = _it_ticket_payload(
+		doc,
+		"ticket_feedback",
+		{"rating": rating, "newStatus": doc.status, "newStatusLabel": _it_status_label_vn(doc.status or "")},
+	)
 
 	actor = _normalize_email(actor_email)
 	notified = set()
 
-	# Assignee — bật email để lưu hồ sơ đánh giá
+	# Người xử lý — bật email để lưu hồ sơ đánh giá
 	assignee_email = _get_assignee_email(doc)
 	if assignee_email and assignee_email != actor:
 		_emit_it_unified(
 			assignee_email,
-			_("Đánh giá ticket IT"),
-			body,
+			_("{0} · Đã đóng, {1}/5 sao").format(title, rating),
+			_("Người tạo đã chấp nhận kết quả {0} và đánh giá {1}/5 sao.").format(f"#{code}", rating),
 			payload,
 			notification_type="it_support_ticket_feedback",
 			include_email=True,
 		)
 		notified.add(assignee_email)
 
-	# Creator (người vừa đánh giá xong) → push xác nhận, không email
+	# Người tạo (nếu không phải người vừa bấm) — xác nhận ticket đã đóng
 	creator = _normalize_email(doc.creator_email)
 	if creator and creator != actor and creator not in notified:
 		_emit_it_unified(
 			creator,
-			_("Đánh giá ticket IT"),
-			_("Cảm ơn bạn đã đánh giá ticket {0}").format(f"#{code}"),
+			_("{0} · Đã đóng").format(title),
+			_("{0} đã được đánh giá {1}/5 sao và đóng lại.").format(f"#{code}", rating),
 			payload,
 			notification_type="it_support_ticket_feedback",
 			include_email=False,
 		)
 		notified.add(creator)
-
-	# IT support team — push để team thấy reputation update
-	for em in _get_support_team_emails():
-		if em == actor or em in notified:
-			continue
-		_emit_it_unified(
-			em,
-			_("Đánh giá ticket IT"),
-			body,
-			payload,
-			notification_type="it_support_ticket_feedback",
-			include_email=False,
-		)
-		notified.add(em)
 
 
 def _emit_it_new_message_realtime(doc, message_data: dict, sender_email: str):

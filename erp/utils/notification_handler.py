@@ -308,6 +308,54 @@ def get_parent_emails(guardians: List[Dict]) -> List[str]:
         raise
 
 
+def _deliver_parent_push_batch(targets, title, body, final_title_str, final_body_str, tag):
+    """
+    Gửi push cho danh sách phụ huynh — chạy trong background worker (frappe.enqueue).
+
+    Tách khỏi send_bulk_parent_notifications để request nghiệp vụ (điểm danh, thông báo...)
+    không bị chặn bởi HTTP tới VAPID endpoints / Expo API.
+
+    Args:
+        targets: [{"email": str, "data": dict}]
+        title / body: chuỗi hoặc dict {vi, en} — cho Expo batch (resolve theo bundle)
+        final_title_str / final_body_str: chuỗi đã resolve — cho VAPID web push
+        tag: notification tag (= recipient_type)
+    """
+    from erp.api.parent_portal.push_notification import send_push_notification
+
+    # 1. VAPID web push (PWA) — per-parent, skip_expo để không gọi Expo N lần
+    for target in targets or []:
+        try:
+            send_push_notification(
+                user_email=target.get("email"),
+                title=final_title_str,
+                body=final_body_str,
+                icon="/icon.png",
+                data=target.get("data"),
+                tag=tag,
+                skip_expo=True,
+            )
+        except Exception as push_error:
+            frappe.logger().error(
+                f"💥 [Bulk Push Job] VAPID exception for {target.get('email')}: {str(push_error)}"
+            )
+
+    # 2. Expo mobile — 1 POST batch cho tất cả token
+    try:
+        from erp.api.erp_sis.mobile_push_notification import send_mobile_notifications_bulk
+
+        bulk_expo_result = send_mobile_notifications_bulk(
+            targets=targets, title=title, body=body
+        )
+        frappe.logger().info(
+            f"📱 [Bulk Expo Job] sent={bulk_expo_result.get('success_count', 0)} "
+            f"failed={bulk_expo_result.get('failed_count', 0)} "
+            f"total={bulk_expo_result.get('total_messages', 0)}"
+        )
+    except Exception as bulk_expo_err:
+        frappe.logger().error(f"💥 [Bulk Expo Job] Lỗi gửi BATCH Expo: {str(bulk_expo_err)}")
+
+
 def send_bulk_parent_notifications(
     recipient_type: str,
     recipients_data: Dict,
@@ -576,30 +624,9 @@ def send_bulk_parent_notifications(
                     emit_unread_count_update(parent_email, unread_count)
 
                     # Push: bỏ qua nếu event stale (attendance); list vẫn được tạo ở trên
+                    # Việc gửi thật (VAPID + Expo) dồn vào 1 background job sau loop —
+                    # loop này chỉ làm việc DB + realtime để request không bị chặn bởi HTTP.
                     if not skip_push:
-                        # Send VAPID push only (skip_expo=True) — Expo sẽ gửi BATCH 1 lần ở dưới
-                        # Tránh gọi Expo N lần cho N parents (mỗi lần ~10s timeout)
-                        try:
-                            from erp.api.parent_portal.push_notification import send_push_notification
-
-                            push_result = send_push_notification(
-                                user_email=parent_email,
-                                title=final_title_str,
-                                body=final_body_str,
-                                icon="/icon.png",
-                                data=parent_merged_data,
-                                tag=recipient_type,
-                                skip_expo=True,  # Phase C.1: gửi Expo BATCH ở cuối
-                            )
-
-                            devices_sent = push_result.get('devices_sent', 0)
-                            if devices_sent > 0:
-                                frappe.logger().debug(f"✅ [Bulk Push] VAPID OK for {parent_email}: {devices_sent} device(s)")
-
-                        except Exception as push_error:
-                            frappe.logger().error(f"💥 [Bulk Push] VAPID exception for {parent_email}: {str(push_error)}")
-                        
-                        # Collect target để gửi Expo BATCH 1 lần sau loop
                         expo_targets.append({
                             "email": parent_email,
                             "data": parent_merged_data,
@@ -623,25 +650,33 @@ def send_bulk_parent_notifications(
             
             frappe.db.commit()
             
-            # Phase C.2: Gửi Expo BATCH cho tất cả parents trong 1 POST duy nhất
-            # Trước: N parents × 1-3 device × 10s timeout = worst case 30-150s
-            # Sau:   1 POST với tất cả messages, timeout 5s
+            # Gửi push (VAPID + Expo batch) trong background job để không chặn request.
+            # Nếu enqueue thất bại (Redis queue không sẵn sàng) → fallback gửi sync.
             if expo_targets:
+                push_job_kwargs = {
+                    "targets": expo_targets,
+                    "title": notification_title,
+                    "body": notification_body,
+                    "final_title_str": final_title_str,
+                    "final_body_str": final_body_str,
+                    "tag": recipient_type,
+                }
                 try:
-                    from erp.api.erp_sis.mobile_push_notification import send_mobile_notifications_bulk
-                    
-                    bulk_expo_result = send_mobile_notifications_bulk(
-                        targets=expo_targets,
-                        title=notification_title,
-                        body=notification_body,
+                    frappe.enqueue(
+                        "erp.utils.notification_handler._deliver_parent_push_batch",
+                        queue="short",
+                        job_name=f"parent_push_{recipient_type}_{frappe.utils.now()}",
+                        timeout=300,
+                        **push_job_kwargs,
                     )
                     frappe.logger().info(
-                        f"📱 [Bulk Expo] sent={bulk_expo_result.get('success_count', 0)} "
-                        f"failed={bulk_expo_result.get('failed_count', 0)} "
-                        f"total={bulk_expo_result.get('total_messages', 0)}"
+                        f"📤 [Notification Handler] Enqueued push job for {len(expo_targets)} parents"
                     )
-                except Exception as bulk_expo_err:
-                    frappe.logger().error(f"💥 [Bulk Expo] Lỗi gửi BATCH Expo: {str(bulk_expo_err)}")
+                except Exception as enqueue_err:
+                    frappe.logger().warning(
+                        f"⚠️ [Notification Handler] Enqueue failed ({str(enqueue_err)}) — gửi sync fallback"
+                    )
+                    _deliver_parent_push_batch(**push_job_kwargs)
             
             frappe.logger().info(f"✅ [Notification Handler] Notifications sent - Success: {success_count}, Failed: {failed_count}")
             
