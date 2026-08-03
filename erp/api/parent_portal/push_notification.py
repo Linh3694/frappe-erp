@@ -110,7 +110,6 @@ def save_push_subscription(subscription_json=None, device_name=None):
                 subscription_json = frappe.form_dict.get('subscription_json')
             else:
                 # Try to get from raw request body for JSON requests
-                import json
                 try:
                     request_data = json.loads(frappe.request.get_data(as_text=True))
                     subscription_json = request_data.get('subscription_json')

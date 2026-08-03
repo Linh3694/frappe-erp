@@ -916,32 +916,38 @@ def process_single_attendance_event(event_data):
 		
 		logger.info("attendance saved employee=%s", employee_code)
 		
-		# Bỏ qua notification nếu subEventType = 7 (Invalid Time Period)
-		# Học sinh quẹt thẻ ngoài khung giờ cho phép trên máy HiKvision
+		# subEventType = 7 (Invalid Time Period) nghĩa là người quẹt ngoài khung giờ
+		# thiết bị cho phép — nhưng bản ghi điểm danh Ở TRÊN đã được lưu, nên vẫn phải
+		# thông báo. Trước đây chặn ở đây làm phụ huynh không biết con đã tới trường
+		# cho tới khi em quẹt lại một đầu đọc khác (ca 2026-08-03: lệch 12 phút).
 		INVALID_TIME_PERIOD_SUB_EVENT = 7
 		if sub_event_type == INVALID_TIME_PERIOD_SUB_EVENT:
-			logger.debug("skip notif Invalid Time subEvent=7 employee=%s", employee_code)
-		else:
-			# Luôn enqueue notification; worker skip push nếu event stale, vẫn tạo notification list
-			try:
-				frappe.enqueue(
-					"erp.api.attendance.notification.publish_attendance_notification",
-					queue="short",
-					timeout=120,
-					enqueue_after_commit=True,
-					employee_code=employee_code,
-					employee_name=employee_name,
-					timestamp=parsed_timestamp.isoformat(),
-					device_id=device_id,
-					device_name=device_name,
-					check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
-					check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
-					total_check_ins=attendance_doc.total_check_ins,
-					date=str(attendance_doc.date),
-				)
-				logger.debug("notif enqueued employee=%s", employee_code)
-			except Exception as notif_error:
-				logger.error("notif enqueue fail employee=%s: %s", employee_code, str(notif_error))
+			_increment_daily_counter("attendance:invalid_time_period:count")
+			logger.info(
+				"invalid time period subEvent=7 employee=%s device=%s - van gui notification",
+				employee_code, device_name,
+			)
+
+		# Luôn enqueue notification; worker skip push nếu event stale, vẫn tạo notification list
+		try:
+			frappe.enqueue(
+				"erp.api.attendance.notification.publish_attendance_notification",
+				queue="short",
+				timeout=120,
+				enqueue_after_commit=True,
+				employee_code=employee_code,
+				employee_name=employee_name,
+				timestamp=parsed_timestamp.isoformat(),
+				device_id=device_id,
+				device_name=device_name,
+				check_in_time=attendance_doc.check_in_time.isoformat() if attendance_doc.check_in_time else None,
+				check_out_time=attendance_doc.check_out_time.isoformat() if attendance_doc.check_out_time else None,
+				total_check_ins=attendance_doc.total_check_ins,
+				date=str(attendance_doc.date),
+			)
+			logger.debug("notif enqueued employee=%s", employee_code)
+		except Exception as notif_error:
+			logger.error("notif enqueue fail employee=%s: %s", employee_code, str(notif_error))
 		
 		return True
 		

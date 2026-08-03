@@ -23,8 +23,11 @@ from erp.utils.api_response import (
     not_found_response
 )
 
-# URL pdf-service (có thể cấu hình trong site_config.json)
-PDF_SERVICE_URL = frappe.conf.get("pdf_service_url", "http://172.16.20.113:5020")
+# URL pdf-service (cấu hình trong site_config.json).
+# GD1-11: đọc trong hàm — frappe.conf là proxy per-request, đọc lúc import sẽ
+# đóng băng giá trị theo site nạp module trước (bench nhiều site dùng sai URL).
+def get_pdf_service_url() -> str:
+    return frappe.conf.get("pdf_service_url", "http://127.0.0.1:5020")
 
 # Nhóm lý do không tái ghi danh — value lưu DB ↔ nhãn tiếng Việt.
 # Phải khớp với options Select trên SIS Re-enrollment & CRM Lead và
@@ -2798,7 +2801,7 @@ def upload_service_document():
         images = []
         try:
             # Upload file đến pdf-service
-            pdf_service_url = frappe.conf.get("pdf_service_url", "http://172.16.20.113:5020")
+            pdf_service_url = get_pdf_service_url()
             
             # Reset stream để upload
             file_obj.stream.seek(0)

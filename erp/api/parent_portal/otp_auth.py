@@ -31,15 +31,23 @@ def _parent_portal_serialize_guardian_contacts(guardian_doc):
 # VIVAS SMS Configuration — đọc từ site_config (PLAN-04 §6.5 / GD1-11).
 # KHÔNG hardcode secret. Prod PHẢI set trong site_config.json trước lần deploy
 # bản này: vivas_sms_username / vivas_sms_password / vivas_sms_brandname.
-VIVAS_SMS_CONFIG = {
-    "url": frappe.conf.get("vivas_sms_url", "https://sms.vivas.vn/SMSBNAPINEW/sendsms"),
-    "username": frappe.conf.get("vivas_sms_username", "wellspring"),
-    "password": frappe.conf.get("vivas_sms_password", ""),
-    "brandname": frappe.conf.get("vivas_sms_brandname", "WELLSPRING"),
-    # Mặc định True để giữ nguyên hành vi OTP hiện tại của prod
-    # (khác bus_application/auth.py: bên đó mặc định False).
-    "enabled": frappe.conf.get("vivas_sms_enabled", True),
-}
+#
+# GD1-11: đọc TRONG HÀM, không phải ở cấp module. `frappe.conf` là proxy tới
+# `frappe.local.conf`, chỉ được nạp per-request trong frappe.init()
+# (frappe/__init__.py:228). Đọc lúc import sẽ đóng băng giá trị theo site nào
+# nạp module trước → bench nhiều site (đúng kịch bản white-label) có thể gửi SMS
+# bằng credential/brandname của tenant khác, và đổi site_config không có tác dụng
+# cho tới khi restart process.
+def get_vivas_sms_config() -> dict:
+    return {
+        "url": frappe.conf.get("vivas_sms_url", "https://sms.vivas.vn/SMSBNAPINEW/sendsms"),
+        "username": frappe.conf.get("vivas_sms_username", "wellspring"),
+        "password": frappe.conf.get("vivas_sms_password", ""),
+        "brandname": frappe.conf.get("vivas_sms_brandname", "WELLSPRING"),
+        # Mặc định True để giữ nguyên hành vi OTP hiện tại của prod
+        # (khác bus_application/auth.py: bên đó mặc định False).
+        "enabled": frappe.conf.get("vivas_sms_enabled", True),
+    }
 
 
 def get_parent_portal_user_from_request():
@@ -456,8 +464,11 @@ def send_sms_via_vivas(phone_number, message, otp_code=None):
                 "is_production": False
             }
         
+        # GD1-11: đọc cấu hình theo site của request hiện tại, không dùng hằng module
+        vivas = get_vivas_sms_config()
+
         # Check if SMS sending is enabled (chỉ apply cho production)
-        if not VIVAS_SMS_CONFIG.get("enabled", False):
+        if not vivas.get("enabled", False):
             logs.append("⚠️ SMS sending is DISABLED in configuration")
             logs.append(f"📱 Would send to: {phone_number}")
             logs.append(f"📝 Message: {message}")
@@ -473,25 +484,25 @@ def send_sms_via_vivas(phone_number, message, otp_code=None):
         
         # Prepare request payload
         payload = {
-            "username": VIVAS_SMS_CONFIG["username"],
-            "password": VIVAS_SMS_CONFIG["password"],
-            "brandname": VIVAS_SMS_CONFIG["brandname"],
+            "username": vivas["username"],
+            "password": vivas["password"],
+            "brandname": vivas["brandname"],
             "textmsg": message,
             "sendtime": datetime.now().strftime("%Y%m%d%H%M%S"),
             "isunicode": 0,  # 0 for non-Unicode, 8 for Unicode
             "listmsisdn": phone_number
         }
-        
-        logs.append(f"📤 Sending SMS to VIVAS API: {VIVAS_SMS_CONFIG['url']}")
-        logs.append(f"🔑 Username: {VIVAS_SMS_CONFIG['username']}")
+
+        logs.append(f"📤 Sending SMS to VIVAS API: {vivas['url']}")
+        logs.append(f"🔑 Username: {vivas['username']}")
         logs.append("🔑 Password: ****")  # không log secret
-        logs.append(f"🏷️ Brandname: {VIVAS_SMS_CONFIG['brandname']}")
+        logs.append(f"🏷️ Brandname: {vivas['brandname']}")
         logs.append(f"📱 Phone: {phone_number}")
         logs.append(f"📝 Message: {message}")
         
         # Send request to VIVAS
         response = requests.post(
-            VIVAS_SMS_CONFIG["url"],
+            vivas["url"],
             json=payload,
             headers={"Content-Type": "application/json;charset=UTF-8"},
             timeout=10

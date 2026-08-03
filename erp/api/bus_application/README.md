@@ -1,14 +1,13 @@
 # Bus Application Backend API
 
-Backend API implementation cho hệ thống quản lý vận chuyển học sinh bằng xe bus với nhận diện khuôn mặt.
+Backend API implementation cho hệ thống quản lý vận chuyển học sinh bằng xe bus.
 
 ## Tổng quan
 
 Hệ thống cung cấp các API endpoints để mobile application quản lý:
 - Xác thực giám sát viên qua OTP
 - Quản lý chuyến xe hàng ngày
-- Nhận diện khuôn mặt học sinh
-- Điểm danh lên/xuống xe
+- Điểm danh lên/xuống xe (thủ công và đồng bộ offline)
 - Đồng bộ offline
 
 ## Cài đặt và Setup
@@ -23,10 +22,7 @@ Thêm vào `site_config.json`:
   "vivas_sms_username": "wellspring",
   "vivas_sms_password": "__VIVAS_SMS_PASSWORD__",
   "vivas_sms_brandname": "WELLSPRING",
-  "bus_app_otp_test_mode": true,
-  "compreface_mock_mode": false,
-  "compreface_url": "http://__INTERNAL_HOST__:8080",
-  "compreface_api_key": "00000000-0000-0000-0000-000000000002"
+  "bus_app_otp_test_mode": true
 }
 ```
 
@@ -116,21 +112,9 @@ Content-Type: application/json
 }
 ```
 
-### Face Recognition
+### Điểm danh (module `face_recognition` — tên di sản)
 
-#### Recognize Student Face
-```http
-POST /api/method/erp.api.bus_application.face_recognition.recognize_student_face
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "image": "base64_encoded_image",
-  "campus_id": "campus-1",
-  "school_year_id": "SY-2024-2025",
-  "trip_id": "SIS_DAILY_TRIP-00001"
-}
-```
+Điểm danh hiện chỉ còn đường thủ công và đường đồng bộ offline. Các endpoint nhận diện khuôn mặt đã được gỡ.
 
 #### Check Student In Trip
 ```http
@@ -141,8 +125,7 @@ Content-Type: application/json
 {
   "student_id": "CRM_STUDENT-00001",
   "trip_id": "SIS_DAILY_TRIP-00001",
-  "method": "face_recognition",
-  "similarity": 0.95
+  "method": "manual"
 }
 ```
 
@@ -226,7 +209,7 @@ Content-Type: application/json
 
 - **OTP Authentication**: Bảo mật 2 lớp với SMS OTP
 - **JWT Tokens**: Token-based authentication (30 ngày expiry)
-- **Rate Limiting**: Giới hạn request cho OTP (5/h) và face recognition (100/10min)
+- **Rate Limiting**: Giới hạn request cho OTP (5/h)
 - **Authorization**: Campus isolation và monitor permissions
 - **Audit Logging**: Ghi log tất cả actions vào Activity Log
 - **Input Validation**: Validate tất cả inputs
@@ -253,7 +236,6 @@ API trả về format thống nhất:
 ## Development Notes
 
 - Sử dụng `bus_app_otp_test_mode: true` để skip SMS sending
-- Sử dụng `compreface_mock_mode: true` để skip face recognition API
 - Activity Log chứa detailed logs cho debugging
 - Offline queue hỗ trợ retry mechanism với exponential backoff
 
@@ -261,5 +243,4 @@ API trả về format thống nhất:
 
 - frappe.utils.rate_limit: Rate limiting
 - erp.utils.api_response: Standardized API responses
-- erp.utils.compreFace_service: Face recognition integration
 - VIVAS SMS API: OTP SMS sending

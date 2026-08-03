@@ -397,6 +397,19 @@ def test_notification_handler_logic():
     return result.summary()
 
 
+def _run_checkout_rule_tests():
+    """Gọi bộ test của checkout_rule (import trong hàm để tránh import vòng)."""
+    from erp.api.attendance.test_checkout_rule import run_tests
+
+    summary = run_tests()
+    return {
+        "total": summary["total"],
+        "passed": summary["passed"],
+        "failed": summary["failed"],
+        "errors": [],
+    }
+
+
 def run_all_tests():
     """
     Chạy tất cả unit tests và tổng hợp kết quả
@@ -418,6 +431,7 @@ def run_all_tests():
         ("Debounce Logic", test_debounce_logic),
         ("Batch Processor Logic", test_batch_processor_logic),
         ("Notification Handler Logic", test_notification_handler_logic),
+        ("Checkout Rule", _run_checkout_rule_tests),
     ]
     
     for test_name, test_func in tests:
