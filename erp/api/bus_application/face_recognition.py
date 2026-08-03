@@ -67,15 +67,15 @@ def recognize_student_face():
             return validation_error_response({"school_year_id": ["School year ID is required"]})
 
         # Verify monitor has access to this campus
-        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        # Extract citizen_id from email (format: citizen_id@busmonitor.wellspring.edu.vn)
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return error_response("Invalid user account format", code="INVALID_USER")
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active", "campus_id": campus_id},
+            filters={"citizen_id": citizen_id, "status": "Active", "campus_id": campus_id},
             fields=["name"]
         )
 
@@ -257,15 +257,15 @@ def check_student_in_trip():
             return error_response("Authentication required", code="AUTH_REQUIRED")
 
         # Get current monitor
-        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        # Extract citizen_id from email (format: citizen_id@busmonitor.wellspring.edu.vn)
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return error_response("Invalid user account format", code="INVALID_USER")
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["name"]
         )
 
@@ -419,11 +419,11 @@ def mark_student_absent():
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return error_response("Invalid user account format", code="INVALID_USER")
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["name"]
         )
 
@@ -573,11 +573,11 @@ def verify_and_checkin():
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return error_response("Invalid user account format", code="INVALID_USER")
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["name", "campus_id", "school_year_id"]
         )
 

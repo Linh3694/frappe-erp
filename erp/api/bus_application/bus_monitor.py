@@ -67,7 +67,7 @@ def authenticate_bus_monitor():
         monitors = frappe.get_all(
             "SIS Bus Monitor",
             filters={"phone_number": phone_number, "status": "Active"},
-            fields=["name", "monitor_code", "full_name", "phone_number", "user_id", "campus_id", "school_year_id"]
+            fields=["name", "citizen_id", "full_name", "phone_number", "user_id", "campus_id", "school_year_id"]
         )
 
         if not monitors:
@@ -77,7 +77,7 @@ def authenticate_bus_monitor():
 
         # Get monitor's user details (if exists)
         user_details = None
-        user_email = f"{monitor['monitor_code']}@busmonitor.wellspring.edu.vn"
+        user_email = f"{monitor['citizen_id']}@busmonitor.wellspring.edu.vn"
         if frappe.db.exists("User", user_email):
             try:
                 user_doc = frappe.get_doc("User", user_email)
@@ -96,7 +96,7 @@ def authenticate_bus_monitor():
 
         monitor_data = {
             "monitor_id": monitor.name,
-            "monitor_code": monitor.monitor_code,
+            "citizen_id": monitor.citizen_id,
             "monitor_name": monitor.full_name,
             "phone_number": monitor.phone_number,
             "campus_id": monitor.campus_id,
@@ -124,16 +124,16 @@ def get_monitor_profile():
             return error_response("Authentication required", code="AUTH_REQUIRED")
 
         # Find bus monitor by user email
-        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        # Extract citizen_id from email (format: citizen_id@busmonitor.wellspring.edu.vn)
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return error_response("Invalid user account format", code="INVALID_USER")
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
-            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id"]
+            filters={"citizen_id": citizen_id, "status": "Active"},
+            fields=["name", "citizen_id", "full_name", "phone_number", "campus_id", "school_year_id"]
         )
 
         if not monitors:
@@ -143,7 +143,7 @@ def get_monitor_profile():
 
         monitor_data = {
             "monitor_id": monitor.name,
-            "monitor_code": monitor.monitor_code,
+            "citizen_id": monitor.citizen_id,
             "monitor_name": monitor.full_name,
             "phone_number": monitor.phone_number,
             "campus_id": monitor.campus_id,
@@ -189,15 +189,15 @@ def update_monitor_profile():
             data = frappe.local.form_dict
 
         # Find bus monitor by user email
-        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        # Extract citizen_id from email (format: citizen_id@busmonitor.wellspring.edu.vn)
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return error_response("Invalid user account format", code="INVALID_USER")
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["name"]
         )
 
@@ -228,7 +228,7 @@ def update_monitor_profile():
 
         monitor_data = {
             "monitor_id": monitor_doc.name,
-            "monitor_code": monitor_doc.monitor_code,
+            "citizen_id": monitor_doc.citizen_id,
             "monitor_name": monitor_doc.full_name,
             "phone_number": monitor_doc.phone_number,
             "campus_id": monitor_doc.campus_id,

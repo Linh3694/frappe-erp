@@ -18,13 +18,6 @@ class SISBusDriver(Document):
 			}):
 				frappe.throw("Số CCCD đã tồn tại")
 
-		if self.driver_code:
-			if frappe.db.exists("SIS Bus Driver", {
-				"driver_code": self.driver_code,
-				"name": ("!=", self.name)
-			}):
-				frappe.throw("Mã Driver đã tồn tại")
-
 		if self.phone_number:
 			if frappe.db.exists("SIS Bus Driver", {
 				"phone_number": self.phone_number,

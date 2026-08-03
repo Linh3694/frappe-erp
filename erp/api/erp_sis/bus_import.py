@@ -374,24 +374,28 @@ def _route_row_handler(
     if not vehicle_id:
         return None, f"Dòng {row_num}: không tìm thấy xe có biển số '{license_plate}'", False
 
-    driver_code = values.get("driver_code", "")
+    driver_citizen_id = values.get("driver_citizen_id", "")
     driver_id = frappe.db.get_value(
-        "SIS Bus Driver", {"driver_code": driver_code, "campus_id": campus_id}, "name"
+        "SIS Bus Driver", {"citizen_id": driver_citizen_id, "campus_id": campus_id}, "name"
     )
     if not driver_id:
-        return None, f"Dòng {row_num}: không tìm thấy tài xế có mã '{driver_code}'", False
+        return None, f"Dòng {row_num}: không tìm thấy tài xế có CCCD '{driver_citizen_id}'", False
 
     monitor_ids: List[str] = []
-    for index, field in enumerate(("monitor1_code", "monitor2_code"), start=1):
-        code = values.get(field, "")
-        if not code:
+    for index, field in enumerate(("monitor1_citizen_id", "monitor2_citizen_id"), start=1):
+        citizen_id = values.get(field, "")
+        if not citizen_id:
             monitor_ids.append("")
             continue
         monitor_id = frappe.db.get_value(
-            "SIS Bus Monitor", {"monitor_code": code, "campus_id": campus_id}, "name"
+            "SIS Bus Monitor", {"citizen_id": citizen_id, "campus_id": campus_id}, "name"
         )
         if not monitor_id:
-            return None, f"Dòng {row_num}: không tìm thấy giám sát {index} có mã '{code}'", False
+            return (
+                None,
+                f"Dòng {row_num}: không tìm thấy giám sát {index} có CCCD '{citizen_id}'",
+                False,
+            )
         monitor_ids.append(monitor_id)
 
     school_year_id = _resolve_school_year(campus_id)

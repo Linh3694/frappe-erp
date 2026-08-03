@@ -27,7 +27,7 @@ def get_all_bus_monitors():
 			"SIS Bus Monitor",
 			filters=filters,
 			fields=[
-				"name", "full_name", "monitor_code", "gender", "citizen_id",
+				"name", "full_name", "gender", "citizen_id",
 				"phone_number", "contractor", "address", "status",
 				"campus_id", "school_year_id", "creation", "modified"
 			],
@@ -167,6 +167,8 @@ def update_bus_monitor():
 			return error_response("Bus monitor name is required")
 
 		doc = frappe.get_doc("SIS Bus Monitor", name)
+		# Mã giám sát đã bỏ, CCCD là định danh duy nhất — lờ đi nếu FE cũ còn gửi lên
+		data.pop('monitor_code', None)
 		doc.update(data)
 		doc.save()
 		frappe.db.commit()

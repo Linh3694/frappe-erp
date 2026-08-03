@@ -18,13 +18,6 @@ class SISBusMonitor(Document):
 			}):
 				frappe.throw("Số CCCD đã tồn tại")
 
-		if self.monitor_code:
-			if frappe.db.exists("SIS Bus Monitor", {
-				"monitor_code": self.monitor_code,
-				"name": ("!=", self.name)
-			}):
-				frappe.throw("Mã Monitor đã tồn tại")
-
 		if self.phone_number:
 			if frappe.db.exists("SIS Bus Monitor", {
 				"phone_number": self.phone_number,

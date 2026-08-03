@@ -25,4 +25,5 @@ erp.patches.v1_0.backfill_crm_issue_school_year
 erp.patches.v1_0.normalize_family_relationship_types
 erp.patches.v1_0.sync_crm_guardian_flat_phone
 erp.patches.v1_0.backfill_bus_route_vehicle_code
+erp.patches.v1_0.drop_bus_staff_codes
 erp.patches.v1_0.seed_system_config

@@ -28,7 +28,7 @@ def get_all_bus_drivers():
 			"SIS Bus Driver",
 			filters=filters,
 			fields=[
-				"name", "full_name", "driver_code", "gender", "citizen_id",
+				"name", "full_name", "gender", "citizen_id",
 				"phone_number", "contractor", "address", "status",
 				"campus_id", "school_year_id", "creation", "modified"
 			],
@@ -174,6 +174,8 @@ def update_bus_driver():
 			return error_response("Bus driver name is required")
 
 		doc = frappe.get_doc("SIS Bus Driver", name)
+		# Mã tài xế đã bỏ, CCCD là định danh duy nhất — lờ đi nếu FE cũ còn gửi lên
+		data.pop('driver_code', None)
 		doc.update(data)
 		doc.save()
 		frappe.db.commit()

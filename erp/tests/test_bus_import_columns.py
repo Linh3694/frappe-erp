@@ -49,7 +49,6 @@ class TestParseRowDriver(unittest.TestCase):
     def _row(self, **override):
         row = {
             "Họ tên": "Nguyễn Văn A",
-            "Mã tài xế": "TX001",
             "Giới tính": "Nam",
             "CCCD": "001234567890",
             "Số điện thoại": "0901234567",
@@ -65,16 +64,15 @@ class TestParseRowDriver(unittest.TestCase):
         values, err = bic.parse_row(spec, self._row(), 2)
         self.assertIsNone(err)
         self.assertEqual(values["full_name"], "Nguyễn Văn A")
-        self.assertEqual(values["driver_code"], "TX001")
         self.assertEqual(values["gender"], "Male")
         self.assertEqual(values["status"], "Active")
 
     def test_thieu_gia_tri_bat_buoc(self):
         spec = bic.BUS_IMPORT_SPECS["driver"]
-        values, err = bic.parse_row(spec, self._row(**{"Mã tài xế": ""}), 5)
+        values, err = bic.parse_row(spec, self._row(**{"CCCD": ""}), 5)
         self.assertIsNone(values)
         self.assertIn("Dòng 5", err)
-        self.assertIn("Mã tài xế", err)
+        self.assertIn("CCCD", err)
 
     def test_gioi_tinh_khong_hop_le(self):
         spec = bic.BUS_IMPORT_SPECS["driver"]
@@ -131,9 +129,9 @@ class TestParseRowRoute(unittest.TestCase):
             "Tên tuyến": "Ecopark 1",
             "Mã xe": "12",
             "Biển số": "29B-173.96",
-            "Mã tài xế": "TX001",
-            "Mã giám sát 1": "GS001",
-            "Mã giám sát 2": "",
+            "CCCD tài xế": "001234567890",
+            "CCCD giám sát 1": "001234567891",
+            "CCCD giám sát 2": "",
             "Trạng thái": "",
         }
         row.update(override)
@@ -145,7 +143,7 @@ class TestParseRowRoute(unittest.TestCase):
         self.assertIsNone(err)
         self.assertEqual(values["route_name"], "Ecopark 1")
         self.assertEqual(values["vehicle_code"], "12")
-        self.assertEqual(values["monitor2_code"], "")
+        self.assertEqual(values["monitor2_citizen_id"], "")
         self.assertEqual(values["status"], "Active")
 
     def test_thieu_bien_so(self):
@@ -213,10 +211,10 @@ class TestFriendlyUniqueError(unittest.TestCase):
         """Giá trị trùng chứa tên trường khác — vẫn báo đúng cột theo tên khóa."""
         spec = bic.BUS_IMPORT_SPECS["driver"]
         msg = bic.friendly_unique_error(
-            "Duplicate entry 'full_name' for key 'driver_code'", spec, 8
+            "Duplicate entry 'full_name' for key 'citizen_id'", spec, 8
         )
         self.assertIn("Dòng 8", msg)
-        self.assertIn("Mã tài xế", msg)
+        self.assertIn("CCCD", msg)
         self.assertNotIn("Họ tên", msg)
 
     def test_ten_khoa_co_tien_to_bang(self):

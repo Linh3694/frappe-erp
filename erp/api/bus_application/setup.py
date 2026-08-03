@@ -114,7 +114,7 @@ def create_test_data():
             monitor = frappe.get_doc({
                 "doctype": "SIS Bus Monitor",
                 "name": "TEST-MON001",
-                "monitor_code": "MON001",
+                "citizen_id": "001099000001",
                 "full_name": "Nguyễn Văn Giám Sát",
                 "phone_number": "84987654321",
                 "status": "Active",
@@ -126,7 +126,7 @@ def create_test_data():
             monitor.insert(ignore_permissions=True)
 
             # Create User for monitor
-            user_email = "MON001@busmonitor.wellspring.edu.vn"
+            user_email = "001099000001@busmonitor.wellspring.edu.vn"
             if not frappe.db.exists("User", user_email):
                 user = frappe.get_doc({
                     "doctype": "User",
@@ -182,7 +182,7 @@ def create_test_data():
             "data": {
                 "campus_id": "TEST-CAMPUS",
                 "school_year_id": "TEST-2024-2025",
-                "monitor_code": "MON001",
+                "monitor_citizen_id": "001099000001",
                 "monitor_phone": "84987654321",
                 "route_id": "TEST-ROUTE-001",
                 "bus_id": "TEST-BUS-001",

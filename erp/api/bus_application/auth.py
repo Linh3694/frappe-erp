@@ -178,7 +178,7 @@ def request_otp(phone_number):
         monitors = frappe.get_all(
             "SIS Bus Monitor",
             filters={"phone_number": ["in", phone_formats], "status": "Active"},
-            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id"]
+            fields=["name", "citizen_id", "full_name", "phone_number", "campus_id", "school_year_id"]
         )
 
         if not monitors:
@@ -190,7 +190,7 @@ def request_otp(phone_number):
             }
 
         monitor = monitors[0]
-        logs.append(f"✅ Found monitor: {monitor['full_name']} ({monitor['monitor_code']})")
+        logs.append(f"✅ Found monitor: {monitor['full_name']} ({monitor['citizen_id']})")
 
         # Generate OTP
         otp_code = generate_otp(6)
@@ -203,7 +203,7 @@ def request_otp(phone_number):
             {
                 "otp": otp_code,
                 "monitor_name": monitor["full_name"],
-                "monitor_code": monitor["monitor_code"],
+                "citizen_id": monitor["citizen_id"],
                 "phone_number": normalized_phone,
                 "created_at": datetime.now().isoformat()
             },
@@ -224,7 +224,7 @@ def request_otp(phone_number):
             "message": "Mã OTP đã được gửi đến số điện thoại của bạn",
             "data": {
                 "monitor_name": monitor["full_name"],
-                "monitor_code": monitor["monitor_code"],
+                "citizen_id": monitor["citizen_id"],
                 "phone_number": normalized_phone,
                 "otp_sent": sms_result.get("success", False),
                 "sms_mock": sms_result.get("mock", False)
@@ -309,7 +309,7 @@ def verify_otp_and_login(phone_number, otp):
         monitors = frappe.get_all(
             "SIS Bus Monitor",
             filters={"phone_number": ["in", phone_formats], "status": "Active"},
-            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
+            fields=["name", "citizen_id", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
         )
 
         if not monitors:
@@ -324,7 +324,7 @@ def verify_otp_and_login(phone_number, otp):
         logs.append(f"✅ Monitor found: {monitor['full_name']}")
 
         # Get or create User for this monitor
-        user_email = f"{monitor['monitor_code']}@busmonitor.wellspring.edu.vn"
+        user_email = f"{monitor['citizen_id']}@busmonitor.wellspring.edu.vn"
 
         if not frappe.db.exists("User", user_email):
             logs.append(f"📝 Creating new User for monitor: {user_email}")
@@ -391,7 +391,7 @@ def verify_otp_and_login(phone_number, otp):
             "data": {
                 "monitor": {
                     "name": monitor["name"],
-                    "monitor_code": monitor["monitor_code"],
+                    "citizen_id": monitor["citizen_id"],
                     "full_name": monitor["full_name"],
                     "phone_number": monitor["phone_number"],
                     "campus_id": monitor["campus_id"],
@@ -439,20 +439,20 @@ def get_monitor_profile():
                 "message": "Vui lòng đăng nhập"
             }
 
-        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        # Extract citizen_id from email (format: citizen_id@busmonitor.wellspring.edu.vn)
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return {
                 "success": False,
                 "message": "Tài khoản không hợp lệ"
             }
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         # Get monitor (ignore permissions as user can only access their own data)
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
-            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
+            filters={"citizen_id": citizen_id, "status": "Active"},
+            fields=["name", "citizen_id", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
         )
 
         if not monitors:
@@ -529,19 +529,19 @@ def refresh_token():
                 "message": "Vui lòng đăng nhập"
             }
 
-        # Extract monitor_code from email (format: monitor_code@busmonitor.wellspring.edu.vn)
+        # Extract citizen_id from email (format: citizen_id@busmonitor.wellspring.edu.vn)
         if "@busmonitor.wellspring.edu.vn" not in user_email:
             return {
                 "success": False,
                 "message": "Tài khoản không hợp lệ"
             }
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
 
         # Verify monitor exists and is active
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["full_name"]
         )
 
@@ -614,7 +614,7 @@ def login_with_password(phone_number, password):
         monitors = frappe.get_all(
             "SIS Bus Monitor",
             filters={"phone_number": ["in", phone_formats], "status": "Active"},
-            fields=["name", "monitor_code", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
+            fields=["name", "citizen_id", "full_name", "phone_number", "campus_id", "school_year_id", "contractor", "address"]
         )
         
         if not monitors:
@@ -626,7 +626,7 @@ def login_with_password(phone_number, password):
             }
         
         monitor = monitors[0]
-        logs.append(f"✅ Found monitor: {monitor['full_name']} ({monitor['monitor_code']})")
+        logs.append(f"✅ Found monitor: {monitor['full_name']} ({monitor['citizen_id']})")
         
         # Verify password
         # Default password is the phone number (in various formats)
@@ -661,7 +661,7 @@ def login_with_password(phone_number, password):
         logs.append(f"✅ Password verified")
         
         # Get or create User for this monitor
-        user_email = f"{monitor['monitor_code']}@busmonitor.wellspring.edu.vn"
+        user_email = f"{monitor['citizen_id']}@busmonitor.wellspring.edu.vn"
         
         # Use run_as to bypass Guest permission restrictions
         frappe.set_user("Administrator")
@@ -745,7 +745,7 @@ def login_with_password(phone_number, password):
             "data": {
                 "monitor": {
                     "name": monitor["name"],
-                    "monitor_code": monitor["monitor_code"],
+                    "citizen_id": monitor["citizen_id"],
                     "full_name": monitor["full_name"],
                     "phone_number": monitor["phone_number"],
                     "campus_id": monitor["campus_id"],

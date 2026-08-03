@@ -342,10 +342,10 @@ def add_offline_action():
                 "message": "Invalid user account format"
             }
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["name"]
         )
 
@@ -412,10 +412,10 @@ def sync_offline_actions():
                 "message": "Invalid user account format"
             }
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["name"]
         )
 
@@ -463,10 +463,10 @@ def get_offline_queue_status():
                 "message": "Invalid user account format"
             }
 
-        monitor_code = user_email.split("@")[0]
+        citizen_id = user_email.split("@")[0]
         monitors = frappe.get_all(
             "SIS Bus Monitor",
-            filters={"monitor_code": monitor_code, "status": "Active"},
+            filters={"citizen_id": citizen_id, "status": "Active"},
             fields=["name"]
         )
 

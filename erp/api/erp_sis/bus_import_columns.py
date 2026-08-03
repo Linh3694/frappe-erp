@@ -107,23 +107,15 @@ BUS_IMPORT_SPECS: Dict[str, ImportSpec] = {
         key="driver",
         doctype="SIS Bus Driver",
         entity_label="tài xế",
-        columns=(
-            ColumnSpec("Họ tên", "full_name", required=True),
-            ColumnSpec("Mã tài xế", "driver_code", required=True),
-        )
-        + _PERSON_COLUMNS[1:],
-        dedupe_fields=("driver_code",),
+        columns=_PERSON_COLUMNS,
+        dedupe_fields=("citizen_id",),
     ),
     "monitor": ImportSpec(
         key="monitor",
         doctype="SIS Bus Monitor",
         entity_label="giám sát",
-        columns=(
-            ColumnSpec("Họ tên", "full_name", required=True),
-            ColumnSpec("Mã giám sát", "monitor_code", required=True),
-        )
-        + _PERSON_COLUMNS[1:],
-        dedupe_fields=("monitor_code",),
+        columns=_PERSON_COLUMNS,
+        dedupe_fields=("citizen_id",),
     ),
     "transportation": ImportSpec(
         key="transportation",
@@ -158,9 +150,9 @@ BUS_IMPORT_SPECS: Dict[str, ImportSpec] = {
             ColumnSpec("Tên tuyến", "route_name", required=True),
             ColumnSpec("Mã xe", "vehicle_code", required=True),
             ColumnSpec("Biển số", "license_plate", required=True),
-            ColumnSpec("Mã tài xế", "driver_code", required=True),
-            ColumnSpec("Mã giám sát 1", "monitor1_code", required=True),
-            ColumnSpec("Mã giám sát 2", "monitor2_code"),
+            ColumnSpec("CCCD tài xế", "driver_citizen_id", required=True),
+            ColumnSpec("CCCD giám sát 1", "monitor1_citizen_id", required=True),
+            ColumnSpec("CCCD giám sát 2", "monitor2_citizen_id"),
             ColumnSpec("Trạng thái", "status", normalizer="status", default="Active"),
         ),
         dedupe_fields=("route_name",),
