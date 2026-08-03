@@ -169,3 +169,30 @@ common_site_config.json
 
 # SDD scratch (task briefs/reports)
 .superpowers/
+
+# ===== Bổ sung GD0-03 (03/08/2026) =====
+# Phòng thủ: repo erp KHÔNG chứa gì của bench root.
+# Lịch sử từng dính sites/common_site_config.json (mật khẩu Redis) — xem PLAN-01 §0.2
+sites/
+session_cookies.txt
+debug_class_log.py
+
+# Env — chỉ .env.example được commit
+*.env
+!.env.example
+
+# Thư viện test tạm (5.666 file từng bị track — gỡ ở GD0-03)
+.test_deps_py*/
+
+# Bytecode & log
+__pycache__/
+*.pyc
+*.log
+logs/
+env/
+
+# File tạm của editor
+*.bak
+*.swp
+*.swo
+*~

@@ -1189,6 +1189,18 @@ doc_events = {
 	"SIS Disease Classification": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
 	},
+	# GD1-04 — bust cache bootstrap khi cấu hình hệ thống đổi.
+	# Ba Single này cũng tự gọi clear_bootstrap_cache() trong on_update của chúng;
+	# đăng ký thêm ở đây để cả đường ghi bằng frappe.db.set_value / patch cũng bust.
+	"ERP School Profile": {
+		"on_update": "erp.api.erp_common_system.config.clear_bootstrap_cache",
+	},
+	"ERP Branding Settings": {
+		"on_update": "erp.api.erp_common_system.config.clear_bootstrap_cache",
+	},
+	"ERP Feature Settings": {
+		"on_update": "erp.api.erp_common_system.config.clear_bootstrap_cache",
+	},
 }
 
 # Scheduled Tasks

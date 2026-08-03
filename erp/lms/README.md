@@ -35,7 +35,7 @@ Ví dụ:
 
 ```json
 {
-  "lms_media_service_url": "http://172.16.20.21:5020",
+  "lms_media_service_url": "http://__INTERNAL_HOST__:5020",
   "lms_media_internal_secret": "same-as-lms-media-service-INTERNAL_SERVICE_SECRET",
   "lms_media_public_url": "https://media.lms.wellspring.edu.vn",
   "lms_hls_playback_base": "https://media.lms.wellspring.edu.vn/api/lms/hls"
@@ -44,7 +44,7 @@ Ví dụ:
 
 API đầy đủ: [`lms-api.md`](../../../../lms-api.md) (repo root).
 
-**Private network:** MinIO VM1 `172.16.20.93:9000` · Media VM2 `172.16.20.21:5020`
+**Private network:** MinIO VM1 `__INTERNAL_HOST__:9000` · Media VM2 `__INTERNAL_HOST__:5020`
 
 ## Phase hiện tại
 

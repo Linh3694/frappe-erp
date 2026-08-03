@@ -21,11 +21,11 @@ Thêm vào `site_config.json`:
 {
   "vivas_sms_enabled": false,
   "vivas_sms_username": "wellspring",
-  "vivas_sms_password": "2805@Smsbn",
+  "vivas_sms_password": "__VIVAS_SMS_PASSWORD__",
   "vivas_sms_brandname": "WELLSPRING",
   "bus_app_otp_test_mode": true,
   "compreface_mock_mode": false,
-  "compreface_url": "http://172.16.20.116:8080",
+  "compreface_url": "http://__INTERNAL_HOST__:8080",
   "compreface_api_key": "00000000-0000-0000-0000-000000000002"
 }
 ```
