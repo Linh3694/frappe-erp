@@ -382,6 +382,25 @@ def send_staff_attendance_notification(
 			return
 
 		if skip_push:
+			# Không push, nhưng vẫn phải ghi hộp thư notification-service: app đọc màn
+			# Thông báo từ inbox chứ không đọc ERP Notification, thiếu envelope này thì
+			# web có bản ghi mà app trống trơn.
+			try:
+				from erp.common.notification_emit import emit_inbox_mirror
+
+				emit_inbox_mirror(
+					[staff_email],
+					title,
+					message,
+					"attendance",
+					data=notification_data,
+					channels=["inapp"],
+				)
+			except Exception as mirror_err:
+				frappe.logger().error(
+					f"💥 [Staff Attendance] Lỗi mirror hộp thư (skip_push): {str(mirror_err)}"
+				)
+
 			frappe.logger().info(
 				f"⏭️ [Staff Attendance] SKIP PUSH (stale) for {staff_email} - notification list đã tạo"
 			)

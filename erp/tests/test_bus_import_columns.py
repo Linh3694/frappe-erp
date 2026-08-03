@@ -31,12 +31,12 @@ class TestNormalizeCell(unittest.TestCase):
 class TestMissingHeaders(unittest.TestCase):
     def test_du_cot_bat_buoc(self):
         spec = bic.BUS_IMPORT_SPECS["transportation"]
-        headers = ["Mã xe", "Biển số", "Loại xe", "Trạng thái"]
+        headers = ["Biển số", "Loại xe", "Trạng thái"]
         self.assertEqual(bic.missing_headers(spec, headers), [])
 
     def test_thieu_cot_bat_buoc_tra_ve_ten_cot(self):
         spec = bic.BUS_IMPORT_SPECS["transportation"]
-        headers = ["Mã xe", "Trạng thái"]
+        headers = ["Trạng thái"]
         self.assertEqual(bic.missing_headers(spec, headers), ["Biển số", "Loại xe"])
 
     def test_cot_khong_bat_buoc_thieu_van_hop_le(self):

@@ -37,11 +37,11 @@ def get_all_bus_transportation():
 			"SIS Bus Transportation",
 			filters=filters,
 			fields=[
-				"name", "vehicle_code", "license_plate", "vehicle_type",
+				"name", "license_plate", "vehicle_type",
 				"status", "campus_id", "school_year_id",
 				"creation", "modified"
 			],
-			order_by="vehicle_code asc"
+			order_by="license_plate asc"
 		)
 
 		# Map field names to correct format
@@ -124,7 +124,6 @@ def create_bus_transportation(**data):
 		doc = frappe.new_doc("SIS Bus Transportation")
 
 		# Set fields explicitly
-		doc.vehicle_code = data.get("vehicle_code")
 		doc.license_plate = data.get("license_plate")
 		doc.vehicle_type = data.get("vehicle_type")
 		# Map frontend status (lowercase) to backend status (capitalized)
@@ -235,7 +234,9 @@ def update_bus_transportation(**data):
 			
 		# Remove name from data before updating document
 		data.pop('name', None)
-		
+		# Mã xe đã chuyển sang tuyến đường — bỏ qua nếu FE cũ còn gửi lên
+		data.pop('vehicle_code', None)
+
 		# Map frontend status (lowercase) to backend status (capitalized) if present
 		if data.get("status"):
 			status = data.get("status")
@@ -278,8 +279,8 @@ def delete_bus_transportation():
 def get_available_vehicles():
 	"""Get all available vehicles"""
 	return frappe.db.sql("""
-		SELECT name, vehicle_code, license_plate, vehicle_type
+		SELECT name, license_plate, vehicle_type
 		FROM `tabSIS Bus Transportation`
 		WHERE status = 'Active'
-		ORDER BY vehicle_code
+		ORDER BY license_plate
 	""", as_dict=True)

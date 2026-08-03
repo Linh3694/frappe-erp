@@ -11,13 +11,6 @@ class SISBusTransportation(Document):
 
 	def validate_unique_fields(self):
 		"""Validate unique fields"""
-		if self.vehicle_code:
-			if frappe.db.exists("SIS Bus Transportation", {
-				"vehicle_code": self.vehicle_code,
-				"name": ("!=", self.name)
-			}):
-				frappe.throw("Mã xe đã tồn tại")
-
 		if self.license_plate:
 			if frappe.db.exists("SIS Bus Transportation", {
 				"license_plate": self.license_plate,

@@ -111,7 +111,8 @@ def get_all_bus_routes():
 			"SIS Bus Route",
 			filters=filters,
 			fields=[
-				"name", "route_name", "vehicle_id", "driver_id", "monitor1_id", "monitor2_id",
+				"name", "route_name", "vehicle_code", "vehicle_id", "driver_id",
+				"monitor1_id", "monitor2_id",
 				"status", "campus_id", "school_year_id", "creation", "modified"
 			],
 			order_by="route_name asc"
@@ -128,7 +129,6 @@ def get_all_bus_routes():
 			if route.vehicle_id:
 				vehicle = frappe.get_doc("SIS Bus Transportation", route.vehicle_id)
 				route.update({
-					"vehicle_code": vehicle.vehicle_code,
 					"license_plate": vehicle.license_plate,
 					"vehicle_type": vehicle.vehicle_type
 				})
@@ -187,7 +187,6 @@ def get_bus_route():
 			logs.append(f"🚌 Loading vehicle: {route_data.get('vehicle_id')}")
 			vehicle = frappe.get_doc("SIS Bus Transportation", route_data['vehicle_id'])
 			route_data.update({
-				"vehicle_code": vehicle.vehicle_code,
 				"vehicle_type": vehicle.vehicle_type,
 				"license_plate": vehicle.license_plate
 			})
@@ -1388,22 +1387,22 @@ def get_daily_trips():
 			# Get route information
 			if trip.route_id:
 				route_data = frappe.db.sql("""
-					SELECT route_name FROM `tabSIS Bus Route` WHERE name = %s
+					SELECT route_name, vehicle_code FROM `tabSIS Bus Route` WHERE name = %s
 				""", (trip.route_id,), as_dict=True)
 				if route_data:
 					trip.update({
-						"route_name": route_data[0].route_name
+						"route_name": route_data[0].route_name,
+						"vehicle_code": route_data[0].vehicle_code
 					})
 
 			# Get vehicle information
 			if trip.vehicle_id:
 				vehicle_data = frappe.db.sql("""
-					SELECT vehicle_code, license_plate, vehicle_type 
+					SELECT license_plate, vehicle_type
 					FROM `tabSIS Bus Transportation` WHERE name = %s
 				""", (trip.vehicle_id,), as_dict=True)
 				if vehicle_data:
 					trip.update({
-						"vehicle_code": vehicle_data[0].vehicle_code,
 						"license_plate": vehicle_data[0].license_plate,
 						"vehicle_type": vehicle_data[0].vehicle_type
 					})
@@ -1497,21 +1496,21 @@ def get_daily_trip():
 		# Get related entity details using SQL queries instead of frappe.get_doc
 		if trip_data.get('route_id'):
 			route_data = frappe.db.sql("""
-				SELECT route_name FROM `tabSIS Bus Route` WHERE name = %s
+				SELECT route_name, vehicle_code FROM `tabSIS Bus Route` WHERE name = %s
 			""", (trip_data['route_id'],), as_dict=True)
 			if route_data:
 				trip_data.update({
-					"route_name": route_data[0].route_name
+					"route_name": route_data[0].route_name,
+					"vehicle_code": route_data[0].vehicle_code
 				})
 
 		if trip_data.get('vehicle_id'):
 			vehicle_data = frappe.db.sql("""
-				SELECT vehicle_code, vehicle_type, license_plate 
+				SELECT vehicle_type, license_plate
 				FROM `tabSIS Bus Transportation` WHERE name = %s
 			""", (trip_data['vehicle_id'],), as_dict=True)
 			if vehicle_data:
 				trip_data.update({
-					"vehicle_code": vehicle_data[0].vehicle_code,
 					"vehicle_type": vehicle_data[0].vehicle_type,
 					"license_plate": vehicle_data[0].license_plate
 				})
@@ -1716,14 +1715,14 @@ def get_daily_trips_by_date():
 			if trip.route_id:
 				route = frappe.get_doc("SIS Bus Route", trip.route_id)
 				trip.update({
-					"route_name": route.route_name
+					"route_name": route.route_name,
+					"vehicle_code": route.vehicle_code
 				})
 
 			# Get vehicle information
 			if trip.vehicle_id:
 				vehicle = frappe.get_doc("SIS Bus Transportation", trip.vehicle_id)
 				trip.update({
-					"vehicle_code": vehicle.vehicle_code,
 					"license_plate": vehicle.license_plate,
 					"vehicle_type": vehicle.vehicle_type
 				})
@@ -2250,11 +2249,12 @@ def update_daily_trip_personnel():
 				dt.name, dt.route_id, dt.trip_date, dt.weekday, dt.trip_type,
 				dt.vehicle_id, dt.driver_id, dt.monitor1_id, dt.monitor2_id,
 				dt.trip_status, dt.campus_id, dt.school_year_id,
-				v.vehicle_code, v.license_plate,
+				r.vehicle_code, v.license_plate,
 				d.full_name as driver_name, d.phone_number as driver_phone,
 				m1.full_name as monitor1_name, m1.phone_number as monitor1_phone,
 				m2.full_name as monitor2_name, m2.phone_number as monitor2_phone
 			FROM `tabSIS Bus Daily Trip` dt
+			LEFT JOIN `tabSIS Bus Route` r ON dt.route_id = r.name
 			LEFT JOIN `tabSIS Bus Transportation` v ON dt.vehicle_id = v.name
 			LEFT JOIN `tabSIS Bus Driver` d ON dt.driver_id = d.name
 			LEFT JOIN `tabSIS Bus Monitor` m1 ON dt.monitor1_id = m1.name
@@ -2396,7 +2396,7 @@ def get_daily_trips_paginated():
 		if search:
 			conditions.append("""(
 				r.route_name LIKE %s 
-				OR v.vehicle_code LIKE %s 
+				OR r.vehicle_code LIKE %s
 				OR d.full_name LIKE %s
 			)""")
 			search_param = f"%{search}%"
@@ -2422,8 +2422,8 @@ def get_daily_trips_paginated():
 				dt.vehicle_id, dt.driver_id, dt.monitor1_id, dt.monitor2_id,
 				dt.trip_status, dt.campus_id, dt.school_year_id,
 				dt.creation as created_at, dt.modified as updated_at,
-				r.route_name,
-				v.vehicle_code, v.license_plate, v.vehicle_type,
+				r.route_name, r.vehicle_code,
+				v.license_plate, v.vehicle_type,
 				d.full_name as driver_name, d.phone_number as driver_phone,
 				m1.full_name as monitor1_name, m1.phone_number as monitor1_phone,
 				m2.full_name as monitor2_name, m2.phone_number as monitor2_phone,

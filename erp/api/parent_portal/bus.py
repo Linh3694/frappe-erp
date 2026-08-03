@@ -70,8 +70,8 @@ def get_student_bus_trips():
             SELECT
                 dt.name as trip_id,
                 dt.trip_date, dt.weekday, dt.trip_type, dt.trip_status,
-                r.route_name,
-                v.vehicle_code, v.license_plate, v.vehicle_type,
+                r.route_name, r.vehicle_code,
+                v.license_plate, v.vehicle_type,
                 d.full_name as driver_name, d.phone_number as driver_phone,
                 m1.full_name as monitor1_name, m1.phone_number as monitor1_phone,
                 m2.full_name as monitor2_name, m2.phone_number as monitor2_phone,

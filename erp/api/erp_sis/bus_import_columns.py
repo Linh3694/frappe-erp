@@ -130,12 +130,11 @@ BUS_IMPORT_SPECS: Dict[str, ImportSpec] = {
         doctype="SIS Bus Transportation",
         entity_label="phương tiện",
         columns=(
-            ColumnSpec("Mã xe", "vehicle_code", required=True),
             ColumnSpec("Biển số", "license_plate", required=True),
             ColumnSpec("Loại xe", "vehicle_type", required=True),
             ColumnSpec("Trạng thái", "status", normalizer="status", default="Active"),
         ),
-        dedupe_fields=("vehicle_code",),
+        dedupe_fields=("license_plate",),
     ),
     "pickup_point": ImportSpec(
         key="pickup_point",

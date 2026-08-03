@@ -511,6 +511,9 @@ def send_bulk_parent_notifications(
             
             # Phase C.1+C.2: Collect targets cho Expo BATCH push (gửi 1 lần sau loop)
             expo_targets = []  # [{email, data}]
+            # skip_push: không đẩy push nhưng VẪN phải ghi hộp thư notification-service,
+            # nếu không app sẽ trống hoàn toàn (app đọc inbox, không đọc ERP Notification)
+            inbox_only_targets = []  # [{email, data}]
             
             # Create notification for each parent
             frappe.logger().info(f"📧 [Bulk Handler] Processing {len(parent_emails)} parent emails")
@@ -604,7 +607,13 @@ def send_bulk_parent_notifications(
                             "email": parent_email,
                             "data": parent_merged_data,
                         })
-                    
+                    else:
+                        # Stale event: chỉ ghi hộp thư, không push (mirror ở cuối loop)
+                        inbox_only_targets.append({
+                            "email": parent_email,
+                            "data": parent_merged_data,
+                        })
+
                     success_count += 1
                     results.append({
                         "email": parent_email,
@@ -642,7 +651,28 @@ def send_bulk_parent_notifications(
                     )
                 except Exception as bulk_expo_err:
                     frappe.logger().error(f"💥 [Bulk Expo] Lỗi gửi BATCH Expo: {str(bulk_expo_err)}")
-            
+
+            # skip_push (điểm danh stale): không đi qua nhánh Expo/Redis ở trên nên
+            # notification-service không có envelope nào → màn Thông báo của app trống
+            # dù web vẫn thấy ERP Notification. Mirror với channels=["inapp"] để chỉ
+            # ghi hộp thư, không đẩy push (đúng ý đồ skip_push).
+            if inbox_only_targets:
+                try:
+                    from erp.common.notification_emit import emit_inbox_mirror_bulk
+
+                    mirrored = emit_inbox_mirror_bulk(
+                        targets=inbox_only_targets,
+                        title=notification_title,
+                        body=notification_body,
+                        notification_type=recipient_type,
+                        channels=["inapp"],
+                    )
+                    frappe.logger().info(
+                        f"📥 [Inbox Mirror] skip_push → mirrored {mirrored}/{len(inbox_only_targets)} envelope (không push)"
+                    )
+                except Exception as mirror_err:
+                    frappe.logger().error(f"💥 [Inbox Mirror] Lỗi mirror hộp thư (skip_push): {str(mirror_err)}")
+
             frappe.logger().info(f"✅ [Notification Handler] Notifications sent - Success: {success_count}, Failed: {failed_count}")
             
             return {

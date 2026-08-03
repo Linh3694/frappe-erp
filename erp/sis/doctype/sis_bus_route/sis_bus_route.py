@@ -20,7 +20,31 @@ def create_daily_trips_for_route(route_name):
 class SISBusRoute(Document):
 	def validate(self):
 		self.validate_references_exist()
+		self.validate_vehicle_code_unique()
 		self.validate_monitor_assignment()
+
+	def validate_vehicle_code_unique(self):
+		"""Mã xe không được trùng trong cùng cơ sở và năm học (áp cho cả tuyến Inactive)"""
+		code = (self.vehicle_code or "").strip()
+		if not code:
+			return
+
+		# Lưu nguyên văn người dùng nhập, chỉ bỏ khoảng trắng thừa hai đầu
+		self.vehicle_code = code
+
+		exclude_route = self.name if self.name else "NONE"
+		duplicate = frappe.db.sql("""
+			SELECT name, route_name
+			FROM `tabSIS Bus Route`
+			WHERE LOWER(TRIM(vehicle_code)) = %s
+			AND campus_id = %s
+			AND school_year_id = %s
+			AND name != %s
+			LIMIT 1
+		""", (code.lower(), self.campus_id, self.school_year_id, exclude_route), as_dict=True)
+
+		if duplicate:
+			frappe.throw(f"Mã xe '{code}' đã được dùng ở tuyến {duplicate[0].route_name} trong cùng cơ sở và năm học")
 
 	def validate_references_exist(self):
 		"""Validate that all referenced entities exist"""

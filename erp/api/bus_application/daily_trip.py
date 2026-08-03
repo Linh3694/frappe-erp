@@ -61,7 +61,7 @@ def get_monitor_daily_trips():
                 dt.trip_status,
                 dt.notes,
                 br.route_name,
-                bv.vehicle_code as bus_number,
+                br.vehicle_code as bus_number,
                 bv.license_plate,
                 COUNT(dts.name) as total_students,
                 SUM(CASE WHEN dts.student_status = 'Boarded' THEN 1 ELSE 0 END) as boarded_count,
@@ -154,7 +154,7 @@ def get_daily_trip_detail(trip_id=None):
             SELECT
                 dt.*,
                 br.route_name,
-                bv.vehicle_code as bus_number, bv.license_plate, bv.vehicle_type as bus_model,
+                br.vehicle_code as bus_number, bv.license_plate, bv.vehicle_type as bus_model,
                 bd.full_name as driver_name, bd.phone_number as driver_phone
             FROM `tabSIS Bus Daily Trip` dt
             LEFT JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
@@ -544,7 +544,7 @@ def get_monitor_trips_by_date_range():
                 dt.notes,
                 br.name as route_id,
                 br.route_name,
-                bv.vehicle_code as bus_number,
+                br.vehicle_code as bus_number,
                 bv.license_plate,
                 bd.full_name as driver_name,
                 bd.phone_number as driver_phone,

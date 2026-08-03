@@ -17,7 +17,6 @@
  "engine": "InnoDB",
  "field_order": [
   "basic_information",
-  "vehicle_code",
   "license_plate",
   "vehicle_type",
   "status",
@@ -30,14 +29,6 @@
    "fieldname": "basic_information",
    "fieldtype": "Section Break",
    "label": "Basic Information"
-  },
-  {
-   "fieldname": "vehicle_code",
-   "fieldtype": "Data",
-   "label": "Vehicle Code",
-   "reqd": 1,
-   "unique": 1,
-   "in_list_view": 1
   },
   {
    "fieldname": "license_plate",

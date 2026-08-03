@@ -156,9 +156,8 @@ def create_test_data():
             bus = frappe.get_doc({
                 "doctype": "SIS Bus Transportation",
                 "name": "TEST-BUS-001",
-                "bus_number": "BUS-001",
                 "license_plate": "51A-12345",
-                "bus_model": "Test Model",
+                "vehicle_type": "Test Model",
                 "campus_id": "TEST-CAMPUS"
             })
             bus.insert(ignore_permissions=True)
