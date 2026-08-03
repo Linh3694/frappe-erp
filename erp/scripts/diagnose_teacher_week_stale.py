@@ -88,30 +88,80 @@ def diagnose(email_or_teacher_id: str, week_start: str, verbose: bool = True):
 		)
 	result["assignments"] = len(assignments)
 
-	# --- 2) Pattern rows ---------------------------------------------------
-	print("\n--- 2) SIS Timetable Instance Row (pattern, date IS NULL) ---")
+	# --- 2) Timetable Instance Row ------------------------------------------
+	# ⚠️ GV nằm ở child table `SIS Timetable Instance Row Teacher` — teacher_1_id/
+	# teacher_2_id đã DEPRECATED nên KHÔNG được dùng để tra.
+	# ⚠️ Phân công `from_date` sinh OVERRIDE row (date NOT NULL), `full_year` sửa
+	# PATTERN row (date IS NULL) — phải đếm cả hai.
+	print("\n--- 2) SIS Timetable Instance Row (qua child table teachers) ---")
 	rows = frappe.db.sql(
 		"""
-		SELECT r.name, r.parent, i.class_id, r.day_of_week, r.timetable_column_id,
-		       r.subject_id, r.teacher_1_id, r.teacher_2_id, r.valid_from, r.valid_to, r.modified
+		SELECT r.name, r.parent, i.class_id, r.date, r.day_of_week, r.timetable_column_id,
+		       r.subject_id, r.valid_from, r.valid_to, r.modified
 		FROM `tabSIS Timetable Instance Row` r
 		JOIN `tabSIS Timetable Instance` i ON i.name = r.parent
-		WHERE r.date IS NULL AND (r.teacher_1_id IN %(t)s OR r.teacher_2_id IN %(t)s)
-		ORDER BY i.class_id, r.day_of_week
+		JOIN `tabSIS Timetable Instance Row Teacher` rt
+		     ON rt.parent = r.name AND rt.parentfield = 'teachers'
+		WHERE rt.teacher_id IN %(t)s
+		ORDER BY i.class_id, r.date, r.day_of_week
 		""",
 		{"t": tuple(tids)},
 		as_dict=True,
 	)
-	print(f"   count = {len(rows)}")
+	pattern = [r for r in rows if not r.date]
+	override = [r for r in rows if r.date]
+	in_week = [r for r in override if ws <= str(r.date) <= we]
+	print(f"   tổng = {len(rows)}   (pattern={len(pattern)}, override={len(override)}, "
+	      f"override trong tuần={len(in_week)})")
 	if verbose:
 		for r in rows[:60]:
 			print(
-				f"   {r.class_id}  {r.day_of_week}  cột={r.timetable_column_id}  môn={r.subject_id}  "
-				f"gv1={r.teacher_1_id} gv2={r.teacher_2_id}  hiệu lực {r.valid_from or ''}..{r.valid_to or ''}"
+				f"   {r.class_id}  {r.date or 'PATTERN'}  {r.day_of_week}  cột={r.timetable_column_id}  "
+				f"môn={r.subject_id}  hiệu lực {r.valid_from or ''}..{r.valid_to or ''}"
 			)
 		if len(rows) > 60:
 			print(f"   ... (còn {len(rows) - 60} dòng)")
-	result["pattern_rows"] = len(rows)
+	result["pattern_rows"] = len(pattern)
+	result["override_rows"] = len(override)
+	result["rows_total"] = len(rows)
+
+	# --- 2b) Dò từng phân công: vì sao sync ra 0 row? ------------------------
+	# Replay find_pattern_rows() của timetable_sync_v2 — đây là chỗ sync bỏ cuộc
+	# với "No pattern rows found", và lỗi đó đang bị nuốt trong except.
+	print("\n--- 2b) Dò từng phân công (replay find_pattern_rows) ---")
+	from erp.api.erp_sis.subject_assignment.timetable_sync_v2 import (
+		find_pattern_rows,
+		get_all_subject_ids_from_actual,
+	)
+
+	broken = []
+	for a in assignments:
+		doc = frappe.get_doc("SIS Subject Assignment", a.name)
+		subj_ids = get_all_subject_ids_from_actual(doc.actual_subject_id, doc.campus_id) or []
+		insts = frappe.get_all("SIS Timetable Instance", filters={"class_id": doc.class_id}, pluck="name")
+		prows = find_pattern_rows(doc.class_id, doc.actual_subject_id, doc.campus_id) if subj_ids else []
+		mine = len([
+			r for r in rows
+			if r.class_id == doc.class_id and (not r.date or ws <= str(r.date) <= we)
+		])
+		if not subj_ids:
+			why = "❌ actual_subject KHÔNG map sang SIS Subject nào (campus này)"
+		elif not insts:
+			why = "❌ lớp chưa có SIS Timetable Instance"
+		elif not prows:
+			why = "❌ instance không có pattern row nào mang subject này (TKB lớp chưa xếp môn)"
+		elif not mine:
+			why = "⚠️ có pattern row nhưng GV chưa được gắn vào row nào"
+		else:
+			why = "✅ ok"
+		if not why.startswith("✅"):
+			broken.append((a.class_title or a.class_id, why))
+		print(
+			f"   {(a.class_title or a.class_id):<12} {doc.application_type:<10} "
+			f"subjects={len(subj_ids)} instances={len(insts)} pattern_rows={len(prows)} "
+			f"rows_có_GV={mine}  {why}"
+		)
+	result["broken"] = broken
 
 	# --- 3) Materialized view ---------------------------------------------
 	print(f"\n--- 3) SIS Teacher Timetable (materialized) tuần {ws}..{we} ---")
@@ -178,14 +228,17 @@ def diagnose(email_or_teacher_id: str, week_start: str, verbose: bool = True):
 
 	# --- Kết luận ----------------------------------------------------------
 	print("\n" + "=" * 78)
-	if assignments and not rows:
-		verdict = "SYNC ASSIGNMENT → INSTANCE ROW hỏng (sync_assignment_to_timetable)"
+	if not assignments:
+		verdict = "Không có phân công nào cho GV này — kiểm tra lại phía phân công"
+	elif broken:
+		verdict = (
+			f"SYNC ASSIGNMENT → INSTANCE ROW không chạy được cho {len(broken)} lớp "
+			f"({', '.join(c for c, _ in broken[:6])}{'...' if len(broken) > 6 else ''}) — xem cột lý do ở khối 2b"
+		)
 	elif rows and not tt:
 		verdict = "MATERIALIZED VIEW chưa sync (sync_for_rows) — chạy resync_all_teacher_timetables"
 	elif rows and tt:
 		verdict = "Dữ liệu nền ĐÚNG → nếu UI vẫn sai thì là cache teacher_week (thứ tự invalidate)"
-	elif not assignments:
-		verdict = "Không có phân công nào cho GV này — kiểm tra lại phía phân công"
 	else:
 		verdict = "Chưa kết luận được, xem chi tiết từng khối ở trên"
 	print(f"📌 KẾT LUẬN: {verdict}")
