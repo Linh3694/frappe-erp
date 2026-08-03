@@ -55,9 +55,9 @@ Chỗ đáng nhìn tiếp, **chưa ai xem nội dung**: 71 ảnh `SIS Library Ev
 ## 1. Đường vào các máy chủ
 
 ```
-ssh cdn                 # VM3 CDN     42.96.41.26   / 172.16.20.31  (wshn-vpc-cdn)
-  └── ssh micro         # microservices 172.16.20.113 (wshn-vpc-ticket-service)
-  └── ssh frappe        # Frappe/SIS    172.16.20.111 (wshn-vpc-backend-02)
+ssh cdn                 # VM3 CDN     42.96.41.26   / __INTERNAL_HOST__  (wshn-vpc-cdn)
+  └── ssh micro         # microservices __INTERNAL_HOST__ (wshn-vpc-ticket-service)
+  └── ssh frappe        # Frappe/SIS    __INTERNAL_HOST__ (wshn-vpc-backend-02)
 ```
 
 `micro` và `frappe` **chỉ vào được qua `cdn`** — alias nằm trong `~/.ssh/config` của VM3, không có trên máy cá nhân.
@@ -73,7 +73,7 @@ Doc gốc viết trước khi dựng máy, ba thông số đã đổi. **Dùng g
 | | Doc gốc | Thực tế |
 |---|---|---|
 | Domain | `cdn.wellspring.edu.vn` | **`media.wellspring.edu.vn`** |
-| Private IP VM3 | `172.16.20.94` | **`172.16.20.31`** |
+| Private IP VM3 | `__INTERNAL_HOST__` | **`__INTERNAL_HOST__`** |
 | Disk data | 1 TB | **200 GB** |
 
 `cdn.wellspring.edu.vn` **đã bị chiếm**: trỏ về CMC Cloud CDN (`*.cmccdn.net` → 123.30.148.13/15), origin là một site Frappe. Không lấy lại được.
@@ -111,7 +111,7 @@ Mỗi bucket có một file policy `allow-nginx-cdn-<ten>.json` trong `/opt/cdn/
 
 ### Cảnh báo
 
-`cdn-alert.timer` chạy mỗi 5 phút → `cdn-checks.sh` → `cdn-alert.sh` → `POST /send-internal-alert` của email-service (`172.16.20.113:5030`) → `linh.nguyenhai@wellspring.edu.vn`.
+`cdn-alert.timer` chạy mỗi 5 phút → `cdn-checks.sh` → `cdn-alert.sh` → `POST /send-internal-alert` của email-service (`__INTERNAL_HOST__:5030`) → `linh.nguyenhai@wellspring.edu.vn`.
 
 Ngưỡng: disk ≥75%/85%, MinIO health, cert ≤14/7 ngày, cache hit <70%, tỉ lệ 403/410 ≥20%, p95 >0,2s, 5xx ≥10, NTP mất đồng bộ. Chỉ đánh giá chỉ số từ log khi có ≥200 request trong cửa sổ 15 phút (tránh báo động giả lúc vắng).
 
@@ -638,7 +638,7 @@ Một chi tiết nữa: **552/564 avatar tồn tại hai bản trên đĩa** (`f
 9. ~~`apps/erp` chưa commit~~ — ✅ đã commit và push 2026-07-29 (`e8deb030` avatar, `57878df2` học bổng). Prod vẫn ở dạng file rời chưa pull; khi pull hãy theo §11, đã đối chiếu md5 và 9/9 file khớp.
 10. ~~`ecosystem.config.js` PORT 5010 → 5040~~ — ✅ xong 2026-07-29. Đã đồng bộ **ba nguồn**: `ecosystem.config.js` (cả `env` lẫn `env_production`), `config.env` trên prod, và PM2 đang chạy. Quả mìn đã gỡ.
 11. ~~`.gitignore` thiếu `logs/`~~ — ✅ xong 2026-07-29.
-12. ~~`supervisor` trên VM Frappe báo FATAL 2 mục redis~~ — ✅ xong 2026-07-29. **Ghi chú cũ sai nguyên nhân.** Redis thật **không** ở port 11000/13000 mà là redis ngoài `172.16.20.120:6379` (`redis_cache`/`redis_queue`/`redis_socketio` trong `common_site_config.json`, 105 client, dữ liệu ở db1/db2/db10/db11). Hai redis ở 11000/13000 **rỗng hoàn toàn** — `dbsize 0`, client duy nhất là chính `redis-cli`.
+12. ~~`supervisor` trên VM Frappe báo FATAL 2 mục redis~~ — ✅ xong 2026-07-29. **Ghi chú cũ sai nguyên nhân.** Redis thật **không** ở port 11000/13000 mà là redis ngoài `__INTERNAL_HOST__:6379` (`redis_cache`/`redis_queue`/`redis_socketio` trong `common_site_config.json`, 105 client, dữ liệu ở db1/db2/db10/db11). Hai redis ở 11000/13000 **rỗng hoàn toàn** — `dbsize 0`, client duy nhất là chính `redis-cli`.
 
     Nguyên nhân FATAL: hai tiến trình `redis-server` **mồ côi** (PPID=1, chạy từ 30/06) giữ sẵn hai port, nên bản do supervisor quản lý không bind được — log ghi rõ `Could not create server TCP listening socket … Address already in use`. Đã `kill` hai tiến trình mồ côi rồi `supervisorctl start frappe-bench-redis:`; cả hai chuyển sang `RUNNING`. Ping trước và sau đều `200`.
 
@@ -738,7 +738,7 @@ CDN_ENABLED=true
 CDN_AVATAR_ENABLED=true
 CDN_AVATAR_PREFIX=users
 CDN_PUBLIC_URL=https://media.wellspring.edu.vn
-CDN_S3_ENDPOINT=http://172.16.20.31:9000
+CDN_S3_ENDPOINT=http://__INTERNAL_HOST__:9000
 CDN_ACCESS_KEY=social_service
 CDN_SECRET_KEY=<xem /opt/cdn/.env trên VM3>
 CDN_LINK_SECRET=<PHẢI trùng nginx snippet trên VM3>
@@ -763,7 +763,7 @@ CDN_LEGACY_FALLBACK=true
 ### VM Frappe — `/etc/cdn/cdn.env` (root:frappe 640)
 
 ```bash
-CDN_S3_ENDPOINT=http://172.16.20.31:9000
+CDN_S3_ENDPOINT=http://__INTERNAL_HOST__:9000
 CDN_ACCESS_KEY=social_service
 CDN_SECRET_KEY=<xem /opt/cdn/.env trên VM3>
 CDN_BUCKET_AVATARS=cdn-social-avatars
@@ -1113,7 +1113,7 @@ Quy trình thử: thêm Mongo user id của một tài khoản vào `CDN_DIRECT_
 
 Đây là **lần thứ ba** cùng một loại lỗi: code xong, bucket xong, IAM xong, nhưng thiếu `location` trên nginx (trước đó là §14 và `student-photos` thiếu trong `cdn-checks.sh`).
 
-Presigned PUT **buộc** phải ký bằng host công khai — SigV4 phủ `Host`, ký bằng `172.16.20.31:9000` rồi cho client dùng qua `media.wellspring.edu.vn` là `SignatureDoesNotMatch` chắc chắn (`s3.js` đã ghi chú đúng chỗ này). Nên client luôn PUT vào `https://media.wellspring.edu.vn/cdn-staging/<khoá>`. Nhưng vhost `media` **không có `location` nào khớp** ⇒ rơi vào `location / { return 404; }`.
+Presigned PUT **buộc** phải ký bằng host công khai — SigV4 phủ `Host`, ký bằng `__INTERNAL_HOST__:9000` rồi cho client dùng qua `media.wellspring.edu.vn` là `SignatureDoesNotMatch` chắc chắn (`s3.js` đã ghi chú đúng chỗ này). Nên client luôn PUT vào `https://media.wellspring.edu.vn/cdn-staging/<khoá>`. Nhưng vhost `media` **không có `location` nào khớp** ⇒ rơi vào `location / { return 404; }`.
 
 Hệ quả: **mọi** PUT trực tiếp trả 404 và client **âm thầm** quay về multipart. Phase 3 chưa từng chạy được ở bất kỳ đâu — web hay mobile. Vì cờ đang tắt nên không ai bị ảnh hưởng; nếu bật cờ mà không vá, kết quả là "bật rồi mà chẳng thấy gì đổi".
 

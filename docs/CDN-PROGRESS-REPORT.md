@@ -35,7 +35,7 @@ Kế hoạch gốc (`CDN-Design.md` §10) chia 5 phase cho riêng social-service
 
 | Phase | Phạm vi gốc | Trạng thái | Ghi chú |
 |-------|-------------|-----------|---------|
-| **0** — Hạ tầng VM3 | MinIO + Nginx + TLS + UFW | ✅ **Xong, chạy prod** | Domain đổi `cdn.` → **`media.wellspring.edu.vn`** (tên cũ bị CMC Cloud chiếm). IP `172.16.20.31`. Disk **200 GB** thay vì 1 TB. |
+| **0** — Hạ tầng VM3 | MinIO + Nginx + TLS + UFW | ✅ **Xong, chạy prod** | Domain đổi `cdn.` → **`media.wellspring.edu.vn`** (tên cũ bị CMC Cloud chiếm). IP `__INTERNAL_HOST__`. Disk **200 GB** thay vì 1 TB. |
 | **1** — social-service ghi lên CDN | ảnh/video bài đăng, chat, avatar | ✅ **Code xong** / ⚠️ **bản vá cuối chưa deploy** | 8 file chưa commit, gồm `legacyUploadsGuard`. |
 | **2** — Migrate dữ liệu cũ + bật prod | mirror `uploads/`, bật `CDN_ENABLED` | ✅ **Xong, chạy prod** | Legacy 5/5 trên prod; nén legacy chat −75%. |
 | **3** — Upload thẳng lên CDN | presigned PUT từ client | ❌ **Chưa bắt đầu** | Cần sửa client web + mobile. |

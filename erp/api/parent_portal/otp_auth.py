@@ -28,14 +28,17 @@ def _parent_portal_serialize_guardian_contacts(guardian_doc):
     }
 
 
-# VIVAS SMS Configuration
+# VIVAS SMS Configuration — đọc từ site_config (PLAN-04 §6.5 / GD1-11).
+# KHÔNG hardcode secret. Prod PHẢI set trong site_config.json trước lần deploy
+# bản này: vivas_sms_username / vivas_sms_password / vivas_sms_brandname.
 VIVAS_SMS_CONFIG = {
-    "url": "https://sms.vivas.vn/SMSBNAPINEW/sendsms",
-    "username": "wellspring",
-    "password": "2805@Smsbn",
-    "brandname": "WELLSPRING",
-    # IMPORTANT: Set to False in production to prevent accidental SMS sending
-    "enabled": True,  # Set to True only when ready to send real SMS
+    "url": frappe.conf.get("vivas_sms_url", "https://sms.vivas.vn/SMSBNAPINEW/sendsms"),
+    "username": frappe.conf.get("vivas_sms_username", "wellspring"),
+    "password": frappe.conf.get("vivas_sms_password", ""),
+    "brandname": frappe.conf.get("vivas_sms_brandname", "WELLSPRING"),
+    # Mặc định True để giữ nguyên hành vi OTP hiện tại của prod
+    # (khác bus_application/auth.py: bên đó mặc định False).
+    "enabled": frappe.conf.get("vivas_sms_enabled", True),
 }
 
 
@@ -481,7 +484,7 @@ def send_sms_via_vivas(phone_number, message, otp_code=None):
         
         logs.append(f"📤 Sending SMS to VIVAS API: {VIVAS_SMS_CONFIG['url']}")
         logs.append(f"🔑 Username: {VIVAS_SMS_CONFIG['username']}")
-        logs.append(f"🔑 Password: {VIVAS_SMS_CONFIG['password']}")
+        logs.append("🔑 Password: ****")  # không log secret
         logs.append(f"🏷️ Brandname: {VIVAS_SMS_CONFIG['brandname']}")
         logs.append(f"📱 Phone: {phone_number}")
         logs.append(f"📝 Message: {message}")

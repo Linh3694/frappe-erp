@@ -1,0 +1,63 @@
+{
+ "actions": [],
+ "creation": "2026-08-01 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "module": "Common",
+ "name": "ERP Feature Settings",
+ "owner": "Administrator",
+ "modified": "2026-08-01 00:00:00.000000",
+ "modified_by": "Administrator",
+ "description": "Bật/tắt module theo gói sản phẩm đã bán cho trường",
+ "field_order": [
+  "sec_core", "feat_sis", "feat_timetable", "col_core_1", "feat_report_card", "feat_attendance",
+  "sec_ops", "feat_bus", "feat_menu", "col_ops_1", "feat_health", "feat_library", "feat_facility", "feat_finance", "feat_procurement",
+  "sec_engage", "feat_parent_portal", "feat_social_feed", "col_engage_1", "feat_chat", "feat_news",
+  "sec_advanced", "feat_lms", "feat_crm_admission", "col_adv_1", "feat_ai_assistant", "feat_it_inventory", "feat_monitoring",
+  "sec_override", "campus_overrides_json"
+ ],
+ "fields": [
+  {"fieldname": "sec_core", "fieldtype": "Section Break", "label": "Lõi (luôn bật)"},
+  {"fieldname": "feat_sis", "fieldtype": "Check", "label": "Hồ sơ học sinh & lớp", "default": "1", "read_only": 1},
+  {"fieldname": "feat_timetable", "fieldtype": "Check", "label": "Thời khoá biểu", "default": "1"},
+  {"fieldname": "col_core_1", "fieldtype": "Column Break"},
+  {"fieldname": "feat_report_card", "fieldtype": "Check", "label": "Báo cáo học tập / học bạ", "default": "1"},
+  {"fieldname": "feat_attendance", "fieldtype": "Check", "label": "Điểm danh & sổ đầu bài", "default": "1"},
+
+  {"fieldname": "sec_ops", "fieldtype": "Section Break", "label": "Vận hành"},
+  {"fieldname": "feat_bus", "fieldtype": "Check", "label": "Xe buýt", "default": "1"},
+  {"fieldname": "feat_menu", "fieldtype": "Check", "label": "Thực đơn & suất ăn", "default": "1"},
+  {"fieldname": "col_ops_1", "fieldtype": "Column Break"},
+  {"fieldname": "feat_health", "fieldtype": "Check", "label": "Y tế học đường", "default": "1"},
+  {"fieldname": "feat_library", "fieldtype": "Check", "label": "Thư viện", "default": "1"},
+  {"fieldname": "feat_facility", "fieldtype": "Check", "label": "Cơ sở vật chất", "default": "1"},
+  {"fieldname": "feat_finance", "fieldtype": "Check", "label": "Tài chính - kế toán", "default": "1"},
+  {"fieldname": "feat_procurement", "fieldtype": "Check", "label": "Mua sắm", "default": "1"},
+
+  {"fieldname": "sec_engage", "fieldtype": "Section Break", "label": "Tương tác phụ huynh"},
+  {"fieldname": "feat_parent_portal", "fieldtype": "Check", "label": "Cổng phụ huynh", "default": "1"},
+  {"fieldname": "feat_social_feed", "fieldtype": "Check", "label": "Mạng xã hội nội bộ", "default": "1"},
+  {"fieldname": "col_engage_1", "fieldtype": "Column Break"},
+  {"fieldname": "feat_chat", "fieldtype": "Check", "label": "Nhắn tin GV ↔ PH", "default": "1"},
+  {"fieldname": "feat_news", "fieldtype": "Check", "label": "Tin tức & truyền thông", "default": "1"},
+
+  {"fieldname": "sec_advanced", "fieldtype": "Section Break", "label": "Nâng cao"},
+  {"fieldname": "feat_lms", "fieldtype": "Check", "label": "LMS", "default": "0"},
+  {"fieldname": "feat_crm_admission", "fieldtype": "Check", "label": "CRM tuyển sinh", "default": "1"},
+  {"fieldname": "col_adv_1", "fieldtype": "Column Break"},
+  {"fieldname": "feat_ai_assistant", "fieldtype": "Check", "label": "Trợ lý AI", "default": "0"},
+  {"fieldname": "feat_it_inventory", "fieldtype": "Check", "label": "Quản trị IT & thiết bị", "default": "1"},
+  {"fieldname": "feat_monitoring", "fieldtype": "Check", "label": "Giám sát hạ tầng", "default": "0"},
+
+  {"fieldname": "sec_override", "fieldtype": "Section Break", "label": "Ghi đè theo campus", "collapsible": 1},
+  {"fieldname": "campus_overrides_json", "fieldtype": "JSON", "label": "Ghi đè theo campus",
+   "description": "{\"CAMPUS-00002\": {\"feat_bus\": false}} — campus không khai thì dùng giá trị chung"}
+ ],
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

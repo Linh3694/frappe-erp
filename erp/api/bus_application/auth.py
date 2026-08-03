@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 VIVAS_SMS_CONFIG = {
     "url": "https://sms.vivas.vn/SMSBNAPINEW/sendsms",
     "username": frappe.conf.get("vivas_sms_username", "wellspring"),
-    "password": frappe.conf.get("vivas_sms_password", "2805@Smsbn"),
+    "password": frappe.conf.get("vivas_sms_password", ""),
     "brandname": frappe.conf.get("vivas_sms_brandname", "WELLSPRING"),
     # IMPORTANT: Set to False in production to prevent accidental SMS sending
     "enabled": frappe.conf.get("vivas_sms_enabled", False),  # Default False for safety
