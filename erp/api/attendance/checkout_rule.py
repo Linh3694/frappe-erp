@@ -70,7 +70,12 @@ def parse_raw_timestamps(raw_data):
 
 		try:
 			value = frappe.utils.get_datetime(timestamp_str)
-		except Exception:
+		except (ValueError, TypeError):
+			frappe.logger().warning("Bỏ qua timestamp không hợp lệ: %r", timestamp_str)
+			continue
+
+		if value is None:
+			frappe.logger().warning("Bỏ qua timestamp không hợp lệ: %r", timestamp_str)
 			continue
 
 		if value.tzinfo is not None:

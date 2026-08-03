@@ -129,19 +129,40 @@ def test_config_defaults():
         result.add_fail("Hằng số mặc định", e)
 
     try:
-        value = get_checkout_earliest_time()
-        assert isinstance(value, time), f"phải là datetime.time, nhận {type(value)}"
-        result.add_pass("get_checkout_earliest_time trả datetime.time")
+        key = "attendance_checkout_earliest_time"
+        had_key = key in frappe.conf
+        old_value = frappe.conf.get(key)
+        try:
+            frappe.conf[key] = "13:45"
+            assert get_checkout_earliest_time() == time(13, 45)
+            frappe.conf[key] = "không phải giờ"
+            assert get_checkout_earliest_time() == time(12, 0)
+        finally:
+            if had_key:
+                frappe.conf[key] = old_value
+            else:
+                frappe.conf.pop(key, None)
+        result.add_pass("Đọc đúng key giờ sớm nhất và fallback khi sai")
     except Exception as e:
-        result.add_fail("get_checkout_earliest_time trả datetime.time", e)
+        result.add_fail("Đọc đúng key giờ sớm nhất và fallback khi sai", e)
 
     try:
-        value = get_min_session_minutes()
-        assert isinstance(value, int), f"phải là int, nhận {type(value)}"
-        assert value >= 0, f"không được âm, nhận {value}"
-        result.add_pass("get_min_session_minutes trả int không âm")
+        key = "attendance_min_session_minutes"
+        had_key = key in frappe.conf
+        old_value = frappe.conf.get(key)
+        try:
+            frappe.conf[key] = 45
+            assert get_min_session_minutes() == 45
+            frappe.conf[key] = "không phải số"
+            assert get_min_session_minutes() == DEFAULT_MIN_SESSION_MINUTES
+        finally:
+            if had_key:
+                frappe.conf[key] = old_value
+            else:
+                frappe.conf.pop(key, None)
+        result.add_pass("Đọc đúng key số phút và fallback khi sai")
     except Exception as e:
-        result.add_fail("get_min_session_minutes trả int không âm", e)
+        result.add_fail("Đọc đúng key số phút và fallback khi sai", e)
 
     return result.summary()
 
@@ -173,6 +194,25 @@ def test_parse_raw_timestamps():
         result.add_pass("Timestamp có offset +07:00, tự sort tăng dần")
     except Exception as e:
         result.add_fail("Timestamp có offset +07:00, tự sort tăng dần", e)
+
+    try:
+        raw = [{"timestamp": "2026-08-03T00:00:00+00:00"}]
+        parsed = parse_raw_timestamps(raw)
+        assert parsed == [_dt(7, 0)], f"phải đổi sang giờ VN trước khi bỏ timezone, nhận {parsed}"
+        result.add_pass("Timestamp offset UTC được đổi sang giờ VN")
+    except Exception as e:
+        result.add_fail("Timestamp offset UTC được đổi sang giờ VN", e)
+
+    try:
+        raw = [
+            {"timestamp": "0000-00-00 00:00:00"},
+            {"timestamp": "2026-08-03 07:00:00"},
+        ]
+        parsed = parse_raw_timestamps(raw)
+        assert parsed == [_dt(7, 0)], f"phải bỏ qua timestamp trả None, nhận {parsed}"
+        result.add_pass("Bỏ qua timestamp trả None")
+    except Exception as e:
+        result.add_fail("Bỏ qua timestamp trả None", e)
 
     try:
         # Định dạng cũ (naive, đã là giờ VN)
