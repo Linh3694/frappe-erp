@@ -1,0 +1,68 @@
+{
+  "rules": [
+    {
+      "id": "brand-name",
+      "severity": "error",
+      "pattern": "wellspring",
+      "flags": "i",
+      "message": "Tên trường phải lấy từ useSchoolInfo().school_name_vn / school_name_en, không viết thẳng."
+    },
+    {
+      "id": "brand-domain",
+      "severity": "error",
+      "pattern": "wellspring\\.edu\\.vn",
+      "flags": "i",
+      "message": "Domain phải lấy từ biến môi trường hoặc useSchoolInfo(), không hardcode."
+    },
+    {
+      "id": "brand-shortcode",
+      "severity": "error",
+      "pattern": "\\b(WSHN|WSSG)\\b",
+      "flags": "",
+      "message": "Mã trường phải lấy từ useSchoolInfo().school_code."
+    },
+    {
+      "id": "brand-hex",
+      "severity": "error",
+      "pattern": "#(F05023|002855|D8421A|FEE8E0|E04420|C03D1C|FF6B3D|001A3A|003B7A)\\b",
+      "flags": "i",
+      "message": "Màu thương hiệu phải dùng token: class `bg-brand`/`text-brand-secondary` hoặc var(--brand-primary)."
+    },
+    {
+      "id": "subbrand-name",
+      "severity": "warn",
+      "pattern": "\\b(Wislife|WISCom|WISMe|WISers|LIAVI)\\b",
+      "flags": "",
+      "message": "Tên sản phẩm con nên lấy từ useBranding().social_feed_name / ai_assistant_name / student_nickname."
+    },
+    {
+      "id": "hardcoded-api-fallback",
+      "severity": "error",
+      "pattern": "https?://[a-z0-9.-]*\\.(edu\\.vn|wellspring)[a-z0-9./-]*",
+      "flags": "i",
+      "message": "URL backend phải đến từ import.meta.env / process.env, không đặt fallback cứng trong code."
+    }
+  ],
+  "allowlistPaths": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/dev-dist/**",
+    "**/*.min.*",
+    "**/package-lock.json",
+    "**/tools/brand-lint/**",
+    "**/tenants/wellspring/**",
+    "**/eslint.config.js",
+    "**/eslint.config.mjs",
+    "**/eslint.config.cjs",
+    "**/.pre-commit-config.yaml",
+    "**/.env.example",
+    "**/CHANGELOG.md",
+    "**/white-label-plans/**",
+    "**/BAO-CAO-DANH-GIA-*.md"
+  ],
+  "allowlistPathsByRule": {
+    "subbrand-name": ["**/locales/**", "**/assets/**"],
+    "brand-name": ["**/locales/**"]
+  },
+  "inlineIgnoreMarker": "brand-lint-disable-next-line"
+}

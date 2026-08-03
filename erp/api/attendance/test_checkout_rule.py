@@ -256,6 +256,72 @@ def test_parse_raw_timestamps():
     return result.summary()
 
 
+def test_doctype_recalculate():
+    """DocType phải tính giờ vào/ra theo đúng checkout_rule, không tự suy luận lại."""
+    print("\n" + "=" * 60)
+    print("🧪 CHECKOUT RULE: DocType recalculate_times")
+    print("=" * 60)
+
+    result = TestResult()
+
+    import json
+    import types
+
+    from erp.common.doctype.erp_time_attendance.erp_time_attendance import ERPTimeAttendance
+
+    # Dùng object stub thay vì frappe.new_doc: new_doc phải đọc metadata DocType từ DB,
+    # còn recalculate_times chỉ chạm 4 attribute dưới đây. Nhờ vậy test không cần site.
+    doc = types.SimpleNamespace(
+        raw_data="[]",
+        check_in_time=None,
+        check_out_time=None,
+        total_check_ins=None,
+    )
+    doc.recalculate_times = lambda: ERPTimeAttendance.recalculate_times(doc)
+
+    try:
+        # Ca Trần Ngọc Anh: hai lần quẹt buổi sáng, không có giờ ra
+        doc.raw_data = json.dumps([
+            {"timestamp": "2026-08-03T06:57:20+07:00", "device_name": "Gate 2 - Check Out"},
+            {"timestamp": "2026-08-03T07:09:26+07:00", "device_name": "Gate 2 - Check In"},
+        ])
+        doc.recalculate_times()
+        assert doc.check_in_time == _dt(6, 57, 20), f"giờ vào: nhận {doc.check_in_time}"
+        assert doc.check_out_time is None, f"giờ ra phải None, nhận {doc.check_out_time}"
+        assert doc.total_check_ins == 2, f"nhận {doc.total_check_ins}"
+        result.add_pass("Hai lần quẹt buổi sáng → không có giờ ra")
+    except Exception as e:
+        result.add_fail("Hai lần quẹt buổi sáng → không có giờ ra", e)
+
+    try:
+        # Ngày bình thường
+        doc.raw_data = json.dumps([
+            {"timestamp": "2026-08-03T07:00:00+07:00", "device_name": "Gate 5 - Check In"},
+            {"timestamp": "2026-08-03T15:30:00+07:00", "device_name": "Gate 5 - Check Out"},
+        ])
+        doc.recalculate_times()
+        assert doc.check_in_time == _dt(7, 0), f"giờ vào: nhận {doc.check_in_time}"
+        assert doc.check_out_time == _dt(15, 30), f"giờ ra: nhận {doc.check_out_time}"
+        result.add_pass("Vào sáng ra chiều → có cả hai")
+    except Exception as e:
+        result.add_fail("Vào sáng ra chiều → có cả hai", e)
+
+    try:
+        # Một lần quẹt duy nhất: trước đây gán check_out = check_in
+        doc.raw_data = json.dumps([
+            {"timestamp": "2026-08-03T07:20:00+07:00", "device_name": "Gate 2 - Check In"},
+        ])
+        doc.recalculate_times()
+        assert doc.check_in_time == _dt(7, 20), f"giờ vào: nhận {doc.check_in_time}"
+        assert doc.check_out_time is None, f"giờ ra phải None, nhận {doc.check_out_time}"
+        assert doc.total_check_ins == 1, f"nhận {doc.total_check_ins}"
+        result.add_pass("Một lần quẹt → giờ ra None, không copy giờ vào")
+    except Exception as e:
+        result.add_fail("Một lần quẹt → giờ ra None, không copy giờ vào", e)
+
+    return result.summary()
+
+
 def run_tests():
     """Chạy toàn bộ test của checkout_rule."""
     all_results = {}
@@ -266,6 +332,7 @@ def run_tests():
         ("Parse raw timestamps", test_parse_raw_timestamps),
         ("Resolve check in/out", test_resolve_check_in_out),
         ("Config defaults", test_config_defaults),
+        ("DocType recalculate", test_doctype_recalculate),
     ]
 
     for name, func in tests:

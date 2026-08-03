@@ -467,36 +467,35 @@ def check_compreface_subject(student_code=None):
 			as_dict=True
 		)
 
-		# Check complete status from CompreFace API
-		import time
+		# Gọi CompreFace ĐÚNG MỘT LẦN. Trước đây có vòng lặp 3 lần với time.sleep(2)
+		# giữa các lần: khi CompreFace không trả lời, mỗi request giữ một worker
+		# gunicorn ~4 giây mà không làm gì. Prod chỉ có 18 worker sync, còn frontend
+		# gọi endpoint này thành burst 200 request/phút, nên 03/08/2026 p95 toàn hệ
+		# thống nhảy từ 242ms lên 2.937ms. Không lấy được trạng thái thì rơi về cờ
+		# compreface_registered trong database ở nhánh dưới.
 		complete_status = None
-		
-		for attempt in range(3):
-			check_result = compreFace_service.check_subject_complete(student_code)
-			if check_result["success"]:
-				complete_status = check_result.get("data", {})
-				
-				# Update database flag based on complete status
-				if bus_student:
-					should_be_registered = (
-						complete_status.get("subject_exists") and 
-						complete_status.get("has_photos")
+
+		check_result = compreFace_service.check_subject_complete(student_code)
+		if check_result["success"]:
+			complete_status = check_result.get("data", {})
+
+			# Update database flag based on complete status
+			if bus_student:
+				should_be_registered = (
+					complete_status.get("subject_exists") and
+					complete_status.get("has_photos")
+				)
+				current_registered = bus_student.get("compreface_registered")
+
+				# Only update if status has changed
+				if should_be_registered != current_registered:
+					frappe.db.set_value(
+						"SIS Bus Student",
+						bus_student.name,
+						"compreface_registered",
+						1 if should_be_registered else 0
 					)
-					current_registered = bus_student.get("compreface_registered")
-					
-					# Only update if status has changed
-					if should_be_registered != current_registered:
-						frappe.db.set_value(
-							"SIS Bus Student", 
-							bus_student.name, 
-							"compreface_registered", 
-							1 if should_be_registered else 0
-						)
-						frappe.db.commit()
-				
-				break
-			elif attempt < 2:  # Don't sleep after last attempt
-				time.sleep(2)  # Wait 2 seconds between attempts
+					frappe.db.commit()
 
 		# If we couldn't get status, fallback to database flag
 		if not complete_status:

@@ -652,7 +652,11 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
                 "recorded_by": frappe.session.user,
                 "campus_id": campus_id
             })
-            doc.insert()
+            # Khung log này do hệ thống tự tạo khi người dùng chỉ ĐANG XEM, nên
+            # không đòi quyền create trên SIS Class Log Subject. Doctype chỉ cấp
+            # create cho System Manager và SIS Teacher; người dùng hợp lệ ngoài
+            # hai role đó trước đây nhận PermissionError ngay ở đường đọc.
+            doc.insert(ignore_permissions=True)
             subject_id = doc.name
             general_comment = None
             lesson_name = None

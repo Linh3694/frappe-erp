@@ -283,18 +283,26 @@ def ensure_mobile_device_token_doctype():
                 })
             
             if new_fields:
+                # Thêm DocField vào DocType rồi để Frappe tự đồng bộ schema.
+                # Trước đây dùng ALTER TABLE trực tiếp: nó thêm column SQL nhưng
+                # KHÔNG thêm DocField, nên điều kiện kiểm tra ở trên (dựa vào
+                # frappe.get_meta) mãi mãi đúng và hàm chạy lại vô hạn.
+                doctype_doc = frappe.get_doc("DocType", "Mobile Device Token")
                 for field in new_fields:
-                    frappe.db.sql(f"""
-                        ALTER TABLE `tabMobile Device Token`
-                        ADD COLUMN IF NOT EXISTS `{field['fieldname']}` VARCHAR(140)
-                    """)
+                    doctype_doc.append("fields", field)
+                doctype_doc.save(ignore_permissions=True)
                 frappe.db.commit()
-                frappe.logger().info(f"Added new fields to Mobile Device Token: {[f['fieldname'] for f in new_fields]}")
+                frappe.clear_cache(doctype="Mobile Device Token")
+                frappe.logger().info(
+                    f"Added new fields to Mobile Device Token: {[f['fieldname'] for f in new_fields]}"
+                )
         except Exception as e:
             frappe.logger().warning(f"Could not add new fields to Mobile Device Token: {str(e)}")
 
-# Initialize on module load
-ensure_mobile_device_token_doctype()
+# KHÔNG gọi ensure_mobile_device_token_doctype() ở cấp module.
+# Mỗi worker gunicorn nạp module là chạy lại; trên prod 03/08/2026 điều này tạo
+# ~575 câu ALTER TABLE mỗi 20-40 phút, mỗi câu cần metadata lock trên bảng.
+# Schema thay đổi thì chạy `bench migrate`, đừng sửa schema trong đường đi request.
 
 
 @frappe.whitelist(allow_guest=True)

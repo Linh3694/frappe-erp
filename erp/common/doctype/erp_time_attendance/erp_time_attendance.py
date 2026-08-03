@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 import json
 import pytz
 
+from erp.api.attendance.checkout_rule import parse_raw_timestamps, resolve_check_in_out
+
 
 class ERPTimeAttendance(Document):
 	"""
@@ -75,37 +77,15 @@ class ERPTimeAttendance(Document):
 				'recorded_at': frappe.utils.now()
 			})
 
-		# RECALCULATE check-in and check-out from ALL raw_data
-		# This ensures accuracy even when records arrive out of order
-		if len(raw_data) == 1:
-			# First record
-			self.check_in_time = check_time
-			self.check_out_time = check_time
-			self.total_check_ins = 1
-		else:
-			# Multiple records: parse timestamps correctly (they may be original device timestamps)
-			all_times = []
-			for item in raw_data:
-				ts_str = item['timestamp']
-				# If timestamp has timezone info, parse as device timestamp
-				if '+' in ts_str or ts_str.endswith('Z'):
-					parsed_ts = frappe.utils.get_datetime(ts_str)
-					if parsed_ts.tzinfo is not None:
-						try:
-							import pytz
-							vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
-							parsed_ts = parsed_ts.astimezone(vn_tz)
-						except ImportError:
-							pass
-					all_times.append(parsed_ts.replace(tzinfo=None) if parsed_ts.tzinfo else parsed_ts)
-				else:
-					# Legacy format - already processed VN time
-					all_times.append(frappe.utils.get_datetime(ts_str))
+		# Tính lại giờ vào / giờ ra từ TOÀN BỘ raw_data — đúng cả khi event của thiết bị
+		# về muộn và không theo thứ tự. Quy tắc nằm ở erp.api.attendance.checkout_rule
+		# để DocType, API báo cáo và parent portal dùng chung một nguồn.
+		all_times = parse_raw_timestamps(raw_data)
+		check_in, check_out = resolve_check_in_out(all_times)
 
-			all_times.sort()
-			self.check_in_time = all_times[0]  # Earliest = check-in
-			self.check_out_time = all_times[-1]  # Latest = check-out
-			self.total_check_ins = len(raw_data)
+		self.check_in_time = check_in
+		self.check_out_time = check_out
+		self.total_check_ins = len(raw_data)
 
 		# Update device info if provided
 		if device_id_to_use and not self.device_id:
@@ -119,25 +99,19 @@ class ERPTimeAttendance(Document):
 		return self
 	
 	def recalculate_times(self):
-		"""Recalculate check-in/check-out times from raw_data"""
+		"""Tính lại giờ vào / giờ ra từ raw_data. Dùng cho backfill dữ liệu cũ."""
 		raw_data = json.loads(self.raw_data or "[]")
-		
+
 		if not raw_data:
 			return self
-		
-		if len(raw_data) == 1:
-			time = frappe.utils.get_datetime(raw_data[0]['timestamp'])
-			self.check_in_time = time
-			self.check_out_time = time
-			self.total_check_ins = 1
-		else:
-			all_times = [frappe.utils.get_datetime(item['timestamp']) for item in raw_data]
-			all_times.sort()
-			
-			self.check_in_time = all_times[0]
-			self.check_out_time = all_times[-1]
-			self.total_check_ins = len(raw_data)
-		
+
+		all_times = parse_raw_timestamps(raw_data)
+		check_in, check_out = resolve_check_in_out(all_times)
+
+		self.check_in_time = check_in
+		self.check_out_time = check_out
+		self.total_check_ins = len(raw_data)
+
 		return self
 
 
