@@ -65,6 +65,56 @@ def _notification_channel() -> str:
 	return str(frappe.conf.get("NOTIFICATION_STREAM_CHANNEL") or "frappe_notifications")
 
 
+def _it_status_label_vn(status_key: str) -> str:
+	"""Nhãn TV cho trạng thái ticket IT — không đưa khoá tiếng Anh vào câu tiếng Việt.
+
+	`Done` ở luồng IT chưa phải kết thúc: người tạo còn phải chấp nhận kết quả mới sang
+	`Closed` (xem TicketProcessingV2), nên nhãn phải nói rõ là còn chờ xác nhận.
+	"""
+	s = (status_key or "").strip()
+	m = {
+		"Open": _("Mở"),
+		"Assigned": _("Đã phân công"),
+		"Processing": _("Đang xử lý"),
+		"In Progress": _("Đang xử lý"),
+		"Waiting for Customer": _("Chờ phản hồi từ người tạo"),
+		"Done": _("Hoàn thành (chờ xác nhận)"),
+		"Resolved": _("Đã xử lý (chờ xác nhận)"),
+		"Closed": _("Đã đóng"),
+		"Cancelled": _("Đã hủy"),
+	}
+	return m.get(s, s) if s else ""
+
+
+def _it_status_to_push_action(new_status: str) -> str:
+	"""Trạng thái đích -> action push (khớp whitelist deep-link của mobile)."""
+	s = (new_status or "").strip()
+	m = {
+		"Processing": "ticket_processing",
+		"In Progress": "ticket_processing",
+		"Waiting for Customer": "ticket_waiting",
+		"Done": "ticket_done",
+		"Resolved": "ticket_done",
+		"Closed": "ticket_closed",
+		"Cancelled": "ticket_cancelled",
+	}
+	return m.get(s) or "ticket_status_changed"
+
+
+def _shorten(value: str, max_len: int = 70) -> str:
+	"""Cắt tiêu đề ticket cho vừa một dòng banner push / dòng tiêu đề trong danh sách."""
+	s = " ".join((value or "").split())
+	return s if len(s) <= max_len else s[: max_len - 1].rstrip() + "…"
+
+
+def _it_full_name(email: str) -> str:
+	"""Họ tên hiển thị của một email; rỗng nếu không tra được."""
+	em = _normalize_email(email)
+	if not em:
+		return ""
+	return (frappe.db.get_value("User", {"email": em}, "full_name") or "").strip()
+
+
 def _it_ticket_payload(doc, event_type: str, extra: Optional[dict] = None) -> dict:
 	code = doc.ticket_code or doc.name
 	data = {
@@ -75,6 +125,7 @@ def _it_ticket_payload(doc, event_type: str, extra: Optional[dict] = None) -> di
 		"ticketCode": code,
 		"ticket_code": code,
 		"status": doc.status,
+		"statusLabel": _it_status_label_vn(doc.status or ""),
 		"title": doc.title or "",
 		"category": _category_title(doc),
 	}
@@ -166,24 +217,65 @@ def _notify_it_status_changed(
 	- Creator luôn nhận khi đổi trạng thái (creator-driven UX hiện tại).
 	- Assignee + IT support team nhận thêm để theo dõi (loại actor).
 	- Status final (Done/Closed/Cancelled): bật email cho cả nhóm support; ngược lại chỉ push.
+
+	Nội dung tách hai phía: người tạo cần biết việc phải làm tiếp, đội IT cần biết ai
+	vừa thao tác. Tiêu đề mang tên ticket vì đó là thứ người dùng nhận ra được — mã
+	ticket một mình thì mọi dòng thông báo trông giống nhau.
 	"""
 	code = doc.ticket_code or doc.name
-	title = (doc.title or "").strip() or code
-	body = _("Ticket {0} chuyển sang «{1}»").format(f"#{code}", new_status)
+	title = _shorten((doc.title or "").strip() or code)
+	new_label = _it_status_label_vn(new_status)
+	action = _it_status_to_push_action(new_status)
+	actor = _normalize_email(actor_email)
+	actor_name = _it_full_name(actor)
+
 	pdata = _it_ticket_payload(
 		doc,
-		"ticket_status_changed",
-		{"oldStatus": old_status, "newStatus": new_status, **(message_extras or {})},
+		action,
+		{
+			"oldStatus": old_status,
+			"newStatus": new_status,
+			"oldStatusLabel": _it_status_label_vn(old_status),
+			"newStatusLabel": new_label,
+			"actorName": actor_name,
+			**(message_extras or {}),
+		},
 	)
 
+	# Người tạo: nói rõ chuyện gì xảy ra và có phải làm gì tiếp không.
+	if action == "ticket_processing":
+		creator_title = _("Ticket IT đang được xử lý")
+		creator_body = _("«{0}» đã được tiếp nhận và đang xử lý.").format(title)
+	elif action == "ticket_waiting":
+		creator_title = _("Ticket IT chờ phản hồi của bạn")
+		creator_body = _("«{0}» cần thêm thông tin từ bạn để tiếp tục xử lý.").format(title)
+	elif action == "ticket_done":
+		creator_title = _("Ticket IT đã xử lý xong")
+		creator_body = _("«{0}» đã xử lý xong. Vui lòng kiểm tra và xác nhận kết quả.").format(title)
+	elif action == "ticket_closed":
+		creator_title = _("Ticket IT đã đóng")
+		creator_body = _("«{0}» đã được đóng.").format(title)
+	elif action == "ticket_cancelled":
+		creator_title = _("Ticket IT đã hủy")
+		creator_body = _("«{0}» đã được hủy.").format(title)
+	else:
+		creator_title = _("Cập nhật ticket IT")
+		creator_body = _("«{0}» chuyển sang trạng thái {1}.").format(title, new_label)
+
+	# Đội IT theo dõi: nhấn vào người thao tác + trạng thái, kèm mã để tra cứu.
+	team_title = f"{title} · {new_label}"
+	if actor_name:
+		team_body = _("{0} chuyển {1} sang {2}.").format(actor_name, f"#{code}", new_label)
+	else:
+		team_body = _("{0} chuyển sang {1}.").format(f"#{code}", new_label)
+
 	creator = _normalize_email(doc.creator_email)
-	actor = _normalize_email(actor_email)
 
 	if creator and creator != actor:
 		_emit_it_unified(
 			creator,
-			_("Cập nhật ticket IT"),
-			body,
+			creator_title,
+			creator_body,
 			pdata,
 			notification_type="it_support_ticket_status",
 		)
@@ -197,8 +289,8 @@ def _notify_it_status_changed(
 			continue
 		_emit_it_unified(
 			em,
-			_("Cập nhật ticket IT"),
-			body,
+			team_title,
+			team_body,
 			pdata,
 			notification_type="it_support_ticket_status",
 			include_email=include_email_for_team,
