@@ -2,10 +2,16 @@
 # For license information, please see license.txt
 
 """
-Nhắc phụ huynh trước giờ mở cổng đăng ký Câu lạc bộ.
+Thông báo vòng đời đợt đăng ký Câu lạc bộ.
 
-Chạy theo cron mỗi 5 phút, quét đợt sắp mở trong `minutes_before` phút tới. Mỗi
-đợt chỉ gửi một lần nhờ cờ `open_reminder_sent` trên chính đợt đó.
+Ba mốc, cùng một lõi gửi, khác nhau ở cửa sổ thời gian và cờ chống trùng:
+
+  open    — ~15 phút TRƯỚC giờ mở đăng ký
+  closing — ~1 tiếng TRƯỚC giờ đóng đăng ký
+  closed  — ngay SAU khi đóng đăng ký
+
+Chạy theo cron mỗi 5 phút. Mỗi đợt × mỗi mốc chỉ gửi một lần nhờ cờ riêng trên
+chính đợt đó.
 
 Người nhận = phụ huynh của học sinh THỰC SỰ đăng ký được: khối của em phải nằm
 trong ít nhất một buổi đang mở của đợt. Gửi cho toàn trường thì phần lớn phụ
@@ -23,8 +29,37 @@ from erp.api.parent_portal.club_beta_access import (
 DT_PERIOD = "SIS Club Registration Period"
 DT_OFFERING = "SIS Club Offering"
 
-#: Nhắc trước bao nhiêu phút (mặc định theo yêu cầu nghiệp vụ).
+#: Nhắc trước bao nhiêu phút (giữ tên cũ cho tương thích lời gọi sẵn có).
 DEFAULT_MINUTES_BEFORE = 15
+
+#: Cấu hình từng mốc.
+#:   field   — cột mốc thời gian trên đợt
+#:   flag    — cờ chống gửi trùng
+#:   window  — số phút TRƯỚC mốc mà cron được phép bắn
+#:   after   — True: mốc đã QUA (bắn sau), False: mốc SẮP tới (bắn trước)
+KINDS = {
+    "open": {
+        "field": "registration_start_datetime",
+        "flag": "open_reminder_sent",
+        "window": 15,
+        "after": False,
+    },
+    "closing": {
+        "field": "registration_end_datetime",
+        "flag": "close_reminder_sent",
+        "window": 60,
+        "after": False,
+    },
+    "closed": {
+        # Bắn sau khi mốc đã qua. Cửa sổ 120 phút là CHẶN AN TOÀN: thiếu nó thì
+        # lần deploy đầu tiên mọi đợt cũ đã đóng từ lâu đều có cờ = 0 và sẽ bị
+        # bắn hàng loạt cho phụ huynh về những đợt của năm ngoái.
+        "field": "registration_end_datetime",
+        "flag": "closed_notice_sent",
+        "window": 120,
+        "after": True,
+    },
+}
 
 
 def _eligible_student_ids(period):
@@ -83,8 +118,8 @@ def _fit_body(lead, tail, max_length=MAX_BODY_LENGTH):
       3. tên đợt vẫn quá dài -> cắt bớt tên, thêm "…"
 
     Mức 3 không có trong yêu cầu nhưng cần: câu chính CHỨA tên đợt, nên một cái
-    tên 200 ký tự vẫn vượt ngưỡng sau khi đã bỏ câu cuối. Thà cắt tên còn hơn để
-    thông báo bị chính thiết bị cắt ở chỗ ngẫu nhiên.
+    tên 200 ký tự vẫn vượt ngưỡng sau khi đã bỏ câu cuối. Thà mình cắt còn hơn
+    để thiết bị cắt ở chỗ ngẫu nhiên.
     """
     full = f"{lead} {tail}"
     if len(full) <= max_length:
@@ -94,77 +129,136 @@ def _fit_body(lead, tail, max_length=MAX_BODY_LENGTH):
     return lead[: max_length - 1].rstrip() + "…"
 
 
-def _reminder_text(period, now):
+def _humanize(minutes, lang):
     """
-    Nội dung nhắc.
+    "khoảng 1 tiếng" thay vì "58 phút".
 
-    Nói SỐ PHÚT CÒN LẠI THẬT, không nói giá trị cấu hình `minutes_before`. Cron
-    chạy 5 phút một lần nên thời điểm bắn rơi bất kỳ đâu trong khoảng 10–15 phút
-    trước giờ mở; in cứng "15 phút" là sai với phần lớn các lần gửi.
+    Cron 5 phút một nhịp nên mốc 1 tiếng thực tế bắn ở 55–60 phút. Nói "58 phút"
+    đúng nhưng đọc như máy; nói "1 tiếng" mà thực tế còn 58 phút thì vẫn đúng
+    trong cách người ta nói. Dưới 45 phút mới quay lại đếm phút cho chính xác.
     """
-    reg_start = get_datetime(period.registration_start_datetime)
-    remaining = max(1, int(round((reg_start - now).total_seconds() / 60.0)))
+    if minutes >= 45:
+        return "khoảng 1 tiếng" if lang == "vi" else "about 1 hour"
+    return f"{minutes} phút" if lang == "vi" else f"{minutes} minutes"
 
-    title = {
-        "vi": "Mở đăng ký CLB",
-        "en": "Club Registration Opening Soon!",
-    }
-    body = {
-        "vi": _fit_body(
-            f"{period.title_vn} sẽ mở đăng ký sau {remaining} phút nữa.",
-            "Phụ huynh nhanh tay bấm để không bỏ lỡ!",
-        ),
-        "en": _fit_body(
-            f"{period.title_en or period.title_vn} registration opens in "
-            f"{remaining} minutes.",
-            "Tap now so you don't miss out!",
-        ),
-    }
-    return title, body
+
+def _reminder_text(period, kind, now):
+    """
+    Nội dung theo từng mốc.
+
+    Số phút là THỜI GIAN CÒN LẠI THẬT, không phải hằng số cấu hình: cron chạy
+    5 phút một lần nên thời điểm bắn rơi bất kỳ đâu trong cửa sổ.
+    """
+    title_vn = period.title_vn
+    title_en = period.title_en or period.title_vn
+
+    if kind == "closed":
+        return (
+            {"vi": "Đã đóng đăng ký CLB", "en": "Club Registration Closed"},
+            {
+                "vi": _fit_body(
+                    f"{title_vn} đã đóng đăng ký.",
+                    "Phụ huynh xem lại các CLB con đã đăng ký tại Parent Portal.",
+                ),
+                "en": _fit_body(
+                    f"{title_en} registration has closed.",
+                    "View your child's registered clubs on Parent Portal.",
+                ),
+            },
+        )
+
+    field = KINDS[kind]["field"]
+    remaining = max(1, int(round((get_datetime(period.get(field)) - now).total_seconds() / 60.0)))
+
+    if kind == "closing":
+        return (
+            {"vi": "Sắp đóng đăng ký CLB", "en": "Club Registration Closing Soon!"},
+            {
+                "vi": _fit_body(
+                    f"{title_vn} sẽ đóng đăng ký sau {_humanize(remaining, 'vi')} nữa.",
+                    "Phụ huynh nhanh tay bấm để không bỏ lỡ!",
+                ),
+                "en": _fit_body(
+                    f"{title_en} registration closes in {_humanize(remaining, 'en')}.",
+                    "Tap now so you don't miss out!",
+                ),
+            },
+        )
+
+    return (
+        {"vi": "Mở đăng ký CLB", "en": "Club Registration Opening Soon!"},
+        {
+            "vi": _fit_body(
+                f"{title_vn} sẽ mở đăng ký sau {_humanize(remaining, 'vi')} nữa.",
+                "Phụ huynh nhanh tay bấm để không bỏ lỡ!",
+            ),
+            "en": _fit_body(
+                f"{title_en} registration opens in {_humanize(remaining, 'en')}.",
+                "Tap now so you don't miss out!",
+            ),
+        },
+    )
+
+
+def _scan(kind, now=None):
+    """Quét các đợt tới hạn của MỘT mốc và gửi."""
+    cfg = KINDS[kind]
+    now = now or now_datetime()
+
+    if cfg["after"]:
+        # Mốc đã qua: [now - window, now]
+        lo, hi = add_to_date(now, minutes=-cfg["window"]), now
+    else:
+        # Mốc sắp tới: [now, now + window]
+        lo, hi = now, add_to_date(now, minutes=cfg["window"])
+
+    return frappe.get_all(
+        DT_PERIOD,
+        filters={
+            "status": "Open",
+            cfg["flag"]: 0,
+            cfg["field"]: ["between", [lo, hi]],
+        },
+        fields=["name"],
+        ignore_permissions=True,
+    )
+
+
+def _run(kind, now=None):
+    try:
+        now = now or now_datetime()
+        for row in _scan(kind, now):
+            try:
+                _send_for_period(row.name, kind, now)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), f"club_reminders.{kind}.item")
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"club_reminders.{kind}")
 
 
 def send_club_open_reminders(minutes_before=DEFAULT_MINUTES_BEFORE):
-    """
-    Scheduler: nhắc phụ huynh ~15 phút trước giờ mở đăng ký CLB.
-
-    Chỉ xét đợt `status = Open` và đã tới khoảng hiển thị — đợt còn Nháp thì phụ
-    huynh chưa nhìn thấy gì, nhắc là gây hoang mang.
-    """
-    try:
-        minutes_before = cint(minutes_before) or DEFAULT_MINUTES_BEFORE
-        now = now_datetime()
-        threshold = add_to_date(now, minutes=minutes_before)
-
-        periods = frappe.get_all(
-            DT_PERIOD,
-            filters={
-                "status": "Open",
-                "open_reminder_sent": 0,
-                "registration_start_datetime": ["between", [now, threshold]],
-            },
-            fields=["name"],
-            ignore_permissions=True,
-        )
-
-        for row in periods:
-            try:
-                _send_for_period(row.name, minutes_before, now)
-            except Exception:
-                frappe.log_error(
-                    frappe.get_traceback(), "club_reminders.send_club_open_reminders.item"
-                )
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), "club_reminders.send_club_open_reminders")
+    """Scheduler: nhắc ~15 phút TRƯỚC giờ mở đăng ký."""
+    _run("open")
 
 
-def _send_for_period(period_name, minutes_before, now):
+def send_club_close_reminders():
+    """Scheduler: nhắc ~1 tiếng TRƯỚC giờ đóng đăng ký."""
+    _run("closing")
+
+
+def send_club_closed_notices():
+    """Scheduler: báo đã đóng cổng, ngay SAU giờ đóng đăng ký."""
+    _run("closed")
+
+
+def _send_for_period(period_name, kind, now):
     from erp.utils.notification_handler import send_bulk_parent_notifications
 
+    cfg = KINDS[kind]
     period = frappe.get_doc(DT_PERIOD, period_name)
 
     # Đợt chưa tới khoảng hiển thị: phụ huynh mở app cũng không thấy gì. Chưa đốt
-    # cờ để lần quét sau thử lại — nhưng nếu tới lúc mở cổng vẫn chưa hiển thị
-    # thì đợt rớt khỏi cửa sổ và không nhắc nữa, đúng ý.
+    # cờ để lần quét sau thử lại — nhưng nếu tới lúc rớt khỏi cửa sổ thì thôi.
     if period.display_start_datetime and get_datetime(period.display_start_datetime) > now:
         return {"sent": 0, "outcome": "chưa tới khoảng hiển thị của đợt"}
 
@@ -172,7 +266,7 @@ def _send_for_period(period_name, minutes_before, now):
     if not student_ids:
         # Chưa khai buổi nào / chưa xếp lớp -> không có ai để nhắc. Đốt cờ luôn,
         # nếu không mỗi 5 phút lại quét lại một đợt vĩnh viễn rỗng.
-        frappe.db.set_value(DT_PERIOD, period_name, "open_reminder_sent", 1)
+        frappe.db.set_value(DT_PERIOD, period_name, cfg["flag"], 1)
         frappe.db.commit()
         return {"sent": 0, "outcome": "không có học sinh nào đủ điều kiện"}
 
@@ -180,15 +274,14 @@ def _send_for_period(period_name, minutes_before, now):
     eligible_count = len(student_ids)
     student_ids = filter_students_for_beta(student_ids)
     if not student_ids:
-        # KHÔNG đốt cờ: danh sách chạy thử có thể được bổ sung trước giờ mở, lần
-        # quét sau vẫn kịp gửi.
+        # KHÔNG đốt cờ: danh sách chạy thử có thể được bổ sung, lần quét sau vẫn kịp.
         return {
             "sent": 0,
             "outcome": "cổng chạy thử loại hết người nhận",
             "eligible_students": eligible_count,
         }
 
-    title, body = _reminder_text(period, now)
+    title, body = _reminder_text(period, kind, now)
 
     result = send_bulk_parent_notifications(
         recipient_type="club_registration",
@@ -200,14 +293,13 @@ def _send_for_period(period_name, minutes_before, now):
         # em đó vẫn lọt. `None` = cổng tắt = giữ nguyên hành vi gửi cho tất cả.
         allowed_parent_emails=allowed_parent_emails(student_ids),
         data={
-            "type": "club_registration_opening",
+            "type": f"club_registration_{kind}",
             "period_id": period_name,
-            "minutes_before": minutes_before,
             # `timestamp` BẮT BUỘC phải có: `send_bulk_parent_notifications` dựng
             # khoá chống trùng từ `data["timestamp"]`. Thiếu nó thì khoá là hằng
-            # số và mọi lần gửi sau cho cùng nhóm học sinh đều bị nuốt im lặng —
-            # nhìn từ ngoài y hệt "đã gửi mà không có thông báo nào".
-            "timestamp": str(now),
+            # số và mọi lần gửi sau cho cùng nhóm học sinh đều bị nuốt im lặng.
+            # Có `kind` trong khoá để ba mốc không đè lên nhau.
+            "timestamp": f"{kind}:{now}",
             # Điều hướng: web dùng path, app map sang route riêng.
             "url": "/club",
         },
@@ -220,14 +312,15 @@ def _send_for_period(period_name, minutes_before, now):
     # luôn cơ hội nhắc, mà log thì im lặng.
     sent = cint(result.get("success_count")) if isinstance(result, dict) else 0
     if sent > 0:
-        frappe.db.set_value(DT_PERIOD, period_name, "open_reminder_sent", 1)
+        frappe.db.set_value(DT_PERIOD, period_name, cfg["flag"], 1)
         frappe.db.commit()
         frappe.logger().info(
-            f"club_reminders: đợt {period_name} -> {len(student_ids)} HS, {sent} thông báo"
+            f"club_reminders[{kind}]: đợt {period_name} -> {len(student_ids)} HS, {sent} thông báo"
         )
         return {
             "sent": sent,
             "outcome": "đã gửi",
+            "kind": kind,
             "students": len(student_ids),
             "recipients": result.get("parent_emails"),
         }
@@ -235,15 +328,15 @@ def _send_for_period(period_name, minutes_before, now):
     # `frappe.log_error(title, message)` — THAM SỐ ĐẦU LÀ TIÊU ĐỀ, giới hạn 140
     # ký tự và KHÔNG tự cắt: nhét cả phản hồi vào đó thì chính lời ghi log ném
     # CharacterLengthExceededError, nuốt mất nguyên nhân thật.
-    # (Frappe chỉ hoán đổi hai tham số khi tiêu đề có chữ "Traceback".)
     frappe.log_error(
-        "club_reminders: không tạo được thông báo",
+        f"club_reminders[{kind}]: không tạo được thông báo",
         f"Đợt {period_name}: {len(student_ids)} học sinh đủ điều kiện nhưng "
         f"KHÔNG tạo được thông báo nào.\n\nPhản hồi:\n{result}",
     )
     return {
         "sent": 0,
-        "outcome": "gửi thất bại — xem Error Log 'club_reminders: không tạo được thông báo'",
+        "outcome": "gửi thất bại — xem Error Log 'club_reminders'",
+        "kind": kind,
         "students": len(student_ids),
         "errors": [r.get("error") for r in (result or {}).get("results", []) if r.get("error")][:3],
     }
@@ -284,7 +377,22 @@ def debug_club_reminder(period_id=None):
 
     period = frappe.get_doc(DT_PERIOD, period_id)
     reg_start = get_datetime(period.registration_start_datetime)
+    reg_end = get_datetime(period.registration_end_datetime)
     minutes_to_open = (reg_start - now).total_seconds() / 60.0
+    minutes_to_close = (reg_end - now).total_seconds() / 60.0
+
+    def _kind_state(kind):
+        """Từng mốc: còn bao lâu, có đang trong cửa sổ, cờ đã đốt chưa."""
+        cfg = KINDS[kind]
+        delta = (get_datetime(period.get(cfg["field"])) - now).total_seconds() / 60.0
+        in_window = (
+            -cfg["window"] <= delta <= 0 if cfg["after"] else 0 <= delta <= cfg["window"]
+        )
+        return {
+            "minutes_to_mark": round(delta, 1),
+            "in_window": in_window,
+            "already_sent": cint(period.get(cfg["flag"])),
+        }
 
     students = _eligible_student_ids(period)
     after_beta = filter_students_for_beta(students)
@@ -305,10 +413,12 @@ def debug_club_reminder(period_id=None):
         "status": period.status,
         "server_now": str(now),
         "registration_start": str(reg_start),
+        "registration_end": str(reg_end),
         "minutes_to_open": round(minutes_to_open, 1),
-        # Cron chỉ bắn khi 0 <= minutes_to_open <= minutes_before
-        "in_reminder_window": 0 <= minutes_to_open <= DEFAULT_MINUTES_BEFORE,
-        "already_sent_flag": cint(period.get("open_reminder_sent")),
+        "minutes_to_close": round(minutes_to_close, 1),
+        # Trạng thái RIÊNG cho từng mốc — trước đây chỉ báo mốc "open", nhìn vào
+        # không biết hai mốc kia đã gửi hay chưa.
+        "marks": {k: _kind_state(k) for k in KINDS},
         "eligible_students": len(students),
         "after_beta_filter": len(after_beta),
         "beta_gate_enabled": beta_gate_enabled(),
@@ -514,27 +624,24 @@ def debug_club_beta_phones(period_id=None):
 
 
 @frappe.whitelist()
-def send_club_open_reminder_now(
-    period_id=None, minutes_before=DEFAULT_MINUTES_BEFORE, force=0
-):
+def send_club_open_reminder_now(period_id=None, kind="open", force=0):
     """
-    Gửi nhắc NGAY, không chờ cron — dùng để kiểm thử.
+    Gửi NGAY một mốc bất kỳ, không chờ cron — dùng để kiểm thử.
 
-    Bỏ qua cửa sổ thời gian và cờ `open_reminder_sent`, nhưng VẪN đi qua cổng
-    chạy thử trong `_send_for_period`.
+    `kind`: open | closing | closed. Bỏ qua cửa sổ thời gian và reset cờ của
+    riêng mốc đó, nhưng VẪN đi qua cổng chạy thử trong `_send_for_period`.
 
     CHỐT AN TOÀN: từ chối chạy khi cổng chạy thử đang TẮT (danh sách số rỗng),
     vì lúc đó `filter_students_for_beta` trả nguyên danh sách và một lệnh gõ tay
-    sẽ đẩy push tới TOÀN BỘ phụ huynh của mọi khối có mở buổi — việc không thu
-    hồi được. Cổng tắt là trạng thái đúng sau khi release, nhưng khi đó thông
-    báo phải do cron gửi theo lịch, không phải do người gõ lệnh.
-    Muốn gửi thật cho tất cả thì truyền `force=1` một cách có chủ đích.
+    sẽ đẩy push tới TOÀN BỘ phụ huynh — việc không thu hồi được. Muốn gửi thật
+    cho tất cả thì truyền `force=1` một cách có chủ đích.
     """
     from erp.api.parent_portal.club_beta_access import beta_gate_enabled
 
     if not frappe.has_permission(DT_PERIOD, "write"):
         frappe.throw("Không có quyền")
-
+    if kind not in KINDS:
+        frappe.throw(f"kind phải là một trong {sorted(KINDS)}")
     if not cint(force) and not beta_gate_enabled():
         frappe.throw(
             "Cổng chạy thử đang TẮT (danh sách số điện thoại rỗng) — lệnh này sẽ gửi "
@@ -542,18 +649,15 @@ def send_club_open_reminder_now(
             "`CLUB_BETA_PHONES` trong club_beta_access.py. Nếu thật sự muốn gửi cho "
             "tất cả, chạy lại với force=1."
         )
-
     if not period_id:
         frappe.throw("Thiếu period_id")
     if not frappe.db.exists(DT_PERIOD, period_id):
         frappe.throw("Không tìm thấy đợt đăng ký")
 
-    frappe.db.set_value(DT_PERIOD, period_id, "open_reminder_sent", 0)
+    frappe.db.set_value(DT_PERIOD, period_id, KINDS[kind]["flag"], 0)
     frappe.db.commit()
-    # Trả về KẾT QUẢ THẬT, không phải `{"ok": True}`: lần trước lệnh này báo
-    # thành công trong khi không một thông báo nào được tạo — `ok` chỉ có nghĩa
-    # "không ném exception", vô dụng đúng lúc cần biết nhất.
-    outcome = _send_for_period(
-        period_id, cint(minutes_before) or DEFAULT_MINUTES_BEFORE, now_datetime()
-    )
-    return {"period_id": period_id, **(outcome or {})}
+
+    # Trả về KẾT QUẢ THẬT, không phải `{"ok": True}`: `ok` chỉ có nghĩa "không
+    # ném exception", vô dụng đúng lúc cần biết nhất.
+    outcome = _send_for_period(period_id, kind, now_datetime())
+    return {"period_id": period_id, "kind": kind, **(outcome or {})}

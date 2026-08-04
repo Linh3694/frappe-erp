@@ -25,6 +25,8 @@
   "status",
   "activity_days",
   "open_reminder_sent",
+  "close_reminder_sent",
+  "closed_notice_sent",
   "display_timeline_section",
   "display_start_datetime",
   "column_break_display",
@@ -109,6 +111,22 @@
    "default": "0",
    "read_only": 1,
    "description": "Hệ thống tự đặt sau khi gửi thông báo nhắc trước giờ mở đăng ký."
+  },
+  {
+   "fieldname": "close_reminder_sent",
+   "fieldtype": "Check",
+   "label": "Đã gửi nhắc sắp đóng cổng",
+   "default": "0",
+   "read_only": 1,
+   "description": "Hệ thống tự đặt sau khi gửi thông báo nhắc trước giờ đóng đăng ký."
+  },
+  {
+   "fieldname": "closed_notice_sent",
+   "fieldtype": "Check",
+   "label": "Đã gửi thông báo đóng cổng",
+   "default": "0",
+   "read_only": 1,
+   "description": "Hệ thống tự đặt sau khi gửi thông báo đã đóng đăng ký."
   },
   {
    "fieldname": "display_timeline_section",
