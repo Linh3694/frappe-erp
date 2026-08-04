@@ -67,8 +67,8 @@ FEATURE_FIELDS = [
 	"feat_finance", "feat_procurement",
 	"feat_parent_portal", "feat_social_feed", "feat_chat", "feat_news",
 	"feat_lms", "feat_crm_admission", "feat_ai_assistant",
-	"feat_it_inventory", "feat_monitoring",
+	"feat_it_inventory",
 ]
 
 DEFAULT_FEATURES = {name: True for name in FEATURE_FIELDS}
-DEFAULT_FEATURES.update({"feat_lms": False, "feat_ai_assistant": False, "feat_monitoring": False})
+DEFAULT_FEATURES.update({"feat_lms": False, "feat_ai_assistant": False})
