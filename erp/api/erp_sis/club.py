@@ -1029,8 +1029,12 @@ def get_club_registrations():
         conditions = ["r.period_id = %(period_id)s"]
         values = {"period_id": period_id}
 
+        # `subject_id` lọc theo MÔN (gộp mọi thứ mà môn đó mở); `offering_id` lọc
+        # đúng một buổi. Cột `subject_id` được denormalize sẵn trên dòng đăng ký
+        # nên không phải JOIN sang offering.
         for key, column in (
             ("offering_id", "r.offering_id"),
+            ("subject_id", "r.subject_id"),
             ("education_grade_id", "r.education_grade_id"),
             ("day_of_week", "r.day_of_week"),
             ("class_id", "r.class_id"),
