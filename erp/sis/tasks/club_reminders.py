@@ -121,7 +121,7 @@ def _fit_body(lead, tail, max_length=MAX_BODY_LENGTH):
     tên 200 ký tự vẫn vượt ngưỡng sau khi đã bỏ câu cuối. Thà mình cắt còn hơn
     để thiết bị cắt ở chỗ ngẫu nhiên.
     """
-    full = f"{lead} {tail}"
+    full = f"{lead} {tail}".strip() if tail else lead
     if len(full) <= max_length:
         return full
     if len(lead) <= max_length:
@@ -156,14 +156,9 @@ def _reminder_text(period, kind, now):
         return (
             {"vi": "Đã đóng đăng ký CLB", "en": "Club Registration Closed"},
             {
-                "vi": _fit_body(
-                    f"{title_vn} đã đóng đăng ký.",
-                    "Phụ huynh xem lại các CLB con đã đăng ký tại Parent Portal.",
-                ),
-                "en": _fit_body(
-                    f"{title_en} registration has closed.",
-                    "View your child's registered clubs on Parent Portal.",
-                ),
+                # Cổng đã đóng thì không còn việc gì để giục — chỉ một câu thông báo.
+                "vi": _fit_body(f"{title_vn} đã đóng đăng ký.", ""),
+                "en": _fit_body(f"{title_en} registration has closed.", ""),
             },
         )
 
@@ -176,11 +171,11 @@ def _reminder_text(period, kind, now):
             {
                 "vi": _fit_body(
                     f"{title_vn} sẽ đóng đăng ký sau {_humanize(remaining, 'vi')} nữa.",
-                    "Phụ huynh nhanh tay bấm để không bỏ lỡ!",
+                    "Phụ huynh vui lòng hoàn thiện đăng ký cho con.",
                 ),
                 "en": _fit_body(
                     f"{title_en} registration closes in {_humanize(remaining, 'en')}.",
-                    "Tap now so you don't miss out!",
+                    "Please complete your child's registration.",
                 ),
             },
         )
