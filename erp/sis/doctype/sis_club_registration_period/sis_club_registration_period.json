@@ -23,6 +23,7 @@
   "column_break_basic",
   "school_year_id",
   "status",
+  "activity_days",
   "display_timeline_section",
   "display_start_datetime",
   "column_break_display",
@@ -92,6 +93,13 @@
    "reqd": 1,
    "in_list_view": 1,
    "description": "Draft: Nháp, Open: Đang mở, Closed: Đã đóng"
+  },
+  {
+   "fieldname": "activity_days",
+   "fieldtype": "Data",
+   "label": "Ngày sinh hoạt",
+   "length": 64,
+   "description": "Danh sách thứ CLB sinh hoạt trong đợt, dạng CSV: mon,tue,wed,thu,fri,sat. Để trống = cho phép mọi thứ."
   },
   {
    "fieldname": "display_timeline_section",

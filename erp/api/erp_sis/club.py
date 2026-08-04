@@ -12,6 +12,7 @@ import json
 
 import frappe
 
+from erp.sis.utils.club_days import days_to_csv, normalize_days
 from erp.sis.utils.club_registration import (
     DAY_LABELS_EN,
     DAY_LABELS_VN,
@@ -44,6 +45,7 @@ PERIOD_WRITE_FIELDS = [
     "title_en",
     "school_year_id",
     "status",
+    "activity_days",
     "display_start_datetime",
     "display_end_datetime",
     "registration_start_datetime",
@@ -315,6 +317,12 @@ def get_club_period():
         data["school_year_name"] = frappe.db.get_value(
             "SIS School Year", doc.school_year_id, "title_vn"
         )
+        # Trả về DANH SÁCH, không phải CSV thô: FE dựng cột và checkbox từ đây.
+        # `activity_days_configured` phân biệt "chưa cấu hình" (hiện đủ 6 thứ)
+        # với "đã chọn đủ 6 thứ" — hai trạng thái này trông giống nhau ở
+        # `activity_days` nhưng khác nhau khi hiển thị trạng thái form.
+        data["activity_days"] = doc.get_activity_days()
+        data["activity_days_configured"] = bool(normalize_days(doc.get("activity_days")))
         data["attachments"] = [
             {
                 "name": a.name,
@@ -338,7 +346,11 @@ def get_club_period():
 def _write_period(doc, data):
     for field in PERIOD_WRITE_FIELDS:
         if field in data:
-            doc.set(field, data.get(field))
+            # API nói chuyện bằng danh sách, DB lưu CSV — quy đổi ở đúng một chỗ.
+            value = (
+                days_to_csv(data.get(field)) if field == "activity_days" else data.get(field)
+            )
+            doc.set(field, value)
 
     if "attachments" in data:
         doc.set("attachments", [])
@@ -662,18 +674,28 @@ def update_club_subject_intro():
                     code="NOT_A_CLUB_SUBJECT",
                 )
 
-        doc = frappe.get_doc("SIS Subject", subject_id)
-        for field in SUBJECT_INTRO_FIELDS:
-            if field in data:
-                doc.set(field, data.get(field))
-        doc.flags.ignore_permissions = True
-        doc.save()
+        updates = {f: data.get(f) for f in SUBJECT_INTRO_FIELDS if f in data}
+        if not updates:
+            return validation_error_response(
+                "Không có nội dung nào để lưu",
+                {"club_short_description_vn": ["Bắt buộc"]},
+            )
+
+        # Ghi thẳng cột thay vì `doc.save()`.
+        #
+        # `SISSubject.validate()` bắt buộc phải có `timetable_subject_id` VÀ
+        # `actual_subject_id` — hai ràng buộc sinh ra cho môn học thuật (map
+        # import Excel, phân công GV, học bạ). Môn CLB thường không có
+        # `actual_subject_id`, nên `doc.save()` sẽ throw "Actual Subject is
+        # required" và không bao giờ lưu được ảnh/mô tả. Ba trường này thuần mô
+        # tả, không đụng tới business state, nên vá cột là đúng phạm vi.
+        frappe.db.set_value("SIS Subject", subject_id, updates, update_modified=True)
         frappe.db.commit()
 
-        return single_item_response(
-            {f: doc.get(f) for f in ["name", *SUBJECT_INTRO_FIELDS]},
-            "Đã lưu giới thiệu môn câu lạc bộ",
+        saved = frappe.db.get_value(
+            "SIS Subject", subject_id, ["name", *SUBJECT_INTRO_FIELDS], as_dict=True
         )
+        return single_item_response(saved, "Đã lưu giới thiệu môn câu lạc bộ")
     except frappe.ValidationError as e:
         frappe.db.rollback()
         return error_response(str(e), code="VALIDATION_ERROR")
@@ -951,9 +973,11 @@ def get_schedule_matrix():
 
         return success_response(
             data={
+                # Chỉ các thứ đợt này sinh hoạt. Đợt chưa cấu hình thì
+                # `get_activity_days()` trả đủ sáu thứ như trước.
                 "days": [
                     {"key": d, "label_vn": DAY_LABELS_VN[d], "label_en": DAY_LABELS_EN[d]}
-                    for d in DAY_ORDER
+                    for d in frappe.get_cached_doc(DT_PERIOD, period_id).get_activity_days()
                 ],
                 "stages": stages,
                 "cells": cells,

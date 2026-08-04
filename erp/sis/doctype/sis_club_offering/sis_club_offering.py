@@ -5,23 +5,7 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import now_datetime
 
-DAY_LABELS_VN = {
-    "mon": "Thứ 2",
-    "tue": "Thứ 3",
-    "wed": "Thứ 4",
-    "thu": "Thứ 5",
-    "fri": "Thứ 6",
-    "sat": "Thứ 7",
-}
-
-DAY_LABELS_EN = {
-    "mon": "Monday",
-    "tue": "Tuesday",
-    "wed": "Wednesday",
-    "thu": "Thursday",
-    "fri": "Friday",
-    "sat": "Saturday",
-}
+from erp.sis.utils.club_days import DAY_LABELS_VN, format_days_vn
 
 
 class SISClubOffering(Document):
@@ -50,7 +34,29 @@ class SISClubOffering(Document):
         self.resolve_titles()
         self.validate_capacity()
         self.validate_grades()
+        self.validate_day_allowed()
         self.validate_unique_subject_day()
+
+    def validate_day_allowed(self):
+        """
+        Thứ của buổi phải nằm trong «ngày sinh hoạt» của đợt.
+
+        Enum `day_of_week` mở cả sáu thứ cho mọi đợt; ràng buộc hẹp hơn là của
+        TỪNG đợt nên không diễn đạt được ở tầng doctype, phải kiểm ở đây. Đợt để
+        trống cấu hình thì `get_activity_days()` trả đủ sáu thứ -> không chặn gì.
+        """
+        if not (self.period_id and self.day_of_week):
+            return
+
+        allowed = frappe.get_cached_doc(
+            "SIS Club Registration Period", self.period_id
+        ).get_activity_days()
+        if self.day_of_week not in allowed:
+            frappe.throw(
+                f"Đợt này không sinh hoạt vào {DAY_LABELS_VN.get(self.day_of_week, self.day_of_week)}. "
+                f"Các thứ đang mở: {format_days_vn(allowed)}. "
+                f"Sửa ở tab «Thông tin» của đợt nếu muốn thêm thứ."
+            )
 
     def validate_subject_is_club(self):
         """

@@ -5,6 +5,13 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import now_datetime, get_datetime
 
+from erp.sis.utils.club_days import (
+    DAY_ORDER,
+    days_to_csv,
+    format_days_vn,
+    normalize_days,
+)
+
 
 class SISClubRegistrationPeriod(Document):
     """
@@ -26,8 +33,62 @@ class SISClubRegistrationPeriod(Document):
 
     def before_save(self):
         self.updated_at = now_datetime()
+        self.normalize_activity_days()
         self.validate_timelines()
         self.validate_single_open_period()
+        self.validate_activity_days_cover_offerings()
+
+    # ------------------------------------------------------------------
+    # Ngày sinh hoạt
+    # ------------------------------------------------------------------
+
+    def normalize_activity_days(self):
+        """
+        Chuẩn hoá về CSV đúng thứ tự tuần, bỏ trùng và bỏ giá trị lạ.
+
+        Lưu CSV thay vì child table: tối đa sáu token cố định, mà child table thì
+        Frappe xoá và tạo lại toàn bộ dòng con sau mỗi `parent.save()` — thừa
+        rủi ro cho một danh sách bé thế này.
+        """
+        # `self.get(...)` chứ không phải `self.activity_days`: giữa lúc deploy code
+        # và lúc chạy migrate thì field chưa có trong meta, truy cập thẳng sẽ
+        # AttributeError và làm hỏng MỌI thao tác lưu đợt.
+        self.activity_days = days_to_csv(self.get("activity_days"))
+
+    def get_activity_days(self):
+        """
+        Các thứ đợt này cho phép mở buổi.
+
+        Để TRỐNG nghĩa là chưa cấu hình -> cho phép mọi thứ. Nhờ vậy các đợt tạo
+        trước khi có trường này vẫn chạy nguyên như cũ, không cần patch backfill.
+        """
+        days = normalize_days(self.get("activity_days"))
+        return days or list(DAY_ORDER)
+
+    def validate_activity_days_cover_offerings(self):
+        """
+        Không cho bỏ một thứ đang có buổi.
+
+        Nếu cho qua thì buổi đó thành mồ côi: bảng cấu hình không còn cột để hiện
+        nó, nhưng phụ huynh vẫn đăng ký được vì Parent Portal gom theo buổi thật.
+        Sửa được bằng cách xoá buổi trước, nên báo rõ thứ nào đang vướng.
+        """
+        days = normalize_days(self.get("activity_days"))
+        if not days or not self.name:
+            return
+
+        orphan = frappe.get_all(
+            "SIS Club Offering",
+            filters={"period_id": self.name, "day_of_week": ["not in", days]},
+            fields=["day_of_week"],
+            distinct=True,
+            pluck="day_of_week",
+        )
+        if orphan:
+            frappe.throw(
+                f"Không thể bỏ {format_days_vn(orphan)} khỏi ngày sinh hoạt vì đợt "
+                f"đang có môn mở vào những thứ đó. Hãy gỡ các buổi đó ở tab «Môn CLB» trước."
+            )
 
     def validate_timelines(self):
         """Kiểm tra hai khung thời gian và quan hệ giữa chúng."""

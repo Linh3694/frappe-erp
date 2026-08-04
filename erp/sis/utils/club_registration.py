@@ -41,6 +41,8 @@ import time
 import frappe
 from frappe.utils import now_datetime
 
+from erp.sis.utils import club_days
+
 DT_PERIOD = "SIS Club Registration Period"
 DT_OFFERING = "SIS Club Offering"
 DT_REGISTRATION = "SIS Club Registration"
@@ -48,25 +50,11 @@ DT_REGISTRATION = "SIS Club Registration"
 MAX_LOCK_ATTEMPTS = 3
 LOCK_WAIT_TIMEOUT_SECONDS = 10
 
-DAY_LABELS_VN = {
-    "mon": "Thứ 2",
-    "tue": "Thứ 3",
-    "wed": "Thứ 4",
-    "thu": "Thứ 5",
-    "fri": "Thứ 6",
-    "sat": "Thứ 7",
-}
-
-DAY_LABELS_EN = {
-    "mon": "Monday",
-    "tue": "Tuesday",
-    "wed": "Wednesday",
-    "thu": "Thursday",
-    "fri": "Friday",
-    "sat": "Saturday",
-}
-
-DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat"]
+# Re-export: nguồn sự thật nằm ở `club_days`, giữ tên ở đây để các module đang
+# `from ...club_registration import DAY_ORDER` không phải đổi import.
+DAY_LABELS_EN = club_days.DAY_LABELS_EN
+DAY_LABELS_VN = club_days.DAY_LABELS_VN
+DAY_ORDER = club_days.DAY_ORDER
 
 
 class ClubRegError(Exception):
