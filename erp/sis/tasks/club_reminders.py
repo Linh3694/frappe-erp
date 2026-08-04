@@ -338,11 +338,25 @@ def _send_for_period(period_name, kind, now):
         f"Đợt {period_name}: {len(student_ids)} học sinh đủ điều kiện nhưng "
         f"KHÔNG tạo được thông báo nào.\n\nPhản hồi:\n{result}",
     )
+    # Phân biệt "bị debounce nuốt" với "insert hỏng": hai cái này cùng cho
+    # success_count = 0 nhưng cách xử lý ngược nhau — một cái chờ 60 giây rồi
+    # chạy lại là xong, một cái phải sửa code. Nhánh debounce không có `results`
+    # nên `errors` rỗng; chỉ nhìn `errors` thì không tài nào đoán ra.
+    skipped = cint(result.get("skipped_count")) if isinstance(result, dict) else 0
+    message = (result or {}).get("message") or ""
+    debounced = skipped > 0 or "debounce" in message.lower()
+
     return {
         "sent": 0,
-        "outcome": "gửi thất bại — xem Error Log 'club_reminders'",
+        "outcome": (
+            "bị chặn trùng (debounce 60 giây) — chờ 1 phút rồi chạy lại"
+            if debounced
+            else "gửi thất bại — xem Error Log 'club_reminders'"
+        ),
         "kind": kind,
         "students": len(student_ids),
+        "skipped": skipped,
+        "server_message": message,
         "errors": [r.get("error") for r in (result or {}).get("results", []) if r.get("error")][:3],
     }
 
