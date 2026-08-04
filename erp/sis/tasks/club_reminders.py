@@ -241,15 +241,34 @@ def debug_club_reminder(period_id=None):
 
 
 @frappe.whitelist()
-def send_club_open_reminder_now(period_id=None, minutes_before=DEFAULT_MINUTES_BEFORE):
+def send_club_open_reminder_now(
+    period_id=None, minutes_before=DEFAULT_MINUTES_BEFORE, force=0
+):
     """
-    Gửi nhắc ngay, không chờ cron — dùng để kiểm thử trên staging.
+    Gửi nhắc NGAY, không chờ cron — dùng để kiểm thử.
 
-    Bỏ qua cửa sổ thời gian và cờ `open_reminder_sent` nhưng VẪN qua cổng chạy
-    thử, nên không thể lỡ tay bắn cho toàn trường.
+    Bỏ qua cửa sổ thời gian và cờ `open_reminder_sent`, nhưng VẪN đi qua cổng
+    chạy thử trong `_send_for_period`.
+
+    CHỐT AN TOÀN: từ chối chạy khi cổng chạy thử đang TẮT (danh sách số rỗng),
+    vì lúc đó `filter_students_for_beta` trả nguyên danh sách và một lệnh gõ tay
+    sẽ đẩy push tới TOÀN BỘ phụ huynh của mọi khối có mở buổi — việc không thu
+    hồi được. Cổng tắt là trạng thái đúng sau khi release, nhưng khi đó thông
+    báo phải do cron gửi theo lịch, không phải do người gõ lệnh.
+    Muốn gửi thật cho tất cả thì truyền `force=1` một cách có chủ đích.
     """
+    from erp.api.parent_portal.club_beta_access import beta_gate_enabled
+
     if not frappe.has_permission(DT_PERIOD, "write"):
         frappe.throw("Không có quyền")
+
+    if not cint(force) and not beta_gate_enabled():
+        frappe.throw(
+            "Cổng chạy thử đang TẮT (danh sách số điện thoại rỗng) — lệnh này sẽ gửi "
+            "cho TẤT CẢ phụ huynh. Kiểm `club_beta_phones` trong site_config.json và "
+            "`CLUB_BETA_PHONES` trong club_beta_access.py. Nếu thật sự muốn gửi cho "
+            "tất cả, chạy lại với force=1."
+        )
 
     if not period_id:
         frappe.throw("Thiếu period_id")
