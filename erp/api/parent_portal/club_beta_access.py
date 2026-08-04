@@ -24,7 +24,12 @@ import frappe
 #: Số điện thoại được phép chạy thử. RỖNG = mở cho tất cả (giống bản web).
 #: Có thể ghi đè bằng site_config.json để đổi người test mà không cần deploy:
 #:     "club_beta_phones": ["0376412589", "0912345678"]
-CLUB_BETA_PHONES: list[str] = []
+#: Lưu ý: site_config ghi đè HOÀN TOÀN danh sách dưới đây, không cộng dồn.
+CLUB_BETA_PHONES: list[str] = [
+    "0376412589",
+    "0378881694",
+    "0976881749",
+]
 
 _SITE_CONFIG_KEY = "club_beta_phones"
 

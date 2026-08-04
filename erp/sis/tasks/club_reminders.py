@@ -24,13 +24,32 @@ DT_OFFERING = "SIS Club Offering"
 DEFAULT_MINUTES_BEFORE = 15
 
 
-def _eligible_student_ids(period_name):
+def _eligible_student_ids(period):
     """
     Học sinh đăng ký được: đang học ở một lớp thuộc khối mà đợt có mở buổi.
 
     Đi thẳng từ khối -> lớp -> học sinh bằng một query thay vì gọi
     `_get_students_by_grade` cho từng khối: một đợt có thể phủ cả chục khối.
+
+    BẮT BUỘC lọc theo năm học của đợt: khối "Khối 1" tồn tại ở mọi năm, không lọc
+    thì lớp của các năm cũ cũng khớp và ta nhắc cả học sinh đã lên lớp hoặc đã ra
+    trường. Lọc thêm campus khi đợt có ràng buộc campus.
     """
+    conditions = [
+        "o.period_id = %(period_id)s",
+        "o.status = 'active'",
+        "cs.student_id IS NOT NULL",
+        "c.school_year_id = %(school_year_id)s",
+    ]
+    values = {
+        "period_id": period.name,
+        "offering_dt": DT_OFFERING,
+        "school_year_id": period.school_year_id,
+    }
+    if period.campus_id:
+        conditions.append("c.campus_id = %(campus_id)s")
+        values["campus_id"] = period.campus_id
+
     rows = frappe.db.sql(
         f"""
         SELECT DISTINCT cs.student_id
@@ -39,11 +58,9 @@ def _eligible_student_ids(period_name):
                 ON g.parent = o.name AND g.parenttype = %(offering_dt)s
         INNER JOIN `tabSIS Class` c ON c.education_grade = g.education_grade_id
         INNER JOIN `tabSIS Class Student` cs ON cs.class_id = c.name
-        WHERE o.period_id = %(period_id)s
-          AND o.status = 'active'
-          AND cs.student_id IS NOT NULL
+        WHERE {' AND '.join(conditions)}
         """,
-        {"period_id": period_name, "offering_dt": DT_OFFERING},
+        values,
         as_dict=True,
     )
     return [r["student_id"] for r in rows if r.get("student_id")]
@@ -112,7 +129,7 @@ def _send_for_period(period_name, minutes_before, now):
     if period.display_start_datetime and get_datetime(period.display_start_datetime) > now:
         return
 
-    student_ids = _eligible_student_ids(period_name)
+    student_ids = _eligible_student_ids(period)
     if not student_ids:
         # Chưa khai buổi nào / chưa xếp lớp -> không có ai để nhắc. Đốt cờ luôn,
         # nếu không mỗi 5 phút lại quét lại một đợt vĩnh viễn rỗng.
