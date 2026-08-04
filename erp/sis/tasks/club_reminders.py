@@ -298,8 +298,13 @@ def _send_for_period(period_name, kind, now):
             # `timestamp` BẮT BUỘC phải có: `send_bulk_parent_notifications` dựng
             # khoá chống trùng từ `data["timestamp"]`. Thiếu nó thì khoá là hằng
             # số và mọi lần gửi sau cho cùng nhóm học sinh đều bị nuốt im lặng.
-            # Có `kind` trong khoá để ba mốc không đè lên nhau.
-            "timestamp": f"{kind}:{now}",
+            #
+            # PHẢI là datetime THUẦN — cùng giá trị này còn được ghi thẳng vào
+            # cột `event_timestamp` (kiểu Datetime) của ERP Notification, thêm
+            # tiền tố gì vào là MySQL từ chối cả bản ghi.
+            # Ba mốc không cần phân biệt trong khoá: chúng cách nhau hàng chục
+            # phút theo thiết kế, không thể rơi vào cùng một phút.
+            "timestamp": str(now),
             # Điều hướng: web dùng path, app map sang route riêng.
             "url": "/club",
         },
