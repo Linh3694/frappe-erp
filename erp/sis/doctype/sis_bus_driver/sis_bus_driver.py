@@ -10,18 +10,12 @@ class SISBusDriver(Document):
 		self.validate_unique_fields()
 
 	def validate_unique_fields(self):
-		"""Validate unique fields"""
+		"""CCCD là định danh duy nhất; số điện thoại được phép trùng (nhiều tài xế
+		cùng nhà thầu dùng chung một số liên lạc)."""
 		if self.citizen_id:
 			if frappe.db.exists("SIS Bus Driver", {
 				"citizen_id": self.citizen_id,
 				"name": ("!=", self.name)
 			}):
 				frappe.throw("Số CCCD đã tồn tại")
-
-		if self.phone_number:
-			if frappe.db.exists("SIS Bus Driver", {
-				"phone_number": self.phone_number,
-				"name": ("!=", self.name)
-			}):
-				frappe.throw("Số điện thoại đã tồn tại")
 

@@ -26,6 +26,7 @@ from erp.sis.utils.club_registration import (
 )
 from erp.utils.api_response import (
     error_response,
+    forbidden_response,
     list_response,
     not_found_response,
     paginated_response,
@@ -112,6 +113,22 @@ def _as_list(value):
 
 def _campus():
     return get_current_campus_from_context() or "campus-1"
+
+
+def _can_write(doctype):
+    """
+    Chốt quyền ghi cho các endpoint KHÔNG đi qua kiểm quyền của Frappe.
+
+    Đường ghi đăng ký (`club_registration.py`) và phần giới thiệu môn đều đặt
+    `ignore_permissions` / `frappe.db.set_value` — bắt buộc, vì cùng đường đó
+    phục vụ cả Parent Portal (role Parent chỉ có `read`). Hệ quả: nếu không
+    kiểm ở đây thì role chỉ-đọc (SIS BOD) vẫn huỷ/chuyển/đăng ký hộ được qua
+    API dù màn hình đã giấu nút.
+
+    Kiểm theo permission của doctype, không hard-code tên role: đổi phân quyền
+    trong .json là endpoint đổi theo.
+    """
+    return bool(frappe.has_permission(doctype, ptype="write"))
 
 
 def _named_search(fields, query, prefix):
@@ -660,6 +677,9 @@ def update_club_subject_intro():
     để không ai vô tình gắn nội dung marketing vào môn học thuật.
     """
     try:
+        if not _can_write(DT_OFFERING):
+            return forbidden_response("Bạn chỉ có quyền xem câu lạc bộ")
+
         data = _data()
         subject_id = data.get("subject_id")
         if not subject_id:
@@ -1150,6 +1170,9 @@ def get_club_registration_stats():
 def cancel_club_registration():
     """Nhà trường huỷ một đăng ký. Bắt buộc có lý do để giữ vết xử lý."""
     try:
+        if not _can_write(DT_REGISTRATION):
+            return forbidden_response("Bạn chỉ có quyền xem đăng ký câu lạc bộ")
+
         registration_id = _param("registration_id")
         reason = _param("reason")
         if not registration_id:
@@ -1173,6 +1196,9 @@ def cancel_club_registration():
 def move_club_registration():
     """Nhà trường chuyển một đăng ký sang môn khác (kiểm lại slot + 2 luật)."""
     try:
+        if not _can_write(DT_REGISTRATION):
+            return forbidden_response("Bạn chỉ có quyền xem đăng ký câu lạc bộ")
+
         registration_id = _param("registration_id")
         target_offering_id = _param("target_offering_id")
         reason = _param("reason")
@@ -1201,6 +1227,9 @@ def staff_create_registration():
     lượng / một môn mỗi thứ / không trùng môn thì VẪN áp dụng đầy đủ.
     """
     try:
+        if not _can_write(DT_REGISTRATION):
+            return forbidden_response("Bạn chỉ có quyền xem đăng ký câu lạc bộ")
+
         data = _data()
         period_id = data.get("period_id")
         student_id = data.get("student_id")
@@ -1249,6 +1278,9 @@ def staff_create_registration():
 def recalculate_club_counts():
     """Sửa chữa registered_count nếu có ai đó sửa dữ liệu ngoài luồng."""
     try:
+        if not _can_write(DT_OFFERING):
+            return forbidden_response("Bạn chỉ có quyền xem câu lạc bộ")
+
         period_id = _param("period_id")
         if not period_id:
             return validation_error_response("Thiếu period_id", {"period_id": ["Bắt buộc"]})
