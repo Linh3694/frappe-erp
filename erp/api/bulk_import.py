@@ -978,7 +978,28 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                         row_data.pop("timetable_subject_id", None)
                 else:
                     raise frappe.ValidationError(f"[SIS Subject] Không thể tìm thấy Timetable Subject: '{timetable_subject_name}' cho campus {campus_id}")
-                    
+
+            # Loại môn học: 'academic' (mặc định) hoặc 'club'.
+            # Header cột đã được label_map nhận diện sẵn (cả 'subject_type' lẫn nhãn
+            # 'Loại môn học'), ở đây chỉ chuẩn hoá GIÁ TRỊ vì người dùng gõ tay tiếng
+            # Việt trong Excel. Bỏ trống -> academic, giữ nguyên hành vi file cũ.
+            from erp.api.erp_sis.subject import _normalize_subject_type
+
+            subject_type_value = None
+            for key in ["subject_type", "Subject Type", "loại môn học", "Loại môn học"]:
+                if key in row_data and row_data[key] is not None and str(row_data[key]).strip():
+                    subject_type_value = row_data[key]
+                    break
+
+            doc_data["subject_type"] = _normalize_subject_type(subject_type_value)
+            if subject_type_value and doc_data["subject_type"] == "academic":
+                normalized_input = " ".join(str(subject_type_value).strip().lower().split())
+                if normalized_input not in ("academic", "học thuật", "hoc thuat", "môn học thuật", "mon hoc thuat"):
+                    frappe.logger().warning(
+                        f"Row {row_num} - [SIS Subject] Loại môn học '{subject_type_value}' không hợp lệ, "
+                        f"dùng mặc định 'academic'"
+                    )
+
         elif doctype == "SIS Actual Subject":
             
             # Handle curriculum lookup
@@ -1916,6 +1937,13 @@ def _process_single_record(job, row_data, row_num, update_if_exists, dry_run):
                 "homeroom_teacher", "vice_homeroom_teacher", "room",  # Resolved above from Excel codes -> docname
                 "enrollment_status"  # CRM Student: field he thong, suy tu CRM Lead — khong cho Excel ghi de
             ]
+            if doctype == "SIS Subject":
+                # Đã chuẩn hoá ở khối transform phía trên ("Câu lạc bộ" -> "club").
+                # Không loại ở đây thì vòng lặp bên dưới ghi đè lại bằng CHUỖI THÔ
+                # trong Excel, và giá trị đó không thuộc Select options.
+                # Chỉ loại cho SIS Subject: `subject_type` còn là field của
+                # SIS Timetable Rule và SIS Report Card Score Config với nghĩa khác.
+                excluded_fields.append("subject_type")
             for field in meta.fields:
                 if field.fieldname in row_data and field.fieldname not in excluded_fields:
                     # Regular field mapping (skip already processed reference fields)

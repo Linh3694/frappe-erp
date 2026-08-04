@@ -193,11 +193,33 @@ def _subject_type_clause(alias="s", include_club=False):
     return f" AND IFNULL({alias}.subject_type, 'academic') != 'club'"
 
 
+SUBJECT_TYPE_ALIASES = {
+    "club": "club",
+    "clb": "club",
+    "câu lạc bộ": "club",
+    "cau lac bo": "club",
+    "caulacbo": "club",
+    "academic": "academic",
+    "học thuật": "academic",
+    "hoc thuat": "academic",
+    "môn học thuật": "academic",
+    "mon hoc thuat": "academic",
+}
+
+
 def _normalize_subject_type(value):
-    """Chỉ nhận 'academic' | 'club'; giá trị lạ/thiếu -> 'academic' (fail-safe:
-    không bao giờ tự động biến một môn thành môn CLB)."""
-    normalized = str(value or "").strip().lower()
-    return "club" if normalized == "club" else "academic"
+    """
+    Chuẩn hoá giá trị `subject_type` về 'academic' | 'club'.
+
+    Nhận cả nhãn tiếng Việt vì cột này còn đến từ file Excel do người dùng gõ tay
+    (import hàng loạt), không chỉ từ dropdown của form.
+
+    Giá trị lạ/thiếu -> 'academic'. Đây là fail-safe có chủ đích: gõ sai chính tả
+    không bao giờ được phép âm thầm biến một môn học thuật thành môn CLB (làm vậy
+    sẽ khiến môn đó biến mất khỏi TKB / phân công GV / học bạ).
+    """
+    normalized = " ".join(str(value or "").strip().lower().split())
+    return SUBJECT_TYPE_ALIASES.get(normalized, "academic")
 
 
 def _to_bool_int(value):
@@ -1260,6 +1282,7 @@ def bulk_import_subjects():
         # Validate required columns
         required_columns = ['title', 'education_stage']
         optional_columns = [
+            'subject_type',
             'timetable_subject',
             'actual_subject',
             'subcurriculum',
@@ -1329,6 +1352,7 @@ def bulk_import_subjects():
                 subcurriculum_name = str(row.get('subcurriculum', '')).strip() if pd.notna(row.get('subcurriculum')) else None
                 room_name = str(row.get('room', '')).strip() if pd.notna(row.get('room')) else None
                 is_homeroom_raw = row.get('is_homeroom')
+                subject_type_raw = row.get('subject_type')
                 allowed_rooms_raw = row.get('allowed_rooms')
                 if allowed_rooms_raw is None and 'allowed_room_ids' in df.columns:
                     allowed_rooms_raw = row.get('allowed_room_ids')
@@ -1345,6 +1369,8 @@ def bulk_import_subjects():
                 if room_name:
                     room_name = ' '.join(room_name.split())
                 is_homeroom = _to_bool_int(is_homeroom_raw) if pd.notna(is_homeroom_raw) else 0
+                # Bỏ trống -> 'academic', giữ nguyên hành vi của file import cũ.
+                subject_type = _normalize_subject_type(subject_type_raw) if pd.notna(subject_type_raw) else 'academic'
                 
                 frappe.logger().info(f"Processing row {index + 2}: Title='{title}', Education Stage='{education_stage}'")
                 
@@ -1480,6 +1506,8 @@ def bulk_import_subjects():
                     subject_data["room_id"] = room_id
                 if _subject_has_field("is_homeroom"):
                     subject_data["is_homeroom"] = is_homeroom
+                if _subject_has_field("subject_type"):
+                    subject_data["subject_type"] = subject_type
                 
                 # Create subject
                 subject_doc = frappe.get_doc(subject_data)
