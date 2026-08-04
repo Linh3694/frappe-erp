@@ -74,9 +74,25 @@ def _cancel_duplicates(group_column: str) -> None:
     )
 
 
+def _commit_before_ddl() -> None:
+    """
+    Chốt transaction trước mỗi câu DDL.
+
+    Frappe chặn `ALTER/CREATE/DROP` khi transaction đang có lệnh ghi chưa commit
+    (`check_implicit_commit` -> ImplicitCommitError), vì DDL trong MySQL gây commit
+    ngầm và sẽ âm thầm chốt luôn phần ghi dang dở. Patch này chạy UPDATE (đồng bộ
+    `active_student_key`, dọn trùng) TRƯỚC khi ALTER nên chắc chắn dính.
+
+    `frappe.db.commit()` đặt lại bộ đếm `transaction_writes = 0` → hết chặn. Đây
+    đúng là cách `frappe.db.add_index()` / `add_unique()` của Frappe tự làm.
+    """
+    frappe.db.commit()
+
+
 def _add_unique(index_name: str, columns_sql: str) -> None:
     if _has_index(index_name):
         return
+    _commit_before_ddl()
     frappe.db.sql(
         f"ALTER TABLE `{TABLE}` ADD UNIQUE INDEX `{index_name}` ({columns_sql})"
     )
@@ -85,6 +101,7 @@ def _add_unique(index_name: str, columns_sql: str) -> None:
 def _add_index(index_name: str, columns_sql: str) -> None:
     if _has_index(index_name):
         return
+    _commit_before_ddl()
     frappe.db.sql(f"ALTER TABLE `{TABLE}` ADD INDEX `{index_name}` ({columns_sql})")
 
 
