@@ -581,54 +581,72 @@ class TimetableImportValidator:
 		return conflicts
 	
 	def _check_subject_assignments(self) -> List[str]:
-		"""Check if Subject Assignment exists for each class-subject pair"""
-		missing = []
+		"""
+		Đối chiếu file TKB với phân công chuyên môn (PCCM), báo trước những tiết sẽ không có
+		giáo viên.
+
+		Kiểm hai thứ, vì cả hai đều làm giáo viên biến mất khỏi TKB mà không có lỗi nào:
+		1. Cặp (lớp, môn) không có phân công nào → tiết tạo ra sẽ trống giáo viên.
+		2. Phân công có giới hạn `weekdays` nhưng TKB xếp môn đó vào thứ khác → tiết ở
+		   những thứ không được phủ sẽ trống giáo viên.
+
+		Trả về danh sách message tiếng Việt, đã gom nhóm để không xả hàng trăm dòng.
+		"""
+		from .helpers import DAY_CODES, normalize_day_of_week, day_label_vn
+
+		def _days_in_order(days) -> List[str]:
+			return sorted(days, key=lambda d: DAY_CODES.index(d) if d in DAY_CODES else 99)
+
+		messages = []
 		campus_id = self.metadata["campus_id"]
-		
-		# Get unique (class, subject) pairs from Excel based on format
-		pairs_list = []
-		
-		if self.format == "row_based":
-			# OLD FORMAT: Get pairs from Lớp and Môn học columns
-			unique_pairs = self.df[["Lớp", "Môn học"]].drop_duplicates()
-			pairs_list = [(row["Lớp"], row["Môn học"]) for _, row in unique_pairs.iterrows()]
-		else:
-			# NEW FORMAT: Extract pairs from class columns
-			class_columns = list(self.cache["classes"].keys())
-			pairs_set = set()
-			for class_title in class_columns:
-				if class_title in self.df.columns:
-					# Get unique subjects for this class
-					unique_subjects = self.df[class_title].dropna().unique()
-					for subject_title in unique_subjects:
-						subj_str = str(subject_title).strip()
-						if subj_str and subj_str != "":
-							pairs_set.add((class_title, subj_str))
-			pairs_list = list(pairs_set)
-		
-		for class_title, subject_title in pairs_list:
-			# Get IDs from cache
+
+		# (class_title, subject_title) -> set(mã thứ) mà file xếp môn đó
+		pair_days: Dict[Tuple[str, str], set] = {}
+
+		def _add_pair(class_title, subject_title, day_value):
+			subj = str(subject_title).strip()
+			if not subj or subj.lower() == "nan":
+				return
+			key = (class_title, subj)
+			pair_days.setdefault(key, set())
+			if day_value is not None and not (isinstance(day_value, float) and pd.isna(day_value)):
+				pair_days[key].add(normalize_day_of_week(day_value))
+
+		has_day_column = "Thứ" in self.df.columns
+
+		class_columns = [c for c in self.cache["classes"].keys() if c in self.df.columns]
+
+		for _, row in self.df.iterrows():
+			day_value = row.get("Thứ") if has_day_column else None
+
+			if self.format == "row_based":
+				if pd.isna(row.get("Lớp")) or pd.isna(row.get("Môn học")):
+					continue
+				_add_pair(row["Lớp"], row["Môn học"], day_value)
+			else:
+				for class_title in class_columns:
+					subject_title = row.get(class_title)
+					if pd.isna(subject_title):
+						continue
+					_add_pair(class_title, subject_title, day_value)
+
+		missing_assignment = []
+		missing_actual_subject = []
+		weekday_gaps = []
+
+		for (class_title, subject_title), days_in_file in sorted(pair_days.items()):
 			class_id = self.cache["classes"].get(class_title)
 			subject_id = self.cache["subjects"].get(subject_title)
-			
+
 			if not class_id or not subject_id:
-				continue  # Already reported as error
-			
-			# Get actual_subject_id from SIS Subject
-			actual_subject_id = frappe.db.get_value(
-				"SIS Subject",
-				subject_id,
-				"actual_subject_id"
-			)
-			
+				continue  # Đã báo ở phần lỗi tham chiếu
+
+			actual_subject_id = frappe.db.get_value("SIS Subject", subject_id, "actual_subject_id")
+
 			if not actual_subject_id:
-				missing.append(
-					f"No Actual Subject linked for '{subject_title}' (class '{class_title}'). "
-					f"Please link SIS Subject to Actual Subject."
-				)
+				missing_actual_subject.append(f"{subject_title} (lớp {class_title})")
 				continue
-			
-			# Check if Subject Assignment exists
+
 			assignment_filters = {
 				"class_id": class_id,
 				"actual_subject_id": actual_subject_id,
@@ -636,19 +654,80 @@ class TimetableImportValidator:
 			}
 			if self.metadata.get("school_year_id"):
 				assignment_filters["school_year_id"] = self.metadata["school_year_id"]
-			assignment = frappe.db.get_value(
+
+			assignments = frappe.get_all(
 				"SIS Subject Assignment",
-				assignment_filters,
-				"name"
+				filters=assignment_filters,
+				fields=["name", "weekdays"],
 			)
-			
-			if not assignment:
-				missing.append(
-					f"No Subject Assignment found for class '{class_title}' + subject '{subject_title}'. "
-					f"Timetable will be created but teacher assignment may be incomplete."
+
+			if not assignments:
+				missing_assignment.append(f"lớp {class_title} – {subject_title}")
+				continue
+
+			if not days_in_file:
+				continue
+
+			# Phân công không giới hạn thứ (weekdays rỗng) = dạy mọi thứ → phủ hết
+			covered = set()
+			for assignment in assignments:
+				weekdays = self._parse_weekdays(assignment.get("weekdays"))
+				if not weekdays:
+					covered = None
+					break
+				covered.update(weekdays)
+
+			if covered is None:
+				continue
+
+			uncovered = _days_in_order(days_in_file - covered)
+			if uncovered:
+				weekday_gaps.append(
+					f"lớp {class_title} – {subject_title}: phân công chỉ áp dụng "
+					f"{', '.join(day_label_vn(d) for d in _days_in_order(covered))} "
+					f"nhưng TKB xếp {', '.join(day_label_vn(d) for d in uncovered)}"
 				)
-		
-		return missing
+
+		if missing_actual_subject:
+			messages.append(
+				f"Môn chưa liên kết Actual Subject nên không tra được phân công: "
+				f"{'; '.join(missing_actual_subject[:15])}"
+				+ (f" ... và {len(missing_actual_subject) - 15} môn khác" if len(missing_actual_subject) > 15 else "")
+			)
+
+		if missing_assignment:
+			messages.append(
+				f"Chưa có phân công chuyên môn cho {len(missing_assignment)} cặp lớp–môn, "
+				f"các tiết này sẽ KHÔNG hiện trên TKB của giáo viên: "
+				f"{'; '.join(missing_assignment[:15])}"
+				+ (f" ... và {len(missing_assignment) - 15} cặp khác" if len(missing_assignment) > 15 else "")
+			)
+
+		if weekday_gaps:
+			messages.append(
+				f"Phân công giới hạn thứ không phủ hết TKB ({len(weekday_gaps)} cặp lớp–môn), "
+				f"tiết ở những thứ còn lại sẽ không có giáo viên: "
+				f"{'; '.join(weekday_gaps[:10])}"
+				+ (f" ... và {len(weekday_gaps) - 10} cặp khác" if len(weekday_gaps) > 10 else "")
+			)
+
+		return messages
+
+	def _parse_weekdays(self, value) -> List[str]:
+		"""Đọc field JSON `weekdays` của phân công; rỗng/hỏng = không giới hạn thứ."""
+		if not value:
+			return []
+
+		if isinstance(value, list):
+			return [str(v) for v in value]
+
+		try:
+			import json as json_module
+
+			parsed = json_module.loads(value)
+			return [str(v) for v in parsed] if isinstance(parsed, list) else []
+		except (ValueError, TypeError):
+			return []
 	
 	# ============= HELPER METHODS =============
 	

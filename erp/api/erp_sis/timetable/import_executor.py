@@ -102,6 +102,10 @@ class TimetableImportExecutor:
 		# Track processed instances for materialized view sync
 		self.processed_instances = {}  # {instance_id: {class_id, start_date, end_date}}
 
+		# Cảnh báo trả về UI (import vẫn chạy nhưng người dùng phải biết): tiết không có
+		# giáo viên, phân công sync hỏng...
+		self.warnings = []
+
 		# Tên cột lớp trong Excel nhưng không tra ra SIS Class (theo campus + năm học)
 		self.unresolved_classes = []
 
@@ -184,13 +188,24 @@ class TimetableImportExecutor:
 			try:
 				self._sync_teachers_from_assignments()
 			except Exception as e:
-				frappe.logger().warning(f"Failed to sync teachers from assignments: {str(e)}")
-				# Don't fail import - teachers can be synced later via resync API
-			
-			# ⚡ FIX (2026-01-05): Bỏ step 4 (_queue_async_sync)
-			# Step 3.5 đã sync Teacher Timetable thành công qua sync_for_rows()
-			# Không cần gọi _queue_async_sync() nữa
-			
+				# KHÔNG nuốt lỗi: bước 3.6 vẫn dựng lại TKB giáo viên từ tiết học nên import
+				# không cần fail ở đây, nhưng người dùng phải thấy phân công đã lỗi.
+				msg = f"Gán giáo viên từ phân công lỗi: {str(e)}"
+				frappe.logger().warning(msg)
+				self.logs.append(f"⚠️ {msg}")
+				self.warnings.append(msg)
+
+			# Step 3.6: Dựng lại SIS Teacher Timetable TỪ CHÍNH tiết học vừa import.
+			# Bước 3.5 xóa sạch entries của instance rồi chỉ dựng lại theo đường phân công;
+			# phân công nào sync hỏng (lệch campus/năm học/môn, weekdays không khớp, conflict)
+			# là giáo viên biến mất khỏi TKB cá nhân dù tiết vẫn hiện tên GV ở TKB lớp — lỗi
+			# im lặng, import vẫn báo thành công. Nguồn sự thật phải là instance row + child
+			# table teachers, không phải Subject Assignment.
+			self._rebuild_teacher_timetable_from_rows()
+
+			# Step 3.7: Đối soát — tiết không có giáo viên phải nổi lên UI, không im lặng
+			self._audit_teacher_coverage()
+
 			# Commit transaction
 			frappe.db.commit()
 			
@@ -208,6 +223,8 @@ class TimetableImportExecutor:
 				           f"{self.stats['rows_created']} rows created",
 				"stats": self.stats,
 				"logs": self._get_user_friendly_logs(),
+				# Import xong không có nghĩa là đủ giáo viên — cảnh báo phải lên tới UI
+				"warnings": self.warnings,
 				"detailed_logs": self.logs  # Keep full logs for debugging if needed
 			}
 			
@@ -232,6 +249,7 @@ class TimetableImportExecutor:
 				"success": False,
 				"message": f"Import failed: {str(e)}",
 				"error": str(e),
+				"warnings": self.warnings,
 				# ⚠️ Bắt buộc có key `errors`: execute_import_synchronous() và frontend
 				# (TimetableImportModal.extractImportLists) đều đọc danh sách lỗi ở đây.
 				# Thiếu key này thì lỗi thật bị nuốt, UI chỉ còn message tổng.
@@ -1587,6 +1605,142 @@ class TimetableImportExecutor:
 			frappe.logger().error(error_msg)
 			self.logs.append(f"⚠️ {error_msg}")
 	
+	def _rebuild_teacher_timetable_from_rows(self):
+		"""
+		Dựng lại SIS Teacher Timetable cho các instance vừa import, lấy giáo viên từ
+		instance row + child table `teachers` — KHÔNG đi qua Subject Assignment.
+
+		Vì sao bắt buộc có bước này: `_sync_teachers_from_assignments()` xóa toàn bộ entries
+		của instance (STEP 0) rồi chỉ dựng lại qua `sync_assignment_to_timetable()`. Phân công
+		nào sync thất bại thì giáo viên đó mất sạch tiết trên TKB cá nhân — trong khi TKB lớp
+		vẫn hiện tên vì tên nằm ở child table của row. Import vẫn báo thành công.
+
+		Dựng theo range của CHÍNH instance (đọc lại từ DB vì instance có thể vừa được nới
+		rộng), không phải range của file import: entries đã bị xóa theo `timetable_instance_id`
+		nên dựng theo range file sẽ mất phần nằm ngoài range đó.
+		"""
+		if not self.processed_instances:
+			return
+
+		from .bulk_sync_engine import sync_instance_bulk
+
+		campus_id = self.metadata["campus_id"]
+		total_entries = 0
+
+		self.logs.append("🔄 Đang dựng lại TKB giáo viên từ tiết học vừa import...")
+
+		for instance_id, info in self.processed_instances.items():
+			inst = frappe.db.get_value(
+				"SIS Timetable Instance",
+				instance_id,
+				["class_id", "start_date", "end_date"],
+				as_dict=True
+			)
+
+			if not inst or not inst.start_date or not inst.end_date:
+				raise Exception(
+					f"TKB lớp {info.get('class_id') or instance_id} thiếu khoảng thời gian, "
+					f"không dựng lại được TKB giáo viên"
+				)
+
+			# Xóa sạch trước khi dựng lại: bulk insert không chống trùng
+			# (SIS Teacher Timetable không có unique index) nên chạy đè sẽ nhân đôi tiết.
+			frappe.db.sql("""
+				DELETE FROM `tabSIS Teacher Timetable`
+				WHERE timetable_instance_id = %s
+			""", (instance_id,))
+
+			# sync_instance_bulk parse bằng strptime("%Y-%m-%d") nên phải là ngày thuần,
+			# str() thẳng từ datetime sẽ kèm giờ và ném lỗi.
+			teacher_count, _ = sync_instance_bulk(
+				instance_id=instance_id,
+				class_id=inst.class_id or info.get("class_id"),
+				start_date=str(frappe.utils.getdate(inst.start_date)),
+				end_date=str(frappe.utils.getdate(inst.end_date)),
+				campus_id=campus_id
+			)
+			total_entries += teacher_count
+
+		self.logs.append(
+			f"✅ Synced TKB giáo viên: {total_entries} tiết cho {len(self.processed_instances)} lớp"
+		)
+		frappe.logger().info(
+			f"✅ Rebuilt Teacher Timetable from rows: {total_entries} entries, "
+			f"{len(self.processed_instances)} instances"
+		)
+
+	def _audit_teacher_coverage(self):
+		"""
+		Đối soát sau import: tiết nào chưa có giáo viên thì phải nổi lên UI.
+
+		Trước đây tiết thiếu GV là lỗi hoàn toàn im lặng — người dùng chỉ biết khi giáo viên
+		mở TKB cá nhân thấy trống rồi báo ngược lại.
+		"""
+		if not self.processed_instances:
+			return
+
+		instance_ids = list(self.processed_instances.keys())
+		placeholders = ','.join(['%s'] * len(instance_ids))
+
+		missing = frappe.db.sql(f"""
+			SELECT
+				COALESCE(c.title, i.class_id) AS class_title,
+				COALESCE(s.title, r.subject_id) AS subject_title,
+				COUNT(*) AS missing_rows
+			FROM `tabSIS Timetable Instance Row` r
+			INNER JOIN `tabSIS Timetable Instance` i ON i.name = r.parent
+			LEFT JOIN `tabSIS Class` c ON c.name = i.class_id
+			LEFT JOIN `tabSIS Subject` s ON s.name = r.subject_id
+			LEFT JOIN `tabSIS Timetable Instance Row Teacher` rt
+				ON rt.parent = r.name AND rt.parentfield = 'teachers'
+			WHERE r.parent IN ({placeholders})
+			  AND rt.name IS NULL
+			GROUP BY class_title, subject_title
+			ORDER BY class_title, subject_title
+		""", tuple(instance_ids), as_dict=True)
+
+		# Rows CÓ giáo viên nhưng không sinh được entry nào ⇒ tầng materialized đứt thật sự
+		rows_with_teacher = frappe.db.sql(f"""
+			SELECT COUNT(DISTINCT r.name) AS cnt
+			FROM `tabSIS Timetable Instance Row` r
+			INNER JOIN `tabSIS Timetable Instance Row Teacher` rt
+				ON rt.parent = r.name AND rt.parentfield = 'teachers'
+			WHERE r.parent IN ({placeholders})
+		""", tuple(instance_ids), as_dict=True)[0].cnt or 0
+
+		synced_entries = frappe.db.sql(f"""
+			SELECT COUNT(*) AS cnt
+			FROM `tabSIS Teacher Timetable`
+			WHERE timetable_instance_id IN ({placeholders})
+		""", tuple(instance_ids), as_dict=True)[0].cnt or 0
+
+		if rows_with_teacher and not synced_entries:
+			raise Exception(
+				f"Đã gán giáo viên cho {rows_with_teacher} tiết nhưng không tạo được bản ghi "
+				f"TKB giáo viên nào — TKB của giáo viên sẽ trống. Import đã được hủy."
+			)
+
+		if missing:
+			total_missing = sum(m.missing_rows for m in missing)
+			details = [
+				f"Lớp {m.class_title} – môn {m.subject_title}: {m.missing_rows} tiết"
+				for m in missing[:20]
+			]
+			if len(missing) > 20:
+				details.append(f"... và {len(missing) - 20} cặp lớp–môn khác")
+
+			self.warnings.append(
+				f"⚠️ {total_missing} tiết chưa có giáo viên (chưa có phân công chuyên môn khớp "
+				f"lớp + môn, hoặc phân công giới hạn thứ khác). Các tiết này sẽ KHÔNG hiện trên "
+				f"TKB của giáo viên: " + "; ".join(details)
+			)
+			self.logs.append(f"⚠️ {total_missing} tiết chưa có giáo viên sau import")
+
+		frappe.logger().info(
+			f"📊 Teacher coverage: {rows_with_teacher} rows có GV, {synced_entries} entries TKB GV, "
+			f"{len(missing)} cặp lớp–môn thiếu GV"
+		)
+
 	def _queue_async_sync(self):
 		"""
 		⚡ SYNC DIRECTLY (not background) to ensure teacher timetable is immediately available.
@@ -1954,50 +2108,15 @@ class TimetableImportExecutor:
 	def _normalize_day_of_week(self, day_str: str) -> str:
 		"""Normalize day of week to lowercase 3-letter code.
 
-		Pandas hay đọc cột Thứ thành float (2.0) → str = '2.0' không khớp map cũ
-		và bị fallback hết về 'mon' (sai cả tuần).
+		Dùng chung helper với import_validator để cảnh báo lúc validate và thứ thực sự
+		được xếp lúc import không bao giờ lệch nhau.
 		"""
-		day_map = {
-			"2": "mon",
-			"3": "tue",
-			"4": "wed",
-			"5": "thu",
-			"6": "fri",
-			"7": "sat",
-			"CN": "sun",
-			"cn": "sun",
-			"Thứ 2": "mon",
-			"Thứ 3": "tue",
-			"Thứ 4": "wed",
-			"Thứ 5": "thu",
-			"Thứ 6": "fri",
-			"Thứ 7": "sat",
-			"Chủ nhật": "sun",
-			"mon": "mon",
-			"tue": "tue",
-			"wed": "wed",
-			"thu": "thu",
-			"fri": "fri",
-			"sat": "sat",
-			"sun": "sun",
-		}
+		from .helpers import normalize_day_of_week
 
 		if day_str is None or (isinstance(day_str, float) and pd.isna(day_str)):
 			return "mon"
 
-		raw = str(day_str).strip()
-		if raw in day_map:
-			return day_map[raw]
-
-		# Chuẩn hóa float/int Excel: 2.0 → "2"
-		try:
-			as_int = str(int(float(raw)))
-			if as_int in day_map:
-				return day_map[as_int]
-		except (TypeError, ValueError):
-			pass
-
-		return day_map.get(raw, "mon")
+		return normalize_day_of_week(day_str)
 	
 	def _get_user_friendly_logs(self) -> List[str]:
 		"""

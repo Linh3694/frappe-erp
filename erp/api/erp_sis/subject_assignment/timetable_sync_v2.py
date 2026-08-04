@@ -117,15 +117,23 @@ def sync_full_year_assignment(assignment, replace_teacher_map: dict = None) -> D
 	debug_info.append(f"📋 Found {len(all_rows)} rows ({pattern_count} pattern, {override_count} override)")
 	
 	# STEP 2: Get ALL assignments for this class + subject (including weekdays)
+	# Lọc theo năm học của chính phân công đang sync để đồng chuẩn với import TKB
+	# (_cache_teacher_assignments / _sync_teachers_from_assignments đều lọc school_year_id).
+	# Không lọc thì phân công năm cũ bị gom vào TKB năm mới, và hai bên hiểu khác nhau.
+	assignment_filters = {
+		"class_id": class_id,
+		"actual_subject_id": actual_subject_id,
+		"campus_id": campus_id,
+		"application_type": "full_year"
+	}
+	school_year_id = getattr(assignment, "school_year_id", None)
+	if school_year_id:
+		assignment_filters["school_year_id"] = school_year_id
+
 	all_assignments = frappe.get_all(
 		"SIS Subject Assignment",
 		fields=["name", "teacher_id", "weekdays"],
-		filters={
-			"class_id": class_id,
-			"actual_subject_id": actual_subject_id,
-			"campus_id": campus_id,
-			"application_type": "full_year"
-		},
+		filters=assignment_filters,
 		order_by="creation asc"
 	)
 	
@@ -853,15 +861,18 @@ def find_all_rows(class_id: str, actual_subject_id: str, campus_id: str) -> List
 		return []
 	
 	# Get instances for this class
+	# ⚡ KHÔNG lọc campus_id: lớp đã thuộc đúng một campus, còn instance thì có bản campus_id
+	# rỗng/lệch. Lọc ở đây làm sync trả "No timetable rows found" và giáo viên biến mất khỏi
+	# TKB. Giữ đồng chuẩn với find_pattern_rows() và get_class_week() — cả hai đều không lọc.
 	instances = frappe.get_all(
 		"SIS Timetable Instance",
-		filters={"class_id": class_id, "campus_id": campus_id},
+		filters={"class_id": class_id},
 		pluck="name"
 	)
-	
+
 	if not instances:
 		frappe.logger().warning(
-			f"find_all_rows: No timetable instances for class={class_id}, campus={campus_id}"
+			f"find_all_rows: No timetable instances for class={class_id}"
 		)
 		return []
 	

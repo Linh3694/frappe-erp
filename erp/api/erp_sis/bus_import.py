@@ -44,6 +44,15 @@ def _resolve_campus() -> str:
     return get_current_campus_from_context() or "campus-1"
 
 
+def _campus_filter(campus_id: str) -> List[Optional[str]]:
+    """Nhận cả bản ghi chưa gán campus.
+
+    Danh mục Bus có bản ghi cũ để trống `campus_id` (xem `get_all_bus_drivers`), lọc chặt
+    theo campus sẽ báo "không tìm thấy" dù bản ghi vẫn nằm đó.
+    """
+    return ["in", [campus_id, None, ""]]
+
+
 def _read_rows(
     file_content: bytes, spec: ImportSpec
 ) -> Tuple[List[str], List[Tuple[int, Dict[str, Any]]]]:
@@ -332,8 +341,19 @@ def _student_row_handler(
 
     route_name = values.get("route_name", "")
     if route_name:
+        # Ưu tiên tuyến của năm học học sinh đang theo — tuyến các năm hay trùng tên
         route_id = frappe.db.get_value(
-            "SIS Bus Route", {"route_name": route_name, "campus_id": campus_id}, "name"
+            "SIS Bus Route",
+            {
+                "route_name": route_name,
+                "campus_id": _campus_filter(campus_id),
+                "school_year_id": student["school_year_id"],
+            },
+            "name",
+        ) or frappe.db.get_value(
+            "SIS Bus Route",
+            {"route_name": route_name, "campus_id": _campus_filter(campus_id)},
+            "name",
         )
         if not route_id:
             return None, f"Dòng {row_num}: không tìm thấy tuyến đường '{route_name}'", False
@@ -362,21 +382,41 @@ def _resolve_school_year(campus_id: str) -> Optional[str]:
 def _route_row_handler(
     values: Dict[str, str], row_num: int, campus_id: str
 ) -> Tuple[Any, Optional[str], bool]:
-    """Dựng payload SIS Bus Route: biển số → xe, mã tài xế/giám sát → nhân sự."""
+    """Dựng payload SIS Bus Route: biển số → xe, CCCD → nhân sự."""
+    school_year_id = _resolve_school_year(campus_id)
+    if not school_year_id:
+        return None, f"Dòng {row_num}: chưa có năm học nào đang hoạt động", False
+
     route_name = values.get("route_name", "")
-    if frappe.db.exists("SIS Bus Route", {"route_name": route_name, "campus_id": campus_id}):
-        return None, f"Dòng {row_num}: tuyến '{route_name}' đã có trong hệ thống", True
+    # Chỉ coi là trùng khi cùng NĂM HỌC — tuyến năm trước thường trùng tên với năm nay
+    if frappe.db.exists(
+        "SIS Bus Route",
+        {
+            "route_name": route_name,
+            "campus_id": _campus_filter(campus_id),
+            "school_year_id": school_year_id,
+        },
+    ):
+        return (
+            None,
+            f"Dòng {row_num}: tuyến '{route_name}' đã có trong năm học này",
+            True,
+        )
 
     license_plate = values.get("license_plate", "")
     vehicle_id = frappe.db.get_value(
-        "SIS Bus Transportation", {"license_plate": license_plate, "campus_id": campus_id}, "name"
+        "SIS Bus Transportation",
+        {"license_plate": license_plate, "campus_id": _campus_filter(campus_id)},
+        "name",
     )
     if not vehicle_id:
         return None, f"Dòng {row_num}: không tìm thấy xe có biển số '{license_plate}'", False
 
     driver_citizen_id = values.get("driver_citizen_id", "")
     driver_id = frappe.db.get_value(
-        "SIS Bus Driver", {"citizen_id": driver_citizen_id, "campus_id": campus_id}, "name"
+        "SIS Bus Driver",
+        {"citizen_id": driver_citizen_id, "campus_id": _campus_filter(campus_id)},
+        "name",
     )
     if not driver_id:
         return None, f"Dòng {row_num}: không tìm thấy tài xế có CCCD '{driver_citizen_id}'", False
@@ -388,7 +428,9 @@ def _route_row_handler(
             monitor_ids.append("")
             continue
         monitor_id = frappe.db.get_value(
-            "SIS Bus Monitor", {"citizen_id": citizen_id, "campus_id": campus_id}, "name"
+            "SIS Bus Monitor",
+            {"citizen_id": citizen_id, "campus_id": _campus_filter(campus_id)},
+            "name",
         )
         if not monitor_id:
             return (
@@ -397,10 +439,6 @@ def _route_row_handler(
                 False,
             )
         monitor_ids.append(monitor_id)
-
-    school_year_id = _resolve_school_year(campus_id)
-    if not school_year_id:
-        return None, f"Dòng {row_num}: chưa có năm học nào đang hoạt động", False
 
     payload: Dict[str, Any] = {
         "route_name": route_name,
@@ -425,12 +463,28 @@ def _route_student_row_handler(
     Cấu hình chung cho cả tuần: nở ra T2–T6; lượt Đón/Trả suy từ việc cột
     'Điểm đón' / 'Điểm trả' có được điền hay không.
     """
+    school_year_id = _resolve_school_year(campus_id)
+    if not school_year_id:
+        return None, f"Dòng {row_num}: chưa có năm học nào đang hoạt động", False
+
     route_name = values.get("route_name", "")
+    # Phải bám năm học đang hoạt động, nếu không học sinh sẽ chui vào tuyến năm trước
+    # (tuyến các năm hay trùng tên nhau)
     route_id = frappe.db.get_value(
-        "SIS Bus Route", {"route_name": route_name, "campus_id": campus_id}, "name"
+        "SIS Bus Route",
+        {
+            "route_name": route_name,
+            "campus_id": _campus_filter(campus_id),
+            "school_year_id": school_year_id,
+        },
+        "name",
     )
     if not route_id:
-        return None, f"Dòng {row_num}: không tìm thấy tuyến đường '{route_name}'", False
+        return (
+            None,
+            f"Dòng {row_num}: không tìm thấy tuyến đường '{route_name}' trong năm học này",
+            False,
+        )
 
     student_code = values.get("student_code", "")
     student = _lookup_student_for_bus(student_code, campus_id)

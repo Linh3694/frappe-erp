@@ -35,6 +35,61 @@ def period_match_key(value) -> str:
     return str(value).strip()
 
 
+DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+DAY_LABELS_VN = {
+    "mon": "Thứ 2",
+    "tue": "Thứ 3",
+    "wed": "Thứ 4",
+    "thu": "Thứ 5",
+    "fri": "Thứ 6",
+    "sat": "Thứ 7",
+    "sun": "Chủ nhật",
+}
+
+_DAY_OF_WEEK_MAP = {
+    "2": "mon", "3": "tue", "4": "wed", "5": "thu", "6": "fri", "7": "sat",
+    "CN": "sun", "cn": "sun",
+    "Thứ 2": "mon", "Thứ 3": "tue", "Thứ 4": "wed", "Thứ 5": "thu",
+    "Thứ 6": "fri", "Thứ 7": "sat", "Chủ nhật": "sun",
+    "mon": "mon", "tue": "tue", "wed": "wed", "thu": "thu",
+    "fri": "fri", "sat": "sat", "sun": "sun",
+}
+
+
+def normalize_day_of_week(day_str, default: str = "mon") -> str:
+    """
+    Chuẩn hoá cột "Thứ" của Excel về mã 3 ký tự.
+
+    Pandas hay đọc cột Thứ thành float (2.0) → str = '2.0' không khớp map thẳng nên phải
+    hạ về int trước, nếu không cả tuần bị fallback về 'mon'.
+
+    Dùng chung cho import_validator và import_executor để hai bên không lệch chuẩn: validator
+    cảnh báo theo thứ này thì executor cũng phải xếp tiết vào đúng thứ đó.
+    """
+    if day_str is None:
+        return default
+
+    raw = str(day_str).strip()
+    if raw in _DAY_OF_WEEK_MAP:
+        return _DAY_OF_WEEK_MAP[raw]
+
+    # Chuẩn hóa float/int Excel: 2.0 → "2"
+    try:
+        as_int = str(int(float(raw)))
+        if as_int in _DAY_OF_WEEK_MAP:
+            return _DAY_OF_WEEK_MAP[as_int]
+    except (TypeError, ValueError):
+        pass
+
+    return default
+
+
+def day_label_vn(day_code: str) -> str:
+    """Nhãn tiếng Việt của mã thứ, để thông báo cho người dùng đọc được."""
+    return DAY_LABELS_VN.get(day_code, day_code)
+
+
 def format_time_for_html(time_value):
     """
     Format time for HTML time input (HH:MM format)
