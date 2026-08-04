@@ -69,19 +69,55 @@ def _eligible_student_ids(period):
     return [r["student_id"] for r in rows if r.get("student_id")]
 
 
-def _reminder_text(period, minutes_before):
+#: Giới hạn độ dài phần nội dung thông báo.
+MAX_BODY_LENGTH = 140
+
+
+def _fit_body(lead, tail, max_length=MAX_BODY_LENGTH):
+    """
+    Ghép câu chính + câu kêu gọi, cắt dần cho vừa `max_length`.
+
+    Ba mức, dừng ở mức đầu tiên vừa:
+      1. đủ cả hai câu
+      2. bỏ câu kêu gọi (đúng yêu cầu nghiệp vụ)
+      3. tên đợt vẫn quá dài -> cắt bớt tên, thêm "…"
+
+    Mức 3 không có trong yêu cầu nhưng cần: câu chính CHỨA tên đợt, nên một cái
+    tên 200 ký tự vẫn vượt ngưỡng sau khi đã bỏ câu cuối. Thà cắt tên còn hơn để
+    thông báo bị chính thiết bị cắt ở chỗ ngẫu nhiên.
+    """
+    full = f"{lead} {tail}"
+    if len(full) <= max_length:
+        return full
+    if len(lead) <= max_length:
+        return lead
+    return lead[: max_length - 1].rstrip() + "…"
+
+
+def _reminder_text(period, now):
+    """
+    Nội dung nhắc.
+
+    Nói SỐ PHÚT CÒN LẠI THẬT, không nói giá trị cấu hình `minutes_before`. Cron
+    chạy 5 phút một lần nên thời điểm bắn rơi bất kỳ đâu trong khoảng 10–15 phút
+    trước giờ mở; in cứng "15 phút" là sai với phần lớn các lần gửi.
+    """
+    reg_start = get_datetime(period.registration_start_datetime)
+    remaining = max(1, int(round((reg_start - now).total_seconds() / 60.0)))
+
     title = {
-        "vi": "Sắp mở đăng ký câu lạc bộ",
-        "en": "Club registration opens soon",
+        "vi": "Mở đăng ký CLB",
+        "en": "Club Registration Opening Soon!",
     }
     body = {
-        "vi": (
-            f"«{period.title_vn}» mở đăng ký sau {minutes_before} phút. "
-            "Vào Parent Portal để xem danh sách câu lạc bộ và giữ chỗ cho con."
+        "vi": _fit_body(
+            f"{period.title_vn} sẽ mở đăng ký sau {remaining} phút nữa.",
+            "Phụ huynh nhanh tay bấm để không bỏ lỡ!",
         ),
-        "en": (
-            f"«{period.title_en or period.title_vn}» opens in {minutes_before} minutes. "
-            "Open Parent Portal to view the clubs and hold a seat for your child."
+        "en": _fit_body(
+            f"{period.title_en or period.title_vn} registration opens in "
+            f"{remaining} minutes.",
+            "Tap now so you don't miss out!",
         ),
     }
     return title, body
@@ -152,7 +188,7 @@ def _send_for_period(period_name, minutes_before, now):
             "eligible_students": eligible_count,
         }
 
-    title, body = _reminder_text(period, minutes_before)
+    title, body = _reminder_text(period, now)
 
     result = send_bulk_parent_notifications(
         recipient_type="club_registration",
@@ -291,6 +327,16 @@ def debug_club_reminder(period_id=None):
         ],
         "mobile_push_tokens": mobile_tokens,
         "web_push_subscriptions": web_subs,
+        # Token Expo lưu theo `frappe.session.user` lúc app gọi register, còn
+        # push thì tìm theo email tổng hợp `{guardian_id}@parent…`. Hai giá trị
+        # này lệch nhau là push mobile im lặng không tới. Liệt kê token mới nhất
+        # để đối chiếu xem nó thật sự nằm dưới user nào.
+        "recent_mobile_tokens": frappe.get_all(
+            "Mobile Device Token",
+            fields=["user", "platform", "app_type", "is_active", "last_seen"],
+            order_by="modified desc",
+            limit=10,
+        ),
     }
 
 
