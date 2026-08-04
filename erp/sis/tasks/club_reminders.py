@@ -130,7 +130,7 @@ def _send_for_period(period_name, minutes_before, now):
     # cờ để lần quét sau thử lại — nhưng nếu tới lúc mở cổng vẫn chưa hiển thị
     # thì đợt rớt khỏi cửa sổ và không nhắc nữa, đúng ý.
     if period.display_start_datetime and get_datetime(period.display_start_datetime) > now:
-        return
+        return {"sent": 0, "outcome": "chưa tới khoảng hiển thị của đợt"}
 
     student_ids = _eligible_student_ids(period)
     if not student_ids:
@@ -138,14 +138,19 @@ def _send_for_period(period_name, minutes_before, now):
         # nếu không mỗi 5 phút lại quét lại một đợt vĩnh viễn rỗng.
         frappe.db.set_value(DT_PERIOD, period_name, "open_reminder_sent", 1)
         frappe.db.commit()
-        return
+        return {"sent": 0, "outcome": "không có học sinh nào đủ điều kiện"}
 
     # Cổng chạy thử — GỠ TRƯỚC KHI RELEASE (xem `club_beta_access`).
+    eligible_count = len(student_ids)
     student_ids = filter_students_for_beta(student_ids)
     if not student_ids:
         # KHÔNG đốt cờ: danh sách chạy thử có thể được bổ sung trước giờ mở, lần
         # quét sau vẫn kịp gửi.
-        return
+        return {
+            "sent": 0,
+            "outcome": "cổng chạy thử loại hết người nhận",
+            "eligible_students": eligible_count,
+        }
 
     title, body = _reminder_text(period, minutes_before)
 
@@ -184,7 +189,12 @@ def _send_for_period(period_name, minutes_before, now):
         frappe.logger().info(
             f"club_reminders: đợt {period_name} -> {len(student_ids)} HS, {sent} thông báo"
         )
-        return
+        return {
+            "sent": sent,
+            "outcome": "đã gửi",
+            "students": len(student_ids),
+            "recipients": result.get("parent_emails"),
+        }
 
     # `frappe.log_error(title, message)` — THAM SỐ ĐẦU LÀ TIÊU ĐỀ, giới hạn 140
     # ký tự và KHÔNG tự cắt: nhét cả phản hồi vào đó thì chính lời ghi log ném
@@ -195,6 +205,12 @@ def _send_for_period(period_name, minutes_before, now):
         f"Đợt {period_name}: {len(student_ids)} học sinh đủ điều kiện nhưng "
         f"KHÔNG tạo được thông báo nào.\n\nPhản hồi:\n{result}",
     )
+    return {
+        "sent": 0,
+        "outcome": "gửi thất bại — xem Error Log 'club_reminders: không tạo được thông báo'",
+        "students": len(student_ids),
+        "errors": [r.get("error") for r in (result or {}).get("results", []) if r.get("error")][:3],
+    }
 
 
 @frappe.whitelist()
@@ -488,5 +504,10 @@ def send_club_open_reminder_now(
 
     frappe.db.set_value(DT_PERIOD, period_id, "open_reminder_sent", 0)
     frappe.db.commit()
-    _send_for_period(period_id, cint(minutes_before) or DEFAULT_MINUTES_BEFORE, now_datetime())
-    return {"ok": True, "period_id": period_id}
+    # Trả về KẾT QUẢ THẬT, không phải `{"ok": True}`: lần trước lệnh này báo
+    # thành công trong khi không một thông báo nào được tạo — `ok` chỉ có nghĩa
+    # "không ném exception", vô dụng đúng lúc cần biết nhất.
+    outcome = _send_for_period(
+        period_id, cint(minutes_before) or DEFAULT_MINUTES_BEFORE, now_datetime()
+    )
+    return {"period_id": period_id, **(outcome or {})}
