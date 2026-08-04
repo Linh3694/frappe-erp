@@ -115,6 +115,18 @@ def _existing_doc_name(spec: ImportSpec, values: Dict[str, str], campus_id: str)
     return frappe.db.get_value(spec.doctype, filters, "name")
 
 
+def _validation_message(ex: Exception) -> Optional[str]:
+    """Câu thông báo của `frappe.throw` trong validate của doctype, đã bỏ thẻ HTML.
+
+    Chỉ nhận ValidationError: lỗi hệ thống (SQL, thiếu quyền, lập trình) vẫn phải rơi
+    xuống nhánh generic + log_error, không đưa nguyên văn ra cho người dùng.
+    """
+    if not isinstance(ex, frappe.exceptions.ValidationError):
+        return None
+    message = frappe.utils.strip_html(str(ex) or "").strip()
+    return message or None
+
+
 def _run_import(
     spec: ImportSpec,
     rows: List[Tuple[int, Dict[str, Any]]],
@@ -174,8 +186,13 @@ def _run_import(
         except Exception as ex:  # noqa: BLE001 — gom mọi lỗi tạo doc về mức dòng
             frappe.db.rollback(save_point=save_point)
             duplicate_message = friendly_unique_error(str(ex), spec, row_num)
+            validation_message = _validation_message(ex)
             if duplicate_message:
                 skipped.append({"row": row_num, "error": duplicate_message})
+            elif validation_message:
+                # Doctype tự chặn bằng frappe.throw — câu tiếng Việt đó nêu đúng lý do,
+                # hữu ích hơn nhiều so với câu generic bên dưới
+                errors.append({"row": row_num, "error": f"Dòng {row_num}: {validation_message}"})
             else:
                 frappe.log_error(
                     title=f"Lỗi import Excel {spec.doctype}, dòng {row_num}",

@@ -46,6 +46,17 @@ class SISBusRoute(Document):
 		if duplicate:
 			frappe.throw(f"Mã xe '{code}' đã được dùng ở tuyến {duplicate[0].route_name} trong cùng cơ sở và năm học")
 
+	def _school_year_scope(self, alias=""):
+		"""Điều kiện SQL giới hạn xung đột tài nguyên trong cùng năm học.
+
+		Trả ('', []) khi tuyến chưa gán năm học — bản ghi cũ trước khi có trường này vẫn
+		được so toàn cục như trước, không nới lỏng ngầm.
+		"""
+		if not self.school_year_id:
+			return "", []
+		prefix = f"{alias}." if alias else ""
+		return f"AND {prefix}school_year_id = %s", [self.school_year_id]
+
 	def validate_references_exist(self):
 		"""Validate that all referenced entities exist"""
 		if self.vehicle_id:
@@ -87,7 +98,13 @@ class SISBusRoute(Document):
 		
 		if not monitors_to_check:
 			return  # No monitors to validate
-		
+
+		# Mọi kiểm tra xung đột dưới đây đều giới hạn trong CÙNG NĂM HỌC: cùng một xe /
+		# tài xế / giám sát được phép xếp ở tuyến của hai năm học khác nhau. Không có
+		# ràng buộc này thì tuyến năm cũ (vẫn Active, vẫn còn Daily Trip) sẽ chặn toàn bộ
+		# tuyến năm mới. Bản ghi cũ chưa gán năm học → giữ nguyên hành vi so toàn cục.
+		year_condition, year_params = self._school_year_scope()
+
 		# Check active routes
 		if self.name:
 			# For existing documents, exclude current route
@@ -98,8 +115,9 @@ class SISBusRoute(Document):
 				WHERE (monitor1_id IN ({placeholders}) OR monitor2_id IN ({placeholders}))
 				AND name != %s
 				AND status = 'Active'
+				{year_condition}
 			"""
-			params = monitors_to_check + monitors_to_check + [self.name]
+			params = monitors_to_check + monitors_to_check + [self.name] + year_params
 			existing_routes = frappe.db.sql(query, params, as_dict=True)
 		else:
 			# For new documents, check all routes
@@ -109,8 +127,9 @@ class SISBusRoute(Document):
 				FROM `tabSIS Bus Route`
 				WHERE (monitor1_id IN ({placeholders}) OR monitor2_id IN ({placeholders}))
 				AND status = 'Active'
+				{year_condition}
 			"""
-			params = monitors_to_check + monitors_to_check
+			params = monitors_to_check + monitors_to_check + year_params
 			existing_routes = frappe.db.sql(query, params, as_dict=True)
 
 		if existing_routes:
@@ -130,7 +149,8 @@ class SISBusRoute(Document):
 		future_date = today + timedelta(days=30)
 		
 		exclude_route = self.name if self.name else "NONE"
-		
+		trip_year_condition, trip_year_params = self._school_year_scope("br")
+
 		# Check monitors
 		if monitors_to_check:
 			placeholders = ','.join(['%s'] * len(monitors_to_check))
@@ -142,9 +162,10 @@ class SISBusRoute(Document):
 				AND dt.trip_date BETWEEN %s AND %s
 				AND dt.route_id != %s
 				AND br.status = 'Active'
+				{trip_year_condition}
 				LIMIT 3
 			"""
-			params = monitors_to_check + monitors_to_check + [today, future_date, exclude_route]
+			params = monitors_to_check + monitors_to_check + [today, future_date, exclude_route] + trip_year_params
 			monitor_conflicts = frappe.db.sql(monitor_trips_query, params, as_dict=True)
 			
 			if monitor_conflicts:
@@ -153,7 +174,7 @@ class SISBusRoute(Document):
 		
 		# Check driver
 		if self.driver_id:
-			driver_trips_query = """
+			driver_trips_query = f"""
 				SELECT DISTINCT dt.route_id, dt.trip_date, dt.trip_type, br.route_name
 				FROM `tabSIS Bus Daily Trip` dt
 				INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
@@ -161,9 +182,10 @@ class SISBusRoute(Document):
 				AND dt.trip_date BETWEEN %s AND %s
 				AND dt.route_id != %s
 				AND br.status = 'Active'
+				{trip_year_condition}
 				LIMIT 3
 			"""
-			driver_conflicts = frappe.db.sql(driver_trips_query, [self.driver_id, today, future_date, exclude_route], as_dict=True)
+			driver_conflicts = frappe.db.sql(driver_trips_query, [self.driver_id, today, future_date, exclude_route] + trip_year_params, as_dict=True)
 			
 			if driver_conflicts:
 				trip_info = [f"{t.route_name} - {t.trip_type} ({t.trip_date})" for t in driver_conflicts]
@@ -171,7 +193,7 @@ class SISBusRoute(Document):
 		
 		# Check vehicle
 		if self.vehicle_id:
-			vehicle_trips_query = """
+			vehicle_trips_query = f"""
 				SELECT DISTINCT dt.route_id, dt.trip_date, dt.trip_type, br.route_name
 				FROM `tabSIS Bus Daily Trip` dt
 				INNER JOIN `tabSIS Bus Route` br ON dt.route_id = br.name
@@ -179,9 +201,10 @@ class SISBusRoute(Document):
 				AND dt.trip_date BETWEEN %s AND %s
 				AND dt.route_id != %s
 				AND br.status = 'Active'
+				{trip_year_condition}
 				LIMIT 3
 			"""
-			vehicle_conflicts = frappe.db.sql(vehicle_trips_query, [self.vehicle_id, today, future_date, exclude_route], as_dict=True)
+			vehicle_conflicts = frappe.db.sql(vehicle_trips_query, [self.vehicle_id, today, future_date, exclude_route] + trip_year_params, as_dict=True)
 			
 			if vehicle_conflicts:
 				trip_info = [f"{t.route_name} - {t.trip_type} ({t.trip_date})" for t in vehicle_conflicts]
