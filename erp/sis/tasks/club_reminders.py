@@ -162,17 +162,34 @@ def _send_for_period(period_name, minutes_before, now):
             "type": "club_registration_opening",
             "period_id": period_name,
             "minutes_before": minutes_before,
+            # `timestamp` BẮT BUỘC phải có: `send_bulk_parent_notifications` dựng
+            # khoá chống trùng từ `data["timestamp"]`. Thiếu nó thì khoá là hằng
+            # số và mọi lần gửi sau cho cùng nhóm học sinh đều bị nuốt im lặng —
+            # nhìn từ ngoài y hệt "đã gửi mà không có thông báo nào".
+            "timestamp": str(now),
             # Điều hướng: web dùng path, app map sang route riêng.
             "url": "/club",
         },
     )
 
-    frappe.db.set_value(DT_PERIOD, period_name, "open_reminder_sent", 1)
-    frappe.db.commit()
+    # CHỈ đốt cờ khi thật sự tạo được thông báo.
+    #
+    # Trước đây đốt vô điều kiện: gửi hỏng (sai tham số, debounce nuốt, guardian
+    # rỗng…) vẫn bị đánh dấu "đã gửi" và đợt vĩnh viễn không được thử lại — mất
+    # luôn cơ hội nhắc, mà log thì im lặng.
+    sent = cint(result.get("success_count")) if isinstance(result, dict) else 0
+    if sent > 0:
+        frappe.db.set_value(DT_PERIOD, period_name, "open_reminder_sent", 1)
+        frappe.db.commit()
+        frappe.logger().info(
+            f"club_reminders: đợt {period_name} -> {len(student_ids)} HS, {sent} thông báo"
+        )
+        return
 
-    frappe.logger().info(
-        f"club_reminders: đợt {period_name} -> {len(student_ids)} HS, "
-        f"{result.get('total_parents', 0)} phụ huynh"
+    frappe.log_error(
+        f"Đợt {period_name}: {len(student_ids)} học sinh nhưng KHÔNG tạo được thông báo nào. "
+        f"Phản hồi: {result}",
+        "club_reminders.no_notification_created",
     )
 
 
@@ -189,6 +206,7 @@ def debug_club_reminder(period_id=None):
         frappe.throw("Không có quyền")
 
     from erp.api.parent_portal.club_beta_access import (
+        allowed_parent_emails,
         beta_gate_enabled,
         guardian_phones,
         is_guardian_allowed,
@@ -216,6 +234,8 @@ def debug_club_reminder(period_id=None):
     after_beta = filter_students_for_beta(students)
     guardians = get_guardians_for_students(after_beta) if after_beta else []
     emails = [g.get("email") for g in guardians if g.get("email")]
+    # None = cổng tắt = gửi cho tất cả (giữ nguyên ngữ nghĩa của tham số).
+    recipient_emails = allowed_parent_emails(after_beta) if after_beta else None
 
     mobile_tokens = (
         frappe.db.count("Mobile Device Token", {"user": ["in", emails], "is_active": 1})
@@ -236,7 +256,14 @@ def debug_club_reminder(period_id=None):
         "eligible_students": len(students),
         "after_beta_filter": len(after_beta),
         "beta_gate_enabled": beta_gate_enabled(),
+        # `guardians` = MỌI phụ huynh của các em đủ điều kiện (chưa lọc).
+        # `recipients_after_email_filter` mới là số người THỰC SỰ nhận — lọc học
+        # sinh giữ em lại vì mẹ trong nhóm thì bố vẫn nằm trong `guardians`.
         "guardians": len(guardians),
+        "recipients_after_email_filter": (
+            len(recipient_emails) if recipient_emails is not None else len(guardians)
+        ),
+        "recipient_emails": recipient_emails,
         "guardian_phones_sample": [
             {"guardian": g["guardian_name"], "phones": guardian_phones(g["guardian_name"]),
              "allowed": is_guardian_allowed(g["guardian_name"])}
