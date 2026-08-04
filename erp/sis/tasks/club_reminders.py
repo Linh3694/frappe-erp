@@ -241,6 +241,101 @@ def debug_club_reminder(period_id=None):
 
 
 @frappe.whitelist()
+def debug_club_beta_phones(period_id=None):
+    """
+    Soi NGƯỢC từ số trong danh sách chạy thử: số -> phụ huynh -> con -> có đủ
+    điều kiện của đợt không.
+
+    `debug_club_reminder` chỉ nói "rơi về 0", không nói vì sao. Có bốn nguyên
+    nhân khác hẳn nhau: số không có trong CRM, số có nhưng lưu ở dạng lạ, phụ
+    huynh không gắn với học sinh nào, hoặc con học khối/năm học/campus mà đợt
+    không mở. Hàm này phân biệt được cả bốn.
+    """
+    if not frappe.has_permission(DT_PERIOD, "read"):
+        frappe.throw("Không có quyền")
+
+    from erp.api.parent_portal.club_beta_access import _allowed_set, normalize_phone
+
+    allowed = sorted(_allowed_set())
+    if not allowed:
+        return {"error": "Danh sách chạy thử đang rỗng"}
+
+    eligible = set()
+    if period_id:
+        eligible = set(_eligible_student_ids(frappe.get_doc(DT_PERIOD, period_id)))
+
+    # Bỏ dấu phân cách ngay trong SQL rồi so HẬU TỐ 9 chữ số: đủ bắt '0376…',
+    # '+84376…', '84376…', '037 641 2589', '037.641.2589', '+84 (376) 412-589'.
+    #
+    # Phải bỏ CẢ CẶP ngoặc: bỏ mỗi '(' thì '(376) 412589' còn '376)412589' và
+    # hậu tố không khớp — tệ hơn là không xử lý gì, vì trông như đã xử lý.
+    def _strip_separators(col):
+        expr = col
+        for ch in (" ", ".", "-", "(", ")", "+"):
+            expr = f"REPLACE({expr},'{ch}','')"
+        return expr
+
+    report = []
+    for suffix in allowed:
+        rows = frappe.db.sql(
+            f"""
+            SELECT g.name, g.guardian_id, g.guardian_name, g.phone_number
+            FROM `tabCRM Guardian` g
+            WHERE {_strip_separators('g.phone_number')} LIKE %(like)s
+            UNION
+            SELECT g.name, g.guardian_id, g.guardian_name, g.phone_number
+            FROM `tabCRM Guardian` g
+            INNER JOIN `tabCRM Guardian Phone` p
+                    ON p.parent = g.name AND p.parenttype = 'CRM Guardian'
+            WHERE {_strip_separators('p.phone_number')} LIKE %(like)s
+            """,
+            {"like": f"%{suffix}"},
+            as_dict=True,
+        )
+
+        entry = {"phone_suffix": suffix, "guardians": []}
+        for g in rows:
+            students = frappe.db.sql(
+                """
+                SELECT DISTINCT fr.student, s.student_name, s.student_code
+                FROM `tabCRM Family Relationship` fr
+                INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+                LEFT JOIN `tabCRM Student` s ON s.name = fr.student
+                WHERE fr.guardian = %(g)s
+                  AND fr.parentfield = 'relationships'
+                  AND f.docstatus < 2
+                """,
+                {"g": g["name"]},
+                as_dict=True,
+            )
+            entry["guardians"].append(
+                {
+                    "guardian": g["name"],
+                    "guardian_name": g["guardian_name"],
+                    "phone_stored": g["phone_number"],
+                    "phone_normalized": normalize_phone(g["phone_number"]),
+                    "students": [
+                        {
+                            "student": s["student"],
+                            "name": s["student_name"],
+                            "code": s["student_code"],
+                            "eligible_for_period": s["student"] in eligible,
+                        }
+                        for s in students
+                    ],
+                }
+            )
+        report.append(entry)
+
+    return {
+        "period": period_id,
+        "eligible_students_in_period": len(eligible),
+        "allowlist": allowed,
+        "found": report,
+    }
+
+
+@frappe.whitelist()
 def send_club_open_reminder_now(
     period_id=None, minutes_before=DEFAULT_MINUTES_BEFORE, force=0
 ):
