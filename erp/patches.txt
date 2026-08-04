@@ -29,3 +29,4 @@ erp.patches.v1_0.drop_bus_staff_codes
 erp.patches.v1_0.seed_system_config
 erp.patches.v1_0.add_club_registration_unique_indexes
 erp.patches.v1_0.backfill_sis_subject_type
+erp.patches.v1_0.rename_sis_club_role_to_sis_tdc

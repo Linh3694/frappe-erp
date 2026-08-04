@@ -209,21 +209,21 @@
    "print": 1,
    "read": 1,
    "report": 1,
-   "role": "SIS BOD",
+   "role": "SIS TDC",
    "share": 1,
    "write": 1
   },
   {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
    "read": 1,
-   "report": 1,
-   "role": "SIS Club",
-   "share": 1,
-   "write": 1
+   "report": 0,
+   "role": "SIS BOD",
+   "share": 0,
+   "write": 0
   },
   {
    "create": 0,

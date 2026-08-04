@@ -6,7 +6,9 @@ REQUIRED_ROLES = [
     "SIS Medical",
     "SIS Finance",
     "SIS Sales Care Admin",
-    "SIS Club",
+    # Đội vận hành Câu lạc bộ (trước đây là "SIS Club" — xem patch
+    # erp.patches.v1_0.rename_sis_club_role_to_sis_tdc)
+    "SIS TDC",
 ]
 
 # Danh mục ticket IT mặc định — title khớp FE (Overall, Camera, ...)
