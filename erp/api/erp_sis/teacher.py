@@ -1170,6 +1170,66 @@ def get_education_stages_for_teacher():
         )
 
 
+@frappe.whitelist(allow_guest=False, methods=['GET'])
+def get_my_education_stages():
+    """Get education stages the CURRENT user is declared to teach.
+
+    Nguồn duy nhất là `SIS Teacher Education Stage` (chính là ô "Các cấp học giảng dạy"
+    trong form giáo viên), không suy diễn qua phân công môn.
+
+    Trả về danh sách rỗng khi user không phải giáo viên hoặc chưa khai cấp học —
+    caller tự quyết fallback.
+    """
+    try:
+        campus_id = get_current_campus_from_context()
+
+        teacher_filters = {"user_id": frappe.session.user}
+        if campus_id:
+            teacher_filters["campus_id"] = campus_id
+
+        teacher_ids = [
+            t.name
+            for t in frappe.get_all(
+                "SIS Teacher",
+                fields=["name"],
+                filters=teacher_filters,
+                limit_page_length=0,
+            )
+        ]
+
+        if not teacher_ids:
+            return success_response(
+                data=[],
+                message="No teacher record for current user",
+                meta={"has_teacher_record": False},
+            )
+
+        stages = frappe.db.sql("""
+            SELECT DISTINCT
+                es.name,
+                COALESCE(es.title_vn, '') AS title_vn,
+                COALESCE(es.title_en, '') AS title_en
+            FROM `tabSIS Teacher Education Stage` tes
+            INNER JOIN `tabSIS Education Stage` es ON tes.education_stage_id = es.name
+            WHERE tes.teacher_id IN %(teacher_ids)s
+              AND tes.is_active = 1
+            ORDER BY es.title_vn ASC
+        """, {"teacher_ids": teacher_ids}, as_dict=True)
+
+        return success_response(
+            data=stages,
+            message="Education stages for current teacher fetched successfully",
+            meta={"has_teacher_record": True},
+        )
+
+    except Exception as e:
+        frappe.log_error(f"Error fetching education stages for current teacher: {str(e)}")
+        return error_response(
+            message="Error fetching education stages for current teacher",
+            code="FETCH_MY_EDUCATION_STAGES_ERROR"
+        )
+
+
 @frappe.whitelist(allow_guest=True, methods=['GET'])
 def get_teacher_class_assignments(user_id: str = None):
     """Return homeroom/vice_homeroom/teaching class ids for given user (or current user).

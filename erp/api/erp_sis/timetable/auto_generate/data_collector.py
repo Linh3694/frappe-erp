@@ -443,6 +443,7 @@ class TimetableDataCollector:
 			  AND education_stage = %(education_stage_id)s
 			  AND timetable_subject_id IS NOT NULL
 			  AND timetable_subject_id != ''
+			  AND IFNULL(subject_type, 'academic') != 'club'  -- môn CLB không tham gia TKB
 		""".format(is_homeroom_sql=is_homeroom_sql), {
 			"campus_id": self.session.campus_id,
 			"education_stage_id": self.session.education_stage_id,

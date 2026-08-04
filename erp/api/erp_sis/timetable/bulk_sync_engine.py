@@ -160,6 +160,7 @@ class BulkSyncEngine:
 			SELECT name, actual_subject_id
 			FROM `tabSIS Subject`
 			WHERE campus_id = %s AND actual_subject_id IS NOT NULL
+			  AND IFNULL(subject_type, 'academic') != 'club'  -- môn CLB không tham gia TKB
 		""", (self.campus_id,), as_dict=True)
 		
 		for subj in subjects:

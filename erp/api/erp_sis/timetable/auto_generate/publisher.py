@@ -210,6 +210,7 @@ class TimetablePublisher:
 			  AND s.education_stage = %(education_stage_id)s
 			  AND s.timetable_subject_id IS NOT NULL
 			  AND s.timetable_subject_id != ''
+			  AND IFNULL(s.subject_type, 'academic') != 'club'  -- môn CLB không tham gia TKB
 		""", {
 			"campus_id": self.session.campus_id,
 			"education_stage_id": self.session.education_stage_id,

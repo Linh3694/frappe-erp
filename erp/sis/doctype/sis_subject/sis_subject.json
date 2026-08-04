@@ -19,6 +19,7 @@
   "basic_information",
   "campus_id",
   "title",
+  "subject_type",
   "education_stage",
   "timetable_subject_id",
   "actual_subject_id",
@@ -49,6 +50,15 @@
    "label": "Subject Title",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "subject_type",
+   "fieldtype": "Select",
+   "label": "Loại môn học",
+   "options": "academic\nclub",
+   "default": "academic",
+   "in_standard_filter": 1,
+   "description": "academic: môn học thuật (hiện trong TKB, phân công GV, học bạ). club: môn câu lạc bộ — bị loại khỏi các danh sách đó."
   },
   {
    "fieldname": "education_stage",

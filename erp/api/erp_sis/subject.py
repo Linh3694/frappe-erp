@@ -179,6 +179,27 @@ def _subject_has_field(fieldname):
     return frappe.db.has_column("SIS Subject", fieldname)
 
 
+def _subject_type_clause(alias="s", include_club=False):
+    """
+    Mệnh đề loại bỏ môn Câu lạc bộ khỏi danh sách môn học thuật.
+
+    Môn CLB nằm chung bảng `SIS Subject` (module CLB link tới đây thay vì tự tạo
+    danh mục riêng), nhưng KHÔNG được hiện trong dropdown chọn môn của TKB /
+    phân công GV / học bạ. `IFNULL` để dữ liệu cũ chưa backfill vẫn coi là
+    academic; trả chuỗi rỗng nếu cột chưa tồn tại (chưa chạy bench migrate).
+    """
+    if include_club or not _subject_has_field("subject_type"):
+        return ""
+    return f" AND IFNULL({alias}.subject_type, 'academic') != 'club'"
+
+
+def _normalize_subject_type(value):
+    """Chỉ nhận 'academic' | 'club'; giá trị lạ/thiếu -> 'academic' (fail-safe:
+    không bao giờ tự động biến một môn thành môn CLB)."""
+    normalized = str(value or "").strip().lower()
+    return "club" if normalized == "club" else "academic"
+
+
 def _to_bool_int(value):
     if isinstance(value, bool):
         return int(value)
@@ -235,9 +256,9 @@ def get_all_subjects():
                 LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
                 LEFT JOIN `tabSIS Sub Curriculum` sc ON s.subcurriculum_id = sc.name AND sc.campus_id = s.campus_id
                 LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
-                WHERE s.campus_id = %s
+                WHERE s.campus_id = %s{subject_type_clause}
                 ORDER BY s.title ASC
-            """.format(is_homeroom_sql=is_homeroom_sql)
+            """.format(is_homeroom_sql=is_homeroom_sql, subject_type_clause=_subject_type_clause())
             subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
         except Exception as column_error:
             frappe.logger().warning(f"Query with all fields failed: {str(column_error)}, trying with basic fields only")
@@ -265,9 +286,9 @@ def get_all_subjects():
                 LEFT JOIN `tabSIS Timetable Subject` ts ON s.timetable_subject_id = ts.name AND ts.campus_id = s.campus_id
                 LEFT JOIN `tabSIS Actual Subject` act ON s.actual_subject_id = act.name AND act.campus_id = s.campus_id
                 LEFT JOIN `tabERP Administrative Room` r ON s.room_id = r.name
-                WHERE s.campus_id = %s
+                WHERE s.campus_id = %s{subject_type_clause}
                 ORDER BY s.title ASC
-            """.format(is_homeroom_sql=is_homeroom_sql)
+            """.format(is_homeroom_sql=is_homeroom_sql, subject_type_clause=_subject_type_clause())
             subjects = frappe.db.sql(subjects_query, (campus_id,), as_dict=True)
 
         frappe.logger().info(f"Found {len(subjects)} subjects")
@@ -457,6 +478,7 @@ def get_subject_by_id():
             "subcurriculum_id": subject.subcurriculum_id,
             "room_id": subject.room_id,
             "is_homeroom": int(subject.is_homeroom or 0),
+            "subject_type": getattr(subject, "subject_type", None) or "academic",
             "allowed_room_ids": allowed_room_ids,
             "allowed_rooms": allowed_rooms,
             "campus_id": subject.campus_id,
@@ -557,6 +579,8 @@ def create_subject():
             subject_data["room_id"] = room_id
         if _subject_has_field("is_homeroom"):
             subject_data["is_homeroom"] = is_homeroom
+        if _subject_has_field("subject_type"):
+            subject_data["subject_type"] = _normalize_subject_type(data.get("subject_type"))
         if subcurriculum_id:
             subject_data["subcurriculum_id"] = subcurriculum_id
 
@@ -618,6 +642,7 @@ def create_subject():
             "actual_subject_id": subject_doc.actual_subject_id,
             "room_id": subject_doc.room_id,
             "is_homeroom": int(subject_doc.is_homeroom or 0),
+            "subject_type": getattr(subject_doc, "subject_type", None) or "academic",
             "allowed_room_ids": [r.room_id for r in (subject_doc.get("allowed_rooms") or []) if r.room_id],
             "campus_id": subject_doc.campus_id,
             "education_stage_name": education_stage_name,
@@ -737,6 +762,8 @@ def update_subject():
             subject_doc.room_id = room_id
         if is_homeroom is not None and _subject_has_field("is_homeroom"):
             subject_doc.is_homeroom = _to_bool_int(is_homeroom)
+        if 'subject_type' in data and _subject_has_field("subject_type"):
+            subject_doc.subject_type = _normalize_subject_type(data.get('subject_type'))
         if 'subcurriculum_id' in data and subcurriculum_id != subject_doc.subcurriculum_id:
             subject_doc.subcurriculum_id = subcurriculum_id
         if allowed_room_ids is not None and _subject_has_field("allowed_rooms"):

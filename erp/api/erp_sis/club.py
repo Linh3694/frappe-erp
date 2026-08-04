@@ -1094,6 +1094,11 @@ def search_subjects_for_club():
     """
     Dropdown chọn môn khi khai báo offering.
 
+    CHỈ trả môn có `subject_type = 'club'`. Môn học thuật và môn CLB dùng chung
+    bảng `SIS Subject`, nên không lọc thì danh sách này lẫn cả trăm môn Toán/Văn.
+    Chiều ngược lại (môn CLB lọt vào dropdown TKB / phân công GV / học bạ) được
+    chặn ở `erp/api/erp_sis/subject.py::_subject_type_clause`.
+
     Tên hiển thị ưu tiên SIS Timetable Subject (song ngữ); môn chưa gắn timetable
     subject vẫn trả về nhưng kèm cờ `has_bilingual_title=0` để form cảnh báo.
     """
@@ -1103,6 +1108,9 @@ def search_subjects_for_club():
 
         conditions = ["s.campus_id = %(campus_id)s"]
         values = {"campus_id": _campus()}
+
+        if frappe.db.has_column("SIS Subject", "subject_type"):
+            conditions.append("s.subject_type = 'club'")
 
         if education_stage_id:
             conditions.append("s.education_stage = %(education_stage_id)s")

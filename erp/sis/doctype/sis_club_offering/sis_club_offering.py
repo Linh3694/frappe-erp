@@ -46,11 +46,32 @@ class SISClubOffering(Document):
 
     def before_save(self):
         self.updated_at = now_datetime()
+        self.validate_subject_is_club()
         self.resolve_titles()
         self.validate_capacity()
         self.validate_times()
         self.validate_grades()
         self.validate_unique_subject_day()
+
+    def validate_subject_is_club(self):
+        """
+        Môn gắn vào CLB phải có `subject_type = 'club'`.
+
+        Gắn nhầm một môn học thuật không chỉ sai nghiệp vụ: các luồng TKB /
+        phân công GV / học bạ lọc theo chính cột này, nên môn đó sẽ vừa nằm
+        trong TKB vừa nằm trong CLB và không nơi nào phát hiện được.
+        """
+        if not self.subject_id:
+            return
+        if not frappe.db.has_column("SIS Subject", "subject_type"):
+            return  # chưa chạy bench migrate — bỏ qua thay vì chặn toàn bộ
+
+        subject_type = frappe.db.get_value("SIS Subject", self.subject_id, "subject_type")
+        if subject_type and subject_type != "club":
+            frappe.throw(
+                "Môn đã chọn là môn học thuật, không dùng cho câu lạc bộ được. "
+                "Hãy tạo môn mới với Loại môn học = «Câu lạc bộ», hoặc đổi loại của môn này."
+            )
 
     def resolve_titles(self):
         """
