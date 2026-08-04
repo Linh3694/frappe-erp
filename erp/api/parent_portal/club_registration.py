@@ -207,7 +207,6 @@ def _eligible_offerings(period, education_grade_id):
         SELECT DISTINCT
             o.name AS offering_id, o.subject_id, o.title_vn, o.title_en,
             o.day_of_week, o.capacity, o.registered_count,
-            o.start_time, o.end_time, o.location, o.teacher_name, o.fee,
             o.cover_image, o.short_description_vn, o.short_description_en
         FROM `tab{DT_OFFERING}` o
         INNER JOIN `tabSIS Club Offering Grade` g ON g.parent = o.name
@@ -268,11 +267,6 @@ def _build_days(period, education_grade_id, existing, is_open):
             "short_description_en": o.short_description_en,
             "cover_image": o.cover_image,
             "day_of_week": o.day_of_week,
-            "start_time": str(o.start_time) if o.start_time else None,
-            "end_time": str(o.end_time) if o.end_time else None,
-            "location": o.location,
-            "teacher_name": o.teacher_name,
-            "fee": o.fee,
             "capacity": capacity,
             "registered_count": registered,
             "remaining": remaining,
@@ -307,7 +301,7 @@ def _my_registrations_payload(period_id, student_id):
         SELECT
             r.name AS registration_id, r.offering_id, r.subject_id, r.day_of_week,
             r.registration_datetime,
-            o.title_vn, o.title_en, o.start_time, o.end_time, o.location, o.cover_image
+            o.title_vn, o.title_en, o.cover_image
         FROM `tab{DT_REGISTRATION}` r
         LEFT JOIN `tab{DT_OFFERING}` o ON o.name = r.offering_id
         WHERE r.period_id = %(period_id)s AND r.student_id = %(student_id)s
@@ -323,8 +317,6 @@ def _decorate_registrations(rows):
     for r in rows:
         r["label_vn"] = DAY_LABELS_VN.get(r.get("day_of_week"), r.get("day_of_week"))
         r["label_en"] = DAY_LABELS_EN.get(r.get("day_of_week"), r.get("day_of_week"))
-        r["start_time"] = str(r["start_time"]) if r.get("start_time") else None
-        r["end_time"] = str(r["end_time"]) if r.get("end_time") else None
         r["registration_datetime"] = (
             str(r["registration_datetime"]) if r.get("registration_datetime") else None
         )
@@ -491,16 +483,9 @@ def get_club_detail():
                 "cover_image": doc.cover_image,
                 "short_description_vn": doc.short_description_vn,
                 "short_description_en": doc.short_description_en,
-                "description_vn": doc.description_vn,
-                "description_en": doc.description_en,
                 "day_of_week": doc.day_of_week,
                 "label_vn": DAY_LABELS_VN.get(doc.day_of_week, doc.day_of_week),
                 "label_en": DAY_LABELS_EN.get(doc.day_of_week, doc.day_of_week),
-                "start_time": str(doc.start_time) if doc.start_time else None,
-                "end_time": str(doc.end_time) if doc.end_time else None,
-                "location": doc.location,
-                "teacher_name": doc.teacher_name,
-                "fee": doc.fee,
                 "capacity": capacity,
                 "registered_count": registered,
                 "remaining": max(0, capacity - registered),

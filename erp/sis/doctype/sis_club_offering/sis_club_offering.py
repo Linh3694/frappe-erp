@@ -49,7 +49,6 @@ class SISClubOffering(Document):
         self.validate_subject_is_club()
         self.resolve_titles()
         self.validate_capacity()
-        self.validate_times()
         self.validate_grades()
         self.validate_unique_subject_day()
 
@@ -118,10 +117,6 @@ class SISClubOffering(Document):
             frappe.throw(
                 f"Không thể hạ giới hạn xuống {self.capacity} khi đã có {current} học sinh đăng ký"
             )
-
-    def validate_times(self):
-        if self.start_time and self.end_time and str(self.start_time) >= str(self.end_time):
-            frappe.throw("Giờ bắt đầu phải trước giờ kết thúc")
 
     def validate_grades(self):
         if not self.education_grades:

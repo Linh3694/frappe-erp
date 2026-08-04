@@ -29,19 +29,10 @@
   "capacity",
   "registered_count",
   "status",
-  "logistics_section",
-  "start_time",
-  "end_time",
-  "location",
-  "column_break_logistics",
-  "teacher_name",
-  "fee",
   "intro_section",
   "cover_image",
   "short_description_vn",
   "short_description_en",
-  "description_vn",
-  "description_en",
   "grades_section",
   "education_grades",
   "system_information",
@@ -151,42 +142,6 @@
    "reqd": 1
   },
   {
-   "fieldname": "logistics_section",
-   "fieldtype": "Section Break",
-   "label": "Thông tin buổi sinh hoạt"
-  },
-  {
-   "fieldname": "start_time",
-   "fieldtype": "Time",
-   "label": "Giờ bắt đầu"
-  },
-  {
-   "fieldname": "end_time",
-   "fieldtype": "Time",
-   "label": "Giờ kết thúc"
-  },
-  {
-   "fieldname": "location",
-   "fieldtype": "Data",
-   "label": "Địa điểm"
-  },
-  {
-   "fieldname": "column_break_logistics",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "teacher_name",
-   "fieldtype": "Data",
-   "label": "Giáo viên phụ trách",
-   "description": "Nhập tự do — GV CLB có thể là người thuê ngoài, không có trong SIS Teacher"
-  },
-  {
-   "fieldname": "fee",
-   "fieldtype": "Currency",
-   "label": "Học phí",
-   "description": "Chỉ để hiển thị, chưa nối vào module tài chính"
-  },
-  {
    "fieldname": "intro_section",
    "fieldtype": "Section Break",
    "label": "Giới thiệu môn học"
@@ -206,16 +161,6 @@
    "fieldname": "short_description_en",
    "fieldtype": "Small Text",
    "label": "Mô tả ngắn (EN)"
-  },
-  {
-   "fieldname": "description_vn",
-   "fieldtype": "Text Editor",
-   "label": "Giới thiệu đầy đủ (VN)"
-  },
-  {
-   "fieldname": "description_en",
-   "fieldtype": "Text Editor",
-   "label": "Giới thiệu đầy đủ (EN)"
   },
   {
    "fieldname": "grades_section",

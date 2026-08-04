@@ -58,16 +58,9 @@ OFFERING_WRITE_FIELDS = [
     "day_of_week",
     "capacity",
     "status",
-    "start_time",
-    "end_time",
-    "location",
-    "teacher_name",
-    "fee",
     "cover_image",
     "short_description_vn",
     "short_description_en",
-    "description_vn",
-    "description_en",
 ]
 
 
@@ -503,9 +496,7 @@ def get_offerings():
             SELECT
                 o.name, o.period_id, o.subject_id, o.timetable_subject_id,
                 o.title_vn, o.title_en, o.day_of_week, o.capacity, o.registered_count,
-                o.status, o.start_time, o.end_time, o.location, o.teacher_name, o.fee,
-                o.cover_image, o.short_description_vn, o.short_description_en,
-                o.description_vn, o.description_en
+                o.status, o.cover_image, o.short_description_vn, o.short_description_en
             FROM `tab{DT_OFFERING}` o
             WHERE {' AND '.join(conditions)}
             ORDER BY FIELD(o.day_of_week, 'mon','tue','wed','thu','fri','sat'), o.title_vn
@@ -716,7 +707,6 @@ def get_schedule_matrix():
             SELECT
                 o.name AS offering_id, o.title_vn, o.title_en, o.day_of_week,
                 o.capacity, o.registered_count, o.status,
-                o.start_time, o.end_time, o.location,
                 g.education_grade_id, g.education_grade_name, g.education_stage_id
             FROM `tab{DT_OFFERING}` o
             INNER JOIN `tabSIS Club Offering Grade` g ON g.parent = o.name
@@ -743,9 +733,6 @@ def get_schedule_matrix():
                     "capacity": _int(r.capacity),
                     "registered_count": _int(r.registered_count),
                     "remaining": max(0, _int(r.capacity) - _int(r.registered_count)),
-                    "start_time": str(r.start_time) if r.start_time else None,
-                    "end_time": str(r.end_time) if r.end_time else None,
-                    "location": r.location,
                 }
             )
             bucket = totals.setdefault(key, {"offerings": 0, "capacity": 0, "registered": 0})
@@ -874,7 +861,6 @@ def get_club_registrations():
                 r.source, r.registration_datetime, r.registered_by,
                 r.cancelled_at, r.cancel_reason,
                 o.title_vn AS offering_title_vn, o.title_en AS offering_title_en,
-                o.start_time, o.end_time, o.location,
                 COALESCE(g.title_vn, '') AS education_grade_name
             FROM `tab{DT_REGISTRATION}` r
             LEFT JOIN `tab{DT_OFFERING}` o ON o.name = r.offering_id
@@ -890,8 +876,6 @@ def get_club_registrations():
         for r in rows:
             r["day_label_vn"] = DAY_LABELS_VN.get(r.get("day_of_week"), r.get("day_of_week"))
             r["day_label_en"] = DAY_LABELS_EN.get(r.get("day_of_week"), r.get("day_of_week"))
-            r["start_time"] = str(r["start_time"]) if r.get("start_time") else None
-            r["end_time"] = str(r["end_time"]) if r.get("end_time") else None
 
         return paginated_response(
             data=rows,
