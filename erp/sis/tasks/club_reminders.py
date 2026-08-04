@@ -170,6 +170,77 @@ def _send_for_period(period_name, minutes_before, now):
 
 
 @frappe.whitelist()
+def debug_club_reminder(period_id=None):
+    """
+    Phễu chẩn đoán: chỉ ra chính xác bước nào rơi về 0.
+
+    KHÔNG gửi gì cả. Dựng ra vì khi "không thấy thông báo" thì có tới sáu chỗ có
+    thể đứt (đợt ngoài cửa sổ, cờ đã đốt, chưa khai buổi, chưa xếp lớp, cổng
+    beta, chưa có token push) mà log không phân biệt được.
+    """
+    if not frappe.has_permission(DT_PERIOD, "read"):
+        frappe.throw("Không có quyền")
+
+    from erp.api.parent_portal.club_beta_access import (
+        beta_gate_enabled,
+        guardian_phones,
+        is_guardian_allowed,
+    )
+    from erp.utils.notification_handler import get_guardians_for_students
+
+    now = now_datetime()
+    if not period_id:
+        rows = frappe.get_all(
+            DT_PERIOD,
+            filters={"status": "Open"},
+            fields=["name"],
+            order_by="registration_start_datetime desc",
+            limit=1,
+        )
+        if not rows:
+            return {"error": "Không có đợt nào ở trạng thái Open"}
+        period_id = rows[0].name
+
+    period = frappe.get_doc(DT_PERIOD, period_id)
+    reg_start = get_datetime(period.registration_start_datetime)
+    minutes_to_open = (reg_start - now).total_seconds() / 60.0
+
+    students = _eligible_student_ids(period)
+    after_beta = filter_students_for_beta(students)
+    guardians = get_guardians_for_students(after_beta) if after_beta else []
+    emails = [g.get("email") for g in guardians if g.get("email")]
+
+    mobile_tokens = (
+        frappe.db.count("Mobile Device Token", {"user": ["in", emails], "is_active": 1})
+        if emails
+        else 0
+    )
+    web_subs = frappe.db.count("Push Subscription", {"user": ["in", emails]}) if emails else 0
+
+    return {
+        "period": period_id,
+        "status": period.status,
+        "server_now": str(now),
+        "registration_start": str(reg_start),
+        "minutes_to_open": round(minutes_to_open, 1),
+        # Cron chỉ bắn khi 0 <= minutes_to_open <= minutes_before
+        "in_reminder_window": 0 <= minutes_to_open <= DEFAULT_MINUTES_BEFORE,
+        "already_sent_flag": cint(period.get("open_reminder_sent")),
+        "eligible_students": len(students),
+        "after_beta_filter": len(after_beta),
+        "beta_gate_enabled": beta_gate_enabled(),
+        "guardians": len(guardians),
+        "guardian_phones_sample": [
+            {"guardian": g["guardian_name"], "phones": guardian_phones(g["guardian_name"]),
+             "allowed": is_guardian_allowed(g["guardian_name"])}
+            for g in guardians[:5]
+        ],
+        "mobile_push_tokens": mobile_tokens,
+        "web_push_subscriptions": web_subs,
+    }
+
+
+@frappe.whitelist()
 def send_club_open_reminder_now(period_id=None, minutes_before=DEFAULT_MINUTES_BEFORE):
     """
     Gửi nhắc ngay, không chờ cron — dùng để kiểm thử trên staging.
