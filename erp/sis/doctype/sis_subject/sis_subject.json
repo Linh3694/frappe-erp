@@ -28,7 +28,11 @@
   "room_id",
   "room_config_section",
   "is_homeroom",
-  "allowed_rooms"
+  "allowed_rooms",
+  "club_intro_section",
+  "club_cover_image",
+  "club_short_description_vn",
+  "club_short_description_en"
  ],
  "fields": [
   {
@@ -114,6 +118,30 @@
    "fieldtype": "Table",
    "label": "Allowed Rooms",
    "options": "SIS Subject Room"
+  },
+  {
+   "fieldname": "club_intro_section",
+   "fieldtype": "Section Break",
+   "label": "Giới thiệu câu lạc bộ",
+   "collapsible": 1,
+   "depends_on": "eval:doc.subject_type=='club'",
+   "description": "Chỉ dùng cho môn có Loại môn học = Câu lạc bộ. Hiển thị trên Parent Portal."
+  },
+  {
+   "fieldname": "club_cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Ảnh giới thiệu CLB"
+  },
+  {
+   "fieldname": "club_short_description_vn",
+   "fieldtype": "Small Text",
+   "label": "Mô tả ngắn CLB (VN)",
+   "description": "Hiển thị trên thẻ môn ở Parent Portal"
+  },
+  {
+   "fieldname": "club_short_description_en",
+   "fieldtype": "Small Text",
+   "label": "Mô tả ngắn CLB (EN)"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -29,10 +29,6 @@
   "capacity",
   "registered_count",
   "status",
-  "intro_section",
-  "cover_image",
-  "short_description_vn",
-  "short_description_en",
   "grades_section",
   "education_grades",
   "system_information",
@@ -140,27 +136,6 @@
    "options": "active\ninactive",
    "default": "active",
    "reqd": 1
-  },
-  {
-   "fieldname": "intro_section",
-   "fieldtype": "Section Break",
-   "label": "Giới thiệu môn học"
-  },
-  {
-   "fieldname": "cover_image",
-   "fieldtype": "Attach Image",
-   "label": "Ảnh bìa"
-  },
-  {
-   "fieldname": "short_description_vn",
-   "fieldtype": "Small Text",
-   "label": "Mô tả ngắn (VN)",
-   "description": "Hiển thị trên thẻ môn ở Parent Portal"
-  },
-  {
-   "fieldname": "short_description_en",
-   "fieldtype": "Small Text",
-   "label": "Mô tả ngắn (EN)"
   },
   {
    "fieldname": "grades_section",

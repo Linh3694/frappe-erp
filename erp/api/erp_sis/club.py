@@ -58,9 +58,14 @@ OFFERING_WRITE_FIELDS = [
     "day_of_week",
     "capacity",
     "status",
-    "cover_image",
-    "short_description_vn",
-    "short_description_en",
+]
+
+# Ảnh + mô tả giới thiệu thuộc về MÔN (SIS Subject), không thuộc buổi: một môn mở
+# cả thứ 3 lẫn thứ 5 vẫn chỉ có một bản giới thiệu, không thể lệch nhau.
+SUBJECT_INTRO_FIELDS = [
+    "club_cover_image",
+    "club_short_description_vn",
+    "club_short_description_en",
 ]
 
 
@@ -496,8 +501,12 @@ def get_offerings():
             SELECT
                 o.name, o.period_id, o.subject_id, o.timetable_subject_id,
                 o.title_vn, o.title_en, o.day_of_week, o.capacity, o.registered_count,
-                o.status, o.cover_image, o.short_description_vn, o.short_description_en
+                o.status,
+                s.club_cover_image AS cover_image,
+                s.club_short_description_vn AS short_description_vn,
+                s.club_short_description_en AS short_description_en
             FROM `tab{DT_OFFERING}` o
+            LEFT JOIN `tabSIS Subject` s ON s.name = o.subject_id
             WHERE {' AND '.join(conditions)}
             ORDER BY FIELD(o.day_of_week, 'mon','tue','wed','thu','fri','sat'), o.title_vn
             """,
@@ -630,12 +639,58 @@ def delete_offering():
 
 
 @frappe.whitelist()
+def update_club_subject_intro():
+    """
+    Sửa ảnh + mô tả giới thiệu của MỘT MÔN câu lạc bộ.
+
+    Các trường này nằm trên `SIS Subject` chứ không trên từng buổi: một môn mở
+    nhiều thứ vẫn chỉ có một bản giới thiệu. Chỉ cho sửa môn `subject_type='club'`
+    để không ai vô tình gắn nội dung marketing vào môn học thuật.
+    """
+    try:
+        data = _data()
+        subject_id = data.get("subject_id")
+        if not subject_id:
+            return validation_error_response("Thiếu subject_id", {"subject_id": ["Bắt buộc"]})
+        if not frappe.db.exists("SIS Subject", subject_id):
+            return not_found_response("Không tìm thấy môn học")
+
+        if frappe.db.has_column("SIS Subject", "subject_type"):
+            if frappe.db.get_value("SIS Subject", subject_id, "subject_type") != "club":
+                return error_response(
+                    "Chỉ môn có Loại môn học = «Câu lạc bộ» mới có phần giới thiệu này",
+                    code="NOT_A_CLUB_SUBJECT",
+                )
+
+        doc = frappe.get_doc("SIS Subject", subject_id)
+        for field in SUBJECT_INTRO_FIELDS:
+            if field in data:
+                doc.set(field, data.get(field))
+        doc.flags.ignore_permissions = True
+        doc.save()
+        frappe.db.commit()
+
+        return single_item_response(
+            {f: doc.get(f) for f in ["name", *SUBJECT_INTRO_FIELDS]},
+            "Đã lưu giới thiệu môn câu lạc bộ",
+        )
+    except frappe.ValidationError as e:
+        frappe.db.rollback()
+        return error_response(str(e), code="VALIDATION_ERROR")
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "Club update_club_subject_intro")
+        return error_response(f"Lỗi khi lưu giới thiệu: {e}", code="UPDATE_SUBJECT_INTRO_ERROR")
+
+
+@frappe.whitelist()
 def bulk_save_offerings():
     """
     Lưu nhiều môn CLB trong một request — phục vụ bảng sửa tại chỗ.
 
-    Body: {period_id, rows: [{offering_id?, subject_id, day_of_week, capacity,
-                              education_grade_ids[]}]}
+    Body: {period_id,
+           rows: [{offering_id?, subject_id, day_of_week, capacity, education_grade_ids[]}],
+           delete_offering_ids: [...]}
 
     Mỗi dòng nằm trong savepoint riêng: một dòng sai (trùng môn+thứ, khối lệch
     cấp, môn không phải loại CLB…) chỉ hỏng dòng đó, phần còn lại vẫn lưu. Trả về
@@ -646,16 +701,34 @@ def bulk_save_offerings():
         data = _data()
         period_id = data.get("period_id")
         rows = _as_list(data.get("rows"))
+        delete_ids = _as_list(data.get("delete_offering_ids"))
 
         if not period_id:
             return validation_error_response("Thiếu period_id", {"period_id": ["Bắt buộc"]})
         if not frappe.db.exists(DT_PERIOD, period_id):
             return not_found_response("Không tìm thấy đợt đăng ký")
-        if not rows:
-            return validation_error_response("Không có dòng nào để lưu", {"rows": ["Bắt buộc"]})
+        if not rows and not delete_ids:
+            return validation_error_response(
+                "Không có thay đổi nào để lưu", {"rows": ["Bắt buộc"]}
+            )
 
         campus_id = _campus()
-        saved, failed = [], []
+        saved, failed, deleted = [], [], []
+
+        # Xoá TRƯỚC khi ghi: bỏ một ô rồi mở lại chính (môn, thứ) đó trong cùng một
+        # lần lưu sẽ vướng ràng buộc "mỗi (đợt, môn, thứ) chỉ một lần" nếu bản ghi
+        # cũ vẫn còn nằm đó.
+        for offering_id in delete_ids:
+            savepoint = "club_del_" + str(offering_id).replace("-", "_")
+            frappe.db.savepoint(savepoint)
+            try:
+                if frappe.db.exists(DT_OFFERING, offering_id):
+                    # on_trash của doctype chặn nếu môn còn học sinh đăng ký.
+                    frappe.delete_doc(DT_OFFERING, offering_id)
+                deleted.append(offering_id)
+            except Exception as e:
+                frappe.db.rollback(save_point=savepoint)
+                failed.append({"offering_id": offering_id, "message": str(e)})
 
         for index, row in enumerate(rows):
             if not isinstance(row, dict):
@@ -704,12 +777,17 @@ def bulk_save_offerings():
 
         frappe.db.commit()
 
-        message = f"Đã lưu {len(saved)} môn"
+        parts = []
+        if saved:
+            parts.append(f"đã lưu {len(saved)} môn")
+        if deleted:
+            parts.append(f"gỡ {len(deleted)} môn")
         if failed:
-            message += f", {len(failed)} dòng lỗi"
+            parts.append(f"{len(failed)} lỗi")
+        message = ("Đã " + ", ".join(parts)) if parts else "Không có thay đổi"
 
         return success_response(
-            data={"saved": saved, "failed": failed}, message=message
+            data={"saved": saved, "failed": failed, "deleted": deleted}, message=message
         )
     except Exception as e:
         frappe.db.rollback()
@@ -1205,6 +1283,9 @@ def search_subjects_for_club():
                 COALESCE(ts.title_vn, s.title) AS title_vn,
                 COALESCE(ts.title_en, s.title) AS title_en,
                 CASE WHEN ts.name IS NULL THEN 0 ELSE 1 END AS has_bilingual_title,
+                s.club_cover_image,
+                s.club_short_description_vn,
+                s.club_short_description_en,
                 COALESCE(es.title_vn, '') AS education_stage_name
             FROM `tabSIS Subject` s
             LEFT JOIN `tabSIS Timetable Subject` ts ON ts.name = s.timetable_subject_id

@@ -207,9 +207,12 @@ def _eligible_offerings(period, education_grade_id):
         SELECT DISTINCT
             o.name AS offering_id, o.subject_id, o.title_vn, o.title_en,
             o.day_of_week, o.capacity, o.registered_count,
-            o.cover_image, o.short_description_vn, o.short_description_en
+            s.club_cover_image AS cover_image,
+            s.club_short_description_vn AS short_description_vn,
+            s.club_short_description_en AS short_description_en
         FROM `tab{DT_OFFERING}` o
         INNER JOIN `tabSIS Club Offering Grade` g ON g.parent = o.name
+        LEFT JOIN `tabSIS Subject` s ON s.name = o.subject_id
         WHERE o.period_id = %(period_id)s
           AND o.status = 'active'
           AND g.education_grade_id = %(grade)s
@@ -301,9 +304,10 @@ def _my_registrations_payload(period_id, student_id):
         SELECT
             r.name AS registration_id, r.offering_id, r.subject_id, r.day_of_week,
             r.registration_datetime,
-            o.title_vn, o.title_en, o.cover_image
+            o.title_vn, o.title_en, s.club_cover_image AS cover_image
         FROM `tab{DT_REGISTRATION}` r
         LEFT JOIN `tab{DT_OFFERING}` o ON o.name = r.offering_id
+        LEFT JOIN `tabSIS Subject` s ON s.name = r.subject_id
         WHERE r.period_id = %(period_id)s AND r.student_id = %(student_id)s
           AND r.status = 'active'
         ORDER BY FIELD(r.day_of_week,'mon','tue','wed','thu','fri','sat')
@@ -473,6 +477,13 @@ def get_club_detail():
         doc = frappe.get_doc(DT_OFFERING, offering_id)
         capacity = _int(doc.capacity)
         registered = _int(doc.registered_count)
+        # Giới thiệu thuộc về môn, không thuộc buổi.
+        intro = frappe.db.get_value(
+            "SIS Subject",
+            doc.subject_id,
+            ["club_cover_image", "club_short_description_vn", "club_short_description_en"],
+            as_dict=True,
+        ) or frappe._dict()
 
         return single_item_response(
             {
@@ -480,9 +491,9 @@ def get_club_detail():
                 "subject_id": doc.subject_id,
                 "title_vn": doc.title_vn,
                 "title_en": doc.title_en,
-                "cover_image": doc.cover_image,
-                "short_description_vn": doc.short_description_vn,
-                "short_description_en": doc.short_description_en,
+                "cover_image": intro.get("club_cover_image"),
+                "short_description_vn": intro.get("club_short_description_vn"),
+                "short_description_en": intro.get("club_short_description_en"),
                 "day_of_week": doc.day_of_week,
                 "label_vn": DAY_LABELS_VN.get(doc.day_of_week, doc.day_of_week),
                 "label_en": DAY_LABELS_EN.get(doc.day_of_week, doc.day_of_week),
