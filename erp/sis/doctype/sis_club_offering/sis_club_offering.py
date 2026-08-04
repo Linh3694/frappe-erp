@@ -171,3 +171,21 @@ class SISClubOffering(Document):
             frappe.throw(
                 "Không thể xoá môn đang có học sinh đăng ký. Vui lòng huỷ các đăng ký trước."
             )
+
+        # Đăng ký đã huỷ là soft-delete: dòng vẫn nằm lại (status='cancelled',
+        # active_student_key=NULL) để giữ vết. Nhưng Frappe kiểm link TRƯỚC khi xoá
+        # và không phân biệt trạng thái, nên chỉ cần một dòng đã huỷ là buổi này
+        # vĩnh viễn không xoá được — dù giao diện báo "chưa có học sinh nào đăng ký".
+        #
+        # `on_trash` chạy TRƯỚC `check_if_doc_is_linked` (frappe/model/delete_doc.py),
+        # nên dọn ở đây là link check phía sau sẽ pass. Vết xoá vẫn còn nhờ
+        # `erp.observability.audit.log_delete` gắn ở doc_events.
+        cancelled = frappe.get_all(
+            "SIS Club Registration",
+            filters={"offering_id": self.name, "status": "cancelled"},
+            pluck="name",
+        )
+        for registration in cancelled:
+            frappe.delete_doc(
+                "SIS Club Registration", registration, ignore_permissions=True, force=True
+            )
