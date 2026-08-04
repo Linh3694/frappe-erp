@@ -180,6 +180,23 @@ class TestRouteStudentWeeklyConfig(unittest.TestCase):
         self.assertIsNone(trips)
         self.assertIn("Dòng 9", err)
 
+    def test_tra_tuyen_theo_ma_tuyen_khong_theo_ten(self):
+        spec = bic.BUS_IMPORT_SPECS["route_student"]
+        values, err = bic.parse_row(
+            spec,
+            {"Mã tuyến": "12", "Mã học sinh": "WS12345", "Thứ tự đón": "1", "Điểm đón": "12 Lê Lợi"},
+            2,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(values["vehicle_code"], "12")
+        self.assertNotIn("route_name", values)
+
+    def test_thieu_ma_tuyen_thi_bao_loi(self):
+        spec = bic.BUS_IMPORT_SPECS["route_student"]
+        values, err = bic.parse_row(spec, {"Mã học sinh": "WS12345", "Thứ tự đón": "1"}, 4)
+        self.assertIsNone(values)
+        self.assertIn("Mã tuyến", err)
+
     def test_tuan_hoc_la_thu_2_den_thu_6(self):
         self.assertEqual(bic.BUS_WEEKDAYS, ("Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6"))
 

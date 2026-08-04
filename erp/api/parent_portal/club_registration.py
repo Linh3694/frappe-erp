@@ -44,6 +44,7 @@ from erp.utils.api_response import (
     validation_error_response,
 )
 from erp.utils.family_access import RIGHT_OPERATIONAL, can_guardian_access_student, students_for_guardian
+from erp.api.parent_portal.club_beta_access import is_guardian_allowed
 from erp.utils.portal_error_handler import get_current_guardian
 
 DT_PERIOD = "SIS Club Registration Period"
@@ -92,6 +93,20 @@ def _as_list(value):
 def _guardian():
     g = get_current_guardian()
     return g.get("name") if g else None
+
+
+def _beta_blocked(guardian):
+    """
+    Cổng chạy thử — GỠ TRƯỚC KHI RELEASE (xem `club_beta_access`).
+
+    Trả về response "chưa có đợt nào" thay vì 403: phụ huynh ngoài nhóm chạy thử
+    không nên biết là module đang tồn tại mà mình bị chặn. Đặt ở TỪNG endpoint
+    chứ không chỉ trong `_visible_period` vì `get_registration_data` và
+    `save_registration` nhận thẳng `period_id` từ client, không đi qua hàm đó.
+    """
+    if is_guardian_allowed(guardian):
+        return None
+    return success_response(data=None, message="Chưa có đợt đăng ký câu lạc bộ nào")
 
 
 def _phase_and_countdown(period, now=None):
@@ -343,6 +358,9 @@ def get_period_overview():
         guardian = _guardian()
         if not guardian:
             return forbidden_response("Không tìm thấy thông tin phụ huynh")
+        blocked = _beta_blocked(guardian)
+        if blocked:
+            return blocked
 
         students = _guardian_students(guardian)
         campus_id = students[0].campus_id if students else None
@@ -378,6 +396,9 @@ def get_registration_data():
         guardian = _guardian()
         if not guardian:
             return forbidden_response("Không tìm thấy thông tin phụ huynh")
+        blocked = _beta_blocked(guardian)
+        if blocked:
+            return blocked
 
         students = _guardian_students(guardian)
         if not students:
@@ -467,6 +488,9 @@ def get_club_detail():
         guardian = _guardian()
         if not guardian:
             return forbidden_response("Không tìm thấy thông tin phụ huynh")
+        blocked = _beta_blocked(guardian)
+        if blocked:
+            return blocked
 
         offering_id = _param("offering_id")
         if not offering_id:
@@ -527,6 +551,9 @@ def save_registration():
         guardian = _guardian()
         if not guardian:
             return forbidden_response("Không tìm thấy thông tin phụ huynh")
+        blocked = _beta_blocked(guardian)
+        if blocked:
+            return blocked
 
         data = _data()
         period_id = data.get("period_id")
@@ -603,6 +630,9 @@ def get_my_registrations():
         guardian = _guardian()
         if not guardian:
             return forbidden_response("Không tìm thấy thông tin phụ huynh")
+        blocked = _beta_blocked(guardian)
+        if blocked:
+            return blocked
 
         students = _guardian_students(guardian)
         if not students:

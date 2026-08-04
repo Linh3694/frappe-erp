@@ -24,6 +24,7 @@
   "school_year_id",
   "status",
   "activity_days",
+  "open_reminder_sent",
   "display_timeline_section",
   "display_start_datetime",
   "column_break_display",
@@ -100,6 +101,14 @@
    "label": "Ngày sinh hoạt",
    "length": 64,
    "description": "Danh sách thứ CLB sinh hoạt trong đợt, dạng CSV: mon,tue,wed,thu,fri,sat. Để trống = cho phép mọi thứ."
+  },
+  {
+   "fieldname": "open_reminder_sent",
+   "fieldtype": "Check",
+   "label": "Đã gửi nhắc mở cổng",
+   "default": "0",
+   "read_only": 1,
+   "description": "Hệ thống tự đặt sau khi gửi thông báo nhắc trước giờ mở đăng ký."
   },
   {
    "fieldname": "display_timeline_section",

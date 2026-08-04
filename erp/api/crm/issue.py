@@ -15,7 +15,7 @@ from erp.utils.api_response import (
     validation_error_response,
     not_found_response,
 )
-from erp.api.crm.utils import ALLOWED_ROLES, check_crm_permission, get_request_data
+from erp.api.crm.utils import ALLOWED_ROLES, get_request_data
 from erp.utils.search import build_search_condition, paginated_search
 
 # Phong ban = don vi So do to chuc (ERP Organization Unit). Thay the CRM Issue Department.
@@ -232,7 +232,7 @@ def _mark_first_response_if_eligible(doc):
 
 
 def _can_write_issue_ops(user: str, issue_doc) -> bool:
-    """User duoc chinh sua van de (sau check_crm_permission): role ISSUE_WRITE_ROLES,
+    """User duoc chinh sua van de (sau _guard_issue_module_access): role ISSUE_WRITE_ROLES,
     thanh vien mot phong ban lien quan, hoac nam trong nhom nguoi lien quan cua van de."""
     if not user or user == "Guest":
         return False
@@ -320,6 +320,19 @@ def _can_access_crm_issue_list() -> bool:
     if CRM_ISSUE_LIST_EXTRA_ROLES & roles:
         return True
     return False
+
+
+def _guard_issue_module_access():
+    """Cua vao cua cac endpoint GHI van de — dung dung cua vao cua duong doc.
+
+    KHONG dung check_crm_permission (chi ALLOWED_ROLES): thanh vien phong ban lien quan
+    (SIS Administrative / Teacher / IT...) doc duoc van de va BE tra ve can_write_issue /
+    can_add_process_log = true cho ho, nhung lai bi chan ngay dong dau khi bam gui —
+    FE moi lam, BE cam lam. Hang rao that nam o tang duoi cua tung endpoint
+    (_can_write_issue_ops / PIC / Care Admin), khong phai o cua vao module nay.
+    """
+    if not _can_access_crm_issue_list():
+        frappe.throw("Khong co quyen thao tac van de CRM", frappe.PermissionError)
 
 
 def _can_access_crm_issue_report() -> bool:
@@ -489,16 +502,27 @@ def _notify_issue_department_added(doc, emails, exclude_user=None, email_event="
         return
     code = (getattr(doc, "issue_code", None) or doc.name or "").strip()
     title = (getattr(doc, "title", None) or "").strip()
+    closed = (getattr(doc, "status", None) or "").strip() == "Dong"
+    if closed:
+        # Van de da dong van cho keo them nguoi (xem lai ho so cu) — nhung goi ho "can xu ly"
+        # la sai viec: khong con gi de xu ly. Doi thanh tin de nam, va KHONG gui email:
+        # eventType `new_issue` se bao mot van de da xong nhu viec moi.
+        notif_title = "Bạn được thêm vào một vấn đề đã đóng"
+        notif_body = f"{code}: {title} — Vấn đề đã xử lý xong, thêm bạn vào để nắm thông tin."
+    else:
+        notif_title = "Bạn được thêm vào vấn đề cần xử lý"
+        notif_body = f"{code}: {title} — Vui lòng kiểm tra và phối hợp xử lý."
     _notify_crm_issue_mobile(
         targets,
-        "Bạn được thêm vào vấn đề cần xử lý",
-        f"{code}: {title} — Vui lòng kiểm tra và phối hợp xử lý.",
+        notif_title,
+        notif_body,
         doc,
         "crm_issue_department_added",
         exclude_user=exclude_user,
     )
-    # Email: dung eventType san co cua email-service (chua co template rieng cho su kien nay).
-    _issue_send_emails(doc, email_event, targets, exclude_user=exclude_user)
+    if not closed:
+        # Email: dung eventType san co cua email-service (chua co template rieng cho su kien nay).
+        _issue_send_emails(doc, email_event, targets, exclude_user=exclude_user)
 
 
 def _issue_email_enabled():
@@ -2719,7 +2743,7 @@ def reject_issue():
 @frappe.whitelist(methods=["POST"])
 def update_issue():
     """Cap nhat van de"""
-    check_crm_permission()
+    _guard_issue_module_access()
     data = get_request_data()
 
     name = data.get("name")
@@ -2878,7 +2902,7 @@ def update_issue():
 @frappe.whitelist(methods=["POST"])
 def change_issue_status():
     """Chuyen trang thai van de"""
-    check_crm_permission()
+    _guard_issue_module_access()
     data = get_request_data()
 
     name = data.get("name")
@@ -3021,7 +3045,7 @@ def change_issue_status():
 @frappe.whitelist(methods=["POST"])
 def add_process_log():
     """Them log qua trinh xu ly"""
-    check_crm_permission()
+    _guard_issue_module_access()
     data = get_request_data()
 
     issue_name = data.get("issue_name")
@@ -3094,7 +3118,7 @@ def add_process_log():
 @frappe.whitelist(methods=["POST"])
 def update_process_log():
     """Cap nhat log xu ly"""
-    check_crm_permission()
+    _guard_issue_module_access()
     data = get_request_data()
 
     issue_name = data.get("issue_name")

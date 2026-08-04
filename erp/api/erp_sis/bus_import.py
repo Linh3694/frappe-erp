@@ -484,24 +484,27 @@ def _route_student_row_handler(
     if not school_year_id:
         return None, f"Dòng {row_num}: chưa có năm học nào đang hoạt động", False
 
-    route_name = values.get("route_name", "")
+    vehicle_code = values.get("vehicle_code", "")
     # Phải bám năm học đang hoạt động, nếu không học sinh sẽ chui vào tuyến năm trước
-    # (tuyến các năm hay trùng tên nhau)
-    route_id = frappe.db.get_value(
+    # (mã tuyến chỉ unique trong phạm vi campus + năm học)
+    route = frappe.db.get_value(
         "SIS Bus Route",
         {
-            "route_name": route_name,
+            "vehicle_code": vehicle_code,
             "campus_id": _campus_filter(campus_id),
             "school_year_id": school_year_id,
         },
-        "name",
+        ["name", "route_name"],
+        as_dict=True,
     )
-    if not route_id:
+    if not route:
         return (
             None,
-            f"Dòng {row_num}: không tìm thấy tuyến đường '{route_name}' trong năm học này",
+            f"Dòng {row_num}: không tìm thấy tuyến đường có mã '{vehicle_code}' trong năm học này",
             False,
         )
+    route_id = route.name
+    route_name = route.route_name
 
     student_code = values.get("student_code", "")
     student = _lookup_student_for_bus(student_code, campus_id)

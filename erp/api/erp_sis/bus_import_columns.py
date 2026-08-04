@@ -162,13 +162,15 @@ BUS_IMPORT_SPECS: Dict[str, ImportSpec] = {
         doctype="SIS Bus Route Student",
         entity_label="học sinh trong tuyến",
         columns=(
-            ColumnSpec("Tên tuyến", "route_name", required=True),
+            # Tra tuyến theo MÃ (vehicle_code), không theo tên: tên tuyến các năm hay
+            # trùng nhau và người dùng gõ tên dễ sai chính tả/khoảng trắng.
+            ColumnSpec("Mã tuyến", "vehicle_code", required=True),
             ColumnSpec("Mã học sinh", "student_code", required=True),
             ColumnSpec("Thứ tự đón", "pickup_order", required=True),
             ColumnSpec("Điểm đón", "pickup_location"),
             ColumnSpec("Điểm trả", "drop_off_location"),
         ),
-        dedupe_fields=("route_name", "student_code"),
+        dedupe_fields=("vehicle_code", "student_code"),
     ),
     "student": ImportSpec(
         key="student",

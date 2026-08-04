@@ -1470,8 +1470,10 @@ scheduler_events = {
             "erp.api.erp_sis.daily_health_notification.check_stale_health_visits"
         ],
         # Nhắc PIC (task + công việc con) ~1 tiếng trước giờ bắt đầu sự kiện CSVC (mỗi 5 phút)
+        # + Nhắc PH ~15 phút trước giờ mở đăng ký Câu lạc bộ
         "*/5 * * * *": [
-            "erp.api.erp_administrative.administrative_ticket.send_event_facility_reminders"
+            "erp.api.erp_administrative.administrative_ticket.send_event_facility_reminders",
+            "erp.sis.tasks.club_reminders.send_club_open_reminders",
         ],
         # Renew subscription mỗi 30 phút
         "0 2 * * *": [
