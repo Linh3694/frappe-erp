@@ -86,6 +86,27 @@ def _ensure_it_support_ticket_file_folder():
         frappe.db.rollback()
 
 
+def _ensure_discipline_file_folder():
+    """Folder upload ảnh minh chứng kỷ luật (khớp FE Home/Discipline → CDN)."""
+    if frappe.db.exists(
+        "File",
+        {"is_folder": 1, "file_name": "Discipline", "folder": "Home"},
+    ):
+        return
+    try:
+        frappe.get_doc(
+            {
+                "doctype": "File",
+                "file_name": "Discipline",
+                "is_folder": 1,
+                "folder": "Home",
+            }
+        ).insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+
+
 def _seed_it_support_categories():
     """Seed 7 danh mục ticket IT nếu chưa có."""
     for cat in IT_SUPPORT_CATEGORIES:
@@ -184,6 +205,7 @@ def execute():
     _ensure_administrative_ticket_file_folder()
     _ensure_it_support_ticket_file_folder()
     _ensure_admission_file_folder()
+    _ensure_discipline_file_folder()
     _seed_it_support_categories()
     _seed_procurement()
     _seed_workflow_registry()
