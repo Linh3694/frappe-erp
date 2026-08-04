@@ -630,6 +630,94 @@ def delete_offering():
 
 
 @frappe.whitelist()
+def bulk_save_offerings():
+    """
+    Lưu nhiều môn CLB trong một request — phục vụ bảng sửa tại chỗ.
+
+    Body: {period_id, rows: [{offering_id?, subject_id, day_of_week, capacity,
+                              education_grade_ids[]}]}
+
+    Mỗi dòng nằm trong savepoint riêng: một dòng sai (trùng môn+thứ, khối lệch
+    cấp, môn không phải loại CLB…) chỉ hỏng dòng đó, phần còn lại vẫn lưu. Trả về
+    theo INDEX của dòng để bảng ở FE tô đỏ đúng dòng thay vì báo một lỗi chung
+    chung rồi bắt nhà trường tự dò.
+    """
+    try:
+        data = _data()
+        period_id = data.get("period_id")
+        rows = _as_list(data.get("rows"))
+
+        if not period_id:
+            return validation_error_response("Thiếu period_id", {"period_id": ["Bắt buộc"]})
+        if not frappe.db.exists(DT_PERIOD, period_id):
+            return not_found_response("Không tìm thấy đợt đăng ký")
+        if not rows:
+            return validation_error_response("Không có dòng nào để lưu", {"rows": ["Bắt buộc"]})
+
+        campus_id = _campus()
+        saved, failed = [], []
+
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                failed.append({"index": index, "message": "Dữ liệu dòng không hợp lệ"})
+                continue
+
+            savepoint = f"club_bulk_{index}"
+            frappe.db.savepoint(savepoint)
+            try:
+                offering_id = row.get("offering_id")
+                grade_ids = _as_list(row.get("education_grade_ids"))
+
+                if not row.get("subject_id"):
+                    raise frappe.ValidationError("Chưa chọn môn học")
+                if not row.get("day_of_week"):
+                    raise frappe.ValidationError("Chưa chọn thứ sinh hoạt")
+                if not grade_ids:
+                    raise frappe.ValidationError("Chưa chọn khối áp dụng")
+
+                if offering_id:
+                    if not frappe.db.exists(DT_OFFERING, offering_id):
+                        raise frappe.ValidationError("Môn CLB không tồn tại")
+                    doc = frappe.get_doc(DT_OFFERING, offering_id)
+                else:
+                    doc = frappe.new_doc(DT_OFFERING)
+                    doc.period_id = period_id
+                    doc.campus_id = campus_id
+
+                for field in ("subject_id", "day_of_week", "capacity", "status"):
+                    if field in row:
+                        doc.set(field, row.get(field))
+                _apply_grades(doc, grade_ids)
+                doc.save()
+
+                saved.append(
+                    {
+                        "index": index,
+                        "offering_id": doc.name,
+                        "title_vn": doc.title_vn,
+                        "day_of_week": doc.day_of_week,
+                    }
+                )
+            except Exception as e:
+                frappe.db.rollback(save_point=savepoint)
+                failed.append({"index": index, "message": str(e) or "Không lưu được dòng này"})
+
+        frappe.db.commit()
+
+        message = f"Đã lưu {len(saved)} môn"
+        if failed:
+            message += f", {len(failed)} dòng lỗi"
+
+        return success_response(
+            data={"saved": saved, "failed": failed}, message=message
+        )
+    except Exception as e:
+        frappe.db.rollback()
+        frappe.log_error(frappe.get_traceback(), "Club bulk_save_offerings")
+        return error_response(f"Lỗi khi lưu danh sách môn: {e}", code="BULK_SAVE_OFFERINGS_ERROR")
+
+
+@frappe.whitelist()
 def duplicate_offering():
     """
     Nhân bản một môn sang thứ khác.
