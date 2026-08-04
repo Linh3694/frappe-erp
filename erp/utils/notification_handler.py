@@ -365,6 +365,7 @@ def send_bulk_parent_notifications(
     actions: Optional[List] = None,
     data: Optional[Dict] = None,
     skip_push: bool = False,
+    allowed_parent_emails: Optional[List[str]] = None,
 ) -> Dict:
     """
     Unified push notification sender
@@ -423,7 +424,21 @@ def send_bulk_parent_notifications(
         
         # Get guardians
         guardians = get_guardians_for_students(student_ids)
-        
+
+        # Giới hạn người nhận theo email (tuỳ chọn).
+        #
+        # Lọc theo học sinh là CHƯA ĐỦ khi cần giới hạn đúng một nhóm người nhận:
+        # một học sinh thường có hai phụ huynh, giữ em đó lại vì mẹ nằm trong
+        # nhóm thì bố cũng nhận thông báo. Tham số này để module gọi tự quyết
+        # danh sách cuối cùng; bỏ trống = giữ nguyên hành vi cũ (mọi phụ huynh).
+        if allowed_parent_emails is not None:
+            allowed = {e for e in allowed_parent_emails if e}
+            before = len(guardians)
+            guardians = [g for g in guardians if g.get("email") in allowed]
+            frappe.logger().info(
+                f"🔒 allowed_parent_emails: {before} → {len(guardians)} phụ huynh"
+            )
+
         if not guardians:
             frappe.logger().info(f"ℹ️ No guardians found for {len(student_ids)} students")
             return {

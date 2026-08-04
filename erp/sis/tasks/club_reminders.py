@@ -15,7 +15,10 @@ huynh nhận thông báo về một thứ họ không dùng được.
 import frappe
 from frappe.utils import add_to_date, cint, get_datetime, now_datetime
 
-from erp.api.parent_portal.club_beta_access import filter_students_for_beta
+from erp.api.parent_portal.club_beta_access import (
+    allowed_parent_emails,
+    filter_students_for_beta,
+)
 
 DT_PERIOD = "SIS Club Registration Period"
 DT_OFFERING = "SIS Club Offering"
@@ -151,6 +154,10 @@ def _send_for_period(period_name, minutes_before, now):
         recipients_data={"student_ids": student_ids, "period_id": period_name},
         title=title,
         body=body,
+        # Cắt lần hai ở tầng NGƯỜI NHẬN: lọc học sinh mới chỉ đảm bảo "em này có
+        # ít nhất một phụ huynh trong nhóm chạy thử", phụ huynh còn lại của chính
+        # em đó vẫn lọt. `None` = cổng tắt = giữ nguyên hành vi gửi cho tất cả.
+        allowed_parent_emails=allowed_parent_emails(student_ids),
         data={
             "type": "club_registration_opening",
             "period_id": period_name,
@@ -261,8 +268,77 @@ def debug_club_beta_phones(period_id=None):
         return {"error": "Danh sách chạy thử đang rỗng"}
 
     eligible = set()
+    period = None
     if period_id:
-        eligible = set(_eligible_student_ids(frappe.get_doc(DT_PERIOD, period_id)))
+        period = frappe.get_doc(DT_PERIOD, period_id)
+        eligible = set(_eligible_student_ids(period))
+
+    def _period_requirements():
+        """Đợt yêu cầu gì: năm học, campus, và các khối có mở buổi."""
+        if not period:
+            return None
+        grades = frappe.db.sql(
+            f"""
+            SELECT DISTINCT g.education_grade_id, g.education_grade_name
+            FROM `tab{DT_OFFERING}` o
+            INNER JOIN `tabSIS Club Offering Grade` g
+                    ON g.parent = o.name AND g.parenttype = %(dt)s
+            WHERE o.period_id = %(pid)s AND o.status = 'active'
+            """,
+            {"pid": period.name, "dt": DT_OFFERING},
+            as_dict=True,
+        )
+        return {
+            "school_year_id": period.school_year_id,
+            "campus_id": period.campus_id,
+            "grades": grades,
+        }
+
+    def _placement(student_id):
+        """
+        Học sinh đang ở lớp nào, khối nào, năm học nào.
+
+        Lấy MỌI năm học chứ không chỉ năm của đợt: cần phân biệt "chưa xếp lớp
+        năm nay" với "học khối mà đợt không mở" — hai nguyên nhân này đòi hai
+        cách xử lý hoàn toàn khác nhau.
+        """
+        return frappe.db.sql(
+            """
+            SELECT cs.class_id, c.education_grade, c.school_year_id, c.campus_id,
+                   COALESCE(eg.title_vn, '') AS grade_name
+            FROM `tabSIS Class Student` cs
+            INNER JOIN `tabSIS Class` c ON c.name = cs.class_id
+            LEFT JOIN `tabSIS Education Grade` eg ON eg.name = c.education_grade
+            WHERE cs.student_id = %(sid)s
+            ORDER BY c.school_year_id DESC
+            LIMIT 10
+            """,
+            {"sid": student_id},
+            as_dict=True,
+        )
+
+    def _reason(student_id, placement):
+        if student_id in eligible:
+            return "ok"
+        if not placement:
+            return "chưa xếp lớp ở bất kỳ năm học nào"
+        if period and not any(p["school_year_id"] == period.school_year_id for p in placement):
+            years = sorted({p["school_year_id"] for p in placement if p["school_year_id"]})
+            return f"không có lớp trong năm học của đợt ({period.school_year_id}); đang ở: {years}"
+        if period and period.campus_id and not any(
+            p["campus_id"] == period.campus_id
+            for p in placement
+            if p["school_year_id"] == period.school_year_id
+        ):
+            return f"khác campus với đợt ({period.campus_id})"
+        grades = sorted(
+            {
+                p["grade_name"] or p["education_grade"]
+                for p in placement
+                if p["school_year_id"] == (period.school_year_id if period else None)
+            }
+        )
+        return f"đợt không mở buổi cho khối của em ({grades})"
 
     # Bỏ dấu phân cách ngay trong SQL rồi so HẬU TỐ 9 chữ số: đủ bắt '0376…',
     # '+84376…', '84376…', '037 641 2589', '037.641.2589', '+84 (376) 412-589'.
@@ -274,6 +350,19 @@ def debug_club_beta_phones(period_id=None):
         for ch in (" ", ".", "-", "(", ")", "+"):
             expr = f"REPLACE({expr},'{ch}','')"
         return expr
+
+    def _student_entry(s):
+        # Gọi `_placement` một lần rồi dùng lại cho cả `reason` lẫn output —
+        # trước đó gọi hai lần, tức gấp đôi query cho mỗi học sinh.
+        placement = _placement(s["student"])
+        return {
+            "student": s["student"],
+            "name": s["student_name"],
+            "code": s["student_code"],
+            "eligible_for_period": s["student"] in eligible,
+            "reason": _reason(s["student"], placement),
+            "placement": placement,
+        }
 
     report = []
     for suffix in allowed:
@@ -315,12 +404,7 @@ def debug_club_beta_phones(period_id=None):
                     "phone_stored": g["phone_number"],
                     "phone_normalized": normalize_phone(g["phone_number"]),
                     "students": [
-                        {
-                            "student": s["student"],
-                            "name": s["student_name"],
-                            "code": s["student_code"],
-                            "eligible_for_period": s["student"] in eligible,
-                        }
+                        _student_entry(s)
                         for s in students
                     ],
                 }
@@ -330,6 +414,7 @@ def debug_club_beta_phones(period_id=None):
     return {
         "period": period_id,
         "eligible_students_in_period": len(eligible),
+        "period_requirements": _period_requirements(),
         "allowlist": allowed,
         "found": report,
     }

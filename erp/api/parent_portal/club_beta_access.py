@@ -98,6 +98,42 @@ def is_guardian_allowed(guardian_name: str) -> bool:
     return any(normalize_phone(p) in allowed for p in guardian_phones(guardian_name))
 
 
+def allowed_parent_emails(student_ids: list):
+    """
+    Email của CHÍNH những phụ huynh trong danh sách chạy thử, trong số phụ huynh
+    của các học sinh này.
+
+    `filter_students_for_beta` chỉ lọc HỌC SINH — giữ em lại vì mẹ nằm trong
+    nhóm thì bố cũng lọt vào danh sách gửi. Hàm này cắt tiếp ở tầng người nhận.
+    Trả `None` khi cổng đang tắt, để bên gọi truyền thẳng vào
+    `send_bulk_parent_notifications(allowed_parent_emails=...)` mà vẫn giữ hành
+    vi "gửi cho tất cả".
+
+    Email dựng theo đúng công thức của `get_guardians_for_students`.
+    """
+    if not _allowed_set() or not student_ids:
+        return None
+
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT g.name, g.guardian_id
+        FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Family` f ON f.name = fr.parent
+        INNER JOIN `tabCRM Guardian` g ON g.name = fr.guardian
+        WHERE fr.student IN %(students)s
+          AND fr.parentfield = 'relationships'
+          AND f.docstatus < 2
+        """,
+        {"students": list(student_ids)},
+        as_dict=True,
+    )
+    return [
+        f"{r['guardian_id']}@parent.wellspring.edu.vn"
+        for r in rows
+        if r.get("guardian_id") and is_guardian_allowed(r["name"])
+    ]
+
+
 def filter_students_for_beta(student_ids: list) -> list:
     """
     Giữ lại học sinh có ÍT NHẤT MỘT phụ huynh nằm trong danh sách chạy thử.
