@@ -133,6 +133,14 @@ PHASE2_BACKFILL: dict[str, list[tuple[str, str, dict]]] = {
 		("SIS Medicine", "copy", {"source_field": "campus"}),
 		("SIS Disease Classification", "copy", {"source_field": "campus"}),
 	],
+	"dot7": [
+		# Doctype CLB sinh ra đã có campus_id + before_insert inject_campus_id, và
+		# bảng rỗng lúc deploy nên KHÔNG có gì để backfill. Khai ở đây để
+		# all_phase2_doctypes() / sinh permission_query wrapper biết tới chúng.
+		("SIS Club Registration Period", "skip", {}),
+		("SIS Club Offering", "skip", {}),
+		("SIS Club Registration", "skip", {}),
+	],
 }
 
 # Module routing cho permission_query wrapper

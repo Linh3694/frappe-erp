@@ -6,6 +6,7 @@ REQUIRED_ROLES = [
     "SIS Medical",
     "SIS Finance",
     "SIS Sales Care Admin",
+    "SIS Club",
 ]
 
 # Danh mục ticket IT mặc định — title khớp FE (Overall, Camera, ...)

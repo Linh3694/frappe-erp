@@ -426,6 +426,18 @@ def sis_menu_registration_period_query(user):
 	"""Permission query for SIS Menu Registration Period."""
 	return get_campus_permission_query("SIS Menu Registration Period", user)
 
+def sis_club_registration_period_query(user):
+	"""Permission query for SIS Club Registration Period."""
+	return get_campus_permission_query("SIS Club Registration Period", user)
+
+def sis_club_offering_query(user):
+	"""Permission query for SIS Club Offering."""
+	return get_campus_permission_query("SIS Club Offering", user)
+
+def sis_club_registration_query(user):
+	"""Permission query for SIS Club Registration."""
+	return get_campus_permission_query("SIS Club Registration", user)
+
 def sis_teacher_education_stage_query(user):
 	"""Permission query for SIS Teacher Education Stage."""
 	return get_campus_permission_query("SIS Teacher Education Stage", user)

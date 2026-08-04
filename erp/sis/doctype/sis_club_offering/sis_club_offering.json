@@ -1,0 +1,338 @@
+{
+ "actions": [],
+ "allow_copy": 1,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-CLUB-OFF-{#####}",
+ "beta": 0,
+ "creation": "2026-08-03 00:00:00.000000",
+ "custom": 0,
+ "description": "Môn CLB trong một đợt đăng ký — một dòng = một môn, một thứ",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "campus_id",
+  "period_id",
+  "school_year_id",
+  "subject_id",
+  "timetable_subject_id",
+  "column_break_basic",
+  "title_vn",
+  "title_en",
+  "day_of_week",
+  "capacity",
+  "registered_count",
+  "status",
+  "logistics_section",
+  "start_time",
+  "end_time",
+  "location",
+  "column_break_logistics",
+  "teacher_name",
+  "fee",
+  "intro_section",
+  "cover_image",
+  "short_description_vn",
+  "short_description_en",
+  "description_vn",
+  "description_en",
+  "grades_section",
+  "education_grades",
+  "system_information",
+  "created_by",
+  "created_at",
+  "column_break_system",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "period_id",
+   "fieldtype": "Link",
+   "label": "Đợt đăng ký",
+   "options": "SIS Club Registration Period",
+   "reqd": 1,
+   "search_index": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "read_only": 1,
+   "fetch_from": "period_id.school_year_id"
+  },
+  {
+   "fieldname": "subject_id",
+   "fieldtype": "Link",
+   "label": "Môn học",
+   "options": "SIS Subject",
+   "reqd": 1,
+   "search_index": 1,
+   "description": "Tái sử dụng danh mục môn sẵn có. Tên hiển thị lấy từ SIS Timetable Subject."
+  },
+  {
+   "fieldname": "timetable_subject_id",
+   "fieldtype": "Link",
+   "label": "Timetable Subject",
+   "options": "SIS Timetable Subject",
+   "read_only": 1,
+   "fetch_from": "subject_id.timetable_subject_id"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "label": "Tên môn (VN)",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Snapshot từ SIS Timetable Subject, fallback SIS Subject.title"
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "label": "Tên môn (EN)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "day_of_week",
+   "fieldtype": "Select",
+   "label": "Thứ sinh hoạt",
+   "options": "mon\ntue\nwed\nthu\nfri\nsat",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "description": "mon=Thứ 2, tue=Thứ 3, wed=Thứ 4, thu=Thứ 5, fri=Thứ 6, sat=Thứ 7"
+  },
+  {
+   "fieldname": "capacity",
+   "fieldtype": "Int",
+   "label": "Giới hạn số lượng",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "registered_count",
+   "fieldtype": "Int",
+   "label": "Đã đăng ký",
+   "default": "0",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Cache hiển thị. Chỉ được ghi bởi erp/sis/utils/club_registration.py trong lock."
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "active\ninactive",
+   "default": "active",
+   "reqd": 1
+  },
+  {
+   "fieldname": "logistics_section",
+   "fieldtype": "Section Break",
+   "label": "Thông tin buổi sinh hoạt"
+  },
+  {
+   "fieldname": "start_time",
+   "fieldtype": "Time",
+   "label": "Giờ bắt đầu"
+  },
+  {
+   "fieldname": "end_time",
+   "fieldtype": "Time",
+   "label": "Giờ kết thúc"
+  },
+  {
+   "fieldname": "location",
+   "fieldtype": "Data",
+   "label": "Địa điểm"
+  },
+  {
+   "fieldname": "column_break_logistics",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "teacher_name",
+   "fieldtype": "Data",
+   "label": "Giáo viên phụ trách",
+   "description": "Nhập tự do — GV CLB có thể là người thuê ngoài, không có trong SIS Teacher"
+  },
+  {
+   "fieldname": "fee",
+   "fieldtype": "Currency",
+   "label": "Học phí",
+   "description": "Chỉ để hiển thị, chưa nối vào module tài chính"
+  },
+  {
+   "fieldname": "intro_section",
+   "fieldtype": "Section Break",
+   "label": "Giới thiệu môn học"
+  },
+  {
+   "fieldname": "cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Ảnh bìa"
+  },
+  {
+   "fieldname": "short_description_vn",
+   "fieldtype": "Small Text",
+   "label": "Mô tả ngắn (VN)",
+   "description": "Hiển thị trên thẻ môn ở Parent Portal"
+  },
+  {
+   "fieldname": "short_description_en",
+   "fieldtype": "Small Text",
+   "label": "Mô tả ngắn (EN)"
+  },
+  {
+   "fieldname": "description_vn",
+   "fieldtype": "Text Editor",
+   "label": "Giới thiệu đầy đủ (VN)"
+  },
+  {
+   "fieldname": "description_en",
+   "fieldtype": "Text Editor",
+   "label": "Giới thiệu đầy đủ (EN)"
+  },
+  {
+   "fieldname": "grades_section",
+   "fieldtype": "Section Break",
+   "label": "Khối được áp dụng"
+  },
+  {
+   "fieldname": "education_grades",
+   "fieldtype": "Table",
+   "label": "Danh sách khối",
+   "options": "SIS Club Offering Grade",
+   "reqd": 1,
+   "description": "Mọi khối phải thuộc cấp học của môn (SIS Subject.education_stage)"
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Người tạo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_system",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-08-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Club Offering",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Club",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "SIS Teacher",
+   "share": 0,
+   "write": 0
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title_vn",
+ "track_changes": 1
+}

@@ -1,0 +1,277 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "format:SIS-CLUB-PERIOD-{#####}",
+ "beta": 0,
+ "creation": "2026-08-03 00:00:00.000000",
+ "custom": 0,
+ "description": "Đợt đăng ký câu lạc bộ theo năm học",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "campus_id",
+  "title_vn",
+  "title_en",
+  "column_break_basic",
+  "school_year_id",
+  "status",
+  "display_timeline_section",
+  "display_start_datetime",
+  "column_break_display",
+  "display_end_datetime",
+  "registration_timeline_section",
+  "registration_start_datetime",
+  "column_break_registration",
+  "registration_end_datetime",
+  "intro_section",
+  "cover_image",
+  "intro_vn",
+  "intro_en",
+  "attachments_section",
+  "attachments",
+  "system_information",
+  "created_by",
+  "created_at",
+  "column_break_system",
+  "updated_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin cơ bản"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "title_vn",
+   "fieldtype": "Data",
+   "label": "Tên đợt (VN)",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "VD: Đăng ký CLB Học kỳ 1 năm học 2026-2027"
+  },
+  {
+   "fieldname": "title_en",
+   "fieldtype": "Data",
+   "label": "Tên đợt (EN)"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "Draft\nOpen\nClosed",
+   "default": "Draft",
+   "reqd": 1,
+   "in_list_view": 1,
+   "description": "Draft: Nháp, Open: Đang mở, Closed: Đã đóng"
+  },
+  {
+   "fieldname": "display_timeline_section",
+   "fieldtype": "Section Break",
+   "label": "Thời gian hiển thị trên Parent Portal"
+  },
+  {
+   "fieldname": "display_start_datetime",
+   "fieldtype": "Datetime",
+   "label": "Bắt đầu hiển thị",
+   "reqd": 1,
+   "description": "Từ thời điểm này phụ huynh nhìn thấy đợt trên Parent Portal"
+  },
+  {
+   "fieldname": "column_break_display",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "display_end_datetime",
+   "fieldtype": "Datetime",
+   "label": "Kết thúc hiển thị",
+   "reqd": 1
+  },
+  {
+   "fieldname": "registration_timeline_section",
+   "fieldtype": "Section Break",
+   "label": "Thời gian đăng ký"
+  },
+  {
+   "fieldname": "registration_start_datetime",
+   "fieldtype": "Datetime",
+   "label": "Bắt đầu nhận đăng ký",
+   "reqd": 1,
+   "description": "Phải nằm trong hoặc bằng thời điểm bắt đầu hiển thị"
+  },
+  {
+   "fieldname": "column_break_registration",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "registration_end_datetime",
+   "fieldtype": "Datetime",
+   "label": "Kết thúc nhận đăng ký",
+   "reqd": 1
+  },
+  {
+   "fieldname": "intro_section",
+   "fieldtype": "Section Break",
+   "label": "Giới thiệu chung"
+  },
+  {
+   "fieldname": "cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Ảnh bìa"
+  },
+  {
+   "fieldname": "intro_vn",
+   "fieldtype": "Text Editor",
+   "label": "Mô tả tổng quan (VN)"
+  },
+  {
+   "fieldname": "intro_en",
+   "fieldtype": "Text Editor",
+   "label": "Mô tả tổng quan (EN)"
+  },
+  {
+   "fieldname": "attachments_section",
+   "fieldtype": "Section Break",
+   "label": "Ảnh & slide giới thiệu"
+  },
+  {
+   "fieldname": "attachments",
+   "fieldtype": "Table",
+   "label": "Tài liệu đính kèm",
+   "options": "SIS Club Registration Period Attachment",
+   "description": "Ảnh slide (PNG/JPG) hoặc PDF. File .pptx chỉ hiển thị dạng link tải về."
+  },
+  {
+   "fieldname": "system_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin hệ thống",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "created_by",
+   "fieldtype": "Link",
+   "label": "Người tạo",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày tạo",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_system",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "updated_at",
+   "fieldtype": "Datetime",
+   "label": "Ngày cập nhật",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-08-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Club Registration Period",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Club",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "SIS Teacher",
+   "share": 0,
+   "write": 0
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title_vn",
+ "track_changes": 1
+}

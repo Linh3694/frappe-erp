@@ -1,0 +1,324 @@
+{
+ "actions": [],
+ "allow_copy": 0,
+ "allow_events_in_timeline": 0,
+ "allow_guest_to_view": 0,
+ "allow_import": 1,
+ "allow_rename": 0,
+ "autoname": "format:SIS-CLUB-REG-{#####}",
+ "beta": 0,
+ "creation": "2026-08-03 00:00:00.000000",
+ "custom": 0,
+ "description": "Đăng ký câu lạc bộ của học sinh — một dòng cho mỗi (học sinh, môn)",
+ "docstatus": 0,
+ "doctype": "DocType",
+ "document_type": "Document",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "basic_information",
+  "campus_id",
+  "period_id",
+  "offering_id",
+  "subject_id",
+  "day_of_week",
+  "column_break_basic",
+  "student_id",
+  "student_name",
+  "student_code",
+  "school_year_id",
+  "education_grade_id",
+  "class_id",
+  "class_name",
+  "status_section",
+  "status",
+  "active_student_key",
+  "source",
+  "column_break_status",
+  "registered_by",
+  "registered_by_guardian",
+  "registration_datetime",
+  "audit_section",
+  "cancelled_by",
+  "cancelled_at",
+  "column_break_audit",
+  "cancel_reason",
+  "moved_from_offering_id"
+ ],
+ "fields": [
+  {
+   "fieldname": "basic_information",
+   "fieldtype": "Section Break",
+   "label": "Thông tin đăng ký"
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "reqd": 0,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "period_id",
+   "fieldtype": "Link",
+   "label": "Đợt đăng ký",
+   "options": "SIS Club Registration Period",
+   "reqd": 1,
+   "search_index": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "offering_id",
+   "fieldtype": "Link",
+   "label": "Môn CLB",
+   "options": "SIS Club Offering",
+   "reqd": 1,
+   "search_index": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "subject_id",
+   "fieldtype": "Link",
+   "label": "Môn học",
+   "options": "SIS Subject",
+   "reqd": 1,
+   "read_only": 1,
+   "description": "Denormalize từ môn CLB — cột này gánh UNIQUE index «1 môn / 1 HS / 1 đợt»"
+  },
+  {
+   "fieldname": "day_of_week",
+   "fieldtype": "Select",
+   "label": "Thứ",
+   "options": "mon\ntue\nwed\nthu\nfri\nsat",
+   "reqd": 1,
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "description": "Denormalize từ môn CLB — cột này gánh UNIQUE index «tối đa 1 môn / thứ»"
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "student_id",
+   "fieldtype": "Link",
+   "label": "Học sinh",
+   "options": "CRM Student",
+   "reqd": 1,
+   "search_index": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_name",
+   "fieldtype": "Data",
+   "label": "Tên học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_name",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "student_code",
+   "fieldtype": "Data",
+   "label": "Mã học sinh",
+   "read_only": 1,
+   "fetch_from": "student_id.student_code"
+  },
+  {
+   "fieldname": "school_year_id",
+   "fieldtype": "Link",
+   "label": "Năm học",
+   "options": "SIS School Year",
+   "read_only": 1
+  },
+  {
+   "fieldname": "education_grade_id",
+   "fieldtype": "Link",
+   "label": "Khối",
+   "options": "SIS Education Grade",
+   "read_only": 1,
+   "description": "Snapshot khối tại thời điểm đăng ký"
+  },
+  {
+   "fieldname": "class_id",
+   "fieldtype": "Link",
+   "label": "Lớp chính quy",
+   "options": "SIS Class",
+   "read_only": 1,
+   "search_index": 1,
+   "description": "Snapshot lớp tại thời điểm đăng ký"
+  },
+  {
+   "fieldname": "class_name",
+   "fieldtype": "Data",
+   "label": "Tên lớp",
+   "read_only": 1,
+   "fetch_from": "class_id.title"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Trạng thái",
+   "options": "active\ncancelled",
+   "default": "active",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "active_student_key",
+   "fieldtype": "Data",
+   "label": "Active Student Key",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "= student_id khi active, NULL khi cancelled. MariaDB bỏ qua dòng NULL trong UNIQUE index nên dòng đã huỷ không chặn đăng ký lại."
+  },
+  {
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Nguồn",
+   "options": "parent_portal\nstaff",
+   "default": "parent_portal",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "registered_by",
+   "fieldtype": "Link",
+   "label": "Người đăng ký",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "registered_by_guardian",
+   "fieldtype": "Link",
+   "label": "Phụ huynh đăng ký",
+   "options": "CRM Guardian",
+   "read_only": 1
+  },
+  {
+   "fieldname": "registration_datetime",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm đăng ký",
+   "read_only": 1
+  },
+  {
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Xử lý của nhà trường",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "cancelled_by",
+   "fieldtype": "Link",
+   "label": "Người huỷ",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cancelled_at",
+   "fieldtype": "Datetime",
+   "label": "Thời điểm huỷ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_audit",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "cancel_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do huỷ"
+  },
+  {
+   "fieldname": "moved_from_offering_id",
+   "fieldtype": "Link",
+   "label": "Chuyển từ môn",
+   "options": "SIS Club Offering",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 0,
+ "links": [],
+ "modified": "2026-08-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sis",
+ "name": "SIS Club Registration",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS BOD",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "SIS Club",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "SIS Teacher",
+   "share": 0,
+   "write": 0
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "Parent",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "student_name",
+ "track_changes": 1
+}

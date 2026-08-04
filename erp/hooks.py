@@ -230,6 +230,9 @@ permission_query_conditions = {
 	"SIS Bus Route Student": "erp.sis.utils.permission_query.sis_bus_route_student_query",
 	"SIS Menu Registration": "erp.sis.utils.permission_query.sis_menu_registration_query",
 	"SIS Menu Registration Period": "erp.sis.utils.permission_query.sis_menu_registration_period_query",
+	"SIS Club Registration Period": "erp.sis.utils.permission_query.sis_club_registration_period_query",
+	"SIS Club Offering": "erp.sis.utils.permission_query.sis_club_offering_query",
+	"SIS Club Registration": "erp.sis.utils.permission_query.sis_club_registration_query",
 	"SIS Teacher Education Stage": "erp.sis.utils.permission_query.sis_teacher_education_stage_query",
 	"SIS Finance Order": "erp.sis.utils.permission_query.sis_finance_order_query",
 	"SIS Finance Order Student": "erp.sis.utils.permission_query.sis_finance_order_student_query",
@@ -416,6 +419,9 @@ has_permission = {
 	"SIS Bus Route Student": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Menu Registration": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Menu Registration Period": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Club Registration Period": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Club Offering": "erp.sis.utils.campus_permissions.has_campus_permission",
+	"SIS Club Registration": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Teacher Education Stage": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Finance Order": "erp.sis.utils.campus_permissions.has_campus_permission",
 	"SIS Finance Order Student": "erp.sis.utils.campus_permissions.has_campus_permission",
@@ -968,6 +974,20 @@ doc_events = {
 	},
 	"SIS Menu Registration Period": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Club Registration Period": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Club Offering": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Club Registration": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+		# Đăng ký CLB là bất biến với phụ huynh nên mọi thay đổi đều là can thiệp
+		# của nhà trường -> ghi vết đầy đủ.
+		"after_insert": "erp.observability.audit.log_create",
+		"on_update": "erp.observability.audit.log_update",
+		"on_trash": "erp.observability.audit.log_delete",
 	},
 	"SIS Teacher Education Stage": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",

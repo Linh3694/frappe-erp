@@ -27,3 +27,4 @@ erp.patches.v1_0.sync_crm_guardian_flat_phone
 erp.patches.v1_0.backfill_bus_route_vehicle_code
 erp.patches.v1_0.drop_bus_staff_codes
 erp.patches.v1_0.seed_system_config
+erp.patches.v1_0.add_club_registration_unique_indexes
