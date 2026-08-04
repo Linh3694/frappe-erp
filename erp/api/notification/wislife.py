@@ -192,6 +192,64 @@ def _portal_email_from_guardian_id(guardian_id):
     return f"{gid}@parent.wellspring.edu.vn"
 
 
+def _homeroom_teacher_emails_for_class(class_id):
+    """
+    Email User của GVCN + phó chủ nhiệm lớp — để WIS (web/app) nhận bài mới
+    khi GVBM / người khác đăng bảng tin.
+    """
+    class_id = (class_id or "").strip()
+    if not class_id:
+        return []
+
+    row = frappe.db.get_value(
+        "SIS Class",
+        class_id,
+        ["homeroom_teacher", "vice_homeroom_teacher", "title", "short_title"],
+        as_dict=True,
+    )
+    if not row:
+        return []
+
+    teacher_ids = [
+        tid
+        for tid in (row.get("homeroom_teacher"), row.get("vice_homeroom_teacher"))
+        if tid
+    ]
+    if not teacher_ids:
+        return []
+
+    emails = []
+    seen = set()
+    for tid in teacher_ids:
+        user_id = frappe.db.get_value("SIS Teacher", tid, "user_id")
+        if not user_id:
+            continue
+        email = (
+            frappe.db.get_value("User", user_id, "email") or str(user_id)
+        ).strip().lower()
+        if not email or "@" not in email or email in seen:
+            continue
+        seen.add(email)
+        emails.append(email)
+    return emails
+
+
+def _class_display_title(class_id, event_data=None):
+    title = ""
+    if event_data:
+        title = str(event_data.get("classTitle") or event_data.get("class_title") or "").strip()
+    if title:
+        return title
+    if not class_id:
+        return "lớp"
+    row = frappe.db.get_value(
+        "SIS Class", class_id, ["title", "short_title"], as_dict=True
+    )
+    if not row:
+        return "lớp"
+    return (row.get("short_title") or row.get("title") or class_id or "lớp").strip()
+
+
 def _guardian_student_pairs_for_class(class_id, school_year_id=None):
     """
     (guardian_id, student_id) — student_id là tên bản ghi CRM Student.
@@ -225,8 +283,17 @@ def _guardian_student_pairs_for_class(class_id, school_year_id=None):
 
 
 def _do_notify_class_new_post(event_data):
-    """Background: thông báo bài mới trong Nhật ký lớp tới PH (có studentId gợi ý trong payload)."""
+    """
+    Background: bài mới trên Bảng tin lớp →
+      • Phụ huynh: Expo + ERP Notification (PP web) + mirror inbox (PP mobile / khi không stream-only)
+      • GVCN + phó: Expo + mirror inbox (WIS web/app đọc notification-service)
+    """
     try:
+        from erp.common.notification_emit import (
+            emit_inbox_mirror_bulk,
+            push_delivered_by_notification_service,
+        )
+
         raw_author_name = event_data.get("authorName", "Ai đó")
         author_name = format_vietnamese_name(raw_author_name)
         post_id = event_data.get("postId")
@@ -240,24 +307,22 @@ def _do_notify_class_new_post(event_data):
             frappe.logger().warning("⚠️ [Wislife Class Post Job] Thiếu postId hoặc classId")
             return
 
+        class_title = _class_display_title(class_id, event_data)
+        journal_url = f"/journal/{post_id}"
+        teacher_web_url = f"/teaching/classes/{class_id}?tab=newsfeed"
+
         pairs = _guardian_student_pairs_for_class(class_id, school_year_id)
         frappe.logger().info(
             f"📱 [Wislife Class Post Job] class={class_id} sy={school_year_id or '_'} → pairs={len(pairs)}"
         )
-        if not pairs:
+        if not pairs and school_year_id:
             # Thử lại không lọc school_year_id để tránh mismatch (data cũ / format khác).
-            if school_year_id:
-                pairs = _guardian_student_pairs_for_class(class_id, None)
-                frappe.logger().info(
-                    f"📱 [Wislife Class Post Job] retry không lọc school_year_id → pairs={len(pairs)}"
-                )
-            if not pairs:
-                frappe.logger().warning(
-                    f"⚠️ [Wislife Class Post Job] Không có PH nào cho lớp {class_id}"
-                )
-                return
+            pairs = _guardian_student_pairs_for_class(class_id, None)
+            frappe.logger().info(
+                f"📱 [Wislife Class Post Job] retry không lọc school_year_id → pairs={len(pairs)}"
+            )
 
-        # Mỗi guardian (portal email) → tập con trong lớp; chọn 1 studentId để deep link mobile
+        # Mỗi guardian (portal email) → tập con trong lớp; chọn 1 studentId để deep link
         email_to_students = defaultdict(set)
         for row in pairs:
             gid = row.get("guardian_id")
@@ -266,65 +331,144 @@ def _do_notify_class_new_post(event_data):
             if portal and sid:
                 email_to_students[portal].add(sid)
 
-        notification_message = f'{author_name} vừa đăng: "{content_preview}..."'
-        push_title = "Wislife - Bài viết mới"
+        parent_message = (
+            f'{author_name} vừa đăng trên Bảng tin lớp {class_title}: "{content_preview}..."'
+            if content_preview
+            else f"{author_name} vừa đăng trên Bảng tin lớp {class_title}"
+        )
+        teacher_message = (
+            f'{author_name} vừa đăng trên Bảng tin lớp {class_title}: "{content_preview}..."'
+            if content_preview
+            else f"{author_name} vừa đăng trên Bảng tin lớp {class_title}"
+        )
+        push_title = "Bảng tin lớp"
 
-        targets = []
+        parent_targets = []
         for portal_email, student_set in email_to_students.items():
             if author_email and portal_email.strip().lower() == author_email:
                 continue
             pick_student = sorted(student_set)[0]
             base = {
-                "type": "wislife_new_post",
-                "postId": post_id,
+                "type": "wislife_class_post",
+                "postId": str(post_id),
                 "action": "open_post",
                 "studentId": pick_student,
                 "student_id": pick_student,
+                "url": journal_url,
+                "action_url": journal_url,
+                "actorName": author_name,
+                "classTitle": class_title,
             }
             base.update(_wislife_extra_fields(event_data))
-            targets.append({"email": portal_email, "data": base})
+            parent_targets.append({"email": portal_email, "data": base})
 
-        if not targets:
-            frappe.logger().info("📱 [Wislife Class Post Job] Không có người nhận sau khi lọc tác giả")
+        teacher_targets = []
+        for teacher_email in _homeroom_teacher_emails_for_class(class_id):
+            if author_email and teacher_email == author_email:
+                continue
+            base = {
+                "type": "wislife_class_post",
+                "postId": str(post_id),
+                "action": "open_class_newsfeed",
+                "classId": str(class_id),
+                "class_id": str(class_id),
+                "url": teacher_web_url,
+                "action_url": teacher_web_url,
+                "actorName": author_name,
+                "classTitle": class_title,
+            }
+            if school_year_id:
+                base["schoolYearId"] = str(school_year_id)
+                base["school_year_id"] = str(school_year_id)
+            base.update(_wislife_extra_fields(event_data))
+            teacher_targets.append({"email": teacher_email, "data": base})
+
+        if not parent_targets and not teacher_targets:
+            frappe.logger().warning(
+                f"⚠️ [Wislife Class Post Job] Không có PH/GVCN nhận cho lớp {class_id}"
+            )
             return
 
         frappe.logger().info(
-            f"📱 [Wislife Class Post Job] Gửi tới {len(targets)} PH cho lớp {class_id}"
+            f"📱 [Wislife Class Post Job] class={class_id} → "
+            f"PH={len(parent_targets)} GVCN={len(teacher_targets)}"
         )
 
-        try:
-            bulk_result = send_mobile_notifications_bulk(
-                targets,
-                push_title,
-                notification_message,
-            )
-            frappe.logger().info(
-                f"✅ [Wislife Class Post Job] Bulk Expo: {bulk_result.get('success_count', 0)}/"
-                f"{bulk_result.get('total_messages', 0)}"
-            )
-        except Exception as bulk_err:
-            frappe.logger().error(f"❌ [Wislife Class Post Job] Bulk Expo failed: {str(bulk_err)}")
-
-        saved = 0
-        for t in targets:
-            em = t["email"]
-            data = t["data"]
+        # Push Expo (hoặc stream đầy đủ nếu MOBILE_NOTIFY_VIA_REDIS_STREAM_ONLY)
+        for label, targets, title, body in (
+            ("PH", parent_targets, push_title, parent_message),
+            ("GVCN", teacher_targets, push_title, teacher_message),
+        ):
+            if not targets:
+                continue
             try:
-                create_notification(
-                    title=push_title,
-                    message=notification_message,
-                    recipient_user=em,
-                    notification_type="system",
-                    priority="normal",
-                    data={**data, "actorName": author_name},
-                    channel="push",
-                    event_timestamp=frappe.utils.now(),
+                bulk_result = send_mobile_notifications_bulk(targets, title, body)
+                frappe.logger().info(
+                    f"✅ [Wislife Class Post Job] Bulk {label}: "
+                    f"{bulk_result.get('success_count', 0)}/{bulk_result.get('total_messages', 0)}"
                 )
-                saved += 1
-            except Exception as db_err:
-                frappe.logger().error(f"❌ [Wislife Class Post Job] DB {em}: {str(db_err)}")
+            except Exception as bulk_err:
+                frappe.logger().error(
+                    f"❌ [Wislife Class Post Job] Bulk {label} failed: {str(bulk_err)}"
+                )
 
-        frappe.logger().info(f"✅ [Wislife Class Post Job] Đã lưu notification center: {saved}/{len(targets)}")
+        # ERP Notification — PP web vẫn đọc notification_center Frappe
+        saved = 0
+        for group_msg, group_targets in (
+            (parent_message, parent_targets),
+            (teacher_message, teacher_targets),
+        ):
+            for t in group_targets:
+                em = t["email"]
+                data = t["data"]
+                try:
+                    create_notification(
+                        title=push_title,
+                        message=group_msg,
+                        recipient_user=em,
+                        notification_type="system",
+                        priority="medium",
+                        data=data,
+                        channel="push",
+                        event_timestamp=frappe.utils.now(),
+                    )
+                    saved += 1
+                except Exception as db_err:
+                    frappe.logger().error(f"❌ [Wislife Class Post Job] DB {em}: {str(db_err)}")
+
+        frappe.logger().info(
+            f"✅ [Wislife Class Post Job] ERP Notification: {saved}/"
+            f"{len(parent_targets) + len(teacher_targets)}"
+        )
+
+        # Mirror hộp thư notification-service khi Frappe tự gửi Expo
+        # (WIS web/app + PP mobile đọc inbox từ đây, không đọc ERP Notification).
+        if not push_delivered_by_notification_service():
+            try:
+                mirrored = 0
+                if parent_targets:
+                    mirrored += emit_inbox_mirror_bulk(
+                        parent_targets,
+                        push_title,
+                        parent_message,
+                        notification_type="wislife_class_post",
+                        channels=["inapp"],
+                    )
+                if teacher_targets:
+                    mirrored += emit_inbox_mirror_bulk(
+                        teacher_targets,
+                        push_title,
+                        teacher_message,
+                        notification_type="wislife_class_post",
+                        channels=["inapp"],
+                    )
+                frappe.logger().info(
+                    f"📥 [Wislife Class Post Job] Inbox mirror: {mirrored} envelope"
+                )
+            except Exception as mirror_err:
+                frappe.logger().error(
+                    f"❌ [Wislife Class Post Job] Inbox mirror failed: {str(mirror_err)}"
+                )
 
     except Exception as e:
         frappe.logger().error(f"❌ [Wislife Class Post Job] {str(e)}")
