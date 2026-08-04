@@ -371,6 +371,7 @@ def map_frontend_type_to_db(frontend_type):
 		'announcement': 'announcement',
 		'news': 'news',
 		'leave': 'system',  # Leave uses system type
+		'journal': 'system',  # Bảng tin lưu ERP Notification type=system + data.type
 		'system': 'system',
 		'health_examination': 'health_examination',
 		'periodic_health_checkup': 'periodic_health_checkup',
@@ -388,12 +389,19 @@ def map_db_type_to_frontend(db_type, data):
 	if custom_type == 'ticket':
 		return 'ticket'
 	
-	if custom_type in ['contact_log', 'report_card', 'student_attendance', 'attendance', 'announcement', 'news', 'leave', 'health_examination', 'health', 'daily_health', 'periodic_health_checkup', 'finance_payment']:
+	if custom_type in ['contact_log', 'report_card', 'student_attendance', 'attendance', 'announcement', 'news', 'leave', 'health_examination', 'health', 'daily_health', 'periodic_health_checkup', 'finance_payment', 'journal']:
 		if custom_type == 'student_attendance':
 			return 'attendance'
 		if custom_type in ['health', 'daily_health']:
 			return 'health_examination'
 		return custom_type
+
+	# Bảng tin lớp / Wislife → journal (PP web deep link /journal/:postId)
+	if custom_type and (
+		custom_type == 'journal'
+		or str(custom_type).startswith('wislife_')
+	):
+		return 'journal'
 	
 	# Check if it's a ticket-related action
 	if db_type and db_type.startswith('ticket_') or db_type in ['new_ticket_admin', 'user_reply', 'completion_confirmed']:
@@ -481,10 +489,17 @@ def generate_action_url(notif_type, data, student_id=None):
 			return f"/finance/{fsid}"
 		return "/finance"
 
+	elif notif_type == 'journal':
+		post_id = (data or {}).get('postId') or (data or {}).get('post_id')
+		if post_id:
+			base = f"/journal/{post_id}"
+			return f"{base}?student={student_id}" if student_id else base
+		return f"/journal?student={student_id}" if student_id else "/journal"
+
 	# Không có nhánh riêng: dùng `data.url` do producer đặt (vd `reminder` →
 	# /re-enrollment, /menu/registration). Chỉ nhận path nội bộ để không điều
 	# hướng ra ngoài theo dữ liệu không kiểm soát.
-	url = (data or {}).get('url')
+	url = (data or {}).get('url') or (data or {}).get('action_url')
 	if isinstance(url, str):
 		url = url.strip()
 		if url.startswith('/') and not url.startswith('//'):
