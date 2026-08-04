@@ -478,6 +478,29 @@ def _notify_crm_issue_mobile(users, title, body, issue_doc, notif_type, exclude_
     _mirror_crm_issue_to_inbox(targets, title, body, payload, notif_type, issue_doc)
 
 
+def _notify_issue_department_added(doc, emails, exclude_user=None, email_event="new_issue"):
+    """Bao cho nguoi cua Phong ban / Nhom / Nguoi lien quan VUA duoc them vao van de.
+
+    Khac voi "Van de moi" / "Van de da duoc duyet" (thong bao su kien), ban tin nay noi ro
+    nguoi nhan la ben duoc gan: doc xong phai biet minh can vao xu ly, khong phai tin tuc.
+    """
+    targets = _enabled_emails(emails)
+    if not targets:
+        return
+    code = (getattr(doc, "issue_code", None) or doc.name or "").strip()
+    title = (getattr(doc, "title", None) or "").strip()
+    _notify_crm_issue_mobile(
+        targets,
+        "Bạn được thêm vào vấn đề cần xử lý",
+        f"{code}: {title} — Vui lòng kiểm tra và phối hợp xử lý.",
+        doc,
+        "crm_issue_department_added",
+        exclude_user=exclude_user,
+    )
+    # Email: dung eventType san co cua email-service (chua co template rieng cho su kien nay).
+    _issue_send_emails(doc, email_event, targets, exclude_user=exclude_user)
+
+
 def _issue_email_enabled():
     """Gui email van de chung qua email-service hay khong.
 
@@ -2198,12 +2221,19 @@ def set_issue_related_users():
         )
 
     try:
+        old_assigned = set(_issue_notify_group_emails(doc))
         _rebuild_issue_related_users(doc, manual_emails=users)
         doc.save(ignore_permissions=True)
         frappe.db.commit()
     except Exception as e:
         frappe.db.rollback()
         return error_response(f"Loi cap nhat nguoi lien quan: {str(e)}")
+
+    try:
+        added = [e for e in _issue_notify_group_emails(doc) if e not in old_assigned]
+        _notify_issue_department_added(doc, added, exclude_user=frappe.session.user)
+    except Exception as e:
+        frappe.logger().error(f"CRM Issue notify related users added: {e}")
 
     return success_response(
         {
@@ -2472,11 +2502,15 @@ def create_issue():
                     doc, "new_issue_pending", approvers, exclude_user=frappe.session.user
                 )
             else:
+                # Nhom lien quan (phong ban / nhom / nguoi duoc gan) nhan ban tin "duoc them
+                # vao van de"; PIC va members loai van de nhan tin "Van de moi" nhu cu.
+                assigned = _issue_notify_group_emails(doc)
+                assigned_set = {e for e in assigned}
                 recipients = []
                 if doc.pic:
                     recipients.append(doc.pic)
-                recipients.extend(_issue_notify_group_emails(doc))
                 recipients.extend(_module_member_emails(doc.issue_module))
+                recipients = [e for e in recipients if e not in assigned_set]
                 _notify_crm_issue_mobile(
                     recipients,
                     "Vấn đề mới",
@@ -2487,6 +2521,9 @@ def create_issue():
                 )
                 _issue_send_emails(
                     doc, "new_issue", recipients, exclude_user=frappe.session.user
+                )
+                _notify_issue_department_added(
+                    doc, assigned, exclude_user=frappe.session.user
                 )
             # Xac nhan cho nguoi tao (giong ticket_creation_confirmation cua ticket IT/HC).
             # KHONG exclude nguoi thao tac: day chinh la email xac nhan gui cho chinh ho.
@@ -2586,11 +2623,15 @@ def approve_issue():
     frappe.db.commit()
 
     try:
+        # Phong ban lien quan duoc chot ngay o buoc duyet -> ho la nguoi VUA duoc gan,
+        # bao "duoc them vao van de" thay vi "da duoc duyet" (tin nay khong goi hanh dong).
+        assigned = _issue_notify_group_emails(doc)
+        assigned_set = {e for e in assigned}
         recipients = []
         if doc.pic:
             recipients.append(doc.pic)
-        recipients.extend(_issue_notify_group_emails(doc))
         recipients.extend(_module_member_emails(doc.issue_module))
+        recipients = [e for e in recipients if e not in assigned_set]
         _notify_crm_issue_mobile(
             recipients,
             "Vấn đề đã được duyệt",
@@ -2600,6 +2641,9 @@ def approve_issue():
             exclude_user=frappe.session.user,
         )
         _issue_send_emails(doc, "issue_approved", recipients, exclude_user=frappe.session.user)
+        _notify_issue_department_added(
+            doc, assigned, exclude_user=frappe.session.user, email_event="issue_approved"
+        )
         if doc.created_by_user:
             _issue_send_emails(doc, "issue_approved_creator", [doc.created_by_user])
     except Exception as e:
@@ -2691,6 +2735,8 @@ def update_issue():
             return error_response("Khong co quyen sua van de nay")
 
         old_pic = doc.pic
+        # Chup danh sach nhom lien quan TRUOC khi sua de sau khi luu chi bao nguoi moi them.
+        old_assigned = set(_issue_notify_group_emails(doc))
 
         updatable = [
             "title",
@@ -2809,6 +2855,19 @@ def update_issue():
                 )
         except Exception as e:
             frappe.logger().error(f"CRM Issue notify pic change: {e}")
+
+        try:
+            # Them phong ban / nhom / nguoi lien quan giua chung -> nguoi moi phai biet
+            # ho vua bi keo vao va can vao xu ly. Nguoi da co trong danh sach khong bao lai.
+            new_pic_s = (doc.pic or "").strip()
+            added = [
+                e
+                for e in _issue_notify_group_emails(doc)
+                if e not in old_assigned and e != new_pic_s
+            ]
+            _notify_issue_department_added(doc, added, exclude_user=frappe.session.user)
+        except Exception as e:
+            frappe.logger().error(f"CRM Issue notify related added: {e}")
 
         return single_item_response(_finalize_issue_api_dict(doc), "Cap nhat van de thanh cong")
     except Exception as e:
