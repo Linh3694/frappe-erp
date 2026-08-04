@@ -17,13 +17,14 @@ import frappe
 
 
 def execute():
-    if not frappe.db.table_exists("tabSIS Subject"):
-        return
-
     # Frappe đánh dấu patch ĐÃ CHẠY ngay khi execute() thoát không lỗi, nên không
-    # được lặng lẽ `return` khi thiếu cột — làm vậy là backfill không bao giờ chạy
-    # nữa. reload_doc bảo đảm doctype (và cột) có mặt trước khi UPDATE.
+    # được lặng lẽ `return` — làm vậy là backfill không bao giờ chạy nữa.
+    # Lưu ý `table_exists()` TỰ thêm tiền tố `tab`: truyền "tabSIS Subject" sẽ luôn
+    # trả False và khiến patch no-op im lặng.
     frappe.reload_doc("sis", "doctype", "sis_subject")
+
+    if not frappe.db.table_exists("SIS Subject"):
+        frappe.throw("Không tìm thấy bảng `tabSIS Subject` — doctype chưa được sync.")
 
     frappe.db.sql(
         """

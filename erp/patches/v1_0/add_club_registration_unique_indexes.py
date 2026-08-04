@@ -23,7 +23,12 @@ chặn cả bench console, import và mọi code tương lai.
 
 import frappe
 
-TABLE = "tabSIS Club Registration"
+# `TABLE` dùng cho SQL thô (cần tiền tố `tab`), `DOCTYPE` dùng cho API của Frappe.
+# KHÔNG hoán đổi hai cái này: `frappe.db.table_exists()` TỰ thêm `tab`, truyền
+# nhầm chuỗi đã có tiền tố sẽ luôn trả False -> patch no-op im lặng nhưng vẫn bị
+# đánh dấu đã chạy, và unique index không bao giờ được tạo.
+DOCTYPE = "SIS Club Registration"
+TABLE = f"tab{DOCTYPE}"
 
 
 def _has_index(index_name: str) -> bool:
@@ -84,8 +89,16 @@ def _add_index(index_name: str, columns_sql: str) -> None:
 
 
 def execute():
-    if not frappe.db.table_exists(TABLE):
-        return
+    # Bảo đảm doctype đã sync trước khi ALTER — và nếu vẫn chưa có bảng thì báo lỗi
+    # to thay vì lặng lẽ bỏ qua: hai index này là lưới an toàn duy nhất chống trùng
+    # đăng ký, mất nó mà không ai biết là kịch bản tệ nhất.
+    frappe.reload_doc("sis", "doctype", "sis_club_registration")
+
+    if not frappe.db.table_exists(DOCTYPE):
+        frappe.throw(
+            f"Không tìm thấy bảng `{TABLE}`. Doctype chưa được sync — "
+            "chạy lại `bench migrate` sau khi code đã lên đủ."
+        )
 
     _sync_active_student_key()
     _cancel_duplicates("subject_id")
