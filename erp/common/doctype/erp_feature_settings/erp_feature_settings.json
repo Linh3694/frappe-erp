@@ -14,7 +14,7 @@
   "sec_core", "feat_sis", "feat_timetable", "col_core_1", "feat_report_card", "feat_attendance",
   "sec_ops", "feat_bus", "feat_menu", "col_ops_1", "feat_health", "feat_library", "feat_facility", "feat_finance", "feat_procurement",
   "sec_engage", "feat_parent_portal", "feat_social_feed", "col_engage_1", "feat_chat", "feat_news",
-  "sec_advanced", "feat_lms", "feat_crm_admission", "col_adv_1", "feat_ai_assistant", "feat_it_inventory", "feat_monitoring",
+  "sec_advanced", "feat_lms", "feat_crm_admission", "col_adv_1", "feat_ai_assistant", "feat_it_inventory",
   "sec_override", "campus_overrides_json"
  ],
  "fields": [
@@ -48,7 +48,6 @@
   {"fieldname": "col_adv_1", "fieldtype": "Column Break"},
   {"fieldname": "feat_ai_assistant", "fieldtype": "Check", "label": "Trợ lý AI", "default": "0"},
   {"fieldname": "feat_it_inventory", "fieldtype": "Check", "label": "Quản trị IT & thiết bị", "default": "1"},
-  {"fieldname": "feat_monitoring", "fieldtype": "Check", "label": "Giám sát hạ tầng", "default": "0"},
 
   {"fieldname": "sec_override", "fieldtype": "Section Break", "label": "Ghi đè theo campus", "collapsible": 1},
   {"fieldname": "campus_overrides_json", "fieldtype": "JSON", "label": "Ghi đè theo campus",

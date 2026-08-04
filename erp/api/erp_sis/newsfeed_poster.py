@@ -206,7 +206,11 @@ def get_my_class_newsfeed_access(class_id=None, school_year_id=None):
 
 @frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
 def get_class_newsfeed_posters(class_id=None, school_year_id=None):
-	"""Danh sách giáo viên được cấu hình đăng bài (kèm môn dạy)."""
+	"""Toàn bộ người được đăng bài lớp: GVCN/phó (mặc định) + GV được cấu hình thêm.
+
+	Card ở giao diện hiển thị cả hai nhóm để người dùng thấy đúng "ai đang đăng
+	được", nên GVCN/phó phải nằm trong payload dù không có bản ghi trong DocType.
+	"""
 	try:
 		payload = _parse_payload()
 		class_id = class_id or payload.get("class_id")
@@ -221,6 +225,24 @@ def get_class_newsfeed_posters(class_id=None, school_year_id=None):
 		access_data = _compute_my_access(cls, class_id, school_year_id)
 		if access_data.get("access") == "none" and not access_data.get("can_manage_posters"):
 			return error_response(message="Bạn không có quyền xem danh sách", code="ACCESS_DENIED")
+
+		homeroom = []
+		for tid, role in [
+			(cls.get("homeroom_teacher"), "homeroom"),
+			(cls.get("vice_homeroom_teacher"), "vice_homeroom"),
+		]:
+			snap = _teacher_snapshot_for_chat(tid, homeroom_role=role)
+			if not snap:
+				continue
+			homeroom.append(
+				{
+					"teacherId": snap.get("teacherId") or tid,
+					"teacherName": snap.get("name") or tid,
+					"email": snap.get("email") or "",
+					"avatarUrl": snap.get("avatarUrl") or "",
+					"role": role,
+				}
+			)
 
 		rows = _poster_rows(class_id, school_year_id)
 		subjects_map = _teacher_subjects_map(
@@ -251,7 +273,13 @@ def get_class_newsfeed_posters(class_id=None, school_year_id=None):
 				}
 			)
 
-		return success_response(data={"posters": posters})
+		return success_response(
+			data={
+				"homeroom": homeroom,
+				"posters": posters,
+				"can_manage_posters": bool(access_data.get("can_manage_posters")),
+			}
+		)
 	except Exception as e:
 		frappe.logger().error(f"[NewsfeedPoster] get_class_newsfeed_posters: {e}")
 		return error_response(
