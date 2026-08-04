@@ -186,10 +186,14 @@ def _send_for_period(period_name, minutes_before, now):
         )
         return
 
+    # `frappe.log_error(title, message)` — THAM SỐ ĐẦU LÀ TIÊU ĐỀ, giới hạn 140
+    # ký tự và KHÔNG tự cắt: nhét cả phản hồi vào đó thì chính lời ghi log ném
+    # CharacterLengthExceededError, nuốt mất nguyên nhân thật.
+    # (Frappe chỉ hoán đổi hai tham số khi tiêu đề có chữ "Traceback".)
     frappe.log_error(
-        f"Đợt {period_name}: {len(student_ids)} học sinh nhưng KHÔNG tạo được thông báo nào. "
-        f"Phản hồi: {result}",
-        "club_reminders.no_notification_created",
+        "club_reminders: không tạo được thông báo",
+        f"Đợt {period_name}: {len(student_ids)} học sinh đủ điều kiện nhưng "
+        f"KHÔNG tạo được thông báo nào.\n\nPhản hồi:\n{result}",
     )
 
 
