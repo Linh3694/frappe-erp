@@ -21,6 +21,35 @@ from erp.sis.discipline_record_permissions import (
 # Điểm trừ nhập tay trên từng dòng đối tượng (child table)
 _ALLOWED_DEDUCTION_POINTS = frozenset({"1", "5", "10", "15"})
 
+def _ensure_discipline_upload_folder():
+    """
+    Tạo File folder Home/Discipline nếu chưa có.
+    FE (web/mobile) gọi upload_file với folder này — thiếu thì toast
+    'Could not find Folder'; sau khi có File, discipline_store đẩy CDN.
+    Giống AdministrativeTicket: ensure lúc migrate + lúc gọi API mở module.
+    """
+    try:
+        if frappe.db.exists(
+            "File",
+            {"is_folder": 1, "file_name": "Discipline", "folder": "Home"},
+        ):
+            return
+        frappe.get_doc(
+            {
+                "doctype": "File",
+                "file_name": "Discipline",
+                "is_folder": 1,
+                "folder": "Home",
+            }
+        ).insert(ignore_permissions=True)
+        frappe.db.commit()
+    except Exception:
+        frappe.db.rollback()
+        frappe.log_error(
+            frappe.get_traceback(),
+            "discipline._ensure_discipline_upload_folder",
+        )
+
 
 def _normalize_deduction_points(raw):
     """Chuẩn hoá điểm trừ per-target: 1 / 5 / 10 / 15 — mặc định 10."""
@@ -275,6 +304,7 @@ def get_discipline_classifications(campus: str = None):
     Lấy danh sách phân loại kỷ luật theo campus
     """
     try:
+        _ensure_discipline_upload_folder()
         from erp.utils.campus_utils import resolve_campus_param
 
         filters = {"enabled": 1}
@@ -440,6 +470,7 @@ def delete_discipline_classification(name: str = None):
 def get_discipline_forms(campus: str = None):
     """Lấy danh sách hình thức kỷ luật theo campus"""
     try:
+        _ensure_discipline_upload_folder()
         from erp.utils.campus_utils import resolve_campus_param
 
         filters = {"enabled": 1}
@@ -575,6 +606,7 @@ def delete_discipline_form(name: str = None):
 def get_discipline_times(campus: str = None):
     """Lấy danh sách khai báo thời gian kỷ luật theo campus"""
     try:
+        _ensure_discipline_upload_folder()
         from erp.utils.campus_utils import resolve_campus_param
 
         filters = {"enabled": 1}
@@ -757,6 +789,7 @@ def get_discipline_violations(campus: str = None, include_points: str = None):
     include_points: "1" = thêm student_points, class_points cho mỗi vi phạm (để tính điểm trừ).
     """
     try:
+        _ensure_discipline_upload_folder()
         data = _get_request_data()
         campus = campus or data.get("campus")
         include_points = include_points if include_points is not None else data.get("include_points", "0")
@@ -2410,6 +2443,7 @@ def get_discipline_records(owner_only: str = "0", campus: str = None):
     Khi có page: trả pagination + data là mảng bản ghi; khi không: data = { data, total } (tương thích cũ).
     """
     try:
+        _ensure_discipline_upload_folder()
         from erp.utils.campus_utils import get_current_campus_from_context
 
         req = _get_request_data()
@@ -2650,6 +2684,7 @@ def get_discipline_records_for_export(
 def get_discipline_record(name: str = None):
     """Lấy chi tiết 1 bản ghi ghi nhận lỗi"""
     try:
+        _ensure_discipline_upload_folder()
         data = _get_request_data()
         name = name or data.get("name")
         if not name:
