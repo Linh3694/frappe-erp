@@ -507,6 +507,13 @@ def get_offering_counts():
     phụ huynh trong đợt đều thấy trên màn đăng ký. Đổi lại `education_grade_id`
     nhận thẳng từ client (client đã có sẵn từ lần load đầu), tránh phải truy
     context lớp của học sinh — chính là phần đắt nhất muốn cắt bỏ.
+
+    `my_offering_ids` là ngoại lệ có chủ đích: số chỗ thôi thì chưa đủ, vì nhà
+    trường có thể HUỶ một đăng ký — lúc đó số chỗ tăng nhưng ô vẫn phải bỏ khoá
+    "đã đăng ký". Trả kèm danh sách môn đang đăng ký của học sinh để client biết
+    tập đăng ký đã đổi và nạp lại payload đầy đủ MỘT lần; các cờ `lock_reason`
+    vẫn do máy chủ tính, client không tự suy. Phần này theo từng học sinh nên
+    không cache được, nhưng chỉ là một lookup có index.
     """
     try:
         guardian = _guardian()
@@ -527,10 +534,23 @@ def get_offering_counts():
                 },
             )
 
+        student_id = _param("student_id")
+        my_offering_ids = (
+            [
+                r.offering_id
+                for r in get_active_registrations(period_id, student_id)
+            ]
+            if student_id
+            else []
+        )
+
         cache_key = f"club:offering_counts:{period_id}:{education_grade_id}"
         cached = frappe.cache().get_value(cache_key)
         if cached is not None:
-            return success_response(data=cached, message="Lấy số chỗ CLB thành công")
+            return success_response(
+                data={"counts": cached, "my_offering_ids": my_offering_ids},
+                message="Lấy số chỗ CLB thành công",
+            )
 
         rows = frappe.db.sql(
             f"""
@@ -555,7 +575,10 @@ def get_offering_counts():
             for r in rows
         ]
         frappe.cache().set_value(cache_key, counts, expires_in_sec=OFFERING_COUNTS_CACHE_TTL)
-        return success_response(data=counts, message="Lấy số chỗ CLB thành công")
+        return success_response(
+            data={"counts": counts, "my_offering_ids": my_offering_ids},
+            message="Lấy số chỗ CLB thành công",
+        )
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "PP Club get_offering_counts")
         return error_response(f"Lỗi khi lấy số chỗ: {e}", code="GET_OFFERING_COUNTS_ERROR")
