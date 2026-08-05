@@ -32,4 +32,3 @@ erp.patches.v1_0.backfill_sis_subject_type
 erp.patches.v1_0.rename_sis_club_role_to_sis_tdc
 erp.patches.v1_0.backfill_faceid_device_push_status
 erp.patches.v1_0.backfill_faceid_device_remote_check
-erp.patches.v1_0.backfill_faceid_access_groups

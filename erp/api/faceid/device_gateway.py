@@ -40,6 +40,23 @@ def push_device_to_controller(doc) -> dict:
         doc.controller_device_id = int(cid)
     frappe.db.set_value("FaceID Device", doc.name, values, update_modified=False)
     doc.push_status = "synced"
+
+    # Chiều đầu đọc + mã cổng: phán quyết đón tại chỗ cần 2 trường này để
+    # scope unlock theo cổng và xét khung giờ đúng chiều
+    try:
+        gateway_post(
+            "/api/access-grants/device-topology",
+            {
+                "device_ip": ip,
+                "direction": doc.get("direction") or "checkin",
+                "gate_no": doc.get("gate_no") or None,
+            },
+        )
+    except Exception as e:
+        frappe.log_error(
+            title=f"FaceID topology {doc.name}", message=f"{ip}: {e}"
+        )
+
     return device or res or {}
 
 
