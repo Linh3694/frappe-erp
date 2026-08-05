@@ -1047,7 +1047,23 @@ doc_events = {
 		"on_update": "erp.api.erp_sis.chat_membership_hooks.on_family_change",
 	},
 	"CRM Student": {
-		"on_update": "erp.api.erp_sis.chat_membership_hooks.on_student_change",
+		# APPEND vào list này, đừng tạo entry "CRM Student" thứ hai (key trùng bị đè)
+		"on_update": [
+			"erp.api.erp_sis.chat_membership_hooks.on_student_change",
+			# HS chuyển sang nghỉ học → gỡ khỏi terminal FaceID ngay, không đợi cron
+			"erp.api.faceid.person_hooks.on_student_enrollment_changed",
+		],
+	},
+	"CRM Lead": {
+		"on_update": "erp.api.faceid.person_hooks.on_lead_deal_status_changed",
+	},
+	# Mô hình nhóm quyền vào FaceID — đổi nhóm/thành viên thì tính lại desired state
+	"FaceID Access Group": {
+		"on_update": "erp.api.faceid.person_hooks.on_access_group_changed",
+	},
+	"FaceID Access Group Member": {
+		"after_insert": "erp.api.faceid.person_hooks.on_access_group_member_changed",
+		"on_trash": "erp.api.faceid.person_hooks.on_access_group_member_changed",
 	},
 	"CRM Admission Course": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
@@ -1443,6 +1459,10 @@ scheduler_events = {
         # FaceID: poll trạng thái online/offline từng terminal qua controller
         "*/10 * * * *": [
             "erp.api.faceid.sync_worker.refresh_all_device_status",
+        ],
+        # FaceID: reconcile desired state person × máy + thu hồi slot mồ côi (1h sáng)
+        "0 1 * * *": [
+            "erp.api.faceid.access_engine.reconcile_all",
         ],
         # Nhắc giáo viên điểm danh + Báo cáo điểm danh homeroom lúc 8:30 AM
         "30 8 * * *": [

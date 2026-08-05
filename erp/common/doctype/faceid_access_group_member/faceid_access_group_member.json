@@ -1,0 +1,70 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "group",
+  "person",
+  "origin",
+  "valid_from",
+  "valid_to"
+ ],
+ "fields": [
+  {
+   "fieldname": "group",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Nhóm",
+   "options": "FaceID Access Group",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "person",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Person",
+   "options": "FaceID Person",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "manual",
+   "description": "system = engine tự ghi (nhóm dẫn xuất), không sửa tay",
+   "fieldname": "origin",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Nguồn",
+   "options": "manual\nsystem"
+  },
+  {
+   "description": "Bỏ trống = theo hiệu lực của nhóm",
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Hiệu lực từ"
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Hiệu lực đến"
+  }
+ ],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Access Group Member",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

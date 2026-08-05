@@ -834,6 +834,10 @@ def list_devices():
             "controller_device_id",
             "campus_id",
             "model",
+            "device_group",
+            "enable_remote_check",
+            "auto_provision",
+            "note",
             "person_count",
             "face_count",
             "device_time",
@@ -942,45 +946,6 @@ def delete_device_screen_image(name, uuid):
 def provision_device(name):
     create_device_sync_job("provision_device", "FaceID Device", name, priority=6)
     return _ok(message="Đã xếp hàng provision thiết bị")
-
-
-@frappe.whitelist()
-def pull_devices_from_controller():
-    """Đồng bộ danh sách thiết bị từ controller."""
-    frappe.flags.faceid_skip_controller_push = True
-    try:
-        res = gateway_get("/api/devices")
-        devices = res.get("devices") or []
-        synced = 0
-        for d in devices:
-            ip = str(d.get("ip", "")).split("/")[0]
-            existing = frappe.db.get_value("FaceID Device", {"ip": ip}, "name")
-            if existing:
-                frappe.db.set_value(
-                    "FaceID Device",
-                    existing,
-                    {
-                        "controller_device_id": d.get("id"),
-                        "status": d.get("status") or "unknown",
-                        "last_seen": d.get("last_seen"),
-                    },
-                    update_modified=False,
-                )
-            else:
-                frappe.get_doc(
-                    {
-                        "doctype": "FaceID Device",
-                        "device_name": d.get("name") or ip,
-                        "ip": ip,
-                        "controller_device_id": d.get("id"),
-                        "model": d.get("model"),
-                        "status": d.get("status") or "unknown",
-                    }
-                ).insert(ignore_permissions=True)
-            synced += 1
-        return _ok({"synced": synced})
-    finally:
-        frappe.flags.faceid_skip_controller_push = False
 
 
 @frappe.whitelist()

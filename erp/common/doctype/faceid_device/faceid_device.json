@@ -15,9 +15,15 @@
   "auth_mode",
   "column_break_creds",
   "gate_type",
+  "direction",
+  "gate_no",
   "campus_id",
   "is_pickup_gate",
   "model",
+  "device_group",
+  "enable_remote_check",
+  "auto_provision",
+  "note",
   "section_status",
   "status",
   "last_seen",
@@ -90,6 +96,21 @@
    "default": "attendance"
   },
   {
+   "default": "checkin",
+   "description": "Đầu đọc này ở chiều nào của cổng — quyết định nhận ca vào hay ca ra của nhóm",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Chiều",
+   "options": "checkin\ncheckout"
+  },
+  {
+   "description": "Mã cổng vật lý — 2 đầu đọc cùng cổng phải trùng mã (dùng cho phán quyết đón)",
+   "fieldname": "gate_no",
+   "fieldtype": "Data",
+   "label": "Cổng số"
+  },
+  {
    "fieldname": "campus_id",
    "fieldtype": "Link",
    "label": "Campus",
@@ -105,6 +126,31 @@
    "fieldname": "model",
    "fieldtype": "Data",
    "label": "Model"
+  },
+  {
+   "fieldname": "device_group",
+   "fieldtype": "Data",
+   "label": "Nhóm máy",
+   "description": "Gom nhóm máy trên controller (grp)"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_remote_check",
+   "fieldtype": "Check",
+   "label": "Bật remote-check trên máy",
+   "description": "Máy hỏi controller trước khi mở cửa — bắt buộc cho cổng đón"
+  },
+  {
+   "default": "1",
+   "fieldname": "auto_provision",
+   "fieldtype": "Check",
+   "label": "Tự provision sau khi lưu",
+   "description": "Trỏ event host + NTP + remote-check xuống máy"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú / vị trí lắp"
   },
   {
    "fieldname": "section_status",
@@ -166,7 +212,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-05 00:00:00.000000",
+ "modified": "2026-08-05 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "Common",
  "name": "FaceID Device",

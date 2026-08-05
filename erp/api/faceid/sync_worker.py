@@ -7,6 +7,7 @@ import time
 from datetime import date
 
 import frappe
+from frappe.utils import cint
 
 from erp.api.faceid.photo import get_person_photo_bytes
 from erp.utils.faceid_gateway import (
@@ -244,6 +245,8 @@ def _process_one_job(job_name: str):
         handler = {
             "upsert_person": _job_upsert_person,
             "delete_person": _job_delete_person,
+            "apply_person_access": _job_apply_person_access,
+            "sync_device_slot": _job_sync_device_slot,
             "upsert_shift": _job_upsert_shift,
             "sync_shift": _job_sync_shift,
             "upsert_pickup": _job_upsert_pickup,
@@ -345,14 +348,191 @@ def _job_delete_person(job):
         )
 
 
+def _job_sync_device_slot(job):
+    """Đẩy week plan + plan template của một slot xuống đúng một máy."""
+    doc = frappe.get_doc("FaceID Device Slot", job.ref_name)
+    ip = frappe.db.get_value("FaceID Device", doc.device, "ip")
+    if not ip:
+        raise ValueError(f"Máy {doc.device} chưa khai IP")
+    periods = json.loads(doc.periods_json or "[]")
+    gateway_post(
+        "/api/device-slots/sync",
+        {
+            "device_ip": str(ip).split("/")[0],
+            "slot": int(doc.slot),
+            "name": doc.label or f"slot-{doc.slot}",
+            "periods": periods,
+        },
+    )
+    frappe.db.set_value(
+        "FaceID Device Slot",
+        doc.name,
+        {
+            "applied_hash": doc.desired_hash,
+            "sync_status": "synced",
+            "last_synced_at": frappe.utils.now(),
+            "last_error": None,
+        },
+        update_modified=False,
+    )
+
+
+def _ensure_device_slot(device_name: str, signature: str):
+    """Week plan phải có trên máy TRƯỚC khi person trỏ vào slot đó."""
+    from erp.api.faceid.access_engine import ALLDAY_SIGNATURE
+
+    if signature == ALLDAY_SIGNATURE:
+        return  # slot 1 = template 24/7 mặc định sẵn có trên máy
+    slot_name = frappe.db.get_value(
+        "FaceID Device Slot",
+        {"device": device_name, "schedule_signature": signature},
+        "name",
+    )
+    if not slot_name:
+        return
+    slot_doc = frappe.get_doc("FaceID Device Slot", slot_name)
+    if slot_doc.sync_status == "synced" and slot_doc.applied_hash == slot_doc.desired_hash:
+        return
+    _job_sync_device_slot(frappe._dict({"ref_name": slot_name}))
+
+
+def _job_apply_person_access(job):
+    """Áp toàn bộ trạng thái mong muốn của 1 person xuống các máy đích.
+
+    Đọc lại bảng Assignment lúc chạy (không dùng payload) để tự lành khi
+    desired state đổi giữa lúc xếp hàng và lúc xử lý.
+    """
+    doc = frappe.get_doc("FaceID Person", job.ref_name)
+    rows = frappe.get_all(
+        "FaceID Person Device Assignment",
+        filters={"person": doc.name},
+        fields=["name", "device", "slot", "schedule_signature", "state", "desired_hash",
+                "applied_hash", "valid_from", "valid_to"],
+    )
+    keep = [r for r in rows if r.state != "deleting"]
+    drop = [r for r in rows if r.state == "deleting"]
+
+    device_ids = []
+    for r in keep:
+        cid = frappe.db.get_value("FaceID Device", r.device, "controller_device_id")
+        if cid:
+            device_ids.append(int(cid))
+
+    # Hiệu lực trên controller = bao ngoài của các dòng đang giữ
+    valid_from = min((str(r.valid_from) for r in keep if r.valid_from), default=None)
+    valid_to = max((str(r.valid_to) for r in keep if r.valid_to), default=None)
+
+    payload = {
+        "employee_no": doc.external_code,
+        "person_type": doc.person_type,
+        "name": doc.display_name,
+        "valid_from": valid_from,
+        "valid_to": valid_to,
+        "shift_id": None,
+        "device_ids": device_ids,
+        "extra": {},
+    }
+    try:
+        gateway_put(f"/api/persons/{doc.external_code}", payload)
+    except Exception:
+        gateway_post("/api/persons", payload)
+
+    photo = get_person_photo_bytes(doc)
+    if photo:
+        gateway_post_file(f"/api/persons/{doc.external_code}/face", photo)
+
+    errors: list[str] = []
+
+    for r in keep:
+        # Ảnh đã nằm trong desired_hash (qua photo_file/photo_url) nên hash khớp
+        # nghĩa là máy đang đúng — không đẩy lại.
+        if r.state == "applied" and r.applied_hash == r.desired_hash:
+            continue
+        ip = frappe.db.get_value("FaceID Device", r.device, "ip")
+        if not ip:
+            continue
+        ip = str(ip).split("/")[0]
+        try:
+            _ensure_device_slot(r.device, r.schedule_signature)
+            gateway_post(
+                f"/api/persons/{doc.external_code}/push",
+                {
+                    "device_ips": [ip],
+                    "plan_template_no": int(r.slot or 1),
+                    # Hiệu lực riêng của từng máy — không lấy bao ngoài chung,
+                    # tránh nới quyền khi person thuộc nhiều nhóm khác thời hạn
+                    "valid_from": str(r.valid_from) if r.valid_from else None,
+                    "valid_to": str(r.valid_to) if r.valid_to else None,
+                },
+            )
+            frappe.db.set_value(
+                "FaceID Person Device Assignment",
+                r.name,
+                {
+                    "state": "applied",
+                    "applied_hash": r.desired_hash,
+                    "last_applied_at": frappe.utils.now(),
+                    "last_error": None,
+                },
+                update_modified=False,
+            )
+        except Exception as e:
+            errors.append(f"{ip}: {str(e)[:120]}")
+            frappe.db.set_value(
+                "FaceID Person Device Assignment",
+                r.name,
+                {"state": "error", "last_error": str(e)[:500]},
+                update_modified=False,
+            )
+
+    # Gỡ khỏi máy cũ SAU khi đã đẩy máy mới — tránh khoảng trống quyền
+    for r in drop:
+        ip = frappe.db.get_value("FaceID Device", r.device, "ip")
+        try:
+            if ip:
+                gateway_delete(
+                    f"/api/persons/{doc.external_code}/devices/{str(ip).split('/')[0]}"
+                )
+            frappe.delete_doc(
+                "FaceID Person Device Assignment", r.name, ignore_permissions=True, force=True
+            )
+        except Exception as e:
+            errors.append(f"gỡ {ip}: {str(e)[:120]}")
+            frappe.db.set_value(
+                "FaceID Person Device Assignment",
+                r.name,
+                {"last_error": str(e)[:500]},
+                update_modified=False,
+            )
+
+    frappe.db.set_value(
+        "FaceID Person",
+        doc.name,
+        {
+            "sync_status": "error" if errors else "synced",
+            "on_device": 1 if keep and not errors else 0,
+            "last_synced_at": frappe.utils.now(),
+            "last_error": "; ".join(errors)[:500] if errors else None,
+            "face_status": "synced" if photo and not errors else doc.face_status,
+        },
+        update_modified=False,
+    )
+    if errors:
+        raise RuntimeError("; ".join(errors)[:400])
+
+
 def _shift_payload(doc) -> dict:
+    from erp.api.faceid.access_engine import hhmm
+
     periods = []
     for p in doc.periods or []:
+        # Time field của Frappe là timedelta: str(timedelta(hours=6)) = '6:00:00'
+        # nên cắt [:5] cho ra '6:00:' làm controller parse lỗi — dùng hhmm().
         periods.append(
             {
                 "weekday": int(p.weekday),
-                "start_time": str(p.start_time)[:5],
-                "end_time": str(p.end_time)[:5],
+                "start_time": hhmm(p.start_time),
+                "end_time": hhmm(p.end_time),
             }
         )
     return {
@@ -512,7 +692,11 @@ def _job_reconcile_pickup(job=None):
 
 def _job_provision_device(job):
     doc = frappe.get_doc("FaceID Device", job.ref_name)
-    payload = {"enable_remote_check": bool(doc.is_pickup_gate)}
+    # Bản ghi cũ chưa có enable_remote_check thì suy từ cờ cổng đón
+    remote_check = doc.get("enable_remote_check")
+    if remote_check is None or remote_check == "":
+        remote_check = doc.is_pickup_gate
+    payload = {"enable_remote_check": bool(cint(remote_check))}
     gateway_post(f"/api/devices/{doc.ip}/provision", payload)
 
 

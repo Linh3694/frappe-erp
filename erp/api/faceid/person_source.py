@@ -292,10 +292,16 @@ def _upsert_person(values: dict) -> tuple[str, str]:
     return doc.name, action
 
 
+INACTIVE_ENROLLMENT_STATUSES = ("Nghi hoc",)
+
+
 def refresh_students(campus_id: str | None = None, class_id: str | None = None) -> dict:
     filters = {}
     if campus_id:
         filters["campus_id"] = campus_id
+    # HS đã nghỉ học không được đẩy xuống máy. Chỉ loại trạng thái nghỉ tường minh
+    # (bản ghi cũ để trống enrollment_status vẫn coi là đang học như trước).
+    filters["enrollment_status"] = ["not in", INACTIVE_ENROLLMENT_STATUSES]
     students = frappe.get_all(
         "CRM Student",
         filters=filters,
@@ -339,12 +345,38 @@ def refresh_students(campus_id: str | None = None, class_id: str | None = None) 
         elif action == "skipped_conflict":
             conflicts += 1
 
+    deactivated = _deactivate_withdrawn_students(campus_id)
+
     return {
         "created": created,
         "updated": updated,
         "conflicts": conflicts,
+        "deactivated": deactivated,
         "total_candidates": len(students),
     }
+
+
+def _deactivate_withdrawn_students(campus_id: str | None = None) -> int:
+    """Lưới chắn: HS đã chuyển sang nghỉ học mà person vẫn còn active → tắt + gỡ máy."""
+    from erp.api.faceid.access_engine import deactivate_person
+
+    withdrawn = frappe.get_all(
+        "CRM Student",
+        filters={"enrollment_status": ["in", INACTIVE_ENROLLMENT_STATUSES]},
+        pluck="name",
+        limit=20000,
+    )
+    if not withdrawn:
+        return 0
+
+    person_filters = {"crm_student": ["in", withdrawn], "is_active": 1}
+    if campus_id:
+        person_filters["campus_id"] = campus_id
+    count = 0
+    for name in frappe.get_all("FaceID Person", filters=person_filters, pluck="name"):
+        deactivate_person(name, reason="CRM Student: nghỉ học")
+        count += 1
+    return count
 
 
 def refresh_guardians(campus_id: str | None = None) -> dict:
