@@ -33,15 +33,12 @@ def push_device_to_controller(doc) -> dict:
 
     device = res.get("device") if isinstance(res, dict) else None
     cid = (device or {}).get("id") if device else res.get("id") if isinstance(res, dict) else None
+    values: dict = {"push_status": "synced", "last_error": None}
     if cid and int(cid) != cint(doc.controller_device_id):
-        frappe.db.set_value(
-            "FaceID Device",
-            doc.name,
-            "controller_device_id",
-            int(cid),
-            update_modified=False,
-        )
+        values["controller_device_id"] = int(cid)
         doc.controller_device_id = int(cid)
+    frappe.db.set_value("FaceID Device", doc.name, values, update_modified=False)
+    doc.push_status = "synced"
     return device or res or {}
 
 
@@ -68,10 +65,28 @@ def _extract_isapi_count(data, *keys: str) -> int | None:
     return None
 
 
+def mark_device_offline(doc_name: str, error: str | None = None) -> None:
+    """Đánh dấu máy offline khi không đọc được trạng thái."""
+    frappe.db.set_value(
+        "FaceID Device",
+        doc_name,
+        {
+            "status": "offline",
+            "last_status_at": frappe.utils.now(),
+            "last_error": (error or "")[:500] or None,
+        },
+        update_modified=False,
+    )
+
+
 def fetch_device_status(doc) -> dict:
     """Đọc trạng thái máy từ controller và cache vào doc."""
     ip = str(doc.ip).split("/")[0]
-    res = gateway_get(f"/api/devices/{ip}/status")
+    try:
+        res = gateway_get(f"/api/devices/{ip}/status")
+    except Exception as e:
+        mark_device_offline(doc.name, str(e))
+        raise
     status = res.get("status") or {}
     person_count = _extract_isapi_count(status.get("persons") or {}, "userNumber", "recordNum")
     face_count = _extract_isapi_count(status.get("faces") or {}, "faceLibNum", "recordNum", "faceNum")
@@ -87,6 +102,7 @@ def fetch_device_status(doc) -> dict:
             message=frappe.get_traceback(),
         )
 
+    now = frappe.utils.now()
     frappe.db.set_value(
         "FaceID Device",
         doc.name,
@@ -94,12 +110,19 @@ def fetch_device_status(doc) -> dict:
             "person_count": person_count,
             "face_count": face_count,
             "device_time": device_time,
-            "last_status_at": frappe.utils.now(),
+            "last_status_at": now,
+            # Đọc được ISAPI nghĩa là terminal đang sống
+            "status": "online",
+            "last_seen": now,
+            "last_error": None,
         },
         update_modified=False,
     )
 
     return {
+        "status": "online",
+        "last_seen": now,
+        "last_status_at": now,
         "person_count": person_count,
         "face_count": face_count,
         "device_time": device_time,

@@ -20,7 +20,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Loại job",
-   "options": "upsert_person\ndelete_person\nupsert_shift\nsync_shift\nupsert_pickup\nrevoke_pickup\nreapply_pickup\nprovision_device\nreconcile_pickup",
+   "options": "upsert_person\ndelete_person\nupsert_shift\nsync_shift\nupsert_pickup\nrevoke_pickup\nreapply_pickup\nprovision_device\nreconcile_pickup\nupsert_device",
    "reqd": 1
   },
   {
@@ -65,7 +65,7 @@
    "label": "Lỗi"
   }
  ],
- "modified": "2026-06-25 00:00:00.000000",
+ "modified": "2026-08-05 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Common",
  "name": "FaceID Device Sync Job",

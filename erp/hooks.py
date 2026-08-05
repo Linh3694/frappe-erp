@@ -1440,6 +1440,10 @@ scheduler_events = {
         "*/30 * * * *": [
             "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
         ],
+        # FaceID: poll trạng thái online/offline từng terminal qua controller
+        "*/10 * * * *": [
+            "erp.api.faceid.sync_worker.refresh_all_device_status",
+        ],
         # Nhắc giáo viên điểm danh + Báo cáo điểm danh homeroom lúc 8:30 AM
         "30 8 * * *": [
             "erp.api.erp_sis.attendance.remind_homeroom_attendance",

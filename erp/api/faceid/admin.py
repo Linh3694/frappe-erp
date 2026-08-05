@@ -19,9 +19,11 @@ SYNC_INLINE_MAX = 5
 from erp.utils.faceid_gateway import (
     gateway_delete,
     gateway_get,
+    gateway_healthz,
     gateway_post,
     gateway_post_file,
     gateway_put,
+    get_gateway_config,
 )
 
 
@@ -836,6 +838,8 @@ def list_devices():
             "face_count",
             "device_time",
             "last_status_at",
+            "push_status",
+            "last_error",
         ],
         order_by="device_name asc",
     )
@@ -883,9 +887,27 @@ def get_device_status(name):
 
 @frappe.whitelist()
 def probe_device(name):
+    """Bắt tay ISAPI với terminal — kiểm tra IP + credential có đúng không."""
+    from erp.api.faceid.device_gateway import mark_device_offline
+
     ip = _device_ip(name)
-    res = gateway_post(f"/api/devices/{ip}/probe", {})
-    return _ok(res)
+    try:
+        res = gateway_post(f"/api/devices/{ip}/probe", {})
+    except Exception as e:
+        mark_device_offline(name, str(e))
+        return _err(f"Không kết nối được tới máy {ip}: {e}")
+    frappe.db.set_value(
+        "FaceID Device",
+        name,
+        {
+            "status": "online",
+            "last_seen": frappe.utils.now(),
+            "last_status_at": frappe.utils.now(),
+            "last_error": None,
+        },
+        update_modified=False,
+    )
+    return _ok(res, message=f"Kết nối tới {ip} OK")
 
 
 @frappe.whitelist()
@@ -959,6 +981,106 @@ def pull_devices_from_controller():
         return _ok({"synced": synced})
     finally:
         frappe.flags.faceid_skip_controller_push = False
+
+
+@frappe.whitelist()
+def get_gateway_status():
+    """Tình trạng đường nối Frappe → controller local (hiển thị trên UI máy)."""
+    cfg = get_gateway_config()
+    configured = bool(cfg["base_url"])
+    online = gateway_healthz() if configured else False
+    version = None
+    if online:
+        try:
+            version = (gateway_get("/api/healthz") or {}).get("version")
+        except Exception:
+            version = None
+    return _ok(
+        {
+            "configured": configured,
+            "online": online,
+            "base_url": cfg["base_url"],
+            "version": version,
+            "device_count": frappe.db.count("FaceID Device"),
+        }
+    )
+
+
+@frappe.whitelist()
+def refresh_devices_status(name=None):
+    """Đọc trạng thái live từ controller cho 1 máy hoặc toàn bộ."""
+    from erp.api.faceid.device_gateway import fetch_device_status, mark_device_offline
+    from erp.api.faceid.sync_worker import refresh_all_device_status
+
+    if name:
+        doc = frappe.get_doc("FaceID Device", name)
+        try:
+            return _ok(fetch_device_status(doc))
+        except Exception as e:
+            mark_device_offline(name, str(e))
+            return _err(f"Không đọc được trạng thái máy: {e}")
+
+    result = refresh_all_device_status()
+    if result.get("skipped"):
+        return _err("Controller local không phản hồi — kiểm tra WireGuard tunnel", result)
+    return _ok(result, message=f"Đã kiểm tra {result.get('checked', 0)} máy")
+
+
+@frappe.whitelist()
+def retry_device_push(name):
+    """Đẩy lại khai báo máy xuống controller (khi lần lưu trước bị lỗi tunnel)."""
+    from erp.api.faceid.device_gateway import push_device_to_controller
+
+    doc = frappe.get_doc("FaceID Device", name)
+    try:
+        push_device_to_controller(doc)
+    except Exception as e:
+        frappe.db.set_value(
+            "FaceID Device",
+            name,
+            {"push_status": "failed", "last_error": str(e)[:500]},
+            update_modified=False,
+        )
+        return _err(f"Vẫn chưa đẩy được xuống controller: {e}")
+    return _ok(message="Đã đẩy khai báo máy xuống controller")
+
+
+@frappe.whitelist()
+def discover_unregistered_devices(limit=500):
+    """Máy đang đẩy event về listener nhưng chưa được khai báo trên WIS.
+
+    Controller ghi event với device_id NULL nếu IP nguồn chưa có trong bảng
+    devices — IP thật nằm trong payload.remoteHostAddr.
+    """
+    res = gateway_get(f"/api/events?limit={cint(limit) or 500}")
+    events = (res or {}).get("events") or []
+    known_ips = {
+        str(ip).split("/")[0]
+        for ip in frappe.get_all("FaceID Device", pluck="ip")
+        if ip
+    }
+    found: dict[str, dict] = {}
+    for e in events:
+        payload = e.get("payload") or {}
+        ip = e.get("device_ip") or payload.get("remoteHostAddr")
+        if not ip or e.get("device_id"):
+            continue
+        ip = str(ip).split("/")[0]
+        if ip in known_ips:
+            continue
+        item = found.setdefault(
+            ip,
+            {
+                "ip": ip,
+                "device_name": payload.get("deviceName"),
+                "event_count": 0,
+                "last_event_at": e.get("occurred_at"),
+            },
+        )
+        item["event_count"] += 1
+        if not item.get("device_name") and payload.get("deviceName"):
+            item["device_name"] = payload.get("deviceName")
+    return _ok(sorted(found.values(), key=lambda x: -x["event_count"]))
 
 
 # ---- Sync status ----
