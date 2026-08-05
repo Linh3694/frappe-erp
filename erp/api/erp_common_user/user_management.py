@@ -9,11 +9,149 @@ from frappe import _
 from datetime import datetime
 import json
 
-from erp.utils.search import build_search_condition, order_rows_by_names, sort_by_relevance
+from erp.utils.search import (
+    build_search_condition,
+    order_rows_by_names,
+    sort_by_relevance,
+    sql_unaccent,
+    strip_accents,
+)
+
+
+# Cột được phép lọc — bám đúng các cột FilterBuilder khai báo ở UserListV2.
+# Text -> chuẩn search chung (bỏ dấu, token, đầu từ). Exact/bool -> khớp giá trị lưu.
+_USER_FILTER_TEXT_COLUMNS = ("full_name", "email", "department", "job_title")
+_USER_FILTER_EXACT_COLUMNS = ("provider",)
+_USER_FILTER_BOOL_COLUMNS = ("enabled",)
+# Cột luôn có trên tabUser (không cần has_column) — phần còn lại là custom field.
+_USER_CORE_COLUMNS = {"full_name", "email", "enabled"}
+
+
+def _user_has_column(fieldname):
+    """True nếu `tabUser` thực sự có cột (custom field có thể chưa cài trên site)."""
+    if fieldname in _USER_CORE_COLUMNS:
+        return True
+    try:
+        return bool(frappe.db.has_column("User", fieldname))
+    except Exception:
+        return False
+
+
+def _user_search_fields():
+    """Cột dùng cho thanh tìm kiếm — đồng bộ với placeholder ở FE (tên, email, phòng ban…)."""
+    fields = ["full_name", "email"]
+    for optional in ("username", "employee_code", "department", "job_title"):
+        if _user_has_column(optional):
+            fields.append(optional)
+    return fields
+
+
+def _text_filter_condition(column, operator, value):
+    """Điều kiện SQL cho cột text — cùng ngữ nghĩa `erp/utils/search.py` (bỏ dấu, đầu từ).
+
+    Dùng IFNULL để bản ghi rỗng vẫn tham gia được vế phủ định (NULL LIKE ... = NULL).
+    """
+    col_expr = f"IFNULL(u.`{column}`, '')"
+    if operator in ("contains", "not_contains"):
+        frag, params = build_search_condition([col_expr], value)
+        if not frag:
+            return None, []
+        return (f"NOT {frag}" if operator == "not_contains" else frag), params
+
+    normalized_col = sql_unaccent(col_expr)
+    needle = strip_accents(value)
+    if operator == "is":
+        return f"{normalized_col} = %s", [needle]
+    if operator == "is_not":
+        return f"{normalized_col} != %s", [needle]
+    if operator == "starts_with":
+        return f"{normalized_col} LIKE %s", [f"{needle}%"]
+    if operator == "ends_with":
+        return f"{normalized_col} LIKE %s", [f"%{needle}"]
+    return None, []
+
+
+def _exact_filter_condition(column, operator, value):
+    """Điều kiện SQL cho cột dropdown (enum/link) — khớp CHÍNH XÁC trên giá trị lưu."""
+    col_expr = f"IFNULL(u.`{column}`, '')"
+    op_map = {"is": "=", "is_not": "!=", "contains": "LIKE", "not_contains": "NOT LIKE",
+              "starts_with": "LIKE", "ends_with": "LIKE"}
+    if operator not in op_map:
+        return None, []
+    if operator in ("contains", "not_contains"):
+        cmp_value = f"%{value}%"
+    elif operator == "starts_with":
+        cmp_value = f"{value}%"
+    elif operator == "ends_with":
+        cmp_value = f"%{value}"
+    else:
+        cmp_value = value
+    return f"{col_expr} {op_map[operator]} %s", [cmp_value]
+
+
+def _parse_user_filters(raw):
+    """FilterBuilder (JSON) -> (danh sách fragment SQL, params).
+
+    Mỗi điều kiện FE: {"column", "operator", "value"} — AND giữa các điều kiện,
+    khớp đúng ngữ nghĩa client ở `src/utils/filterUtils.ts`.
+    """
+    if not raw:
+        return [], []
+    try:
+        conditions = frappe.parse_json(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return [], []
+    if not isinstance(conditions, list):
+        return [], []
+
+    fragments, params = [], []
+    for condition in conditions:
+        if not isinstance(condition, dict):
+            continue
+        column = condition.get("column")
+        operator = condition.get("operator")
+        value = condition.get("value")
+        if value is None or (isinstance(value, str) and not value.strip()):
+            continue
+        if not column or not _user_has_column(column):
+            continue
+
+        if column in _USER_FILTER_BOOL_COLUMNS:
+            truthy = 1 if str(value).lower() in ("1", "true", "yes") else 0
+            fragments.append(f"IFNULL(u.`{column}`, 0) {'!=' if operator == 'is_not' else '='} %s")
+            params.append(truthy)
+            continue
+
+        if column in _USER_FILTER_EXACT_COLUMNS:
+            fragment, fragment_params = _exact_filter_condition(column, operator, value)
+        elif column in _USER_FILTER_TEXT_COLUMNS:
+            fragment, fragment_params = _text_filter_condition(column, operator, value)
+        else:
+            continue
+
+        if fragment:
+            fragments.append(f"({fragment})")
+            params.extend(fragment_params)
+
+    return fragments, params
+
+
+def _provider_options(base_where, base_params):
+    """Giá trị `provider` có thật trong tập user — cho dropdown lọc (không phụ thuộc trang)."""
+    if not _user_has_column("provider"):
+        return []
+    try:
+        rows = frappe.db.sql(
+            f"SELECT DISTINCT u.provider FROM `tabUser` u WHERE {base_where} AND IFNULL(u.provider, '') != ''",
+            base_params,
+        )
+    except Exception:
+        return []
+    return sorted({row[0] for row in rows if row and row[0]})
 
 
 @frappe.whitelist()
-def get_users(page=1, limit=20, search=None, role=None, department=None, active=None):
+def get_users(page=1, limit=20, search=None, role=None, department=None, active=None, filters=None):
     """
     Get users with filtering and pagination
     
@@ -24,6 +162,7 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         role: Filter by role
         department: Filter by department  
         active: Filter by active status (maps to enabled)
+        filters: JSON list điều kiện FilterBuilder [{column, operator, value}]
     """
     try:
         # Read parameters from URL or function args
@@ -34,13 +173,8 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
         role = all_params.get('role', role)
         department = all_params.get('department', department)
         active = all_params.get('active', active)
-        
-        # Build filters
-        filters = {"user_type": "System User"}  # Only system users
-        
-        if active is not None:
-            filters["enabled"] = int(active)
-        
+        filters = all_params.get('filters', filters)
+
         # Calculate offset
         offset = (page - 1) * limit
 
@@ -56,22 +190,23 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
             where_conditions.append("u.department = %s")
             query_params.append(department)
 
+        # Dropdown provider lấy trên toàn tập user (trước search/filter) để không đổi theo trang
+        provider_options = _provider_options(" AND ".join(where_conditions), list(query_params))
+
         rank_fields = []
         if search:
             # token + bỏ dấu + đầu từ (đồng bộ mọi field)
-            search_fields = ["u.full_name", "u.email"]
-            try:
-                if frappe.db.has_column("User", "username"):
-                    search_fields.append("u.username")
-                if frappe.db.has_column("User", "employee_code"):
-                    search_fields.append("u.employee_code")
-            except Exception:
-                pass
-            rank_fields = [f.split(".", 1)[1] for f in search_fields]
+            rank_fields = _user_search_fields()
+            search_fields = [f"u.{f}" for f in rank_fields]
             search_frag, search_params = build_search_condition(search_fields, search)
             if search_frag:
                 where_conditions.append(search_frag)
                 query_params.extend(search_params)
+
+        # Bộ lọc nâng cao từ FilterBuilder
+        filter_frags, filter_params = _parse_user_filters(filters)
+        where_conditions.extend(filter_frags)
+        query_params.extend(filter_params)
 
         if role:
             where_conditions.append(
@@ -180,6 +315,9 @@ def get_users(page=1, limit=20, search=None, role=None, department=None, active=
                 "total_count": total_count,
                 "limit": limit,
                 "offset": offset
+            },
+            "filter_options": {
+                "providers": provider_options
             }
         }
         
