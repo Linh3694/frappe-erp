@@ -12,6 +12,7 @@ from frappe.utils import now_datetime
 from datetime import datetime
 import json
 from collections import defaultdict
+from urllib.parse import quote
 
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification, send_mobile_notifications_bulk
 from erp.common.doctype.erp_notification.erp_notification import create_notification
@@ -308,7 +309,6 @@ def _do_notify_class_new_post(event_data):
             return
 
         class_title = _class_display_title(class_id, event_data)
-        journal_url = f"/journal/{post_id}"
         teacher_web_url = f"/teaching/classes/{class_id}?tab=newsfeed"
 
         pairs = _guardian_student_pairs_for_class(class_id, school_year_id)
@@ -348,6 +348,10 @@ def _do_notify_class_new_post(event_data):
             if author_email and portal_email.strip().lower() == author_email:
                 continue
             pick_student = sorted(student_set)[0]
+            # Deep link phải kèm student — PP mobile/web ACL theo học sinh
+            journal_url = (
+                f"/journal/{post_id}?student={quote(str(pick_student), safe='')}"
+            )
             base = {
                 "type": "wislife_class_post",
                 "postId": str(post_id),
