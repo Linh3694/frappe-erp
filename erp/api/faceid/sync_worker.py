@@ -553,7 +553,7 @@ def refresh_all_device_status() -> dict:
             fetch_device_status(doc)
             online += 1
         except Exception as e:
-            mark_device_offline(d.name, str(e))
+            mark_device_offline(d.name, e)
             offline += 1
         frappe.db.commit()
     return {"checked": len(devices), "online": online, "offline": offline}

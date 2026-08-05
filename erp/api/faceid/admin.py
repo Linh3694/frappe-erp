@@ -894,7 +894,7 @@ def probe_device(name):
     try:
         res = gateway_post(f"/api/devices/{ip}/probe", {})
     except Exception as e:
-        mark_device_offline(name, str(e))
+        mark_device_offline(name, e)
         return _err(f"Không kết nối được tới máy {ip}: {e}")
     frappe.db.set_value(
         "FaceID Device",
@@ -1017,7 +1017,7 @@ def refresh_devices_status(name=None):
         try:
             return _ok(fetch_device_status(doc))
         except Exception as e:
-            mark_device_offline(name, str(e))
+            mark_device_offline(name, e)
             return _err(f"Không đọc được trạng thái máy: {e}")
 
     result = refresh_all_device_status()
@@ -1062,7 +1062,7 @@ def discover_unregistered_devices(limit=500):
     found: dict[str, dict] = {}
     for e in events:
         payload = e.get("payload") or {}
-        ip = e.get("device_ip") or payload.get("remoteHostAddr")
+        ip = e.get("device_ip") or payload.get("_source_ip") or payload.get("remoteHostAddr")
         if not ip or e.get("device_id"):
             continue
         ip = str(ip).split("/")[0]
