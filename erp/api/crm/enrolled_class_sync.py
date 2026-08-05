@@ -7,8 +7,6 @@ khi hoc sinh da co lop Regular trong SIS, khoi lop that (SIS Education Grade)
 duoc ghi nguoc ve field current_grade cua lead (Select: K, 1-12).
 """
 
-import re
-
 import frappe
 
 
@@ -203,9 +201,13 @@ def promote_leads_to_dang_hoc_if_class_assigned(crm_student_name: str) -> None:
 
 
 def _is_test_student_code(student_code) -> bool:
-    """Ma hoc sinh test: WS0 + chu so (vd WS012345). Duoc mien kiem tra xep lop."""
-    code = str(student_code or "").strip().upper()
-    return bool(re.fullmatch(r"WS0\d+", code))
+    """Ma hoc sinh test: prefix "WS0" (vd WS01, WS012345). Duoc mien kiem tra xep lop.
+
+    Dung DUNG dinh dang voi filter danh sach o
+    erp/api/erp_sis/student.py (`student_code LIKE 'WS0%'`) — lech dinh dang se sinh
+    ra HS hien trong dropdown nhung bi chan luc luu.
+    """
+    return str(student_code or "").strip().upper().startswith("WS0")
 
 
 def can_assign_student_to_class(crm_student_name: str) -> tuple[bool, str]:

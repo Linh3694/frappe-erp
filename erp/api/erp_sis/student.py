@@ -92,12 +92,19 @@ def get_all_students(include_all_campuses=0, only_eligible_for_class=0):
             from erp.utils.campus_utils import get_campus_filter_for_api
             filters = get_campus_filter_for_api()
 
+        or_filters = None
         if only_eligible_for_class:
             from erp.api.crm.lead_student_sync import ENROLLMENT_STATUS_STUDYING
             # filters la dict do campus_utils tra ve — copy truoc khi them key
             # de khong mutate gia tri cua module khac.
             filters = dict(filters or {})
-            filters["enrollment_status"] = ENROLLMENT_STATUS_STUDYING
+            # OR: dang hoc, HOAC ma test WS0xxxxx (bypass giong
+            # erp.api.crm.enrolled_class_sync.can_assign_student_to_class).
+            # get_all: filters AND (or_filters) -> campus van duoc giu.
+            or_filters = [
+                ["enrollment_status", "=", ENROLLMENT_STATUS_STUDYING],
+                ["student_code", "like", "WS0%"],
+            ]
 
         # Always fetch all students - no pagination
         students = frappe.get_all(
@@ -116,6 +123,7 @@ def get_all_students(include_all_campuses=0, only_eligible_for_class=0):
                 "modified"
             ],
             filters=filters,
+            or_filters=or_filters,
             order_by="student_name asc"
         )
 
