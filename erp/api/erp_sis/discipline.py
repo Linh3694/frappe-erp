@@ -2012,6 +2012,126 @@ def _class_violation_stats_internal(class_id, violation_id, first_day, last_day)
     }
 
 
+_BULK_VIOLATION_STATS_MAX_PAIRS = 200
+
+
+def _batch_student_violation_counts(student_ids, violation_ids, first_day, last_day):
+    """
+    Đếm DISTINCT record theo (student_id, violation) — 1 query thay vì N.
+    Logic khớp _student_violation_stats_internal (target_student / SE / class membership).
+    """
+    if not student_ids or not violation_ids:
+        return {}
+
+    rows = frappe.db.sql(
+        """
+        SELECT DISTINCT r.name AS record_name, r.violation AS violation_id,
+            r.target_student AS target_student,
+            se.student_id AS se_student_id,
+            cs.student_id AS cs_student_id
+        FROM `tabSIS Discipline Record` r
+        LEFT JOIN `tabSIS Discipline Record Student Entry` se
+            ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+        LEFT JOIN `tabSIS Discipline Record Class Entry` ce
+            ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+        LEFT JOIN `tabSIS Class Student` cs
+            ON cs.class_id = ce.class_id AND cs.student_id IN %(sids)s
+        WHERE r.violation IN %(vids)s
+            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+            AND (
+                r.target_student IN %(sids)s
+                OR se.student_id IN %(sids)s
+                OR cs.student_id IS NOT NULL
+            )
+        """,
+        {
+            "sids": list(student_ids),
+            "vids": list(violation_ids),
+            "first_day": first_day,
+            "last_day": last_day,
+        },
+        as_dict=True,
+    )
+
+    # (sid, vid) -> set(record_name)
+    buckets = {}
+    sid_set = set(student_ids)
+    for row in rows:
+        vid = row.get("violation_id")
+        matched = set()
+        ts = row.get("target_student")
+        if ts in sid_set:
+            matched.add(ts)
+        se = row.get("se_student_id")
+        if se in sid_set:
+            matched.add(se)
+        cs = row.get("cs_student_id")
+        if cs in sid_set:
+            matched.add(cs)
+        for sid in matched:
+            buckets.setdefault((sid, vid), set()).add(row["record_name"])
+
+    return {k: len(v) for k, v in buckets.items()}
+
+
+def _batch_student_deduction_points(student_ids, violation_ids, first_day, last_day):
+    """Tổng điểm trừ đã lưu theo (student_id, violation) — gom 2 nhánh SE + Class Entry."""
+    if not student_ids or not violation_ids:
+        return {}
+
+    se_rows = frappe.db.sql(
+        """
+        SELECT se.student_id AS student_id, r.violation AS violation_id,
+            CAST(IFNULL(se.deduction_points, '10') AS UNSIGNED) AS dp
+        FROM `tabSIS Discipline Record` r
+        INNER JOIN `tabSIS Discipline Record Student Entry` se
+            ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+        WHERE r.violation IN %(vids)s
+            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+            AND se.student_id IN %(sids)s
+        """,
+        {
+            "sids": list(student_ids),
+            "vids": list(violation_ids),
+            "first_day": first_day,
+            "last_day": last_day,
+        },
+        as_dict=True,
+    )
+    ce_rows = frappe.db.sql(
+        """
+        SELECT cs.student_id AS student_id, r.violation AS violation_id,
+            CAST(IFNULL(ce.deduction_points, '10') AS UNSIGNED) AS dp
+        FROM `tabSIS Discipline Record` r
+        INNER JOIN `tabSIS Discipline Record Class Entry` ce
+            ON ce.parent = r.name AND ce.parenttype = 'SIS Discipline Record'
+        INNER JOIN `tabSIS Class Student` cs
+            ON cs.class_id = ce.class_id AND cs.student_id IN %(sids)s
+        WHERE r.violation IN %(vids)s
+            AND r.date >= %(first_day)s AND r.date <= %(last_day)s
+            AND NOT EXISTS (
+                SELECT 1 FROM `tabSIS Discipline Record Student Entry` se2
+                WHERE se2.parent = r.name
+                    AND se2.parenttype = 'SIS Discipline Record'
+                    AND se2.student_id = cs.student_id
+            )
+        """,
+        {
+            "sids": list(student_ids),
+            "vids": list(violation_ids),
+            "first_day": first_day,
+            "last_day": last_day,
+        },
+        as_dict=True,
+    )
+
+    totals = {}
+    for row in list(se_rows) + list(ce_rows):
+        key = (row["student_id"], row["violation_id"])
+        totals[key] = totals.get(key, 0) + int(row.get("dp") or 0)
+    return totals
+
+
 @frappe.whitelist(allow_guest=False)
 def get_bulk_violation_stats(pairs=None, date_from=None, date_to=None):
     """
@@ -2042,8 +2162,11 @@ def get_bulk_violation_stats(pairs=None, date_from=None, date_to=None):
             first_day = today.replace(day=1)
             last_day = today
 
-        stats = {}
-        for item in pairs:
+        # Chuẩn hoá + dedupe + trần số cặp (tránh storm DB)
+        student_pairs = []
+        class_pairs = []
+        seen = set()
+        for item in pairs[:_BULK_VIOLATION_STATS_MAX_PAIRS]:
             if not isinstance(item, dict):
                 continue
             kind = (item.get("type") or "").strip().lower()
@@ -2051,16 +2174,43 @@ def get_bulk_violation_stats(pairs=None, date_from=None, date_to=None):
             vid = item.get("violation_id") or item.get("violationId")
             if not entity_id or not vid:
                 continue
+            key = f"{kind}|{entity_id}|{vid}"
+            if key in seen:
+                continue
+            seen.add(key)
             if kind == "student":
-                key = f"s|{entity_id}|{vid}"
-                stats[key] = _student_violation_stats_internal(
-                    entity_id, vid, first_day, last_day
-                )
+                student_pairs.append((entity_id, vid))
             elif kind == "class":
-                key = f"c|{entity_id}|{vid}"
-                stats[key] = _class_violation_stats_internal(
-                    entity_id, vid, first_day, last_day
-                )
+                class_pairs.append((entity_id, vid))
+
+        stats = {}
+
+        # ---- Student: batch count + points + cache bảng điểm theo violation ----
+        if student_pairs:
+            sids = {p[0] for p in student_pairs}
+            vids = {p[1] for p in student_pairs}
+            counts = _batch_student_violation_counts(sids, vids, first_day, last_day)
+            points_map = _batch_student_deduction_points(sids, vids, first_day, last_day)
+            point_tables = {}
+            for vid in vids:
+                student_rows, _ = _get_violation_point_tables_for_stats(vid, last_day)
+                point_tables[vid] = student_rows
+
+            for sid, vid in student_pairs:
+                count = int(counts.get((sid, vid), 0))
+                tier = _match_tier_from_point_rows(point_tables.get(vid) or [], count)
+                stats[f"s|{sid}|{vid}"] = {
+                    "count": count,
+                    "level": tier["level"],
+                    "level_label": tier["level_label"],
+                    "points": int(points_map.get((sid, vid), 0)),
+                }
+
+        # Class pairs thường ít hơn student — giữ helper cũ (đã có index discipline)
+        for class_id, vid in class_pairs:
+            stats[f"c|{class_id}|{vid}"] = _class_violation_stats_internal(
+                class_id, vid, first_day, last_day
+            )
 
         return success_response(
             data={"stats": stats},

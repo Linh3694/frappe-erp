@@ -68,6 +68,36 @@ def get_student_class_scopes(student_id=None):
             limit_page_length=1000,
         )
 
+        # Batch class + school year — tránh get_value trong vòng lặp
+        class_ids = list({r.get("class_id") for r in class_students if r.get("class_id")})
+        class_map = {}
+        if class_ids:
+            for c in frappe.get_all(
+                "SIS Class",
+                filters={"name": ["in", class_ids]},
+                fields=["name", "title", "short_title", "school_year_id", "campus_id", "class_type"],
+                ignore_permissions=True,
+                limit_page_length=1000,
+            ):
+                class_map[c.name] = c
+
+        year_ids = set()
+        for row in class_students:
+            cid = row.get("class_id")
+            sy = row.get("school_year_id") or (class_map.get(cid) or {}).get("school_year_id")
+            if sy:
+                year_ids.add(sy)
+        year_map = {}
+        if year_ids:
+            for y in frappe.get_all(
+                "SIS School Year",
+                filters={"name": ["in", list(year_ids)]},
+                fields=["name", "title_vn", "title_en"],
+                ignore_permissions=True,
+                limit_page_length=500,
+            ):
+                year_map[y.name] = y
+
         scopes = []
         seen = set()
         for row in class_students:
@@ -79,21 +109,9 @@ def get_student_class_scopes(student_id=None):
                 continue
             seen.add(key)
 
-            class_doc = frappe.db.get_value(
-                "SIS Class",
-                class_id,
-                ["title", "short_title", "school_year_id", "campus_id", "class_type"],
-                as_dict=True,
-            ) or {}
+            class_doc = class_map.get(class_id) or {}
             school_year_id = row.get("school_year_id") or class_doc.get("school_year_id")
-            school_year = {}
-            if school_year_id:
-                school_year = frappe.db.get_value(
-                    "SIS School Year",
-                    school_year_id,
-                    ["title_vn", "title_en"],
-                    as_dict=True,
-                ) or {}
+            school_year = year_map.get(school_year_id) or {}
 
             scopes.append({
                 "classId": class_id,
@@ -245,14 +263,21 @@ def get_class_chat_scope(class_id=None, school_year_id=None):
         )
         student_ids = [r.student_id for r in class_student_rows if r.get("student_id")]
 
+        # Batch 1 query thay vì get_value từng HS (API nóng Parent Portal)
+        student_map = {}
+        if student_ids:
+            for row in frappe.get_all(
+                "CRM Student",
+                filters={"name": ["in", student_ids]},
+                fields=["name", "student_name", "student_code", "family_code"],
+                ignore_permissions=True,
+                limit_page_length=10000,
+            ):
+                student_map[row.name] = row
+
         students_out = []
         for sid in student_ids:
-            row = frappe.db.get_value(
-                "CRM Student",
-                sid,
-                ["student_name", "student_code", "family_code"],
-                as_dict=True,
-            ) or {}
+            row = student_map.get(sid) or {}
             students_out.append({
                 "student_id": sid,
                 "student_name": row.get("student_name"),
