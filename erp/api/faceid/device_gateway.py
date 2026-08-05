@@ -33,15 +33,12 @@ def push_device_to_controller(doc) -> dict:
 
     device = res.get("device") if isinstance(res, dict) else None
     cid = (device or {}).get("id") if device else res.get("id") if isinstance(res, dict) else None
+    values: dict = {"push_status": "synced", "last_error": None}
     if cid and int(cid) != cint(doc.controller_device_id):
-        frappe.db.set_value(
-            "FaceID Device",
-            doc.name,
-            "controller_device_id",
-            int(cid),
-            update_modified=False,
-        )
+        values["controller_device_id"] = int(cid)
         doc.controller_device_id = int(cid)
+    frappe.db.set_value("FaceID Device", doc.name, values, update_modified=False)
+    doc.push_status = "synced"
     return device or res or {}
 
 
@@ -68,13 +65,48 @@ def _extract_isapi_count(data, *keys: str) -> int | None:
     return None
 
 
+def _error_status(err: Exception) -> str:
+    """Lỗi cấu hình (4xx từ controller) không có nghĩa là máy tắt."""
+    resp = getattr(err, "response", None)
+    code = getattr(resp, "status_code", None)
+    if code and 400 <= code < 500:
+        return "unknown"
+    return "offline"
+
+
+def mark_device_offline(doc_name: str, error: Exception | str | None = None) -> None:
+    """Ghi nhận không đọc được trạng thái: offline nếu mất kết nối, unknown nếu lỗi cấu hình."""
+    status = _error_status(error) if isinstance(error, Exception) else "offline"
+    frappe.db.set_value(
+        "FaceID Device",
+        doc_name,
+        {
+            "status": status,
+            "last_status_at": frappe.utils.now(),
+            "last_error": str(error or "")[:500] or None,
+        },
+        update_modified=False,
+    )
+
+
 def fetch_device_status(doc) -> dict:
     """Đọc trạng thái máy từ controller và cache vào doc."""
     ip = str(doc.ip).split("/")[0]
-    res = gateway_get(f"/api/devices/{ip}/status")
+    try:
+        res = gateway_get(f"/api/devices/{ip}/status")
+    except Exception as e:
+        mark_device_offline(doc.name, e)
+        raise
     status = res.get("status") or {}
     person_count = _extract_isapi_count(status.get("persons") or {}, "userNumber", "recordNum")
-    face_count = _extract_isapi_count(status.get("faces") or {}, "faceLibNum", "recordNum", "faceNum")
+    face_count = _extract_isapi_count(
+        status.get("faces") or {},
+        # Terminal Hikvision trả recordDataNumber cho FDLib/Count
+        "recordDataNumber",
+        "faceLibNum",
+        "recordNum",
+        "faceNum",
+    )
     time_info = status.get("time") or {}
     device_time = time_info.get("localTime") or time_info.get("LocalTime")
 
@@ -87,19 +119,28 @@ def fetch_device_status(doc) -> dict:
             message=frappe.get_traceback(),
         )
 
-    frappe.db.set_value(
-        "FaceID Device",
-        doc.name,
-        {
-            "person_count": person_count,
-            "face_count": face_count,
-            "device_time": device_time,
-            "last_status_at": frappe.utils.now(),
-        },
-        update_modified=False,
-    )
+    now = frappe.utils.now()
+    # Cột Int của Frappe là NOT NULL — ghi None sẽ ném IntegrityError và làm
+    # máy bị đánh nhầm thành offline, nên chỉ ghi field nào đọc được.
+    values: dict = {
+        "last_status_at": now,
+        # Đọc được ISAPI nghĩa là terminal đang sống
+        "status": "online",
+        "last_seen": now,
+        "last_error": None,
+    }
+    if person_count is not None:
+        values["person_count"] = person_count
+    if face_count is not None:
+        values["face_count"] = face_count
+    if device_time:
+        values["device_time"] = device_time
+    frappe.db.set_value("FaceID Device", doc.name, values, update_modified=False)
 
     return {
+        "status": "online",
+        "last_seen": now,
+        "last_status_at": now,
         "person_count": person_count,
         "face_count": face_count,
         "device_time": device_time,

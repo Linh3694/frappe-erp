@@ -24,7 +24,9 @@
   "person_count",
   "face_count",
   "device_time",
-  "last_status_at"
+  "last_status_at",
+  "push_status",
+  "last_error"
  ],
  "fields": [
   {
@@ -146,11 +148,25 @@
    "fieldtype": "Datetime",
    "label": "Lần cập nhật trạng thái",
    "read_only": 1
+  },
+  {
+   "fieldname": "push_status",
+   "fieldtype": "Select",
+   "label": "Trạng thái đẩy xuống controller",
+   "options": "pending\nsynced\nfailed",
+   "default": "pending",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Lỗi gần nhất",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-26 00:00:00.000000",
+ "modified": "2026-08-05 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Common",
  "name": "FaceID Device",

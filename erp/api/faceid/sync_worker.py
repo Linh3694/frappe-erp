@@ -251,6 +251,7 @@ def _process_one_job(job_name: str):
             "reapply_pickup": _job_reapply_pickup,
             "reconcile_pickup": _job_reconcile_pickup,
             "provision_device": _job_provision_device,
+            "upsert_device": _job_upsert_device,
         }.get(job.job_type)
         if not handler:
             raise ValueError(f"Job type không hỗ trợ: {job.job_type}")
@@ -513,6 +514,49 @@ def _job_provision_device(job):
     doc = frappe.get_doc("FaceID Device", job.ref_name)
     payload = {"enable_remote_check": bool(doc.is_pickup_gate)}
     gateway_post(f"/api/devices/{doc.ip}/provision", payload)
+
+
+def _job_upsert_device(job):
+    """Retry đẩy khai báo máy xuống controller (khi lưu lúc tunnel chết)."""
+    from erp.api.faceid.device_gateway import push_device_to_controller
+
+    doc = frappe.get_doc("FaceID Device", job.ref_name)
+    try:
+        push_device_to_controller(doc)
+    except Exception as e:
+        frappe.db.set_value(
+            "FaceID Device",
+            doc.name,
+            {"push_status": "failed", "last_error": str(e)[:500]},
+            update_modified=False,
+        )
+        raise
+
+
+def refresh_all_device_status() -> dict:
+    """Cron: hỏi controller trạng thái từng máy, cập nhật online/offline.
+
+    Controller chỉ set last_seen khi có người quét, nên nếu không poll thì cột
+    trạng thái trên WIS đứng yên ở 'unknown'.
+    """
+    from erp.api.faceid.device_gateway import fetch_device_status, mark_device_offline
+
+    if not gateway_healthz():
+        # Tunnel chết: không kết luận từng máy offline, chỉ ghi nhận
+        return {"skipped": "gateway_offline"}
+
+    devices = frappe.get_all("FaceID Device", fields=["name"])
+    online = offline = 0
+    for d in devices:
+        try:
+            doc = frappe.get_doc("FaceID Device", d.name)
+            fetch_device_status(doc)
+            online += 1
+        except Exception as e:
+            mark_device_offline(d.name, e)
+            offline += 1
+        frappe.db.commit()
+    return {"checked": len(devices), "online": online, "offline": offline}
 
 
 def reconcile_pickup_auth_to_controller():

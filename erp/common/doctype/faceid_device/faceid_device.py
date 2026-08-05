@@ -30,7 +30,11 @@ class FaceIDDevice(Document):
             )
 
     def _sync_to_controller(self):
-        """Đẩy máy xuống controller sau khi lưu trên Frappe."""
+        """Đẩy máy xuống controller sau khi lưu trên Frappe.
+
+        Không chặn việc lưu: controller/tunnel chết thì máy vẫn được khai báo trên
+        Frappe, đánh dấu push_status=failed và xếp job retry.
+        """
         if frappe.flags.get("faceid_skip_controller_push"):
             return
         try:
@@ -42,4 +46,26 @@ class FaceIDDevice(Document):
                 title=f"FaceID push device {self.name}",
                 message=frappe.get_traceback(),
             )
-            frappe.throw(f"Không đẩy được xuống controller: {e}")
+            frappe.db.set_value(
+                "FaceID Device",
+                self.name,
+                {"push_status": "failed", "last_error": str(e)[:500]},
+                update_modified=False,
+            )
+            try:
+                from erp.api.faceid.sync_worker import create_device_sync_job
+
+                create_device_sync_job(
+                    "upsert_device", "FaceID Device", self.name, priority=9
+                )
+            except Exception:
+                frappe.log_error(
+                    title=f"FaceID queue device job {self.name}",
+                    message=frappe.get_traceback(),
+                )
+            frappe.msgprint(
+                f"Đã lưu trên Frappe nhưng chưa đẩy được xuống controller: {e}. "
+                "Hệ thống sẽ tự thử lại.",
+                indicator="orange",
+                alert=True,
+            )
