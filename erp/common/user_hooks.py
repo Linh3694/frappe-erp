@@ -4,65 +4,24 @@ import requests
 import time
 
 
-# Webhook configuration - có thể lấy từ Site Config hoặc hardcode
+# ticket-service (:5001) và inventory-service (:5010) đã khai tử — không còn fallback hardcode.
+# Chỉ gửi khi site_config còn khai báo endpoint hợp lệ (thường để mảng rỗng).
+
+
 def get_webhook_endpoints():
-	"""
-	Get webhook endpoints từ site config hoặc default values
-	Format trong site_config.json:
-	{
-		"user_webhook_endpoints": [
-			{
-				"url": "http://172.16.20.113:5001/api/ticket/user/webhook/frappe-user-changed",
-				"name": "Ticket Service User Webhook"
-			}
-		]
-	}
-	"""
-	# Try to get from site config first
-	endpoints = frappe.conf.get("user_webhook_endpoints", [])
-	
-	# Fallback: hardcode service endpoints
-	if not endpoints:
-		endpoints = [
-			{
-				"url": "http://172.16.20.113:5001/api/ticket/user/webhook/frappe-user-changed",
-				"name": "Ticket Service User Webhook"
-			},
-			{
-				"url": "http://172.16.20.113:5010/api/inventory/user/webhook/frappe-user-changed",
-				"name": "Inventory Service User Webhook"
-			}
-		]
-	
-	return endpoints
+	"""Đọc user_webhook_endpoints từ site_config; mặc định không gửi gì."""
+	endpoints = frappe.conf.get("user_webhook_endpoints") or []
+	if not isinstance(endpoints, list):
+		return []
+	return [e for e in endpoints if isinstance(e, dict) and e.get("url")]
 
 
 def get_room_webhook_endpoints():
-	"""
-	Get room webhook endpoints từ site config hoặc default values
-	Format trong site_config.json:
-	{
-		"room_webhook_endpoints": [
-			{
-				"url": "http://172.16.20.113:5010/api/inventory/room/webhook/frappe-room-changed",
-				"name": "Inventory Service Room Webhook"
-			}
-		]
-	}
-	"""
-	# Try to get from site config first
-	endpoints = frappe.conf.get("room_webhook_endpoints", [])
-	
-	# Fallback: hardcode service endpoints
-	if not endpoints:
-		endpoints = [
-			{
-				"url": "http://172.16.20.113:5010/api/inventory/room/webhook/frappe-room-changed",
-				"name": "Inventory Service Room Webhook"
-			}
-		]
-	
-	return endpoints
+	"""Đọc room_webhook_endpoints từ site_config; mặc định không gửi gì."""
+	endpoints = frappe.conf.get("room_webhook_endpoints") or []
+	if not isinstance(endpoints, list):
+		return []
+	return [e for e in endpoints if isinstance(e, dict) and e.get("url")]
 
 
 def trigger_user_webhooks(doc, event):

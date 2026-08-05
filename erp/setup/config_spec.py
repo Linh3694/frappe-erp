@@ -98,9 +98,10 @@ SITE_CONFIG_SPEC: list[ConfKey] = [
 	ConfKey("IT_SUPPORT_EMAIL_API_KEY", secret=True, tenant_scope=WELLSPRING_ONLY),
 
 	ConfKey("user_webhook_endpoints", tenant_scope=WELLSPRING_ONLY,
-	        note="⚠ Trên prod đang chứa 2 entry trỏ ticket/inventory-service ĐÃ GỠ → webhook bắn "
-	             "vào địa chỉ chết mỗi lần user đổi. Dọn trên prod (việc GĐ0, backup trước)"),
-	ConfKey("room_webhook_endpoints", tenant_scope=WELLSPRING_ONLY),
+	        note="Để [] — ticket/inventory microservice đã khai tử; không hardcode fallback"),
+	ConfKey("room_webhook_endpoints", tenant_scope=WELLSPRING_ONLY,
+	        note="Để [] — inventory-service đã khai tử"),
+
 	ConfKey("USER_WEBHOOK_QUEUE", tenant_scope=WELLSPRING_ONLY),
 	ConfKey("USER_WEBHOOK_TIMEOUT_SECONDS", tenant_scope=WELLSPRING_ONLY),
 	ConfKey("USER_WEBHOOK_JOB_TIMEOUT_SECONDS", tenant_scope=WELLSPRING_ONLY),
