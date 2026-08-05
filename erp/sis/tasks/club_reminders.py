@@ -451,13 +451,19 @@ def debug_club_reminder(period_id=None):
         ],
         "mobile_push_tokens": mobile_tokens,
         "web_push_subscriptions": web_subs,
-        # Token Expo lưu theo `frappe.session.user` lúc app gọi register, còn
-        # push thì tìm theo email tổng hợp `{guardian_id}@parent…`. Hai giá trị
-        # này lệch nhau là push mobile im lặng không tới. Liệt kê token mới nhất
-        # để đối chiếu xem nó thật sự nằm dưới user nào.
-        "recent_mobile_tokens": frappe.get_all(
+        # `Mobile Device Token` DÙNG CHUNG với app nhân viên (workspace-mobile
+        # gọi cùng endpoint register), mà `app_type` chỉ phân biệt
+        # expo-go/standalone chứ không phân biệt hai app. Lấy 10 dòng mới nhất
+        # là ra toàn token nhân viên, che mất câu hỏi thật: app PHỤ HUYNH đã
+        # đăng ký token nào chưa. Nên lọc theo domain tài khoản phụ huynh.
+        "parent_mobile_tokens_total": frappe.db.count(
             "Mobile Device Token",
-            fields=["user", "platform", "app_type", "is_active", "last_seen"],
+            {"user": ["like", "%@parent.wellspring.edu.vn"], "is_active": 1},
+        ),
+        "recent_parent_mobile_tokens": frappe.get_all(
+            "Mobile Device Token",
+            filters={"user": ["like", "%@parent.wellspring.edu.vn"]},
+            fields=["user", "platform", "app_type", "bundle_id", "is_active", "last_seen"],
             order_by="modified desc",
             limit=10,
         ),

@@ -148,7 +148,9 @@ BUS_IMPORT_SPECS: Dict[str, ImportSpec] = {
         entity_label="tuyến đường",
         columns=(
             ColumnSpec("Tên tuyến", "route_name", required=True),
-            ColumnSpec("Mã xe", "vehicle_code", required=True),
+            # Cùng tên cột với file nhập học sinh theo tuyến — tránh người dùng
+            # phải tự hiểu "Mã xe" và "Mã tuyến" là cùng một giá trị
+            ColumnSpec("Mã tuyến", "vehicle_code", required=True),
             ColumnSpec("Biển số", "license_plate", required=True),
             ColumnSpec("CCCD tài xế", "driver_citizen_id", required=True),
             ColumnSpec("CCCD giám sát 1", "monitor1_citizen_id", required=True),

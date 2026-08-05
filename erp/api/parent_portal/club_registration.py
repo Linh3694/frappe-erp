@@ -51,6 +51,10 @@ DT_PERIOD = "SIS Club Registration Period"
 DT_OFFERING = "SIS Club Offering"
 DT_REGISTRATION = "SIS Club Registration"
 
+#: TTL cache số chỗ (giây). Đặt thấp hơn chu kỳ poll của client để mỗi lần poll
+#: vẫn thấy số mới, nhưng đủ để mọi phụ huynh cùng khối dùng chung một query.
+OFFERING_COUNTS_CACHE_TTL = 2
+
 
 # ----------------------------------------------------------------------
 # Helper
@@ -479,6 +483,82 @@ def get_registration_data():
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "PP Club get_registration_data")
         return error_response(f"Lỗi khi lấy dữ liệu đăng ký: {e}", code="GET_REGISTRATION_DATA_ERROR")
+
+
+@frappe.whitelist()
+def get_offering_counts():
+    """
+    CHỈ số chỗ của các môn trong một đợt, cho đúng một khối.
+
+    Vì sao tách khỏi `get_registration_data`: màn đăng ký cần số chỗ nhúc nhích
+    gần thời gian thực, nhưng payload đầy đủ tốn ~15-25 round-trip SQL (quyền,
+    danh sách con, doc đợt + child table, context lớp, đăng ký hiện có). Poll
+    payload đó vài giây một lần với hàng nghìn phụ huynh lúc mở cổng sẽ giành
+    lock với chính các transaction ghi đăng ký — polling làm hỏng đúng việc mà
+    nó phục vụ.
+
+    Hàm này đổi lại: một câu SQL, và số chỗ là dữ liệu DÙNG CHUNG theo cặp
+    (đợt, khối) nên cache Redis vài giây làm tải DB thành O(1) — 2000 người
+    poll hay 2 người poll cũng chỉ một query mỗi chu kỳ.
+
+    Quyền: chỉ cần là phụ huynh hợp lệ (và trong nhóm chạy thử). KHÔNG kiểm
+    `can_guardian_access_student` như các endpoint khác vì response không chứa
+    bất kỳ dữ liệu học sinh nào — chỉ sức chứa/đã đăng ký của môn, thứ mà mọi
+    phụ huynh trong đợt đều thấy trên màn đăng ký. Đổi lại `education_grade_id`
+    nhận thẳng từ client (client đã có sẵn từ lần load đầu), tránh phải truy
+    context lớp của học sinh — chính là phần đắt nhất muốn cắt bỏ.
+    """
+    try:
+        guardian = _guardian()
+        if not guardian:
+            return forbidden_response("Không tìm thấy thông tin phụ huynh")
+        blocked = _beta_blocked(guardian)
+        if blocked:
+            return blocked
+
+        period_id = _param("period_id")
+        education_grade_id = _param("education_grade_id")
+        if not period_id or not education_grade_id:
+            return validation_error_response(
+                "Thiếu tham số",
+                {
+                    "period_id": ["Bắt buộc"] if not period_id else [],
+                    "education_grade_id": ["Bắt buộc"] if not education_grade_id else [],
+                },
+            )
+
+        cache_key = f"club:offering_counts:{period_id}:{education_grade_id}"
+        cached = frappe.cache().get_value(cache_key)
+        if cached is not None:
+            return success_response(data=cached, message="Lấy số chỗ CLB thành công")
+
+        rows = frappe.db.sql(
+            f"""
+            SELECT DISTINCT o.name AS offering_id, o.capacity, o.registered_count
+            FROM `tab{DT_OFFERING}` o
+            INNER JOIN `tabSIS Club Offering Grade` g ON g.parent = o.name
+            WHERE o.period_id = %(period_id)s
+              AND o.status = 'active'
+              AND g.education_grade_id = %(grade)s
+            """,
+            {"period_id": period_id, "grade": education_grade_id},
+            as_dict=True,
+        )
+
+        counts = [
+            {
+                "offering_id": r.offering_id,
+                "capacity": _int(r.capacity),
+                "registered_count": _int(r.registered_count),
+                "remaining": max(0, _int(r.capacity) - _int(r.registered_count)),
+            }
+            for r in rows
+        ]
+        frappe.cache().set_value(cache_key, counts, expires_in_sec=OFFERING_COUNTS_CACHE_TTL)
+        return success_response(data=counts, message="Lấy số chỗ CLB thành công")
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "PP Club get_offering_counts")
+        return error_response(f"Lỗi khi lấy số chỗ: {e}", code="GET_OFFERING_COUNTS_ERROR")
 
 
 @frappe.whitelist()

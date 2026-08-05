@@ -7,6 +7,8 @@ khi hoc sinh da co lop Regular trong SIS, khoi lop that (SIS Education Grade)
 duoc ghi nguoc ve field current_grade cua lead (Select: K, 1-12).
 """
 
+import re
+
 import frappe
 
 
@@ -200,6 +202,12 @@ def promote_leads_to_dang_hoc_if_class_assigned(crm_student_name: str) -> None:
         _log_step_change(lead_name, "Enrolled", "Enrolled", old_status, doc.status)
 
 
+def _is_test_student_code(student_code) -> bool:
+    """Ma hoc sinh test: WS0 + chu so (vd WS012345). Duoc mien kiem tra xep lop."""
+    code = str(student_code or "").strip().upper()
+    return bool(re.fullmatch(r"WS0\d+", code))
+
+
 def can_assign_student_to_class(crm_student_name: str) -> tuple[bool, str]:
     """Kiem tra hoc sinh co duoc XEP LOP MOI khong.
 
@@ -231,6 +239,12 @@ def can_assign_student_to_class(crm_student_name: str) -> tuple[bool, str]:
     )
     if not row:
         return False, f"Không tìm thấy hồ sơ học sinh {sid}."
+
+    # Bypass cho hoc sinh TEST: student_code dang WS0xxxxx (prefix "WS0" + so).
+    # Ho so test khong di qua luong CRM nen enrollment_status luon rong -> bi allowlist
+    # chan; cho phep xep lop de QA/demo chay duoc.
+    if _is_test_student_code(row.get("student_code")):
+        return True, ""
 
     status = str(row.get("enrollment_status") or "").strip()
     if status == "Dang hoc":

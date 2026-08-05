@@ -127,7 +127,7 @@ class TestParseRowRoute(unittest.TestCase):
     def _row(self, **override):
         row = {
             "Tên tuyến": "Ecopark 1",
-            "Mã xe": "12",
+            "Mã tuyến": "12",
             "Biển số": "29B-173.96",
             "CCCD tài xế": "001234567890",
             "CCCD giám sát 1": "001234567891",
