@@ -1,0 +1,136 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "person",
+  "device",
+  "state",
+  "column_break_main",
+  "slot",
+  "schedule_signature",
+  "section_scope",
+  "valid_from",
+  "column_break_scope",
+  "valid_to",
+  "source_groups",
+  "section_sync",
+  "desired_hash",
+  "applied_hash",
+  "last_applied_at",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "person",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Person",
+   "options": "FaceID Person",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Thiết bị",
+   "options": "FaceID Device",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "default": "pending",
+   "description": "deleting = cần gỡ khỏi máy; applied = máy đã khớp desired",
+   "fieldname": "state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trạng thái",
+   "options": "pending\napplied\ndeleting\nerror",
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "slot",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Slot trên máy"
+  },
+  {
+   "fieldname": "schedule_signature",
+   "fieldtype": "Data",
+   "label": "Chữ ký lịch"
+  },
+  {
+   "fieldname": "section_scope",
+   "fieldtype": "Section Break",
+   "label": "Phạm vi"
+  },
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Hiệu lực từ"
+  },
+  {
+   "fieldname": "column_break_scope",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Hiệu lực đến"
+  },
+  {
+   "description": "Các nhóm góp khung giờ cho dòng này (trace/debug)",
+   "fieldname": "source_groups",
+   "fieldtype": "Small Text",
+   "label": "Nhóm nguồn"
+  },
+  {
+   "fieldname": "section_sync",
+   "fieldtype": "Section Break",
+   "label": "Đồng bộ"
+  },
+  {
+   "fieldname": "desired_hash",
+   "fieldtype": "Data",
+   "label": "Hash mong muốn"
+  },
+  {
+   "fieldname": "applied_hash",
+   "fieldtype": "Data",
+   "label": "Hash đã đẩy"
+  },
+  {
+   "fieldname": "last_applied_at",
+   "fieldtype": "Datetime",
+   "label": "Lần đẩy cuối"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Lỗi"
+  }
+ ],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Person Device Assignment",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

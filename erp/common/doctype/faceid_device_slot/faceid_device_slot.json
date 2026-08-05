@@ -1,0 +1,107 @@
+{
+ "actions": [],
+ "autoname": "format:FID-SLOT-{#####}",
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "device",
+  "slot",
+  "schedule_signature",
+  "label",
+  "periods_json",
+  "section_sync",
+  "desired_hash",
+  "applied_hash",
+  "sync_status",
+  "last_synced_at",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Thiết bị",
+   "options": "FaceID Device",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Slot week plan trên máy (1 = 24/7 mặc định, 2-16 cấp phát động)",
+   "fieldname": "slot",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Slot",
+   "reqd": 1
+  },
+  {
+   "description": "Hash chuẩn hóa của hợp các khung giờ dùng slot này",
+   "fieldname": "schedule_signature",
+   "fieldtype": "Data",
+   "label": "Chữ ký lịch",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Nhãn"
+  },
+  {
+   "fieldname": "periods_json",
+   "fieldtype": "Long Text",
+   "label": "Khung giờ (JSON)"
+  },
+  {
+   "fieldname": "section_sync",
+   "fieldtype": "Section Break",
+   "label": "Đồng bộ"
+  },
+  {
+   "fieldname": "desired_hash",
+   "fieldtype": "Data",
+   "label": "Hash mong muốn"
+  },
+  {
+   "fieldname": "applied_hash",
+   "fieldtype": "Data",
+   "label": "Hash đã đẩy"
+  },
+  {
+   "default": "pending",
+   "fieldname": "sync_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Trạng thái sync",
+   "options": "pending\nsynced\nerror"
+  },
+  {
+   "fieldname": "last_synced_at",
+   "fieldtype": "Datetime",
+   "label": "Lần sync cuối"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Lỗi sync"
+  }
+ ],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Device Slot",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

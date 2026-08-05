@@ -1,0 +1,165 @@
+{
+ "actions": [],
+ "autoname": "format:FID-AGRP-{#####}",
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "group_name",
+  "campus_id",
+  "is_active",
+  "column_break_main",
+  "managed_by",
+  "system_key",
+  "note",
+  "section_schedule",
+  "shift_in",
+  "column_break_schedule",
+  "shift_out",
+  "section_validity",
+  "valid_from",
+  "column_break_validity",
+  "valid_to",
+  "section_devices",
+  "devices",
+  "section_stats",
+  "member_count",
+  "last_applied_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "group_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên nhóm",
+   "reqd": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Campus",
+   "options": "SIS Campus"
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Đang áp dụng"
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "admin",
+   "fieldname": "managed_by",
+   "fieldtype": "Select",
+   "label": "Nguồn quản lý",
+   "options": "admin\nsystem",
+   "read_only": 1
+  },
+  {
+   "description": "Khóa định danh nhóm hệ thống (vd. pickup_guardians)",
+   "fieldname": "system_key",
+   "fieldtype": "Data",
+   "label": "Khóa hệ thống",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "section_schedule",
+   "fieldtype": "Section Break",
+   "label": "Ca áp dụng"
+  },
+  {
+   "description": "Khung giờ được VÀO — áp cho các đầu đọc direction=checkin. Để trống = 24/7.",
+   "fieldname": "shift_in",
+   "fieldtype": "Link",
+   "label": "Ca chiều vào",
+   "options": "FaceID Work Shift"
+  },
+  {
+   "fieldname": "column_break_schedule",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Khung giờ được RA — áp cho các đầu đọc direction=checkout. Để trống = 24/7 (chiều ra do remote-check quyết).",
+   "fieldname": "shift_out",
+   "fieldtype": "Link",
+   "label": "Ca chiều ra",
+   "options": "FaceID Work Shift"
+  },
+  {
+   "fieldname": "section_validity",
+   "fieldtype": "Section Break",
+   "label": "Hiệu lực"
+  },
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Hiệu lực từ"
+  },
+  {
+   "fieldname": "column_break_validity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Hiệu lực đến"
+  },
+  {
+   "fieldname": "section_devices",
+   "fieldtype": "Section Break",
+   "label": "Thiết bị"
+  },
+  {
+   "fieldname": "devices",
+   "fieldtype": "Table",
+   "label": "Máy áp dụng",
+   "options": "FaceID Access Group Device"
+  },
+  {
+   "fieldname": "section_stats",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái"
+  },
+  {
+   "fieldname": "member_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Số thành viên",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_applied_at",
+   "fieldtype": "Datetime",
+   "label": "Lần áp dụng cuối",
+   "read_only": 1
+  }
+ ],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Common",
+ "name": "FaceID Access Group",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

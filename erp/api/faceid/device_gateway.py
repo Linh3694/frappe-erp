@@ -18,6 +18,7 @@ def push_device_to_controller(doc) -> dict:
         "name": doc.device_name,
         "ip": ip,
         "model": doc.model,
+        "grp": doc.device_group or None,
         "user": doc.username,
         "https": bool(doc.https),
         "auth": doc.auth_mode or "auto",
