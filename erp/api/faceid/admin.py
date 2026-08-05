@@ -125,10 +125,59 @@ def list_persons(
     return _ok({"items": rows, "total": total})
 
 
+# Trên ngưỡng này thì kéo nguồn ở background — request web (timeout 60s phía
+# frontend) không kham nổi hàng nghìn bản upsert trong một lần bấm.
+SOURCE_REFRESH_INLINE_MAX = 300
+
+
+def _count_source_candidates(person_type, campus_id=None):
+    if person_type == "student":
+        filters = {"campus_id": campus_id} if campus_id else {}
+        return frappe.db.count("CRM Student", filters)
+    if person_type == "guardian":
+        filters = {"campus_id": campus_id} if campus_id else {}
+        return frappe.db.count("CRM Guardian", filters)
+    if person_type == "staff":
+        return frappe.db.sql(
+            """
+            SELECT COUNT(*) FROM `tabUser` u
+            WHERE u.user_type = 'System User'
+              AND u.name NOT IN ('Guest', 'Administrator')
+              AND u.email NOT LIKE %s
+            """,
+            ("%@parent.wellspring.edu.vn",),
+        )[0][0]
+    return 0
+
+
 @frappe.whitelist()
-def refresh_persons_from_source(person_type, campus_id=None, class_id=None):
-    """Lấy dữ liệu từ nguồn CRM/SIS/User và upsert vào FaceID Person."""
+def refresh_persons_from_source(person_type, campus_id=None, class_id=None, background=None):
+    """Lấy dữ liệu từ nguồn CRM/SIS/User và upsert vào FaceID Person.
+
+    Lô lớn tự chuyển sang queue long (trả về ngay `async=True`);
+    truyền background=0/1 để ép chạy inline/nền.
+    """
     from erp.api.faceid.person_source import refresh_persons_from_source as _refresh
+
+    total = _count_source_candidates(person_type, campus_id)
+    run_background = (
+        total > SOURCE_REFRESH_INLINE_MAX if background is None else bool(cint(background))
+    )
+    if run_background:
+        frappe.enqueue(
+            "erp.api.faceid.person_source.refresh_persons_from_source",
+            queue="long",
+            timeout=3600,
+            job_id=f"faceid_refresh_source_{person_type}",  # bấm liên tiếp không chồng job
+            deduplicate=True,
+            person_type=person_type,
+            campus_id=campus_id,
+            class_id=class_id,
+        )
+        return _ok(
+            {"async": True, "total_candidates": total},
+            message=f"Đang kéo {total} bản ghi {person_type} ở nền — tải lại danh sách sau ít phút",
+        )
 
     stats = _refresh(person_type, campus_id, class_id)
     msg = f"Đã lấy dữ liệu: {stats.get('created', 0)} mới, {stats.get('updated', 0)} cập nhật"

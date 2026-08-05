@@ -345,12 +345,15 @@ def _upsert_person(values: dict) -> tuple[str, str]:
             if doc.get(key) != new_val:
                 doc.set(key, new_val)
                 changed = True
-        if changed:
-            doc.sync_status = "pending"
-            doc.source_synced_at = now
+        if not changed:
+            # Không ghi gì khi dữ liệu nguồn không đổi — save thừa × hàng nghìn
+            # bản ghi là thứ làm refresh toàn trường vượt timeout request.
+            return doc.name, "unchanged"
+        doc.sync_status = "pending"
+        doc.source_synced_at = now
         doc.flags.faceid_refresh = 1
         doc.save(ignore_permissions=True)
-        return doc.name, "updated" if changed else "unchanged"
+        return doc.name, "updated"
 
     insert_code = _resolve_external_code_for_insert(values)
     doc = frappe.get_doc(
