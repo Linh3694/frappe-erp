@@ -24,19 +24,29 @@ from erp.utils.school_day_utils import is_school_instruction_day
 # Danh sách người nhận theo cấp THCS / THPT (production)
 DISCIPLINE_REPORT_RECIPIENTS_THCS = [
     "nga.lt@wellspring.edu.vn",
-    "linh.nguyenviet@wellspring.edu.vn",
+    "huong.nguyenthithu.ts@wellspring.edu.vn",
+    "quynh.doanngoc@wellspring.edu.vn",
+    "hoa.phamthi@wellspring.edu.vn",
+    "ha.trinhthingan@wellspring.edu.vn",
+    "anh.doanvan@wellspring.edu.vn",
+    "ha.nguyenvan@wellspring.edu.vn",
     "chunhiem_thcs@wellspring.edu.vn",
 ]
 DISCIPLINE_REPORT_RECIPIENTS_THPT = [
     "nhan.dothithanh@wellspring.edu.vn",
     "minh.hoangthi@wellspring.edu.vn",
     "chunhiem_thpt@wellspring.edu.vn",
+    # antoanhocduong@ nhận qua DISCIPLINE_REPORT_CC_COMMON (CC cả 2 cấp)
+    "thao.lethiphuong@wellspring.edu.vn",
+    "toan.domanh@wellspring.edu.vn",
+    "anh.phantuan@wellspring.edu.vn",
+    "huong.dothi@wellspring.edu.vn",
+    "linh.tranduy@wellspring.edu.vn",
 ]
 
-# CC dùng chung cho cả 2 cấp — Ban An toàn học đường + lãnh đạo theo dõi
+# CC dùng chung cho cả 2 cấp — Ban An toàn học đường
 DISCIPLINE_REPORT_CC_COMMON = [
     "antoanhocduong@wellspring.edu.vn",
-    "son.nguyenvinh@wellspring.edu.vn",
 ]
 
 # Hộp thư gửi đi — đồng bộ các email tự động khác (xem finance/notification.py)

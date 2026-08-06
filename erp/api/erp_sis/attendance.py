@@ -1248,6 +1248,7 @@ HOMEROOM_REPORT_RECIPIENTS = {
 		"tham.tranthihong@wellspring.edu.vn",
 		"ngoc.phamminh@wellspring.edu.vn",
 		"ha.nguyenthiviet@wellspring.edu.vn",
+		"nhan.dothithanh@wellspring.edu.vn",
 	],
 }
 
