@@ -1,0 +1,233 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:MDM-REQ-{#####}",
+ "creation": "2026-08-07 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_machine",
+  "serial_number",
+  "hostname",
+  "os_version",
+  "column_break_machine",
+  "status",
+  "known_serial",
+  "blocked",
+  "section_specs",
+  "specs_summary",
+  "section_identity",
+  "agent_pubkey",
+  "check_in_secret_hash",
+  "column_break_identity",
+  "source_ip",
+  "first_seen",
+  "last_seen",
+  "section_result",
+  "linked_device",
+  "linked_asset",
+  "column_break_result",
+  "approved_by",
+  "approved_on",
+  "reject_reason",
+  "section_handover",
+  "pending_token_secret",
+  "token_delivered_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_machine",
+   "fieldtype": "Section Break",
+   "label": "Máy check-in"
+  },
+  {
+   "fieldname": "serial_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Serial",
+   "reqd": 1
+  },
+  {
+   "fieldname": "hostname",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên máy"
+  },
+  {
+   "fieldname": "os_version",
+   "fieldtype": "Data",
+   "label": "Phiên bản Windows"
+  },
+  {
+   "fieldname": "column_break_machine",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "Pending\nApproved\nRejected",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Serial đã thuộc một MDM Device — gợi ý re-approve thay vì tạo mới",
+   "fieldname": "known_serial",
+   "fieldtype": "Check",
+   "label": "Serial đã biết",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Serial bị chặn: check-in sau này bị từ chối thẳng",
+   "fieldname": "blocked",
+   "fieldtype": "Check",
+   "label": "Chặn serial",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_specs",
+   "fieldtype": "Section Break",
+   "label": "Cấu hình"
+  },
+  {
+   "description": "CPU / RAM / ổ đĩa — để admin xem trước khi duyệt",
+   "fieldname": "specs_summary",
+   "fieldtype": "JSON",
+   "label": "Cấu hình cơ bản"
+  },
+  {
+   "fieldname": "section_identity",
+   "fieldtype": "Section Break",
+   "label": "Định danh agent"
+  },
+  {
+   "description": "Public key ECDSA P-256 agent tự sinh (base64 SPKI)",
+   "fieldname": "agent_pubkey",
+   "fieldtype": "Small Text",
+   "label": "Agent public key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "check_in_secret_hash",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Check-in secret hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_ip",
+   "fieldtype": "Data",
+   "label": "IP nguồn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "first_seen",
+   "fieldtype": "Datetime",
+   "label": "Lần đầu thấy",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_seen",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Thấy gần nhất",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_result",
+   "fieldtype": "Section Break",
+   "label": "Kết quả duyệt"
+  },
+  {
+   "fieldname": "linked_device",
+   "fieldtype": "Link",
+   "label": "MDM Device",
+   "options": "MDM Device",
+   "read_only": 1
+  },
+  {
+   "fieldname": "linked_asset",
+   "fieldtype": "Link",
+   "label": "Tài sản",
+   "options": "ERP Inventory Device",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_result",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Người duyệt",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_on",
+   "fieldtype": "Datetime",
+   "label": "Duyệt lúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reject_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do từ chối",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_handover",
+   "fieldtype": "Section Break",
+   "label": "Bàn giao token"
+  },
+  {
+   "description": "Token secret chờ agent lấy đúng một lần, xóa ngay sau khi giao",
+   "fieldname": "pending_token_secret",
+   "fieldtype": "Password",
+   "hidden": 1,
+   "label": "Token secret chờ giao",
+   "read_only": 1
+  },
+  {
+   "fieldname": "token_delivered_on",
+   "fieldtype": "Datetime",
+   "label": "Giao token lúc",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MDM",
+ "name": "MDM Enrollment Request",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

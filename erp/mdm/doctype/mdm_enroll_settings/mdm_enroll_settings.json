@@ -1,0 +1,116 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-07 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_key",
+  "site_check_in_key",
+  "key_rotated_on",
+  "column_break_key",
+  "check_in_enabled",
+  "section_policy",
+  "poll_interval_sec",
+  "auto_approve_known_serial",
+  "column_break_policy",
+  "check_in_rate_limit_per_hour",
+  "section_notes",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_key",
+   "fieldtype": "Section Break",
+   "label": "Site check-in key"
+  },
+  {
+   "description": "Chuỗi chung toàn trường, nhúng vào MSI. KHÔNG phải token per-device — chỉ là cổng thô chống spam hàng đợi. Cổng tin cậy thật là nút Duyệt.",
+   "fieldname": "site_check_in_key",
+   "fieldtype": "Data",
+   "label": "Site check-in key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "key_rotated_on",
+   "fieldtype": "Datetime",
+   "label": "Xoay khóa lúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_key",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Tắt để đóng hoàn toàn hàng đợi check-in (ví dụ ngoài đợt triển khai)",
+   "fieldname": "check_in_enabled",
+   "fieldtype": "Check",
+   "label": "Cho phép check-in"
+  },
+  {
+   "fieldname": "section_policy",
+   "fieldtype": "Section Break",
+   "label": "Chính sách duyệt"
+  },
+  {
+   "default": "30",
+   "description": "Chu kỳ agent hỏi lại trạng thái duyệt (giây)",
+   "fieldname": "poll_interval_sec",
+   "fieldtype": "Int",
+   "label": "Chu kỳ poll"
+  },
+  {
+   "default": "0",
+   "description": "Serial đã thuộc một MDM Device Active thì duyệt thẳng, không cần bấm tay. Dùng khi cài lại Windows hàng loạt.",
+   "fieldname": "auto_approve_known_serial",
+   "fieldtype": "Check",
+   "label": "Tự duyệt serial đã biết"
+  },
+  {
+   "fieldname": "column_break_policy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "120",
+   "fieldname": "check_in_rate_limit_per_hour",
+   "fieldtype": "Int",
+   "label": "Giới hạn check-in / IP / giờ"
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MDM",
+ "name": "MDM Enroll Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
