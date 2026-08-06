@@ -84,13 +84,20 @@ if [ "$STATE" = "ok" ]; then
 	exit 0
 fi
 
+# Chụp trạng thái kết nối lúc lỗi: worker đang kẹt ở DB hay Redis?
+# (db-01 :3306, valkey :6379 — số established từ máy này)
+CONN_DB=$(ss -tn state established '( dport = :3306 )' 2>/dev/null | tail -n +2 | wc -l)
+CONN_REDIS=$(ss -tn state established '( dport = :6379 )' 2>/dev/null | tail -n +2 | wc -l)
+GUNI_BUSY=$(ps -C gunicorn -o stat= 2>/dev/null | grep -c '^[RD]')
+DIAG="db_conn=$CONN_DB redis_conn=$CONN_REDIS gunicorn_busy=$GUNI_BUSY"
+
 if [ "$STATE" = "soft_timeout" ] || [ "$STATE" = "soft_http" ]; then
 	soft=$(cat "$SOFT_FAILURE_COUNT_FILE")
 	soft=$((soft + 1))
 	echo "$soft" > "$SOFT_FAILURE_COUNT_FILE"
 	# Reset hard counter — vẫn còn process, chỉ chậm
 	echo "0" > "$HARD_FAILURE_COUNT_FILE"
-	echo "$(ts) - DEGRADED ($STATE) soft=$soft http=$HTTP_CODE curl_exit=$CURL_EXIT err=${CURL_ERR:-none} (no restart)" >> "$LOG_FILE"
+	echo "$(ts) - DEGRADED ($STATE) soft=$soft http=$HTTP_CODE curl_exit=$CURL_EXIT $DIAG err=${CURL_ERR:-none} (no restart)" >> "$LOG_FILE"
 	exit 0
 fi
 
@@ -98,7 +105,7 @@ fi
 hard=$(cat "$HARD_FAILURE_COUNT_FILE")
 hard=$((hard + 1))
 echo "$hard" > "$HARD_FAILURE_COUNT_FILE"
-echo "$(ts) - HARD_DOWN hard=$hard/$MAX_HARD_FAILURES http=$HTTP_CODE curl_exit=$CURL_EXIT listen=$LISTEN_OK err=${CURL_ERR:-none}" >> "$LOG_FILE"
+echo "$(ts) - HARD_DOWN hard=$hard/$MAX_HARD_FAILURES http=$HTTP_CODE curl_exit=$CURL_EXIT listen=$LISTEN_OK $DIAG err=${CURL_ERR:-none}" >> "$LOG_FILE"
 
 if [ "$hard" -lt "$MAX_HARD_FAILURES" ]; then
 	exit 0
@@ -106,7 +113,7 @@ fi
 
 if [ "$IN_PEAK_WINDOW" -eq 1 ]; then
 	echo "$(ts) - HARD_DOWN đạt ngưỡng nhưng trong cửa sổ 16-17h: KHÔNG restart, cần xử lý tay" >> "$LOG_FILE"
-	# Giữ counter ở ngưỡng để log mỗi phút, không reset (tránh restart ngay 18:00 nếu vẫn down)
+	# Không reset counter: nếu qua 18:00 mà vẫn hard-down thì restart ngay ở lần check kế tiếp
 	exit 0
 fi
 
