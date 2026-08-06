@@ -1231,13 +1231,79 @@ def test_email_service_connection():
 		return error_response(f"Error: {str(e)}", code="TEST_ERROR")
 
 
+# Người nhận báo cáo điểm danh chủ nhiệm — tách riêng theo campus (mỗi campus một email).
+# Mở campus mới: thêm một entry vào dict này, campus chưa khai báo sẽ bị bỏ qua và ghi log.
+HOMEROOM_REPORT_RECIPIENTS = {
+	"CAMPUS-00001": [
+		"linh.nguyenhai@wellspring.edu.vn",
+		"hieu.nguyenduy@wellspring.edu.vn",
+		"le.vuthinhat@wellspring.edu.vn",
+		"ha.nguyenhoang@wellspring.edu.vn",
+		"huong.nguyenthien@wellspring.edu.vn",
+		"phuong.phamngoc@wellspring.edu.vn",
+		"linh.nguyenviet@wellspring.edu.vn",
+		"linh.tranduy@wellspring.edu.vn",
+		"huong.nguyenthithu.ts@wellspring.edu.vn",
+		"minh.hoangthi@wellspring.edu.vn",
+		"tham.tranthihong@wellspring.edu.vn",
+		"ngoc.phamminh@wellspring.edu.vn",
+		"ha.nguyenthiviet@wellspring.edu.vn",
+	],
+}
+
+
+def _active_school_year_id():
+	"""Năm học đang active (is_enable = 1)."""
+	rows = frappe.get_all(
+		"SIS School Year",
+		filters={"is_enable": 1},
+		fields=["name"],
+		order_by="creation desc",
+		limit=1,
+	)
+	return rows[0].name if rows else None
+
+
+def _campuses_with_regular_classes(school_year_id):
+	"""
+	Campus thực sự có lớp regular trong năm học — nguồn campus cho các scheduled job.
+
+	Suy từ dữ liệu thay vì đoán qua context: khi chạy nền (không có request),
+	get_current_campus_from_context() có thể trả campus không có lớp nào,
+	khiến job im lặng bỏ qua toàn bộ báo cáo.
+	"""
+	if not school_year_id:
+		return []
+
+	rows = frappe.db.sql("""
+		SELECT DISTINCT campus_id
+		FROM `tabSIS Class`
+		WHERE docstatus = 0
+			AND class_type = 'regular'
+			AND school_year_id = %s
+			AND IFNULL(campus_id, '') != ''
+	""", (school_year_id,), as_dict=True)
+
+	return [row.campus_id for row in rows]
+
+
+def _campus_title(campus_id):
+	"""Tên campus để hiển thị trong tiêu đề/nội dung email."""
+	try:
+		return frappe.db.get_value("SIS Campus", campus_id, "title_vn") or campus_id
+	except Exception:
+		return campus_id
+
+
 @frappe.whitelist(allow_guest=False)
-def send_homeroom_attendance_report(date=None):
+def send_homeroom_attendance_report(date=None, campus_id=None):
 	"""
 	Check homeroom attendance status and send email report to admin.
 
 	Params:
 		date: Date to check (YYYY-MM-DD). Defaults to today.
+		campus_id: Campus cần báo cáo. Scheduler luôn truyền tường minh —
+			để trống sẽ rơi về campus theo context và có thể chọn nhầm campus.
 
 	Returns:
 		Status of email sending
@@ -1247,14 +1313,30 @@ def send_homeroom_attendance_report(date=None):
 			date = frappe.utils.nowdate()
 
 		# Get homeroom attendance status
-		status_result = check_homeroom_attendance_status(date=date)
+		status_result = check_homeroom_attendance_status(date=date, campus_id=campus_id)
 		if not status_result.get('success'):
 			return error_response("Failed to check attendance status", code="CHECK_FAILED")
 
 		attendance_data = status_result['data']
+		report_campus_id = campus_id or attendance_data.get('campus_id')
+		campus_title = _campus_title(report_campus_id)
+
+		# Không có lớp nào → báo lỗi thay vì lặng lẽ gửi một email rỗng
+		if not attendance_data.get('total_classes'):
+			frappe.log_error(
+				title="homeroom_attendance_report_no_classes",
+				message=(
+					f"Không có lớp nào để báo cáo — date={date} campus={report_campus_id}. "
+					f"Kiểm tra năm học đang active và campus_id của SIS Class."
+				),
+			)
+			return error_response(
+				f"No classes to report for campus {report_campus_id}",
+				code="NO_CLASSES",
+			)
 
 		# Generate email content
-		email_content = generate_homeroom_report_email(attendance_data)
+		email_content = generate_homeroom_report_email(attendance_data, campus_title=campus_title)
 
 		# Format date for subject (DD/MM/YYYY)
 		try:
@@ -1264,31 +1346,31 @@ def send_homeroom_attendance_report(date=None):
 		except:
 			formatted_date = date
 
-		# Send email via email service
-		recipients = [
-			"linh.nguyenhai@wellspring.edu.vn", 
-			"hieu.nguyenduy@wellspring.edu.vn", 
-			"le.vuthinhat@wellspring.edu.vn",
-			"ha.nguyenhoang@wellspring.edu.vn",
-			"huong.nguyenthien@wellspring.edu.vn",
-			"phuong.phamngoc@wellspring.edu.vn",
-			"linh.nguyenviet@wellspring.edu.vn",
-			"linh.tranduy@wellspring.edu.vn",
-			"huong.nguyenthithu.ts@wellspring.edu.vn",
-			"minh.hoangthi@wellspring.edu.vn",
-			"tham.tranthihong@wellspring.edu.vn",
-			"ngoc.phamminh@wellspring.edu.vn",
-			"ha.nguyenthiviet@wellspring.edu.vn"
-		]
+		# Send email via email service — người nhận tách riêng theo campus
+		recipients = HOMEROOM_REPORT_RECIPIENTS.get(report_campus_id)
+		if not recipients:
+			frappe.log_error(
+				title="homeroom_attendance_report_no_recipients",
+				message=(
+					f"Campus {report_campus_id} chưa khai báo người nhận trong "
+					f"HOMEROOM_REPORT_RECIPIENTS — bỏ qua báo cáo ngày {date}."
+				),
+			)
+			return error_response(
+				f"No recipients configured for campus {report_campus_id}",
+				code="NO_RECIPIENTS",
+			)
+
 		email_result = send_email_via_service(
 			to=recipients,
-			subject=f"[WSHN] Báo cáo điểm danh chủ nhiệm ngày {formatted_date}",
+			subject=f"[WSHN] Báo cáo điểm danh chủ nhiệm {campus_title} ngày {formatted_date}",
 			body=email_content
 		)
 
 		if email_result.get('success'):
 			return success_response({
 				"email_sent": True,
+				"campus_id": report_campus_id,
 				"recipients": recipients,
 				"report_date": date
 			}, "Homeroom attendance report sent successfully")
@@ -1300,11 +1382,16 @@ def send_homeroom_attendance_report(date=None):
 		return error_response("Failed to send attendance report", code="SEND_REPORT_ERROR")
 
 
-def generate_homeroom_report_email(attendance_data):
+def generate_homeroom_report_email(attendance_data, campus_title=None):
 	"""
 	Generate HTML email content for homeroom attendance report
+
+	Params:
+		attendance_data: Dữ liệu điểm danh theo lớp
+		campus_title: Tên campus hiển thị ở tiêu đề (mỗi campus một email riêng)
 	"""
 	date = attendance_data.get('date', frappe.utils.nowdate())
+	campus_suffix = f" — {campus_title}" if campus_title else ""
 
 	# Group classes by education stage
 	stage_data = {}
@@ -1336,7 +1423,7 @@ def generate_homeroom_report_email(attendance_data):
 	html_content = f"""
 	<div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
 		<h1 style="color: #2e7d32; text-align: center; border-bottom: 3px solid #2e7d32; padding-bottom: 10px;">
-			Báo cáo điểm danh chủ nhiệm ngày {date}
+			Báo cáo điểm danh chủ nhiệm{campus_suffix} ngày {date}
 		</h1>
 
 		<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
@@ -1793,21 +1880,6 @@ def is_production_server():
 	return site_config.get("is_production", False)
 
 
-def _homeroom_scheduler_campus_id():
-	"""
-	Campus cho scheduler điểm danh chủ nhiệm — khớp check_homeroom_attendance_status (context hoặc mặc định).
-	"""
-	try:
-		from erp.utils.campus_utils import get_current_campus_from_context
-
-		campus_id = get_current_campus_from_context()
-	except Exception:
-		campus_id = None
-	if not campus_id:
-		campus_id = "CAMPUS-00001"
-	return campus_id
-
-
 # Scheduled job to remind teachers about homeroom attendance
 @frappe.whitelist()
 def remind_homeroom_attendance():
@@ -1830,20 +1902,35 @@ def remind_homeroom_attendance():
 		from datetime import datetime
 		today = datetime.now().strftime('%Y-%m-%d')
 
-		# Chỉ nhắc nhở khi ngày đó có tiết học theo TKB (campus báo cáo chủ nhiệm)
-		sched_campus = _homeroom_scheduler_campus_id()
-		ok_day, day_meta = is_school_instruction_day(today, campus_id=sched_campus)
-		if not ok_day:
+		# Chỉ nhắc nhở khi có ít nhất một campus đang là ngày học theo TKB.
+		# Danh sách lớp bên dưới không lọc campus nên một campus có tiết là đủ điều kiện nhắc.
+		active_school_year_id = _active_school_year_id()
+		if not active_school_year_id:
+			frappe.logger().warning("⚠️ Không tìm thấy năm học đang active (is_enable = 1)")
+			return {
+				"success": False,
+				"message": "Không tìm thấy năm học đang active"
+			}
+
+		day_metas = {}
+		instruction_campuses = []
+		for campus in _campuses_with_regular_classes(active_school_year_id):
+			ok_day, day_meta = is_school_instruction_day(today, campus_id=campus)
+			day_metas[campus] = day_meta
+			if ok_day:
+				instruction_campuses.append(campus)
+
+		if not instruction_campuses:
 			frappe.logger().info(
-				f"⏭️ Bỏ qua remind_homeroom_attendance ngày {today} — không phải ngày học theo TKB: "
-				f"{day_meta.get('reason')} {day_meta}"
+				f"⏭️ Bỏ qua remind_homeroom_attendance ngày {today} — không campus nào là ngày học theo TKB: "
+				f"{day_metas}"
 			)
 			return {
 				"success": True,
 				"message": "Skipped - school day off per timetable",
 				"skipped": True,
 				"skipped_reason": "school_day_off",
-				"school_day_meta": day_meta,
+				"school_day_meta": day_metas,
 			}
 		
 		frappe.logger().info(f"📢 Starting homeroom attendance reminder for {today}")
@@ -1969,6 +2056,9 @@ def daily_homeroom_attendance_report():
 	Daily scheduled job to send homeroom attendance report
 	Called automatically every day at configured time
 	Chỉ chạy trên server production (is_production = true trong site_config.json)
+
+	Mỗi campus có lớp regular sẽ nhận một email riêng, gửi tới danh sách
+	người nhận khai báo trong HOMEROOM_REPORT_RECIPIENTS.
 	"""
 	try:
 		# Kiểm tra xem có phải production server không
@@ -1979,37 +2069,63 @@ def daily_homeroom_attendance_report():
 				"message": "Skipped - not production server",
 				"skipped": True
 			}
-		
+
 		# Get today's date for the report (gửi báo cáo ngày hiện tại)
 		from datetime import datetime
 		today = datetime.now().strftime('%Y-%m-%d')
 
-		sched_campus = _homeroom_scheduler_campus_id()
-		ok_day, day_meta = is_school_instruction_day(today, campus_id=sched_campus)
-		if not ok_day:
-			frappe.logger().info(
-				f"⏭️ Bỏ qua daily_homeroom_attendance_report ngày {today} — không phải ngày học theo TKB: "
-				f"{day_meta.get('reason')} {day_meta}"
+		school_year_id = _active_school_year_id()
+		campuses = _campuses_with_regular_classes(school_year_id)
+		if not campuses:
+			frappe.log_error(
+				title="homeroom_attendance_report_no_campus",
+				message=(
+					f"Không có campus nào có lớp regular — school_year={school_year_id}, ngày {today}. "
+					f"Báo cáo điểm danh chủ nhiệm không được gửi."
+				),
 			)
 			return {
-				"success": True,
-				"message": "Skipped - school day off per timetable",
-				"skipped": True,
-				"skipped_reason": "school_day_off",
-				"school_day_meta": day_meta,
+				"success": False,
+				"message": "No campus with regular classes",
+				"school_year_id": school_year_id,
 			}
 
-		frappe.logger().info(f"🏫 Starting daily homeroom attendance report for {today}")
+		results = []
+		for campus in campuses:
+			ok_day, day_meta = is_school_instruction_day(today, campus_id=campus)
+			if not ok_day:
+				frappe.logger().info(
+					f"⏭️ Bỏ qua báo cáo điểm danh campus {campus} ngày {today} — không phải ngày học theo TKB: "
+					f"{day_meta.get('reason')} {day_meta}"
+				)
+				results.append({
+					"campus_id": campus,
+					"success": True,
+					"skipped": True,
+					"skipped_reason": "school_day_off",
+					"school_day_meta": day_meta,
+				})
+				continue
 
-		# Call the report endpoint
-		result = send_homeroom_attendance_report(date=today)
+			frappe.logger().info(f"🏫 Starting daily homeroom attendance report for {today} — campus {campus}")
 
-		if result.get('success'):
-			frappe.logger().info("✅ Daily homeroom attendance report sent successfully")
-		else:
-			frappe.logger().error(f"❌ Failed to send daily homeroom attendance report: {result.get('message')}")
+			result = send_homeroom_attendance_report(date=today, campus_id=campus)
 
-		return result
+			if result.get('success'):
+				frappe.logger().info(f"✅ Daily homeroom attendance report sent — campus {campus}")
+			else:
+				frappe.logger().error(
+					f"❌ Failed to send daily homeroom attendance report — campus {campus}: {result.get('message')}"
+				)
+
+			results.append({**result, "campus_id": campus})
+
+		sent = sum(1 for r in results if r.get('success') and not r.get('skipped'))
+		return {
+			"success": sent > 0,
+			"message": f"Sent {sent}/{len(campuses)} campus reports",
+			"results": results,
+		}
 
 	except Exception as e:
 		frappe.logger().error(f"❌ Error in daily_homeroom_attendance_report: {str(e)}")
