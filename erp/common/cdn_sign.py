@@ -29,8 +29,9 @@ encode ở bước cuối khi ghép URL. Đảo thứ tự hai bước này ⇒ 
 import base64
 import hashlib
 import math
+import re
 import time
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 
 import frappe
 
@@ -43,7 +44,19 @@ CDN_CONF_PATH = "/etc/cdn/cdn.env"
 DEFAULT_WINDOW_SEC = 3600
 DEFAULT_LIFETIME_SEC = 7200
 
+# Prefix CDN mà DB lưu dưới dạng `/files/<phần sau prefix>`. Khác social-service
+# (lưu `cdn://…`): Frappe giữ path File gốc để tắt CDN là đọc lại được.
+FILES_CDN_PREFIXES = (
+    "sis-content",
+    "student-photos",
+    "scholarship",
+    "discipline",
+)
+
 _conf_cache = None
+# Cache regex theo tập host — đổi CDN_PUBLIC_URL phải restart worker (như load_conf).
+_media_text_re = None
+_media_text_re_hosts = None
 
 
 def load_conf():
@@ -171,3 +184,94 @@ def sign_scholarship_list(value, separator=None):
         sign_scholarship_url(part.strip()) if part.strip() else part
         for part in value.split(separator)
     )
+
+
+def _cdn_public_hosts():
+    """Tập host CDN công khai — luôn gồm media.wellspring làm fallback cứng."""
+    hosts = {"media.wellspring.edu.vn"}
+    conf = load_conf() or {}
+    pub = (conf.get("CDN_PUBLIC_URL") or "").strip()
+    if pub:
+        try:
+            host = urlparse(pub).hostname
+            if host:
+                hosts.add(host.lower())
+        except Exception:  # noqa: BLE001
+            pass
+    return hosts
+
+
+def to_files_url(value):
+    """URL media đã ký (hoặc hết hạn) → dạng lưu `/files/...`.
+
+    Cùng triết lý `toStoredKey` bên social-service: client/API hay echo URL đã
+    ký khi edit → ghi DB thì link chết sau khi `e` hết hạn. Hàm này quy về path
+    File gốc; giá trị không phải CDN files thì trả nguyên (URL ngoài, rỗng…).
+    """
+    if not value or not isinstance(value, str):
+        return value
+    v = value.strip()
+    if not v:
+        return value
+
+    # Đã là path lưu — chỉ bỏ query/hash nếu lỡ dính chữ ký.
+    if v.startswith("/files/"):
+        return v.split("?", 1)[0].split("#", 1)[0]
+
+    if not (v.startswith("http://") or v.startswith("https://")):
+        return value
+
+    try:
+        parsed = urlparse(v)
+    except Exception:  # noqa: BLE001
+        return value
+
+    host = (parsed.hostname or "").lower()
+    if host not in _cdn_public_hosts():
+        return value
+
+    path = unquote(parsed.path or "")
+    for prefix in FILES_CDN_PREFIXES:
+        head = f"/{prefix}/"
+        if path.startswith(head):
+            key = path[len(head):]
+            if not key or ".." in key:
+                return value
+            return f"/files/{key}"
+    return value
+
+
+def _media_urls_re():
+    """Regex thay URL media trong HTML/JSON → `/files/...`."""
+    global _media_text_re, _media_text_re_hosts
+    hosts = frozenset(_cdn_public_hosts())
+    if _media_text_re is not None and _media_text_re_hosts == hosts:
+        return _media_text_re
+    host_alt = "|".join(re.escape(h) for h in sorted(hosts))
+    prefix_alt = "|".join(re.escape(p) for p in FILES_CDN_PREFIXES)
+    # Host CDN + prefix files; bỏ ?e=&s= (và fragment). Không nuốt dấu cách/
+    # dấu ngoặc JSON.
+    _media_text_re = re.compile(
+        rf'https?://(?:{host_alt})/({prefix_alt})/([^"\\?#\s]+)(?:[?#][^"\\\s]*)?',
+        re.IGNORECASE,
+    )
+    _media_text_re_hosts = hosts
+    return _media_text_re
+
+
+def media_urls_to_files(text):
+    """Thay mọi URL media (đã ký) trong chuỗi bằng `/files/<khoá>`.
+
+    Dùng cho HTML tin tức và bước chuẩn hoá trước `files_cdn.sign_text` để URL
+    hết hạn trong response cũ vẫn được ký lại.
+    """
+    if not text or not isinstance(text, str) or "://" not in text:
+        return text
+
+    def repl(m):
+        key = unquote(m.group(2))
+        if not key or ".." in key:
+            return m.group(0)
+        return f"/files/{key}"
+
+    return _media_urls_re().sub(repl, text)

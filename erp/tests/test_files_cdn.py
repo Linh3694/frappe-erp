@@ -4,8 +4,9 @@ Ba rang buoc cua regex tung lam vo production nen moi rang buoc co mot test rien
 """
 
 import unittest
+from unittest import mock
 
-from erp.common import files_cdn, student_photo_cdn
+from erp.common import cdn_sign, files_cdn, student_photo_cdn
 
 
 def _domain(keys, prefix="student-photos", key_from_url=None):
@@ -137,6 +138,87 @@ class TestStudentPhotoKhongTranhSisSubdir(unittest.TestCase):
         self.assertNotIn("student-photos/SameName.jpg", out)
         # Anh hoc sinh o goc van ky nhu cu
         self.assertIn("https://cdn/student-photos/WS123.jpg?e=1&s=x", out)
+
+
+class TestToFilesUrl(unittest.TestCase):
+    """URL CDN da ky phai quy ve /files/ — tranh luu ?e=&s= vao DB."""
+
+    def setUp(self):
+        # reset cache regex/host giua cac test
+        cdn_sign._media_text_re = None
+        cdn_sign._media_text_re_hosts = None
+
+    def test_signed_sis_content_ve_files(self):
+        url = (
+            "https://media.wellspring.edu.vn/sis-content/0582.webp"
+            "?e=1785585600&s=yLaUddyQQvCqzVzTdULprw"
+        )
+        with mock.patch.object(cdn_sign, "load_conf", return_value=None):
+            self.assertEqual(cdn_sign.to_files_url(url), "/files/0582.webp")
+
+    def test_signed_menu_subdir(self):
+        url = (
+            "https://media.wellspring.edu.vn/sis-content/Menu_Categories/PHO19.jpg"
+            "?e=1&s=x"
+        )
+        with mock.patch.object(cdn_sign, "load_conf", return_value=None):
+            self.assertEqual(
+                cdn_sign.to_files_url(url), "/files/Menu_Categories/PHO19.jpg"
+            )
+
+    def test_files_path_bo_query(self):
+        self.assertEqual(
+            cdn_sign.to_files_url("/files/0609.webp?e=1&s=x"), "/files/0609.webp"
+        )
+
+    def test_url_ngoai_giu_nguyen(self):
+        url = "https://example.com/photo.jpg"
+        self.assertEqual(cdn_sign.to_files_url(url), url)
+
+    def test_media_urls_to_files_trong_html(self):
+        html = (
+            '<img src="https://media.wellspring.edu.vn/sis-content/a.webp?e=1&s=x">'
+            '<p>ok</p>'
+        )
+        with mock.patch.object(cdn_sign, "load_conf", return_value=None):
+            out = cdn_sign.media_urls_to_files(html)
+        self.assertEqual(out, '<img src="/files/a.webp"><p>ok</p>')
+
+    def test_sign_text_sau_khi_unsign_media(self):
+        """Response con URL het han → unsign → ky lai chu ky moi."""
+        import urllib.parse
+
+        raw = (
+            '{"cover":"https://media.wellspring.edu.vn/sis-content/0582.webp'
+            '?e=1785585600&s=old"}'
+        )
+        with mock.patch.object(cdn_sign, "load_conf", return_value=None):
+            normalized = cdn_sign.media_urls_to_files(raw)
+        self.assertIn("/files/0582.webp", normalized)
+        self.assertNotIn("media.wellspring", normalized)
+
+        d = {
+            "name": "sis-content",
+            "prefix": "sis-content",
+            "keys": {"0582.webp"},
+            "key_from_url": lambda raw: urllib.parse.unquote(raw),
+        }
+        out = files_cdn.sign_text(
+            normalized, [d], signer=lambda p, expires=None: f"https://cdn{p}?e=9&s=new"
+        )
+        self.assertIn("https://cdn/sis-content/0582.webp?e=9&s=new", out)
+
+
+class TestSanitizeDoc(unittest.TestCase):
+    def test_library_title_cover(self):
+        doc = mock.Mock()
+        doc.doctype = "SIS Library Title"
+        doc.cover_image = (
+            "https://media.wellspring.edu.vn/sis-content/0604.webp?e=1&s=x"
+        )
+        with mock.patch.object(cdn_sign, "load_conf", return_value=None):
+            files_cdn.sanitize_doc(doc)
+        self.assertEqual(doc.cover_image, "/files/0604.webp")
 
 
 if __name__ == "__main__":

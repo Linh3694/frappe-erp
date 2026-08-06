@@ -32,8 +32,8 @@
  ],
  "fields": [
   {"fieldname": "subject_id", "label": "Class Log Subject", "fieldtype": "Link", "options": "SIS Class Log Subject", "reqd": 1},
-  {"fieldname": "class_student_id", "label": "Class Student", "fieldtype": "Link", "options": "SIS Class Student"},
-  {"fieldname": "student_id", "label": "Student", "fieldtype": "Link", "options": "CRM Student", "reqd": 1},
+  {"fieldname": "class_student_id", "label": "Class Student", "fieldtype": "Link", "options": "SIS Class Student", "search_index": 1},
+  {"fieldname": "student_id", "label": "Student", "fieldtype": "Link", "options": "CRM Student", "reqd": 1, "search_index": 1},
   {"fieldname": "homework", "label": "Homework", "fieldtype": "Link", "options": "SIS Class Log Score"},
   {"fieldname": "behavior", "label": "Behavior", "fieldtype": "Link", "options": "SIS Class Log Score"},
   {"fieldname": "participation", "label": "Participation", "fieldtype": "Link", "options": "SIS Class Log Score"},
