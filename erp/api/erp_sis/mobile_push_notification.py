@@ -822,8 +822,17 @@ def _build_expo_message(token_doc, title, body, data):
 
     action = data.get("action") if data else None
     
-    if notification_type == "attendance":
+    # Điểm danh: producer gửi `type` chi tiết ('student_attendance' cho PH,
+    # 'attendance_reminder' cho GVCN) vì router deep-link của app dựa vào đúng chuỗi đó.
+    # Chỉ khớp "attendance" là mọi noti điểm danh rơi xuống kênh 'default', còn kênh
+    # "Điểm danh" trong Cài đặt Android không bao giờ nhận gì. Khớp theo tiền/hậu tố.
+    if notification_type and "attendance" in str(notification_type):
         channel_id = "attendance"
+        sound_name = "default"
+    elif notification_type == "news":
+        # Khớp notification-service (expoPush.expoChannelFromData) — hai backend phải
+        # cùng channelId, nếu không cùng một loại noti lại vào hai kênh khác nhau.
+        channel_id = "news"
         sound_name = "default"
     elif notification_type == "ticket":
         channel_id = "ticket"

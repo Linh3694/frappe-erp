@@ -8,9 +8,25 @@ Handles: Report Card, Contact Log, Announcement, etc.
 """
 
 import frappe
+import hashlib
 import json
 from datetime import datetime
 from typing import List, Dict, Set, Optional
+
+
+def _student_scope_key(student_ids: List[str]) -> str:
+    """Định danh ổn định cho TOÀN BỘ danh sách học sinh của một lô gửi.
+
+    Trước đây key debounce ghép `student_ids[:5]`: hai lô khác nhau nhưng trùng 5 ID đầu
+    (sau sort) sẽ dùng chung key, và lô sau bị bỏ SẠCH — không phụ huynh nào nhận được.
+    Rất dễ xảy ra với thông báo toàn khối/lớp, y tế, học phí vì các lô đó chia sẻ phần lớn
+    danh sách học sinh. Hash cả danh sách thì hai lô chỉ trùng key khi thực sự cùng tập.
+    """
+    unique_sorted = sorted({str(s).strip() for s in (student_ids or []) if s})
+    if not unique_sorted:
+        return "none"
+    digest = hashlib.sha256("|".join(unique_sorted).encode("utf-8")).hexdigest()[:16]
+    return f"{len(unique_sorted)}-{digest}"
 
 
 def resolve_recipient_students(recipients_list: List[Dict]) -> List[str]:
@@ -520,9 +536,9 @@ def send_bulk_parent_notifications(
             results = []
             
             # FIX: Debounce key cho parent notification để tránh duplicate
-            # Key: student_id + notification_type + timestamp (rounded to minute)
-            student_ids_str = ",".join(sorted(student_ids[:5]))  # Lấy 5 student đầu tiên làm key
-            
+            # Key: toàn bộ tập student (hash) + notification_type + mốc phân biệt lô
+            student_ids_str = _student_scope_key(student_ids)
+
             # Với health_examination: mỗi lô exam riêng biệt phải tạo notification riêng
             # Dùng exam_ids làm key thay vì timestamp để mỗi lần gửi exam khác nhau đều qua
             if recipient_type == "health_examination" and data:
@@ -542,6 +558,18 @@ def send_bulk_parent_notifications(
                 # Round timestamp to minute để debounce trong cùng 1 phút
                 if event_ts and len(event_ts) > 16:
                     event_ts = event_ts[:16]  # YYYY-MM-DDTHH:MM
+                if not event_ts:
+                    # Không có timestamp sự kiện thì key chỉ còn type+students: hai thông
+                    # báo KHÁC NHAU gửi cùng nhóm trong 60s sẽ nuốt nhau. Lấy vân tay nội
+                    # dung làm mốc — trùng nội dung mới là duplicate thật.
+                    event_ts = "c" + hashlib.sha256(
+                        json.dumps(
+                            [notification_title, notification_body],
+                            sort_keys=True,
+                            ensure_ascii=False,
+                            default=str,
+                        ).encode("utf-8")
+                    ).hexdigest()[:16]
                 debounce_key = f"parent_notif_debounce:{recipient_type}:{student_ids_str}:{event_ts}"
             
             # Check debounce
