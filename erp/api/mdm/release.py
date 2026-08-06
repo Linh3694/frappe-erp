@@ -6,6 +6,10 @@ quyền, không phụ thuộc vào việc attachment được đánh dấu priva
 
 from __future__ import annotations
 
+import io
+import json
+import zipfile
+
 import frappe
 
 DOCTYPE = "MDM Agent Release"
@@ -101,9 +105,67 @@ def download(name=None, release_name=None, channel="stable"):
     if isinstance(content, str):
         content = content.encode("utf-8")
 
-    frappe.local.response.filename = doc.file_name or file_doc.file_name
+    filename = doc.file_name or file_doc.file_name
+    if (filename or "").lower().endswith(".zip"):
+        content = _inject_site_config(content)
+
+    frappe.local.response.filename = filename
     frappe.local.response.filecontent = content
     frappe.local.response.type = "download"
+
+
+def _inject_site_config(zip_bytes: bytes) -> bytes:
+    """Nhúng site key + URL server vào appsettings.json bên trong gói tải về.
+
+    Site key là một khóa cho cả trường, không phải per-device — nên chỗ đúng để
+    nhúng nó là lúc phát gói, không phải bắt IT gõ lại ở từng máy. Gói tải từ UI
+    là gói đã cấu hình sẵn: giải nén, chạy script cài, xong.
+
+    Gói hỏng vì lý do gì đó thì trả nguyên bản chứ không chặn việc tải — IT vẫn
+    còn đường điền tay.
+    """
+    from erp.mdm.doctype.mdm_enroll_settings.mdm_enroll_settings import get_settings
+
+    settings = get_settings()
+    site_key = settings.site_check_in_key
+    if not site_key:
+        frappe.logger("mdm").warning(
+            "Chưa có site_check_in_key — phát gói agent chưa cấu hình"
+        )
+        return zip_bytes
+
+    base_url = frappe.utils.get_url()
+
+    try:
+        source = io.BytesIO(zip_bytes)
+        target = io.BytesIO()
+        patched = False
+
+        with zipfile.ZipFile(source) as zin, zipfile.ZipFile(
+            target, "w", zipfile.ZIP_DEFLATED
+        ) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename.rsplit("/", 1)[-1] == "appsettings.json":
+                    data = _patch_appsettings(data, base_url, site_key)
+                    patched = True
+                zout.writestr(item, data)
+
+        if not patched:
+            frappe.logger("mdm").warning("Không thấy appsettings.json trong gói agent")
+            return zip_bytes
+        return target.getvalue()
+    except Exception:
+        frappe.log_error(title="MDM inject site config", message=frappe.get_traceback())
+        return zip_bytes
+
+
+def _patch_appsettings(raw: bytes, base_url: str, site_key: str) -> bytes:
+    config = json.loads(raw.decode("utf-8-sig"))
+    config.setdefault("Mdm", {})
+    config["Mdm"]["BaseUrl"] = base_url
+    config["Mdm"]["SiteKey"] = site_key
+    return json.dumps(config, indent=2, ensure_ascii=False).encode("utf-8")
 
 
 def _check_read_permission():

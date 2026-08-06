@@ -1,0 +1,126 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:MDM-POL-{#####}",
+ "creation": "2026-08-07 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "is_active",
+  "column_break_1",
+  "scope",
+  "campus_id",
+  "room",
+  "section_wallpaper",
+  "wallpaper",
+  "wallpaper_locked",
+  "section_meta",
+  "priority",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Tên chính sách",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Đang áp dụng",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "scope",
+   "fieldtype": "Select",
+   "label": "Phạm vi",
+   "options": "Toàn trường\nCampus\nPhòng",
+   "default": "Toàn trường",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "depends_on": "eval:doc.scope=='Campus'"
+  },
+  {
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "label": "Phòng",
+   "options": "ERP Administrative Room",
+   "depends_on": "eval:doc.scope=='Phòng'"
+  },
+  {
+   "fieldname": "section_wallpaper",
+   "fieldtype": "Section Break",
+   "label": "Hình nền"
+  },
+  {
+   "fieldname": "wallpaper",
+   "fieldtype": "Attach Image",
+   "label": "Ảnh nền"
+  },
+  {
+   "fieldname": "wallpaper_locked",
+   "fieldtype": "Check",
+   "label": "Khóa không cho đổi nền",
+   "default": "1",
+   "description": "Ghi Registry policy NoChangingWallPaper — bền hơn agent ngồi canh"
+  },
+  {
+   "fieldname": "section_meta",
+   "fieldtype": "Section Break",
+   "label": "Khác"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Ưu tiên",
+   "default": "0",
+   "description": "Phòng > Campus > Toàn trường; cùng mức thì số lớn thắng"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MDM",
+ "name": "MDM Policy",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

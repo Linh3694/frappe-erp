@@ -1,0 +1,137 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-08-07 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "device",
+  "captured_at",
+  "column_break_1",
+  "cpu_pct",
+  "ram_pct",
+  "section_disk",
+  "disk_free_gb",
+  "disk_total_gb",
+  "disk_health",
+  "column_break_2",
+  "battery_pct",
+  "charging",
+  "uptime_sec",
+  "cpu_temp"
+ ],
+ "fields": [
+  {
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "label": "Thiết bị",
+   "options": "MDM Device",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "captured_at",
+   "fieldtype": "Datetime",
+   "label": "Đo lúc",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "cpu_pct",
+   "fieldtype": "Float",
+   "label": "CPU %",
+   "precision": "1"
+  },
+  {
+   "fieldname": "ram_pct",
+   "fieldtype": "Float",
+   "label": "RAM %",
+   "precision": "1"
+  },
+  {
+   "fieldname": "section_disk",
+   "fieldtype": "Section Break",
+   "label": "Ổ đĩa"
+  },
+  {
+   "fieldname": "disk_free_gb",
+   "fieldtype": "Float",
+   "label": "Trống (GB)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "disk_total_gb",
+   "fieldtype": "Float",
+   "label": "Tổng (GB)",
+   "precision": "1"
+  },
+  {
+   "fieldname": "disk_health",
+   "fieldtype": "Select",
+   "label": "Sức khỏe ổ",
+   "options": "\nok\nwarning\ncritical\nunknown"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break",
+   "label": ""
+  },
+  {
+   "fieldname": "battery_pct",
+   "fieldtype": "Int",
+   "label": "Pin %"
+  },
+  {
+   "fieldname": "charging",
+   "fieldtype": "Check",
+   "label": "Đang sạc",
+   "default": "0"
+  },
+  {
+   "fieldname": "uptime_sec",
+   "fieldtype": "Int",
+   "label": "Uptime (giây)"
+  },
+  {
+   "fieldname": "cpu_temp",
+   "fieldtype": "Float",
+   "label": "Nhiệt độ CPU",
+   "precision": "1",
+   "description": "Chỉ có khi đọc được sensor (GĐ2-01); rỗng là bình thường"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-07 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MDM",
+ "name": "MDM Telemetry",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

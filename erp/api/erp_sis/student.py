@@ -1750,14 +1750,16 @@ def _is_teaching_any_class(teacher_ids, class_ids):
     params = {"teacher_ids": teacher_ids, "class_ids": class_ids}
 
     try:
+        # EXISTS giúp optimizer dừng sớm hơn SELECT 1 ... LIMIT trên join lớn
         assignment = frappe.db.sql("""
-            SELECT 1
-            FROM `tabSIS Subject Assignment`
-            WHERE teacher_id IN %(teacher_ids)s
-                AND class_id IN %(class_ids)s
-            LIMIT 1
+            SELECT EXISTS(
+                SELECT 1
+                FROM `tabSIS Subject Assignment`
+                WHERE teacher_id IN %(teacher_ids)s
+                    AND class_id IN %(class_ids)s
+            )
         """, params)
-        if assignment:
+        if assignment and assignment[0][0]:
             return True
     except Exception:
         frappe.log_error(
@@ -1765,15 +1767,22 @@ def _is_teaching_any_class(teacher_ids, class_ids):
             message=frappe.get_traceback()
         )
 
-    # Fallback: phân công qua thời khoá biểu (giống cách auth.py dựng teacher_info)
+    # Fallback: phân công qua TKB — tách OR thành 2 EXISTS để dùng index từng cột GV
     try:
         timetable = frappe.db.sql("""
-            SELECT 1
-            FROM `tabSIS Timetable Instance Row` r
-            INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
-            WHERE (r.teacher_1_id IN %(teacher_ids)s OR r.teacher_2_id IN %(teacher_ids)s)
-                AND i.class_id IN %(class_ids)s
-            LIMIT 1
+            SELECT 1 FROM DUAL WHERE EXISTS(
+                SELECT 1
+                FROM `tabSIS Timetable Instance Row` r
+                INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
+                WHERE r.teacher_1_id IN %(teacher_ids)s
+                    AND i.class_id IN %(class_ids)s
+            ) OR EXISTS(
+                SELECT 1
+                FROM `tabSIS Timetable Instance Row` r
+                INNER JOIN `tabSIS Timetable Instance` i ON r.parent = i.name
+                WHERE r.teacher_2_id IN %(teacher_ids)s
+                    AND i.class_id IN %(class_ids)s
+            )
         """, params)
         if timetable:
             return True
@@ -1892,19 +1901,18 @@ def get_student_profile():
         except Exception as photo_err:
             frappe.logger().warning(f"Error fetching photo for student {student.name}: {str(photo_err)}")
 
-        # Build SQL query parameters
+        # Một query lấy cả lớp Regular + mixed (trước đây 2 round-trip giống nhau)
         sql_params = {"student_id": student_id}
         school_year_filter = ""
         if school_year_id:
             school_year_filter = "AND cs.school_year_id = %(school_year_id)s"
             sql_params["school_year_id"] = school_year_id
 
-        # Get homeroom class (Regular class type)
-        homeroom_class = None
-        homeroom_class_student = frappe.db.sql("""
+        class_rows = frappe.db.sql("""
             SELECT
                 cs.name as class_student_id,
                 cs.class_id,
+                c.class_type,
                 c.title as class_name,
                 c.short_title as class_short_title,
                 c.homeroom_teacher,
@@ -1928,56 +1936,39 @@ def get_student_profile():
             LEFT JOIN `tabUser` u2 ON t2.user_id = u2.name
             LEFT JOIN `tabSIS Academic Program` ap ON c.academic_program = ap.name
             WHERE cs.student_id = %(student_id)s
-                AND c.class_type = 'Regular'
-                {school_year_filter}
-            LIMIT 1
-        """.format(school_year_filter=school_year_filter), sql_params, as_dict=True)
-
-        if homeroom_class_student and len(homeroom_class_student) > 0:
-            homeroom_class = homeroom_class_student[0]
-
-        # Build SQL query parameters for running classes
-        sql_params_running = {"student_id": student_id}
-        school_year_filter_running = ""
-        if school_year_id:
-            school_year_filter_running = "AND cs.school_year_id = %(school_year_id)s"
-            sql_params_running["school_year_id"] = school_year_id
-
-        # Get mixed classes (running/extra-curricular classes)
-        running_classes = frappe.db.sql("""
-            SELECT
-                cs.name as class_student_id,
-                cs.class_id,
-                c.title as class_name,
-                c.short_title as class_short_title,
-                c.homeroom_teacher,
-                c.room,
-                t1.user_id as homeroom_teacher_user_id,
-                u1.full_name as homeroom_teacher_name,
-                u1.user_image as homeroom_teacher_user_image
-            FROM `tabSIS Class Student` cs
-            INNER JOIN `tabSIS Class` c ON cs.class_id = c.name
-            LEFT JOIN `tabSIS Teacher` t1 ON c.homeroom_teacher = t1.name
-            LEFT JOIN `tabUser` u1 ON t1.user_id = u1.name
-            WHERE cs.student_id = %(student_id)s
-                AND c.class_type = 'mixed'
+                AND c.class_type IN ('Regular', 'mixed')
                 {school_year_filter}
             ORDER BY c.title ASC
-        """.format(school_year_filter=school_year_filter_running), sql_params_running, as_dict=True)
+        """.format(school_year_filter=school_year_filter), sql_params, as_dict=True) or []
 
-        # Build SQL query parameters for student subjects
+        homeroom_class = None
+        running_classes = []
+        for row in class_rows:
+            ctype = (row.get("class_type") or "").lower()
+            if ctype == "regular" and not homeroom_class:
+                # Payload homeroom giữ nguyên field; bỏ class_type nội bộ
+                homeroom_class = {k: v for k, v in row.items() if k != "class_type"}
+            elif ctype == "mixed":
+                running_classes.append({
+                    "class_student_id": row.get("class_student_id"),
+                    "class_id": row.get("class_id"),
+                    "class_name": row.get("class_name"),
+                    "class_short_title": row.get("class_short_title"),
+                    "homeroom_teacher": row.get("homeroom_teacher"),
+                    "room": row.get("room"),
+                    "homeroom_teacher_user_id": row.get("homeroom_teacher_user_id"),
+                    "homeroom_teacher_name": row.get("homeroom_teacher_name"),
+                    "homeroom_teacher_user_image": row.get("homeroom_teacher_user_image"),
+                })
+
+        # Môn học: tách khỏi Subject Assignment để tránh join nổ + GROUP_CONCAT
         sql_params_subjects = {"student_id": student_id}
         school_year_filter_subjects = ""
         if school_year_id:
-            # SIS Student Subject không có cột school_year_id; lọc năm học qua
-            # lớp (c.school_year_id) và phân công giảng dạy (sa.school_year_id)
-            school_year_filter_subjects = (
-                "AND c.school_year_id = %(school_year_id)s "
-                "AND sa.school_year_id = %(school_year_id)s"
-            )
+            # SIS Student Subject không có school_year_id — lọc qua lớp
+            school_year_filter_subjects = "AND c.school_year_id = %(school_year_id)s"
             sql_params_subjects["school_year_id"] = school_year_id
 
-        # Get student subjects with teacher information
         student_subjects = frappe.db.sql("""
             SELECT
                 ss.name,
@@ -1987,64 +1978,74 @@ def get_student_profile():
                 ss.actual_subject_id,
                 acts.title_vn as actual_subject_name,
                 ss.class_id,
-                c.title as class_name,
-                -- Teacher information from Subject Assignment (concatenated)
-                GROUP_CONCAT(DISTINCT CONCAT(
-                    t.user_id, '|',
-                    u.full_name, '|',
-                    u.email, '|',
-                    COALESCE(u.user_image, '')
-                ) SEPARATOR ';') as teachers_info
+                c.title as class_name
             FROM `tabSIS Student Subject` ss
             INNER JOIN `tabSIS Subject` s ON ss.subject_id = s.name
             LEFT JOIN `tabSIS Actual Subject` acts ON ss.actual_subject_id = acts.name
             LEFT JOIN `tabSIS Class` c ON ss.class_id = c.name
-            LEFT JOIN `tabSIS Subject Assignment` sa ON sa.class_id = ss.class_id AND sa.actual_subject_id = ss.actual_subject_id
-            LEFT JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
-            LEFT JOIN `tabUser` u ON t.user_id = u.name
             WHERE ss.student_id = %(student_id)s
                 {school_year_filter_subjects}
-                AND sa.teacher_id IS NOT NULL
-            GROUP BY ss.name, ss.subject_id, s.title, s.title, ss.actual_subject_id, acts.title_vn, ss.class_id, c.title
             ORDER BY s.title ASC
-        """.format(school_year_filter_subjects=school_year_filter_subjects), sql_params_subjects, as_dict=True)
+        """.format(school_year_filter_subjects=school_year_filter_subjects), sql_params_subjects, as_dict=True) or []
 
-        # Process teachers_info to create teacher arrays
+        # Batch lấy GV theo (class_id, actual_subject_id) — tránh join nổ với mọi năm học
+        teachers_by_pair = {}
+        if student_subjects:
+            class_ids = list({r.class_id for r in student_subjects if r.get("class_id")})
+            actual_ids = list({r.actual_subject_id for r in student_subjects if r.get("actual_subject_id")})
+            if class_ids and actual_ids:
+                sa_params = {"class_ids": class_ids, "actual_ids": actual_ids}
+                sa_year_filter = ""
+                if school_year_id:
+                    sa_year_filter = "AND sa.school_year_id = %(school_year_id)s"
+                    sa_params["school_year_id"] = school_year_id
+
+                teacher_rows = frappe.db.sql("""
+                    SELECT
+                        sa.class_id,
+                        sa.actual_subject_id,
+                        t.user_id,
+                        u.full_name,
+                        u.email,
+                        u.user_image
+                    FROM `tabSIS Subject Assignment` sa
+                    INNER JOIN `tabSIS Teacher` t ON sa.teacher_id = t.name
+                    INNER JOIN `tabUser` u ON t.user_id = u.name
+                    WHERE sa.class_id IN %(class_ids)s
+                        AND sa.actual_subject_id IN %(actual_ids)s
+                        {sa_year_filter}
+                """.format(sa_year_filter=sa_year_filter), sa_params, as_dict=True) or []
+
+                for tr in teacher_rows:
+                    key = (tr.class_id, tr.actual_subject_id)
+                    bucket = teachers_by_pair.setdefault(key, [])
+                    # Tránh trùng GV nếu có nhiều bản ghi phân công
+                    if any(t.get("user_id") == tr.user_id for t in bucket):
+                        continue
+                    bucket.append({
+                        "user_id": tr.user_id,
+                        "full_name": tr.full_name,
+                        "email": tr.email,
+                        "user_image": tr.user_image or None,
+                    })
+
+        # Giữ hành vi cũ: chỉ trả môn có phân công GV (INNER JOIN sa trước đây)
+        filtered_subjects = []
         for subject in student_subjects:
-            if subject.get('teachers_info'):
-                teachers = []
-                for teacher_info in subject['teachers_info'].split(';'):
-                    if teacher_info.strip():
-                        parts = teacher_info.split('|')
-                        if len(parts) >= 3:
-                            teachers.append({
-                                'user_id': parts[0],
-                                'full_name': parts[1],
-                                'email': parts[2],
-                                'user_image': parts[3] if len(parts) > 3 and parts[3] else None
-                            })
-                subject['teachers'] = teachers
-                # Keep backward compatibility with single teacher fields
-                if teachers:
-                    subject['teacher_id'] = teachers[0].get('teacher_id')
-                    subject['teacher_user_id'] = teachers[0].get('user_id')
-                    subject['teacher_name'] = teachers[0].get('full_name')
-                    subject['teacher_email'] = teachers[0].get('email')
-                    subject['teacher_user_image'] = teachers[0].get('user_image')
-                else:
-                    subject['teachers'] = []
-                    subject['teacher_id'] = None
-                    subject['teacher_user_id'] = None
-                    subject['teacher_name'] = None
-                    subject['teacher_email'] = None
-                    subject['teacher_user_image'] = None
-            else:
-                subject['teachers'] = []
-                subject['teacher_id'] = None
-                subject['teacher_user_id'] = None
-                subject['teacher_name'] = None
-                subject['teacher_email'] = None
-                subject['teacher_user_image'] = None
+            teachers = teachers_by_pair.get(
+                (subject.get("class_id"), subject.get("actual_subject_id")),
+                [],
+            )
+            if not teachers:
+                continue
+            subject["teachers"] = teachers
+            subject["teacher_id"] = None
+            subject["teacher_user_id"] = teachers[0].get("user_id")
+            subject["teacher_name"] = teachers[0].get("full_name")
+            subject["teacher_email"] = teachers[0].get("email")
+            subject["teacher_user_image"] = teachers[0].get("user_image")
+            filtered_subjects.append(subject)
+        student_subjects = filtered_subjects
 
         # Build response
         profile_data = {

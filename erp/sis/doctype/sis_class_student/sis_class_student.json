@@ -52,14 +52,16 @@
    "label": "Student",
    "options": "CRM Student",
    "reqd": 1,
-   "in_list_view": 1
+   "in_list_view": 1,
+   "search_index": 1
   },
   {
    "fieldname": "school_year_id",
    "fieldtype": "Link",
    "label": "School Year",
    "options": "SIS School Year",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "class_type",

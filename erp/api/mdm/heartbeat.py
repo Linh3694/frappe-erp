@@ -6,6 +6,7 @@ import frappe
 from frappe.utils import cint, now_datetime
 
 from erp.api.mdm.auth import client_ip, get_authenticated_device
+from erp.api.mdm.command import has_pending_commands
 
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 120
 
@@ -42,7 +43,5 @@ def heartbeat(agent_version=None, os_version=None, os_build=None):
         "device_id": device.name,
         "server_time": now_datetime().isoformat(),
         "heartbeat_interval_sec": heartbeat_interval_sec(),
-        # GĐ2 sẽ nối vào hàng đợi MDM Command; giữ field từ bây giờ để agent
-        # không phải đổi hợp đồng API khi command queue lên.
-        "has_pending_commands": False,
+        "has_pending_commands": has_pending_commands(device.name),
     }
