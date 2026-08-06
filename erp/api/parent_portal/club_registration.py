@@ -230,7 +230,8 @@ def _eligible_offerings(period, education_grade_id):
             o.day_of_week, o.capacity, o.registered_count,
             s.club_cover_image AS cover_image,
             s.club_short_description_vn AS short_description_vn,
-            s.club_short_description_en AS short_description_en
+            s.club_short_description_en AS short_description_en,
+            g.education_grade_name AS grade_name
         FROM `tab{DT_OFFERING}` o
         INNER JOIN `tabSIS Club Offering Grade` g ON g.parent = o.name
         LEFT JOIN `tabSIS Subject` s ON s.name = o.subject_id
@@ -290,6 +291,7 @@ def _build_days(period, education_grade_id, existing, is_open):
             "short_description_vn": o.short_description_vn,
             "short_description_en": o.short_description_en,
             "cover_image": o.cover_image,
+            "grade_name": o.grade_name,
             "day_of_week": o.day_of_week,
             "capacity": capacity,
             "registered_count": registered,
