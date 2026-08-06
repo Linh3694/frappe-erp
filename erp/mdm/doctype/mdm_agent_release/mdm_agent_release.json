@@ -1,0 +1,133 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:MDM-REL-{version}",
+ "creation": "2026-08-06 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "version",
+  "channel",
+  "is_current",
+  "column_break_main",
+  "published_on",
+  "installer",
+  "section_file",
+  "file_name",
+  "file_size",
+  "column_break_file",
+  "sha256",
+  "section_notes",
+  "release_notes"
+ ],
+ "fields": [
+  {
+   "description": "SemVer, ví dụ 0.1.0",
+   "fieldname": "version",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Phiên bản",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "stable",
+   "fieldname": "channel",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Kênh",
+   "options": "stable\ncanary",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "Bản agent đang phát hành cho kênh này. Chỉ một bản được đánh dấu.",
+   "fieldname": "is_current",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Bản hiện hành"
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "published_on",
+   "fieldtype": "Datetime",
+   "label": "Phát hành lúc"
+  },
+  {
+   "description": "ZIP hoặc EXE đã build. Tải lên dưới dạng file riêng tư.",
+   "fieldname": "installer",
+   "fieldtype": "Attach",
+   "label": "Gói cài đặt",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_file",
+   "fieldtype": "Section Break",
+   "label": "Thông tin tệp"
+  },
+  {
+   "fieldname": "file_name",
+   "fieldtype": "Data",
+   "label": "Tên tệp",
+   "read_only": 1
+  },
+  {
+   "description": "Byte",
+   "fieldname": "file_size",
+   "fieldtype": "Int",
+   "label": "Kích thước",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_file",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Agent kiểm hash trước khi tự cập nhật (GĐ4-01)",
+   "fieldname": "sha256",
+   "fieldtype": "Data",
+   "label": "SHA-256",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Ghi chú phát hành"
+  },
+  {
+   "fieldname": "release_notes",
+   "fieldtype": "Small Text",
+   "label": "Nội dung thay đổi"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MDM",
+ "name": "MDM Agent Release",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

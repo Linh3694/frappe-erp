@@ -6,5 +6,6 @@ project_management
 lms
 inventory_it
 it_support
+mdm
 finance
 procurement

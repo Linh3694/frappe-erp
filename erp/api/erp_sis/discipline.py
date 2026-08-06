@@ -61,6 +61,18 @@ def _normalize_deduction_points(raw):
     return "10"
 
 
+def _absolute_student_photo_url(purl):
+    """Chuẩn hoá đường dẫn ảnh thành URL tuyệt đối (giống các chỗ enrich khác)."""
+    if not purl:
+        return None
+    purl = str(purl)
+    if purl.startswith("/files/"):
+        return frappe.utils.get_url(purl)
+    if not purl.startswith("http"):
+        return frappe.utils.get_url("/files/" + purl.lstrip("/"))
+    return purl
+
+
 def _get_student_display_info(sid):
     """Lấy thông tin hiển thị cho 1 học sinh: name, code, class, photo"""
     s = frappe.db.get_value(
@@ -96,37 +108,14 @@ def _get_student_display_info(sid):
         )
         cs = cs_row[0]["class_id"] if cs_row else None
     class_title = frappe.db.get_value("SIS Class", cs, "title") or "" if cs else ""
-    # Ảnh
+    # Ảnh — SSOT theo năm học (start_date), không theo upload_date
     photo_url = None
     try:
-        if current_sy:
-            photo_row = frappe.db.sql(
-                """SELECT photo FROM `tabSIS Photo`
-                WHERE student_id = %s AND type = 'student' AND status = 'Active'
-                ORDER BY CASE WHEN school_year_id = %s THEN 0 ELSE 1 END,
-                         (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
-                         upload_date DESC, creation DESC LIMIT 1""",
-                (sid, current_sy),
-                as_dict=True,
-            )
-        else:
-            photo_row = frappe.db.sql(
-                """SELECT photo FROM `tabSIS Photo`
-                WHERE student_id = %s AND type = 'student' AND status = 'Active'
-                ORDER BY (SELECT sy.start_date FROM `tabSIS School Year` sy WHERE sy.name = school_year_id) DESC,
-                         upload_date DESC, creation DESC LIMIT 1""",
-                (sid,),
-                as_dict=True,
-            )
-        if photo_row and photo_row[0].get("photo"):
-            purl = photo_row[0]["photo"]
-            if purl.startswith("/files/"):
-                purl = frappe.utils.get_url(purl)
-            elif not purl.startswith("http"):
-                purl = frappe.utils.get_url("/files/" + purl)
-            photo_url = purl
-    except Exception:
-        pass
+        from erp.common.student_photo import get_photo_url
+
+        photo_url = _absolute_student_photo_url(get_photo_url(sid, current_sy))
+    except Exception as photo_err:
+        frappe.logger().warning(f"discipline photo single {sid}: {photo_err}")
     return {
         "student_id": sid,
         "student_name": s.get("student_name") or "",
@@ -227,49 +216,14 @@ def _batch_get_student_display_info(student_ids):
             out[sid]["student_class_id"] = cid
             out[sid]["student_class_title"] = class_titles.get(cid, "") or ""
 
-    ph_all = frappe.get_all(
-        "SIS Photo",
-        filters={
-            "student_id": ["in", student_ids],
-            "type": "student",
-            "status": "Active",
-        },
-        fields=["student_id", "photo", "school_year_id", "upload_date", "creation"],
-    )
-    from collections import defaultdict
+    # Ảnh batch — SSOT erp.common.student_photo (ưu tiên năm hiện tại, fallback start_date)
+    try:
+        from erp.common.student_photo import get_photo_urls
 
-    by_sid = defaultdict(list)
-    for p in ph_all:
-        by_sid[p["student_id"]].append(p)
-
-    def _ts(row, field):
-        v = row.get(field)
-        if not v:
-            return 0.0
-        try:
-            return frappe.utils.get_datetime(v).timestamp()
-        except Exception:
-            return 0.0
-
-    for sid in student_ids:
-        rows = by_sid.get(sid, [])
-        if not rows:
-            continue
-        rows.sort(
-            key=lambda r: (
-                0 if r.get("school_year_id") == current_sy else 1,
-                -_ts(r, "upload_date"),
-                -_ts(r, "creation"),
-            )
-        )
-        best = rows[0]
-        purl = best.get("photo")
-        if purl:
-            if purl.startswith("/files/"):
-                purl = frappe.utils.get_url(purl)
-            elif not str(purl).startswith("http"):
-                purl = frappe.utils.get_url("/files/" + str(purl))
-            out[sid]["student_photo_url"] = purl
+        for sid, purl in get_photo_urls(student_ids, current_sy).items():
+            out[sid]["student_photo_url"] = _absolute_student_photo_url(purl)
+    except Exception as photo_err:
+        frappe.logger().warning(f"discipline photo batch: {photo_err}")
 
     return out
 
