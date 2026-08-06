@@ -1476,6 +1476,15 @@ scheduler_events = {
         "*/30 * * * *": [
             "erp.api.erp_common_user.microsoft_auth.ensure_users_subscription"
         ],
+        # MDM: máy im lặng quá lâu thì báo IT (gỡ agent được, nhưng không giấu
+        # được việc máy ngừng báo cáo)
+        "0 * * * *": [
+            "erp.api.mdm.alert.check_offline_devices",
+        ],
+        # MDM: TTL telemetry — đặt từ đầu, không đợi DB phình rồi mới lo
+        "30 2 * * *": [
+            "erp.api.mdm.telemetry.cleanup_old_telemetry",
+        ],
         # FaceID: poll trạng thái online/offline từng terminal qua controller
         "*/10 * * * *": [
             "erp.api.faceid.sync_worker.refresh_all_device_status",
