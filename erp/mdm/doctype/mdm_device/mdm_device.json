@@ -1,0 +1,251 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:MDM-DEV-{#####}",
+ "creation": "2026-08-06 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_identity",
+  "device_name",
+  "serial_number",
+  "inventory_device",
+  "column_break_identity",
+  "inventory_name",
+  "room",
+  "campus_id",
+  "section_network",
+  "wg_ip",
+  "wg_pubkey",
+  "column_break_network",
+  "last_ip",
+  "section_auth",
+  "token_key",
+  "token_secret_hash",
+  "enroll_token_used",
+  "section_status",
+  "status",
+  "agent_version",
+  "last_heartbeat",
+  "column_break_status",
+  "os_version",
+  "os_build",
+  "enrolled_on",
+  "section_hardware",
+  "hardware_snapshot",
+  "section_notes",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_identity",
+   "fieldtype": "Section Break",
+   "label": "Định danh"
+  },
+  {
+   "fieldname": "device_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên máy (hostname)"
+  },
+  {
+   "description": "Win32_BIOS.SerialNumber — khóa tài sản bất biến",
+   "fieldname": "serial_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Serial",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "description": "Sổ tài sản là nguồn chuẩn (SSOT). Bản ghi MDM chỉ giữ trạng thái runtime.",
+   "fieldname": "inventory_device",
+   "fieldtype": "Link",
+   "label": "Thiết bị trong sổ tài sản",
+   "options": "ERP Inventory Device"
+  },
+  {
+   "fieldname": "column_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "inventory_device.name_display",
+   "fieldname": "inventory_name",
+   "fieldtype": "Data",
+   "label": "Tên trong sổ tài sản",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "inventory_device.room",
+   "fieldname": "room",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Phòng",
+   "options": "ERP Administrative Room",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "inventory_device.campus_id",
+   "fieldname": "campus_id",
+   "fieldtype": "Link",
+   "label": "Campus",
+   "options": "SIS Campus",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_network",
+   "fieldtype": "Section Break",
+   "label": "Mạng"
+  },
+  {
+   "fieldname": "wg_ip",
+   "fieldtype": "Data",
+   "label": "WireGuard IP",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "wg_pubkey",
+   "fieldtype": "Small Text",
+   "label": "WireGuard public key",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_network",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "IP nguồn của lần gọi API gần nhất",
+   "fieldname": "last_ip",
+   "fieldtype": "Data",
+   "label": "IP gần nhất",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_auth",
+   "fieldtype": "Section Break",
+   "label": "Xác thực"
+  },
+  {
+   "fieldname": "token_key",
+   "fieldtype": "Data",
+   "label": "Token key",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "description": "SHA-256 của token secret. Secret gốc chỉ trả về một lần lúc enroll.",
+   "fieldname": "token_secret_hash",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Token secret hash",
+   "read_only": 1
+  },
+  {
+   "fieldname": "enroll_token_used",
+   "fieldtype": "Link",
+   "label": "Enroll token đã dùng",
+   "options": "MDM Enroll Token",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_status",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái"
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "Active\nDisabled\nRetired",
+   "reqd": 1
+  },
+  {
+   "fieldname": "agent_version",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Agent version",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_heartbeat",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Heartbeat gần nhất",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "os_version",
+   "fieldtype": "Data",
+   "label": "Phiên bản Windows",
+   "read_only": 1
+  },
+  {
+   "fieldname": "os_build",
+   "fieldtype": "Data",
+   "label": "Build",
+   "read_only": 1
+  },
+  {
+   "fieldname": "enrolled_on",
+   "fieldtype": "Datetime",
+   "label": "Enroll lúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_hardware",
+   "fieldtype": "Section Break",
+   "label": "Kiểm kê phần cứng"
+  },
+  {
+   "description": "Inventory mới nhất do agent gửi lên (điền ở GĐ1)",
+   "fieldname": "hardware_snapshot",
+   "fieldtype": "JSON",
+   "label": "Hardware snapshot"
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MDM",
+ "name": "MDM Device",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

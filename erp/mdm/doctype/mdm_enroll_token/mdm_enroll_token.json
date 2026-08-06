@@ -1,0 +1,113 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:MDM-ENR-{#####}",
+ "creation": "2026-08-06 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "label",
+  "token",
+  "is_active",
+  "column_break_main",
+  "expires_on",
+  "max_uses",
+  "used_count",
+  "section_policy",
+  "allow_unknown_serial",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên đợt cấp",
+   "reqd": 1
+  },
+  {
+   "description": "Chuỗi nhúng vào MSI. Để trống khi tạo mới thì hệ thống tự sinh.",
+   "fieldname": "token",
+   "fieldtype": "Data",
+   "label": "Token",
+   "read_only": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Đang hiệu lực"
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "expires_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Hết hạn",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "description": "0 = không giới hạn",
+   "fieldname": "max_uses",
+   "fieldtype": "Int",
+   "label": "Số lượt tối đa"
+  },
+  {
+   "default": "0",
+   "fieldname": "used_count",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Đã dùng",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_policy",
+   "fieldtype": "Section Break",
+   "label": "Chính sách enroll"
+  },
+  {
+   "default": "0",
+   "description": "Cho phép enroll máy chưa có trong sổ tài sản. Chỉ bật cho token thử nghiệm — máy thật phải nằm trong ERP Inventory Device trước.",
+   "fieldname": "allow_unknown_serial",
+   "fieldtype": "Check",
+   "label": "Cho phép serial lạ"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MDM",
+ "name": "MDM Enroll Token",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
