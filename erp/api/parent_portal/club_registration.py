@@ -183,6 +183,8 @@ def _period_payload(period):
         "cover_image": period.cover_image,
         "intro_vn": period.intro_vn,
         "intro_en": period.intro_en,
+        "guideline_vn": period.guideline_vn,
+        "guideline_en": period.guideline_en,
         "display_start_datetime": str(period.display_start_datetime),
         "display_end_datetime": str(period.display_end_datetime),
         "registration_start_datetime": str(period.registration_start_datetime),

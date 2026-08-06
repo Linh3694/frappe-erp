@@ -54,6 +54,8 @@ PERIOD_WRITE_FIELDS = [
     "cover_image",
     "intro_vn",
     "intro_en",
+    "guideline_vn",
+    "guideline_en",
 ]
 
 OFFERING_WRITE_FIELDS = [

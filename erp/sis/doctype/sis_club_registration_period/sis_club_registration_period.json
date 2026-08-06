@@ -39,6 +39,9 @@
   "cover_image",
   "intro_vn",
   "intro_en",
+  "guideline_section",
+  "guideline_vn",
+  "guideline_en",
   "attachments_section",
   "attachments",
   "system_information",
@@ -191,6 +194,22 @@
    "fieldname": "intro_en",
    "fieldtype": "Text Editor",
    "label": "Mô tả tổng quan (EN)"
+  },
+  {
+   "fieldname": "guideline_section",
+   "fieldtype": "Section Break",
+   "label": "Quy định"
+  },
+  {
+   "fieldname": "guideline_vn",
+   "fieldtype": "Text Editor",
+   "label": "Hướng dẫn tham gia (VN)",
+   "description": "Hiển thị thành mục \"Hướng dẫn tham gia hoạt động Câu lạc bộ\", trước Mốc thời gian."
+  },
+  {
+   "fieldname": "guideline_en",
+   "fieldtype": "Text Editor",
+   "label": "Hướng dẫn tham gia (EN)"
   },
   {
    "fieldname": "attachments_section",
