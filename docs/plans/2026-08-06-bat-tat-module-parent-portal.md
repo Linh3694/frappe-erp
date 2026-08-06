@@ -212,13 +212,28 @@ nó nặng thêm (endpoint ghi chứa SĐT là `update_features()` đã ship t�
 Không sửa kèm trong ticket này: bật verify chạm mọi API call, cần biết secret ký và mọi
 nơi phát token, sai là đá toàn bộ phụ huynh ra màn đăng nhập.
 
-### 6.4 Chốt deep link — hoãn, chấp nhận khoảng hở
+### 6.4 Chốt deep link — ĐÃ LÀM (2026-08-06)
 
-Ẩn module xong, push notification vẫn đẩy vào được (`lib/notificationRouter.ts` 3 tầng,
-không kiểm cờ). Ở bản UI-only điều này **không hại** — màn hình vẫn chạy vì backend không
-bị chặn. Ghi lại vì giai đoạn 2 bắt buộc phải xử lý, và nó khó hơn vẻ ngoài:
-`resolveNotificationHref` return sớm ở hai nhánh, còn `/feature/chat/<id>` và
-`/journal/<id>` không khớp `MOBILE_HREF` bằng so sánh chuỗi thẳng.
+Ban đầu định hoãn, nhưng để hở thì tắt module mà tab/thông báo vẫn vào được — nửa vời
+hơn cả không làm. Đã bịt 4 lối:
+
+| Lối vào | Chốt |
+|---|---|
+| Mục lục, lưới Dashboard | lọc theo cờ |
+| Thanh tab (`journal`, `chat`) | `TAB_MODULE` trong `components/GlassTabBar.tsx` |
+| Push notification | `PushNotificationProvider` → rơi về `/feature/notifications` |
+| Trung tâm thông báo | `NotificationsScreen` → vẫn đánh dấu đã đọc, chỉ chặn điều hướng |
+| Màn hình (chốt cuối) | `ModuleGate` bọc **32 route file** |
+
+`portalModuleKeyForDeepLink` khớp theo RANH GIỚI ĐOẠN, có bảng alias riêng cho đường dẫn
+kiểu web (`/announcement/<id>`, `/news/<id>`, `/journal/<id>`, `/communication`) vì
+`resolveNotificationHref` sinh ra những dạng đó chứ không phải `MOBILE_HREF`.
+
+Chốt đọc cờ ĐỒNG BỘ từ MMKV (`lib/moduleGuard.ts`) vì `notificationRouter` chạy cả lúc
+mở lạnh app, trước khi cây provider dựng xong.
+
+**Vẫn KHÔNG khoá API** — đúng bản chất UI-only. Ai gọi thẳng endpoint vẫn lấy được dữ
+liệu, trừ CLB (có cổng server riêng).
 
 ### 6.5 Client-side `featureAccess.ts` — gỡ ở sprint sau
 
