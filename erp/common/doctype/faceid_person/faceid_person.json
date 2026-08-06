@@ -14,10 +14,8 @@
   "crm_student",
   "crm_guardian",
   "user",
-  "work_shift",
   "valid_from",
   "valid_to",
-  "target_devices",
   "photo_file",
   "photo_url",
   "is_active",
@@ -89,12 +87,6 @@
    "options": "User"
   },
   {
-   "fieldname": "work_shift",
-   "fieldtype": "Link",
-   "label": "Ca làm việc",
-   "options": "FaceID Work Shift"
-  },
-  {
    "fieldname": "valid_from",
    "fieldtype": "Date",
    "label": "Hiệu lực từ"
@@ -103,12 +95,6 @@
    "fieldname": "valid_to",
    "fieldtype": "Date",
    "label": "Hiệu lực đến"
-  },
-  {
-   "fieldname": "target_devices",
-   "fieldtype": "Table",
-   "label": "Thiết bị đích",
-   "options": "FaceID Person Device"
   },
   {
    "fieldname": "photo_file",

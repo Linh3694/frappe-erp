@@ -12,7 +12,6 @@ from frappe.utils import cint
 from erp.api.faceid.photo import get_person_photo_bytes
 from erp.utils.faceid_gateway import (
     gateway_delete,
-    gateway_get,
     gateway_healthz,
     gateway_post,
     gateway_post_file,
@@ -80,7 +79,7 @@ def person_sync_job_stats(person_type: str | None = None) -> dict:
             FROM `tabFaceID Device Sync Job` j
             INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
             WHERE j.ref_doctype = 'FaceID Person'
-              AND j.job_type IN ('upsert_person', 'delete_person')
+              AND j.job_type IN ('apply_person_access', 'delete_person')
               AND j.state = %s
               {type_clause}
             """,
@@ -243,12 +242,9 @@ def _process_one_job(job_name: str):
 
     try:
         handler = {
-            "upsert_person": _job_upsert_person,
-            "delete_person": _job_delete_person,
             "apply_person_access": _job_apply_person_access,
+            "delete_person": _job_delete_person,
             "sync_device_slot": _job_sync_device_slot,
-            "upsert_shift": _job_upsert_shift,
-            "sync_shift": _job_sync_shift,
             "upsert_pickup": _job_upsert_pickup,
             "revoke_pickup": _job_revoke_pickup,
             "reapply_pickup": _job_reapply_pickup,
@@ -270,60 +266,6 @@ def _process_one_job(job_name: str):
         frappe.db.commit()
 
 
-def _device_ids_for_person(doc) -> list[int]:
-    ids = []
-    for row in doc.target_devices or []:
-        cid = frappe.db.get_value("FaceID Device", row.device, "controller_device_id")
-        if cid:
-            ids.append(int(cid))
-    return ids
-
-
-def _job_upsert_person(job):
-    doc = frappe.get_doc("FaceID Person", job.ref_name)
-    shift_id = None
-    if doc.work_shift:
-        shift_id = frappe.db.get_value(
-            "FaceID Work Shift", doc.work_shift, "controller_shift_id"
-        )
-    payload = {
-        "employee_no": doc.external_code,
-        "person_type": doc.person_type,
-        "name": doc.display_name,
-        "valid_from": str(doc.valid_from) if doc.valid_from else None,
-        "valid_to": str(doc.valid_to) if doc.valid_to else None,
-        "shift_id": int(shift_id) if shift_id else None,
-        "device_ids": _device_ids_for_person(doc),
-        "extra": {},
-    }
-    try:
-        gateway_put(f"/api/persons/{doc.external_code}", payload)
-    except Exception:
-        gateway_post("/api/persons", payload)
-
-    photo = get_person_photo_bytes(doc)
-    if photo:
-        gateway_post_file(f"/api/persons/{doc.external_code}/face", photo)
-
-    job_payload = json.loads(job.payload or "{}") if job.payload else {}
-    device_ips = job_payload.get("device_ips")
-    push_body = {"device_ips": device_ips} if device_ips else {}
-    gateway_post(f"/api/persons/{doc.external_code}/push", push_body)
-
-    frappe.db.set_value(
-        "FaceID Person",
-        doc.name,
-        {
-            "sync_status": "synced",
-            "on_device": 1,
-            "last_synced_at": frappe.utils.now(),
-            "last_error": None,
-            "face_status": "synced" if photo else doc.face_status,
-        },
-        update_modified=False,
-    )
-
-
 def _job_delete_person(job):
     payload = json.loads(job.payload or "{}") if job.payload else {}
     code = payload.get("external_code")
@@ -333,6 +275,11 @@ def _job_delete_person(job):
         code = doc.external_code
         person_name = doc.name
     if code:
+        try:
+            gateway_delete(f"/api/access-grants/{code}")
+        except Exception:
+            # Grant mồ côi không mở được cửa (person đã xóa) — không chặn job
+            pass
         gateway_delete(f"/api/persons/{code}")
     if person_name and frappe.db.exists("FaceID Person", person_name):
         frappe.db.set_value(
@@ -428,7 +375,6 @@ def _job_apply_person_access(job):
         "name": doc.display_name,
         "valid_from": valid_from,
         "valid_to": valid_to,
-        "shift_id": None,
         "device_ids": device_ids,
         "extra": {},
     }
@@ -485,6 +431,8 @@ def _job_apply_person_access(job):
                 update_modified=False,
             )
 
+    _push_access_grants(doc.external_code, keep)
+
     # Gỡ khỏi máy cũ SAU khi đã đẩy máy mới — tránh khoảng trống quyền
     for r in drop:
         ip = frappe.db.get_value("FaceID Device", r.device, "ip")
@@ -521,61 +469,42 @@ def _job_apply_person_access(job):
         raise RuntimeError("; ".join(errors)[:400])
 
 
-def _shift_payload(doc) -> dict:
-    from erp.api.faceid.access_engine import hhmm
+def _push_access_grants(external_code: str, rows: list) -> None:
+    """Đẩy khung giờ hợp lệ theo từng máy xuống controller.
 
-    periods = []
-    for p in doc.periods or []:
-        # Time field của Frappe là timedelta: str(timedelta(hours=6)) = '6:00:00'
-        # nên cắt [:5] cho ra '6:00:' làm controller parse lỗi — dùng hhmm().
-        periods.append(
+    Terminal giao toàn bộ quyền quyết định cho controller khi remote-check bật,
+    nên controller phải tự biết khung giờ — không dựa vào template trên máy.
+    """
+    from erp.api.faceid.access_engine import ALLDAY_SIGNATURE
+
+    items = []
+    for r in rows:
+        ip = frappe.db.get_value("FaceID Device", r.device, "ip")
+        if not ip:
+            continue
+        allday = r.schedule_signature == ALLDAY_SIGNATURE
+        periods = []
+        if not allday:
+            periods_json = frappe.db.get_value(
+                "FaceID Device Slot",
+                {"device": r.device, "schedule_signature": r.schedule_signature},
+                "periods_json",
+            )
+            periods = json.loads(periods_json or "[]")
+        items.append(
             {
-                "weekday": int(p.weekday),
-                "start_time": hhmm(p.start_time),
-                "end_time": hhmm(p.end_time),
+                "employee_no": external_code,
+                "device_ip": str(ip).split("/")[0],
+                "allday": allday,
+                "valid_from": str(r.valid_from) if r.valid_from else None,
+                "valid_to": str(r.valid_to) if r.valid_to else None,
+                "periods": periods,
             }
         )
-    return {
-        "name": doc.shift_name,
-        "note": doc.note,
-        "device_slot": int(doc.device_slot),
-        "periods": periods,
-    }
 
-
-def _job_upsert_shift(job):
-    doc = frappe.get_doc("FaceID Work Shift", job.ref_name)
-    payload = _shift_payload(doc)
-    ctrl_id = doc.controller_shift_id
-    if ctrl_id:
-        gateway_put(f"/api/shifts/{ctrl_id}", payload)
-    else:
-        res = gateway_post("/api/shifts", payload)
-        ctrl_id = res.get("shift", {}).get("id")
-        if ctrl_id:
-            frappe.db.set_value(
-                "FaceID Work Shift",
-                doc.name,
-                "controller_shift_id",
-                ctrl_id,
-                update_modified=False,
-            )
-
-
-def _job_sync_shift(job):
-    doc = frappe.get_doc("FaceID Work Shift", job.ref_name)
-    if not doc.controller_shift_id:
-        _job_upsert_shift(job)
-        doc.reload()
     gateway_post(
-        f"/api/shifts/{doc.controller_shift_id}/sync",
-        {"repush_persons": False},
-    )
-    frappe.db.set_value(
-        "FaceID Work Shift",
-        doc.name,
-        {"sync_status": "synced", "last_synced_at": frappe.utils.now(), "last_error": None},
-        update_modified=False,
+        "/api/access-grants/bulk",
+        {"employee_no": external_code, "items": items, "replace_person": True},
     )
 
 
@@ -794,7 +723,7 @@ def retry_failed_sync_jobs(person_type: str | None = None, limit: int = 2000) ->
         FROM `tabFaceID Device Sync Job` j
         INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
         WHERE j.ref_doctype = 'FaceID Person'
-          AND j.job_type IN ('upsert_person', 'delete_person')
+          AND j.job_type IN ('apply_person_access', 'delete_person')
           AND j.state = 'failed'
           AND j.attempts < %s
           {type_clause}
@@ -829,7 +758,7 @@ def dedupe_failed_person_sync_jobs(person_type: str | None = None) -> int:
         INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
         WHERE j.ref_doctype = 'FaceID Person'
           AND j.state = 'failed'
-          AND j.job_type IN ('upsert_person', 'delete_person')
+          AND j.job_type IN ('apply_person_access', 'delete_person')
           {type_clause}
           AND j.name NOT IN (
             SELECT keep_id FROM (
@@ -837,7 +766,7 @@ def dedupe_failed_person_sync_jobs(person_type: str | None = None) -> int:
               FROM `tabFaceID Device Sync Job` j2
               WHERE j2.ref_doctype = 'FaceID Person'
                 AND j2.state = 'failed'
-                AND j2.job_type IN ('upsert_person', 'delete_person')
+                AND j2.job_type IN ('apply_person_access', 'delete_person')
               GROUP BY j2.ref_name, j2.job_type
             ) AS latest_jobs
           )

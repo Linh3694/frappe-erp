@@ -27,6 +27,10 @@ class FaceIDPickupAuthorization(Document):
         self._enqueue_sync("revoke_pickup")
 
     def _enqueue_sync(self, job_type):
+        # offboard_person xoá doc sau khi đã revoke thẳng xuống controller —
+        # job enqueue lúc đó sẽ mồ côi (get_doc fail) nên cho phép skip.
+        if getattr(self.flags, "faceid_skip_sync", False):
+            return
         from erp.api.faceid.person_hooks import on_pickup_auth_changed
 
         on_pickup_auth_changed(self, job_type=job_type)

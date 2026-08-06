@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime
+from urllib.parse import urlencode
 
 import frappe
 from frappe.utils import cint
@@ -11,18 +12,13 @@ from frappe.utils import cint
 from erp.api.faceid.sync_worker import (
     create_device_sync_job,
     person_sync_job_stats,
-    run_sync_jobs_now,
 )
-
-# Lô nhỏ chạy inline trong request; lớn hơn → worker nền (tránh timeout FE)
-SYNC_INLINE_MAX = 5
 from erp.utils.faceid_gateway import (
     gateway_delete,
     gateway_get,
     gateway_healthz,
     gateway_post,
     gateway_post_file,
-    gateway_put,
     get_gateway_config,
 )
 
@@ -101,7 +97,6 @@ def list_persons(
             "department",
             "photo_url",
             "campus_id",
-            "work_shift",
             "is_active",
             "on_device",
             "face_status",
@@ -130,10 +125,59 @@ def list_persons(
     return _ok({"items": rows, "total": total})
 
 
+# Trên ngưỡng này thì kéo nguồn ở background — request web (timeout 60s phía
+# frontend) không kham nổi hàng nghìn bản upsert trong một lần bấm.
+SOURCE_REFRESH_INLINE_MAX = 300
+
+
+def _count_source_candidates(person_type, campus_id=None):
+    if person_type == "student":
+        filters = {"campus_id": campus_id} if campus_id else {}
+        return frappe.db.count("CRM Student", filters)
+    if person_type == "guardian":
+        filters = {"campus_id": campus_id} if campus_id else {}
+        return frappe.db.count("CRM Guardian", filters)
+    if person_type == "staff":
+        return frappe.db.sql(
+            """
+            SELECT COUNT(*) FROM `tabUser` u
+            WHERE u.user_type = 'System User'
+              AND u.name NOT IN ('Guest', 'Administrator')
+              AND u.email NOT LIKE %s
+            """,
+            ("%@parent.wellspring.edu.vn",),
+        )[0][0]
+    return 0
+
+
 @frappe.whitelist()
-def refresh_persons_from_source(person_type, campus_id=None, class_id=None):
-    """Lấy dữ liệu từ nguồn CRM/SIS/User và upsert vào FaceID Person."""
+def refresh_persons_from_source(person_type, campus_id=None, class_id=None, background=None):
+    """Lấy dữ liệu từ nguồn CRM/SIS/User và upsert vào FaceID Person.
+
+    Lô lớn tự chuyển sang queue long (trả về ngay `async=True`);
+    truyền background=0/1 để ép chạy inline/nền.
+    """
     from erp.api.faceid.person_source import refresh_persons_from_source as _refresh
+
+    total = _count_source_candidates(person_type, campus_id)
+    run_background = (
+        total > SOURCE_REFRESH_INLINE_MAX if background is None else bool(cint(background))
+    )
+    if run_background:
+        frappe.enqueue(
+            "erp.api.faceid.person_source.refresh_persons_from_source",
+            queue="long",
+            timeout=3600,
+            job_id=f"faceid_refresh_source_{person_type}",  # bấm liên tiếp không chồng job
+            deduplicate=True,
+            person_type=person_type,
+            campus_id=campus_id,
+            class_id=class_id,
+        )
+        return _ok(
+            {"async": True, "total_candidates": total},
+            message=f"Đang kéo {total} bản ghi {person_type} ở nền — tải lại danh sách sau ít phút",
+        )
 
     stats = _refresh(person_type, campus_id, class_id)
     msg = f"Đã lấy dữ liệu: {stats.get('created', 0)} mới, {stats.get('updated', 0)} cập nhật"
@@ -173,113 +217,59 @@ def set_persons_active(names, active=1):
 
 
 @frappe.whitelist()
-def sync_persons(person_type=None, campus_id=None, force=0, device_names=None):
+def sync_persons(person_type=None, campus_id=None, force=0):
+    """Tính lại quyền vào của person theo nhóm rồi đẩy phần lệch xuống máy.
+
+    Máy đích KHÔNG chọn ở đây nữa: nó là hệ quả của các Access Group mà person
+    thuộc về (xem `access_engine.compute_person_desired`). `force` chỉ còn nghĩa
+    là đẩy lại cả những dòng engine coi là đã khớp.
     """
-    Đồng bộ dữ liệu xuống controller local:
-    - is_active=1 → upsert_person (force=1: đẩy lại tất cả đang bật)
-    - is_active=0 & on_device=1 → delete_person
-    device_names: danh sách FaceID Device name — chỉ đẩy xuống các máy đã chọn.
-    Chạy inline nếu ≤ SYNC_INLINE_MAX job; lớn hơn → worker nền (tránh timeout HTTP).
-    """
-    force = cint(force)
+    from erp.api.faceid.access_engine import refresh_persons
+
     filters = {}
     if person_type:
         filters["person_type"] = person_type
     _apply_person_campus_filter(filters, person_type, campus_id)
 
-    # Resolve máy đích (picker tạm thời — không ghi vào target_devices)
-    device_ips: list[str] | None = None
-    if device_names:
-        raw_names = frappe.parse_json(device_names) if isinstance(device_names, str) else device_names
-        if raw_names:
-            device_ips = []
-            for dev_name in raw_names:
-                ip = frappe.db.get_value("FaceID Device", dev_name, "ip")
-                if ip:
-                    device_ips.append(str(ip).split("/")[0])
-            if not device_ips:
-                return _err("Không tìm thấy IP cho các máy đã chọn")
-
-    sync_payload = {"device_ips": device_ips} if device_ips else None
-
-    upsert_count = delete_count = 0
-    job_names: list[str] = []
-    persons = frappe.get_all(
-        "FaceID Person",
-        filters=filters,
-        fields=["name", "is_active", "on_device", "sync_status", "external_code"],
-        limit=10000,
-    )
-    for p in persons:
-        if _person_is_active(p):
-            if force or p.sync_status != "synced" or not cint(p.on_device):
-                job_names.append(
-                    create_device_sync_job(
-                        "upsert_person",
-                        "FaceID Person",
-                        p.name,
-                        payload=sync_payload,
-                        priority=8,
-                    )
-                )
-                upsert_count += 1
-        elif cint(p.on_device):
-            job_names.append(
-                create_device_sync_job(
-                    "delete_person",
-                    "FaceID Person",
-                    p.name,
-                    payload={"external_code": p.external_code, **(sync_payload or {})},
-                    priority=8,
-                )
-            )
-            delete_count += 1
-
-    total_queued = upsert_count + delete_count
-    async_mode = False
-    run_stats: dict = {"processed": 0, "failed": 0, "errors": []}
-
-    if job_names:
-        from erp.api.faceid.sync_worker import dedupe_failed_person_sync_jobs
-
-        dedupe_failed_person_sync_jobs(person_type)
-        if len(job_names) <= SYNC_INLINE_MAX:
-            run_stats = run_sync_jobs_now(job_names)
-        else:
-            async_mode = True
-            frappe.enqueue(
-                "erp.api.faceid.sync_worker.drain_pending_device_sync_jobs",
-                queue="long",
-                timeout=7200,
-                enqueue_after_commit=True,
-            )
-
-    processed = run_stats.get("processed", 0)
-    failed = run_stats.get("failed", 0)
-
-    if total_queued == 0:
-        msg = "Không có person nào cần đồng bộ (kiểm tra tab loại và trạng thái kích hoạt)"
-    elif async_mode:
-        msg = f"Đã xếp hàng {total_queued} job — đang đồng bộ nền"
-    elif failed:
-        msg = (
-            f"Đã xử lý {processed}/{total_queued} job; "
-            f"{failed} lỗi (xem FaceID Device Sync Job hoặc last_error trên person)"
+    names = frappe.get_all("FaceID Person", filters=filters, pluck="name", limit=20000)
+    if not names:
+        return _ok(
+            {"persons": 0},
+            message="Không có person nào (kiểm tra tab loại và bộ lọc campus)",
         )
-    else:
-        msg = f"Đã đồng bộ: {upsert_count} đẩy xuống, {delete_count} xóa khỏi máy"
 
+    if cint(force):
+        # Xóa dấu "đã đẩy" để mọi dòng bị coi là lệch và đẩy lại
+        frappe.db.sql(
+            """
+            UPDATE `tabFaceID Person Device Assignment`
+            SET applied_hash = NULL, state = 'pending'
+            WHERE person IN %(names)s
+            """,
+            {"names": tuple(names)},
+        )
+
+    if len(names) > 200:
+        frappe.enqueue(
+            "erp.api.faceid.access_engine.refresh_persons",
+            queue="long",
+            timeout=7200,
+            enqueue_after_commit=True,
+            person_names=names,
+        )
+        return _ok(
+            {"persons": len(names), "async": True},
+            message=f"Đã xếp hàng đồng bộ {len(names)} person — chạy nền",
+        )
+
+    result = refresh_persons(names)
     return _ok(
-        {
-            "upsert_queued": upsert_count,
-            "delete_queued": delete_count,
-            "processed": processed,
-            "failed": failed,
-            "async": async_mode,
-            "errors": run_stats.get("errors") or [],
-            **person_sync_job_stats(person_type),
-        },
-        message=msg,
+        {**result, **person_sync_job_stats(person_type)},
+        message=(
+            f"Đã tính lại {result['persons']} person: "
+            f"+{result['added']} lên máy, ~{result['updated']} cập nhật, "
+            f"-{result['removed']} gỡ khỏi máy"
+        ),
     )
 
 
@@ -287,7 +277,14 @@ def sync_persons(person_type=None, campus_id=None, force=0, device_names=None):
 def get_person(name):
     doc = frappe.get_doc("FaceID Person", name)
     data = doc.as_dict()
-    data["target_devices"] = [r.device for r in doc.target_devices or []]
+    data["groups"] = frappe.get_all(
+        "FaceID Access Group Member", filters={"person": name}, pluck="group"
+    )
+    data["assignments"] = frappe.get_all(
+        "FaceID Person Device Assignment",
+        filters={"person": name},
+        fields=["device", "slot", "state", "last_error"],
+    )
     return _ok(data)
 
 
@@ -300,11 +297,25 @@ def save_person(data):
         doc.update(payload)
     else:
         doc = frappe.get_doc({"doctype": "FaceID Person", **payload})
-    doc.set("target_devices", [])
-    for dev in payload.get("target_devices") or []:
-        doc.append("target_devices", {"device": dev})
     doc.save(ignore_permissions=True)
+    # Ảnh/tên/hiệu lực đổi → desired_hash đổi → đẩy lại xuống các máy đang giữ
+    _refresh_person_access([doc.name])
     return _ok(doc.as_dict())
+
+
+def _refresh_person_access(names: list[str]):
+    """Lô nhỏ chạy inline cho phản hồi tức thì; lô lớn đẩy nền tránh timeout FE."""
+    from erp.api.faceid.access_engine import refresh_persons
+
+    if len(names) > 20:
+        frappe.enqueue(
+            "erp.api.faceid.access_engine.refresh_persons",
+            queue="short",
+            enqueue_after_commit=True,
+            person_names=names,
+        )
+    else:
+        refresh_persons(names)
 
 
 @frappe.whitelist()
@@ -315,20 +326,12 @@ def delete_person(name):
 
 @frappe.whitelist()
 def resync_person(name):
-    doc = frappe.get_doc("FaceID Person", name)
-    if doc.is_active:
-        create_device_sync_job("upsert_person", "FaceID Person", name, priority=8)
-        return _ok(message="Đã xếp hàng sync person")
-    if doc.on_device:
-        create_device_sync_job(
-            "delete_person",
-            "FaceID Person",
-            name,
-            payload={"external_code": doc.external_code},
-            priority=8,
-        )
-        return _ok(message="Đã xếp hàng xóa person khỏi máy")
-    return _ok(message="Person không cần sync")
+    from erp.api.faceid.access_engine import refresh_persons
+
+    result = refresh_persons([name])
+    if result.get("errors"):
+        return _err(result["error_samples"][0]["error"], result)
+    return _ok(result, message="Đã tính lại và xếp hàng đồng bộ person")
 
 
 # Giữ alias bulk_enroll_* cho tương thích ngược — gọi refresh
@@ -352,19 +355,16 @@ def bulk_enroll_guardians(campus_id=None):
 
 @frappe.whitelist()
 def list_work_shifts():
+    """Ca chỉ là khung giờ; slot trên máy do engine cấp phát theo từng máy."""
     rows = frappe.get_all(
         "FaceID Work Shift",
-        fields=[
-            "name",
-            "shift_name",
-            "device_slot",
-            "note",
-            "controller_shift_id",
-            "sync_status",
-            "last_synced_at",
-        ],
-        order_by="device_slot asc",
+        fields=["name", "shift_name", "note"],
+        order_by="shift_name asc",
     )
+    for row in rows:
+        row["used_by_groups"] = frappe.db.count(
+            "FaceID Access Group", {"shift_in": row["name"]}
+        ) + frappe.db.count("FaceID Access Group", {"shift_out": row["name"]})
     return _ok(rows)
 
 
@@ -400,26 +400,19 @@ def save_work_shift(data):
 
 @frappe.whitelist()
 def delete_work_shift(name):
-    doc = frappe.get_doc("FaceID Work Shift", name)
-    if int(doc.device_slot) == 1:
-        return _err("Không thể xóa ca 24/7 (slot 1)")
+    used = frappe.get_all(
+        "FaceID Access Group",
+        filters={"shift_in": name},
+        pluck="group_name",
+    ) + frappe.get_all(
+        "FaceID Access Group", filters={"shift_out": name}, pluck="group_name"
+    )
+    if used:
+        return _err(
+            "Ca đang được dùng bởi nhóm: " + ", ".join(sorted(set(used))[:5])
+        )
     frappe.delete_doc("FaceID Work Shift", name, ignore_permissions=True)
     return _ok()
-
-
-@frappe.whitelist()
-def resync_work_shift(name):
-    create_device_sync_job("sync_shift", "FaceID Work Shift", name, priority=7)
-    return _ok(message="Đã xếp hàng sync ca")
-
-
-@frappe.whitelist()
-def sync_all_work_shifts():
-    """Đồng bộ tất cả ca làm việc xuống controller."""
-    shifts = frappe.get_all("FaceID Work Shift", pluck="name")
-    for name in shifts:
-        create_device_sync_job("sync_shift", "FaceID Work Shift", name, priority=7)
-    return _ok({"queued": len(shifts)}, message=f"Đã xếp hàng sync {len(shifts)} ca")
 
 
 # ---- Pickup Authorization ----
@@ -514,6 +507,162 @@ def reapply_pickup_auth(name):
 def delete_pickup_auth(name):
     frappe.delete_doc("FaceID Pickup Authorization", name, ignore_permissions=True)
     return _ok()
+
+
+def _pickup_default_validity() -> tuple[date, date]:
+    """Hiệu lực mặc định = năm học đang bật (fallback hôm nay)."""
+    school_year = frappe.db.get_value(
+        "SIS School Year", {"is_enable": 1}, ["start_date", "end_date"], as_dict=True
+    )
+    today = date.today()
+    if school_year and school_year.start_date and school_year.end_date:
+        return school_year.start_date, school_year.end_date
+    return today, today
+
+
+@frappe.whitelist()
+def suggest_guardians_for_student(student):
+    """Gợi ý guardian cho màn thêm ủy quyền TAY: quan hệ gia đình chuẩn của học sinh.
+
+    `student` = FaceID Person (loại student). Trả về mọi guardian trong CRM Family
+    của HS kèm cờ đã-map-person và đã-có-ủy-quyền-sống — UI chỉ cho chọn guardian
+    đã tồn tại trong danh sách Person (yêu cầu nghiệp vụ), phần còn lại hiển thị
+    để biết vì sao chưa chọn được.
+    """
+    crm_student = frappe.db.get_value("FaceID Person", student, "crm_student")
+    if not crm_student:
+        return _err("Person không phải học sinh hoặc chưa liên kết CRM Student")
+
+    can_pickup_expr = (
+        "IFNULL(fr.can_pickup, 1)" if _relationship_has_can_pickup() else "1"
+    )
+    rows = frappe.db.sql(
+        f"""
+        SELECT
+            fr.guardian AS crm_guardian,
+            fr.relationship_type,
+            {can_pickup_expr} AS can_pickup,
+            gp.name AS person,
+            gp.display_name,
+            gp.external_code,
+            gp.photo_url
+        FROM `tabCRM Family Relationship` fr
+        INNER JOIN `tabCRM Family` f ON fr.parent = f.name
+        LEFT JOIN `tabFaceID Person` gp
+            ON gp.crm_guardian = fr.guardian AND gp.person_type = 'guardian'
+        WHERE fr.parentfield = 'relationships'
+          AND f.docstatus < 2
+          AND fr.student = %(student)s
+          AND IFNULL(fr.guardian, '') != ''
+        ORDER BY fr.display_order, fr.idx
+        """,
+        {"student": crm_student},
+        as_dict=True,
+    )
+
+    live_guardians = set(
+        frappe.get_all(
+            "FaceID Pickup Authorization",
+            filters={"student": student, "revoked": 0},
+            pluck="guardian",
+        )
+    )
+    seen = set()
+    items = []
+    for r in rows:
+        if r.crm_guardian in seen:
+            continue
+        seen.add(r.crm_guardian)
+        guardian_name = r.display_name or frappe.db.get_value(
+            "CRM Guardian", r.crm_guardian, "guardian_name"
+        )
+        items.append(
+            {
+                "crm_guardian": r.crm_guardian,
+                "relationship_type": r.relationship_type,
+                "can_pickup": cint(r.can_pickup),
+                "person": r.person,
+                "display_name": guardian_name,
+                "external_code": r.external_code,
+                "photo_url": r.photo_url,
+                "has_person": bool(r.person),
+                "has_active_auth": r.person in live_guardians if r.person else False,
+            }
+        )
+    return _ok(items)
+
+
+@frappe.whitelist()
+def create_pickup_auths(student, guardians, valid_from=None, valid_to=None):
+    """Thêm ủy quyền đón BẰNG TAY: 1 học sinh + nhiều guardian.
+
+    Cả student lẫn guardians đều là FaceID Person (guardian bắt buộc đã có trong
+    danh sách Person — validate của doctype chặn loại sai). Cặp đang có ủy quyền
+    sống → bỏ qua; cặp đã revoked → áp dụng lại với hạn mới (giữ version trail).
+    """
+    guardian_list = (
+        frappe.parse_json(guardians) if isinstance(guardians, str) else (guardians or [])
+    )
+    if not guardian_list:
+        return _err("Chưa chọn guardian nào")
+    if frappe.db.get_value("FaceID Person", student, "person_type") != "student":
+        return _err("Student phải là FaceID Person loại student")
+
+    default_from, default_to = _pickup_default_validity()
+    vf = frappe.utils.getdate(valid_from) if valid_from else default_from
+    vt = frappe.utils.getdate(valid_to) if valid_to else default_to
+    if vf > vt:
+        return _err("Từ ngày phải <= Đến ngày")
+
+    created = reapplied = skipped_active = 0
+    errors = []
+    for g in guardian_list:
+        existing = frappe.get_all(
+            "FaceID Pickup Authorization",
+            filters={"guardian": g, "student": student},
+            fields=["name", "revoked"],
+        )
+        if any(not cint(a.revoked) for a in existing):
+            skipped_active += 1
+            continue
+        try:
+            if existing:
+                doc = frappe.get_doc("FaceID Pickup Authorization", existing[0].name)
+                doc.revoked = 0
+                doc.valid_from = vf
+                doc.valid_to = vt
+                doc.save(ignore_permissions=True)
+                create_device_sync_job("reapply_pickup", doc.doctype, doc.name, priority=9)
+                reapplied += 1
+            else:
+                frappe.get_doc(
+                    {
+                        "doctype": "FaceID Pickup Authorization",
+                        "guardian": g,
+                        "student": student,
+                        "valid_from": vf,
+                        "valid_to": vt,
+                        "method": "face",
+                        "revoked": 0,
+                    }
+                ).insert(ignore_permissions=True)
+                created += 1
+        except Exception as e:
+            errors.append(f"{g}: {e}")
+            frappe.log_error(
+                title=f"FaceID create_pickup_auths {g}->{student}",
+                message=frappe.get_traceback(),
+            )
+
+    return _ok(
+        {
+            "created": created,
+            "reapplied": reapplied,
+            "skipped_active": skipped_active,
+            "errors": errors,
+        },
+        message=f"Tạo {created}, áp dụng lại {reapplied}, bỏ qua {skipped_active} đang hiệu lực",
+    )
 
 
 def _relationship_has_can_pickup() -> bool:
@@ -806,6 +955,59 @@ def list_gate_events(
     return _ok(rows)
 
 
+def _fmt_event_time(value):
+    """ISO UTC từ controller → giờ hệ thống (site timezone)."""
+    if not value:
+        return value
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if dt.tzinfo:
+        try:
+            from zoneinfo import ZoneInfo
+
+            from frappe.utils import get_system_timezone
+
+            dt = dt.astimezone(ZoneInfo(get_system_timezone()))
+        except Exception:
+            pass
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+@frappe.whitelist()
+def list_gate_events_live(limit=100, event_type=None, external_code=None):
+    """Đọc event trực tiếp từ controller local qua tunnel — không đụng DB Frappe."""
+    query = {"limit": cint(limit) or 100}
+    if event_type:
+        query["event_type"] = event_type
+    if external_code:
+        query["employee_no"] = external_code
+    try:
+        res = gateway_get(f"/api/events?{urlencode(query)}")
+    except Exception as e:
+        return _err(f"Không nối được controller local: {e}")
+    rows = []
+    for e in (res or {}).get("events") or []:
+        payload = e.get("payload") or {}
+        rows.append(
+            {
+                "name": f"live-{e.get('id')}",
+                "serial_key": str(e.get("serial_no") or ""),
+                "device": e.get("device_name")
+                or e.get("device_ip")
+                or payload.get("remoteHostAddr")
+                or payload.get("_source_ip"),
+                "event_type": e.get("event_type"),
+                "external_code": e.get("employee_no"),
+                "person_name": payload.get("name"),
+                "occurred_at": _fmt_event_time(e.get("occurred_at")),
+                "bridged_attendance": 0,
+            }
+        )
+    return _ok(rows)
+
+
 # ---- Devices ----
 
 
@@ -825,6 +1027,8 @@ def list_devices():
             "device_name",
             "ip",
             "gate_type",
+            "direction",
+            "gate_no",
             "is_pickup_gate",
             "status",
             "last_seen",
@@ -1083,7 +1287,7 @@ def get_sync_status(person_type=None):
         FROM `tabFaceID Device Sync Job` j
         INNER JOIN `tabFaceID Person` p ON p.name = j.ref_name
         WHERE j.ref_doctype = 'FaceID Person'
-          AND j.job_type IN ('upsert_person', 'delete_person')
+          AND j.job_type IN ('apply_person_access', 'delete_person')
           AND j.state = 'failed'
           AND j.last_error IS NOT NULL AND j.last_error != ''
           {type_clause}

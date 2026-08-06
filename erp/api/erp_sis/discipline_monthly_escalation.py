@@ -388,18 +388,116 @@ def resolve_class_deduction_and_level(
     }
 
 
+def _batch_monthly_stats_for_students(
+    student_as_of: dict[tuple[str, str], date],
+) -> dict[tuple[str, str], dict]:
+    """
+    Gom COUNT theo (student_id, YYYY-MM) — 2 query thay vì 2N.
+    student_as_of: (sid, month_key) -> ngày as_of (dùng max ngày trong batch).
+    """
+    if not student_as_of:
+        return {}
+
+    sids = list({sid for sid, _mk in student_as_of})
+    window_dates: list[date] = []
+    for (_sid, _mk), as_of in student_as_of.items():
+        first, _last = calendar_month_bounds(as_of)
+        window_dates.append(first)
+        window_dates.append(as_of)
+    min_d, max_d = min(window_dates), max(window_dates)
+
+    entries = frappe.db.sql(
+        """
+        SELECT se.student_id AS student_id, se.applied_level AS applied_level, r.date AS date
+        FROM `tabSIS Discipline Record` r
+        INNER JOIN `tabSIS Discipline Record Student Entry` se
+            ON se.parent = r.name AND se.parenttype = 'SIS Discipline Record'
+        WHERE se.student_id IN %(sids)s
+            AND r.date >= %(min_d)s AND r.date <= %(max_d)s
+        """,
+        {"sids": sids, "min_d": min_d, "max_d": max_d},
+        as_dict=True,
+    )
+    legacy = frappe.db.sql(
+        """
+        SELECT r.target_student AS student_id, r.date AS date
+        FROM `tabSIS Discipline Record` r
+        WHERE r.target_student IN %(sids)s
+            AND r.date >= %(min_d)s AND r.date <= %(max_d)s
+            AND NOT EXISTS (
+                SELECT 1 FROM `tabSIS Discipline Record Student Entry` se2
+                WHERE se2.parent = r.name
+            )
+        """,
+        {"sids": sids, "min_d": min_d, "max_d": max_d},
+        as_dict=True,
+    )
+
+    # Index nhẹ theo student để đếm in-Python nhanh
+    entries_by_sid: dict[str, list] = {}
+    for e in entries:
+        entries_by_sid.setdefault(e["student_id"], []).append(e)
+    legacy_by_sid: dict[str, list] = {}
+    for e in legacy:
+        legacy_by_sid.setdefault(e["student_id"], []).append(e)
+
+    out: dict[tuple[str, str], dict] = {}
+    for (sid, mk), as_of in student_as_of.items():
+        first, _last = calendar_month_bounds(as_of)
+        total = 0
+        l1 = 0
+        for e in entries_by_sid.get(sid, []):
+            ed = _as_date(e["date"])
+            if ed < first or ed > as_of:
+                continue
+            total += 1
+            if str(e.get("applied_level") or "") == "1":
+                l1 += 1
+        for e in legacy_by_sid.get(sid, []):
+            ed = _as_date(e["date"])
+            if ed < first or ed > as_of:
+                continue
+            total += 1
+        out[(sid, mk)] = {
+            "violations_total_this_month": total,
+            "violations_as_level1_this_month": l1,
+        }
+    return out
+
+
 def enrich_records_with_monthly_student_stats(records: list) -> list:
     """Gắn thống kê tháng + cờ highlight cho từng HS trên bản ghi (dashboard/email)."""
     if not records:
         return records
 
-    cache: dict[tuple[str, str], dict] = {}
+    # Thu thập (sid, month) + as_of = max(date) trong batch — tránh 2 COUNT/HS
+    student_as_of: dict[tuple[str, str], date] = {}
+    for r in records:
+        rd = r.get("date")
+        if not rd:
+            continue
+        as_of = _as_date(rd)
+        month_key = as_of.isoformat()[:7]
+        sids: list[str] = []
+        for st in r.get("target_students") or []:
+            if st.get("student_id"):
+                sids.append(st["student_id"])
+        if not sids and r.get("target_student"):
+            sids.append(r["target_student"])
+        for sid in sids:
+            ck = (sid, month_key)
+            prev = student_as_of.get(ck)
+            if prev is None or as_of > prev:
+                student_as_of[ck] = as_of
+
+    cache = _batch_monthly_stats_for_students(student_as_of)
 
     for r in records:
         rd = r.get("date")
         if not rd:
             continue
-        month_key = str(rd)[:7]
+        as_of = _as_date(rd)
+        month_key = as_of.isoformat()[:7]
         students = []
         for st in r.get("target_students") or []:
             if st.get("student_id"):
@@ -410,19 +508,14 @@ def enrich_records_with_monthly_student_stats(records: list) -> list:
         for st in students:
             sid = st["student_id"]
             ck = (sid, month_key)
-            if ck not in cache:
-                total = count_student_violation_instances_in_month(sid, rd)
-                l1 = count_cross_level1_instances_in_month(sid, rd)
-                cache[ck] = {
-                    "violations_total_this_month": total,
-                    "violations_as_level1_this_month": l1,
-                }
-            st.update(cache[ck])
+            stats = cache.get(ck) or {
+                "violations_total_this_month": 0,
+                "violations_as_level1_this_month": 0,
+            }
+            st.update(stats)
             applied = st.get("applied_level") or ""
-            l1_count = int(cache[ck].get("violations_as_level1_this_month", 0))
-            st["escalation_highlight"] = (
-                l1_count >= 4 or str(applied) in ("2", "3")
-            )
+            l1_count = int(stats.get("violations_as_level1_this_month", 0))
+            st["escalation_highlight"] = l1_count >= 4 or str(applied) in ("2", "3")
 
         r["escalation_highlight"] = any(
             st.get("escalation_highlight") for st in (r.get("target_students") or [])
@@ -432,18 +525,13 @@ def enrich_records_with_monthly_student_stats(records: list) -> list:
             r["violations_count_display"] = max(counts) if counts else 0
         elif r.get("target_student"):
             ck = (r["target_student"], month_key)
-            if ck not in cache:
-                cache[ck] = {
-                    "violations_total_this_month": count_student_violation_instances_in_month(
-                        r["target_student"], rd
-                    ),
-                    "violations_as_level1_this_month": count_cross_level1_instances_in_month(
-                        r["target_student"], rd
-                    ),
-                }
-            r["violations_count_display"] = cache[ck]["violations_total_this_month"]
+            stats = cache.get(ck) or {
+                "violations_total_this_month": 0,
+                "violations_as_level1_this_month": 0,
+            }
+            r["violations_count_display"] = stats["violations_total_this_month"]
             r["escalation_highlight"] = (
-                cache[ck]["violations_as_level1_this_month"] >= 4
+                stats["violations_as_level1_this_month"] >= 4
                 or str(r.get("severity_level") or "") in ("2", "3")
             )
 

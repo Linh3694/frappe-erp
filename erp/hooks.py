@@ -514,9 +514,13 @@ doc_events = {
 		"after_insert": [
 			"erp.common.user_hooks.trigger_user_webhooks",
 			"erp.sis.utils.campus_permissions.create_user_campus_preference",
+			# NV mới → tự tạo FaceID Person staff
+			"erp.api.faceid.person_hooks.on_user_changed",
 		],
 		"on_update": [
-			"erp.common.user_hooks.trigger_user_webhooks"
+			"erp.common.user_hooks.trigger_user_webhooks",
+			# Bật/tắt tài khoản → bật person hoặc gỡ khỏi terminal
+			"erp.api.faceid.person_hooks.on_user_changed",
 		],
 		"on_trash": [
 			"erp.common.user_hooks.trigger_user_webhooks"
@@ -630,15 +634,19 @@ doc_events = {
 	"SIS Class Student": {
 		"after_insert": [
 			"erp.observability.audit.log_create",
-			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change"
+			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change",
+			# Xếp lớp / chuyển lớp → cập nhật Trường trên FaceID Person
+			"erp.api.faceid.person_hooks.on_class_student_changed"
 		],
 		"on_update": [
 			"erp.observability.audit.log_update",
-			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change"
+			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change",
+			"erp.api.faceid.person_hooks.on_class_student_changed"
 		],
 		"on_trash": [
 			"erp.observability.audit.log_delete",
-			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change"
+			"erp.api.erp_sis.chat_membership_hooks.on_class_student_change",
+			"erp.api.faceid.person_hooks.on_class_student_changed"
 		]
 	},
 	"SIS Class Attendance": {
@@ -1040,7 +1048,12 @@ doc_events = {
 	# doc-event trên child không chạy đáng tin, nên hook gắn vào các parent giữ chúng.
 	"CRM Guardian": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
-		"on_update": "erp.api.erp_sis.chat_membership_hooks.on_guardian_change",
+		# Guardian mới / đổi tên-ảnh → tự upsert FaceID Person guardian
+		"after_insert": "erp.api.faceid.person_hooks.on_guardian_changed",
+		"on_update": [
+			"erp.api.erp_sis.chat_membership_hooks.on_guardian_change",
+			"erp.api.faceid.person_hooks.on_guardian_changed",
+		],
 	},
 	"CRM Family": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
@@ -1050,12 +1063,14 @@ doc_events = {
 		# APPEND vào list này, đừng tạo entry "CRM Student" thứ hai (key trùng bị đè)
 		"on_update": [
 			"erp.api.erp_sis.chat_membership_hooks.on_student_change",
-			# HS chuyển sang nghỉ học → gỡ khỏi terminal FaceID ngay, không đợi cron
+			# enrollment_status đổi (sync từ CRM Lead — SSOT):
+			# Enrolled → tự tạo FaceID Person; Nghỉ học → gỡ máy + xoá khỏi danh sách
 			"erp.api.faceid.person_hooks.on_student_enrollment_changed",
 		],
 	},
 	"CRM Lead": {
-		"on_update": "erp.api.faceid.person_hooks.on_lead_deal_status_changed",
+		# Lead rời Enrolled (chuyển trường / tốt nghiệp / bảo lưu) → gỡ HS FaceID ngay
+		"on_update": "erp.api.faceid.person_hooks.on_lead_step_changed",
 	},
 	# Mô hình nhóm quyền vào FaceID — đổi nhóm/thành viên thì tính lại desired state
 	"FaceID Access Group": {
@@ -1064,6 +1079,9 @@ doc_events = {
 	"FaceID Access Group Member": {
 		"after_insert": "erp.api.faceid.person_hooks.on_access_group_member_changed",
 		"on_trash": "erp.api.faceid.person_hooks.on_access_group_member_changed",
+	},
+	"FaceID Work Shift": {
+		"on_update": "erp.api.faceid.person_hooks.on_work_shift_changed",
 	},
 	"CRM Admission Course": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
@@ -1449,6 +1467,8 @@ scheduler_events = {
         # FaceID reconcile pickup + CRM Issue SLA + LMS enrollment (mỗi 15 phút)
         "*/15 * * * *": [
             "erp.api.faceid.sync_worker.reconcile_pickup_auth_to_controller",
+            # Thành viên nhóm "PH cổng đón" dẫn xuất từ ủy quyền đón còn hiệu lực
+            "erp.api.faceid.access_group_api.sync_pickup_guardian_members",
             "erp.api.crm.sla_scheduler.check_crm_issue_sla",
             "erp.api.erp_sis.approval.sla.check_workflow_deadlines",
             "erp.lms.sync.enrollment_sync.sync_all_sections",
@@ -1459,6 +1479,11 @@ scheduler_events = {
         # FaceID: poll trạng thái online/offline từng terminal qua controller
         "*/10 * * * *": [
             "erp.api.faceid.sync_worker.refresh_all_device_status",
+        ],
+        # FaceID: backstop kéo lại person từ nguồn (CRM Student/Guardian/User) —
+        # chạy TRƯỚC reconcile 1h để engine đẩy dữ liệu đã tươi
+        "30 0 * * *": [
+            "erp.api.faceid.person_source.refresh_all_sources",
         ],
         # FaceID: reconcile desired state person × máy + thu hồi slot mồ côi (1h sáng)
         "0 1 * * *": [

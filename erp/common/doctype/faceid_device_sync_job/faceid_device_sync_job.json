@@ -20,7 +20,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Loại job",
-   "options": "upsert_person\ndelete_person\napply_person_access\nsync_device_slot\nupsert_shift\nsync_shift\nupsert_pickup\nrevoke_pickup\nreapply_pickup\nprovision_device\nreconcile_pickup\nupsert_device",
+   "options": "apply_person_access\ndelete_person\nsync_device_slot\nupsert_pickup\nrevoke_pickup\nreapply_pickup\nreconcile_pickup\nprovision_device\nupsert_device",
    "reqd": 1
   },
   {
