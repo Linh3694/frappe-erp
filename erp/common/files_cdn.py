@@ -127,9 +127,19 @@ def sign_response(**kwargs):
             return
 
         raw = response.get_data(as_text=True)
-        # Kiem tra re truoc: da so response khong he co `/files/`
-        if not raw or "/files/" not in raw:
+        if not raw:
             return
+        # Co `/files/` (dang dung) HOAC URL media da ky lot tu DB/cache client.
+        # Buoc media→/files/ truoc de ky lai chu ky moi — URL het han se song lai.
+        has_files = "/files/" in raw
+        has_media = "wellspring.edu.vn/" in raw and any(
+            f"/{p}/" in raw for p in cdn_sign.FILES_CDN_PREFIXES
+        )
+        if not has_files and not has_media:
+            return
+
+        if has_media:
+            raw = cdn_sign.media_urls_to_files(raw)
 
         domains = get_domains()
         if not domains:
@@ -143,3 +153,28 @@ def sign_response(**kwargs):
             response.set_data(signed)
     except Exception as e:  # noqa: BLE001
         frappe.log_error(f"Ky URL file that bai: {e}", "Files CDN")
+
+
+def sanitize_doc(doc, method=None):
+    """validate: chan URL CDN da ky bi ghi vao DB (nguyen nhan anh bia thu vien 410).
+
+    FE load cover tu API (da ky) roi save lai → DB nhan `?e=&s=` → het han la chet.
+    Quy ve `/files/...` o day; response van duoc `sign_response` ky moi moi lan.
+    """
+    try:
+        dtype = doc.doctype
+        if dtype == "SIS Library Title":
+            if getattr(doc, "cover_image", None):
+                doc.cover_image = cdn_sign.to_files_url(doc.cover_image)
+        elif dtype == "SIS Menu Category":
+            if getattr(doc, "image_url", None):
+                doc.image_url = cdn_sign.to_files_url(doc.image_url)
+        elif dtype == "SIS News Article":
+            if getattr(doc, "cover_image", None):
+                doc.cover_image = cdn_sign.to_files_url(doc.cover_image)
+            for field in ("content_en", "content_vn"):
+                val = getattr(doc, field, None)
+                if val:
+                    setattr(doc, field, cdn_sign.media_urls_to_files(val))
+    except Exception as e:  # noqa: BLE001
+        frappe.log_error(f"Sanitize CDN URL that bai: {e}", "Files CDN")

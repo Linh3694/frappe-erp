@@ -405,7 +405,9 @@ def update_title():
         if "is_audio_book" in data:
             doc.is_audio_book = bool(data["is_audio_book"])
         if "cover_image" in data:
-            doc.cover_image = data["cover_image"]
+            # FE hay gui lai URL da ky tu API — quy ve /files/ truoc khi save.
+            from erp.common import cdn_sign
+            doc.cover_image = cdn_sign.to_files_url(data["cover_image"])
         if "description" in data:
             doc.description = json.dumps(data["description"]) if isinstance(data["description"], dict) else data["description"]
         if "introduction" in data:

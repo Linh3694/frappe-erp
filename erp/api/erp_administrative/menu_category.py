@@ -324,7 +324,9 @@ def update_menu_category():
 
         # Luôn update image_url nếu frontend gửi field này
         if 'image_url' in data and image_url != menu_category_doc.image_url:
-            menu_category_doc.image_url = image_url
+            # FE hay echo URL CDN đã ký — quy về /files/ để không chết khi hết hạn.
+            from erp.common import cdn_sign
+            menu_category_doc.image_url = cdn_sign.to_files_url(image_url) if image_url else image_url
 
         menu_category_doc.save()
         frappe.db.commit()

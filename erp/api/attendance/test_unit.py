@@ -98,7 +98,7 @@ def test_hikvision_logic():
             is_historical_attendance,
             format_vn_time,
             get_historical_attendance_threshold_minutes,
-            USE_DIRECT_PROCESSING,
+            _use_direct_processing,
             ATTENDANCE_BUFFER_KEY,
             BUFFER_BATCH_SIZE
         )
@@ -141,9 +141,10 @@ def test_hikvision_logic():
     except Exception as e:
         result.add_fail("is_historical_attendance", e)
     
-    # Test config values
+    # Test config values — mặc định buffer trừ khi site_config bật direct
     try:
-        assert isinstance(USE_DIRECT_PROCESSING, bool), "USE_DIRECT_PROCESSING should be bool"
+        assert callable(_use_direct_processing), "_use_direct_processing should be callable"
+        assert isinstance(_use_direct_processing(), bool), "_use_direct_processing() should return bool"
         assert isinstance(ATTENDANCE_BUFFER_KEY, str), "ATTENDANCE_BUFFER_KEY should be string"
         assert isinstance(BUFFER_BATCH_SIZE, int), "BUFFER_BATCH_SIZE should be int"
         result.add_pass("Config values valid")

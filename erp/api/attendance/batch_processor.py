@@ -573,8 +573,8 @@ def clear_buffer():
 # Scheduled job function - được gọi bởi hooks.py
 def scheduled_process_attendance_buffer():
 	"""
-	Scheduled job wrapper cho process_attendance_buffer.
-	Được hooks.py gọi mỗi 5 giây.
+	Scheduled job wrapper — hooks.py `all` (~ vài giây/lần).
+	Lớp dự phòng khi enqueue drain từ handle_hikvision_event bị bỏ qua (dedupe/busy).
 	"""
 	try:
 		result = process_attendance_buffer()

@@ -858,6 +858,8 @@ doc_events = {
 		]
 	},
 	"SIS News Article": {
+		# Chan URL media da ky bi luu vao cover/HTML — xem files_cdn.sanitize_doc.
+		"validate": "erp.common.files_cdn.sanitize_doc",
 		"after_insert": [
 			"erp.observability.audit.log_create",
 			# Anh bia va anh nhung trong noi dung len CDN ngay khi bai duoc tao.
@@ -1029,6 +1031,8 @@ doc_events = {
 	},
 	"SIS Library Title": {
 		"before_insert": "erp.utils.campus_document.inject_campus_id",
+		# Chan cover_image = URL da ky (FE echo tu API) — files_cdn.sanitize_doc.
+		"validate": "erp.common.files_cdn.sanitize_doc",
 		"after_insert": "erp.common.sis_content_store.on_doc_update",
 		"on_update": "erp.common.sis_content_store.on_doc_update",
 		"on_trash": "erp.common.sis_content_store.on_doc_trash",
@@ -1036,6 +1040,7 @@ doc_events = {
 	# Anh mon an len CDN. Gan vao doctype chu khong vao `File`: 419/565 anh thuc
 	# don khong co File doc nao — controller ghi thang byte xuong dia.
 	"SIS Menu Category": {
+		"validate": "erp.common.files_cdn.sanitize_doc",
 		"after_insert": "erp.common.sis_content_store.on_doc_update",
 		"on_update": "erp.common.sis_content_store.on_doc_update",
 		"on_trash": "erp.common.sis_content_store.on_doc_trash",
