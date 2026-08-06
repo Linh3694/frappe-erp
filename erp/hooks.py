@@ -1253,7 +1253,10 @@ doc_events = {
 		"on_update": "erp.api.erp_common_system.config.clear_bootstrap_cache",
 	},
 	"ERP Feature Settings": {
-		"on_update": "erp.api.erp_common_system.config.clear_bootstrap_cache",
+		"on_update": [
+			"erp.api.erp_common_system.config.clear_bootstrap_cache",
+			"erp.api.parent_portal.module_access.clear_module_config_cache",
+		],
 	},
 }
 

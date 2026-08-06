@@ -15,7 +15,8 @@ nhớ đổi ngược lại một cờ nào.
 
 Cách gỡ khi release:
   1. Xoá file này.
-  2. Bỏ `_beta_blocked()` ở đầu 5 endpoint trong `club_registration.py`.
+  2. Bỏ `_beta_blocked()` ở đầu 6 endpoint trong `club_registration.py`
+     (`save_registration` truyền `write=True` — xem docstring của hàm đó).
   3. Bỏ `filter_students_for_beta()` trong `erp/sis/tasks/club_reminders.py`.
 """
 

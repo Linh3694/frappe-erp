@@ -15,7 +15,8 @@
   "sec_ops", "feat_bus", "feat_menu", "col_ops_1", "feat_health", "feat_library", "feat_facility", "feat_finance", "feat_procurement",
   "sec_engage", "feat_parent_portal", "feat_social_feed", "col_engage_1", "feat_chat", "feat_news",
   "sec_advanced", "feat_lms", "feat_crm_admission", "col_adv_1", "feat_ai_assistant", "feat_it_inventory",
-  "sec_override", "campus_overrides_json"
+  "sec_override", "campus_overrides_json",
+  "sec_pp_modules", "pp_modules_json"
  ],
  "fields": [
   {"fieldname": "sec_core", "fieldtype": "Section Break", "label": "Lõi (luôn bật)"},
@@ -51,7 +52,11 @@
 
   {"fieldname": "sec_override", "fieldtype": "Section Break", "label": "Ghi đè theo campus", "collapsible": 1},
   {"fieldname": "campus_overrides_json", "fieldtype": "JSON", "label": "Ghi đè theo campus",
-   "description": "{\"CAMPUS-00002\": {\"feat_bus\": false}} — campus không khai thì dùng giá trị chung"}
+   "description": "{\"CAMPUS-00002\": {\"feat_bus\": false}} — campus không khai thì dùng giá trị chung"},
+
+  {"fieldname": "sec_pp_modules", "fieldtype": "Section Break", "label": "Hiển thị module Parent Portal", "collapsible": 1},
+  {"fieldname": "pp_modules_json", "fieldtype": "JSON", "label": "Module Parent Portal",
+   "description": "Module KHÔNG khai ở đây = hiện bình thường. Chỉ điều khiển việc ẩn/hiện trên menu, KHÔNG khoá dữ liệu — xem erp.api.parent_portal.module_access."}
  ],
  "permissions": [
   {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1}

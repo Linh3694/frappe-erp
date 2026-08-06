@@ -99,7 +99,7 @@ def _guardian():
     return g.get("name") if g else None
 
 
-def _beta_blocked(guardian):
+def _beta_blocked(guardian, write=False):
     """
     Cổng chạy thử — GỠ TRƯỚC KHI RELEASE (xem `club_beta_access`).
 
@@ -107,9 +107,21 @@ def _beta_blocked(guardian):
     không nên biết là module đang tồn tại mà mình bị chặn. Đặt ở TỪNG endpoint
     chứ không chỉ trong `_visible_period` vì `get_registration_data` và
     `save_registration` nhận thẳng `period_id` từ client, không đi qua hàm đó.
+
+    `write=True` cho đường GHI. Im lặng kiểu "chưa có đợt nào" chỉ đúng với
+    đường ĐỌC: client chỉ nhìn `success` để quyết định, nên một `success` rỗng
+    trả về từ `save_registration` khiến màn kết quả hiện "Đã đăng ký thành công
+    0/0 môn" (tông xanh) và xoá luôn giỏ chọn — phụ huynh tưởng đã đăng ký xong
+    trong khi không có gì được lưu. Đường ghi vì thế phải trả LỖI. Không lộ thêm
+    gì: muốn gọi được nó thì đã đứng sẵn trong màn đăng ký rồi.
     """
     if is_guardian_allowed(guardian):
         return None
+    if write:
+        return error_response(
+            message="Chưa có đợt đăng ký câu lạc bộ nào",
+            code="CLUB_NOT_AVAILABLE",
+        )
     return success_response(data=None, message="Chưa có đợt đăng ký câu lạc bộ nào")
 
 
@@ -692,7 +704,7 @@ def save_registration():
         guardian = _guardian()
         if not guardian:
             return forbidden_response("Không tìm thấy thông tin phụ huynh")
-        blocked = _beta_blocked(guardian)
+        blocked = _beta_blocked(guardian, write=True)
         if blocked:
             return blocked
 

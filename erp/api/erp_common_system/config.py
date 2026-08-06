@@ -201,9 +201,33 @@ def update_branding():
 def update_features():
 	return _update_single(
 		FEATURE_DTYPE,
-		FEATURE_FIELDS + ["campus_overrides_json"],
+		FEATURE_FIELDS + ["campus_overrides_json", "pp_modules_json"],
 		"Đã cập nhật cấu hình tính năng",
 	)
+
+
+@frappe.whitelist(methods=["GET"])
+def get_portal_modules():
+	"""Cấu hình ẩn/hiện module Parent Portal — CHỈ cho WIS.
+
+	Endpoint riêng chứ không nhét vào `bootstrap()`: nội dung chứa số điện thoại
+	whitelist, mà `bootstrap()` là `allow_guest` và cache chung một key.
+	"""
+	if (resp := _require_config_role()):
+		return resp
+	try:
+		raw = frappe.get_single(FEATURE_DTYPE).get("pp_modules_json")
+		parsed = json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw or {})
+		return success_response(
+			data={"pp_modules": parsed if isinstance(parsed, dict) else {}},
+			message="Cấu hình module Parent Portal",
+		)
+	except Exception as ex:
+		frappe.log_error(f"get_portal_modules failed: {ex}", "system_config")
+		return error_response(
+			message="Không đọc được cấu hình module Parent Portal",
+			code="PP_MODULES_READ_ERROR",
+		)
 
 
 # ----------------------------------------------------------------------------
