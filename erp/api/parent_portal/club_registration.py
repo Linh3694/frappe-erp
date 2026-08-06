@@ -230,8 +230,7 @@ def _eligible_offerings(period, education_grade_id):
             o.day_of_week, o.capacity, o.registered_count,
             s.club_cover_image AS cover_image,
             s.club_short_description_vn AS short_description_vn,
-            s.club_short_description_en AS short_description_en,
-            g.education_grade_name AS grade_name
+            s.club_short_description_en AS short_description_en
         FROM `tab{DT_OFFERING}` o
         INNER JOIN `tabSIS Club Offering Grade` g ON g.parent = o.name
         LEFT JOIN `tabSIS Subject` s ON s.name = o.subject_id
@@ -245,6 +244,32 @@ def _eligible_offerings(period, education_grade_id):
     )
 
 
+def _offering_grades(offering_ids):
+    """
+    Toàn bộ khối mà mỗi offering áp dụng — KHÔNG lọc theo khối của học sinh
+    đang xem, vì thẻ CLB cần hiển thị đủ các khối được mở, không chỉ khối của
+    người xem. Sắp theo `SIS Education Grade.sort_order` để tránh sort chuỗi
+    kiểu "Khối 10" đứng trước "Khối 2".
+    """
+    if not offering_ids:
+        return {}
+    rows = frappe.db.sql(
+        """
+        SELECT g.parent AS offering_id, e.title_vn AS grade_name
+        FROM `tabSIS Club Offering Grade` g
+        INNER JOIN `tabSIS Education Grade` e ON e.name = g.education_grade_id
+        WHERE g.parent IN %(offering_ids)s
+        ORDER BY e.sort_order
+        """,
+        {"offering_ids": offering_ids},
+        as_dict=True,
+    )
+    result: dict[str, list[str]] = {}
+    for r in rows:
+        result.setdefault(r.offering_id, []).append(r.grade_name)
+    return result
+
+
 def _build_days(period, education_grade_id, existing, is_open):
     """
     Gom môn theo thứ và tính sẵn trạng thái khoá của từng thẻ.
@@ -256,6 +281,7 @@ def _build_days(period, education_grade_id, existing, is_open):
     taken_days = {r.day_of_week: r for r in existing}
 
     offerings = _eligible_offerings(period, education_grade_id)
+    grades_by_offering = _offering_grades(list({o.offering_id for o in offerings}))
     by_day = {}
 
     for o in offerings:
@@ -291,7 +317,7 @@ def _build_days(period, education_grade_id, existing, is_open):
             "short_description_vn": o.short_description_vn,
             "short_description_en": o.short_description_en,
             "cover_image": o.cover_image,
-            "grade_name": o.grade_name,
+            "grade_names": grades_by_offering.get(o.offering_id, []),
             "day_of_week": o.day_of_week,
             "capacity": capacity,
             "registered_count": registered,
