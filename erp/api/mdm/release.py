@@ -64,12 +64,29 @@ def current_release(channel="stable"):
 
 
 @frappe.whitelist(methods=["GET"])
-def download(name=None):
-    """Stream gói cài đặt về trình duyệt (đã đăng nhập Admin Web)."""
+def download(name=None, release_name=None, channel="stable"):
+    """Stream gói cài đặt về trình duyệt (đã đăng nhập Admin Web).
+
+    Gọi không kèm tham số thì trả về bản hiện hành của kênh — đó là thứ IT muốn
+    trong 99% trường hợp, không việc gì bắt họ biết mã bản ghi.
+    """
     _check_read_permission()
 
+    name = name or release_name
     if not name:
-        frappe.throw("Thiếu tham số name")
+        name = frappe.db.get_value(DOCTYPE, {"channel": channel, "is_current": 1}, "name")
+
+    if not name:
+        # Kèm danh sách tham số nhận được để lần sau khỏi phải đoán
+        received = sorted(k for k in frappe.form_dict.keys() if k != "cmd")
+        frappe.throw(
+            f"Chưa có bản phát hành hiện hành cho kênh '{channel}'. "
+            f"Đánh dấu is_current cho một bản trong {DOCTYPE}. "
+            f"(tham số nhận được: {received})"
+        )
+
+    if not frappe.db.exists(DOCTYPE, name):
+        frappe.throw(f"Không có bản phát hành '{name}'")
 
     doc = frappe.get_doc(DOCTYPE, name)
     if not doc.installer:
