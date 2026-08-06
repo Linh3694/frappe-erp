@@ -23,7 +23,6 @@
   "section_auth",
   "token_key",
   "token_secret_hash",
-  "enroll_token_used",
   "section_status",
   "status",
   "agent_version",
@@ -141,13 +140,6 @@
    "fieldtype": "Data",
    "hidden": 1,
    "label": "Token secret hash",
-   "read_only": 1
-  },
-  {
-   "fieldname": "enroll_token_used",
-   "fieldtype": "Link",
-   "label": "Enroll token đã dùng",
-   "options": "MDM Enroll Token",
    "read_only": 1
   },
   {

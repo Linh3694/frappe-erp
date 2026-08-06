@@ -19,6 +19,7 @@ import secrets
 import frappe
 from frappe.utils import cint, now_datetime
 
+from erp.api.mdm.heartbeat import heartbeat_interval_sec
 from erp.mdm.doctype.mdm_enroll_settings.mdm_enroll_settings import get_settings
 
 REQUEST_DOCTYPE = "MDM Enrollment Request"
@@ -179,9 +180,7 @@ def enrollment_status(check_in_id=None):
         "device_id": device.name,
         "token_key": device.token_key,
         "token_secret": secret,
-        "heartbeat_interval_sec": cint(
-            frappe.conf.get("mdm_heartbeat_interval_sec", 120)
-        ),
+        "heartbeat_interval_sec": heartbeat_interval_sec(),
         "asset": device.inventory_device,
     }
 
