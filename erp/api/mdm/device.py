@@ -70,6 +70,45 @@ def list_devices(status=None, search=None, limit=100):
 
 
 @frappe.whitelist()
+def get_device(name=None):
+    """Một máy kèm hardware_snapshot.
+
+    Tách khỏi list_devices có chủ đích: snapshot là JSON vài chục KB mỗi máy,
+    kéo theo trong danh sách vài trăm máy là tự bắn vào chân mình.
+    """
+    if not frappe.has_permission(DOCTYPE, "read"):
+        frappe.throw("Không có quyền xem thiết bị MDM", frappe.PermissionError)
+    if not name:
+        frappe.throw("Thiếu name")
+
+    doc = frappe.get_doc(DOCTYPE, name)
+    now = now_datetime()
+    return {
+        "name": doc.name,
+        "device_name": doc.device_name,
+        "serial_number": doc.serial_number,
+        "inventory_device": doc.inventory_device,
+        "inventory_name": doc.inventory_name,
+        "room": doc.room,
+        "campus_id": doc.campus_id,
+        "status": doc.status,
+        "agent_version": doc.agent_version,
+        "os_version": doc.os_version,
+        "os_build": doc.os_build,
+        "last_heartbeat": doc.last_heartbeat,
+        "last_ip": doc.last_ip,
+        "wg_ip": doc.wg_ip,
+        "enrolled_on": doc.enrolled_on,
+        "hardware_snapshot": doc.hardware_snapshot,
+        "online": bool(
+            doc.last_heartbeat
+            and (now - get_datetime(doc.last_heartbeat)).total_seconds()
+            < OFFLINE_AFTER_MINUTES * 60
+        ),
+    }
+
+
+@frappe.whitelist()
 def device_summary():
     """Thẻ KPI cho trang MDM."""
     if not frappe.has_permission(DOCTYPE, "read"):
